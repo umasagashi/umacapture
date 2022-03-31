@@ -25,7 +25,7 @@ assignees: ''
 <!-- How many times could you reproduce the behavior? -->
 
 ### Screenshots
-<!-- Optional: If it is not an obvious, please add a screenshot(s). -->
+<!-- Optional: If possible, please add screenshot(s) that show the problem. -->
 
 ## Environment
 - App Version: [Please provide the exact version. Avoid using the term "latest version".]
