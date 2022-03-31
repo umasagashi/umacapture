@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Ask question
+  - name: Ask Question
     url: https://github.com/umasagashi/umasagashi-app/discussions
-    about: Please ask and answer questions here.
+    about: Please ask questions here.
+  - name: 質問
+    url: https://github.com/umasagashi/umasagashi-app/discussions
+    about: 質問はこちら。
