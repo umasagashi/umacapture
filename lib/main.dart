@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'src/platform_channel.dart';
+
 void main() {
   runApp(const MyApp());
 }
@@ -48,17 +50,21 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  final MyChannel _api = MyChannel();
+  String _text = "n";
 
-  void _incrementCounter() {
+  _MyHomePageState() {
+    _api.setCallback(_textUpdated);
+  }
+
+  void _textUpdated(String text) {
     setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
+      _text = text;
     });
+  }
+
+  void _startUpdate() {
+    _api.callJavaFromDart(_text);
   }
 
   @override
@@ -99,14 +105,14 @@ class _MyHomePageState extends State<MyHomePage> {
               'You have pushed the button this many times:',
             ),
             Text(
-              '$_counter',
+              _text,
               style: Theme.of(context).textTheme.headline4,
             ),
           ],
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
+        onPressed: _startUpdate,
         tooltip: 'Increment',
         child: const Icon(Icons.add),
       ), // This trailing comma makes auto-formatting nicer for build methods.
