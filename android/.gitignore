@@ -13,3 +13,6 @@ key.properties
 **/*.jks
 
 .cxx/
+
+# OpenCV
+/sdk/*

@@ -9,7 +9,6 @@ cmake_minimum_required(VERSION 3.18.1)
 set(CMAKE_CXX_STANDARD 11)
 
 # Declares and names the project.
-
 project(umasagashi_app)
 
 set(NATIVE_EXTENSION_DIR
@@ -27,13 +26,24 @@ set(SOURCE_FILES
 # Gradle automatically packages shared libraries with your APK.
 
 add_library( # Sets the name of the library.
-        umasagashi_app
+        ${PROJECT_NAME}
 
         # Sets the library as a shared library.
         SHARED
 
         # Provides a relative path to your source file(s).
         ${SOURCE_FILES})
+
+
+set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../sdk/native/jni")
+
+find_package(OpenCV REQUIRED)
+
+if (OpenCV_FOUND)
+    target_include_directories(${PROJECT_NAME} PUBLIC ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(${PROJECT_NAME} ${OpenCV_LIBS})
+endif ()
+
 
 # Searches for a specified prebuilt library and stores the path as a
 # variable. Because CMake includes system libraries in the search path by
@@ -53,7 +63,7 @@ find_library( # Sets the name of the path variable.
 # build script, prebuilt third-party libraries, or system libraries.
 
 target_link_libraries( # Specifies the target library.
-        umasagashi_app
+        ${PROJECT_NAME}
 
         # Links the target library to the log library
         # included in the NDK.
