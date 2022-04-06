@@ -17,14 +17,23 @@ class MyChannel {
     callbackMethod = method;
   }
 
-  Future<void> callJavaFromDart(String value) async {
-    return await channel.invokeMethod('callJavaFromDart', value);
+  Future<void> setConfig(String config) async {
+    logger.d('setConfig $config');
+    return await channel.invokeMethod('setConfig', config);
+  }
+
+  Future<void> startCapture() async {
+    return await channel.invokeMethod('startCapture');
+  }
+
+  Future<void> stopCapture() async {
+    return await channel.invokeMethod('stopCapture');
   }
 
   Future<dynamic> callDartFromJava(MethodCall call) {
     switch (call.method) {
-      case 'callDartFromJava':
-        logger.d('callDartFromJava ${call.arguments.toString()}');
+      case 'notify':
+        logger.d('notify ${call.arguments.toString()}');
         callbackMethod!(call.arguments.toString());
         return Future.value('called from platform!');
       default:

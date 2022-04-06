@@ -8,19 +8,23 @@
 #include <iostream>
 #include <memory>
 
+#include <opencv2/opencv.hpp>
+
 #include "eventpp/eventqueue.h"
 
 using CallbackMethod = std::function<void(const std::string &)>;
 
 class App {
 public:
-    void set(const std::string &value);
+    void setConfig(const std::string &config);
+
+    void updateFrame(const cv::Mat &frame);
 
     void setCallback(const CallbackMethod &method) {
         this->callbackMethod = method;
     }
 
-    eventpp::EventQueue<int, void(const std::string &)> onEmit;  // as signal
+    eventpp::EventQueue<int, void(const cv::Mat &)> onEmit;  // as signal
 
     void startEventLoop();
 
@@ -31,6 +35,8 @@ private:
 
     CallbackMethod callbackMethod;
     std::shared_ptr<std::thread> eventLoopThread;
+
+    std::string config;
 
 public:
     static App &instance() {
