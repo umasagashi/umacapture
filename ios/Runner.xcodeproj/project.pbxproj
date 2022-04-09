@@ -15,6 +15,8 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		B1AA49A228009EC3002485C7 /* opencv2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA49A128009EC3002485C7 /* opencv2.framework */; };
+		B1AA49A428016AB4002485C7 /* AppWrapper.mm in Sources */ = {isa = PBXBuildFile; fileRef = B1AA49A328016AB4002485C7 /* AppWrapper.mm */; };
+		B1AA49E52801C464002485C7 /* App.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B1AA49E32801C464002485C7 /* App.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -48,6 +50,33 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1AA49A128009EC3002485C7 /* opencv2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = opencv2.framework; sourceTree = "<group>"; };
+		B1AA49A328016AB4002485C7 /* AppWrapper.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = AppWrapper.mm; sourceTree = "<group>"; };
+		B1AA49A528016BBB002485C7 /* AppWrapper.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; path = AppWrapper.h; sourceTree = "<group>"; };
+		B1AA49C82801C464002485C7 /* callbacklist.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = callbacklist.h; sourceTree = "<group>"; };
+		B1AA49C92801C464002485C7 /* hetercallbacklist.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hetercallbacklist.h; sourceTree = "<group>"; };
+		B1AA49CA2801C464002485C7 /* eventqueue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventqueue.h; sourceTree = "<group>"; };
+		B1AA49CC2801C464002485C7 /* mixinfilter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = mixinfilter.h; sourceTree = "<group>"; };
+		B1AA49CD2801C464002485C7 /* mixinheterfilter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = mixinheterfilter.h; sourceTree = "<group>"; };
+		B1AA49CE2801C464002485C7 /* eventpolicies.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventpolicies.h; sourceTree = "<group>"; };
+		B1AA49D02801C464002485C7 /* eventpolicies_i.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventpolicies_i.h; sourceTree = "<group>"; };
+		B1AA49D12801C464002485C7 /* hetercallbacklist_i.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hetercallbacklist_i.h; sourceTree = "<group>"; };
+		B1AA49D22801C464002485C7 /* eventqueue_i.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventqueue_i.h; sourceTree = "<group>"; };
+		B1AA49D32801C464002485C7 /* typeutil_i.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = typeutil_i.h; sourceTree = "<group>"; };
+		B1AA49D42801C464002485C7 /* hetereventqueue.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hetereventqueue.h; sourceTree = "<group>"; };
+		B1AA49D62801C464002485C7 /* scopedremover.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = scopedremover.h; sourceTree = "<group>"; };
+		B1AA49D72801C464002485C7 /* counterremover.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = counterremover.h; sourceTree = "<group>"; };
+		B1AA49D82801C464002485C7 /* orderedqueuelist.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = orderedqueuelist.h; sourceTree = "<group>"; };
+		B1AA49D92801C464002485C7 /* argumentadapter.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = argumentadapter.h; sourceTree = "<group>"; };
+		B1AA49DA2801C464002485C7 /* anyid.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = anyid.h; sourceTree = "<group>"; };
+		B1AA49DB2801C464002485C7 /* conditionalremover.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = conditionalremover.h; sourceTree = "<group>"; };
+		B1AA49DC2801C464002485C7 /* eventmaker.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventmaker.h; sourceTree = "<group>"; };
+		B1AA49DD2801C464002485C7 /* eventutil.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventutil.h; sourceTree = "<group>"; };
+		B1AA49DE2801C464002485C7 /* conditionalfunctor.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = conditionalfunctor.h; sourceTree = "<group>"; };
+		B1AA49DF2801C464002485C7 /* hetereventdispatcher.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = hetereventdispatcher.h; sourceTree = "<group>"; };
+		B1AA49E02801C464002485C7 /* eventdispatcher.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = eventdispatcher.h; sourceTree = "<group>"; };
+		B1AA49E12801C464002485C7 /* App.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = App.h; sourceTree = "<group>"; };
+		B1AA49E22801C464002485C7 /* cli.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = cli.cpp; sourceTree = "<group>"; };
+		B1AA49E32801C464002485C7 /* App.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = App.cpp; sourceTree = "<group>"; };
 		E9FF394D857EE62218EA2F20 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -106,6 +135,7 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				B1AA49C62801C464002485C7 /* src */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -114,8 +144,75 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
+				B1AA49A328016AB4002485C7 /* AppWrapper.mm */,
+				B1AA49A528016BBB002485C7 /* AppWrapper.h */,
 			);
 			path = Runner;
+			sourceTree = "<group>";
+		};
+		B1AA49C62801C464002485C7 /* src */ = {
+			isa = PBXGroup;
+			children = (
+				B1AA49C72801C464002485C7 /* eventpp */,
+				B1AA49E12801C464002485C7 /* App.h */,
+				B1AA49E22801C464002485C7 /* cli.cpp */,
+				B1AA49E32801C464002485C7 /* App.cpp */,
+			);
+			name = src;
+			path = ../../native/src;
+			sourceTree = "<group>";
+		};
+		B1AA49C72801C464002485C7 /* eventpp */ = {
+			isa = PBXGroup;
+			children = (
+				B1AA49C82801C464002485C7 /* callbacklist.h */,
+				B1AA49C92801C464002485C7 /* hetercallbacklist.h */,
+				B1AA49CA2801C464002485C7 /* eventqueue.h */,
+				B1AA49CB2801C464002485C7 /* mixins */,
+				B1AA49CE2801C464002485C7 /* eventpolicies.h */,
+				B1AA49CF2801C464002485C7 /* internal */,
+				B1AA49D42801C464002485C7 /* hetereventqueue.h */,
+				B1AA49D52801C464002485C7 /* utilities */,
+				B1AA49DF2801C464002485C7 /* hetereventdispatcher.h */,
+				B1AA49E02801C464002485C7 /* eventdispatcher.h */,
+			);
+			path = eventpp;
+			sourceTree = "<group>";
+		};
+		B1AA49CB2801C464002485C7 /* mixins */ = {
+			isa = PBXGroup;
+			children = (
+				B1AA49CC2801C464002485C7 /* mixinfilter.h */,
+				B1AA49CD2801C464002485C7 /* mixinheterfilter.h */,
+			);
+			path = mixins;
+			sourceTree = "<group>";
+		};
+		B1AA49CF2801C464002485C7 /* internal */ = {
+			isa = PBXGroup;
+			children = (
+				B1AA49D02801C464002485C7 /* eventpolicies_i.h */,
+				B1AA49D12801C464002485C7 /* hetercallbacklist_i.h */,
+				B1AA49D22801C464002485C7 /* eventqueue_i.h */,
+				B1AA49D32801C464002485C7 /* typeutil_i.h */,
+			);
+			path = internal;
+			sourceTree = "<group>";
+		};
+		B1AA49D52801C464002485C7 /* utilities */ = {
+			isa = PBXGroup;
+			children = (
+				B1AA49D62801C464002485C7 /* scopedremover.h */,
+				B1AA49D72801C464002485C7 /* counterremover.h */,
+				B1AA49D82801C464002485C7 /* orderedqueuelist.h */,
+				B1AA49D92801C464002485C7 /* argumentadapter.h */,
+				B1AA49DA2801C464002485C7 /* anyid.h */,
+				B1AA49DB2801C464002485C7 /* conditionalremover.h */,
+				B1AA49DC2801C464002485C7 /* eventmaker.h */,
+				B1AA49DD2801C464002485C7 /* eventutil.h */,
+				B1AA49DE2801C464002485C7 /* conditionalfunctor.h */,
+			);
+			path = utilities;
 			sourceTree = "<group>";
 		};
 		DC003A6DAB124D63AF86EAC6 /* Pods */ = {
@@ -275,8 +372,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B1AA49A428016AB4002485C7 /* AppWrapper.mm in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
+				B1AA49E52801C464002485C7 /* App.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -343,7 +442,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = iphoneos;
@@ -425,7 +524,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
 				MTL_ENABLE_DEBUG_INFO = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
@@ -474,7 +573,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 9.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 11.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = iphoneos;
 				SUPPORTED_PLATFORMS = iphoneos;
