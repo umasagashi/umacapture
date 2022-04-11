@@ -18,3 +18,5 @@ x86/
 
 # OpenCV
 /opencv/*
+
+/cmake-build-*
