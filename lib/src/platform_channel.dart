@@ -10,7 +10,7 @@ class MyChannel {
   CallbackMethod? callbackMethod;
 
   MyChannel() {
-    channel.setMethodCallHandler(callDartFromJava);
+    channel.setMethodCallHandler(callbackFromPlatform);
   }
 
   void setCallback(CallbackMethod method) {
@@ -30,7 +30,7 @@ class MyChannel {
     return await channel.invokeMethod('stopCapture');
   }
 
-  Future<dynamic> callDartFromJava(MethodCall call) {
+  Future<dynamic> callbackFromPlatform(MethodCall call) {
     switch (call.method) {
       case 'notify':
         logger.d('notify ${call.arguments.toString()}');
