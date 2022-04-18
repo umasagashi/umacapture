@@ -6,18 +6,18 @@
 
 cmake_minimum_required(VERSION 3.18.1)
 
-set(CMAKE_CXX_STANDARD 11)
-
 # Declares and names the project.
 project(umasagashi_app)
+
+set(CMAKE_CXX_STANDARD 17)
 
 set(NATIVE_EXTENSION_DIR
         "../../../../../native/src")
 
 set(SOURCE_FILES
         umasagashi_app.cpp
-        ${NATIVE_EXTENSION_DIR}/App.h
-        ${NATIVE_EXTENSION_DIR}/App.cpp
+        ${NATIVE_EXTENSION_DIR}/native_api.h
+        ${NATIVE_EXTENSION_DIR}/native_api.cpp
         )
 
 # Creates and names a library, sets it as either STATIC

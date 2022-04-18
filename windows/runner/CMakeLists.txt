@@ -18,11 +18,10 @@ set(SOURCE_FILES
         "main.cpp"
         "utils.cpp"
         "win32_window.cpp"
-        "platform_channel.cpp"
         "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
         "Runner.rc"
         "runner.exe.manifest"
-        ${NATIVE_EXTENSION_DIR}/App.cpp
+        ${NATIVE_EXTENSION_DIR}/native_api.cpp
         )
 
 add_executable(${BINARY_NAME} WIN32 ${SOURCE_FILES})

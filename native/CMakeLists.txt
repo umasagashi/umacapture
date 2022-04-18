@@ -1,19 +1,35 @@
 cmake_minimum_required(VERSION 3.21)
 project(native_cli)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 
 set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/opencv/build")
-message(STATUS ${OpenCV_DIR})
-find_package(OpenCV REQUIRED)
-message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")
-include_directories(${OpenCV_INCLUDE_DIRS})
+set(OpenCV_VERSION "455")
+set(OpenCV_ARCH "x64")
+set(OpenCV_RUNTIME "vc15")
+set(OpenCV_DLL_NAME "opencv_world")
+set(OpenCV_DLL_PREFIX "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_DLL_NAME}${OpenCV_VERSION}")
+set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
+set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
 
 set(SOURCE_FILES
         src/cli.cpp
-        src/App.h
-        src/App.cpp
+        src/native_api.cpp
         )
 
-add_executable(native_cli
+add_executable(${PROJECT_NAME}
         ${SOURCE_FILES})
+
+find_package(OpenCV REQUIRED)
+message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")
+
+target_include_directories(${PROJECT_NAME} PRIVATE "${OpenCV_INCLUDE_DIRS}")
+target_link_libraries(${PROJECT_NAME} PRIVATE "${OpenCV_LIBS}")
+
+add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
+        $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+)
