@@ -1,10 +1,56 @@
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
-
+import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'src/platform_channel.dart';
+import 'package:logger/logger.dart';
+
+import 'main.mapper.g.dart' show initializeJsonMapper;
+
+final logger = Logger(printer: PrettyPrinter(printEmojis: false, lineLength: 100));
 
 void main() {
+  initializeJsonMapper();
   runApp(const MyApp());
+}
+
+@jsonSerializable
+class WindowProfile {
+  final String? windowClass;
+  final String? windowTitle;
+
+  const WindowProfile({
+    this.windowClass,
+    this.windowTitle,
+  });
+}
+
+@jsonSerializable
+class RecorderConfig {
+  final WindowProfile? windowProfile;
+  final int? recordingFps;
+
+  const RecorderConfig({
+    this.windowProfile,
+    this.recordingFps,
+  });
+}
+
+@jsonSerializable
+class WindowsConfig {
+  final RecorderConfig? windowRecorder;
+
+  const WindowsConfig({
+    this.windowRecorder,
+  });
+}
+
+@jsonSerializable
+class PlatformConfig {
+  final WindowsConfig? windowsConfig;
+
+  const PlatformConfig({
+    this.windowsConfig,
+  });
 }
 
 class MyApp extends StatelessWidget {
@@ -37,7 +83,26 @@ class _MyHomePageState extends State<MyHomePage> {
 
   _MyHomePageState() {
     _api.setCallback(_textUpdated);
-    _localPath.then((value) => _api.setConfig(value));
+    const serializationConfig = SerializationOptions(
+      indent: '',
+      caseStyle: CaseStyle.snake,
+      ignoreNullMembers: true,
+    );
+    const config = PlatformConfig(
+      windowsConfig: WindowsConfig(
+        windowRecorder: RecorderConfig(
+          recordingFps: 5,
+          windowProfile: WindowProfile(
+            windowClass: "UnityWndClass",
+            windowTitle: "umamusume",
+          ),
+        ),
+      ),
+    );
+    final targetJson = JsonMapper.serialize(config, serializationConfig);
+    logger.d(targetJson);
+    logger.d("targetJson: $targetJson");
+    _localPath.then((value) => _api.setConfig(targetJson));
   }
 
   Future<String> get _localPath async {
