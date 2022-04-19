@@ -15,7 +15,7 @@
 		97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FD1CF9000F007C117D /* Assets.xcassets */; };
 		97C147011CF9000F007C117D /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */; };
 		B1AA49A228009EC3002485C7 /* opencv2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA49A128009EC3002485C7 /* opencv2.framework */; };
-		B1AA49A428016AB4002485C7 /* AppWrapper.mm in Sources */ = {isa = PBXBuildFile; fileRef = B1AA49A328016AB4002485C7 /* AppWrapper.mm */; };
+		B1AA49A428016AB4002485C7 /* NativeApiBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = B1AA49A328016AB4002485C7 /* NativeApiBridge.mm */; };
 		B1AA4A34280DC422002485C7 /* native_api.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B1AA4A2C280DC418002485C7 /* native_api.cpp */; };
 /* End PBXBuildFile section */
 
@@ -50,8 +50,8 @@
 		97C147001CF9000F007C117D /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B1AA49A128009EC3002485C7 /* opencv2.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = opencv2.framework; sourceTree = "<group>"; };
-		B1AA49A328016AB4002485C7 /* AppWrapper.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = AppWrapper.mm; sourceTree = "<group>"; };
-		B1AA49A528016BBB002485C7 /* AppWrapper.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; path = AppWrapper.h; sourceTree = "<group>"; };
+		B1AA49A328016AB4002485C7 /* NativeApiBridge.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = NativeApiBridge.mm; sourceTree = "<group>"; };
+		B1AA49A528016BBB002485C7 /* NativeApiBridge.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; path = NativeApiBridge.h; sourceTree = "<group>"; };
 		B1AA4A13280DC418002485C7 /* callbacklist.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = callbacklist.h; sourceTree = "<group>"; };
 		B1AA4A14280DC418002485C7 /* hetercallbacklist.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = hetercallbacklist.h; sourceTree = "<group>"; };
 		B1AA4A15280DC418002485C7 /* eventqueue.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = eventqueue.h; sourceTree = "<group>"; };
@@ -148,8 +148,8 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
-				B1AA49A328016AB4002485C7 /* AppWrapper.mm */,
-				B1AA49A528016BBB002485C7 /* AppWrapper.h */,
+				B1AA49A328016AB4002485C7 /* NativeApiBridge.mm */,
+				B1AA49A528016BBB002485C7 /* NativeApiBridge.h */,
 			);
 			path = Runner;
 			sourceTree = "<group>";
@@ -272,7 +272,7 @@
 		97C146E61CF9000F007C117D /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1300;
+				LastUpgradeCheck = 1330;
 				ORGANIZATIONNAME = "";
 				TargetAttributes = {
 					97C146ED1CF9000F007C117D = {
@@ -389,7 +389,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B1AA4A34280DC422002485C7 /* native_api.cpp in Sources */,
-				B1AA49A428016AB4002485C7 /* AppWrapper.mm in Sources */,
+				B1AA49A428016AB4002485C7 /* NativeApiBridge.mm in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,
 			);
