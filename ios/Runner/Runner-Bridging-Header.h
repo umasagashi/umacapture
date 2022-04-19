@@ -1,2 +1,3 @@
 #import "GeneratedPluginRegistrant.h"
-#import "AppWrapper.h"
+
+#import "NativeApiBridge.h"
