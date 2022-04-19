@@ -47,9 +47,11 @@ class WindowsConfig {
 @jsonSerializable
 class PlatformConfig {
   final WindowsConfig? windowsConfig;
+  final String? directory; 
 
   const PlatformConfig({
     this.windowsConfig,
+    this.directory,
   });
 }
 
@@ -88,21 +90,24 @@ class _MyHomePageState extends State<MyHomePage> {
       caseStyle: CaseStyle.snake,
       ignoreNullMembers: true,
     );
-    const config = PlatformConfig(
-      windowsConfig: WindowsConfig(
-        windowRecorder: RecorderConfig(
-          recordingFps: 5,
-          windowProfile: WindowProfile(
-            windowClass: "UnityWndClass",
-            windowTitle: "umamusume",
+    _localPath.then((value) {
+     final config = PlatformConfig(
+        directory: value,
+        windowsConfig: WindowsConfig(
+          windowRecorder: RecorderConfig(
+            recordingFps: 5,
+            windowProfile: WindowProfile(
+              windowClass: "UnityWndClass",
+              windowTitle: "umamusume",
+            ),
           ),
         ),
-      ),
-    );
-    final targetJson = JsonMapper.serialize(config, serializationConfig);
-    logger.d(targetJson);
-    logger.d("targetJson: $targetJson");
-    _localPath.then((value) => _api.setConfig(targetJson));
+      );
+      final targetJson = JsonMapper.serialize(config, serializationConfig);
+      logger.d(targetJson);
+      logger.d("targetJson: $targetJson");
+      _api.setConfig(targetJson);
+    });
   }
 
   Future<String> get _localPath async {

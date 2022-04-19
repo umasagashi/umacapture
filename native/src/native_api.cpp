@@ -1,5 +1,7 @@
 #include "native_api.h"
 
+using json = nlohmann::json;
+
 namespace {
 
 void _dummyForSuppressingUnusedWarning() {
@@ -21,7 +23,11 @@ NativeApi::NativeApi() {
     connection->listen([this](const cv::Mat &frame) {
         // for debug.
         std::cout << "on event: " << counter_for_debug << std::endl;
-        cv::imwrite("./sandbox/img_" + std::to_string(counter_for_debug) + ".jpg", frame);
+        if (!path_for_debug.empty()) {
+            auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug) + ".jpg";
+            std::cout << "save as: " << path << std::endl;
+            cv::imwrite(path, frame);
+        }
         callback_to_ui(std::to_string(counter_for_debug++));
     });
 }
@@ -32,6 +38,11 @@ NativeApi::~NativeApi() {
 
 void NativeApi::setConfig(const std::string &native_config) {
     std::cout << __FUNCTION__ << ": " << native_config << std::endl;
+    auto config = json::parse(native_config);
+    auto directory = config.find("directory");
+    if (directory != config.end()) {
+        this->path_for_debug = directory->template get<std::string>();
+    }
     this->config = native_config;
 }
 

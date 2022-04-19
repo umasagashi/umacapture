@@ -49,6 +49,7 @@ private:
     std::string config;
 
     int counter_for_debug = 0;
+    std::string path_for_debug;
 
 public:
     static NativeApi &instance() {
