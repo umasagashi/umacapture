@@ -9,7 +9,10 @@
 #include <thread>
 #include <utility>
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
 #include <opencv2/opencv.hpp>
+#pragma clang diagnostic ppop
 
 #include "eventpp_util.h"
 #include "json_utils.h"
@@ -42,14 +45,19 @@ public:
 
     void joinEventLoop();
 
+public:
+    int counter_for_debug = 0;
+    std::string path_for_debug;
+    std::list<cv::Mat> buffer_for_debug;
+
 private:
     std::function<CallbackMethod> callback_to_ui;
     connection::Sender<const cv::Mat &> frame_captured;
     connection::EventLoopRunner recorder_runner;
     std::string config;
 
-    int counter_for_debug = 0;
-    std::string path_for_debug;
+    std::atomic_int messageIn = 0;
+    std::atomic_int messageOut = 0;
 
 public:
     static NativeApi &instance() {

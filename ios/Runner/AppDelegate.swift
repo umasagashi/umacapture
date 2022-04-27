@@ -3,59 +3,97 @@ import Flutter
 import ReplayKit
 
 @UIApplicationMain
-@objc class AppDelegate: FlutterAppDelegate {
-    private let CHANNEL = "dev.flutter.umasagashi_app/capturing_channel"
-    private let app = AppWrapper()
+class AppDelegate: FlutterAppDelegate {
+    private let METHOD_CHANNEL = "dev.flutter.umasagashi_app/capturing_channel"
+    private let BROADCAST_EXTENSION = "com.umasagashi.umasagashiApp.Capturer"
+    private let APP_GROUP = "group.com.umasagashi"
     
-    private func startCapture() -> Void {
-        NSLog("swift-startCapture")
-        guard !RPScreenRecorder.shared().isRecording else {return}
-        RPScreenRecorder.shared().isMicrophoneEnabled = false
-        RPScreenRecorder.shared().startCapture(handler: { (buffer, bufferType, error) in
-            if let error = error {
-                print(error)
-            }
-            NSLog("handler - ¥(bufferType)")
-        }, completionHandler: {
-            if let error = $0 {
-                print(error)
-            }
-        })
-    }
+    private let api = NativeApiBridge()
     
-    private func stopCapture() -> Void {
-        NSLog("swift-stopCapture")
-        guard RPScreenRecorder.shared().isRecording else {return}
-        RPScreenRecorder.shared().stopCapture { (error) in
-            if let error = error {
-                print(error)
-            }
+    private var appDirectory: String?
+    private var picker: RPSystemBroadcastPickerView? = nil
+    
+    private func copySharedContainer(path: String) -> Void {
+        let fileManager = FileManager.default
+        if let root = fileManager.containerURL(forSecurityApplicationGroupIdentifier: APP_GROUP) {
+            let source = root.appendingPathComponent(path)
+            let dest = URL(fileURLWithPath: appDirectory!).appendingPathComponent(path)
+            try? fileManager.removeItem(at: dest)
+            try? fileManager.copyItem(atPath: source.path, toPath: dest.path)
+            NSLog("copied: \(source.path) to \(dest)")
         }
     }
     
-    private func setConfig(config: String) -> Void {
-        NSLog("swift-setConfig: " + config)
-        app.setConfig(config)
+    private func showBroadcastDialog() -> Void {
+        if self.picker == nil {
+            // No need to show picker itself, since I only require the picker's button.
+            let picker = RPSystemBroadcastPickerView(frame: CGRect())
+            picker.preferredExtension = BROADCAST_EXTENSION
+            picker.showsMicrophoneButton = false
+            self.picker = picker
+        }
+        
+        guard let button = self.picker?.subviews.first as? UIButton else {
+            return
+        }
+        
+        button.sendActions(for: .touchUpInside)
+    }
+    
+    private func startCapture() -> Void {
+        NSLog("AppDelegate: startCapture")
+        showBroadcastDialog()
+    }
+    
+    private func stopCapture() -> Void {
+        NSLog("AppDelegate: stopCapture")
+        copySharedContainer(path: "images")
+    }
+    
+    private func setConfig(_ config: String) -> Void {
+        NSLog("AppDelegate: setConfig")
+        api.setConfig(config)
+        
+        if let d = config.data(using: String.Encoding.utf8) {
+            if let items = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
+                let directory = items["directory"] as? String
+                NSLog("directory: \(directory ?? "nil")")
+                appDirectory = directory
+            }
+        }
+        
+        let userDefaults = UserDefaults(suiteName: APP_GROUP)
+        userDefaults?.set(config, forKey: "config")
+        userDefaults?.synchronize()
     }
     
     override func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        NSLog("swift-application")
-        let controller : FlutterViewController = window?.rootViewController as! FlutterViewController
-        let batteryChannel = FlutterMethodChannel(name: CHANNEL, binaryMessenger: controller.binaryMessenger)
-        batteryChannel.setMethodCallHandler({
+        NSLog("AppDelegate: application")
+        GeneratedPluginRegistrant.register(with: self)
+        
+        let controller = window?.rootViewController as! FlutterViewController
+        let channel = FlutterMethodChannel(name: METHOD_CHANNEL, binaryMessenger: controller.binaryMessenger)
+        channel.setMethodCallHandler({
             (call: FlutterMethodCall, result: @escaping FlutterResult) -> Void in
             switch call.method {
             case "startCapture": self.startCapture()
             case "stopCapture": self.stopCapture()
-            case "setConfig": self.setConfig(config: call.arguments as! String)
+            case "setConfig": self.setConfig(call.arguments as! String)
             default: result(FlutterMethodNotImplemented)
             }
         })
         
-        GeneratedPluginRegistrant.register(with: self)
+        api.setCallback({ (message: String?) in
+            DispatchQueue.main.async {
+                channel.invokeMethod("notify", arguments: message)
+            }
+        });
+        
+        api.startEventLoop()
+        
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
 }
