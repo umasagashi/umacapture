@@ -19,16 +19,28 @@ NativeApi::NativeApi() {
     auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &>>();
     frame_captured = connection;
     recorder_runner = connection::make_runner(connection);
+    
 
     connection->listen([this](const cv::Mat &frame) {
+        messageOut++;
         // for debug.
-        std::cout << "on event: " << counter_for_debug << std::endl;
+//        std::cout << "on event: " << counter_for_debug << std::endl;
         if (!path_for_debug.empty()) {
-            auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug) + ".jpg";
-            std::cout << "save as: " << path << std::endl;
-            cv::imwrite(path, frame);
+            auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
+//            std::cout << "save as: " << path << std::endl;
+//            messageOut += (int)cv::imwrite(path, frame);
+//            if (buffer_for_debug.size() >= 10) {
+//                buffer_for_debug.pop_front();
+//            }
+//            buffer_for_debug.push_back(frame);
         }
-        callback_to_ui(std::to_string(counter_for_debug++));
+        if (callback_to_ui) {
+            callback_to_ui(std::to_string(messageIn)
+                           + ", " + std::to_string(messageOut)
+                           + ", " + std::to_string(frame.cols)
+                           + ", " + std::to_string(frame.rows)
+                           );
+        }
     });
 }
 
@@ -52,12 +64,19 @@ void NativeApi::setCallback(const std::function<CallbackMethod> &method) {
 
 void NativeApi::updateFrame(const cv::Mat &frame) {
     std::cout << __FUNCTION__ << std::endl;
-    frame_captured->send(frame);
+
+    if (messageIn - messageOut < 10) {
+        messageIn++;
+        frame_captured->send(frame);
+    }
 }
 
 void NativeApi::startEventLoop() {
     std::cout << __FUNCTION__ << std::endl;
-    recorder_runner->start();
+
+    if (recorder_runner != nullptr) {
+        recorder_runner->start();
+    }
 }
 
 void NativeApi::joinEventLoop() {

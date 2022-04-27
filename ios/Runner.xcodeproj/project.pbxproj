@@ -17,7 +17,27 @@
 		B1AA49A228009EC3002485C7 /* opencv2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA49A128009EC3002485C7 /* opencv2.framework */; };
 		B1AA49A428016AB4002485C7 /* NativeApiBridge.mm in Sources */ = {isa = PBXBuildFile; fileRef = B1AA49A328016AB4002485C7 /* NativeApiBridge.mm */; };
 		B1AA4A34280DC422002485C7 /* native_api.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B1AA4A2C280DC418002485C7 /* native_api.cpp */; };
+		B1AA4AF52818464F002485C7 /* ReplayKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA4AC12811ACEA002485C7 /* ReplayKit.framework */; };
+		B1AA4AF92818464F002485C7 /* SampleHandler.mm in Sources */ = {isa = PBXBuildFile; fileRef = B1AA4AF82818464F002485C7 /* SampleHandler.mm */; };
+		B1AA4AFD2818464F002485C7 /* Capturer.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = B1AA4AF42818464F002485C7 /* Capturer.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		B1AA4B0228184668002485C7 /* opencv2.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA49A128009EC3002485C7 /* opencv2.framework */; };
+		B1AA4B04281858F9002485C7 /* native_api.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B1AA4A2C280DC418002485C7 /* native_api.cpp */; };
+		B1AA4B0728185F50002485C7 /* ImageConverter.mm in Sources */ = {isa = PBXBuildFile; fileRef = B1AA4B0628185F50002485C7 /* ImageConverter.mm */; };
+		B1AA4B0928186464002485C7 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA4B0828186464002485C7 /* CoreMedia.framework */; };
+		B1AA4B0C28188613002485C7 /* Accelerate.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA4B0B28188613002485C7 /* Accelerate.framework */; };
+		B1AA4B0E2818865E002485C7 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA4B0D2818865E002485C7 /* CoreVideo.framework */; };
+		B1AA4B10281889AA002485C7 /* CoreGraphics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B1AA4B0F281889AA002485C7 /* CoreGraphics.framework */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		B1AA4AFB2818464F002485C7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 97C146E61CF9000F007C117D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = B1AA4AF32818464F002485C7;
+			remoteInfo = Capturer;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		9705A1C41CF9048500538489 /* Embed Frameworks */ = {
@@ -28,6 +48,17 @@
 			files = (
 			);
 			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B1AA4ACA2811ACEA002485C7 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B1AA4AFD2818464F002485C7 /* Capturer.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -81,6 +112,20 @@
 		B1AA4A31280DC418002485C7 /* cli.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = cli.cpp; sourceTree = "<group>"; };
 		B1AA4A32280DC418002485C7 /* json_utils.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = json_utils.h; sourceTree = "<group>"; };
 		B1AA4A33280DC418002485C7 /* thread_util.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = thread_util.h; sourceTree = "<group>"; };
+		B1AA4AC12811ACEA002485C7 /* ReplayKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ReplayKit.framework; path = System/Library/Frameworks/ReplayKit.framework; sourceTree = SDKROOT; };
+		B1AA4AD02811AD15002485C7 /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
+		B1AA4AF42818464F002485C7 /* Capturer.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = Capturer.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		B1AA4AF72818464F002485C7 /* SampleHandler.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; path = SampleHandler.h; sourceTree = "<group>"; };
+		B1AA4AF82818464F002485C7 /* SampleHandler.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = SampleHandler.mm; sourceTree = "<group>"; };
+		B1AA4AFA2818464F002485C7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B1AA4B03281850B3002485C7 /* Capturer.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Capturer.entitlements; sourceTree = "<group>"; };
+		B1AA4B0528185F3D002485C7 /* ImageConverter.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; path = ImageConverter.h; sourceTree = "<group>"; };
+		B1AA4B0628185F50002485C7 /* ImageConverter.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ImageConverter.mm; sourceTree = "<group>"; };
+		B1AA4B0828186464002485C7 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
+		B1AA4B0A2818720D002485C7 /* ScopeExit.h */ = {isa = PBXFileReference; explicitFileType = sourcecode.cpp.h; path = ScopeExit.h; sourceTree = "<group>"; };
+		B1AA4B0B28188613002485C7 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
+		B1AA4B0D2818865E002485C7 /* CoreVideo.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreVideo.framework; path = System/Library/Frameworks/CoreVideo.framework; sourceTree = SDKROOT; };
+		B1AA4B0F281889AA002485C7 /* CoreGraphics.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreGraphics.framework; path = System/Library/Frameworks/CoreGraphics.framework; sourceTree = SDKROOT; };
 		E9FF394D857EE62218EA2F20 /* Pods-Runner.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Runner.debug.xcconfig"; path = "Target Support Files/Pods-Runner/Pods-Runner.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -94,14 +139,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B1AA4AF12818464F002485C7 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1AA4B10281889AA002485C7 /* CoreGraphics.framework in Frameworks */,
+				B1AA4B0928186464002485C7 /* CoreMedia.framework in Frameworks */,
+				B1AA4B0C28188613002485C7 /* Accelerate.framework in Frameworks */,
+				B1AA4B0228184668002485C7 /* opencv2.framework in Frameworks */,
+				B1AA4AF52818464F002485C7 /* ReplayKit.framework in Frameworks */,
+				B1AA4B0E2818865E002485C7 /* CoreVideo.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		5CD8AB46B5A8BB963079D104 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				B1AA4B0F281889AA002485C7 /* CoreGraphics.framework */,
+				B1AA4B0D2818865E002485C7 /* CoreVideo.framework */,
+				B1AA4B0B28188613002485C7 /* Accelerate.framework */,
+				B1AA4B0828186464002485C7 /* CoreMedia.framework */,
 				B1AA49A128009EC3002485C7 /* opencv2.framework */,
 				88BB645C42D30602610524C0 /* Pods_Runner.framework */,
+				B1AA4AC12811ACEA002485C7 /* ReplayKit.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -123,6 +186,7 @@
 				B1AA4A11280DC418002485C7 /* src */,
 				9740EEB11CF90186004384FC /* Flutter */,
 				97C146F01CF9000F007C117D /* Runner */,
+				B1AA4AF62818464F002485C7 /* Capturer */,
 				97C146EF1CF9000F007C117D /* Products */,
 				DC003A6DAB124D63AF86EAC6 /* Pods */,
 				5CD8AB46B5A8BB963079D104 /* Frameworks */,
@@ -133,6 +197,7 @@
 			isa = PBXGroup;
 			children = (
 				97C146EE1CF9000F007C117D /* Runner.app */,
+				B1AA4AF42818464F002485C7 /* Capturer.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -140,6 +205,7 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				B1AA4AD02811AD15002485C7 /* Runner.entitlements */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -231,6 +297,20 @@
 			path = nlohmann;
 			sourceTree = "<group>";
 		};
+		B1AA4AF62818464F002485C7 /* Capturer */ = {
+			isa = PBXGroup;
+			children = (
+				B1AA4B03281850B3002485C7 /* Capturer.entitlements */,
+				B1AA4AF72818464F002485C7 /* SampleHandler.h */,
+				B1AA4AF82818464F002485C7 /* SampleHandler.mm */,
+				B1AA4AFA2818464F002485C7 /* Info.plist */,
+				B1AA4B0528185F3D002485C7 /* ImageConverter.h */,
+				B1AA4B0628185F50002485C7 /* ImageConverter.mm */,
+				B1AA4B0A2818720D002485C7 /* ScopeExit.h */,
+			);
+			path = Capturer;
+			sourceTree = "<group>";
+		};
 		DC003A6DAB124D63AF86EAC6 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
@@ -256,15 +336,36 @@
 				9705A1C41CF9048500538489 /* Embed Frameworks */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				640F9D20C02DB66382E69C60 /* [CP] Embed Pods Frameworks */,
+				B1AA4ACA2811ACEA002485C7 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B1AA4AFC2818464F002485C7 /* PBXTargetDependency */,
+			);
+			name = Runner;
+			packageProductDependencies = (
+			);
+			productName = Runner;
+			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
+			productType = "com.apple.product-type.application";
+		};
+		B1AA4AF32818464F002485C7 /* Capturer */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B1AA4AFE2818464F002485C7 /* Build configuration list for PBXNativeTarget "Capturer" */;
+			buildPhases = (
+				B1AA4AF02818464F002485C7 /* Sources */,
+				B1AA4AF12818464F002485C7 /* Frameworks */,
+				B1AA4AF22818464F002485C7 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = Runner;
-			productName = Runner;
-			productReference = 97C146EE1CF9000F007C117D /* Runner.app */;
-			productType = "com.apple.product-type.application";
+			name = Capturer;
+			productName = Capturer;
+			productReference = B1AA4AF42818464F002485C7 /* Capturer.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -272,12 +373,16 @@
 		97C146E61CF9000F007C117D /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
-				LastUpgradeCheck = 1330;
+				LastSwiftUpdateCheck = 1330;
+				LastUpgradeCheck = 1300;
 				ORGANIZATIONNAME = "";
 				TargetAttributes = {
 					97C146ED1CF9000F007C117D = {
 						CreatedOnToolsVersion = 7.3.1;
 						LastSwiftMigration = 1100;
+					};
+					B1AA4AF32818464F002485C7 = {
+						CreatedOnToolsVersion = 13.3;
 					};
 				};
 			};
@@ -290,11 +395,14 @@
 				Base,
 			);
 			mainGroup = 97C146E51CF9000F007C117D;
+			packageReferences = (
+			);
 			productRefGroup = 97C146EF1CF9000F007C117D /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
+				B1AA4AF32818464F002485C7 /* Capturer */,
 			);
 		};
 /* End PBXProject section */
@@ -308,6 +416,13 @@
 				3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */,
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B1AA4AF22818464F002485C7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -395,7 +510,25 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B1AA4AF02818464F002485C7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1AA4B04281858F9002485C7 /* native_api.cpp in Sources */,
+				B1AA4AF92818464F002485C7 /* SampleHandler.mm in Sources */,
+				B1AA4B0728185F50002485C7 /* ImageConverter.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B1AA4AFC2818464F002485C7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = B1AA4AF32818464F002485C7 /* Capturer */;
+			targetProxy = B1AA4AFB2818464F002485C7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXVariantGroup section */
 		97C146FA1CF9000F007C117D /* Main.storyboard */ = {
@@ -472,8 +605,10 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7AFA3C8E1D35360C0083082E /* Release.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = KFLFYX75S6;
 				ENABLE_BITCODE = NO;
@@ -482,6 +617,7 @@
 					"$(PROJECT_DIR)",
 				);
 				INFOPLIST_FILE = Runner/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -607,8 +743,10 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 9740EEB21CF90195004384FC /* Debug.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = KFLFYX75S6;
 				ENABLE_BITCODE = NO;
@@ -617,6 +755,7 @@
 					"$(PROJECT_DIR)",
 				);
 				INFOPLIST_FILE = Runner/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -634,8 +773,10 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = 7AFA3C8E1D35360C0083082E /* Release.xcconfig */;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;
 				CURRENT_PROJECT_VERSION = "$(FLUTTER_BUILD_NUMBER)";
 				DEVELOPMENT_TEAM = KFLFYX75S6;
 				ENABLE_BITCODE = NO;
@@ -644,6 +785,7 @@
 					"$(PROJECT_DIR)",
 				);
 				INFOPLIST_FILE = Runner/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -655,6 +797,118 @@
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;
+		};
+		B1AA4AFF2818464F002485C7 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = Capturer/Capturer.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KFLFYX75S6;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)",
+				);
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Capturer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = umasagashi;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umasagashi.umasagashiApp.Capturer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B1AA4B002818464F002485C7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = Capturer/Capturer.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KFLFYX75S6;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)",
+				);
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Capturer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = umasagashi;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umasagashi.umasagashiApp.Capturer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		B1AA4B012818464F002485C7 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++17";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CODE_SIGN_ENTITLEMENTS = Capturer/Capturer.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = KFLFYX75S6;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)",
+				);
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Capturer/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = umasagashi;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 12.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0.0;
+				MTL_FAST_MATH = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.umasagashi.umasagashiApp.Capturer;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Profile;
 		};
 /* End XCBuildConfiguration section */
 
@@ -675,6 +929,16 @@
 				97C147061CF9000F007C117D /* Debug */,
 				97C147071CF9000F007C117D /* Release */,
 				249021D4217E4FDB00AE95B9 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B1AA4AFE2818464F002485C7 /* Build configuration list for PBXNativeTarget "Capturer" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B1AA4AFF2818464F002485C7 /* Debug */,
+				B1AA4B002818464F002485C7 /* Release */,
+				B1AA4B012818464F002485C7 /* Profile */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
