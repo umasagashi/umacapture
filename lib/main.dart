@@ -50,7 +50,7 @@ class WindowsConfig {
 @jsonSerializable
 class PlatformConfig {
   final WindowsConfig? windowsConfig;
-  final String? directory; 
+  final String? directory;
 
   const PlatformConfig({
     this.windowsConfig,
@@ -95,8 +95,8 @@ class _MyHomePageState extends State<MyHomePage> {
     );
     _localPath.then((value) {
      final config = PlatformConfig(
-        directory: value,
-        windowsConfig: WindowsConfig(
+        directory: value + "/debug",
+        windowsConfig: const WindowsConfig(
           windowRecorder: RecorderConfig(
             recordingFps: 5,
             windowProfile: WindowProfile(
