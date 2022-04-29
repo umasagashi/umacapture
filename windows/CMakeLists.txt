@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
 project(umasagashi_app LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(BINARY_NAME "umasagashi_app")
 
 cmake_policy(SET CMP0063 NEW)
@@ -33,7 +33,7 @@ add_definitions(-DUNICODE -D_UNICODE)
 # Compilation settings that should be applied to most targets.
 function(APPLY_STANDARD_SETTINGS TARGET)
     target_compile_features(${TARGET} PUBLIC cxx_std_17)
-    target_compile_options(${TARGET} PRIVATE /W4 /WX /wd4100 /wd4819 /wd5054)
+    target_compile_options(${TARGET} PRIVATE /W4 /WX /wd4100 /wd4819 /wd5054 /wd4068)
     target_compile_options(${TARGET} PRIVATE /EHsc)
     target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
     target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")

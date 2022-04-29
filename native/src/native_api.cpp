@@ -4,14 +4,14 @@ using json = nlohmann::json;
 
 namespace {
 
-    void _dummyForSuppressingUnusedWarning() {
-        auto &app = NativeApi::instance();
-        app.startEventLoop();
-        app.joinEventLoop();
-        app.updateFrame({});
-        app.setConfig({});
-        app.setCallback({});
-    }
+void _dummyForSuppressingUnusedWarning() {
+    auto &app = NativeApi::instance();
+    app.startEventLoop();
+    app.joinEventLoop();
+    app.updateFrame({});
+    app.setConfig({});
+    app.setCallback({});
+}
 
 }  // namespace
 
@@ -30,7 +30,7 @@ NativeApi::NativeApi() {
         if (!path_for_debug.empty()) {
             auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
             std::cout << "save as: " << path << std::endl;
-//            message_out += (int) cv::imwrite(path, frame);
+            //            message_out += (int) cv::imwrite(path, frame);
         }
         if (callback_to_ui) {
             callback_to_ui(std::to_string(message_in) + ", " + std::to_string(message_out) + ", "
@@ -45,10 +45,12 @@ NativeApi::~NativeApi() {
 
 void NativeApi::setConfig(const std::string &native_config) {
     std::cout << __FUNCTION__ << ": " << native_config << std::endl;
-    auto config = json::parse(native_config);
-    auto directory = config.find("directory");
-    if (directory != config.end()) {
-        this->path_for_debug = directory->template get<std::string>();
+    auto config_json = json::parse(native_config);
+    auto directory = config_json.find("directory");
+    if (directory != config_json.end()) {
+        path_for_debug = directory->template get<std::string>();
+        std::filesystem::remove_all(path_for_debug);
+        std::filesystem::create_directories(path_for_debug);
     }
     this->config = native_config;
 }
