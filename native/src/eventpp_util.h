@@ -68,7 +68,8 @@ private:
 class EventLoopRunnerImpl : public threading::ThreadBase {
 public:
     EventLoopRunnerImpl(std::shared_ptr<EventProcessorImpl> processor, std::function<void()> finalizer)
-            : processor(std::move(processor)), finalizer(std::move(finalizer)) {}
+        : processor(std::move(processor))
+        , finalizer(std::move(finalizer)) {}
 
 protected:
     void run() override {
