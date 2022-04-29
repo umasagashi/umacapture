@@ -18,6 +18,7 @@ import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
+import android.util.Size;
 import android.view.WindowManager;
 import android.widget.Toast;
 
@@ -38,10 +39,15 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     private static final int REQUEST_CODE = 1234;
 
     private ImageReader mImageReader;
+    private final Size minimumSize = new Size(540, 960);
 
     public native void initializeNativeCounterpart(String config);
 
-    public native void updateNativeFrame(byte[] frame, int width, int height, int pixelStride, int rowStride);
+    public native void updateNativeFrame(ByteBuffer frame, int width, int height, int rowStride, int scaledWidth, int scaledHeight);
+
+    public native void startEventLoop();
+
+    public native void joinEventLoop();
 
     public void notifyPlatform(String arg) {
         Log.d(LOG_TAG, String.format("notifyPlatform %s", arg));
@@ -85,13 +91,13 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     public int onStartCommand(Intent captureIntent, int flags, int startId) {
         Log.d(LOG_TAG, "onStartCommand");
 
-        String config = captureIntent.getStringExtra("config");
+        final String config = captureIntent.getStringExtra("config");
         Log.d(LOG_TAG, "config " + config);
         initializeNativeCounterpart(config);
 
         startForeground(1, createNotification());
 
-        DisplayMetrics metrics = new DisplayMetrics();
+        final DisplayMetrics metrics = new DisplayMetrics();
         ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(metrics);
         Log.d(LOG_TAG, "getRealMetrics " + metrics);
 
@@ -116,6 +122,7 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     public void onCreate() {
         Log.d(LOG_TAG, "onCreate");
         Toast.makeText(this, "Capture Started", Toast.LENGTH_LONG).show();
+        startEventLoop();
         super.onCreate();
     }
 
@@ -124,6 +131,7 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
         Log.d(LOG_TAG, "onDestroy");
         Toast.makeText(this, "Capture Stopped", Toast.LENGTH_LONG).show();
         mImageReader.close();
+        joinEventLoop();
         super.onDestroy();
     }
 
@@ -134,20 +142,32 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
             return;
         }
 
-        final Image.Plane plane = image.getPlanes()[0];
-        final ByteBuffer buffer = plane.getBuffer();
-        byte[] bytes = new byte[buffer.remaining()];
-        buffer.get(bytes);
+        final Image.Plane[] planes = image.getPlanes();
+        if (planes.length != 1) {
+            throw new Error("Unsupported screen format");
+        }
+
+        final Image.Plane plane = planes[0];
+        final ByteBuffer buffer = plane.getBuffer().asReadOnlyBuffer();
+
+        if (!buffer.isDirect() || plane.getPixelStride() != 4) {
+            throw new Error("Unexpected image format");
+        }
 
         final int width = imageReader.getWidth();
         final int height = imageReader.getHeight();
-        final int pixelStride = plane.getPixelStride();
         final int rowStride = plane.getRowStride();
 
+        final float scale = Math.max(
+            (float) minimumSize.getWidth() / width,
+            (float) minimumSize.getHeight() / height
+        );
+        final int scaledWidth = Math.round((float) width * scale);
+        final int scaledHeight = Math.round((float) height * scale);
+
+        updateNativeFrame(buffer, width, height, rowStride, scaledWidth, scaledHeight);
+
         image.close();
-
-
-        updateNativeFrame(bytes, width, height, pixelStride, rowStride);
     }
 
     @Nullable
