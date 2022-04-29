@@ -1,61 +1,17 @@
-import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
-import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
-import 'src/platform_channel.dart';
+import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'main.mapper.g.dart' show initializeJsonMapper;
+import 'src/config.dart';
+import 'src/platform_channel.dart';
 
 final logger = Logger(printer: PrettyPrinter(printEmojis: false, lineLength: 100));
 
 void main() {
   initializeJsonMapper();
   runApp(const MyApp());
-}
-
-@jsonSerializable
-class WindowProfile {
-  final String? windowClass;
-  final String? windowTitle;
-
-  const WindowProfile({
-    this.windowClass,
-    this.windowTitle,
-  });
-}
-
-@jsonSerializable
-class RecorderConfig {
-  final WindowProfile? windowProfile;
-  final int? recordingFps;
-
-  const RecorderConfig({
-    this.windowProfile,
-    this.recordingFps,
-  });
-}
-
-@jsonSerializable
-class WindowsConfig {
-  final RecorderConfig? windowRecorder;
-
-  const WindowsConfig({
-    this.windowRecorder,
-  });
-}
-
-@jsonSerializable
-class PlatformConfig {
-  final WindowsConfig? windowsConfig;
-  final String? directory;
-
-  const PlatformConfig({
-    this.windowsConfig,
-    this.directory,
-  });
 }
 
 class MyApp extends StatelessWidget {
@@ -94,11 +50,15 @@ class _MyHomePageState extends State<MyHomePage> {
       ignoreNullMembers: true,
     );
     _localPath.then((value) {
-     final config = PlatformConfig(
-        directory: value + "/debug",
+      final config = PlatformConfig(
+        directory: value + "/umasagashi/debug",
         windowsConfig: const WindowsConfig(
           windowRecorder: RecorderConfig(
             recordingFps: 5,
+            minimumSize: Size(
+              width: 540,
+              height: 960,
+            ),
             windowProfile: WindowProfile(
               windowClass: "UnityWndClass",
               windowTitle: "umamusume",
