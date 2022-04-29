@@ -134,7 +134,7 @@ cv::Mat scaledRGBMat_;
                     {scaledYUVMat_},
                     {0, 1, 1, 2, 2, 0});  // YpCbCr -> CrYpCb
     
-    const uint8_t permuteMap[4] = {1, 2, 3, 0};  // ARGB -> RGBA
+    const uint8_t permuteMap[4] = {3, 2, 1, 0};  // ARGB -> BGRA
     vImage_Error error = vImageConvert_444CrYpCb8ToARGB8888(&asBuffer(scaledYUVMat_), // in
                                                             &asBuffer(scaledRGBMat_), // out
                                                             &conversionInfo_,
@@ -146,8 +146,7 @@ cv::Mat scaledRGBMat_;
     }
 
     cv::Mat mat = cv::Mat(scaledSize, CV_8UC3);
-    cv::cvtColor(scaledRGBMat_, mat, cv::COLOR_RGBA2RGB);
-//    CGImageRef _mat = MatToCGImage(mat);
+    cv::cvtColor(scaledRGBMat_, mat, cv::COLOR_BGRA2BGR);
     return mat;
 }
 

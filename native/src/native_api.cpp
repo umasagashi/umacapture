@@ -25,12 +25,12 @@ NativeApi::NativeApi() {
     });
 
     connection->listen([this](const cv::Mat &frame) {
-        message_out++;
+//        message_out++;
         // for debug.
         if (!path_for_debug.empty()) {
             auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
             std::cout << "save as: " << path << std::endl;
-            //            message_out += (int) cv::imwrite(path, frame);
+            message_out += (int) cv::imwrite(path, frame);
         }
         if (callback_to_ui) {
             callback_to_ui(std::to_string(message_in) + ", " + std::to_string(message_out) + ", "
@@ -49,8 +49,6 @@ void NativeApi::setConfig(const std::string &native_config) {
     auto directory = config_json.find("directory");
     if (directory != config_json.end()) {
         path_for_debug = directory->template get<std::string>();
-        std::filesystem::remove_all(path_for_debug);
-        std::filesystem::create_directories(path_for_debug);
     }
     this->config = native_config;
 }
