@@ -1,3 +1,4 @@
+#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -50,21 +51,30 @@ bool FlutterWindow::OnCreate() {
 
     channel = std::make_unique<channel::PlatformChannel>(flutter_controller_->engine(), GetHandle());
 
-    channel->addMethodCallHandler("setConfig", [this](const auto &configString) {
-        std::cout << "setConfig: " << configString << std::endl;
-        NativeApi::instance().setConfig(configString);
+    channel->addMethodCallHandler("setConfig", [this](const auto &config_string) {
+        std::cout << "setConfig: " << config_string << std::endl;
+        NativeApi::instance().setConfig(config_string);
 
-        const auto configJson = json::parse(configString);
-        const auto windowsConfigJson = configJson.find("windows_config");
-        if (windowsConfigJson == configJson.end()) {
+        const auto config_json = json::parse(config_string);
+
+        const auto directory_config_json = config_json.find("directory");
+        if (directory_config_json != config_json.end()) {
+            const auto directory_config = directory_config_json->template get<std::string>();
+            std::cout << "directory_config: " << directory_config << std::endl;
+            std::filesystem::remove_all(directory_config);
+            std::filesystem::create_directories(directory_config);
+        }
+
+        const auto windows_config_json = config_json.find("windows_config");
+        if (windows_config_json == config_json.end()) {
             return;
         }
-        std::cout << "windows_config: " << (*windowsConfigJson) << std::endl;
+        std::cout << "windows_config: " << (*windows_config_json) << std::endl;
 
-        const auto windowsConfig = windowsConfigJson->template get<config::WindowsConfig>();
-        std::cout << "windows_config: " << json(windowsConfig).dump(1) << std::endl;
-        if (windowsConfig.window_recorder.has_value()) {
-            window_recorder->setConfig(windowsConfig.window_recorder.value());
+        const auto windows_config = windows_config_json->template get<config::WindowsConfig>();
+        std::cout << "windows_config: " << json(windows_config).dump(1) << std::endl;
+        if (windows_config.window_recorder.has_value()) {
+            window_recorder->setConfig(windows_config.window_recorder.value());
         }
     });
 
