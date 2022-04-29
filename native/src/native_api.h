@@ -27,7 +27,8 @@ struct NativeConfig {
 
 }  // namespace native_config
 
-using CallbackMethod = void(const std::string &);
+using MessageCallback = void(const std::string &);
+using FinalizerCallback = void();
 
 class NativeApi {
 public:
@@ -39,7 +40,8 @@ public:
 
     void updateFrame(const cv::Mat &frame);
 
-    void setCallback(const std::function<CallbackMethod> &method);
+    void setCallback(const std::function<MessageCallback> &method);
+    void setFinalizer(const std::function<FinalizerCallback> &method);
 
     void startEventLoop();
 
@@ -51,13 +53,15 @@ public:
     std::list<cv::Mat> buffer_for_debug;
 
 private:
-    std::function<CallbackMethod> callback_to_ui;
+    std::function<MessageCallback> callback_to_ui;
+    std::function<FinalizerCallback> finalizer;
+
     connection::Sender<const cv::Mat &> frame_captured;
     connection::EventLoopRunner recorder_runner;
     std::string config;
 
-    std::atomic_int messageIn = 0;
-    std::atomic_int messageOut = 0;
+    std::atomic_int message_in = 0;
+    std::atomic_int message_out = 0;
 
 public:
     static NativeApi &instance() {

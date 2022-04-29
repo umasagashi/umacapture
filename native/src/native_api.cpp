@@ -4,42 +4,37 @@ using json = nlohmann::json;
 
 namespace {
 
-void _dummyForSuppressingUnusedWarning() {
-    auto &app = NativeApi::instance();
-    app.startEventLoop();
-    app.joinEventLoop();
-    app.updateFrame({});
-    app.setConfig({});
-    app.setCallback({});
-}
+    void _dummyForSuppressingUnusedWarning() {
+        auto &app = NativeApi::instance();
+        app.startEventLoop();
+        app.joinEventLoop();
+        app.updateFrame({});
+        app.setConfig({});
+        app.setCallback({});
+    }
 
 }  // namespace
 
 NativeApi::NativeApi() {
     auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &>>();
     frame_captured = connection;
-    recorder_runner = connection::make_runner(connection);
-    
+    recorder_runner = connection::make_runner(connection, [this]() {
+        if (finalizer) {
+            finalizer();
+        }
+    });
 
     connection->listen([this](const cv::Mat &frame) {
-        messageOut++;
+        message_out++;
         // for debug.
-//        std::cout << "on event: " << counter_for_debug << std::endl;
         if (!path_for_debug.empty()) {
             auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
-//            std::cout << "save as: " << path << std::endl;
-//            messageOut += (int)cv::imwrite(path, frame);
-//            if (buffer_for_debug.size() >= 10) {
-//                buffer_for_debug.pop_front();
-//            }
-//            buffer_for_debug.push_back(frame);
+            std::cout << "save as: " << path << std::endl;
+//            message_out += (int) cv::imwrite(path, frame);
         }
         if (callback_to_ui) {
-            callback_to_ui(std::to_string(messageIn)
-                           + ", " + std::to_string(messageOut)
-                           + ", " + std::to_string(frame.cols)
-                           + ", " + std::to_string(frame.rows)
-                           );
+            callback_to_ui(std::to_string(message_in) + ", " + std::to_string(message_out) + ", "
+                           + std::to_string(frame.cols) + ", " + std::to_string(frame.rows));
         }
     });
 }
@@ -58,15 +53,20 @@ void NativeApi::setConfig(const std::string &native_config) {
     this->config = native_config;
 }
 
-void NativeApi::setCallback(const std::function<CallbackMethod> &method) {
+void NativeApi::setCallback(const std::function<MessageCallback> &method) {
     this->callback_to_ui = method;
+}
+
+void NativeApi::setFinalizer(const std::function<FinalizerCallback> &method) {
+    this->finalizer = method;
 }
 
 void NativeApi::updateFrame(const cv::Mat &frame) {
     std::cout << __FUNCTION__ << std::endl;
 
-    if (messageIn - messageOut < 10) {
-        messageIn++;
+    // If background threads are not keeping up, frame has to be discarded rather than queued.
+    if (message_in - message_out < 10) {
+        message_in++;
         frame_captured->send(frame);
     }
 }
@@ -74,15 +74,11 @@ void NativeApi::updateFrame(const cv::Mat &frame) {
 void NativeApi::startEventLoop() {
     std::cout << __FUNCTION__ << std::endl;
 
-    if (recorder_runner != nullptr) {
-        recorder_runner->start();
-    }
+    recorder_runner->start();
 }
 
 void NativeApi::joinEventLoop() {
     std::cout << __FUNCTION__ << std::endl;
 
-    if (recorder_runner != nullptr) {
-        recorder_runner = nullptr;
-    }
+    recorder_runner->join();
 }
