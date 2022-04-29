@@ -144,7 +144,7 @@ private:
         cv::resize(plain_mat, scaled_mat, scaled_mat.size(), cv::INTER_LINEAR);
 
         cv::Mat image = cv::Mat(scaled_mat.size(), CV_8UC3);
-        cv::cvtColor(scaled_mat, image, cv::COLOR_RGBA2RGB);
+        cv::cvtColor(scaled_mat, image, cv::COLOR_BGRA2BGR);
 
         SelectObject(memory_dc, old_bitmap);
         DeleteObject(bitmap);
