@@ -67,8 +67,8 @@ private:
 
 class EventLoopRunnerImpl : public threading::ThreadBase {
 public:
-    EventLoopRunnerImpl(std::shared_ptr<EventProcessorImpl> processor)  // NOLINT(google-explicit-constructor)
-        : processor(std::move(processor)) {}
+    EventLoopRunnerImpl(std::shared_ptr<EventProcessorImpl> processor, std::function<void()> finalizer)
+            : processor(std::move(processor)), finalizer(std::move(finalizer)) {}
 
 protected:
     void run() override {
@@ -77,11 +77,15 @@ protected:
             processor->waitFor(loopTimeoutMilliseconds);
             processor->process();
         }
+        if (finalizer) {
+            finalizer();
+        }
         std::cout << __FUNCTION__ << " finished" << std::endl;
     }
 
 private:
     std::shared_ptr<EventProcessorImpl> processor;
+    std::function<void(void)> finalizer;
     const int loopTimeoutMilliseconds = 8;
 };
 
@@ -104,12 +108,13 @@ using QueuedConnection = std::shared_ptr<::QueuedConnectionImpl<T>>;
 using EventLoopRunner = std::shared_ptr<::EventLoopRunnerImpl>;
 
 template<typename SharedPointerType>
-SharedPointerType make_connection() {
+inline SharedPointerType make_connection() {
     return std::make_shared<typename SharedPointerType::element_type>();
 }
 
-std::shared_ptr<::EventLoopRunnerImpl> make_runner(const std::shared_ptr<EventProcessorImpl> &processor) {
-    return std::make_shared<EventLoopRunnerImpl>(processor);
+inline std::shared_ptr<::EventLoopRunnerImpl> make_runner(const std::shared_ptr<EventProcessorImpl> &processor,
+                                                          const std::function<void()> &finalizer = nullptr) {
+    return std::make_shared<EventLoopRunnerImpl>(processor, finalizer);
 }
 
 }  // namespace connection
