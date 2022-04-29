@@ -12,6 +12,14 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+
 import io.flutter.Log;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
@@ -76,6 +84,16 @@ public class MainActivity extends FlutterActivity {
         if (!isCaptureRunning()) {
             Toast.makeText(this, "Capture is not running", Toast.LENGTH_SHORT).show();
             return;
+        }
+
+        // for debug
+        try {
+            final JSONObject configJson = new JSONObject(config);
+            Path directory = Paths.get(configJson.getString("directory"));
+            Files.deleteIfExists(directory);
+            Files.createDirectory(directory);
+        } catch (JSONException | IOException e) {
+            e.printStackTrace();
         }
 
         stopService(new Intent(getApplication(), ScreenCaptureService.class));

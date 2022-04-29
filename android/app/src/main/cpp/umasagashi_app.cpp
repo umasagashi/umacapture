@@ -126,7 +126,7 @@ Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_updateNativeFrame(
     cv::resize(raw_mat, buffer_mat, scaled_size, 0, 0, cv::INTER_LINEAR);
 
     auto mat = cv::Mat(scaled_size, CV_8UC3);
-    cv::cvtColor(buffer_mat, mat, cv::COLOR_BGRA2RGB);
+    cv::cvtColor(buffer_mat, mat, cv::COLOR_RGBA2BGR);
     NativeApi::instance().updateFrame(mat);
 }
 
