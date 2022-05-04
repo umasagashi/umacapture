@@ -1,133 +1,75 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:flex_color_scheme/flex_color_scheme.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:logger/logger.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'main.mapper.g.dart' show initializeJsonMapper;
-import 'src/config.dart';
-import 'src/platform_channel.dart';
+import 'src/app/route.gr.dart';
 
-final logger = Logger(printer: PrettyPrinter(printEmojis: false, lineLength: 100));
+// ignore: unused_import
+import 'src/preference/config.dart'; // TODO: Find out how to use dart_json_mapper without unnecessary import here.
 
-void main() {
+final kIsDesktop = {
+  TargetPlatform.windows,
+  TargetPlatform.linux,
+  TargetPlatform.macOS,
+}.contains(defaultTargetPlatform);
+
+final kIsWindowed = !kIsWeb && kIsDesktop;
+
+class App extends StatelessWidget {
+  App({Key? key}) : super(key: key);
+
+  final _router = AppRouter();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: 'umasagashi',
+      theme: FlexThemeData.light(
+        scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 20,
+        appBarOpacity: 0.95,
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.notoSans().fontFamily,
+      ),
+      darkTheme: FlexThemeData.dark(
+        scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 15,
+        appBarStyle: FlexAppBarStyle.background,
+        appBarOpacity: 0.90,
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.notoSans().fontFamily,
+      ),
+      themeMode: ThemeMode.light,
+      routerDelegate: _router.delegate(),
+      routeInformationParser: _router.defaultRouteParser(),
+    );
+  }
+}
+
+void main() async {
+  await Hive.initFlutter('umasagashi');
   initializeJsonMapper();
-  runApp(const MyApp());
-}
 
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  if (kIsWindowed) {
+    WidgetsFlutterBinding.ensureInitialized();
+    await windowManager.ensureInitialized();
 
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+    WindowOptions windowOptions = WindowOptions(
+      titleBarStyle: TitleBarStyle.hidden,
     );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({Key? key, required this.title}) : super(key: key);
-
-  final String title;
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  final MyChannel _api = MyChannel();
-  String _text = "n";
-
-  _MyHomePageState() {
-    _api.setCallback(_textUpdated);
-    const serializationConfig = SerializationOptions(
-      indent: '',
-      caseStyle: CaseStyle.snake,
-      ignoreNullMembers: true,
-    );
-    _localPath.then((value) {
-      final config = PlatformConfig(
-        directory: value + "/umasagashi/debug",
-        windowsConfig: const WindowsConfig(
-          windowRecorder: RecorderConfig(
-            recordingFps: 5,
-            minimumSize: Size(
-              width: 540,
-              height: 960,
-            ),
-            windowProfile: WindowProfile(
-              windowClass: "UnityWndClass",
-              windowTitle: "umamusume",
-            ),
-          ),
-        ),
-      );
-      final targetJson = JsonMapper.serialize(config, serializationConfig);
-      logger.d(targetJson);
-      logger.d("targetJson: $targetJson");
-      _api.setConfig(targetJson);
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.show();
+      await windowManager.focus();
     });
   }
 
-  Future<String> get _localPath async {
-    final directory = await getApplicationDocumentsDirectory();
-    return directory.path;
-  }
-
-  void _textUpdated(String text) {
-    setState(() {
-      _text = text;
-    });
-  }
-
-  void _startCapture() {
-    _api.startCapture();
-  }
-
-  void _stopCapture() {
-    _api.stopCapture();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.title),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              _text,
-              style: Theme.of(context).textTheme.headline4,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
-        children: <Widget>[
-          FloatingActionButton(
-            onPressed: _startCapture,
-            tooltip: 'StartCapture',
-            child: const Icon(Icons.fiber_manual_record),
-          ),
-          FloatingActionButton(
-            onPressed: _stopCapture,
-            tooltip: 'StopCapture',
-            child: const Icon(Icons.stop),
-          ),
-        ],
-      ),
-    );
-  }
+  runApp(App());
 }
