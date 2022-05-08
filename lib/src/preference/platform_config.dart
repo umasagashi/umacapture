@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 
 @jsonSerializable
@@ -8,17 +10,6 @@ class WindowProfile {
   const WindowProfile({
     this.windowClass,
     this.windowTitle,
-  });
-}
-
-@jsonSerializable
-class Size {
-  final int? width;
-  final int? height;
-
-  const Size({
-    this.width,
-    this.height,
   });
 }
 
