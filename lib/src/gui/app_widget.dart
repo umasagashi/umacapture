@@ -1,12 +1,14 @@
 import 'package:auto_route/auto_route.dart';
+import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:logger/logger.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app/pages.dart';
-
-final logger = Logger(printer: PrettyPrinter(printEmojis: false, lineLength: 100));
+import '../app/route.gr.dart';
+import '../preference/window_state.dart';
 
 class _Sidebar extends StatefulWidget {
   @override
@@ -151,10 +153,42 @@ class _WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize => const Size.fromHeight(kWindowCaptionHeight);
 }
 
-class _Windowed extends StatelessWidget {
+class _Windowed extends ConsumerStatefulWidget {
   final Widget child;
+  final WindowStateBox _windowStateBox;
 
-  const _Windowed({Key? key, required this.child}) : super(key: key);
+  _Windowed({Key? key, required this.child})
+      : _windowStateBox = WindowStateBox(),
+        super(key: key);
+
+  @override
+  ConsumerState<_Windowed> createState() => _WindowedState();
+}
+
+class _WindowedState extends ConsumerState<_Windowed> with WindowListener {
+  @override
+  void initState() {
+    windowManager.addListener(this);
+    super.initState();
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  void onWindowResized() {
+    windowManager.getSize().then((size) => widget._windowStateBox.setSize(size));
+    super.onWindowResized();
+  }
+
+  @override
+  void onWindowMoved() {
+    windowManager.getPosition().then((offset) => widget._windowStateBox.setOffset(offset));
+    super.onWindowMoved();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -163,7 +197,7 @@ class _Windowed extends StatelessWidget {
         icon: Icon(Icons.circle_outlined),
         title: Text('umasagashi'),
       ),
-      body: child,
+      body: widget.child,
     );
   }
 }
@@ -188,6 +222,41 @@ class AppWidget extends StatelessWidget {
           return _ResponsiveScaffold(child: child);
         }
       },
+    );
+  }
+}
+
+class App extends StatelessWidget {
+  App({Key? key}) : super(key: key);
+
+  final _router = AppRouter();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      title: 'umasagashi',
+      theme: FlexThemeData.light(
+        scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 20,
+        appBarOpacity: 0.95,
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.notoSans().fontFamily,
+      ),
+      darkTheme: FlexThemeData.dark(
+        scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 15,
+        appBarStyle: FlexAppBarStyle.background,
+        appBarOpacity: 0.90,
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.notoSans().fontFamily,
+      ),
+      themeMode: ThemeMode.system,
+      routerDelegate: _router.delegate(),
+      routeInformationParser: _router.defaultRouteParser(),
     );
   }
 }
