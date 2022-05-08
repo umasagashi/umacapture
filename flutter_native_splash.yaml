@@ -1,0 +1,13 @@
+flutter_native_splash:
+  # flutter pub run flutter_native_splash:create
+  # flutter pub run flutter_native_splash:remove
+
+  android: true
+  ios: true
+  web: true
+
+  color: "#CBE5FF"
+  #  image: assets/splash.png
+
+  color_dark: "#004B75"
+  #  image_dark: assets/splash-invert.png
