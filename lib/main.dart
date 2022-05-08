@@ -1,75 +1,49 @@
-import 'package:flex_color_scheme/flex_color_scheme.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'main.mapper.g.dart' show initializeJsonMapper;
-import 'src/app/route.gr.dart';
-
-// ignore: unused_import
-import 'src/preference/config.dart'; // TODO: Find out how to use dart_json_mapper without unnecessary import here.
-
-final kIsDesktop = {
-  TargetPlatform.windows,
-  TargetPlatform.linux,
-  TargetPlatform.macOS,
-}.contains(defaultTargetPlatform);
-
-final kIsWindowed = !kIsWeb && kIsDesktop;
-
-class App extends StatelessWidget {
-  App({Key? key}) : super(key: key);
-
-  final _router = AppRouter();
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'umasagashi',
-      theme: FlexThemeData.light(
-        scheme: FlexScheme.blue,
-        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-        blendLevel: 20,
-        appBarOpacity: 0.95,
-        visualDensity: FlexColorScheme.comfortablePlatformDensity,
-        useMaterial3: true,
-        fontFamily: GoogleFonts.notoSans().fontFamily,
-      ),
-      darkTheme: FlexThemeData.dark(
-        scheme: FlexScheme.blue,
-        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-        blendLevel: 15,
-        appBarStyle: FlexAppBarStyle.background,
-        appBarOpacity: 0.90,
-        visualDensity: FlexColorScheme.comfortablePlatformDensity,
-        useMaterial3: true,
-        fontFamily: GoogleFonts.notoSans().fontFamily,
-      ),
-      themeMode: ThemeMode.light,
-      routerDelegate: _router.delegate(),
-      routeInformationParser: _router.defaultRouteParser(),
-    );
-  }
-}
+import 'src/core/json_adapter.dart';
+import 'src/core/utils.dart';
+import 'src/gui/app_widget.dart';
+import 'src/preference/storage_box.dart';
+import 'src/preference/window_state.dart';
 
 void main() async {
-  await Hive.initFlutter('umasagashi');
-  initializeJsonMapper();
+  logger.d('main begin');
+
+  WidgetsFlutterBinding.ensureInitialized();
+  initializeJsonMapper(adapters: [flutterTypesAdapter,]);
+  final packageInfo = await PackageInfo.fromPlatform();
+  await StorageBox.ensureOpened(packageInfo.appName, reset: false);
 
   if (kIsWindowed) {
-    WidgetsFlutterBinding.ensureInitialized();
     await windowManager.ensureInitialized();
+    windowManager.waitUntilReadyToShow(
+      WindowOptions(
+        titleBarStyle: TitleBarStyle.hidden,
+      ),
+      () async {
+        final box = WindowStateBox();
+        final size = box.getSize();
+        if (size != null) {
+          await windowManager.setSize(size);
+        }
 
-    WindowOptions windowOptions = WindowOptions(
-      titleBarStyle: TitleBarStyle.hidden,
+        final offset = box.getOffset();
+        if (offset != null) {
+          await windowManager.setPosition(offset);
+        }
+
+        await windowManager.show();
+        await windowManager.focus();
+      },
     );
-    windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.show();
-      await windowManager.focus();
-    });
   }
 
-  runApp(App());
+  runApp(ProviderScope(
+    observers: [ProviderLogger()],
+    child: App(),
+  ));
 }
