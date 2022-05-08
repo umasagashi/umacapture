@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../core/platform_channel.dart';
-import '../preference/config.dart';
+import '../preference/platform_config.dart';
 
 class MyHomePage extends StatefulWidget {
   const MyHomePage({Key? key, required this.title}) : super(key: key);
@@ -31,10 +31,7 @@ class _MyHomePageState extends State<MyHomePage> {
         windowsConfig: const WindowsConfig(
           windowRecorder: RecorderConfig(
             recordingFps: 5,
-            minimumSize: Size(
-              width: 540,
-              height: 960,
-            ),
+            minimumSize: Size(540, 960),
             windowProfile: WindowProfile(
               windowClass: "UnityWndClass",
               windowTitle: "umamusume",
