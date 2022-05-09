@@ -14,7 +14,7 @@ void main() async {
   logger.d('main begin');
 
   WidgetsFlutterBinding.ensureInitialized();
-  initializeJsonMapper(adapters: [flutterTypesAdapter,]);
+  initializeJsonMapper(adapters: [flutterTypesAdapter]);
   final packageInfo = await PackageInfo.fromPlatform();
   await StorageBox.ensureOpened(packageInfo.appName, reset: false);
 

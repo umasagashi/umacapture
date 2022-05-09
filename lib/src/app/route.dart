@@ -2,6 +2,7 @@ import 'package:auto_route/auto_route.dart';
 
 import '../gui/app_widget.dart';
 import '../gui/dummy.dart';
+import '../gui/settings.dart';
 
 @MaterialAutoRouter(
   replaceInRouteName: 'Page,Route',

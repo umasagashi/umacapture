@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import '../app/pages.dart';
 import '../app/route.gr.dart';
 import '../preference/window_state.dart';
+import '../state/settings_state.dart';
 
 class _Sidebar extends StatefulWidget {
   @override
@@ -226,13 +227,15 @@ class AppWidget extends StatelessWidget {
   }
 }
 
-class App extends StatelessWidget {
+class App extends ConsumerWidget {
   App({Key? key}) : super(key: key);
 
   final _router = AppRouter();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final themeMode = ref.watch(themeSettingProvider);
+
     return MaterialApp.router(
       title: 'umasagashi',
       theme: FlexThemeData.light(
@@ -240,6 +243,13 @@ class App extends StatelessWidget {
         surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
         blendLevel: 20,
         appBarOpacity: 0.95,
+        subThemesData: const FlexSubThemesData(
+          blendOnLevel: 20,
+          blendOnColors: false,
+          navigationRailIndicatorOpacity: 0.54,
+          navigationRailOpacity: 0.98,
+          navigationRailLabelType: NavigationRailLabelType.none,
+        ),
         visualDensity: FlexColorScheme.comfortablePlatformDensity,
         useMaterial3: true,
         fontFamily: GoogleFonts.notoSans().fontFamily,
@@ -247,14 +257,21 @@ class App extends StatelessWidget {
       darkTheme: FlexThemeData.dark(
         scheme: FlexScheme.blue,
         surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-        blendLevel: 15,
+        blendLevel: 18,
         appBarStyle: FlexAppBarStyle.background,
         appBarOpacity: 0.90,
+        appBarElevation: 12.5,
+        subThemesData: const FlexSubThemesData(
+          blendOnLevel: 30,
+          navigationRailIndicatorOpacity: 0.54,
+          navigationRailOpacity: 0.98,
+          navigationRailLabelType: NavigationRailLabelType.none,
+        ),
         visualDensity: FlexColorScheme.comfortablePlatformDensity,
         useMaterial3: true,
         fontFamily: GoogleFonts.notoSans().fontFamily,
       ),
-      themeMode: ThemeMode.system,
+      themeMode: themeMode,
       routerDelegate: _router.delegate(),
       routeInformationParser: _router.defaultRouteParser(),
     );

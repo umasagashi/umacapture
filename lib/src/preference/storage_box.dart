@@ -3,7 +3,7 @@ import 'package:hive_flutter/adapters.dart';
 import 'hive_adapter.dart';
 
 enum BoxKey {
-  config,
+  settings,
   windowState,
 }
 

@@ -12,10 +12,6 @@ class SearchPage extends DummyPage {
   const SearchPage({Key? key}) : super(key: key, title: 'Search');
 }
 
-class SettingsPage extends DummyPage {
-  const SettingsPage({Key? key}) : super(key: key, title: 'Settings');
-}
-
 class GuidePage extends DummyPage {
   const GuidePage({Key? key}) : super(key: key, title: 'Guide');
 }
@@ -46,7 +42,7 @@ class _DummyPageState extends State<DummyPage> with AutomaticKeepAliveClientMixi
                 keyboardType: TextInputType.multiline,
                 maxLines: null,
               ),
-            )
+            ),
           ],
         ),
       ),

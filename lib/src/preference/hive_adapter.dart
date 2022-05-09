@@ -1,6 +1,5 @@
-import 'dart:ui';
-
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
 class JsonAdapter<T> extends TypeAdapter<T?> {
@@ -36,4 +35,5 @@ void registerHiveAdapters() {
   int index = 0;
   Hive.registerAdapter(JsonAdapter<Size>(index++));
   Hive.registerAdapter(JsonAdapter<Offset>(index++));
+  Hive.registerAdapter(JsonAdapter<ThemeMode>(index++));
 }
