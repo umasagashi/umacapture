@@ -1,22 +1,20 @@
 import 'dart:ui';
 
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:flutter/material.dart';
 
-class MappingConverter<T> implements ICustomConverter<T> {
-  final T Function(Map map) _fromMap;
-  final Map Function(T obj) _toMap;
+class MappingConverter<T, S> implements ICustomConverter<T> {
+  final T Function(S map) _fromMap;
+  final S Function(T obj) _toMap;
 
-  MappingConverter({required fromMap, required toMap})
+  MappingConverter({required T Function(S map) fromMap, required S Function(T obj) toMap})
       : _fromMap = fromMap,
         _toMap = toMap,
         super();
 
   @override
   T fromJSON(dynamic jsonValue, DeserializationContext context) {
-    if (jsonValue is Map) {
-      return _fromMap(jsonValue);
-    }
-    return jsonValue;
+    return _fromMap(jsonValue);
   }
 
   @override
@@ -25,15 +23,25 @@ class MappingConverter<T> implements ICustomConverter<T> {
   }
 }
 
+extension on String {
+  ThemeMode toThemeMode() {
+    return ThemeMode.values.firstWhere((e) => e.name == this);
+  }
+}
+
 final flutterTypesAdapter = JsonMapperAdapter(
   converters: {
-    Size: MappingConverter<Size>(
+    Size: MappingConverter<Size, Map>(
       fromMap: (map) => Size(map['width'], map['height']),
       toMap: (obj) => {'width': obj.width, 'height': obj.height},
     ),
-    Offset: MappingConverter<Offset>(
+    Offset: MappingConverter<Offset, Map>(
       fromMap: (map) => Offset(map['dx'], map['dy']),
       toMap: (obj) => {'dx': obj.dx, 'dy': obj.dy},
+    ),
+    ThemeMode: MappingConverter<ThemeMode, String>(
+      fromMap: (map) => map.toThemeMode(),
+      toMap: (obj) => obj.name,
     ),
   },
   valueDecorators: {},
