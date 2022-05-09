@@ -11,33 +11,15 @@ import '../app/route.gr.dart';
 import '../preference/window_state.dart';
 import '../state/settings_state.dart';
 
-class _Sidebar extends StatefulWidget {
+class _Sidebar extends ConsumerWidget {
   @override
-  State<StatefulWidget> createState() => _SidebarState();
-}
-
-class _SidebarState extends State<_Sidebar> {
-  late bool _extended;
-
-  @override
-  void initState() {
-    super.initState();
-    _extended = true;
-  }
-
-  void toggleExtend() {
-    setState(() {
-      _extended = !_extended;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final tabsRouter = AutoTabsRouter.of(context);
+    final isExtended = ref.watch(sidebarExtendedStateProvider);
     return Stack(
       children: [
         NavigationRail(
-          extended: _extended,
+          extended: isExtended,
           selectedIndex: tabsRouter.activeIndex,
           useIndicator: true,
           destinations: [
@@ -56,8 +38,8 @@ class _SidebarState extends State<_Sidebar> {
           left: 0,
           right: 0,
           child: TextButton(
-            child: Icon(_extended ? Icons.chevron_left : Icons.chevron_right),
-            onPressed: () => toggleExtend(),
+            child: Icon(isExtended ? Icons.chevron_left : Icons.chevron_right),
+            onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
           ),
         ),
       ],

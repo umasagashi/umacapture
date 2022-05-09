@@ -3,39 +3,22 @@ import 'package:state_notifier/state_notifier.dart';
 import '../preference/storage_box.dart';
 
 class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
-  final String _boxValueKey;
+  final StorageEntry? _entry;
+
+  // values and indices should be immutable since notifier does not work for them.
   final List<T> values;
   final List<int> indices;
-  final StorageBox _box;
 
   ExclusiveItemsNotifier({
-    required String boxValueKey,
-    required StorageBox box,
     required Iterable<T> values,
     required T defaultValue,
-  })  : _boxValueKey = boxValueKey,
-        _box = box,
+    StorageEntry? entry,
+  })  : _entry = entry,
         values = List.unmodifiable(values),
         indices = List.unmodifiable(List.generate(values.length, (i) => i)),
-        super(box.pull<T>(boxValueKey) ?? defaultValue);
+        super(entry?.pull() ?? defaultValue);
 
   int get length => values.length;
-
-  int indexOf(T value) {
-    return values.indexOf(value);
-  }
-
-  T get() {
-    return state;
-  }
-
-  int index() {
-    return indexOf(state);
-  }
-
-  List<bool> states() {
-    return List.unmodifiable(values.map((e) => e == state));
-  }
 
   void setValue(T value) {
     if (!values.contains(value)) {
@@ -43,7 +26,7 @@ class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
     }
 
     state = value;
-    _box.push(_boxValueKey, value);
+    _entry?.push(value);
   }
 
   void setIndex(int value) {
@@ -55,6 +38,25 @@ class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
   }
 
   void next() {
-    setIndex((index() + 1) % values.length);
+    setIndex((values.indexOf(state) + 1) % values.length);
+  }
+}
+
+class BooleanNotifier extends StateNotifier<bool> {
+  final StorageEntry? _entry;
+
+  BooleanNotifier({
+    required bool defaultValue,
+    StorageEntry? entry,
+  })  : _entry = entry,
+        super(entry?.pull() ?? defaultValue);
+
+  void set(bool value) {
+    state = value;
+    _entry?.push(value);
+  }
+
+  void toggle() {
+    set(!state);
   }
 }
