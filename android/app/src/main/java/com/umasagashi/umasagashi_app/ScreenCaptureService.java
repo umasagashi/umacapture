@@ -20,7 +20,6 @@ import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.util.Size;
 import android.view.WindowManager;
-import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 import androidx.annotation.RequiresApi;
@@ -48,6 +47,10 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     public native void startEventLoop();
 
     public native void joinEventLoop();
+
+    public native void notifyCaptureStarted();
+
+    public native void notifyCaptureStopped();
 
     public void notifyPlatform(String arg) {
         Log.d(LOG_TAG, String.format("notifyPlatform %s", arg));
@@ -94,6 +97,7 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
         final String config = captureIntent.getStringExtra("config");
         Log.d(LOG_TAG, "config " + config);
         initializeNativeCounterpart(config);
+        notifyCaptureStarted();
 
         startForeground(1, createNotification());
 
@@ -121,7 +125,6 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     @Override
     public void onCreate() {
         Log.d(LOG_TAG, "onCreate");
-        Toast.makeText(this, "Capture Started", Toast.LENGTH_LONG).show();
         startEventLoop();
         super.onCreate();
     }
@@ -129,9 +132,9 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     @Override
     public void onDestroy() {
         Log.d(LOG_TAG, "onDestroy");
-        Toast.makeText(this, "Capture Stopped", Toast.LENGTH_LONG).show();
         mImageReader.close();
         joinEventLoop();
+        notifyCaptureStopped();
         super.onDestroy();
     }
 
