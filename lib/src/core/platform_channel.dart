@@ -1,15 +1,14 @@
 import 'package:flutter/services.dart';
-import 'package:logger/logger.dart';
 
-final logger = Logger(printer: PrettyPrinter(printEmojis: false, lineLength: 100));
+import 'utils.dart';
 
 typedef CallbackMethod = void Function(String);
 
-class MyChannel {
+class PlatformChannel {
   static const channel = MethodChannel('dev.flutter.umasagashi_app/capturing_channel');
   CallbackMethod? callbackMethod;
 
-  MyChannel() {
+  PlatformChannel() {
     channel.setMethodCallHandler(callbackFromPlatform);
   }
 

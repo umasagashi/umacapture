@@ -81,11 +81,15 @@ bool FlutterWindow::OnCreate() {
     channel->addMethodCallHandler("startCapture", [this]() {
         std::cout << "startCapture" << std::endl;
         window_recorder->startRecord();
+
+        // In Windows, start operation will never be canceled.
+        NativeApi::instance().notifyCaptureStarted();
     });
 
     channel->addMethodCallHandler("stopCapture", [this]() {
         std::cout << "stopCapture" << std::endl;
         window_recorder->stopRecord();
+        NativeApi::instance().notifyCaptureStopped();
     });
 
     auto &api = NativeApi::instance();

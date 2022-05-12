@@ -24,15 +24,18 @@ NativeApi::NativeApi() {
         }
     });
 
+    timestamp_for_debug = std::chrono::steady_clock::now();
+
     connection->listen([this](const cv::Mat &frame) {
-//        message_out++;
+        //        message_out++;
         // for debug.
         if (!path_for_debug.empty()) {
             auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
             std::cout << "save as: " << path << std::endl;
             message_out += (int) cv::imwrite(path, frame);
         }
-        if (callback_to_ui) {
+        if (callback_to_ui && (std::chrono::steady_clock::now() - timestamp_for_debug) > std::chrono::seconds(10)) {
+            timestamp_for_debug = std::chrono::steady_clock::now();
             callback_to_ui(std::to_string(message_in) + ", " + std::to_string(message_out) + ", "
                            + std::to_string(frame.cols) + ", " + std::to_string(frame.rows));
         }
@@ -81,4 +84,16 @@ void NativeApi::joinEventLoop() {
     std::cout << __FUNCTION__ << std::endl;
 
     recorder_runner->join();
+}
+
+void NativeApi::notify(const std::string &message) {
+    this->callback_to_ui(message);
+}
+
+void NativeApi::notifyCaptureStarted() {
+    notify(json{{"type", "onCaptureStarted"}}.dump());
+}
+
+void NativeApi::notifyCaptureStopped() {
+    notify(json{{"type", "onCaptureStopped"}}.dump());
 }
