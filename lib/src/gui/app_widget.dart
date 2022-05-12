@@ -8,8 +8,28 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app/pages.dart';
 import '../app/route.gr.dart';
+import '../preference/storage_box.dart';
 import '../preference/window_state.dart';
+import '../state/notifier.dart';
 import '../state/settings_state.dart';
+import 'toast.dart';
+
+final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
+  final box = ref.watch(storageBoxProvider);
+  return ExclusiveItemsNotifier<ThemeMode>(
+    entry: StorageEntry(box: box, key: SettingsEntryKey.themeMode.name),
+    values: [ThemeMode.light, ThemeMode.dark, ThemeMode.system],
+    defaultValue: ThemeMode.system,
+  );
+});
+
+final sidebarExtendedStateProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
+  final box = ref.watch(storageBoxProvider);
+  return BooleanNotifier(
+    entry: StorageEntry(box: box, key: SettingsEntryKey.sidebarExtended.name),
+    defaultValue: true,
+  );
+});
 
 class _Sidebar extends ConsumerWidget {
   @override
@@ -89,11 +109,13 @@ class _ResponsiveScaffold extends StatelessWidget {
         return Scaffold(
           appBar: wide ? null : AppBar(title: Text(Pages.at(router.activeIndex).label)),
           drawer: wide ? null : const _Drawer(),
-          body: Row(
-            children: [
-              if (wide) _Sidebar(),
-              Expanded(child: child),
-            ],
+          body: ToastLayer.asSibling(
+            child: Row(
+              children: [
+                if (wide) _Sidebar(),
+                Expanded(child: child),
+              ],
+            ),
           ),
         );
       },
@@ -136,19 +158,19 @@ class _WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
   Size get preferredSize => const Size.fromHeight(kWindowCaptionHeight);
 }
 
-class _Windowed extends ConsumerStatefulWidget {
+class _WindowFrame extends ConsumerStatefulWidget {
   final Widget child;
   final WindowStateBox _windowStateBox;
 
-  _Windowed({Key? key, required this.child})
+  _WindowFrame({Key? key, required this.child})
       : _windowStateBox = WindowStateBox(),
         super(key: key);
 
   @override
-  ConsumerState<_Windowed> createState() => _WindowedState();
+  ConsumerState<_WindowFrame> createState() => _WindowFrameState();
 }
 
-class _WindowedState extends ConsumerState<_Windowed> with WindowListener {
+class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener {
   @override
   void initState() {
     windowManager.addListener(this);
@@ -175,12 +197,15 @@ class _WindowedState extends ConsumerState<_Windowed> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: const _WindowTitleBar(
-        icon: Icon(Icons.circle_outlined),
-        title: Text('umasagashi'),
+    return Container(
+      padding: const EdgeInsets.only(top: 0.5),
+      child: Scaffold(
+        appBar: const _WindowTitleBar(
+          icon: Icon(Icons.circle_outlined),
+          title: Text('umasagashi'),
+        ),
+        body: widget.child,
       ),
-      body: widget.child,
     );
   }
 }
@@ -200,7 +225,7 @@ class AppWidget extends StatelessWidget {
       routes: Pages.routes,
       builder: (context, child, animation) {
         if (!kIsWeb && kIsDesktop) {
-          return _Windowed(child: _ResponsiveScaffold(child: child));
+          return _WindowFrame(child: _ResponsiveScaffold(child: child));
         } else {
           return _ResponsiveScaffold(child: child);
         }
@@ -228,8 +253,8 @@ class App extends ConsumerWidget {
         subThemesData: const FlexSubThemesData(
           blendOnLevel: 20,
           blendOnColors: false,
-          navigationRailIndicatorOpacity: 0.54,
-          navigationRailOpacity: 0.98,
+          navigationRailMutedUnselectedLabel: false,
+          navigationRailMutedUnselectedIcon: false,
           navigationRailLabelType: NavigationRailLabelType.none,
         ),
         visualDensity: FlexColorScheme.comfortablePlatformDensity,
@@ -239,14 +264,13 @@ class App extends ConsumerWidget {
       darkTheme: FlexThemeData.dark(
         scheme: FlexScheme.blue,
         surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-        blendLevel: 18,
+        blendLevel: 15,
         appBarStyle: FlexAppBarStyle.background,
         appBarOpacity: 0.90,
-        appBarElevation: 12.5,
         subThemesData: const FlexSubThemesData(
           blendOnLevel: 30,
-          navigationRailIndicatorOpacity: 0.54,
-          navigationRailOpacity: 0.98,
+          navigationRailMutedUnselectedLabel: false,
+          navigationRailMutedUnselectedIcon: false,
           navigationRailLabelType: NavigationRailLabelType.none,
         ),
         visualDensity: FlexColorScheme.comfortablePlatformDensity,

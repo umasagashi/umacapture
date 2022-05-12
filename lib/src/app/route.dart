@@ -1,6 +1,7 @@
 import 'package:auto_route/auto_route.dart';
 
 import '../gui/app_widget.dart';
+import '../gui/capture.dart';
 import '../gui/dummy.dart';
 import '../gui/settings.dart';
 

@@ -1,6 +1,8 @@
-import 'package:state_notifier/state_notifier.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../preference/storage_box.dart';
+
+typedef ExclusiveItemsNotifierProvider<T> = StateNotifierProvider<ExclusiveItemsNotifier<T>, T>;
 
 class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
   final StorageEntry? _entry;
@@ -41,6 +43,8 @@ class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
     setIndex((values.indexOf(state) + 1) % values.length);
   }
 }
+
+typedef BooleanNotifierProvider = StateNotifierProvider<BooleanNotifier, bool>;
 
 class BooleanNotifier extends StateNotifier<bool> {
   final StorageEntry? _entry;
