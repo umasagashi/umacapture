@@ -2,6 +2,8 @@ import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
+import '../gui/capture.dart';
+
 class JsonAdapter<T> extends TypeAdapter<T?> {
   static const _serializationOptions = SerializationOptions(
     indent: null,
@@ -36,4 +38,5 @@ void registerHiveAdapters() {
   Hive.registerAdapter(JsonAdapter<Size>(index++));
   Hive.registerAdapter(JsonAdapter<Offset>(index++));
   Hive.registerAdapter(JsonAdapter<ThemeMode>(index++));
+  Hive.registerAdapter(JsonAdapter<AutoCopyMode>(index++));
 }
