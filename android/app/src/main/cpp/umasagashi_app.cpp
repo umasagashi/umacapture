@@ -52,7 +52,7 @@ std::string convertToStdString(JNIEnv *env, jstring str) {
 
 cv::Mat asMat(JNIEnv *env, jobject buffer, jint width, jint height, jint step) {
     auto *ptr = env->GetDirectBufferAddress(buffer);
-    return cv::Mat(height, width, CV_8UC4, ptr, step);
+    return {height, width, CV_8UC4, ptr, step};
 }
 
 JNIEnv *getJNIEnv() {
@@ -94,7 +94,23 @@ void callJavaFromCpp(const std::string &arg) {
 
 }  // namespace
 
-extern "C"
+extern "C" {
+
+jint JNI_OnLoad(JavaVM *vm, void *) {
+    java_vm = vm;
+    JNIEnv *env = getJNIEnv();
+    jclass jni_service_class = env->FindClass("com/umasagashi/umasagashi_app/ScreenCaptureService");
+    jni_notify_method = env->GetMethodID(jni_service_class, "notifyPlatform", "(Ljava/lang/String;)V");
+
+    log_d(std::stringstream() << __FUNCTION__ << sep << java_vm << sep << env << sep << jni_service_class
+                              << sep << jni_notify_method << sep << env->ExceptionCheck());
+
+    NativeApi::instance().setCallback(callJavaFromCpp);
+    NativeApi::instance().setFinalizer(detachThread);
+
+    return JNI_VERSION_1_6;
+}
+
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_initializeNativeCounterpart(
         JNIEnv *env, jobject thiz, jstring config) {
@@ -107,7 +123,6 @@ Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_initializeNativeCounter
     NativeApi::instance().setConfig(convertToStdString(env, config));
 }
 
-extern "C"
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_updateNativeFrame(
         JNIEnv *env, jobject, jobject frame, jint width, jint height, jint row_stride,
@@ -130,32 +145,28 @@ Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_updateNativeFrame(
     NativeApi::instance().updateFrame(mat);
 }
 
-extern "C"
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_startEventLoop(JNIEnv *, jobject) {
     log_d(std::stringstream() << __FUNCTION__);
     NativeApi::instance().startEventLoop();
 }
 
-extern "C"
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_joinEventLoop(JNIEnv *, jobject) {
     log_d(std::stringstream() << __FUNCTION__);
     NativeApi::instance().joinEventLoop();
 }
 
-extern "C"
-jint JNI_OnLoad(JavaVM *vm, void *) {
-    java_vm = vm;
-    JNIEnv *env = getJNIEnv();
-    jclass jni_service_class = env->FindClass("com/umasagashi/umasagashi_app/ScreenCaptureService");
-    jni_notify_method = env->GetMethodID(jni_service_class, "notifyPlatform", "(Ljava/lang/String;)V");
-
-    log_d(std::stringstream() << __FUNCTION__ << sep << java_vm << sep << env << sep << jni_service_class
-                              << sep << jni_notify_method << sep << env->ExceptionCheck());
-
-    NativeApi::instance().setCallback(callJavaFromCpp);
-    NativeApi::instance().setFinalizer(detachThread);
-
-    return JNI_VERSION_1_6;
+JNIEXPORT void JNICALL
+Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_notifyCaptureStarted(JNIEnv *, jobject) {
+    log_d(std::stringstream() << __FUNCTION__);
+    NativeApi::instance().notifyCaptureStarted();
 }
+
+JNIEXPORT void JNICALL
+Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_notifyCaptureStopped(JNIEnv *, jobject) {
+    log_d(std::stringstream() << __FUNCTION__);
+    NativeApi::instance().notifyCaptureStopped();
+}
+
+}  // extern "C"
