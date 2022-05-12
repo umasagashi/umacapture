@@ -44,4 +44,14 @@ class PlatformConfig {
     this.windowsConfig,
     this.directory,
   });
+
+  PlatformConfig copyWith({
+    windowsConfig,
+    directory,
+  }) {
+    return PlatformConfig(
+      windowsConfig: windowsConfig ?? this.windowsConfig,
+      directory: directory ?? this.directory,
+    );
+  }
 }

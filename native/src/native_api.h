@@ -43,6 +43,9 @@ public:
     void setCallback(const std::function<MessageCallback> &method);
     void setFinalizer(const std::function<FinalizerCallback> &method);
 
+    void notifyCaptureStarted();
+    void notifyCaptureStopped();
+
     void startEventLoop();
 
     void joinEventLoop();
@@ -51,8 +54,11 @@ public:
     int counter_for_debug = 0;
     std::string path_for_debug;
     std::list<cv::Mat> buffer_for_debug;
+    std::chrono::steady_clock::time_point timestamp_for_debug;
 
 private:
+    void notify(const std::string &message);
+
     std::function<MessageCallback> callback_to_ui;
     std::function<FinalizerCallback> finalizer;
 

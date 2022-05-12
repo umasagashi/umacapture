@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/material.dart';
 
@@ -32,11 +30,11 @@ extension on String {
 final flutterTypesAdapter = JsonMapperAdapter(
   converters: {
     Size: MappingConverter<Size, Map>(
-      fromMap: (map) => Size(map['width'], map['height']),
+      fromMap: (map) => Size(map['width'].toDouble(), map['height'].toDouble()),
       toMap: (obj) => {'width': obj.width, 'height': obj.height},
     ),
     Offset: MappingConverter<Offset, Map>(
-      fromMap: (map) => Offset(map['dx'], map['dy']),
+      fromMap: (map) => Offset(map['dx'].toDouble(), map['dy'].toDouble()),
       toMap: (obj) => {'dx': obj.dx, 'dy': obj.dy},
     ),
     ThemeMode: MappingConverter<ThemeMode, String>(

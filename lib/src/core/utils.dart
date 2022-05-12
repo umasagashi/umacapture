@@ -2,13 +2,43 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 
-final kIsDesktop = {
-  TargetPlatform.windows,
-  TargetPlatform.linux,
-  TargetPlatform.macOS,
-}.contains(defaultTargetPlatform);
+class CurrentPlatform {
+  static bool isWindows() {
+    return defaultTargetPlatform == TargetPlatform.windows;
+  }
 
-final kIsWindowed = !kIsWeb && kIsDesktop;
+  static bool isLinux() {
+    return defaultTargetPlatform == TargetPlatform.linux;
+  }
+
+  static bool isMacOS() {
+    return defaultTargetPlatform == TargetPlatform.macOS;
+  }
+
+  static bool isAndroid() {
+    return defaultTargetPlatform == TargetPlatform.android;
+  }
+
+  static bool isIOS() {
+    return defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  static bool isWeb() {
+    return kIsWeb;
+  }
+
+  static bool isMobile() {
+    return isAndroid() || isIOS();
+  }
+
+  static bool isDesktop() {
+    return isWindows() || isLinux() || isMacOS();
+  }
+
+  static bool hasWindowFrame() {
+    return !isWeb() && isDesktop();
+  }
+}
 
 final logger = Logger(
     printer: PrettyPrinter(
