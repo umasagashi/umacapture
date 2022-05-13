@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -6,14 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/platform_controller.dart';
 import '../core/utils.dart';
 
-final _toastStreamsProvider = Provider<List<StreamProvider<ToastData>>>((ref) {
+final _toastStreamsProvider = Provider<List<Stream<ToastData>>>((ref) {
   return [
-    platformStreamProvider,
+    ref.watch(platformControllerProvider).stream,
   ];
 });
 
 enum ToastType {
   success,
+  info,
+  warning,
   error,
 }
 
@@ -25,10 +28,14 @@ class ToastData {
 
   ToastData.success(this.description) : type = ToastType.success;
 
+  ToastData.info(this.description) : type = ToastType.info;
+
+  ToastData.warning(this.description) : type = ToastType.warning;
+
   ToastData.error(this.description) : type = ToastType.error;
 }
 
-class ToastLayer extends ConsumerWidget {
+class ToastLayer extends ConsumerStatefulWidget {
   const ToastLayer({Key? key}) : super(key: key);
 
   static Widget asSibling({required Widget child}) {
@@ -41,19 +48,32 @@ class ToastLayer extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    for (final stream in ref.watch(_toastStreamsProvider)) {
-      ref.watch(stream).whenData((data) => _showToast(context, data));
-    }
+  ConsumerState<ConsumerStatefulWidget> createState() => _ToastLayerState();
+}
+
+class _ToastLayerState extends ConsumerState<ToastLayer> {
+  final StreamSubscriptionController _subscriptions = StreamSubscriptionController();
+
+  @override
+  Widget build(BuildContext context) {
+    _subscriptions.update<ToastData>(
+      streams: ref.watch(_toastStreamsProvider),
+      onData: (data) => _showToast(context, data),
+    );
     return Container();
+    // return TextButton(child: const Text('test'), onPressed: () => _showToast(context, ToastData.error('message')));
   }
 
   IconData getIcon(ToastData data) {
     switch (data.type) {
       case ToastType.success:
         return Icons.check_circle;
+      case ToastType.info:
+        return Icons.info;
+      case ToastType.warning:
+        return Icons.warning;
       case ToastType.error:
-        return Icons.error;
+        return Icons.dangerous;
       default:
         throw ArgumentError.value(data.type);
     }
@@ -63,6 +83,10 @@ class ToastLayer extends ConsumerWidget {
     switch (data.type) {
       case ToastType.success:
         return Colors.green.shade500;
+      case ToastType.info:
+        return Colors.blue.shade500;
+      case ToastType.warning:
+        return Colors.orange.shade500;
       case ToastType.error:
         return Colors.red.shade400;
       default:
@@ -96,7 +120,7 @@ class ToastLayer extends ConsumerWidget {
           ),
           style: ButtonStyle(overlayColor: MaterialStateProperty.all<Color>(Colors.transparent)),
           onPressed: () {
-            logger.d('onPressed');
+            logger.d('ToastLayer.onPressed');
             snackBar.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
           },
         ),

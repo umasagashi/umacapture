@@ -197,12 +197,12 @@ class _CapturePageState extends ConsumerState<CapturePage> with AutomaticKeepAli
             children: [
               SwitchWidget(
                 title: 'Auto Start',
-                description: 'Automatically start capturing when this tab is opened.',
+                description: 'Start capturing at app startup. Effective from the next session.',
                 provider: autoStartCaptureStateProvider,
               ),
               DropdownButtonWidget<AutoCopyMode>(
                 title: 'Auto Copy',
-                description: 'Automatically copy the image to the clipboard when capturing is completed.',
+                description: 'Copy the captured image to the clipboard when capturing completed.',
                 name: (e) => e.name,
                 provider: autoCopyClipboardStateProvider,
               ),

@@ -4,17 +4,13 @@ import 'dart:convert';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../gui/capture.dart';
 import '../gui/toast.dart';
 import '../preference/platform_config.dart';
 import 'platform_channel.dart';
-import 'utils.dart';
 
 final platformControllerProvider = Provider<PlatformController>((ref) {
   throw Exception('Must override before use');
-});
-
-final platformStreamProvider = StreamProvider<ToastData>((ref) {
-  return ref.watch(platformControllerProvider).stream;
 });
 
 final capturingStateProvider = StateProvider<bool>((ref) {
@@ -28,11 +24,9 @@ class PlatformController {
 
   PlatformController(Ref ref, PlatformConfig initialConfig)
       : _ref = ref,
-        _streamController = StreamController<ToastData>(),
+        _streamController = StreamController<ToastData>.broadcast(),
         _platformChannel = PlatformChannel() {
     _platformChannel.setCallback((message) {
-      logger.d(message);
-      _streamController.sink.add(ToastData.success(message));
       _handleMessage(message);
     });
 
@@ -46,11 +40,16 @@ class PlatformController {
         ),
       ),
     );
+
+    final autoStart = ref.read(autoStartCaptureStateProvider);
+    final isCapturing = ref.read(capturingStateProvider);
+    if (autoStart && !isCapturing) {
+      startCapture();
+    }
   }
 
   void _handleMessage(String message) {
     final messageJson = jsonDecode(message) as Map;
-    logger.d(messageJson);
     final messageType = messageJson['type'].toString();
     if (messageType == 'onCaptureStarted') {
       _onCaptureStarted();
@@ -61,11 +60,15 @@ class PlatformController {
 
   void _onCaptureStarted() {
     _ref.read(capturingStateProvider.notifier).update((state) => true);
+    sendToast(ToastData.info('Screen capture started.'));
   }
 
   void _onCaptureStopped() {
     _ref.read(capturingStateProvider.notifier).update((state) => false);
+    sendToast(ToastData.info('Screen capture stopped.'));
   }
+
+  void sendToast(ToastData data) => _streamController.sink.add(data);
 
   Stream<ToastData> get stream => _streamController.stream;
 

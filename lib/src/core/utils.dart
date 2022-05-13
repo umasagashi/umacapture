@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
@@ -59,5 +61,22 @@ class ProviderLogger extends ProviderObserver {
       'provider: ${provider.name ?? provider.runtimeType}, '
       'value: $previousValue -> $newValue',
     );
+  }
+}
+
+class StreamSubscriptionController {
+  List<StreamSubscription> subscriptions = [];
+
+  void update<T>({
+    required Iterable<Stream<T>> streams,
+    required void Function(T event) onData,
+  }) {
+    for (final sub in subscriptions) {
+      sub.cancel();
+    }
+    subscriptions.clear();
+    for (final stream in streams) {
+      subscriptions.add(stream.listen(onData));
+    }
   }
 }

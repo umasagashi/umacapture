@@ -242,7 +242,6 @@ class App extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeSettingProvider);
-
     return MaterialApp.router(
       title: 'umasagashi',
       theme: FlexThemeData.light(
