@@ -1,9 +1,9 @@
-#ifndef RUNNER_JSON_UTILS_H
-#define RUNNER_JSON_UTILS_H
+#ifndef NATIVE_JSON_UTILS_H
+#define NATIVE_JSON_UTILS_H
 
 #include <optional>
 
-#include "../../native/src/nlohmann/json.hpp"
+#include "vendor/nlohmann/json.hpp"
 
 namespace json_utils {
 
@@ -59,4 +59,4 @@ void extended_from_json(const nlohmann::json &json, const char *key, T &value) {
 
 }  // namespace json_utils
 
-#endif  //RUNNER_JSON_UTILS_H
+#endif  //NATIVE_JSON_UTILS_H

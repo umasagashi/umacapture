@@ -3,8 +3,8 @@
 
 #include <utility>
 
-#include "eventpp/eventdispatcher.h"
-#include "eventpp/eventqueue.h"
+#include "vendor/eventpp/eventdispatcher.h"
+#include "vendor/eventpp/eventqueue.h"
 
 #include "thread_util.h"
 

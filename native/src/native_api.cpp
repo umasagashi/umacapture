@@ -27,12 +27,13 @@ NativeApi::NativeApi() {
     timestamp_for_debug = std::chrono::steady_clock::now();
 
     connection->listen([this](const cv::Mat &frame) {
-        //        message_out++;
+        message_out++;
+
         // for debug.
         if (!path_for_debug.empty()) {
             auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
-            std::cout << "save as: " << path << std::endl;
-            message_out += (int) cv::imwrite(path, frame);
+            std::cout << "save: " << frame.size() << std::endl;
+            //            message_out += (int) cv::imwrite(path, frame);
         }
         if (callback_to_ui && (std::chrono::steady_clock::now() - timestamp_for_debug) > std::chrono::seconds(10)) {
             timestamp_for_debug = std::chrono::steady_clock::now();

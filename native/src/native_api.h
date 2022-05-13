@@ -1,5 +1,5 @@
-#ifndef NATIVE_APP_H
-#define NATIVE_APP_H
+#ifndef NATIVE_API_H
+#define NATIVE_API_H
 
 #include <functional>
 #include <iostream>
@@ -14,8 +14,8 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
-#include "eventpp_util.h"
-#include "json_utils.h"
+#include "util/eventpp_util.h"
+#include "util/json_utils.h"
 
 namespace native_config {
 
@@ -50,6 +50,8 @@ public:
 
     void joinEventLoop();
 
+    bool isRunning() const { return recorder_runner->isRunning(); }
+
 public:
     int counter_for_debug = 0;
     std::string path_for_debug;
@@ -76,4 +78,4 @@ public:
     }
 };
 
-#endif  //NATIVE_APP_H
+#endif  //NATIVE_API_H

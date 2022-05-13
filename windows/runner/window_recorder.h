@@ -8,9 +8,9 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "../../native/src/eventpp_util.h"
-#include "../../native/src/json_utils.h"
-#include "../../native/src/thread_util.h"
+#include "../../native/src/util/eventpp_util.h"
+#include "../../native/src/util/json_utils.h"
+#include "../../native/src/util/thread_util.h"
 
 namespace cv {
 
@@ -33,6 +33,7 @@ namespace config {
 struct WindowProfile {
     std::optional<std::string> window_class;
     std::optional<std::string> window_title;
+    bool fixed_aspect_ratio = false;
 
     [[nodiscard]] const char *windowClassOrNull() const {
         return (window_class && !window_class->empty()) ? window_class->c_str() : nullptr;
@@ -41,7 +42,7 @@ struct WindowProfile {
         return (window_title && !window_title->empty()) ? window_title->c_str() : nullptr;
     }
 
-    EXTENDED_JSON_TYPE_INTRUSIVE(WindowProfile, window_class, window_title);
+    EXTENDED_JSON_TYPE_INTRUSIVE(WindowProfile, window_class, window_title, fixed_aspect_ratio);
 };
 
 struct WindowRecorder {
@@ -77,7 +78,8 @@ public:
             plain_mat = cv::Mat(rect.size(), CV_8UC4);
         }
 
-        const cv::Size &scaled_size = getCircumscribedSize(rect.size(), minimum_size);
+        const cv::Size &scaled_size =
+            window_profile.fixed_aspect_ratio ? minimum_size : getCircumscribedSize(rect.size(), minimum_size);
         if (scaled_mat.size() != scaled_size) {
             scaled_mat = cv::Mat(scaled_size, CV_8UC4);
         }

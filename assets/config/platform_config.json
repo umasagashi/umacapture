@@ -8,7 +8,8 @@
             "recording_fps": 5,
             "window_profile": {
                 "window_class": "UnityWndClass",
-                "window_title": "umamusume"
+                "window_title": "umamusume",
+                "fixed_aspect_ratio": true
             }
         }
     }
