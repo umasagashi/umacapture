@@ -7,7 +7,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
-#include "../../native/src/eventpp_util.h"
+#include "../../native/src/util/eventpp_util.h"
 
 namespace {
 

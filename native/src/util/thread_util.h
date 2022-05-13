@@ -33,8 +33,9 @@ public:
         thread = nullptr;
     }
 
-protected:
     bool isRunning() const { return is_running.load(); }
+
+protected:
     virtual void run() = 0;
 
 private:

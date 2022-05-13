@@ -12,7 +12,7 @@ project(umasagashi_app)
 set(CMAKE_CXX_STANDARD 17)
 
 set(NATIVE_EXTENSION_DIR
-        "../../../../../native/src")
+        "${CMAKE_CURRENT_LIST_DIR}/../../../../../native/src")
 
 set(SOURCE_FILES
         umasagashi_app.cpp
@@ -68,3 +68,8 @@ target_link_libraries( # Specifies the target library.
         # Links the target library to the log library
         # included in the NDK.
         ${log-lib})
+
+target_include_directories(
+        ${PROJECT_NAME}
+        PRIVATE
+        "${NATIVE_EXTENSION_DIR}")

@@ -6,10 +6,12 @@ import 'package:dart_json_mapper/dart_json_mapper.dart';
 class WindowProfile {
   final String? windowClass;
   final String? windowTitle;
+  final bool? fixedAspectRatio;
 
   const WindowProfile({
     this.windowClass,
     this.windowTitle,
+    this.fixedAspectRatio,
   });
 }
 

@@ -5,23 +5,14 @@
 
 #include <flutter/generated_plugin_registrant.h>
 #include <runner/platform_channel.h>
+#include <runner/windows_config.h>
 
-#include "../../native/src/json_utils.h"
+#include "util/json_utils.h"
 #include "../../native/src/native_api.h"
 
 #include "flutter_window.h"
 
 using json = nlohmann::json;
-
-namespace config {
-
-struct WindowsConfig {
-    std::optional<config::WindowRecorder> window_recorder;
-
-    EXTENDED_JSON_TYPE_INTRUSIVE(WindowsConfig, window_recorder);
-};
-
-}  // namespace config
 
 FlutterWindow::FlutterWindow(const flutter::DartProject &project)
     : project_(project) {

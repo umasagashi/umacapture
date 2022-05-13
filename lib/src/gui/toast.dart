@@ -101,7 +101,7 @@ class _ToastLayerState extends ConsumerState<ToastLayer> {
     final isNarrow = barWidth < 600.0;
     final icon = getIcon(data);
     final color = getColor(data);
-    const duration = Duration(seconds: 10);
+    const duration = Duration(seconds: 5);
 
     snackBar.showSnackBar(
       SnackBar(
