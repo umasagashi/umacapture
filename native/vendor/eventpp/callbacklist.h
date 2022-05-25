@@ -379,7 +379,7 @@ private:
 			tail = node->previous;
 		}
 
-		// don't modify node->previous or node->next
+		// don't modify node->previous_condition or node->next
 		// because node may be still used in a loop.
 	}
 
