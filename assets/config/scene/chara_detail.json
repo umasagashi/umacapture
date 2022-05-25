@@ -1,0 +1,1791 @@
+{
+  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+  "rule": null,
+  "children": [
+    {
+      "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+      "rule": null,
+      "children": [
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+              "rule": {
+                "point": {
+                  "x": 0.0167,
+                  "y": 0.049,
+                  "anchor": {
+                    "h": "IntersectStart",
+                    "v": "IntersectStart"
+                  }
+                },
+                "color_range": {
+                  "min": {
+                    "r": 70,
+                    "g": 156,
+                    "b": 0
+                  },
+                  "max": {
+                    "r": 130,
+                    "g": 216,
+                    "b": 30
+                  }
+                }
+              }
+            },
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "rule": {
+                "line_measurer": {
+                  "line": {
+                    "p1": {
+                      "x": 0.0167,
+                      "y": 0.049,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    },
+                    "p2": {
+                      "x": 0.0259,
+                      "y": 0.049,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    }
+                  },
+                  "color_deviation": {
+                    "min": {
+                      "r": -10,
+                      "g": -10,
+                      "b": -10
+                    },
+                    "max": {
+                      "r": 10,
+                      "g": 10,
+                      "b": 10
+                    }
+                  }
+                },
+                "length_range": {
+                  "min": 1.0,
+                  "max": 1.0
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+              "rule": {
+                "point": {
+                  "x": 0.983,
+                  "y": 0.049,
+                  "anchor": {
+                    "h": "IntersectStart",
+                    "v": "IntersectStart"
+                  }
+                },
+                "color_range": {
+                  "min": {
+                    "r": 96,
+                    "g": 174,
+                    "b": 0
+                  },
+                  "max": {
+                    "r": 156,
+                    "g": 234,
+                    "b": 40
+                  }
+                }
+              }
+            },
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "rule": {
+                "line_measurer": {
+                  "line": {
+                    "p1": {
+                      "x": 0.983,
+                      "y": 0.049,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    },
+                    "p2": {
+                      "x": 0.9738,
+                      "y": 0.049,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    }
+                  },
+                  "color_deviation": {
+                    "min": {
+                      "r": -10,
+                      "g": -10,
+                      "b": -10
+                    },
+                    "max": {
+                      "r": 10,
+                      "g": 10,
+                      "b": 10
+                    }
+                  }
+                },
+                "length_range": {
+                  "min": 1.0,
+                  "max": 1.0
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "class condition::NestedCondition<class Frame,class rule::Stable,struct state::TimestampState>",
+      "rule": {
+        "threshold": 50
+      },
+      "child": {
+        "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+        "rule": null,
+        "children": [
+          {
+            "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+            "rule": {
+              "point": {
+                "x": -0.6501,
+                "y": -0.1208,
+                "anchor": {
+                  "h": "IntersectEnd",
+                  "v": "IntersectEnd"
+                }
+              },
+              "color_range": {
+                "min": {
+                  "r": 220,
+                  "g": 221,
+                  "b": 220
+                },
+                "max": {
+                  "r": 255,
+                  "g": 255,
+                  "b": 255
+                }
+              }
+            }
+          },
+          {
+            "type": "class condition::PlainCondition<class Frame,class rule::StableLineLength,struct state::LengthState>",
+            "rule": {
+              "line_measurer": {
+                "line": {
+                  "p1": {
+                    "x": -0.6501,
+                    "y": -0.1208,
+                    "anchor": {
+                      "h": "IntersectEnd",
+                      "v": "IntersectEnd"
+                    }
+                  },
+                  "p2": {
+                    "x": -0.6501,
+                    "y": -0.1042,
+                    "anchor": {
+                      "h": "IntersectEnd",
+                      "v": "IntersectEnd"
+                    }
+                  }
+                },
+                "color_deviation": {
+                  "min": {
+                    "r": -10,
+                    "g": -10,
+                    "b": -10
+                  },
+                  "max": {
+                    "r": 10,
+                    "g": 10,
+                    "b": 10
+                  }
+                }
+              },
+              "length_range": {
+                "min": 0.75,
+                "max": 1.0
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "tab_condition",
+      "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+      "rule": null,
+      "children": [
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.0555,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 135,
+                            "g": 193,
+                            "b": 0
+                          },
+                          "max": {
+                            "r": 195,
+                            "g": 253,
+                            "b": 35
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.0555,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.0833,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3314,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 135,
+                            "g": 193,
+                            "b": 0
+                          },
+                          "max": {
+                            "r": 195,
+                            "g": 253,
+                            "b": 35
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3314,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3036,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3499,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3499,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3777,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.6479,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.6479,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.6202,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.6664,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.6664,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.6942,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.946,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.946,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.9182,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.0555,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.0555,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.0833,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3314,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3314,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3036,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3499,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 135,
+                            "g": 193,
+                            "b": 0
+                          },
+                          "max": {
+                            "r": 195,
+                            "g": 253,
+                            "b": 35
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3499,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3777,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.6479,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 135,
+                            "g": 193,
+                            "b": 0
+                          },
+                          "max": {
+                            "r": 195,
+                            "g": 253,
+                            "b": 35
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.6479,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.6202,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.6664,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.6664,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.6942,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.946,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.946,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.9182,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.0555,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.0555,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.0833,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3314,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3314,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3036,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3499,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3499,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3777,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.6479,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 225,
+                            "g": 225,
+                            "b": 225
+                          },
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 255
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.6479,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.6202,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "rule": null,
+              "children": [
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.6664,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 135,
+                            "g": 193,
+                            "b": 0
+                          },
+                          "max": {
+                            "r": 195,
+                            "g": 253,
+                            "b": 35
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.6664,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.6942,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.946,
+                          "y": 0.4198,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
+                          }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 135,
+                            "g": 193,
+                            "b": 0
+                          },
+                          "max": {
+                            "r": 195,
+                            "g": 253,
+                            "b": 35
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.946,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.9182,
+                              "y": 0.4198,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            }
+                          },
+                          "color_deviation": {
+                            "min": {
+                              "r": -10,
+                              "g": -10,
+                              "b": -10
+                            },
+                            "max": {
+                              "r": 10,
+                              "g": 10,
+                              "b": 10
+                            }
+                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+      "rule": null,
+      "children": [
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "rule": {
+                "line_measurer": {
+                  "line": {
+                    "p1": {
+                      "x": 0.3129,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    },
+                    "p2": {
+                      "x": 0.3684,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    }
+                  },
+                  "color_deviation": {
+                    "min": {
+                      "r": -10,
+                      "g": -10,
+                      "b": -10
+                    },
+                    "max": {
+                      "r": 10,
+                      "g": 10,
+                      "b": 10
+                    }
+                  }
+                },
+                "length_range": {
+                  "min": 0.4,
+                  "max": 0.6
+                }
+              }
+            },
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "rule": {
+                "line_measurer": {
+                  "line": {
+                    "p1": {
+                      "x": 0.3684,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    },
+                    "p2": {
+                      "x": 0.3129,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    }
+                  },
+                  "color_deviation": {
+                    "min": {
+                      "r": -10,
+                      "g": -10,
+                      "b": -10
+                    },
+                    "max": {
+                      "r": 10,
+                      "g": 10,
+                      "b": 10
+                    }
+                  }
+                },
+                "length_range": {
+                  "min": 0.4,
+                  "max": 0.6
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "rule": null,
+          "children": [
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "rule": {
+                "line_measurer": {
+                  "line": {
+                    "p1": {
+                      "x": 0.6294,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    },
+                    "p2": {
+                      "x": 0.685,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    }
+                  },
+                  "color_deviation": {
+                    "min": {
+                      "r": -10,
+                      "g": -10,
+                      "b": -10
+                    },
+                    "max": {
+                      "r": 10,
+                      "g": 10,
+                      "b": 10
+                    }
+                  }
+                },
+                "length_range": {
+                  "min": 0.4,
+                  "max": 0.6
+                }
+              }
+            },
+            {
+              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "rule": {
+                "line_measurer": {
+                  "line": {
+                    "p1": {
+                      "x": 0.685,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    },
+                    "p2": {
+                      "x": 0.6294,
+                      "y": 0.4198,
+                      "anchor": {
+                        "h": "IntersectStart",
+                        "v": "IntersectStart"
+                      }
+                    }
+                  },
+                  "color_deviation": {
+                    "min": {
+                      "r": -10,
+                      "g": -10,
+                      "b": -10
+                    },
+                    "max": {
+                      "r": 10,
+                      "g": 10,
+                      "b": 10
+                    }
+                  }
+                },
+                "length_range": {
+                  "min": 0.4,
+                  "max": 0.6
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

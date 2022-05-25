@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(native_cli)
+project(native)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -15,10 +15,17 @@ set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
 set(SOURCE_FILES
         src/cli.cpp
         src/native_api.cpp
+        src/condition/serializer.cpp
         )
 
 add_executable(${PROJECT_NAME}
         ${SOURCE_FILES})
+
+target_compile_options(${PROJECT_NAME} PRIVATE /wd4068)
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/vendor")
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../windows")
+target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/tool")
 
 find_package(OpenCV REQUIRED)
 message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")
