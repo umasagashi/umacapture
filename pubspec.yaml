@@ -46,3 +46,4 @@ flutter:
 
   assets:
     - assets/config/platform_config.json
+    - assets/config/scene/chara_detail.json

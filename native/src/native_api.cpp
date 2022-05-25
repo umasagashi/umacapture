@@ -1,6 +1,6 @@
-#include "native_api.h"
+#include "cv/frame_distributor.h"
 
-using json = nlohmann::json;
+#include "native_api.h"
 
 namespace {
 
@@ -8,7 +8,7 @@ void _dummyForSuppressingUnusedWarning() {
     auto &app = NativeApi::instance();
     app.startEventLoop();
     app.joinEventLoop();
-    app.updateFrame({});
+    app.updateFrame({}, 0);
     app.setConfig({});
     app.setCallback({});
 }
@@ -16,7 +16,7 @@ void _dummyForSuppressingUnusedWarning() {
 }  // namespace
 
 NativeApi::NativeApi() {
-    auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &>>();
+    auto connection = connection::make_connection<connection::QueuedConnection<const Frame &>>();
     frame_captured = connection;
     recorder_runner = connection::make_runner(connection, [this]() {
         if (finalizer) {
@@ -26,19 +26,18 @@ NativeApi::NativeApi() {
 
     timestamp_for_debug = std::chrono::steady_clock::now();
 
-    connection->listen([this](const cv::Mat &frame) {
+    connection->listen([this](const Frame &frame) {
         message_out++;
 
         // for debug.
         if (!path_for_debug.empty()) {
             auto path = path_for_debug + "/img_" + std::to_string(counter_for_debug++) + ".png";
-            std::cout << "save: " << frame.size() << std::endl;
+//            std::cout << "save: " << frame.size() << std::endl;
             //            message_out += (int) cv::imwrite(path, frame);
         }
         if (callback_to_ui && (std::chrono::steady_clock::now() - timestamp_for_debug) > std::chrono::seconds(10)) {
             timestamp_for_debug = std::chrono::steady_clock::now();
-            callback_to_ui(std::to_string(message_in) + ", " + std::to_string(message_out) + ", "
-                           + std::to_string(frame.cols) + ", " + std::to_string(frame.rows));
+            callback_to_ui(std::to_string(message_in) + ", " + std::to_string(message_out));
         }
     });
 }
@@ -49,7 +48,7 @@ NativeApi::~NativeApi() {
 
 void NativeApi::setConfig(const std::string &native_config) {
     std::cout << __FUNCTION__ << ": " << native_config << std::endl;
-    auto config_json = json::parse(native_config);
+    auto config_json = json_utils::Json::parse(native_config);
     auto directory = config_json.find("directory");
     if (directory != config_json.end()) {
         path_for_debug = directory->template get<std::string>();
@@ -65,13 +64,13 @@ void NativeApi::setFinalizer(const std::function<FinalizerCallback> &method) {
     this->finalizer = method;
 }
 
-void NativeApi::updateFrame(const cv::Mat &frame) {
+void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     std::cout << __FUNCTION__ << std::endl;
 
     // If background threads are not keeping up, frame has to be discarded rather than queued.
     if (message_in - message_out < 10) {
         message_in++;
-        frame_captured->send(frame);
+        frame_captured->send({image, timestamp});
     }
 }
 
@@ -92,9 +91,9 @@ void NativeApi::notify(const std::string &message) {
 }
 
 void NativeApi::notifyCaptureStarted() {
-    notify(json{{"type", "onCaptureStarted"}}.dump());
+    notify(json_utils::Json{{"type", "onCaptureStarted"}}.dump());
 }
 
 void NativeApi::notifyCaptureStopped() {
-    notify(json{{"type", "onCaptureStopped"}}.dump());
+    notify(json_utils::Json{{"type", "onCaptureStopped"}}.dump());
 }

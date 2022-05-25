@@ -7,12 +7,10 @@
 #include <runner/platform_channel.h>
 #include <runner/windows_config.h>
 
-#include "util/json_utils.h"
 #include "../../native/src/native_api.h"
+#include "util/json_utils.h"
 
 #include "flutter_window.h"
-
-using json = nlohmann::json;
 
 FlutterWindow::FlutterWindow(const flutter::DartProject &project)
     : project_(project) {
@@ -37,7 +35,7 @@ bool FlutterWindow::OnCreate() {
     }
     RegisterPlugins(flutter_controller_->engine());
 
-    auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &>>();
+    auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &, uint64>>();
     window_recorder = std::make_unique<recording::WindowRecorder>(connection);
 
     channel = std::make_unique<channel::PlatformChannel>(flutter_controller_->engine(), GetHandle());
@@ -46,7 +44,7 @@ bool FlutterWindow::OnCreate() {
         std::cout << "setConfig: " << config_string << std::endl;
         NativeApi::instance().setConfig(config_string);
 
-        const auto config_json = json::parse(config_string);
+        const auto config_json = json_utils::Json::parse(config_string);
 
         const auto directory_config_json = config_json.find("directory");
         if (directory_config_json != config_json.end()) {
@@ -63,7 +61,7 @@ bool FlutterWindow::OnCreate() {
         std::cout << "windows_config: " << (*windows_config_json) << std::endl;
 
         const auto windows_config = windows_config_json->template get<config::WindowsConfig>();
-        std::cout << "windows_config: " << json(windows_config).dump(1) << std::endl;
+        std::cout << "windows_config: " << json_utils::Json(windows_config).dump(1) << std::endl;
         if (windows_config.window_recorder.has_value()) {
             window_recorder->setConfig(windows_config.window_recorder.value());
         }
@@ -90,7 +88,7 @@ bool FlutterWindow::OnCreate() {
     });
     api.startEventLoop();
 
-    connection->listen([&api](const auto &frame) { api.updateFrame(frame); });
+    connection->listen([&api](const auto &frame, uint64_t timestamp) { api.updateFrame(frame, timestamp); });
     recorder_runner = connection::make_runner(connection);
     recorder_runner->start();
 
@@ -114,8 +112,8 @@ void FlutterWindow::OnDestroy() {
     Win32Window::OnDestroy();
 }
 
-LRESULT FlutterWindow::MessageHandler(HWND hwnd, UINT const message, WPARAM const wparam,
-                                      LPARAM const lparam) noexcept {
+LRESULT
+FlutterWindow::MessageHandler(HWND hwnd, UINT const message, WPARAM const wparam, LPARAM const lparam) noexcept {
     // Give Flutter, including plugins, an opportunity to handle window messages.
     if (flutter_controller_) {
         std::optional<LRESULT> result = flutter_controller_->HandleTopLevelWindowProc(hwnd, message, wparam, lparam);

@@ -11,6 +11,7 @@
 #include "../../native/src/util/eventpp_util.h"
 #include "../../native/src/util/json_utils.h"
 #include "../../native/src/util/thread_util.h"
+#include "../../native/src/util/common.h"
 
 namespace cv {
 
@@ -42,29 +43,29 @@ struct WindowProfile {
         return (window_title && !window_title->empty()) ? window_title->c_str() : nullptr;
     }
 
-    EXTENDED_JSON_TYPE_INTRUSIVE(WindowProfile, window_class, window_title, fixed_aspect_ratio);
+    EXTENDED_JSON_TYPE_NDC(WindowProfile, window_class, window_title, fixed_aspect_ratio);
 };
 
 struct WindowRecorder {
     std::optional<config::WindowProfile> window_profile;
-    std::optional<cv::Size> minimum_size;
+    std::optional<Size<int>> minimum_size;
     std::optional<int> recording_fps;
 
-    EXTENDED_JSON_TYPE_INTRUSIVE(WindowRecorder, window_profile, minimum_size, recording_fps);
+    EXTENDED_JSON_TYPE_NDC(WindowRecorder, window_profile, minimum_size, recording_fps);
 };
 
 }  // namespace config
 
 namespace {
 
-inline cv::Size getCircumscribedSize(const cv::Size &source, const cv::Size &fitTo) {
-    const float scale = std::max(float(fitTo.width) / float(source.width), float(fitTo.height) / float(source.height));
-    return {int(std::round(float(source.width) * scale)), int(std::round(float(source.height) * scale))};
+inline Size<int> getCircumscribedSize(const Size<int> &source, const Size<int> &fitTo) {
+    const float scale = std::max(float(fitTo.width()) / float(source.width()), float(fitTo.height()) / float(source.height()));
+    return {int(std::round(float(source.width()) * scale)), int(std::round(float(source.height()) * scale))};
 }
 
 class WindowCapturer {
 public:
-    WindowCapturer(config::WindowProfile window_profile, const cv::Size &minimum_size)
+    WindowCapturer(config::WindowProfile window_profile, const Size<int> &minimum_size)
         : window_profile(std::move(window_profile))
         , minimum_size(minimum_size) {}
 
@@ -78,10 +79,10 @@ public:
             plain_mat = cv::Mat(rect.size(), CV_8UC4);
         }
 
-        const cv::Size &scaled_size =
+        const Size<int> &scaled_size =
             window_profile.fixed_aspect_ratio ? minimum_size : getCircumscribedSize(rect.size(), minimum_size);
-        if (scaled_mat.size() != scaled_size) {
-            scaled_mat = cv::Mat(scaled_size, CV_8UC4);
+        if (scaled_size != scaled_mat.size()) {
+            scaled_mat = cv::Mat(scaled_size.toCVSize(), CV_8UC4);
         }
 
         return capture(GetDesktopWindow(), rect);
@@ -157,7 +158,7 @@ private:
     }
 
     const config::WindowProfile window_profile;
-    const cv::Size minimum_size;
+    const Size<int> minimum_size;
 
     cv::Mat plain_mat;
     cv::Mat scaled_mat;
@@ -186,8 +187,8 @@ private:
 
 class RecordingThread : public threading::ThreadBase {
 public:
-    RecordingThread(connection::Sender<const cv::Mat &> sender, const config::WindowProfile &window_profile,
-                    const cv::Size &minimum_size, int fps)
+    RecordingThread(connection::Sender<const cv::Mat &, uint64_t> sender, const config::WindowProfile &window_profile,
+                    const Size<int> &minimum_size, int fps)
         : sender(std::move(sender))
         , capturer(std::make_unique<WindowCapturer>(window_profile, minimum_size))
         , minimum_size(minimum_size)
@@ -218,16 +219,16 @@ protected:
             time_keeper.waitLap();
             const auto &frame = capturer->capture();
             if (!frame.empty()) {
-                sender->send(frame);
+                sender->send(frame, chrono::timestamp());
             }
         }
         std::cout << __FUNCTION__ << " finished" << std::endl;
     }
 
 private:
-    const connection::Sender<const cv::Mat &> sender;
+    const connection::Sender<const cv::Mat &, uint64_t> sender;
     std::unique_ptr<WindowCapturer> capturer;
-    const cv::Size minimum_size;
+    const Size<int> minimum_size;
     TimeKeeper time_keeper;
 };
 
@@ -237,7 +238,7 @@ namespace recording {
 
 class WindowRecorder {
 public:
-    explicit WindowRecorder(connection::Sender<const cv::Mat &> sender)
+    explicit WindowRecorder(connection::Sender<const cv::Mat &, uint64_t> sender)
         : frame_captured(std::move(sender)) {}
 
     ~WindowRecorder() {
@@ -281,7 +282,7 @@ public:
 
 private:
     std::unique_ptr<RecordingThread> recording_thread;
-    connection::Sender<const cv::Mat &> frame_captured;
+    connection::Sender<const cv::Mat &, uint64_t> frame_captured;
 };
 
 }  // namespace recording

@@ -14,6 +14,7 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
+#include "cv/frame.h"
 #include "util/eventpp_util.h"
 #include "util/json_utils.h"
 
@@ -22,7 +23,7 @@ namespace native_config {
 struct NativeConfig {
     std::optional<std::string> version;
 
-    EXTENDED_JSON_TYPE_INTRUSIVE(NativeConfig, version);
+    EXTENDED_JSON_TYPE_NDC(NativeConfig, version);
 };
 
 }  // namespace native_config
@@ -38,7 +39,7 @@ public:
 
     void setConfig(const std::string &config);
 
-    void updateFrame(const cv::Mat &frame);
+    void updateFrame(const cv::Mat &image, uint64 timestamp);
 
     void setCallback(const std::function<MessageCallback> &method);
     void setFinalizer(const std::function<FinalizerCallback> &method);
@@ -64,7 +65,7 @@ private:
     std::function<MessageCallback> callback_to_ui;
     std::function<FinalizerCallback> finalizer;
 
-    connection::Sender<const cv::Mat &> frame_captured;
+    connection::Sender<const Frame &> frame_captured;
     connection::EventLoopRunner recorder_runner;
     std::string config;
 
