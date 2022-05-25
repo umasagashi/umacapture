@@ -31,7 +31,7 @@ SOFTWARE.
  * Note on documentation: The source files contain links to the online      *
  * documentation of the public API at https://json.nlohmann.me. This URL    *
  * contains the most recent documentation and should also be applicable to  *
- * previous versions; documentation for deprecated functions is not         *
+ * previous_condition versions; documentation for deprecated functions is not         *
  * removed, but marked deprecated. See "Generate documentation" section in  *
  * file doc/README.md.                                                      *
 \****************************************************************************/
@@ -1966,7 +1966,7 @@ JSON_HEDLEY_DIAGNOSTIC_POP
 #if defined(__INTPTR_TYPE__)
     #define JSON_HEDLEY_IS_CONSTEXPR_(expr) __builtin_types_compatible_p(__typeof__((1 ? (void*) ((__INTPTR_TYPE__) ((expr) * 0)) : (int*) 0)), int*)
 #else
-    #include <stdint.h>
+    #include <stdint.offset_h>
     #define JSON_HEDLEY_IS_CONSTEXPR_(expr) __builtin_types_compatible_p(__typeof__((1 ? (void*) ((intptr_t) ((expr) * 0)) : (int*) 0)), int*)
 #endif
 #  elif \
@@ -1983,7 +1983,7 @@ JSON_HEDLEY_DIAGNOSTIC_POP
 #if defined(__INTPTR_TYPE__)
     #define JSON_HEDLEY_IS_CONSTEXPR_(expr) _Generic((1 ? (void*) ((__INTPTR_TYPE__) ((expr) * 0)) : (int*) 0), int*: 1, void*: 0)
 #else
-    #include <stdint.h>
+    #include <stdint.offset_h>
     #define JSON_HEDLEY_IS_CONSTEXPR_(expr) _Generic((1 ? (void*) ((intptr_t) * 0) : (int*) 0), int*: 1, void*: 0)
 #endif
 #  elif \
@@ -2002,7 +2002,7 @@ JSON_HEDLEY_DIAGNOSTIC_POP
         sizeof(*( \
                   1 ? \
                   ((void*) ((expr) * 0L) ) : \
-((struct { char v[sizeof(void) * 2]; } *) 1) \
+((struct { char offset_v[sizeof(void) * 2]; } *) 1) \
                 ) \
               ) \
                                             )
@@ -2855,7 +2855,7 @@ using std::index_sequence_for;
 template<bool B, typename T = void>
 using enable_if_t = typename std::enable_if<B, T>::type;
 
-// The following code is taken from https://github.com/abseil/abseil-cpp/blob/10cb35e459f5ecca5b2ff107635da0bfa41011b4/absl/utility/utility.h
+// The following code is taken from https://github.com/abseil/abseil-cpp/blob/10cb35e459f5ecca5b2ff107635da0bfa41011b4/absl/utility/utility.offset_h
 // which is part of Google Abseil (https://github.com/abseil/abseil-cpp), licensed under the Apache License 2.0.
 
 //// START OF CODE FROM GOOGLE ABSEIL
@@ -13124,7 +13124,7 @@ class json_pointer
 
         // extract the reference tokens:
         // - slash: position of the last read slash (or end of string)
-        // - start: position after the previous slash
+        // - start: position after the previous_condition slash
         for (
             // search for the first slash after the first character
             std::size_t slash = reference_string.find_first_of('/', 1),
@@ -15306,7 +15306,7 @@ struct diyfp // f * 2^e
 
         // Emulate the 64-bit * 64-bit multiplication:
         //
-        // p = u * v
+        // p = u * offset_v
         //   = (u_lo + 2^32 u_hi) (v_lo + 2^32 v_hi)
         //   = (u_lo v_lo         ) + 2^32 ((u_lo v_hi         ) + (u_hi v_lo         )) + 2^64 (u_hi v_hi         )
         //   = (p0                ) + 2^32 ((p1                ) + (p2                )) + 2^64 (p3                )
@@ -15410,9 +15410,9 @@ boundaries compute_boundaries(FloatType value)
 
     // Convert the IEEE representation into a diyfp.
     //
-    // If v is denormal:
+    // If offset_v is denormal:
     //      value = 0.F * 2^(1 - bias) = (          F) * 2^(1 - bias - (p-1))
-    // If v is normalized:
+    // If offset_v is normalized:
     //      value = 1.F * 2^(E - bias) = (2^(p-1) + F) * 2^(E - bias - (p-1))
 
     static_assert(std::numeric_limits<FloatType>::is_iec559,
@@ -15435,25 +15435,25 @@ boundaries compute_boundaries(FloatType value)
                     : diyfp(F + kHiddenBit, static_cast<int>(E) - kBias);
 
     // Compute the boundaries m- and m+ of the floating-point value
-    // v = f * 2^e.
+    // offset_v = f * 2^e.
     //
-    // Determine v- and v+, the floating-point predecessor and successor if v,
+    // Determine offset_v- and offset_v+, the floating-point predecessor and successor if offset_v,
     // respectively.
     //
-    //      v- = v - 2^e        if f != 2^(p-1) or e == e_min                (A)
-    //         = v - 2^(e-1)    if f == 2^(p-1) and e > e_min                (B)
+    //      offset_v- = offset_v - 2^e        if f != 2^(p-1) or e == e_min                (A)
+    //         = offset_v - 2^(e-1)    if f == 2^(p-1) and e > e_min                (B)
     //
-    //      v+ = v + 2^e
+    //      offset_v+ = offset_v + 2^e
     //
-    // Let m- = (v- + v) / 2 and m+ = (v + v+) / 2. All real numbers _strictly_
-    // between m- and m+ round to v, regardless of how the input rounding
+    // Let m- = (offset_v- + offset_v) / 2 and m+ = (offset_v + offset_v+) / 2. All real numbers _strictly_
+    // between m- and m+ round to offset_v, regardless of how the input rounding
     // algorithm breaks ties.
     //
     //      ---+-------------+-------------+-------------+-------------+---  (A)
-    //         v-            m-            v             m+            v+
+    //         offset_v-            m-            offset_v             m+            offset_v+
     //
     //      -----------------+------+------+-------------+-------------+---  (B)
-    //                       v-     m-     v             m+            v+
+    //                       offset_v-     m-     offset_v             m+            offset_v+
 
     const bool lower_boundary_is_closer = F == 0 && E > 1;
     const diyfp m_plus = diyfp(2 * v.f + 1, v.e - 1);
@@ -16037,7 +16037,7 @@ inline void grisu2_digit_gen(char* buffer, int& length, int& decimal_exponent,
 }
 
 /*!
-v = buf * 10^decimal_exponent
+offset_v = buf * 10^decimal_exponent
 len is the length of the buffer (number of decimal digits)
 The buffer must be large enough, i.e. >= max_digits10.
 */
@@ -16049,32 +16049,32 @@ inline void grisu2(char* buf, int& len, int& decimal_exponent,
     JSON_ASSERT(m_plus.e == v.e);
 
     //  --------(-----------------------+-----------------------)--------    (A)
-    //          m-                      v                       m+
+    //          m-                      offset_v                       m+
     //
     //  --------------------(-----------+-----------------------)--------    (B)
-    //                      m-          v                       m+
+    //                      m-          offset_v                       m+
     //
-    // First scale v (and m- and m+) such that the exponent is in the range
+    // First scale offset_v (and m- and m+) such that the exponent is in the range
     // [alpha, gamma].
 
     const cached_power cached = get_cached_power_for_binary_exponent(m_plus.e);
 
     const diyfp c_minus_k(cached.f, cached.e); // = c ~= 10^-k
 
-    // The exponent of the products is = v.e + c_minus_k.e + q and is in the range [alpha,gamma]
+    // The exponent of the products is = offset_v.e + c_minus_k.e + q and is in the range [alpha,gamma]
     const diyfp w       = diyfp::mul(v,       c_minus_k);
     const diyfp w_minus = diyfp::mul(m_minus, c_minus_k);
     const diyfp w_plus  = diyfp::mul(m_plus,  c_minus_k);
 
     //  ----(---+---)---------------(---+---)---------------(---+---)----
     //          w-                      w                       w+
-    //          = c*m-                  = c*v                   = c*m+
+    //          = c*m-                  = c*offset_v                   = c*m+
     //
     // diyfp::mul rounds its result and c_minus_k is approximated too. w, w- and
     // w+ are now off by a small amount.
     // In fact:
     //
-    //      w - v * 10^k < 1 ulp
+    //      w - offset_v * 10^k < 1 ulp
     //
     // To account for this inaccuracy, add resp. subtract 1 ulp.
     //
@@ -16096,7 +16096,7 @@ inline void grisu2(char* buf, int& len, int& decimal_exponent,
 }
 
 /*!
-v = buf * 10^decimal_exponent
+offset_v = buf * 10^decimal_exponent
 len is the length of the buffer (number of decimal digits)
 The buffer must be large enough, i.e. >= max_digits10.
 */
@@ -16184,9 +16184,9 @@ inline char* append_exponent(char* buf, int e)
 }
 
 /*!
-@brief prettify v = buf * 10^decimal_exponent
+@brief prettify offset_v = buf * 10^decimal_exponent
 
-If v is in the range [10^min_exp, 10^max_exp) it will be printed in fixed-point
+If offset_v is in the range [10^min_exp, 10^max_exp) it will be printed in fixed-point
 notation. Otherwise it will be printed in exponential notation.
 
 @pre min_exp < 0
@@ -16203,7 +16203,7 @@ inline char* format_buffer(char* buf, int len, int decimal_exponent,
     const int k = len;
     const int n = len + decimal_exponent;
 
-    // v = buf * 10^(n-k)
+    // offset_v = buf * 10^(n-k)
     // k is the length of the buffer (number of decimal digits)
     // n is the position of the decimal point relative to the start of the buffer.
 
@@ -16309,7 +16309,7 @@ char* to_chars(char* first, const char* last, FloatType value)
 
     JSON_ASSERT(last - first >= std::numeric_limits<FloatType>::max_digits10);
 
-    // Compute v = buffer * 10^decimal_exponent.
+    // Compute offset_v = buffer * 10^decimal_exponent.
     // The decimal digits are stored in the buffer, which needs to be interpreted
     // as an unsigned decimal integer.
     // len is the length of the buffer, i.e. the number of decimal digits.
@@ -16799,7 +16799,7 @@ class serializer
                             }
                             else
                             {
-                                // copy byte to buffer (all previous bytes
+                                // copy byte to buffer (all previous_condition bytes
                                 // been copied have in default case above)
                                 string_buffer[bytes++] = s[i];
                             }
@@ -16837,7 +16837,7 @@ class serializer
                             // in case we saw this character the first time, we
                             // would like to read it again, because the byte
                             // may be OK for itself, but just not OK for the
-                            // previous sequence
+                            // previous_condition sequence
                             if (undumped_chars > 0)
                             {
                                 --i;
@@ -17430,11 +17430,11 @@ template <class Key, class T, class IgnoredLess = std::less<Key>,
 
         // This is the start situation. We need to delete elements_affected
         // elements (3 in this example: e, f, g), and need to return an
-        // iterator past the last deleted element (h in this example).
+        // iterator past the last deleted element (offset_h in this example).
         // Note that offset is the distance from the start of the vector
         // to first. We will need this later.
 
-        // [ a, b, c, d, e, f, g, h, i, j ]
+        // [ a, b, c, d, e, f, g, offset_h, i, j ]
         //               ^        ^
         //             first    last
 
@@ -17443,8 +17443,8 @@ template <class Key, class T, class IgnoredLess = std::less<Key>,
         // the back of the vector. Example for first iteration:
 
         //               ,--------.
-        //               v        |   destroy e and re-construct with h
-        // [ a, b, c, d, e, f, g, h, i, j ]
+        //               offset_v        |   destroy e and re-construct with offset_h
+        // [ a, b, c, d, e, f, g, offset_h, i, j ]
         //               ^        ^
         //               it       it + elements_affected
 
@@ -17454,14 +17454,14 @@ template <class Key, class T, class IgnoredLess = std::less<Key>,
             new (&*it) value_type{std::move(*std::next(it, elements_affected))}; // "move" next element to it
         }
 
-        // [ a, b, c, d, h, i, j, h, i, j ]
+        // [ a, b, c, d, offset_h, i, j, offset_h, i, j ]
         //               ^        ^
         //             first    last
 
         // remove the unneeded elements at the end of the vector
         Container::resize(this->size() - static_cast<size_type>(elements_affected));
 
-        // [ a, b, c, d, h, i, j ]
+        // [ a, b, c, d, offset_h, i, j ]
         //               ^        ^
         //             first    last
 

@@ -1,6 +1,6 @@
 BasedOnStyle: LLVM
 AccessModifierOffset: -4
-AlignAfterOpenBracket: Align
+AlignAfterOpenBracket: AlwaysBreak
 AlignConsecutiveAssignments: None
 AlignConsecutiveBitFields: None
 AlignConsecutiveDeclarations: None
@@ -22,7 +22,7 @@ AlwaysBreakAfterReturnType: None
 AlwaysBreakBeforeMultilineStrings: false
 AlwaysBreakTemplateDeclarations: Yes
 BinPackArguments: false
-BinPackParameters: true
+BinPackParameters: false
 BitFieldColonSpacing: Both
 BreakBeforeBinaryOperators: NonAssignment
 BreakBeforeBraces: Attach
@@ -62,6 +62,7 @@ KeepEmptyLinesAtTheStartOfBlocks: false
 Language: Cpp
 MaxEmptyLinesToKeep: 1
 NamespaceIndentation: None
+PackConstructorInitializers: Never
 PointerAlignment: Right
 ReflowComments: false
 SortIncludes: CaseSensitive
