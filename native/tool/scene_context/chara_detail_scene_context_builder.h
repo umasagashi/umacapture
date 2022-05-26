@@ -1,10 +1,9 @@
-#ifndef NATIVE_CHARA_DETAIL_SCENE_CONTEXT_H
-#define NATIVE_CHARA_DETAIL_SCENE_CONTEXT_H
+#pragma once
 
+#include "chara_detail/chara_detail_scene_context.h"
 #include "condition/basic_condition.h"
 #include "condition/condition.h"
 #include "condition/cv_rule.h"
-#include "condition/scene_context.h"
 #include "cv/frame.h"
 #include "cv/frame_distributor.h"
 #include "util/json_utils.h"
@@ -104,7 +103,9 @@ stableLineCheck(int threshold, const Line<double> &line, const Range<Color> &p1_
 
 }  // namespace
 
-class CharaDetailSceneContext {
+namespace tool {
+
+class CharaDetailSceneContextBuilder {
 public:
     [[nodiscard]] ConditionBase build() const {
         return allOf({
@@ -196,4 +197,4 @@ private:
     }
 };
 
-#endif  //NATIVE_CHARA_DETAIL_SCENE_CONTEXT_H
+}  // namespace tool

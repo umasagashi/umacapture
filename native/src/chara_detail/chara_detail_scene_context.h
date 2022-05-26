@@ -1,5 +1,4 @@
-#ifndef NATIVE_SCENE_CONTEXT_H
-#define NATIVE_SCENE_CONTEXT_H
+#pragma once
 
 #include "condition/basic_condition.h"
 #include "condition/condition.h"
@@ -8,6 +7,14 @@
 #include "util/eventpp_util.h"
 #include "util/json_utils.h"
 #include "util/stds.h"
+
+namespace {
+
+using TabCondition = condition::ParallelCondition<Frame, rule::LogicalOr>;
+
+}
+
+namespace chara_detail {
 
 enum TabPage {
     SkillPage,
@@ -22,60 +29,65 @@ struct SceneInfo {
         : tab_page(static_cast<TabPage>(tab_page)) {}
 };
 
-namespace {
-
-using TabCondition = condition::ParallelCondition<Frame, rule::LogicalOr>;
-
-}
-
-class SceneContext : public condition::Condition<Frame> {
+class CharaDetailSceneContext {
 public:
-    SceneContext(
-        std::shared_ptr<condition::Condition<Frame>> child,
-        connection::Sender<Frame, SceneInfo> on_scene_begin,
-        connection::Sender<Frame, SceneInfo> on_scene_updated,
-        connection::Sender<> on_scene_end,
+    CharaDetailSceneContext(
+        const std::shared_ptr<condition::Condition<Frame>> &child,
+        const connection::Sender<> &on_scene_begin,
+        const connection::Sender<Frame, SceneInfo> &on_scene_updated,
+        const connection::Sender<> &on_scene_end,
         const std::chrono::milliseconds &scene_end_timeout = std::chrono::milliseconds::zero())
-        : child(std::move(child))
+        : child(child)
         , tab_condition(dynamic_cast<const TabCondition *>(child->getByName("tab_condition")))
-        , on_scene_begin(std::move(on_scene_begin))
-        , on_scene_updated(std::move(on_scene_updated))
-        , on_scene_end(std::move(on_scene_end))
+        , on_scene_begin(on_scene_begin)
+        , on_scene_updated(on_scene_updated)
+        , on_scene_end(on_scene_end)
         , scene_end_timeout(scene_end_timeout) {
         if (tab_condition == nullptr) {
             throw std::runtime_error("tab_condition not found");
         }
     }
 
-    void update(const Frame &input) override {
+    void update(const Frame &input) {
         child->update(input);
         const auto tab_index = getActiveTabIndex();
         met_ = child->met() && tab_index.has_value();
 
-        if (current_timer) {
-            current_timer->cancel();
-            current_timer = nullptr;
-        }
-
-        if (met_ && !previous_condition) {
-            on_scene_begin->send(input, {tab_index.value()});
-        } else if (met_ && previous_condition) {
+        if (met_) {
+            const auto canceled = cancelSceneEndTimer();
+            if (!previous_condition && !canceled) {  // When end is canceled, no need to call begin either.
+                on_scene_begin->send();
+            }
             on_scene_updated->send(input, {tab_index.value()});
-        } else if (!met_ && previous_condition) {
+        } else if (previous_condition) {
             if (scene_end_timeout == std::chrono::milliseconds::zero()) {
                 on_scene_end->send();
             } else {
-                current_timer =
-                    std::make_unique<threading::Timer>(scene_end_timeout, [this]() { this->on_scene_end->send(); });
+                startSceneEndTimer();
             }
         }
 
         previous_condition = met_;
     }
 
-    [[nodiscard]] bool met() const override { return met_; }
+    [[nodiscard]] bool met() const { return met_; }
 
 private:
+    bool cancelSceneEndTimer() {
+        if (scene_end_timer) {
+            scene_end_timer->cancel();
+            const auto expired = scene_end_timer->hasExpired();
+            scene_end_timer = nullptr;
+            return expired.has_value() && !expired.value();
+        }
+        return false;
+    }
+
+    void startSceneEndTimer() {
+        cancelSceneEndTimer();
+        scene_end_timer = std::make_unique<threading::Timer>(scene_end_timeout, [this]() { on_scene_end->send(); });
+    }
+
     [[nodiscard]] std::optional<int> getActiveTabIndex() const {
         const auto tab_states = tab_condition->metDetail();
         const auto active = stds::find(tab_states, true);
@@ -88,15 +100,15 @@ private:
 
     const std::shared_ptr<condition::Condition<Frame>> child;
     const condition::ParallelCondition<Frame, rule::LogicalOr> *tab_condition;
-    const connection::Sender<Frame, SceneInfo> on_scene_begin;
+    const connection::Sender<> on_scene_begin;
     const connection::Sender<Frame, SceneInfo> on_scene_updated;
     const connection::Sender<> on_scene_end;
 
-    std::unique_ptr<threading::Timer> current_timer;
+    std::unique_ptr<threading::Timer> scene_end_timer;
     const std::chrono::milliseconds scene_end_timeout;
 
     bool previous_condition = false;
     bool met_ = false;
 };
 
-#endif  //NATIVE_SCENE_CONTEXT_H
+}  // namespace chara_detail
