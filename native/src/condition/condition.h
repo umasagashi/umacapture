@@ -1,5 +1,4 @@
-#ifndef NATIVE_CONDITION_H
-#define NATIVE_CONDITION_H
+#pragma once
 
 #include <string>
 
@@ -25,5 +24,3 @@ public:
 };
 
 }  // namespace condition
-
-#endif  //NATIVE_CONDITION_H

@@ -1,5 +1,4 @@
-#ifndef NATIVE_JSON_UTILS_H
-#define NATIVE_JSON_UTILS_H
+#pragma once
 
 #include <memory>
 #include <optional>
@@ -201,5 +200,3 @@ inline std::string trim(const std::string &key) {
     }
 
 }  // namespace json_utils
-
-#endif  //NATIVE_JSON_UTILS_H

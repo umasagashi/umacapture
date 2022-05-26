@@ -1,5 +1,4 @@
-#ifndef NATIVE_STDS_H
-#define NATIVE_STDS_H
+#pragma once
 
 #include <algorithm>
 
@@ -53,5 +52,3 @@ inline bool any_of(const Container &container) {
 }
 
 }  // namespace stds
-
-#endif  //NATIVE_STDS_H

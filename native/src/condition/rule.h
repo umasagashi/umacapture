@@ -1,5 +1,4 @@
-#ifndef NATIVE_RULE_H
-#define NATIVE_RULE_H
+#pragma once
 
 #include "util/common.h"
 #include "util/json_utils.h"
@@ -78,5 +77,3 @@ public:
 
 #pragma clang diagnostic pop
 }  // namespace rule
-
-#endif  //NATIVE_RULE_H

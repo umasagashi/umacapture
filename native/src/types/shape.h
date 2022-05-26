@@ -1,5 +1,4 @@
-#ifndef NATIVE_SHAPE_H
-#define NATIVE_SHAPE_H
+#pragma once
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
@@ -183,5 +182,3 @@ private:
     Point<T> bottom_right_;
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Rect)
-
-#endif  //NATIVE_SHAPE_H
