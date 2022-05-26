@@ -1,5 +1,4 @@
-#ifndef NATIVE_COLOR_H
-#define NATIVE_COLOR_H
+#pragma once
 
 #include <utility>
 
@@ -48,5 +47,3 @@ private:
     int b_;
 };
 EXTENDED_JSON_TYPE_PRINTABLE(Color)
-
-#endif  //NATIVE_COLOR_H

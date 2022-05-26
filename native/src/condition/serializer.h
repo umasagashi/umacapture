@@ -1,5 +1,4 @@
-#ifndef NATIVE_SERIALIZER_H
-#define NATIVE_SERIALIZER_H
+#pragma once
 
 #include <memory>
 #include <vector>
@@ -40,5 +39,3 @@ std::vector<ConditionBase> conditionArrayFromJson(const json_utils::Json &j);
 json_utils::Json conditionArrayToJson(const std::vector<ConditionBase> &conditions);
 
 }  // namespace serializer
-
-#endif  //NATIVE_SERIALIZER_H

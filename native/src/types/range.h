@@ -1,5 +1,4 @@
-#ifndef NATIVE_RANGE_H
-#define NATIVE_RANGE_H
+#pragma once
 
 #include "util/json_utils.h"
 
@@ -24,5 +23,3 @@ private:
     T max_;
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Range)
-
-#endif  //NATIVE_RANGE_H

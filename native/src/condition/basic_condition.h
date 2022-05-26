@@ -1,5 +1,4 @@
-#ifndef NATIVE_BASIC_CONDITION_H
-#define NATIVE_BASIC_CONDITION_H
+#pragma once
 
 #include <memory>
 #include <optional>
@@ -174,5 +173,3 @@ private:
 };
 
 }  // namespace condition
-
-#endif  //NATIVE_BASIC_CONDITION_H

@@ -1,5 +1,4 @@
-#ifndef NATIVE_EVENTPP_UTIL_H
-#define NATIVE_EVENTPP_UTIL_H
+#pragma once
 
 #include <utility>
 
@@ -119,5 +118,3 @@ make_runner(const std::shared_ptr<EventProcessorImpl> &processor, const std::fun
 }
 
 }  // namespace connection
-
-#endif  //NATIVE_EVENTPP_UTIL_H

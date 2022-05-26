@@ -1,5 +1,4 @@
-#ifndef NATIVE_FRAME_H
-#define NATIVE_FRAME_H
+#pragma once
 
 #include <utility>
 
@@ -8,8 +7,8 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
-#include "types/range.h"
 #include "types/color.h"
+#include "types/range.h"
 #include "util/common.h"
 #include "util/json_utils.h"
 
@@ -144,5 +143,3 @@ private:
     const uint64 timestamp;
     const FrameAnchor anchor;
 };
-
-#endif  //NATIVE_FRAME_H

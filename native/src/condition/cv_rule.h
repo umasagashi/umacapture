@@ -1,5 +1,4 @@
-#ifndef NATIVE_CV_RULE_H
-#define NATIVE_CV_RULE_H
+#pragma once
 
 #include <optional>
 #include <utility>
@@ -95,5 +94,3 @@ private:
 };
 
 }  // namespace rule
-
-#endif  //NATIVE_CV_RULE_H
