@@ -1,5 +1,4 @@
-#ifndef NATIVE_THREAD_UTIL_H
-#define NATIVE_THREAD_UTIL_H
+#pragma once
 
 #include <atomic>
 #include <iostream>
@@ -59,22 +58,11 @@ public:
 
     ~Timer() { cancel(); }
 
-    void start() {
-        std::lock_guard<std::recursive_mutex> lock(thread_object_mutex);
-        if (thread != nullptr) {
-            cancel();
-        }
-        assert(thread == nullptr);
-
-        canceled = false;
-        const auto timeout = std::chrono::steady_clock::now() + duration;
-        thread = std::make_unique<std::thread>([=]() { run(timeout); });
-    }
-
     void cancel() {
+        std::cout << __FUNCTION__ << std::endl;
         {
             std::lock_guard<std::mutex> lock(condition_mutex);
-            canceled = true;
+            cancelRequested = true;
             condition.notify_all();
         }
 
@@ -87,16 +75,42 @@ public:
         }
     }
 
+    [[nodiscard]] std::optional<bool> hasExpired() {
+        std::unique_lock<std::mutex> lock(condition_mutex, std::defer_lock);
+        if (!lock.try_lock()) {
+            return std::nullopt;
+        } else {
+            return expired;
+        }
+    }
+
 private:
+    void start() {
+        std::lock_guard<std::recursive_mutex> lock(thread_object_mutex);
+        if (thread != nullptr) {
+            cancel();
+        }
+        assert(thread == nullptr);
+
+        cancelRequested = false;
+        expired = std::nullopt;
+        const auto timeout = std::chrono::steady_clock::now() + duration;
+        thread = std::make_unique<std::thread>([=]() { run(timeout); });
+    }
+
     void run(std::chrono::steady_clock::time_point timeout) {
         std::cout << __FUNCTION__ << " started" << std::endl;
 
-        std::unique_lock<std::mutex> lock(condition_mutex);
-        if (condition.wait_until(lock, timeout, [&]() { return canceled; })) {
+        std::unique_lock<std::mutex> cancel_lock(condition_mutex);
+        if (condition.wait_until(cancel_lock, timeout, [&]() { return cancelRequested; })) {
+            std::cout << "on_canceled: " << cancelRequested << std::endl;
+            expired = false;
             if (on_canceled != nullptr) {
                 on_canceled();
             }
         } else {
+            std::cout << "on_expired: " << cancelRequested << std::endl;
+            expired = true;
             on_expired();
         }
 
@@ -109,7 +123,9 @@ private:
 
     std::condition_variable condition;
     std::mutex condition_mutex;
-    bool canceled = false;
+
+    bool cancelRequested = false;
+    std::optional<bool> expired;
 
     const std::chrono::milliseconds duration;
     const std::function<void()> on_expired;
@@ -117,5 +133,3 @@ private:
 };
 
 }  // namespace threading
-
-#endif  //NATIVE_THREAD_UTIL_H

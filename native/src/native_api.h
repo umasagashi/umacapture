@@ -1,5 +1,4 @@
-#ifndef NATIVE_API_H
-#define NATIVE_API_H
+#pragma once
 
 #include <functional>
 #include <iostream>
@@ -14,7 +13,10 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
+#include "chara_detail/chara_detail_scene_context.h"
+#include "chara_detail/chara_detail_stitcher.h"
 #include "cv/frame.h"
+#include "cv/frame_distributor.h"
 #include "util/eventpp_util.h"
 #include "util/json_utils.h"
 
@@ -62,12 +64,20 @@ public:
 private:
     void notify(const std::string &message);
 
-    std::function<MessageCallback> callback_to_ui;
-    std::function<FinalizerCallback> finalizer;
+    std::function<MessageCallback> callback_to_ui = [](const auto &) {};
+    std::function<FinalizerCallback> finalizer = []() {};
 
-    connection::Sender<const Frame &> frame_captured;
+    connection::Sender<Frame> frame_captured;
+    connection::Listener<Frame> frame_supplier;
     connection::EventLoopRunner recorder_runner;
     std::string config;
+
+    connection::Sender<> chara_detail_opened;
+    connection::Sender<Frame, chara_detail::SceneInfo> chara_detail_updated;
+    connection::Sender<> chara_detail_closed;
+    connection::EventLoopRunner stitcher_runner;
+
+    std::unique_ptr<FrameDistributor> frame_distributor;
 
     std::atomic_int message_in = 0;
     std::atomic_int message_out = 0;
@@ -78,5 +88,3 @@ public:
         return app;
     }
 };
-
-#endif  //NATIVE_API_H

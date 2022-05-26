@@ -5,37 +5,24 @@
 #include <CLI11/CLI11.hpp>
 #include <runner/window_recorder.h>
 #include <runner/windows_config.h>
+#include <scene_context/chara_detail_scene_context_builder.h>
 
 #include "condition/serializer.h"
-#include "scene_context/chara_detail_scene_context.h"
+#include "util/common.h"
 #include "util/json_utils.h"
 
 #include "native_api.h"
-
-std::string read(const std::string &path) {
-    std::ifstream file(path);
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
-}
-
-void write(const std::string &path, const std::string &text) {
-    std::ofstream file;
-    file.open(path, std::ios::out);
-    file << text;
-    file.close();
-}
 
 void buildContext(const std::filesystem::path &root_dir) {
     try {
         std::filesystem::create_directories(root_dir);
 
         const std::string path = (root_dir / "chara_detail.json").generic_string();
-        auto context = CharaDetailSceneContext().build();
+        auto context = tool::CharaDetailSceneContextBuilder().build();
         json_utils::Json json = context->toJson();
-        write(path, json.dump(2));
+        io::write(path, json.dump(2));
 
-        auto reconstructed_context = serializer::conditionFromJson(json_utils::Json::parse(read(path)));
+        auto reconstructed_context = serializer::conditionFromJson(json_utils::Json::parse(io::read(path)));
         json_utils::Json reconstructed_json = reconstructed_context->toJson();
         assert(json == reconstructed_json);
     } catch (std::exception &e) {
@@ -52,7 +39,7 @@ void capture() {
     auto recorder_runner = connection::make_runner(connection);
     auto &api = NativeApi::instance();
 
-    std::string config_string = read("../../assets/config/platform_config.json");
+    std::string config_string = io::read("../../assets/config/platform_config.json");
     api.setConfig(config_string);
 
     {
@@ -60,6 +47,11 @@ void capture() {
         std::filesystem::remove_all(directory_config);
         std::filesystem::create_directories(directory_config);
         api.setConfig(json_utils::Json{{"directory", directory_config.string()}}.dump());
+    }
+
+    {
+        const auto context_config = "../../assets/config/scene";
+        api.setConfig(json_utils::Json{{"context", context_config}}.dump());
     }
 
     {

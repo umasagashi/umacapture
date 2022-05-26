@@ -1,7 +1,8 @@
-#ifndef NATIVE_COMMON_H
-#define NATIVE_COMMON_H
+#pragma once
 
 #include <chrono>
+#include <fstream>
+#include <iostream>
 
 #include "types/shape.h"
 
@@ -20,4 +21,20 @@ constexpr Size<int> base_size = {540, 960};
 
 }
 
-#endif  //NATIVE_COMMON_H
+namespace io {
+
+inline std::string read(const std::string &path) {
+    std::ifstream file(path);
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
+
+inline void write(const std::string &path, const std::string &text) {
+    std::ofstream file;
+    file.open(path, std::ios::out);
+    file << text;
+    file.close();
+}
+
+}  // namespace io
