@@ -117,10 +117,8 @@ public:
     }
 
 private:
-    const double tab_bar_y = 0.4198;
-
     [[nodiscard]] ConditionBase titleBar() const {
-        const double y = 0.0490;
+        const double y = 0.0870;
         return allOf({
             lineCheck(lineToX({0.0167, y, IS}, 0.0259), colorRange({100, 186, 0}, 30), full_length),
             lineCheck(lineToX({0.9830, y, IS}, 0.9738), colorRange({126, 204, 10}, 30), full_length),
@@ -129,7 +127,7 @@ private:
 
     [[nodiscard]] ConditionBase closeButton() const {
         return stableLineCheck(
-            50, lineToY({-0.6501, -0.1208, IE}, -0.1042), colorRange({250, 251, 250}, 30), {0.75, 1.0});
+            50, lineToY({-0.6501, -0.2148, IE}, -0.1870), colorRange({250, 251, 250}, 30), {0.75, 1.0});
     }
 
     [[nodiscard]] ConditionBase tabBarButtons() const {
@@ -167,6 +165,8 @@ private:
             lineCheck(lineToX(right, right_end), color_range, full_length),
         });
     }
+
+    const double tab_bar_y = 0.7463;
 
     [[nodiscard]] ConditionBase leftTabButton(const Range<Color> &color_range) const {
         return tabButton({0.0555, tab_bar_y, IS}, 0.0833, {0.3314, tab_bar_y, IS}, 0.3036, color_range);
