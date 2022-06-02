@@ -14,6 +14,10 @@
 #ifndef EVENTUTIL_H_802615012766
 #define EVENTUTIL_H_802615012766
 
+#include "../eventpolicies.h"
+
+#include <memory>
+
 namespace eventpp {
 
 template <typename DispatcherType>

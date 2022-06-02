@@ -1,4 +1,4 @@
-// Don't include this header, include eventpolicies.offset_h instead
+// Don't include this header, include eventpolicies.h instead
 
 namespace internal_ {
 

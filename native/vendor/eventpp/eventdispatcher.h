@@ -16,6 +16,12 @@
 
 #include "callbacklist.h"
 
+#include <string>
+#include <functional>
+#include <type_traits>
+#include <mutex>
+#include <memory>
+
 namespace eventpp {
 
 namespace internal_ {
