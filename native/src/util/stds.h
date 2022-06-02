@@ -2,8 +2,6 @@
 
 #include <algorithm>
 
-#include <stdrv/transform.h>
-
 namespace stds {
 
 template<typename T>
@@ -16,9 +14,11 @@ inline void for_each(const Container &container, Function func) {
     std::for_each(container.begin(), container.end(), func);
 }
 
-template<typename F, typename V>
-inline typename stdrv::unary_transform_impl<std::vector, F, V>::result_type transformed(const V &v, F &&unary) {
-    return stdrv::unary_transform_impl<std::vector, F, V>::apply(v, std::forward<F>(unary));
+template<typename OutContainer, typename InContainer, typename Function>
+inline OutContainer transformed(const InContainer &container, Function func) {
+    OutContainer out;
+    std::transform(container.begin(), container.end(), out.begin(), func);
+    return out;
 }
 
 template<typename Container, typename Predicate>

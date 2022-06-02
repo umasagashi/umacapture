@@ -128,7 +128,7 @@ public:
     [[nodiscard]] bool met() const override { return met_; }
 
     [[nodiscard]] std::vector<bool> metDetail() const {
-        return stds::transformed(children, [](const auto &item) { return item->met(); });
+        return stds::transformed<std::vector<bool>>(children, [](const auto &item) { return item->met(); });
     }
 
     [[nodiscard]] const Condition<InputType> *getByName(const std::string &target) const override {
