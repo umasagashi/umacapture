@@ -16,6 +16,7 @@ set(SOURCE_FILES
         src/cli.cpp
         src/native_api.cpp
         src/condition/serializer.cpp
+        src/util/uuid_util.cpp
         )
 
 add_executable(${PROJECT_NAME}
