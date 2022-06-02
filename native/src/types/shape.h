@@ -58,6 +58,8 @@ public:
 
     Point() noexcept = default;
 
+    [[nodiscard]] inline bool empty() const { return x_ == 0 && y_ == 0; }
+
     [[nodiscard]] inline T x() const { return x_; }
     [[nodiscard]] inline T y() const { return y_; }
     [[nodiscard]] inline Anchor anchor() const { return anchor_; }
@@ -78,6 +80,14 @@ public:
         return {
             static_cast<T>(static_cast<double>(x_) * other),
             static_cast<T>(static_cast<double>(y_) * other),
+            anchor_,
+        };
+    }
+
+    inline Point<T> operator/(double other) const {
+        return {
+            static_cast<T>(static_cast<double>(x_) / other),
+            static_cast<T>(static_cast<double>(y_) / other),
             anchor_,
         };
     }
@@ -110,10 +120,16 @@ public:
     [[nodiscard]] inline T height() const { return height_; }
 
     [[nodiscard]] inline cv::Size_<T> toCVSize() const { return {width_, height_}; }
+    [[nodiscard]] inline Point<T> toPoint() const { return {width_, height_}; }
 
     inline Size<T> &operator=(const Size<T> &other) = default;
+
     inline bool operator!=(const Size<T> &other) const {
         return (width_ != other.width_) || (height_ != other.height_);
+    }
+
+    inline bool operator==(const Size<T> &other) const {
+        return (width_ == other.width_) || (height_ == other.height_);
     }
 
     inline Size<T> operator-(const Size<T> &other) const { return {width_ - other.width_, height_ - other.height_}; }
@@ -126,6 +142,34 @@ private:
     T height_;
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Size)
+
+template<typename T>
+class Line1D {
+public:
+    Line1D(const T &p1, const T &p2) noexcept
+        : p1_(p1)
+        , p2_(p2) {}
+
+    [[nodiscard]] inline T p1() const { return p1_; }
+    [[nodiscard]] inline T p2() const { return p2_; }
+
+    inline Line1D<T> &operator=(const Line1D<T> &other) = default;
+
+    [[nodiscard]] inline T pointAt(double ratio) const { return (p2_ - p1_) * ratio + p1_; }
+
+    [[nodiscard]] inline double length() const { return std::abs(p2_ - p1_); }
+
+    [[nodiscard]] inline Line1D<T> reversed() const { return {p2_, p1_}; }
+
+    inline Line1D<T> operator-(const Line1D<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
+
+    EXTENDED_JSON_TYPE_NDC(Line1D<T>, p1_, p2_);
+
+private:
+    T p1_;
+    T p2_;
+};
+EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Line1D)
 
 template<typename T>
 class Line {
@@ -145,6 +189,14 @@ public:
 
     [[nodiscard]] inline Line<T> reversed() const { return {p2_, p1_}; }
 
+    [[nodiscard]] inline Line1D<double> horizontal() const { return {p1_.x(), p2_.x()}; }
+    [[nodiscard]] inline Line1D<double> vertical() const { return {p1_.y(), p2_.y()}; }
+
+    inline Line<T> operator-(const Line<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
+
+    inline Line<T> operator*(double other) const { return {p1_ * other, p2_ * other}; }
+    inline Line<T> operator/(double other) const { return {p1_ / other, p2_ / other}; }
+
     EXTENDED_JSON_TYPE_NDC(Line<T>, p1_, p2_);
 
 private:
@@ -160,10 +212,14 @@ public:
         : top_left_(top_left)
         , bottom_right_(bottom_right) {}
 
+    Rect() noexcept = default;
+
+    [[nodiscard]] inline bool empty() const { return top_left_.empty() && bottom_right_.empty(); }
+
     inline Rect &operator=(const Rect &other) = default;
 
-    [[nodiscard]] inline T top_left() const { return top_left_; }
-    [[nodiscard]] inline T bottom_right() const { return bottom_right_; }
+    [[nodiscard]] inline const Point<T> &top_left() const { return top_left_; }
+    [[nodiscard]] inline const Point<T> &bottom_right() const { return bottom_right_; }
 
     [[nodiscard]] inline T left() const { return top_left_.x(); }
     [[nodiscard]] inline T top() const { return top_left_.y(); }
