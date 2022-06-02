@@ -16,6 +16,8 @@
 
 #include "../eventpolicies.h"
 
+#include <memory>
+
 namespace eventpp {
 
 template <typename DispatcherType, typename Enabled = void>

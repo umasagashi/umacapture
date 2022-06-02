@@ -15,6 +15,7 @@
 #define ANYID_H_320827729782
 
 #include <functional>
+#include <type_traits>
 
 namespace eventpp {
 

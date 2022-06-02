@@ -17,8 +17,12 @@
 #include "eventdispatcher.h"
 #include "internal/eventqueue_i.h"
 
+#include <list>
 #include <tuple>
 #include <chrono>
+#include <mutex>
+#include <array>
+#include <cassert>
 
 namespace eventpp {
 

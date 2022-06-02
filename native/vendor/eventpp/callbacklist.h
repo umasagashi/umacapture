@@ -15,9 +15,14 @@
 #define CALLBACKLIST_H_588722158669
 
 #include "eventpolicies.h"
+#include "internal/typeutil_i.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <functional>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 namespace eventpp {
 
@@ -379,7 +384,7 @@ private:
 			tail = node->previous;
 		}
 
-		// don't modify node->previous_condition or node->next
+		// don't modify node->previous or node->next
 		// because node may be still used in a loop.
 	}
 
