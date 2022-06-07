@@ -29,9 +29,35 @@ inline bool closeEnough(const std::vector<double> &a, const std::vector<double> 
     return true;
 }
 
+template<typename T>
+inline bool updateUntilReady(T &subject, const Frame &frame) {
+    if (subject->ready()) {
+        return false;
+    }
+    subject->update(frame);
+    return subject->ready();
+}
+
+template<typename T>
+inline bool readyAfterUpdate(T &subject, const Frame &frame) {
+    subject.update(frame);
+    return subject.ready();
+}
+
 }  // namespace
 
 namespace chara_detail {
+
+namespace path_config {
+inline constexpr auto skill_dir = "skill";
+inline constexpr auto factor_dir = "factor";
+inline constexpr auto campaign_dir = "campaign";
+inline constexpr auto base_name = "base.png";
+inline constexpr auto tab_button_name = "tab_button.png";
+inline constexpr auto scroll_area_prefix = "scroll_area_";
+inline constexpr auto scroll_area_suffix = ".png";
+inline constexpr auto scroll_area_digits = 5;
+}  // namespace path_config
 
 struct FrameDescriptor {
     Frame frame;
@@ -78,7 +104,7 @@ private:
         if (!upper_margin || upper_margin.value() == 1. || !lower_margin || lower_margin.value() == 1.) {
             return std::nullopt;  // Bar not found.
         }
-        const auto &scan_line = scroll_bar_scan_line.vertical();
+        const auto &scan_line = frame.anchor().absolute(scroll_bar_scan_line).vertical();
         return Line1D<double>{
             scan_line.pointAt(upper_margin.value()),
             scan_line.pointAt(1. - lower_margin.value()),
@@ -218,59 +244,69 @@ struct ScanParameter {
     EXTENDED_JSON_TYPE_NDC(ScanParameter, x, length, color_range);
 };
 
-class FrameFragmentBox {
+class PageScrapingBox {
 public:
-    FrameFragmentBox(const std::filesystem::path &image_dir, const std::vector<ScanParameter> &scan_parameters)
-        : image_dir(image_dir)
-        , scan_parameters(scan_parameters) {
+    PageScrapingBox(const std::vector<ScanParameter> &scan_parameters, const std::filesystem::path &image_dir)
+        : scan_parameters(scan_parameters)
+        , image_dir(image_dir) {
         current_scan = this->scan_parameters.begin();
+        NativeApi::instance().createDirectory(image_dir);
     }
 
-    explicit FrameFragmentBox(const std::filesystem::path &image_dir)
-        : image_dir(image_dir)
-        , scan_parameters() {
-        current_scan = this->scan_parameters.begin();
+    void addTabButton(const Frame &frame) {
+        assert_(!tab_button_ready);
+        frame.save(image_dir / path_config::tab_button_name);
+        tab_button_ready = true;
     }
 
-    void add(const Frame &frame, double offset_pixels) {
-        assert(!bottomReached());
+    void addScrollArea(const Frame &frame, int offset_pixels) {
+        assert_(current_scan != scan_parameters.end());
+        assert_(1.0 <= offset_pixels && offset_pixels <= frame.height());
 
-        if (scan_parameters.empty()) {
-            addSingleFrame(frame);
-        } else {
-            addFragment(frame, offset_pixels);
-        }
-    }
+        const auto &anchor = frame.anchor();
+        const Point<int> &top_left = {0, frame.height() - offset_pixels};
+        const Point<double> &scaled_top_left = anchor.shrink(top_left);
 
-    [[nodiscard]] inline bool bottomReached() const { return current_scan == scan_parameters.end(); }
-
-private:
-    void addSingleFrame(const Frame &frame) { save(frame); }
-
-    void addFragment(const Frame &frame, double offset_pixels) {
-        const Point<double> scaled_top_left = {0., frame.scale() * offset_pixels};
-        for (int y_pixels = static_cast<int>(offset_pixels); y_pixels < frame.height(); y_pixels++) {
-            const double scaled_y = frame.scale() * y_pixels;
+        for (int y_pixels = top_left.y(); y_pixels < frame.height(); y_pixels++) {
+            const double scaled_y = anchor.shrink({0, y_pixels}).y();
             if (!frame.isIn(current_scan->color_range, {current_scan->x, scaled_y})) {
                 current_length_pixels = 0;
             } else {
-                const auto length_pixels = static_cast<int>(current_scan->length * frame.scale());
+                const auto length_pixels = anchor.expand({0., current_scan->length}).y();
                 if (++current_length_pixels >= length_pixels) {
                     current_length_pixels = 0;
-                    current_scan++;
-                    if (bottomReached()) {
-                        save(frame.view({scaled_top_left, {1., scaled_y}}));
+                    if (++current_scan == scan_parameters.end()) {
+                        saveIncremental(frame.copy({scaled_top_left, {1., scaled_y}}));
                         return;
                     }
                 }
             }
         }
-        save(frame.view({scaled_top_left, {1., frame.height() * frame.scale()}}));
+        saveIncremental(frame.copy({scaled_top_left, anchor.shrink(frame.rect().bottomRight())}));
     }
 
-    void save(const Frame &frame) {
+    void addScrollArea(const Frame &frame) {
+        assert_(image_count == 0);
+        addScrollArea(frame, frame.height());
+    }
+
+    void setScrollArea(const Frame &frame) {
+        assert_(image_count == 0);
+        saveIncremental(frame);
+        current_scan = scan_parameters.end();
+    }
+
+    [[nodiscard]] inline bool scrollAreaReady() const {
+        return image_count > 0 && current_scan == scan_parameters.end();
+    }
+
+    [[nodiscard]] inline bool ready() const { return tab_button_ready && scrollAreaReady(); }
+
+private:
+    void saveIncremental(const Frame &frame) {
         std::ostringstream stream;
-        stream << "scroll_" << std::setw(4) << std::setfill('0') << image_count++ << ".png";
+        stream << path_config::scroll_area_prefix << std::setw(path_config::scroll_area_digits) << std::setfill('0')
+               << image_count++ << path_config::scroll_area_suffix;
         frame.save(image_dir / stream.str());
     }
 
@@ -280,44 +316,62 @@ private:
     std::vector<ScanParameter>::const_iterator current_scan;
     int current_length_pixels = 0;
     int image_count = 0;
+
+    bool tab_button_ready = false;
+};
+
+class SceneScrapingBox {
+public:
+    SceneScrapingBox(
+        const std::vector<ScanParameter> &skill_scans,
+        const std::vector<ScanParameter> &factor_scans,
+        const std::vector<ScanParameter> &campaign_scans,
+        const std::filesystem::path &image_dir)
+        : skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config::skill_dir))
+        , factor_box_(std::make_shared<PageScrapingBox>(factor_scans, image_dir / path_config::factor_dir))
+        , campaign_box_(std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config::campaign_dir))
+        , base_path(image_dir / path_config::base_name) {}
+
+    [[nodiscard]] std::shared_ptr<PageScrapingBox> skill_box() const { return skill_box_; }
+    [[nodiscard]] std::shared_ptr<PageScrapingBox> factor_box() const { return factor_box_; }
+    [[nodiscard]] std::shared_ptr<PageScrapingBox> campaign_box() const { return campaign_box_; }
+
+    void addBase(const Frame &frame) {
+        assert_(!base_ready);
+        frame.save(base_path);
+        base_ready = true;
+    }
+
+    [[nodiscard]] inline bool ready() const {
+        return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
+    }
+
+private:
+    const std::filesystem::path base_path;
+
+    std::shared_ptr<PageScrapingBox> skill_box_;
+    std::shared_ptr<PageScrapingBox> factor_box_;
+    std::shared_ptr<PageScrapingBox> campaign_box_;
+    bool base_ready = false;
 };
 
 class StationaryFrameCatcher {
 public:
-    StationaryFrameCatcher(
-        uint64 time_threshold, uint64 color_threshold, const Rect<double> &rect, const connection::Sender<> &on_ready)
-        : time_threshold(time_threshold)
-        , color_threshold(color_threshold)
-        , target_rect(rect)
-        , on_ready(on_ready) {}
-
-    StationaryFrameCatcher(uint64 time_threshold, uint64 color_threshold, const Rect<double> &rect)
-        : time_threshold(time_threshold)
-        , color_threshold(color_threshold)
-        , target_rect(rect)
-        , on_ready(nullptr) {}
-
-    StationaryFrameCatcher(uint64 time_threshold, uint64 color_threshold)
-        : time_threshold(time_threshold)
-        , color_threshold(color_threshold)
-        , target_rect({})
-        , on_ready(nullptr) {}
+    StationaryFrameCatcher(uint64 stationary_time, int minimum_color, uint64 stationary_color, const Rect<double> &rect)
+        : stationary_time(stationary_time)
+        , minimum_color(minimum_color)
+        , stationary_color(stationary_color)
+        , target_rect(rect) {}
 
     void update(const Frame &frame) {
-        if (isStationary()) {
-            return;
-        }
-
         if (previous_frame.empty()) {
             previous_frame = frame;
             return;
         }
 
-        if (previous_frame.pixelDifference(frame, target_rect) < color_threshold) {
+        if (previous_frame.pixelDifference(frame, target_rect, minimum_color) < stationary_color) {
             if (!first_timestamp) {
                 first_timestamp = previous_frame.timestamp();
-            } else if (on_ready != nullptr && isStationary()) {
-                on_ready->send();
             }
         } else {
             first_timestamp = std::nullopt;
@@ -325,19 +379,21 @@ public:
         previous_frame = frame;
     }
 
-    [[nodiscard]] inline bool isStationary() const {
-        return first_timestamp.has_value() && (previous_frame.timestamp() - first_timestamp.value()) > time_threshold;
+    [[nodiscard]] inline bool ready() const {
+        return first_timestamp.has_value() && (previous_frame.timestamp() - first_timestamp.value()) > stationary_time;
     }
 
     [[nodiscard]] inline Frame fullSizeFrame() const { return previous_frame; }
-    [[nodiscard]] inline Frame croppedFrame() const { return previous_frame.view(target_rect); }
+
+    [[nodiscard]] inline Frame croppedFrame() const {
+        return target_rect.empty() ? previous_frame : previous_frame.copy(target_rect);
+    }
 
 private:
     const Rect<double> target_rect;
-    const uint64 time_threshold;
-    const uint64 color_threshold;
-
-    connection::Sender<> on_ready;
+    const uint64 stationary_time;
+    const int minimum_color;
+    const uint64 stationary_color;
 
     Frame previous_frame;
     std::optional<uint64> first_timestamp;
@@ -347,66 +403,71 @@ class ScrapingInterpreter {
 public:
     virtual ~ScrapingInterpreter() = default;
     virtual void update(const Frame &frame) = 0;
+    [[nodiscard]] virtual bool ready() const = 0;
+};
+
+enum ReadyState {
+    Null,
+    Updatable,
+    Ready,
 };
 
 class NonScrollableScrapingInterpreter : public ScrapingInterpreter {
 public:
     NonScrollableScrapingInterpreter(
-        const std::shared_ptr<FrameFragmentBox> &fragment_box,
-        const StationaryFrameCatcher &stationary_catcher,
-        const connection::Sender<> &on_stitch_ready)
+        const std::shared_ptr<PageScrapingBox> &scraping_box, const StationaryFrameCatcher &stationary_catcher)
         : stationary_catcher(stationary_catcher)
-        , fragment_box(fragment_box)
-        , on_stitch_ready(on_stitch_ready) {}
+        , scraping_box(scraping_box) {}
 
     void update(const Frame &frame) override {
-        if (on_stitch_ready == nullptr) {
-            return;
-        }
-
-        stationary_catcher.update(frame);
-        if (stationary_catcher.isStationary()) {
-            fragment_box->add(stationary_catcher.croppedFrame(), 0.);
-            on_stitch_ready->send();
-            on_stitch_ready = nullptr;
-            return;
+        assert_(state == Updatable);
+        if (readyAfterUpdate(stationary_catcher, frame)) {
+            scraping_box->setScrollArea(stationary_catcher.croppedFrame());
+            state = Ready;
         }
     }
 
-private:
-    connection::Sender<> on_stitch_ready;
+    [[nodiscard]] inline bool ready() const override { return state == Ready; }
 
-    std::shared_ptr<FrameFragmentBox> fragment_box;
+private:
+    std::shared_ptr<PageScrapingBox> scraping_box;
     StationaryFrameCatcher stationary_catcher;
+    ReadyState state = Updatable;
 };
 
-class BeforeScrollScrapingInterpreter : public ScrapingInterpreter {
+class ScrollableScrapingInterpreter : public ScrapingInterpreter {
 public:
-    BeforeScrollScrapingInterpreter(
-        const std::shared_ptr<FrameFragmentBox> &fragment_box,
+    ScrollableScrapingInterpreter(
+        const std::shared_ptr<PageScrapingBox> &scraping_box,
         const ScrollAreaOffsetEstimator &offset_estimator,
         const StationaryFrameCatcher &stationary_catcher,
-        double scroll_threshold,
-        const connection::Sender<> &on_scroll_ready,
-        const connection::Sender<Frame> &on_state_changed)
+        double initial_scroll_threshold,
+        double minimum_scroll_threshold,
+        const connection::Sender<> &on_scroll_ready)
         : offset_estimator(offset_estimator)
         , stationary_catcher(stationary_catcher)
-        , fragment_box(fragment_box)
-        , scroll_threshold(scroll_threshold)
-        , on_scroll_ready(on_scroll_ready)
-        , on_state_changed(on_state_changed) {}
+        , scraping_box(scraping_box)
+        , initial_scroll(initial_scroll_threshold)
+        , minimum_scroll(minimum_scroll_threshold)
+        , on_scroll_ready(on_scroll_ready) {}
 
     void update(const Frame &frame) override {
-        if (on_state_changed == nullptr) {
-            return;
-        }
+        assert_(state == Updatable);
 
-        stationary_catcher.update(frame);
-        if (stationary_catcher.isStationary()) {
-            fragment_box->add(stationary_catcher.croppedFrame(), 0.);
+        if (is_scrolling) {
+            updateScrolling(frame);
+        } else {
+            updateBefore(frame);
+        }
+    }
+
+    [[nodiscard]] inline bool ready() const override { return state == Ready; }
+
+private:
+    void updateBefore(const Frame &frame) {
+        if (readyAfterUpdate(stationary_catcher, frame)) {
+            startScrolling(stationary_catcher.fullSizeFrame());
             on_scroll_ready->send();
-            on_state_changed->send(stationary_catcher.croppedFrame());
-            on_state_changed = nullptr;
             return;
         }
 
@@ -416,95 +477,74 @@ public:
         }
 
         FrameDescriptor current_descriptor = {frame};
-        const auto &offset = offset_estimator.estimate(initial_descriptor, current_descriptor);
-        if (offset.has_value() && offset.value() > scroll_threshold) {
+        if (offset_estimator.estimate(initial_descriptor, current_descriptor).value_or(-1.0) > initial_scroll) {
+            startScrolling(initial_descriptor.frame);
             // didn't get a stationary image, so won't send a ready.
-            fragment_box->add(initial_descriptor.frame, 0.);
-            on_state_changed->send(initial_descriptor.frame);
-            on_state_changed = nullptr;
             return;
         }
     }
 
-private:
-    const ScrollAreaOffsetEstimator offset_estimator;
-    const double scroll_threshold;
+    void startScrolling(const Frame &valid_frame) {
+        scraping_box->addScrollArea(valid_frame);
+        previous_descriptor = {valid_frame, initial_descriptor.scroll_bar_length};
+        is_scrolling = true;
+    }
 
-    connection::Sender<> on_scroll_ready;
-    connection::Sender<Frame> on_state_changed;
-
-    std::shared_ptr<FrameFragmentBox> fragment_box;
-    StationaryFrameCatcher stationary_catcher;
-    FrameDescriptor initial_descriptor;
-};
-
-class ScrollingScrapingInterpreter : public ScrapingInterpreter {
-public:
-    ScrollingScrapingInterpreter(
-        const std::shared_ptr<FrameFragmentBox> &fragment_box,
-        const ScrollAreaOffsetEstimator &offset_estimator,
-        double scroll_threshold,
-        const connection::Sender<> &on_stitch_ready)
-        : offset_estimator(offset_estimator)
-        , scroll_threshold(scroll_threshold)
-        , on_stitch_ready(on_stitch_ready)
-        , fragment_box(fragment_box) {}
-
-    void update(const Frame &frame) override {
-        if (on_stitch_ready == nullptr) {
-            return;
-        }
-
-        if (previous_descriptor.empty()) {
-            previous_descriptor = {frame};
-            return;
-        }
-
+    void updateScrolling(const Frame &frame) {
         FrameDescriptor current_fragment = {frame};
         const auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
-        if (!offset || offset.value() < scroll_threshold) {
+        if (offset.value_or(-1.0) <= minimum_scroll) {
             return;
         }
 
-        fragment_box->add(frame, offset.value());
-        if (fragment_box->bottomReached()) {
-            on_stitch_ready->send();
-            on_stitch_ready = nullptr;
+        scraping_box->addScrollArea(frame, std::lround(offset.value()));
+        if (scraping_box->scrollAreaReady()) {
+            state = Ready;
             return;
         }
 
         previous_descriptor = current_fragment;
     }
 
-private:
+    const connection::Sender<> on_scroll_ready;
+
     const ScrollAreaOffsetEstimator offset_estimator;
-    const double scroll_threshold;
+    const double initial_scroll;
+    const double minimum_scroll;
 
-    connection::Sender<> on_stitch_ready;
-
+    std::shared_ptr<PageScrapingBox> scraping_box;
+    StationaryFrameCatcher stationary_catcher;
+    FrameDescriptor initial_descriptor;
     FrameDescriptor previous_descriptor;
-    std::shared_ptr<FrameFragmentBox> fragment_box;
+    ReadyState state = Updatable;
+    bool is_scrolling = false;
 };
 
 struct SceneScraperConfig {
     Rect<double> base_image_rect;
     Rect<double> tab_button_rect;
     Rect<double> scroll_area_rect;
+    Rect<double> scroll_area_stationary_rect;
     Range<Color> scroll_bar_bg_color;
     Line<double> scroll_bar_scan_line;
-    double scroll_minimum_threshold;
-    int stationary_time_threshold;
-    int stationary_color_threshold;
+    double initial_scroll_threshold;
+    double minimum_scroll_threshold;
+    uint64 stationary_time_threshold;
+    int minimum_color_threshold;
+    uint64 stationary_color_threshold;
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
         base_image_rect,
         tab_button_rect,
         scroll_area_rect,
+        scroll_area_stationary_rect,
         scroll_bar_bg_color,
         scroll_bar_scan_line,
-        scroll_minimum_threshold,
+        initial_scroll_threshold,
+        minimum_scroll_threshold,
         stationary_time_threshold,
+        minimum_color_threshold,
         stationary_color_threshold);
 };
 
@@ -512,111 +552,81 @@ class SceneScraper {
 public:
     SceneScraper(
         const SceneScraperConfig &config,
-        const std::vector<ScanParameter> &scan_parameters,
-        const std::filesystem::path &image_dir,
-        const connection::Sender<> &stitch_ready_notifier,
+        const std::shared_ptr<PageScrapingBox> &scraping_box,
         const connection::Sender<> &scroll_ready_notifier)
         : config(config)
-        , scan_parameters(scan_parameters)
-        , image_dir(image_dir)
-        , on_stitch_ready(stitch_ready_notifier)
+        , scraping_box(scraping_box)
         , on_scroll_ready(scroll_ready_notifier) {}
 
     void update(const Frame &frame) {
-        if (ready()) {
-            return;
+        if (state == Null) {
+            build(frame);
+        }
+        assert_(state == Updatable);
+
+        if (updateUntilReady(tab_button_catcher, frame)) {
+            scraping_box->addTabButton(tab_button_catcher->croppedFrame());
+            readyForStitch();
         }
 
-        if (!tab_button_stationary_catcher->isStationary()) {
-            tab_button_stationary_catcher->update(frame);
-        }
-
-        if (!fragment_box->bottomReached()) {
-            if (scroll_area_scraping_interpreter == nullptr) {
-                build(frame);
-            }
-            scroll_area_scraping_interpreter->update(frame.view(config.scroll_area_rect));
+        if (updateUntilReady(scroll_area_scraper, frame.copy(config.scroll_area_rect))) {
+            readyForStitch();
         }
     }
 
-    [[nodiscard]] inline bool ready() const { return on_stitch_ready == nullptr; }
+    [[nodiscard]] inline bool ready() const { return state == Ready; }
 
 private:
     void build(const Frame &frame) {
-        const auto initial_frame = frame.view(config.scroll_area_rect).clone();
-        const auto scaled_scroll_minimum_threshold = config.scroll_minimum_threshold * config.scroll_area_rect.height();
+        assert_(state == Null);
+
+        const auto initial_frame = frame.copy(config.scroll_area_rect);
 
         const auto scroll_bar_offset_estimator =
             ScrollBarOffsetEstimator(config.scroll_bar_bg_color, config.scroll_bar_scan_line);
 
-        // This catcher receives the cropped frame, do not set scroll_area_rect.
-        const auto stationary_catcher =
-            StationaryFrameCatcher(config.stationary_time_threshold, config.stationary_color_threshold);
-
-        const auto internal_ready_notifier = connection::make_connection<connection::DirectConnection<>>();
-        internal_ready_notifier->listen([this]() { readyForStitch(); });
+        const auto stationary_catcher = StationaryFrameCatcher(
+            config.stationary_time_threshold,
+            config.minimum_color_threshold,
+            config.stationary_color_threshold,
+            config.scroll_area_stationary_rect);
 
         if (scroll_bar_offset_estimator.hasScrollbar(initial_frame)) {
-            fragment_box = std::make_shared<FrameFragmentBox>(image_dir, scan_parameters);
-            const auto state_change_notifier = connection::make_connection<connection::DirectConnection<Frame>>();
-            const auto scroll_area_offset_estimator =
-                ScrollAreaOffsetEstimator(scroll_bar_offset_estimator, ImageOffsetEstimator());
-
-            scroll_area_scraping_interpreter = std::make_unique<BeforeScrollScrapingInterpreter>(
-                fragment_box,
-                scroll_area_offset_estimator,
+            scroll_area_scraper = std::make_unique<ScrollableScrapingInterpreter>(
+                scraping_box,
+                ScrollAreaOffsetEstimator(scroll_bar_offset_estimator, ImageOffsetEstimator()),
                 stationary_catcher,
-                scaled_scroll_minimum_threshold,
-                on_scroll_ready,
-                state_change_notifier);
-
-            state_change_notifier->listen([&](const Frame &pre_state_frame) {
-                scroll_area_scraping_interpreter = std::make_unique<ScrollingScrapingInterpreter>(
-                    fragment_box,
-                    scroll_area_offset_estimator,
-                    scaled_scroll_minimum_threshold,
-                    internal_ready_notifier);
-                scroll_area_scraping_interpreter->update(pre_state_frame);
-            });
+                config.initial_scroll_threshold * initial_frame.height(),
+                config.minimum_scroll_threshold * initial_frame.height(),
+                on_scroll_ready);
         } else {
-            fragment_box = std::make_shared<FrameFragmentBox>(image_dir);
-            scroll_area_scraping_interpreter = std::make_unique<NonScrollableScrapingInterpreter>(
-                fragment_box, stationary_catcher, internal_ready_notifier);
+            scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(scraping_box, stationary_catcher);
         }
 
-        const auto tab_button_ready_notifier = connection::make_connection<connection::DirectConnection<>>();
-        tab_button_ready_notifier->listen([this]() {
-            std::ostringstream stream;
-            stream << image_dir << "/tab_button.png";
-            tab_button_stationary_catcher->croppedFrame().save(stream.str());
-            readyForStitch();
-        });
+        tab_button_catcher = std::make_unique<StationaryFrameCatcher>(
+            config.stationary_time_threshold,
+            config.minimum_color_threshold,
+            config.stationary_color_threshold,
+            config.tab_button_rect);
 
-        tab_button_stationary_catcher = std::make_unique<StationaryFrameCatcher>(
-            config.stationary_time_threshold, config.stationary_color_threshold, config.tab_button_rect);
+        state = Updatable;
     }
 
     void readyForStitch() {
-        if (on_stitch_ready == nullptr) {
-            return;
-        }
-
-        if (fragment_box->bottomReached() && tab_button_stationary_catcher->isStationary()) {
-            on_stitch_ready->send();
-            on_stitch_ready = nullptr;
+        assert_(state == Updatable);
+        if (scraping_box->ready()) {
+            state = Ready;
         }
     }
 
+    const connection::Sender<> on_scroll_ready;
+
     const SceneScraperConfig config;
-    const std::vector<ScanParameter> scan_parameters;
-    const std::filesystem::path image_dir;
 
-    connection::Sender<> on_stitch_ready;
-    connection::Sender<> on_scroll_ready;
-
-    std::unique_ptr<StationaryFrameCatcher> tab_button_stationary_catcher;
-    std::unique_ptr<ScrapingInterpreter> scroll_area_scraping_interpreter;
-    std::shared_ptr<FrameFragmentBox> fragment_box;
+    std::unique_ptr<StationaryFrameCatcher> tab_button_catcher;
+    std::unique_ptr<ScrapingInterpreter> scroll_area_scraper;
+    std::shared_ptr<PageScrapingBox> scraping_box;
+    ReadyState state = Null;
 };
 
 struct CharaDetailSceneScraperConfig {
@@ -624,129 +634,197 @@ struct CharaDetailSceneScraperConfig {
     std::vector<ScanParameter> skill_scans;
     std::vector<ScanParameter> factor_scans;
     std::vector<ScanParameter> campaign_scans;
+    Line<double> snackbar_scan_line;
+    Range<Color> snackbar_color_range;
+    uint64 snackbar_time_threshold;
 
-    const std::string skill_tab_name = "skill";
-    const std::string factor_tab_name = "factor";
-    const std::string campaign_tab_name = "campaign";
+    EXTENDED_JSON_TYPE_NDC(
+        CharaDetailSceneScraperConfig,
+        common,
+        skill_scans,
+        factor_scans,
+        campaign_scans,
+        snackbar_scan_line,
+        snackbar_color_range,
+        snackbar_time_threshold);
+};
 
-    EXTENDED_JSON_TYPE_NDC(CharaDetailSceneScraperConfig, common, skill_scans, factor_scans, campaign_scans);
+class BaseFrameCatcher {
+public:
+    BaseFrameCatcher(
+        const StationaryFrameCatcher &base_frame_catcher,
+        const Line<double> &snackbar_scan_line,
+        const Range<Color> &snackbar_bg_color_range,
+        const uint64 snackbar_time_threshold)
+        : base_frame_catcher(base_frame_catcher)
+        , snackbar_scan_line(snackbar_scan_line)
+        , snackbar_bg_color_range(snackbar_bg_color_range)
+        , snackbar_time_threshold(snackbar_time_threshold) {}
+
+    void update(const Frame &frame) {
+        if (ready()) {  // Keep the valid image.
+            return;
+        }
+
+        base_frame_catcher.update(frame);
+
+        if (isSnackbarVisible(frame)) {
+            last_snackbar_visible = frame.timestamp();
+        } else if (frame.timestamp() - last_snackbar_visible.value_or(0) > snackbar_time_threshold) {
+            last_snackbar_visible = std::nullopt;
+        }
+    }
+
+    [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && !last_snackbar_visible; }
+
+    [[nodiscard]] inline Frame frame() const { return base_frame_catcher.fullSizeFrame(); }
+
+private:
+    [[nodiscard]] bool isSnackbarVisible(const Frame &frame) const {
+        return frame.isIn(snackbar_bg_color_range, snackbar_scan_line);
+    }
+
+    const Line<double> snackbar_scan_line;
+    const Range<Color> snackbar_bg_color_range;
+    const uint64 snackbar_time_threshold;
+
+    StationaryFrameCatcher base_frame_catcher;
+    std::optional<uint64> last_snackbar_visible;
 };
 
 class CharaDetailSceneScraper {
 public:
     CharaDetailSceneScraper(
-        const connection::Listener<Frame, SceneInfo> &on_updated,
         const connection::Listener<> &on_opened,
+        const connection::Listener<Frame, SceneInfo> &on_updated,
         const connection::Listener<> &on_closed,
-        const connection::Sender<> &on_closed_before_ready,
+        const connection::Sender<> &on_closed_before_completed,
         const connection::Sender<> &on_scroll_ready,
-        const connection::Sender<> &on_stitch_ready,
+        const connection::Sender<> &on_page_ready,
+        const connection::Sender<std::string> &on_completed,
         const CharaDetailSceneScraperConfig &config,
-        const std::filesystem::path &fragment_dir)
+        const std::filesystem::path &scraping_dir)
         : on_updated(on_updated)
         , on_opened(on_opened)
         , on_closed(on_closed)
-        , on_closed_before_ready(on_closed_before_ready)
+        , on_closed_before_completed(on_closed_before_completed)
         , on_scroll_ready(on_scroll_ready)
-        , on_stitch_ready(on_stitch_ready)
+        , on_page_ready(on_page_ready)
+        , on_completed(on_completed)
         , config(config)
-        , fragment_root_dir(fragment_dir) {
-        this->on_opened->listen([this]() { this->build(); });
-        this->on_closed->listen([this]() {
-            if (!ready()) {
-                this->on_closed_before_ready->send();
-            }
-            this->release();
+        , scraping_root_dir(scraping_dir) {
+        this->on_opened->listen([this]() {
+            std::cout << "on_opened" << std::endl;
+            this->build();
         });
         this->on_updated->listen(
             [this](const Frame &frame, const SceneInfo &scene_info) { this->update(frame, scene_info); });
+        this->on_closed->listen([this]() {
+            std::cout << "on_closed" << std::endl;
+            if (!ready()) {
+                this->on_closed_before_completed->send();
+            }
+            this->release();
+        });
     }
 
     void build() {
+        assert_(state == Null);
+
         current_uuid = uuid::uuid4();
-        const auto skill_fragment_dir = fragment_root_dir / current_uuid / config.skill_tab_name;
-        const auto factor_fragment_dir = fragment_root_dir / current_uuid / config.factor_tab_name;
-        const auto campaign_fragment_dir = fragment_root_dir / current_uuid / config.campaign_tab_name;
 
-        NativeApi::instance().createDirectory(skill_fragment_dir);
-        NativeApi::instance().createDirectory(factor_fragment_dir);
-        NativeApi::instance().createDirectory(campaign_fragment_dir);
+        scraping_box = std::make_shared<SceneScrapingBox>(
+            config.skill_scans, config.factor_scans, config.campaign_scans, scraping_root_dir / current_uuid);
 
-        auto internal_ready_notifier = connection::make_connection<connection::DirectConnection<>>();
-        internal_ready_notifier->listen([this]() { readyForStitch(); });
+        skill_scraper = std::make_unique<SceneScraper>(config.common, scraping_box->skill_box(), on_scroll_ready);
 
-        skill_tab_aligner = std::make_unique<SceneScraper>(
-            config.common, config.skill_scans, skill_fragment_dir, internal_ready_notifier, on_scroll_ready);
+        factor_scraper = std::make_unique<SceneScraper>(config.common, scraping_box->factor_box(), on_scroll_ready);
 
-        factor_tab_aligner = std::make_unique<SceneScraper>(
-            config.common, config.factor_scans, factor_fragment_dir, internal_ready_notifier, on_scroll_ready);
+        campaign_scraper = std::make_unique<SceneScraper>(config.common, scraping_box->campaign_box(), on_scroll_ready);
 
-        campaign_tab_aligner = std::make_unique<SceneScraper>(
-            config.common, config.campaign_scans, campaign_fragment_dir, internal_ready_notifier, on_scroll_ready);
+        base_frame_catcher = std::make_unique<BaseFrameCatcher>(
+            StationaryFrameCatcher{
+                config.common.stationary_time_threshold,
+                config.common.minimum_color_threshold,
+                config.common.stationary_color_threshold,
+                config.common.base_image_rect,
+            },
+            config.snackbar_scan_line,
+            config.snackbar_color_range,
+            config.snackbar_time_threshold);
 
-        base_frame_catcher = std::make_unique<StationaryFrameCatcher>(
-            config.common.stationary_time_threshold,
-            config.common.stationary_color_threshold,
-            config.common.base_image_rect,
-            internal_ready_notifier);
+        state = Updatable;
     }
 
     void update(const Frame &frame, const SceneInfo &scene_info) {
-        auto tab_aligner = tabStitcher(scene_info.tab_page);
-        if (!tab_aligner->ready()) {
-            tab_aligner->update(frame);
+        //        std::cout << " - " << frame.timestamp() << std::endl;
+        if (ready()) {  // After ready, do nothing until scene is closed.
+            return;
         }
 
-        if (!base_frame_catcher->isStationary()) {
-            base_frame_catcher->update(frame);
+        const auto tab_scraper = tabScraper(scene_info.tab_page);
+        if (updateUntilReady(tab_scraper, frame)) {
+            on_page_ready->send();
+            checkForCompleted();
         }
+
+        if (updateUntilReady(base_frame_catcher, frame)) {
+            scraping_box->addBase(base_frame_catcher->frame());
+            checkForCompleted();
+        }
+
+        //        std::cout << __FUNCTION__ << ": " << (chrono::timestamp() - frame.timestamp()) << std::endl;
     }
 
     void release() {
-        skill_tab_aligner = nullptr;
-        factor_tab_aligner = nullptr;
-        campaign_tab_aligner = nullptr;
+        skill_scraper = nullptr;
+        factor_scraper = nullptr;
+        campaign_scraper = nullptr;
         base_frame_catcher = nullptr;
+        scraping_box = nullptr;
+        state = Null;
     }
 
 private:
-    [[nodiscard]] SceneScraper *tabStitcher(TabPage tab_page) const {
+    [[nodiscard]] SceneScraper *tabScraper(TabPage tab_page) const {
+        assert_(state == Updatable);
         switch (tab_page) {
-            case TabPage::SkillPage: return skill_tab_aligner.get();
-            case TabPage::FactorPage: return factor_tab_aligner.get();
-            case TabPage::CampaignPage: return campaign_tab_aligner.get();
+            case TabPage::SkillPage: return skill_scraper.get();
+            case TabPage::FactorPage: return factor_scraper.get();
+            case TabPage::CampaignPage: return campaign_scraper.get();
             default: throw std::invalid_argument("Unknown tab page.");
         }
     }
 
-    [[nodiscard]] bool ready() const {
-        return skill_tab_aligner && skill_tab_aligner->ready() && factor_tab_aligner && factor_tab_aligner->ready()
-            && campaign_tab_aligner && campaign_tab_aligner->ready() && base_frame_catcher
-            && base_frame_catcher->isStationary();
-    }
+    [[nodiscard]] bool ready() const { return state == Ready; }
 
-    void readyForStitch() {
-        if (ready()) {
-            base_frame_catcher->fullSizeFrame().save(fragment_root_dir / current_uuid / "base.png");
-            on_stitch_ready->send();
+    void checkForCompleted() {
+        assert_(state == Updatable);
+        if (scraping_box->ready()) {
+            on_completed->send(current_uuid);
+            state = Ready;
         }
     }
 
-    const connection::Listener<Frame, SceneInfo> on_updated;
     const connection::Listener<> on_opened;
+    const connection::Listener<Frame, SceneInfo> on_updated;
     const connection::Listener<> on_closed;
-    const connection::Sender<> on_closed_before_ready;
-    const connection::Sender<> on_scroll_ready;
-    const connection::Sender<> on_stitch_ready;
+
+    const connection::Sender<> on_closed_before_completed;
+    const connection::Sender<> on_scroll_ready;  // When user can start scrolling.
+    const connection::Sender<> on_page_ready;  // When each page is ready.
+    const connection::Sender<std::string> on_completed;  // When all three pages are ready.
 
     const CharaDetailSceneScraperConfig config;
-    const std::filesystem::path fragment_root_dir;
+    const std::filesystem::path scraping_root_dir;
 
     std::string current_uuid;
-    std::unique_ptr<SceneScraper> skill_tab_aligner;
-    std::unique_ptr<SceneScraper> factor_tab_aligner;
-    std::unique_ptr<SceneScraper> campaign_tab_aligner;
-    std::unique_ptr<StationaryFrameCatcher> base_frame_catcher;
+    std::unique_ptr<SceneScraper> skill_scraper;
+    std::unique_ptr<SceneScraper> factor_scraper;
+    std::unique_ptr<SceneScraper> campaign_scraper;
+    std::unique_ptr<BaseFrameCatcher> base_frame_catcher;
+    std::shared_ptr<SceneScrapingBox> scraping_box;
+    ReadyState state = Null;
 };
 
 }  // namespace chara_detail

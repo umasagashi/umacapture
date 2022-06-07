@@ -1,5 +1,5 @@
 {
-    "windows_config": {
+    "windows": {
         "window_recorder": {
             "minimum_size": {
                 "height": 960,
