@@ -66,33 +66,33 @@ public:
 
     inline Point<T> &operator=(const Point<T> &other) = default;
 
+    template<typename S>
+    [[nodiscard]] inline Point<S> cast() const {
+        return {static_cast<S>(x_), static_cast<S>(y_), anchor_};
+    }
+
+    [[nodiscard]] inline Point<int> round() const { return {std::lround(x_), std::lround(y_), anchor_}; }
+
     inline Point<T> operator+(const Point<T> &other) const {
-        assert(anchor_ == other.anchor_);
+        assert_(anchor_ == other.anchor_);
         return {x_ + other.x_, y_ + other.y_, anchor_};
     }
 
     inline Point<T> operator-(const Point<T> &other) const {
-        assert(anchor_ == other.anchor_);
+        assert_(anchor_ == other.anchor_);
         return {x_ - other.x_, y_ - other.y_, anchor_};
     }
 
-    inline Point<T> operator*(double other) const {
-        return {
-            static_cast<T>(static_cast<double>(x_) * other),
-            static_cast<T>(static_cast<double>(y_) * other),
-            anchor_,
-        };
+    inline Point<T> operator*(const T &other) const {
+        return {x_ * other, y_ * other, anchor_};
     }
 
-    inline Point<T> operator/(double other) const {
-        return {
-            static_cast<T>(static_cast<double>(x_) / other),
-            static_cast<T>(static_cast<double>(y_) / other),
-            anchor_,
-        };
+    inline Point<T> operator/(const T &other) const {
+        return {x_ / other, y_ / other, anchor_};
     }
 
     [[nodiscard]] double distance(const Point<T> &other) const {
+        assert_(anchor_ == other.anchor_);
         return std::sqrt(std::pow(x_ - other.x_, 2) + std::pow(y_ - other.y_, 2));
     }
 
@@ -122,6 +122,13 @@ public:
     [[nodiscard]] inline cv::Size_<T> toCVSize() const { return {width_, height_}; }
     [[nodiscard]] inline Point<T> toPoint() const { return {width_, height_}; }
 
+    template<typename S>
+    [[nodiscard]] inline Size<S> cast() const {
+        return {static_cast<S>(width_), static_cast<S>(height_)};
+    }
+
+    [[nodiscard]] inline Size<int> round() const { return {std::lround(width_), std::lround(height_)}; }
+
     inline Size<T> &operator=(const Size<T> &other) = default;
 
     inline bool operator!=(const Size<T> &other) const {
@@ -133,7 +140,9 @@ public:
     }
 
     inline Size<T> operator-(const Size<T> &other) const { return {width_ - other.width_, height_ - other.height_}; }
+
     inline Size<T> operator/(const T &other) const { return {width_ / other, height_ / other}; }
+    inline Size<T> operator*(const T &other) const { return {width_ * other, height_ * other}; }
 
     EXTENDED_JSON_TYPE_NDC(Size<T>, width_, height_);
 
@@ -183,19 +192,26 @@ public:
 
     inline Line<T> &operator=(const Line<T> &other) = default;
 
-    [[nodiscard]] inline Point<T> pointAt(double ratio) const { return (p2_ - p1_) * ratio + p1_; }
+    template<typename S>
+    [[nodiscard]] inline Line<S> cast() const {
+        return {p1_.cast<S>(), p2_.cast<S>()};
+    }
+
+    [[nodiscard]] inline Line<int> round() const { return {p1_.round(), p2_.round()}; }
+
+    [[nodiscard]] inline Point<T> pointAt(const T &ratio) const { return (p2_ - p1_) * ratio + p1_; }
 
     [[nodiscard]] inline double length() const { return p1_.distance(p2_); }
 
     [[nodiscard]] inline Line<T> reversed() const { return {p2_, p1_}; }
 
-    [[nodiscard]] inline Line1D<double> horizontal() const { return {p1_.x(), p2_.x()}; }
-    [[nodiscard]] inline Line1D<double> vertical() const { return {p1_.y(), p2_.y()}; }
+    [[nodiscard]] inline Line1D<T> horizontal() const { return {p1_.x(), p2_.x()}; }
+    [[nodiscard]] inline Line1D<T> vertical() const { return {p1_.y(), p2_.y()}; }
 
     inline Line<T> operator-(const Line<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
 
-    inline Line<T> operator*(double other) const { return {p1_ * other, p2_ * other}; }
-    inline Line<T> operator/(double other) const { return {p1_ / other, p2_ / other}; }
+    inline Line<T> operator*(const T &other) const { return {p1_ * other, p2_ * other}; }
+    inline Line<T> operator/(const T &other) const { return {p1_ / other, p2_ / other}; }
 
     EXTENDED_JSON_TYPE_NDC(Line<T>, p1_, p2_);
 
@@ -218,8 +234,8 @@ public:
 
     inline Rect &operator=(const Rect &other) = default;
 
-    [[nodiscard]] inline const Point<T> &top_left() const { return top_left_; }
-    [[nodiscard]] inline const Point<T> &bottom_right() const { return bottom_right_; }
+    [[nodiscard]] inline const Point<T> &topLeft() const { return top_left_; }
+    [[nodiscard]] inline const Point<T> &bottomRight() const { return bottom_right_; }
 
     [[nodiscard]] inline T left() const { return top_left_.x(); }
     [[nodiscard]] inline T top() const { return top_left_.y(); }

@@ -3,5 +3,5 @@
 #include "uuid_util.h"
 
 std::string uuid::uuid4() {
-    return sole::uuid4().str();
+    return std::string(sole::uuid4().str());
 }

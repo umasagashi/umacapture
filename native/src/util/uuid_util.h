@@ -4,6 +4,6 @@
 
 namespace uuid {
 
-inline std::string uuid4();
+std::string uuid4();
 
 }

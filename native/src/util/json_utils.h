@@ -5,6 +5,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "util/common.h"
+
 namespace json_utils {
 
 using Json = nlohmann::ordered_json;
@@ -198,5 +200,9 @@ inline std::string trim(const std::string &key) {
     inline std::ostream &operator<<(std::ostream &outs, const Type<T> &obj) { \
         return outs << #Type << "<" << typeid(T).name() << ">" << json_utils::Json(obj); \
     }
+
+inline json_utils::Json read(const std::filesystem::path &path) {
+    return json_utils::Json::parse(io::read(path));
+}
 
 }  // namespace json_utils
