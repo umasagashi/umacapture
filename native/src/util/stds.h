@@ -17,7 +17,7 @@ inline void for_each(const Container &container, Function func) {
 template<typename OutContainer, typename InContainer, typename Function>
 inline OutContainer transformed(const InContainer &container, Function func) {
     OutContainer out;
-    std::transform(container.begin(), container.end(), out.begin(), func);
+    std::transform(container.begin(), container.end(), std::back_inserter(out), func);
     return out;
 }
 

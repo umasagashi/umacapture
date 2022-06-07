@@ -90,7 +90,7 @@ private:
         if (thread != nullptr) {
             cancel();
         }
-        assert(thread == nullptr);
+        assert_(thread == nullptr);
 
         cancelRequested = false;
         expired = std::nullopt;
