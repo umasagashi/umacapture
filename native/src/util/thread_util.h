@@ -6,6 +6,8 @@
 #include <thread>
 #include <utility>
 
+#include "util/common.h"
+
 namespace threading {
 
 class ThreadBase {
@@ -14,7 +16,10 @@ public:
         : is_running(false)
         , thread(nullptr) {}
 
-    virtual ~ThreadBase() { join(); }
+    virtual ~ThreadBase() {
+        std::cout << __FUNCTION__ << std::endl;
+        assert_(!isRunning());  // Call the join before deleting.
+    }
 
     void start() {
         if (is_running.load()) {
@@ -47,12 +52,12 @@ class Timer {
 public:
     Timer(
         const std::chrono::milliseconds &duration,
-        std::function<void()> on_expired,
-        std::function<void()> on_canceled = nullptr)
+        const std::function<void()> &on_expired,
+        const std::function<void()> &on_canceled = nullptr)
         : thread(nullptr)
         , duration(duration)
-        , on_expired(std::move(on_expired))
-        , on_canceled(std::move(on_canceled)) {
+        , on_expired(on_expired)
+        , on_canceled(on_canceled) {
         start();
     }
 
