@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(native)
+project(umasagashi_cli)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -16,17 +16,24 @@ set(SOURCE_FILES
         src/cli.cpp
         src/native_api.cpp
         src/condition/serializer.cpp
-        src/util/uuid_util.cpp
+        src/util/logger_util.cpp
         )
 
 add_executable(${PROJECT_NAME}
         ${SOURCE_FILES})
 
 target_compile_options(${PROJECT_NAME} PRIVATE /wd4068)
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src")
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/vendor")
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../windows")
-target_include_directories(${PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/tool")
+
+target_include_directories(${PROJECT_NAME} PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${CMAKE_CURRENT_LIST_DIR}/vendor"
+        "${CMAKE_CURRENT_LIST_DIR}/../windows"
+        "${CMAKE_CURRENT_LIST_DIR}/tool"
+        )
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+        USE_CUSTOM_ASSERT
+        )
 
 find_package(OpenCV REQUIRED)
 message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")

@@ -1,17 +1,17 @@
 {
-  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
   "rule": null,
   "children": [
     {
-      "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+      "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
       "rule": null,
       "children": [
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+              "type": "PlainCondition<Frame,PointColor,Empty>",
               "rule": {
                 "point": {
                   "x": 0.0167,
@@ -36,7 +36,7 @@
               }
             },
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "type": "PlainCondition<Frame,LineLength,Empty>",
               "rule": {
                 "line_measurer": {
                   "line": {
@@ -79,11 +79,11 @@
           ]
         },
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+              "type": "PlainCondition<Frame,PointColor,Empty>",
               "rule": {
                 "point": {
                   "x": 0.983,
@@ -108,7 +108,7 @@
               }
             },
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "type": "PlainCondition<Frame,LineLength,Empty>",
               "rule": {
                 "line_measurer": {
                   "line": {
@@ -153,16 +153,16 @@
       ]
     },
     {
-      "type": "class condition::NestedCondition<class Frame,class rule::Stable,struct state::TimestampState>",
+      "type": "NestedCondition<Frame,Stable,TimestampState>",
       "rule": {
         "threshold": 50
       },
       "child": {
-        "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+        "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
         "rule": null,
         "children": [
           {
-            "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+            "type": "PlainCondition<Frame,PointColor,Empty>",
             "rule": {
               "point": {
                 "x": -0.6501,
@@ -187,7 +187,7 @@
             }
           },
           {
-            "type": "class condition::PlainCondition<class Frame,class rule::StableLineLength,struct state::LengthState>",
+            "type": "PlainCondition<Frame,StableLineLength,LengthState>",
             "rule": {
               "line_measurer": {
                 "line": {
@@ -232,23 +232,23 @@
     },
     {
       "name": "tab_condition",
-      "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+      "type": "ParallelCondition<Frame,LogicalOr,Empty>",
       "rule": null,
       "children": [
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.0555,
@@ -273,7 +273,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -316,11 +316,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.3314,
@@ -345,7 +345,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -390,15 +390,15 @@
               ]
             },
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.3499,
@@ -423,7 +423,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -466,11 +466,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.6479,
@@ -495,7 +495,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -540,15 +540,15 @@
               ]
             },
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.6664,
@@ -573,7 +573,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -616,11 +616,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.946,
@@ -645,7 +645,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -692,19 +692,19 @@
           ]
         },
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.0555,
@@ -729,7 +729,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -772,11 +772,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.3314,
@@ -801,7 +801,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -846,15 +846,15 @@
               ]
             },
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.3499,
@@ -879,7 +879,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -922,11 +922,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.6479,
@@ -951,7 +951,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -996,15 +996,15 @@
               ]
             },
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.6664,
@@ -1029,7 +1029,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1072,11 +1072,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.946,
@@ -1101,7 +1101,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1148,19 +1148,19 @@
           ]
         },
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.0555,
@@ -1185,7 +1185,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1228,11 +1228,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.3314,
@@ -1257,7 +1257,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1302,15 +1302,15 @@
               ]
             },
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.3499,
@@ -1335,7 +1335,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1378,11 +1378,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.6479,
@@ -1407,7 +1407,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1452,15 +1452,15 @@
               ]
             },
             {
-              "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+              "type": "ParallelCondition<Frame,LogicalOr,Empty>",
               "rule": null,
               "children": [
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.6664,
@@ -1485,7 +1485,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1528,11 +1528,11 @@
                   ]
                 },
                 {
-                  "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
                   "rule": null,
                   "children": [
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::PointColor,struct state::Empty>",
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
                       "rule": {
                         "point": {
                           "x": 0.946,
@@ -1557,7 +1557,7 @@
                       }
                     },
                     {
-                      "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
                       "rule": {
                         "line_measurer": {
                           "line": {
@@ -1606,15 +1606,15 @@
       ]
     },
     {
-      "type": "class condition::ParallelCondition<class Frame,class rule::LogicalOr,struct state::Empty>",
+      "type": "ParallelCondition<Frame,LogicalOr,Empty>",
       "rule": null,
       "children": [
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "type": "PlainCondition<Frame,LineLength,Empty>",
               "rule": {
                 "line_measurer": {
                   "line": {
@@ -1655,7 +1655,7 @@
               }
             },
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "type": "PlainCondition<Frame,LineLength,Empty>",
               "rule": {
                 "line_measurer": {
                   "line": {
@@ -1698,11 +1698,11 @@
           ]
         },
         {
-          "type": "class condition::ParallelCondition<class Frame,class rule::LogicalAnd,struct state::Empty>",
+          "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "type": "PlainCondition<Frame,LineLength,Empty>",
               "rule": {
                 "line_measurer": {
                   "line": {
@@ -1743,7 +1743,7 @@
               }
             },
             {
-              "type": "class condition::PlainCondition<class Frame,class rule::LineLength,struct state::Empty>",
+              "type": "PlainCondition<Frame,LineLength,Empty>",
               "rule": {
                 "line_measurer": {
                   "line": {

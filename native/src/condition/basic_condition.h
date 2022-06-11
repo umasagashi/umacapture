@@ -4,18 +4,31 @@
 #include <optional>
 #include <vector>
 
+#include <nameof/nameof.hpp>
+
 #include "condition/condition.h"
 #include "condition/serializer.h"
 #include "util/stds.h"
 
 namespace condition {
 
+template<typename Base, typename InputType, typename RuleType, typename StateType>
+[[nodiscard]] std::string typeNameOf() {
+    std::ostringstream stream;
+    stream << nameof::nameof_short_type<Base>() << '<' << nameof::nameof_short_type<InputType>() << ','
+           << nameof::nameof_short_type<RuleType>() << ',' << nameof::nameof_short_type<StateType>() << '>';
+    return stream.str();
+}
+
 template<typename InputType, typename RuleType, typename StateType = typename RuleType::state_type>
 class PlainCondition : public Condition<InputType> {
 public:
-    PlainCondition(const RuleType &rule, std::optional<std::string> name)
+    using rule_type = RuleType;
+    using state_type = StateType;
+
+    PlainCondition(const RuleType &rule, const std::optional<std::string> &name)
         : rule(rule)
-        , name(std::move(name)) {}
+        , condition_name(name) {}
 
     explicit PlainCondition(const RuleType &rule)
         : rule(rule) {}
@@ -24,29 +37,29 @@ public:
 
     [[nodiscard]] bool met() const override { return met_; }
 
-    [[nodiscard]] const Condition<InputType> *getByName(const std::string &name) const override {
-        return (name == this->name) ? this : nullptr;
+    [[nodiscard]] const Condition<InputType> *findByTag(const std::string &tag) const override {
+        return (tag == condition_name) ? this : nullptr;
     }
+
+    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
 
     static Condition<InputType> *fromJson(const json_utils::Json &json) {
         return new PlainCondition<InputType, RuleType, StateType>{
             json_utils::extended_from_json(json, "rule", json_utils::AsType<decltype(rule)>()),
-            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(name)>()),
+            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(condition_name)>()),
         };
     }
 
     [[nodiscard]] json_utils::Json toJson() const {
         json_utils::Json json;
-        json_utils::extended_to_json(json, "name", name);
-        json_utils::extended_to_json(json, "type", type);
+        json_utils::extended_to_json(json, "name", condition_name);
+        json_utils::extended_to_json(json, "type", typeName());
         json_utils::extended_to_json(json, "rule", rule);
         return json;
     }
 
 private:
-    const std::string type = typeid(*this).name();
-
-    const std::optional<std::string> name;
+    const std::optional<std::string> condition_name;
     const RuleType rule;
 
     StateType state;
@@ -56,14 +69,21 @@ private:
 template<typename InputType, typename RuleType, typename StateType = typename RuleType::state_type>
 class NestedCondition : public Condition<InputType> {
 public:
-    NestedCondition(const RuleType &rule, std::shared_ptr<Condition<InputType>> child, std::optional<std::string> name)
-        : rule(rule)
-        , child(std::move(child))
-        , name(std::move(name)) {}
+    //    using input_type = InputType;
+    using rule_type = RuleType;
+    using state_type = StateType;
 
-    NestedCondition(const RuleType &rule, std::shared_ptr<Condition<InputType>> child)
+    NestedCondition(
+        const RuleType &rule,
+        const std::shared_ptr<Condition<InputType>> &child,
+        const std::optional<std::string> &name)
         : rule(rule)
-        , child(std::move(child)) {}
+        , child(child)
+        , condition_name(name) {}
+
+    NestedCondition(const RuleType &rule, const std::shared_ptr<Condition<InputType>> &child)
+        : rule(rule)
+        , child(child) {}
 
     void update(const InputType &input) override {
         child->update(input);
@@ -72,31 +92,31 @@ public:
 
     [[nodiscard]] bool met() const override { return met_; }
 
-    [[nodiscard]] const Condition<InputType> *getByName(const std::string &name) const override {
-        return (name == this->name) ? this : child->getByName(name);
+    [[nodiscard]] const Condition<InputType> *findByTag(const std::string &name) const override {
+        return (name == condition_name) ? this : child->findByTag(name);
     }
+
+    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
 
     static Condition<InputType> *fromJson(const json_utils::Json &json) {
         return new NestedCondition<InputType, RuleType, StateType>{
             json_utils::extended_from_json(json, "rule", json_utils::AsType<decltype(rule)>()),
             serializer::conditionFromJson(json.at("child")),
-            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(name)>()),
+            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(condition_name)>()),
         };
     }
 
     [[nodiscard]] json_utils::Json toJson() const {
         json_utils::Json json;
-        json_utils::extended_to_json(json, "name", name);
-        json_utils::extended_to_json(json, "type", type);
+        json_utils::extended_to_json(json, "name", condition_name);
+        json_utils::extended_to_json(json, "type", typeName());
         json_utils::extended_to_json(json, "rule", rule);
         json_utils::extended_to_json(json, "child", child->toJson());
         return json;
     }
 
 private:
-    const std::string type = typeid(*this).name();
-
-    const std::optional<std::string> name;
+    const std::optional<std::string> condition_name;
     const RuleType rule;
     const std::shared_ptr<Condition<InputType>> child;
 
@@ -107,18 +127,21 @@ private:
 template<typename InputType, typename RuleType, typename StateType = typename RuleType::state_type>
 class ParallelCondition : public Condition<InputType> {
 public:
+    using rule_type = RuleType;
+    using state_type = StateType;
+
     ParallelCondition(
         const RuleType &rule,
-        std::vector<std::shared_ptr<Condition<InputType>>> children,
-        std::optional<std::string> name)
+        const std::vector<std::shared_ptr<Condition<InputType>>> &children,
+        const std::optional<std::string> &name)
         : rule(rule)
-        , children(std::move(children))
-        , name(std::move(name)) {}
+        , children(children)
+        , condition_name(name) {}
 
-    ParallelCondition(const RuleType &rule, std::vector<std::shared_ptr<Condition<InputType>>> children)
+    ParallelCondition(const RuleType &rule, const std::vector<std::shared_ptr<Condition<InputType>>> &children)
         : rule(rule)
-        , children(std::move(children))
-        , name(std::nullopt) {}
+        , children(children)
+        , condition_name(std::nullopt) {}
 
     void update(const InputType &input) override {
         stds::for_each(children, [&](const auto &item) { item->update(input); });
@@ -131,12 +154,12 @@ public:
         return stds::transformed<std::vector<bool>>(children, [](const auto &item) { return item->met(); });
     }
 
-    [[nodiscard]] const Condition<InputType> *getByName(const std::string &target) const override {
-        if (target == name) {
+    [[nodiscard]] const Condition<InputType> *findByTag(const std::string &name) const override {
+        if (name == condition_name) {
             return this;
         }
         for (const auto &item : children) {
-            const auto &p = item->getByName(target);
+            const auto &p = item->findByTag(name);
             if (p != nullptr) {
                 return p;
             }
@@ -144,27 +167,27 @@ public:
         return nullptr;
     }
 
+    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+
     static Condition<InputType> *fromJson(const json_utils::Json &json) {
         return new ParallelCondition<InputType, RuleType, StateType>{
             json_utils::extended_from_json(json, "rule", json_utils::AsType<decltype(rule)>()),
             serializer::conditionArrayFromJson(json.at("children")),
-            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(name)>()),
+            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(condition_name)>()),
         };
     }
 
     [[nodiscard]] json_utils::Json toJson() const {
         json_utils::Json json;
-        json_utils::extended_to_json(json, "name", name);
-        json_utils::extended_to_json(json, "type", type);
+        json_utils::extended_to_json(json, "name", condition_name);
+        json_utils::extended_to_json(json, "type", typeName());
         json_utils::extended_to_json(json, "rule", rule);
         json_utils::extended_to_json(json, "children", serializer::conditionArrayToJson(children));
         return json;
     }
 
 private:
-    const std::string type = typeid(*this).name();
-
-    const std::optional<std::string> name;
+    const std::optional<std::string> condition_name;
     const RuleType rule;
     const std::vector<std::shared_ptr<Condition<InputType>>> children;
 

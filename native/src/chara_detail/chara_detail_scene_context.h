@@ -38,7 +38,7 @@ public:
         const connection::Sender<> &on_scene_end,
         const std::chrono::milliseconds &scene_end_timeout = std::chrono::milliseconds::zero())
         : child(child)
-        , tab_condition(dynamic_cast<const TabCondition *>(child->getByName("tab_condition")))
+        , tab_condition(dynamic_cast<const TabCondition *>(child->findByTag("tab_condition")))
         , on_scene_begin(on_scene_begin)
         , on_scene_updated(on_scene_updated)
         , on_scene_end(on_scene_end)

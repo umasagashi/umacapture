@@ -19,14 +19,25 @@ const auto CONDITION_BUILDERS /* NOLINT(cert-err58-cpp)*/ = {
 
 }
 
+template<typename Base>
+template<typename Impl>
+Builder<Base> Builder<Base>::create() {
+    return {
+        condition::typeNameOf<Impl, typename Impl::input_type, typename Impl::rule_type, typename Impl::state_type>(),
+        [](const json_utils::Json &json) { return ConditionBase(Impl::fromJson(json)); },
+    };
+}
+
 ConditionBase conditionFromJson(const json_utils::Json &json) {
     const auto type = json.at("type").get<std::string>();
+    std::string buf;
     for (const auto &builder : CONDITION_BUILDERS) {
         if (builder.match(type)) {
             return builder.build(json);
         }
+        buf += builder.target_type + " | ";
     }
-    throw std::invalid_argument(type);
+    throw std::invalid_argument(type + " | " + buf);
 }
 
 std::vector<ConditionBase> conditionArrayFromJson(const json_utils::Json &j) {

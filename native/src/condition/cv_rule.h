@@ -53,8 +53,8 @@ private:
 
 class LineLength : public rule::Rule<Frame, state::Empty> {
 public:
-    LineLength(LineMeasurer line_measurer, const Range<double> &length_range) noexcept
-        : line_measurer(std::move(line_measurer))
+    LineLength(const LineMeasurer &line_measurer, const Range<double> &length_range) noexcept
+        : line_measurer(line_measurer)
         , length_range(length_range) {}
 
     [[nodiscard]] bool met(const Frame &frame, state::Empty &) const override {
@@ -71,8 +71,8 @@ private:
 
 class StableLineLength : public rule::Rule<Frame, state::LengthState> {
 public:
-    StableLineLength(LineMeasurer line_measurer, const Range<double> &length_range) noexcept
-        : line_measurer(std::move(line_measurer))
+    StableLineLength(const LineMeasurer &line_measurer, const Range<double> &length_range) noexcept
+        : line_measurer(line_measurer)
         , length_range(length_range) {}
 
     [[nodiscard]] bool met(const Frame &frame, state::LengthState &state) const override {

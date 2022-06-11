@@ -195,10 +195,10 @@ public:
 
     [[nodiscard]] bool isIn(const Range<Color> &color_range, const Line<double> &line) const {
         const Range<BGR> &bgr_range = asBGRRange(color_range);
-        const Line<int> &mapped_line = anchor_.mapToFrame(line);
+        const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
 
         return stds::any_of(linspace(0., 1., (int) mapped_line.length()), [&](const auto &ratio) {
-            const auto &p = mapped_line.pointAt(ratio);
+            const auto &p = mapped_line.pointAt(ratio).round();
             return bgr_range.contains(bgrAt(p.x(), p.y()));
         });
     }

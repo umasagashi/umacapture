@@ -194,7 +194,7 @@ public:
 
     template<typename S>
     [[nodiscard]] inline Line<S> cast() const {
-        return {p1_.cast<S>(), p2_.cast<S>()};
+        return {p1_.template cast<S>(), p2_.template cast<S>()};
     }
 
     [[nodiscard]] inline Line<int> round() const { return {p1_.round(), p2_.round()}; }
