@@ -17,7 +17,9 @@ public:
 
     [[nodiscard]] virtual bool met() const = 0;
 
-    [[nodiscard]] virtual const Condition<InputType> *getByName(const std::string &name) const = 0;
+    [[nodiscard]] virtual const Condition<InputType> *findByTag(const std::string &tag) const = 0;
+
+    [[nodiscard]] virtual std::string typeName() const = 0;
 
     // static Condition<InputType> *fromJson(const json_utils::Json &j);
     [[nodiscard]] virtual json_utils::Json toJson() const = 0;

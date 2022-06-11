@@ -9,8 +9,10 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
+#include <minimal_uuid4/minimal_uuid4.h>
+
 #include "chara_detail/chara_detail_scene_context.h"
-#include "util/uuid_util.h"
+#include "util/logger_util.h"
 
 #include "native_api.h"
 
@@ -123,7 +125,7 @@ public:
         double vertical_threshold = 50.;
         int minimum_key_points = 10;
         int descriptor_channels = 3;
-        float descriptor_threshold = 0.001;
+        float descriptor_threshold = 0.001f;
         int octaves = 2;
         int octave_layers = 1;
         int table_number = 3;
@@ -250,7 +252,7 @@ public:
         : scan_parameters(scan_parameters)
         , image_dir(image_dir) {
         current_scan = this->scan_parameters.begin();
-        NativeApi::instance().createDirectory(image_dir);
+        NativeApi::instance().mkdir(image_dir);
     }
 
     void addTabButton(const Frame &frame) {
@@ -731,7 +733,7 @@ public:
     void build() {
         assert_(state == Null);
 
-        current_uuid = uuid::uuid4();
+        current_uuid = uuid_generator.uuid4().str();
 
         scraping_box = std::make_shared<SceneScrapingBox>(
             config.skill_scans, config.factor_scans, config.campaign_scans, scraping_root_dir / current_uuid);
@@ -757,6 +759,8 @@ public:
     }
 
     void update(const Frame &frame, const SceneInfo &scene_info) {
+//        log_debug("");
+
         //        std::cout << " - " << frame.timestamp() << std::endl;
         if (ready()) {  // After ready, do nothing until scene is closed.
             return;
@@ -773,7 +777,7 @@ public:
             checkForCompleted();
         }
 
-        //        std::cout << __FUNCTION__ << ": " << (chrono::timestamp() - frame.timestamp()) << std::endl;
+//        std::cout << __FUNCTION__ << ": " << (chrono::timestamp() - frame.timestamp()) << std::endl;
     }
 
     void release() {
@@ -817,6 +821,8 @@ private:
 
     const CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
+
+    minimal_uuid4::Generator uuid_generator;
 
     std::string current_uuid;
     std::unique_ptr<SceneScraper> skill_scraper;

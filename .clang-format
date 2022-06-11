@@ -45,8 +45,12 @@ EmptyLineBeforeAccessModifier: Always
 FixNamespaceComments: true
 IncludeBlocks: Regroup
 IncludeCategories:
+  - Regex: '^<opencv2/.+>$'
+    Priority: -85
   - Regex: '^<.+/.+>$'
     Priority: -90
+  - Regex: '^<.*\.h>$'
+    Priority: -100
   - Regex: '^<.*>$'
     Priority: -100
   - Regex: '^".+/.+"$'

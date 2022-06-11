@@ -14,21 +14,20 @@ using ConditionBase = std::shared_ptr<condition::Condition<Frame>>;
 template<typename Base>
 class Builder {
 public:
-    template<typename T>
-    static Builder create() {
-        return {typeid(T).name(), [](const json_utils::Json &json) { return ConditionBase(T::fromJson(json)); }};
-    }
+    template<typename Impl>
+    static Builder<Base> create();
 
-    Builder(std::string type, std::function<Base(const json_utils::Json &)> func)
-        : type(std::move(type))
-        , func(std::move(func)) {}
-
-    [[nodiscard]] bool match(const std::string &type) const { return type == this->type; }
+    [[nodiscard]] bool match(const std::string &type) const { return type == target_type; }
 
     [[nodiscard]] Base build(const json_utils::Json &json) const { return func(json); }
 
+    const std::string target_type;  // TODO: This is for debug.
+
 private:
-    const std::string type;
+    Builder(const std::string &type, const std::function<Base(const json_utils::Json &)> &func)
+        : target_type(type)
+        , func(func) {}
+
     const std::function<Base(const json_utils::Json &)> func;
 };
 
