@@ -5,68 +5,60 @@
 #include <CLI11/CLI11.hpp>
 #include <runner/window_recorder.h>
 #include <runner/windows_config.h>
-#include <scene_context/chara_detail_scene_context_builder.h>
 
+#include "builder/chara_detail_scene_context_builder.h"
+#include "builder/chara_detail_scene_scraper_builder.h"
 #include "condition/serializer.h"
+#include "cv/video_loader.h"
 #include "util/common.h"
 #include "util/json_utils.h"
+#include "util/logger_util.h"
 
 #include "native_api.h"
 
-void buildContext(const std::filesystem::path &root_dir) {
-    try {
-        std::filesystem::create_directories(root_dir);
+template<typename T, typename ToJson, typename FromJson>
+void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJson) {
+    std::filesystem::create_directories(path.parent_path());
 
-        const std::string path = (root_dir / "chara_detail.json").generic_string();
-        auto context = tool::CharaDetailSceneContextBuilder().build();
-        json_utils::Json json = context->toJson();
-        io::write(path, json.dump(2));
+    auto context = T().build();
+    json_utils::Json json = toJson(context);
+    io::write(path, json.dump(2));
 
-        auto reconstructed_context = serializer::conditionFromJson(json_utils::Json::parse(io::read(path)));
-        json_utils::Json reconstructed_json = reconstructed_context->toJson();
-        assert(json == reconstructed_json);
-    } catch (std::exception &e) {
-        std::cerr << e.what() << std::endl;
-        exit(1);
-    }
-
-    exit(0);
+    json_utils::Json reconstructed_json = toJson(fromJson(json_utils::Json::parse(io::read(path))));
+    log_debug(reconstructed_json.dump(2));
+    assert_(json == reconstructed_json);
 }
 
-void capture() {
-    auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &, uint64>>();
-    auto window_recorder = std::make_unique<recording::WindowRecorder>(connection);
-    auto recorder_runner = connection::make_runner(connection);
+json_utils::Json createConfig() {
+    const std::filesystem::path config_dir = "../../assets/config";
+    return {
+        {
+            "chara_detail",
+            {
+                {"scene_context", json_utils::read(config_dir / "chara_detail/scene_context.json")},
+                {"scene_scraper", json_utils::read(config_dir / "chara_detail/scene_scraper.json")},
+                {"scraping_dir", (std::filesystem::current_path() / "scraping").generic_string()},
+            },
+        },
+        {"platform", json_utils::read(config_dir / "platform.json")},
+    };
+}
+
+void captureFromScreen() {
+    const auto recorder_runner = connection::event_runner::makeSingleThreadRunner(nullptr, "recorder");
+    const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
+    const auto window_recorder = std::make_unique<recording::WindowRecorder>(connection);
+
     auto &api = NativeApi::instance();
-
-    std::string config_string = io::read("../../assets/config/platform_config.json");
-    api.setConfig(config_string);
-
-    {
-        const auto directory_config = std::filesystem::current_path() / "temp";
-        std::filesystem::remove_all(directory_config);
-        std::filesystem::create_directories(directory_config);
-        api.setConfig(json_utils::Json{{"directory", directory_config.string()}}.dump());
-    }
-
-    {
-        const auto context_config = "../../assets/config/scene";
-        api.setConfig(json_utils::Json{{"context", context_config}}.dump());
-    }
-
-    {
-        const auto config_json = json_utils::Json::parse(config_string);
-        const auto windows_config_json = config_json.find("windows_config");
-        assert(windows_config_json != config_json.end());
-        const auto windows_config = windows_config_json->template get<config::WindowsConfig>();
-        assert(windows_config.window_recorder.has_value());
-        window_recorder->setConfig(windows_config.window_recorder.value());
-    }
-
-    api.setCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
+    api.setNotifyCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
-    api.startEventLoop();
+    const auto config = createConfig();
+    api.startEventLoop(config.dump());
+
+    const auto windows_config = config["platform"]["windows"].get<config::WindowsConfig>();
+    window_recorder->setConfig(windows_config.window_recorder.value());
+
     recorder_runner->start();
     window_recorder->startRecord();
 
@@ -75,25 +67,79 @@ void capture() {
     }
 }
 
+void captureFromVideo(const std::filesystem::path &path) {
+    const auto recorder_runner = connection::event_runner::makeSingleThreadRunner(nullptr, "recorder");
+    const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
+
+    auto &api = NativeApi::instance();
+    api.setNotifyCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
+    connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
+
+    const auto config = createConfig();
+    api.startEventLoop(config.dump());
+
+    recorder_runner->start();
+
+    auto video = VideoLoader(connection);
+    video.run(path);
+
+    while (api.isRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
 int main(int argc, char **argv) {
-    CLI::App command{"App description"};
-    command.require_subcommand(1);
+    logger_util::init();
 
-    auto build_command = command.add_subcommand("build", "build scene context");
-    std::string output_dir;
-    build_command->add_option("--output_dir,-o", output_dir)->required();
+    vlog_trace(1, 2, 3);
+    vlog_debug(1, 2, 3);
+    vlog_info(1, 2, 3);
+    vlog_warning(1, 2, 3);
+    vlog_error(1, 2, 3);
+    vlog_fatal(1, 2, 3);
 
-    auto capture_command = command.add_subcommand("capture", "run capture mode");
+    try {
+        CLI::App command{"App description"};
+        command.require_subcommand(1);
 
-    CLI11_PARSE(command, argc, argv)
+        auto build_command = command.add_subcommand("build", "build scene context");
+        std::filesystem::path assets_dir;
+        build_command->add_option("--assets_dir", assets_dir)->required();
 
-    if (build_command->parsed()) {
-        buildContext(output_dir);
+        auto capture_command = command.add_subcommand("capture", "run capture mode");
+
+        auto video_command = command.add_subcommand("video", "run capture mode from video");
+        std::filesystem::path video_path;
+        video_command->add_option("--video_path", video_path)->required();
+
+        CLI11_PARSE(command, argc, argv)
+
+        vlog_debug(assets_dir.string(), video_path.string());
+
+        if (build_command->parsed()) {
+            buildJson<tool::CharaDetailSceneContextBuilder>(
+                assets_dir / "chara_detail" / "scene_context.json",
+                [](const auto &obj) { return obj->toJson(); },
+                [](const auto &json) { return serializer::conditionFromJson(json); });
+
+            buildJson<tool::CharaDetailSceneScraperBuilder>(
+                assets_dir / "chara_detail" / "scene_scraper.json",
+                [](const auto &obj) { return obj; },
+                [](const auto &json) { return json; });
+        }
+
+        if (capture_command->parsed()) {
+            captureFromScreen();
+        }
+
+        if (video_command->parsed()) {
+            captureFromVideo(video_path);
+        }
+    } catch (std::exception &e) {
+        std::cerr << e.what() << std::endl;
+        exit(1);
     }
 
-    if (capture_command->parsed()) {
-        capture();
-    }
-
+    spdlog::drop_all();
     return 0;
 }
