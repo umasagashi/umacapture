@@ -21,15 +21,15 @@ set(SOURCE_FILES
         "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
         "Runner.rc"
         "runner.exe.manifest"
-        ${NATIVE_EXTENSION_DIR}/src/native_api.cpp
+        "${NATIVE_EXTENSION_DIR}/src/native_api.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/condition/serializer.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/util/logger_util.cpp"
         )
 
 add_executable(${BINARY_NAME} WIN32 ${SOURCE_FILES})
 
-#target_include_directories(${BINARY_NAME} PRIVATE "${NATIVE_EXTENSION_DIR}")
 target_include_directories(${BINARY_NAME} PRIVATE "${NATIVE_EXTENSION_DIR}/src")
 target_include_directories(${BINARY_NAME} PRIVATE "${NATIVE_EXTENSION_DIR}/vendor")
-#target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../windows")
 
 find_package(OpenCV REQUIRED)
 message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")
@@ -38,7 +38,11 @@ target_include_directories(${BINARY_NAME} PRIVATE "${OpenCV_INCLUDE_DIRS}")
 target_link_libraries(${BINARY_NAME} PRIVATE "${OpenCV_LIBS}")
 
 apply_standard_settings(${BINARY_NAME})
-target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
+target_compile_definitions(${BINARY_NAME} PRIVATE
+        NOMINMAX
+        USE_CUSTOM_ASSERT
+        )
+
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 add_dependencies(${BINARY_NAME} flutter_assemble)

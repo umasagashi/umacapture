@@ -17,11 +17,12 @@ class PlatformChannel {
   }
 
   Future<void> setConfig(String config) async {
-    logger.d('setConfig $config');
+    logger.d('setConfig: ${config.length}');
     return await channel.invokeMethod('setConfig', config);
   }
 
   Future<void> startCapture() async {
+    logger.d('startCapture');
     return await channel.invokeMethod('startCapture');
   }
 

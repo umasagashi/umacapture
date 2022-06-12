@@ -424,7 +424,7 @@ public:
     void update(const Frame &frame) override {
         assert_(state == Updatable);
         if (readyAfterUpdate(stationary_catcher, frame)) {
-            scraping_box->setScrollArea(stationary_catcher.croppedFrame());
+            scraping_box->setScrollArea(stationary_catcher.fullSizeFrame());
             state = Ready;
         }
     }
@@ -759,9 +759,6 @@ public:
     }
 
     void update(const Frame &frame, const SceneInfo &scene_info) {
-//        log_debug("");
-
-        //        std::cout << " - " << frame.timestamp() << std::endl;
         if (ready()) {  // After ready, do nothing until scene is closed.
             return;
         }
@@ -777,7 +774,7 @@ public:
             checkForCompleted();
         }
 
-//        std::cout << __FUNCTION__ << ": " << (chrono::timestamp() - frame.timestamp()) << std::endl;
+//        log_debug("delay: {}", chrono::timestamp() - frame.timestamp());
     }
 
     void release() {

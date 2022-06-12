@@ -1,4 +1,6 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,22 +13,40 @@ import 'src/core/json_adapter.dart';
 import 'src/core/platform_controller.dart';
 import 'src/core/utils.dart';
 import 'src/gui/app_widget.dart';
-import 'src/preference/platform_config.dart';
+
+// import 'src/preference/platform_config.dart';
 import 'src/preference/storage_box.dart';
 import 'src/preference/window_state.dart';
 
-Future<PlatformConfig> loadPlatformConfig(String appName) async {
-  final List<String> items = await Future.wait([
-    getApplicationDocumentsDirectory().then((directory) => directory.path),
-    rootBundle.loadString('assets/config/platform_config.json'),
+typedef JsonMap = Map<String, dynamic>;
+
+Future<Directory> getDirectory() async {
+  if (CurrentPlatform.isAndroid()) {
+    return getExternalStorageDirectories(type: StorageDirectory.pictures).then((directories) {
+      logger.d(directories);
+      return directories!.first;
+    });
+  } else {
+    return getApplicationDocumentsDirectory();
+  }
+}
+
+Future<JsonMap> loadNativeConfig(String appName) async {
+  JsonMap config = {"chara_detail": {}};
+
+  await Future.wait([
+    getDirectory()
+        .then((directory) => config["chara_detail"]["scraping_dir"] = '${directory.path}/$appName/capture/scraping'),
+    rootBundle
+        .loadString('assets/config/chara_detail/scene_context.json')
+        .then((text) => config["chara_detail"]["scene_context"] = jsonDecode(text)),
+    rootBundle
+        .loadString('assets/config/chara_detail/scene_scraper.json')
+        .then((text) => config["chara_detail"]["scene_scraper"] = jsonDecode(text)),
+    rootBundle.loadString('assets/config/platform.json').then((text) => config["platform"] = jsonDecode(text)),
   ]);
-  final configBase = JsonMapper.deserialize<PlatformConfig>(
-    items[1],
-    const DeserializationOptions(
-      caseStyle: CaseStyle.snake,
-    ),
-  );
-  return configBase!.copyWith(directory: items[0] + '/$appName/capture/temp');
+
+  return config;
 }
 
 void main() async {
@@ -36,12 +56,12 @@ void main() async {
   initializeJsonMapper(adapters: [flutterTypesAdapter]);
   final packageInfo = await PackageInfo.fromPlatform();
   await StorageBox.ensureOpened(packageInfo.appName, reset: false);
-  final platformConfig = await loadPlatformConfig(packageInfo.appName);
+  final nativeConfig = await loadNativeConfig(packageInfo.appName);
 
   if (CurrentPlatform.hasWindowFrame()) {
     await windowManager.ensureInitialized();
     windowManager.waitUntilReadyToShow(
-      WindowOptions(
+      const WindowOptions(
         titleBarStyle: TitleBarStyle.hidden,
       ),
       () async {
@@ -65,7 +85,7 @@ void main() async {
   runApp(ProviderScope(
     observers: [ProviderLogger()],
     overrides: [
-      platformControllerProvider.overrideWithProvider(Provider((ref) => PlatformController(ref, platformConfig))),
+      platformControllerProvider.overrideWithProvider(Provider((ref) => PlatformController(ref, nativeConfig))),
     ],
     child: App(),
   ));

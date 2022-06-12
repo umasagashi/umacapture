@@ -8,10 +8,11 @@
 
 #include <opencv2/opencv.hpp>
 
-#include "../../native/src/util/eventpp_util.h"
-#include "../../native/src/util/json_utils.h"
-#include "../../native/src/util/thread_util.h"
-#include "../../native/src/util/common.h"
+#include "types/shape.h"
+#include "util/common.h"
+#include "util/eventpp_util.h"
+#include "util/json_utils.h"
+#include "util/thread_util.h"
 
 namespace cv {
 
@@ -59,14 +60,15 @@ struct WindowRecorder {
 namespace {
 
 inline Size<int> getCircumscribedSize(const Size<int> &source, const Size<int> &fitTo) {
-    const float scale = std::max(float(fitTo.width()) / float(source.width()), float(fitTo.height()) / float(source.height()));
-    return {int(std::round(float(source.width()) * scale)), int(std::round(float(source.height()) * scale))};
+    const auto sd = source.cast<double>();
+    const auto fd = fitTo.cast<double>();
+    return (sd * std::max(fd.width() / sd.width(), fd.height() / sd.height())).round();
 }
 
 class WindowCapturer {
 public:
-    WindowCapturer(config::WindowProfile window_profile, const Size<int> &minimum_size)
-        : window_profile(std::move(window_profile))
+    WindowCapturer(const config::WindowProfile &window_profile, const Size<int> &minimum_size)
+        : window_profile(window_profile)
         , minimum_size(minimum_size) {}
 
     [[nodiscard]] cv::Mat capture() {
@@ -136,13 +138,14 @@ private:
         bitmap_header.biClrUsed = 0;
         bitmap_header.biClrImportant = 0;
 
-        GetDIBits(window_dc,
-                  bitmap,
-                  0,
-                  bitmap_info.bmHeight,
-                  plain_mat.data,
-                  reinterpret_cast<BITMAPINFO *>(&bitmap_header),
-                  DIB_RGB_COLORS);
+        GetDIBits(
+            window_dc,
+            bitmap,
+            0,
+            bitmap_info.bmHeight,
+            plain_mat.data,
+            reinterpret_cast<BITMAPINFO *>(&bitmap_header),
+            DIB_RGB_COLORS);
 
         cv::resize(plain_mat, scaled_mat, scaled_mat.size(), cv::INTER_LINEAR);
 
@@ -187,9 +190,12 @@ private:
 
 class RecordingThread : public threading::ThreadBase {
 public:
-    RecordingThread(connection::Sender<const cv::Mat &, uint64_t> sender, const config::WindowProfile &window_profile,
-                    const Size<int> &minimum_size, int fps)
-        : sender(std::move(sender))
+    RecordingThread(
+        const connection::Sender<cv::Mat, uint64_t> &sender,
+        const config::WindowProfile &window_profile,
+        const Size<int> &minimum_size,
+        int fps)
+        : sender(sender)
         , capturer(std::make_unique<WindowCapturer>(window_profile, minimum_size))
         , minimum_size(minimum_size)
         , time_keeper(fps) {}
@@ -213,7 +219,8 @@ public:
 
 protected:
     void run() override {
-        std::cout << __FUNCTION__ << " started" << std::endl;
+        log_debug("started");
+
         time_keeper.start();
         while (isRunning()) {
             time_keeper.waitLap();
@@ -222,11 +229,12 @@ protected:
                 sender->send(frame, chrono::timestamp());
             }
         }
-        std::cout << __FUNCTION__ << " finished" << std::endl;
+
+        log_debug("finished");
     }
 
 private:
-    const connection::Sender<const cv::Mat &, uint64_t> sender;
+    const connection::Sender<cv::Mat, uint64_t> sender;
     std::unique_ptr<WindowCapturer> capturer;
     const Size<int> minimum_size;
     TimeKeeper time_keeper;
@@ -238,8 +246,8 @@ namespace recording {
 
 class WindowRecorder {
 public:
-    explicit WindowRecorder(connection::Sender<const cv::Mat &, uint64_t> sender)
-        : frame_captured(std::move(sender)) {}
+    explicit WindowRecorder(const connection::Sender<cv::Mat, uint64_t> &sender)
+        : frame_captured(sender) {}
 
     ~WindowRecorder() {
         if (recording_thread) {
@@ -252,10 +260,11 @@ public:
             assert(config.recording_fps.has_value());
             assert(config.minimum_size.has_value());
             assert(config.window_profile.has_value());
-            recording_thread = std::make_unique<RecordingThread>(frame_captured,
-                                                                 config.window_profile.value(),
-                                                                 config.minimum_size.value(),
-                                                                 config.recording_fps.value());
+            recording_thread = std::make_unique<RecordingThread>(
+                frame_captured,
+                config.window_profile.value(),
+                config.minimum_size.value(),
+                config.recording_fps.value());
         } else {
             if (config.recording_fps.has_value()) {
                 recording_thread->setFps(config.recording_fps.value());
@@ -267,22 +276,22 @@ public:
     }
 
     void startRecord() {
-        std::cout << __FUNCTION__ << std::endl;
-
+        log_debug("");
         assert(recording_thread);
+
         recording_thread->start();
     }
 
     void stopRecord() {
-        std::cout << __FUNCTION__ << std::endl;
-
+        log_debug("");
         assert(recording_thread);
+
         recording_thread->join();
     }
 
 private:
     std::unique_ptr<RecordingThread> recording_thread;
-    connection::Sender<const cv::Mat &, uint64_t> frame_captured;
+    connection::Sender<cv::Mat, uint64_t> frame_captured;
 };
 
 }  // namespace recording

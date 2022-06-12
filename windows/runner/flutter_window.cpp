@@ -1,24 +1,31 @@
-#include <filesystem>
 #include <fstream>
 #include <optional>
-#include <string>
 
 #include <flutter/generated_plugin_registrant.h>
-#include <runner/platform_channel.h>
-#include <runner/windows_config.h>
 
-#include "../../native/src/native_api.h"
+#include "runner/platform_channel.h"
 #include "util/json_utils.h"
+#include "util/logger_util.h"
 
 #include "flutter_window.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject &project)
     : project_(project) {
+    logger_util::init();
+
+    vlog_trace(1, 2, 3);
+    vlog_debug(1, 2, 3);
+    vlog_info(1, 2, 3);
+    vlog_warning(1, 2, 3);
+    vlog_error(1, 2, 3);
+    vlog_fatal(1, 2, 3);
 }
 
 FlutterWindow::~FlutterWindow() = default;
 
 bool FlutterWindow::OnCreate() {
+    log_debug("");
+
     if (!Win32Window::OnCreate()) {
         return false;
     }
@@ -35,74 +42,22 @@ bool FlutterWindow::OnCreate() {
     }
     RegisterPlugins(flutter_controller_->engine());
 
-    auto connection = connection::make_connection<connection::QueuedConnection<const cv::Mat &, uint64>>();
-    window_recorder = std::make_unique<recording::WindowRecorder>(connection);
-
-    channel = std::make_unique<channel::PlatformChannel>(flutter_controller_->engine(), GetHandle());
-
-    channel->addMethodCallHandler("setConfig", [this](const auto &config_string) {
-        std::cout << "setConfig: " << config_string << std::endl;
-        NativeApi::instance().setConfig(config_string);
-
-        const auto config_json = json_utils::Json::parse(config_string);
-
-        const auto directory_config_json = config_json.find("directory");
-        if (directory_config_json != config_json.end()) {
-            const auto directory_config = directory_config_json->template get<std::string>();
-            std::cout << "directory_config: " << directory_config << std::endl;
-            std::filesystem::remove_all(directory_config);
-            std::filesystem::create_directories(directory_config);
-        }
-
-        const auto windows_config_json = config_json.find("windows_config");
-        if (windows_config_json == config_json.end()) {
-            return;
-        }
-        std::cout << "windows_config: " << (*windows_config_json) << std::endl;
-
-        const auto windows_config = windows_config_json->template get<config::WindowsConfig>();
-        std::cout << "windows_config: " << json_utils::Json(windows_config).dump(1) << std::endl;
-        if (windows_config.window_recorder.has_value()) {
-            window_recorder->setConfig(windows_config.window_recorder.value());
-        }
-    });
-
-    channel->addMethodCallHandler("startCapture", [this]() {
-        std::cout << "startCapture" << std::endl;
-        window_recorder->startRecord();
-
-        // In Windows, start operation will never be canceled.
-        NativeApi::instance().notifyCaptureStarted();
-    });
-
-    channel->addMethodCallHandler("stopCapture", [this]() {
-        std::cout << "stopCapture" << std::endl;
-        window_recorder->stopRecord();
-        NativeApi::instance().notifyCaptureStopped();
-    });
-
-    auto &api = NativeApi::instance();
-    api.setCallback([this](const auto &message) {
-        std::cout << "notify: " << message << std::endl;
-        channel->notify(message);
-    });
-    api.startEventLoop();
-
-    connection->listen([&api](const auto &frame, uint64_t timestamp) { api.updateFrame(frame, timestamp); });
-    recorder_runner = connection::make_runner(connection);
-    recorder_runner->start();
+    platform_channel = std::make_shared<channel::PlatformChannel>(flutter_controller_->engine(), GetHandle());
+    native_controller = std::make_unique<NativeController>(platform_channel);
 
     SetChildContent(flutter_controller_->view()->GetNativeWindow());
     return true;
 }
 
 void FlutterWindow::OnDestroy() {
-    if (recorder_runner) {
-        recorder_runner = nullptr;
+    log_debug("");
+
+    if (native_controller) {
+        native_controller = nullptr;
     }
 
-    if (channel) {
-        channel = nullptr;
+    if (platform_channel) {
+        platform_channel = nullptr;
     }
 
     if (flutter_controller_) {
@@ -122,8 +77,8 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message, WPARAM const wparam
         }
     }
 
-    if (channel) {
-        std::optional<LRESULT> result = channel->handleMessage(hwnd, message, wparam, lparam);
+    if (platform_channel) {
+        std::optional<LRESULT> result = platform_channel->handleMessage(hwnd, message, wparam, lparam);
         if (result) {
             return *result;
         }
