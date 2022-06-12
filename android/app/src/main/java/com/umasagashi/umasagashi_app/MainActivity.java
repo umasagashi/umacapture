@@ -4,27 +4,16 @@ import android.app.ActivityManager;
 import android.content.Context;
 import android.content.Intent;
 import android.media.projection.MediaProjectionManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresApi;
-
-import org.json.JSONException;
-import org.json.JSONObject;
-
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 import io.flutter.Log;
 import io.flutter.embedding.android.FlutterActivity;
 import io.flutter.embedding.engine.FlutterEngine;
 
-@RequiresApi(api = Build.VERSION_CODES.R)
 public class MainActivity extends FlutterActivity {
     private static final String LOG_TAG = "MainActivity";
     private static final int SCREEN_CAPTURE_REQUEST_CODE = 10001;
@@ -82,20 +71,9 @@ public class MainActivity extends FlutterActivity {
 
     private void stopCapture() {
         if (!isCaptureRunning()) {
-            Toast.makeText(this, "Capture is not running", Toast.LENGTH_SHORT).show();
+            Log.d(LOG_TAG, "Capture is not running");
             return;
         }
-
-        // for debug
-        try {
-            final JSONObject configJson = new JSONObject(config);
-            Path directory = Paths.get(configJson.getString("directory"));
-            Files.deleteIfExists(directory);
-            Files.createDirectory(directory);
-        } catch (JSONException | IOException e) {
-            e.printStackTrace();
-        }
-
         stopService(new Intent(getApplication(), ScreenCaptureService.class));
     }
 
@@ -103,16 +81,24 @@ public class MainActivity extends FlutterActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         Log.d(LOG_TAG, "onCreate");
         super.onCreate(savedInstanceState);
-
         broadcast = new BroadcastChannel(this, MainActivity.class, (arg) -> platform.notify(arg));
     }
 
     @Override
     protected void onDestroy() {
         Log.d(LOG_TAG, "onDestroy");
-        super.onDestroy();
-
+        stopCapture();
         broadcast.unregister();
+        super.onDestroy();
+        Log.d(LOG_TAG, "onDestroy finished");
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (isCaptureRunning()) {
+            return;
+        }
+        super.onBackPressed();
     }
 
     @Override
