@@ -38,21 +38,21 @@ class WindowsConfig {
 }
 
 @jsonSerializable
-class PlatformConfig {
-  final WindowsConfig? windowsConfig;
+class NativeConfig {
+  final WindowsConfig? windows;
   final String? directory;
 
-  const PlatformConfig({
-    this.windowsConfig,
+  const NativeConfig({
+    this.windows,
     this.directory,
   });
 
-  PlatformConfig copyWith({
-    windowsConfig,
+  NativeConfig copyWith({
+    windows,
     directory,
   }) {
-    return PlatformConfig(
-      windowsConfig: windowsConfig ?? this.windowsConfig,
+    return NativeConfig(
+      windows: windows ?? this.windows,
       directory: directory ?? this.directory,
     );
   }

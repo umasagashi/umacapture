@@ -1,12 +1,12 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../gui/capture.dart';
 import '../gui/toast.dart';
-import '../preference/platform_config.dart';
+
+// import '../preference/platform_config.dart';
 import 'platform_channel.dart';
 
 final platformControllerProvider = Provider<PlatformController>((ref) {
@@ -22,24 +22,12 @@ class PlatformController {
   final StreamController<ToastData> _streamController;
   final PlatformChannel _platformChannel;
 
-  PlatformController(Ref ref, PlatformConfig initialConfig)
+  PlatformController(Ref ref, Map<String, dynamic> config)
       : _ref = ref,
         _streamController = StreamController<ToastData>.broadcast(),
         _platformChannel = PlatformChannel() {
-    _platformChannel.setCallback((message) {
-      _handleMessage(message);
-    });
-
-    _platformChannel.setConfig(
-      JsonMapper.serialize(
-        initialConfig,
-        const SerializationOptions(
-          indent: null,
-          caseStyle: CaseStyle.snake,
-          ignoreNullMembers: true,
-        ),
-      ),
-    );
+    _platformChannel.setCallback((message) => _handleMessage(message));
+    _platformChannel.setConfig(jsonEncode(config));
 
     final autoStart = ref.read(autoStartCaptureStateProvider);
     final isCapturing = ref.read(capturingStateProvider);
@@ -72,7 +60,7 @@ class PlatformController {
 
   Stream<ToastData> get stream => _streamController.stream;
 
-  void setConfig(String config) => _platformChannel.setConfig(config);
+  // void setConfig(String config) => _platformChannel.setConfig(config);
 
   void startCapture() => _platformChannel.startCapture();
 

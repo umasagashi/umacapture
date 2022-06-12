@@ -7,7 +7,7 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
-#include "../../native/src/util/eventpp_util.h"
+#include "util/eventpp_util.h"
 
 namespace {
 
@@ -39,7 +39,9 @@ public:
                 }
             });
 
-        notify_connection = connection::make_connection<connection::QueuedConnection<const std::string &>>();
+        const auto notify_connection = connection::makeQueuedConnection<std::string>();
+        on_notify = notify_connection;
+        message_processor = notify_connection;
         notify_connection->listen([this](const std::string &message) {
             channel->InvokeMethod("notify", std::make_unique<flutter::EncodableValue>(message));
         });
@@ -54,13 +56,13 @@ public:
     }
 
     void notify(const std::string &message) {
-        notify_connection->send(message);
+        on_notify->send(message);
         ::PostMessage(flutter_handle, MESSAGE_QUEUE_ID, 0, 0);
     }
 
     std::optional<LRESULT> handleMessage(HWND, UINT message, WPARAM, LPARAM) {
         if (message == MESSAGE_QUEUE_ID) {
-            notify_connection->process();
+            message_processor->processAll();
             return 0;
         } else {
             return {std::nullopt};
@@ -71,7 +73,8 @@ private:
     HWND flutter_handle;
     std::unique_ptr<flutter::MethodChannel<>> channel;
     std::map<std::string, std::function<void(const std::string &)>> method_map;
-    connection::QueuedConnection<const std::string &> notify_connection;
+    connection::Sender<std::string> on_notify;
+    connection::EventProcessor message_processor;
 };
 
 }  // namespace channel

@@ -5,9 +5,10 @@
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
-#include <runner/platform_channel.h>
 #include <runner/win32_window.h>
-#include <runner/window_recorder.h>
+
+#include "runner/native_controller.h"
+#include "runner/platform_channel.h"
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -32,9 +33,8 @@ private:
     // The Flutter instance hosted by this window.
     std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
-    std::unique_ptr<channel::PlatformChannel> channel;
-    std::unique_ptr<recording::WindowRecorder> window_recorder;
-    connection::EventLoopRunner recorder_runner;
+    std::shared_ptr<channel::PlatformChannel> platform_channel;
+    std::unique_ptr<NativeController> native_controller;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
