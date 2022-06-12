@@ -94,16 +94,11 @@ class EventRunnerThread : public threading::ThreadBase {
 public:
     EventRunnerThread(
         const std::shared_ptr<EventProcessorInterface> &processor,
-        const std::function<void()> &finalizer,
+        const std::function<void()> &detach,
         const std::string &name)
         : processor(processor)
-        , finalizer(finalizer)
-        , name(name) {
-        std::cout << __FUNCTION__ << std::endl;
-        std::cout << "finalizer: " << finalizer.target_type().name() << " " << bool(finalizer) << " "
-                  << "finalizer: " << this->finalizer.target_type().name() << " " << bool(this->finalizer) << " "
-                  << std::this_thread::get_id() << name << std::endl;
-    }
+        , detach(detach)
+        , name(name) {}
 
 protected:
     void run() override {
@@ -114,8 +109,8 @@ protected:
             processor->processAll();
         }
 
-        if (finalizer) {
-            finalizer();
+        if (detach) {
+            detach();
         }
 
         log_debug("finished {}", name);
@@ -124,7 +119,7 @@ protected:
 private:
     const std::string name;
     const std::shared_ptr<EventProcessorInterface> processor;
-    const std::function<void(void)> finalizer;
+    const std::function<void(void)> detach;
     const int loopTimeoutMilliseconds = 8;
 };
 
@@ -184,44 +179,6 @@ private:
     std::shared_ptr<EventRunnerThread> runner;
 };
 
-class MultiThreadMultiEventRunnerImpl : public EventRunnerInterface {
-public:
-    ~MultiThreadMultiEventRunnerImpl() override { assert_(!is_running); }
-
-    template<typename... Args>
-    std::shared_ptr<ConnectionInterface<Args...>>
-    makeConnection(const std::function<void()> &finalizer, const std::string &name) {
-        assert_(!isRunning());
-        auto connection = std::make_shared<QueuedConnectionImpl<Args...>>();
-        runners.push_back(std::make_shared<EventRunnerThread>(connection, finalizer, name));
-        return connection;
-    }
-
-    void start() override {
-        vlog_debug(isRunning());
-        assert_(!isRunning());
-        for (const auto &r : runners) {
-            r->start();
-        }
-        is_running = true;
-    }
-
-    void join() override {
-        vlog_debug(isRunning());
-        assert_(isRunning());
-        for (const auto &r : runners) {
-            r->join();
-        }
-        is_running = false;
-    }
-
-    [[nodiscard]] bool isRunning() const override { return is_running; }
-
-private:
-    std::vector<std::unique_ptr<EventRunnerThread>> runners;
-    bool is_running = false;
-};
-
 class EventRunnerController : public EventRunnerInterface {
 public:
     ~EventRunnerController() override { assert_(!is_running); }
@@ -269,44 +226,30 @@ using Listener = std::shared_ptr<::ListenerInterface<Args...>>;
 template<typename... Args>
 using Connection = std::shared_ptr<::ConnectionInterface<Args...>>;
 
+using EventProcessor = std::shared_ptr<::EventProcessorInterface>;
 using EventRunner = std::shared_ptr<::EventRunnerInterface>;
 
-//template<typename... Args>
-//using DirectConnection = std::shared_ptr<::DirectConnectionImpl<Args...>>;
-
-//template<typename... Args>
-//using QueuedConnection = std::shared_ptr<::QueuedConnectionImpl<Args...>>;
-
-//template<typename SharedPointerType>
-//inline SharedPointerType makeConnection() {
-//    return std::make_shared<typename SharedPointerType::element_type>();
-//}
+template<typename... Args>
+using QueuedConnection = std::shared_ptr<::QueuedConnectionImpl<Args...>>;
 
 template<typename... Args>
 inline Connection<Args...> makeDirectConnection() {
     return std::make_shared<DirectConnectionImpl<Args...>>();
 }
 
+template<typename... Args>
+[[maybe_unused]] inline QueuedConnection<Args...> makeQueuedConnection() {
+    return std::make_shared<QueuedConnectionImpl<Args...>>();
+}
+
 namespace event_runner {
 
 using SingleThreadMultiEventRunner = std::shared_ptr<::SingleThreadMultiEventRunnerImpl>;
-using MultiThreadMultiEventRunner = std::shared_ptr<::MultiThreadMultiEventRunnerImpl>;
 
 inline SingleThreadMultiEventRunner
 makeSingleThreadRunner(const std::function<void()> &finalizer, const std::string &name) {
     return std::make_shared<SingleThreadMultiEventRunnerImpl>(finalizer, name);
 }
-
-inline MultiThreadMultiEventRunner makeMultiThreadRunner() {
-    return std::make_shared<MultiThreadMultiEventRunnerImpl>();
-}
-
-//inline EventRunner makeRunner(
-//    const std::shared_ptr<EventProcessorInterface> &processor,
-//    const std::function<void()> &finalizer,
-//    const std::string &name) {
-//    return std::make_shared<EventRunnerImpl>(processor, finalizer, name);
-//}
 
 }  // namespace event_runner
 

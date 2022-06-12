@@ -51,4 +51,23 @@ inline bool any_of(const Container &container) {
     return std::any_of(container.begin(), container.end(), identical<bool>);
 }
 
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "UnusedParameter"
+#pragma ide diagnostic ignored "UnusedLocalVariable"
+template<
+    typename Container,
+    typename Function,
+    typename Predicate,
+    typename T = typename std::invoke_result<Function, typename Container::const_reference>::type>
+inline std::optional<T> find_transformed_if(const Container &container, Function func, Predicate pred) {
+    for (const auto &item : container) {
+        const auto &mapped = func(item);
+        if (pred(mapped)) {
+            return mapped;
+        }
+    }
+    return std::nullopt;
+}
+#pragma clang diagnostic pop
+
 }  // namespace stds

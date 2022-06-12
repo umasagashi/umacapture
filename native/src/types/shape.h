@@ -13,11 +13,11 @@ enum LayoutAnchor {
     IntersectStart,
     IntersectEnd,
 };
-EXTENDED_JSON_TYPE_ENUM(LayoutAnchor, ScreenStart, ScreenEnd, IntersectStart, IntersectEnd);
+EXTENDED_JSON_TYPE_ENUM(LayoutAnchor, ScreenStart, ScreenEnd, IntersectStart, IntersectEnd)
 
 class Anchor {
 public:
-    Anchor(LayoutAnchor h, LayoutAnchor v) noexcept
+    [[maybe_unused]] Anchor(LayoutAnchor h, LayoutAnchor v) noexcept
         : h_(h)
         , v_(v) {}
 
@@ -83,13 +83,9 @@ public:
         return {x_ - other.x_, y_ - other.y_, anchor_};
     }
 
-    inline Point<T> operator*(const T &other) const {
-        return {x_ * other, y_ * other, anchor_};
-    }
+    inline Point<T> operator*(const T &other) const { return {x_ * other, y_ * other, anchor_}; }
 
-    inline Point<T> operator/(const T &other) const {
-        return {x_ / other, y_ / other, anchor_};
-    }
+    inline Point<T> operator/(const T &other) const { return {x_ / other, y_ / other, anchor_}; }
 
     [[nodiscard]] double distance(const Point<T> &other) const {
         assert_(anchor_ == other.anchor_);
@@ -119,7 +115,7 @@ public:
     [[nodiscard]] inline T width() const { return width_; }
     [[nodiscard]] inline T height() const { return height_; }
 
-    [[nodiscard]] inline cv::Size_<T> toCVSize() const { return {width_, height_}; }
+    [[maybe_unused]] [[nodiscard]] inline cv::Size_<T> toCVSize() const { return {width_, height_}; }
     [[nodiscard]] inline Point<T> toPoint() const { return {width_, height_}; }
 
     template<typename S>
@@ -168,7 +164,7 @@ public:
 
     [[nodiscard]] inline double length() const { return std::abs(p2_ - p1_); }
 
-    [[nodiscard]] inline Line1D<T> reversed() const { return {p2_, p1_}; }
+    //    [[nodiscard]] inline Line1D<T> reversed() const { return {p2_, p1_}; }
 
     inline Line1D<T> operator-(const Line1D<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
 

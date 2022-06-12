@@ -45,7 +45,7 @@ inline void init() {
 #else
     spdlog::sinks_init_list sinks = {
         std::make_shared<spdlog::sinks::stdout_color_sink_mt>(),
-        std::make_shared<spdlog::sinks::basic_file_sink_mt>("log.txt", true),
+        std::make_shared<spdlog::sinks::basic_file_sink_mt>("./sandbox/log.txt", true),  // TODO: Path.
     };
     spdlog::set_default_logger(std::make_shared<spdlog::logger>(logger_name, sinks));
     spdlog::set_pattern("%^%L%$ %T.%f [%t] [%!:%#] %v");
@@ -61,6 +61,9 @@ inline void init() {
 #define INTERNAL_EXPAND_NAME(var) #var "={}, "
 #define INTERNAL_VLOG(...) NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXPAND_NAME, __VA_ARGS__)), __VA_ARGS__
 
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "OCUnusedMacroInspection"
+
 #define vlog_trace(...) SPDLOG_TRACE(INTERNAL_VLOG(__VA_ARGS__))
 #define vlog_debug(...) SPDLOG_DEBUG(INTERNAL_VLOG(__VA_ARGS__))
 #define vlog_info(...) SPDLOG_INFO(INTERNAL_VLOG(__VA_ARGS__))
@@ -74,3 +77,5 @@ inline void init() {
 #define log_warning(...) SPDLOG_WARN(__VA_ARGS__)
 #define log_error(...) SPDLOG_ERROR(__VA_ARGS__)
 #define log_fatal(...) SPDLOG_CRITICAL(__VA_ARGS__)
+
+#pragma clang diagnostic pop

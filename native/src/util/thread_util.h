@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "util/common.h"
+#include "util/logger_util.h"
 
 namespace threading {
 
@@ -17,7 +18,7 @@ public:
         , thread(nullptr) {}
 
     virtual ~ThreadBase() {
-        std::cout << __FUNCTION__ << std::endl;
+        log_debug("");
         assert_(!isRunning());  // Call the join before deleting.
     }
 
@@ -64,7 +65,8 @@ public:
     ~Timer() { cancel(); }
 
     void cancel() {
-        std::cout << __FUNCTION__ << std::endl;
+        log_debug("");
+
         {
             std::lock_guard<std::mutex> lock(condition_mutex);
             cancelRequested = true;
@@ -104,22 +106,22 @@ private:
     }
 
     void run(std::chrono::steady_clock::time_point timeout) {
-        std::cout << __FUNCTION__ << " started" << std::endl;
+        log_debug("started: {}", cancelRequested);
 
         std::unique_lock<std::mutex> cancel_lock(condition_mutex);
         if (condition.wait_until(cancel_lock, timeout, [&]() { return cancelRequested; })) {
-            std::cout << "on_canceled: " << cancelRequested << std::endl;
+            log_debug("canceled: {}", cancelRequested);
             expired = false;
             if (on_canceled != nullptr) {
                 on_canceled();
             }
         } else {
-            std::cout << "on_expired: " << cancelRequested << std::endl;
+            log_debug("expired: {}", cancelRequested);
             expired = true;
             on_expired();
         }
 
-        std::cout << __FUNCTION__ << " finished" << std::endl;
+        log_debug("finished: {}", cancelRequested);
     }
 
 private:
@@ -130,7 +132,7 @@ private:
     std::mutex condition_mutex;
 
     bool cancelRequested = false;
-    std::optional<bool> expired;
+    std::optional<bool> expired = std::nullopt;
 
     const std::chrono::milliseconds duration;
     const std::function<void()> on_expired;

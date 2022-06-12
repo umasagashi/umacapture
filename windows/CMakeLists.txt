@@ -33,7 +33,15 @@ add_definitions(-DUNICODE -D_UNICODE)
 # Compilation settings that should be applied to most targets.
 function(APPLY_STANDARD_SETTINGS TARGET)
     target_compile_features(${TARGET} PUBLIC cxx_std_17)
-    target_compile_options(${TARGET} PRIVATE /W4 /WX /wd4100 /wd4819 /wd5054 /wd4068)
+    target_compile_options(${TARGET} PRIVATE
+            /W4
+            /WX
+            /wd4068
+            /wd4100
+            /wd4459
+            /wd4819
+            /wd5054
+            )
     target_compile_options(${TARGET} PRIVATE /EHsc)
     target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
     target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")

@@ -10,7 +10,7 @@
 
 class LineMeasurer {
 public:
-    LineMeasurer(const Line<double> &line, const Range<Color> &color_deviation) noexcept
+    [[maybe_unused]] LineMeasurer(const Line<double> &line, const Range<Color> &color_deviation) noexcept
         : line(line)
         , color_deviation(color_deviation) {}
 

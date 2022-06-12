@@ -50,6 +50,7 @@ std::vector<ConditionBase> conditionArrayFromJson(const json_utils::Json &j) {
 
 json_utils::Json conditionArrayToJson(const std::vector<ConditionBase> &conditions) {
     std::vector<json_utils::Json> out;
+    out.reserve(conditions.size());
     for (const auto &item : conditions) {
         out.push_back(item->toJson());
     }
