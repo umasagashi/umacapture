@@ -10,51 +10,48 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.PixelFormat;
-import android.hardware.HardwareBuffer;
 import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjectionManager;
-import android.os.Build;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.util.Size;
 import android.view.WindowManager;
 
 import androidx.annotation.Nullable;
-import androidx.annotation.RequiresApi;
 
 import java.nio.ByteBuffer;
 
 import io.flutter.Log;
 
-@RequiresApi(api = Build.VERSION_CODES.R)
 public class ScreenCaptureService extends Service implements ImageReader.OnImageAvailableListener {
     private static final String LOG_TAG = "ScreenCapture";
     private static final String VIRTUAL_DISPLAY_ID = "umasagashi_app_virtual_display";
     private static final String NOTIFICATION_CHANNEL_ID = "umasagashi_app_capture";
-    private static final String NOTIFICATION_TITLE = "Title Here";
-    private static final String NOTIFICATION_DESCRIPTION = "Description Here";
     private static final int REQUEST_CODE = 1234;
 
-    private ImageReader mImageReader;
-    private final Size minimumSize = new Size(540, 960);
+    private static final String NOTIFICATION_TITLE = "Title Here";
+    private static final String NOTIFICATION_DESCRIPTION = "Description Here";
 
-    public native void initializeNativeCounterpart(String config);
+    private ImageReader mImageReader;
+    private VirtualDisplay mVirtualDisplay;
+    private final Size minimumSize = new Size(540, 960);
 
     public native void updateNativeFrame(ByteBuffer frame, int width, int height, int rowStride, int scaledWidth, int scaledHeight);
 
-    public native void startEventLoop();
+    public native void startEventLoop(String config);
 
     public native void joinEventLoop();
+
+    public native boolean isRunning();
 
     public native void notifyCaptureStarted();
 
     public native void notifyCaptureStopped();
 
     public void notifyPlatform(String arg) {
-        Log.d(LOG_TAG, String.format("notifyPlatform %s", arg));
-
         BroadcastChannel.send(getBaseContext(), MainActivity.class, arg);
     }
 
@@ -95,8 +92,7 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
         Log.d(LOG_TAG, "onStartCommand");
 
         final String config = captureIntent.getStringExtra("config");
-        Log.d(LOG_TAG, "config " + config);
-        initializeNativeCounterpart(config);
+        startEventLoop(config);
         notifyCaptureStarted();
 
         startForeground(1, createNotification());
@@ -105,12 +101,10 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
         ((WindowManager) getSystemService(WINDOW_SERVICE)).getDefaultDisplay().getRealMetrics(metrics);
         Log.d(LOG_TAG, "getRealMetrics " + metrics);
 
-        mImageReader = ImageReader.newInstance(
-            metrics.widthPixels, metrics.heightPixels, PixelFormat.RGBA_8888,
-            2, HardwareBuffer.USAGE_CPU_READ_OFTEN);
+        mImageReader = ImageReader.newInstance(metrics.widthPixels, metrics.heightPixels, PixelFormat.RGBA_8888, 4);
         mImageReader.setOnImageAvailableListener(this, null);
 
-        ((MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE))
+        mVirtualDisplay = ((MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE))
             .getMediaProjection(Activity.RESULT_OK, captureIntent.getParcelableExtra("mediaProjectionIntent"))
             .createVirtualDisplay(
                 VIRTUAL_DISPLAY_ID,
@@ -125,23 +119,31 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
     @Override
     public void onCreate() {
         Log.d(LOG_TAG, "onCreate");
-        startEventLoop();
         super.onCreate();
     }
 
     @Override
     public void onDestroy() {
         Log.d(LOG_TAG, "onDestroy");
+        mVirtualDisplay.getSurface().release();
+        mVirtualDisplay.release();
+        mImageReader.getSurface().release();
         mImageReader.close();
         joinEventLoop();
         notifyCaptureStopped();
         super.onDestroy();
+        Log.d(LOG_TAG, "onDestroy finished");
     }
 
     @Override
     public void onImageAvailable(ImageReader imageReader) {
         final Image image = imageReader.acquireLatestImage();
         if (image == null) {
+            return;
+        }
+
+        if (!isRunning()) {
+            image.close();
             return;
         }
 
@@ -161,12 +163,12 @@ public class ScreenCaptureService extends Service implements ImageReader.OnImage
         final int height = imageReader.getHeight();
         final int rowStride = plane.getRowStride();
 
-        final float scale = Math.max(
-            (float) minimumSize.getWidth() / width,
-            (float) minimumSize.getHeight() / height
+        final double scale = Math.max(
+            (double) minimumSize.getWidth() / width,
+            (double) minimumSize.getHeight() / height
         );
-        final int scaledWidth = Math.round((float) width * scale);
-        final int scaledHeight = Math.round((float) height * scale);
+        final int scaledWidth = (int) Math.round((double) width * scale);
+        final int scaledHeight = (int) Math.round((double) height * scale);
 
         updateNativeFrame(buffer, width, height, rowStride, scaledWidth, scaledHeight);
 

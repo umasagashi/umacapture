@@ -11,13 +11,12 @@ project(umasagashi_app)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(NATIVE_EXTENSION_DIR
-        "${CMAKE_CURRENT_LIST_DIR}/../../../../../native/src")
+set(NATIVE_EXTENSION_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../../native")
 
 set(SOURCE_FILES
         umasagashi_app.cpp
-        ${NATIVE_EXTENSION_DIR}/native_api.h
-        ${NATIVE_EXTENSION_DIR}/native_api.cpp
+        "${NATIVE_EXTENSION_DIR}/src/native_api.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/condition/serializer.cpp"
         )
 
 # Creates and names a library, sets it as either STATIC
@@ -34,6 +33,14 @@ add_library( # Sets the name of the library.
         # Provides a relative path to your source file(s).
         ${SOURCE_FILES})
 
+target_include_directories(${PROJECT_NAME} PRIVATE
+        "${NATIVE_EXTENSION_DIR}/src"
+        "${NATIVE_EXTENSION_DIR}/vendor"
+        )
+
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+        SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
+        )
 
 set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../sdk/native/jni")
 
@@ -68,8 +75,3 @@ target_link_libraries( # Specifies the target library.
         # Links the target library to the log library
         # included in the NDK.
         ${log-lib})
-
-target_include_directories(
-        ${PROJECT_NAME}
-        PRIVATE
-        "${NATIVE_EXTENSION_DIR}")
