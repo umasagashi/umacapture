@@ -115,8 +115,7 @@ void NativeApi::notifyCaptureStopped() {
 }
 
 [[maybe_unused]] void NativeApi::_dummyForSuppressingUnusedWarning() {
-    log_trace("Do not use this method.");
-    assert_(false);
+    log_fatal("Do not use this method.");
     NativeApi::instance();
     startEventLoop({});
     joinEventLoop();

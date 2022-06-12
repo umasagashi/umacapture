@@ -12,7 +12,7 @@ public:
         std::filesystem::create_directories("./temp");
     }
 
-    void runBatch(const std::vector<std::filesystem::path> &files) const {
+    [[maybe_unused]] void runBatch(const std::vector<std::filesystem::path> &files) const {
         for (const auto &path : files) {
             run(path);
         }
@@ -47,5 +47,5 @@ private:
         cv::imwrite(stream.str(), mat);
     }
 
-    const connection::Sender<cv::Mat, uint64> on_frame_captured;
+    const connection::Sender<cv::Mat, uint64> on_frame_captured{};
 };

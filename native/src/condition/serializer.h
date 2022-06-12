@@ -24,7 +24,7 @@ public:
     const std::string target_type;  // TODO: This is for debug.
 
 private:
-    Builder(const std::string &type, const std::function<Base(const json_utils::Json &)> &func)
+    [[maybe_unused]] Builder(const std::string &type, const std::function<Base(const json_utils::Json &)> &func)
         : target_type(type)
         , func(func) {}
 

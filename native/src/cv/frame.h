@@ -113,9 +113,8 @@ public:
         return {mapToFrame(rect.topLeft()), mapToFrame(rect.bottomRight())};
     }
 
-    [[nodiscard]] static Size<int> baseSize() { return base_size; }
-
-    static void setBaseSize(const Size<int> &size) { base_size = size; }
+    //    [[nodiscard]] static Size<int> baseSize() { return base_size; }
+    //    static void setBaseSize(const Size<int> &size) { base_size = size; }
 
 private:
     FrameAnchor(const Size<int> frame_size, const Rect<int> &intersection)

@@ -102,12 +102,12 @@ void optional_from_json(const Json &json, const std::string &key, std::optional<
 }
 
 template<typename T>
-std::optional<T> optional_from_json(const Json &json, const std::string &key, AsType<const std::optional<T>>) {
+[[maybe_unused]] std::optional<T> optional_from_json(const Json &json, const std::string &key, AsType<const std::optional<T>>) {
     return optional_from_json_impl<T>(json, key);
 }
 
 template<typename T>
-std::optional<T> optional_from_json(const Json &json, const std::string &key, AsType<std::optional<T>>) {
+[[maybe_unused]] std::optional<T> optional_from_json(const Json &json, const std::string &key, AsType<std::optional<T>>) {
     return optional_from_json_impl<T>(json, key);
 }
 
@@ -160,7 +160,7 @@ inline std::string trim(const std::string &key) {
     json_utils::extended_from_json(json, json_utils::trim(#v1), nlohmann::detail::identity_tag<decltype(v1)>()),
 #define INTERNAL_EXTENDED_JSON_ENUM(v1) {v1, #v1},
 
-// A serializer for default constructable types.
+// A serializer for default constructible types.
 //#define EXTENDED_JSON_TYPE(Type, ...) \
 //    friend void to_json(Json &json, const Type &obj) { \
 //        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_TO, __VA_ARGS__)) \
@@ -169,7 +169,7 @@ inline std::string trim(const std::string &key) {
 //        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_FROM, __VA_ARGS__)) \
 //    }
 
-// A serializer for default constructable types with no parameters to store.
+// A serializer for default constructible types with no parameters to store.
 #define EXTENDED_JSON_TYPE_NO_ARGS_DC(Type, ...) \
     friend void to_json(json_utils::Json &json, const Type &obj) {} \
     friend void from_json(const json_utils::Json &json, Type &obj) {}

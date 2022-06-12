@@ -158,13 +158,11 @@ public:
         if (name == condition_name) {
             return this;
         }
-        for (const auto &item : children) {
-            const auto &p = item->findByTag(name);
-            if (p != nullptr) {
-                return p;
-            }
-        }
-        return nullptr;
+        return stds::find_transformed_if(
+                   children,
+                   [&](const auto &child) { return child->findByTag(name); },
+                   [](const auto &ptr) { return ptr != nullptr; })
+            .value_or(nullptr);
     }
 
     [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
