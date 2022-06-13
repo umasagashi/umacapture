@@ -7,7 +7,7 @@
 
 #import <Foundation/Foundation.h>
 
-#import "util/json_utils.h"
+#import "util/json_util.h"
 
 #import "native_api.h"
 #import "util/logger_util.h"
@@ -39,7 +39,7 @@ ImageConverter *imageConverter = nil;
 }
 
 - (void)broadcastStartedWithSetupInfo:(NSDictionary<NSString *,NSObject *> *)setupInfo {
-    uma::NativeApi::instance().setLoggingCallback([](const auto &message){
+    uma::app::NativeApi::instance().setLoggingCallback([](const auto &message){
         NSString *buf = [NSString stringWithCString:message.c_str()
                                            encoding:[NSString defaultCStringEncoding]];
         NSLog(buf);
@@ -53,7 +53,7 @@ ImageConverter *imageConverter = nil;
     vlog_error(1, 2, 3);
     vlog_fatal(1, 2, 3);
     
-    uma::NativeApi::instance().setMkdirCallback([self](const auto &message){
+    uma::app::NativeApi::instance().setMkdirCallback([self](const auto &message){
         NSString *buf = [NSString stringWithCString:message.c_str()
                                            encoding:[NSString defaultCStringEncoding]];
         NSURL *url = [NSURL fileURLWithPath:buf];
@@ -63,7 +63,7 @@ ImageConverter *imageConverter = nil;
 
     auto userDefaults = [[NSUserDefaults alloc] initWithSuiteName: APP_GROUP];
     NSString *config = [userDefaults objectForKey:@"config"];
-    auto configJson = uma::json_utils::Json::parse([config cStringUsingEncoding:NSUTF8StringEncoding]);
+    auto configJson = uma::json_util::Json::parse([config cStringUsingEncoding:NSUTF8StringEncoding]);
     
     NSURL *imageDirectory = [self getSharedDirectoryURL:@"images"];
 //    [self resetDirectory:imageDirectory];
@@ -75,7 +75,7 @@ ImageConverter *imageConverter = nil;
     assert(imageConverter == nil);
     imageConverter = [[ImageConverter alloc] initWithMinimumSize:minimumSize];
     
-    uma::NativeApi::instance().startEventLoop(configJson.dump(0));
+    uma::app::NativeApi::instance().startEventLoop(configJson.dump(0));
     log_debug("finished");
 }
 
@@ -90,7 +90,7 @@ ImageConverter *imageConverter = nil;
 
 - (void)broadcastFinished {
     log_debug("");
-    uma::NativeApi::instance().joinEventLoop();
+    uma::app::NativeApi::instance().joinEventLoop();
     imageConverter = nil;
 }
 
@@ -102,9 +102,9 @@ int counter_for_debug = 0;
             if (counter_for_debug++ % 10 != 0) {  // TODO: Check the queue size. This is reqired to prevent OOM in debug build.
                 break;
             }
-            const auto ts = uma::chrono::timestamp();
+            const auto ts = uma::chrono_util::timestamp();
             cv::Mat mat = [imageConverter convertToMat:sampleBuffer];
-            uma::NativeApi::instance().updateFrame(mat, ts);
+            uma::app::NativeApi::instance().updateFrame(mat, ts);
             break;
         }
         case RPSampleBufferTypeAudioApp:

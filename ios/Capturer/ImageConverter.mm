@@ -8,7 +8,7 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 
-#import "../../native/src/native_api.h"
+#import "core/native_api.h"
 
 #import "ScopeExit.h"
 

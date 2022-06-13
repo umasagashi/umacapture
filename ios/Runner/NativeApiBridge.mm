@@ -14,7 +14,7 @@
 @implementation NativeApiBridge
 
 -(void)initializeNative {
-    uma::NativeApi::instance().setLoggingCallback([](const auto &message){
+    uma::app::NativeApi::instance().setLoggingCallback([](const auto &message){
         NSString *buf = [NSString stringWithCString:message.c_str()
                                            encoding:[NSString defaultCStringEncoding]];
         NSLog(buf);
@@ -36,7 +36,7 @@
 
 -(void)setNotifyCallback:(void (^)(NSString *))method {
     log_debug("");
-    uma::NativeApi::instance().setNotifyCallback([=](const std::string &message) {
+    uma::app::NativeApi::instance().setNotifyCallback([=](const std::string &message) {
         NSString *buf = [NSString stringWithCString:message.c_str()
                                            encoding:[NSString defaultCStringEncoding]];
         method(buf);
