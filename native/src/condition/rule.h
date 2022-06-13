@@ -1,12 +1,10 @@
 #pragma once
 
-#include "util/common.h"
-#include "util/json_utils.h"
+#include "util/json_util.h"
+#include "util/misc.h"
 #include "util/stds.h"
 
-namespace uma {
-
-namespace state {
+namespace uma::state {
 
 struct Empty {};
 
@@ -14,9 +12,9 @@ struct TimestampState {
     uint64_t timestamp = 0;
 };
 
-}  // namespace state
+}  // namespace uma::state
 
-namespace rule {
+namespace uma::rule {
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "readability-convert-member-functions-to-static"
 
@@ -39,8 +37,8 @@ public:
     [[nodiscard]] bool met(const bool &parent, state::TimestampState &state) const override {
         if (parent) {
             if (state.timestamp == 0) {
-                state.timestamp = chrono::timestamp();
-            } else if (chrono::timestamp() - state.timestamp > threshold) {
+                state.timestamp = chrono_util::timestamp();
+            } else if (chrono_util::timestamp() - state.timestamp > threshold) {
                 return true;
             }
         } else {
@@ -78,6 +76,4 @@ public:
 };
 
 #pragma clang diagnostic pop
-}  // namespace rule
-
-}
+}  // namespace uma::rule

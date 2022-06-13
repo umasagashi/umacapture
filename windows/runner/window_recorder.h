@@ -1,5 +1,4 @@
-#ifndef RUNNER_WINDOW_RECORDER_H_
-#define RUNNER_WINDOW_RECORDER_H_
+#pragma once
 
 #include <optional>
 #include <thread>
@@ -9,28 +8,30 @@
 #include <opencv2/opencv.hpp>
 
 #include "types/shape.h"
-#include "util/common.h"
-#include "util/eventpp_util.h"
-#include "util/json_utils.h"
+#include "util/event_util.h"
+#include "util/json_util.h"
+#include "util/misc.h"
 #include "util/thread_util.h"
 
 namespace cv {
 
-inline void to_json(nlohmann::json &j, const Size &d) {
+[[maybe_unused]] inline void to_json(nlohmann::json &j, const Size &d) {
     j = nlohmann::json{
         {"width", d.width},
         {"height", d.height},
     };
 }
 
-inline void from_json(const nlohmann::json &j, Size &d) {
+[[maybe_unused]] inline void from_json(const nlohmann::json &j, Size &d) {
     j.at("width").get_to(d.width);
     j.at("height").get_to(d.height);
 }
 
 }  // namespace cv
 
-namespace config {
+namespace uma::windows {
+
+namespace windows_config {
 
 struct WindowProfile {
     std::optional<std::string> window_class;
@@ -48,16 +49,16 @@ struct WindowProfile {
 };
 
 struct WindowRecorder {
-    std::optional<config::WindowProfile> window_profile;
+    std::optional<WindowProfile> window_profile;
     std::optional<Size<int>> minimum_size;
     std::optional<int> recording_fps;
 
     EXTENDED_JSON_TYPE_NDC(WindowRecorder, window_profile, minimum_size, recording_fps);
 };
 
-}  // namespace config
+}  // namespace windows_config
 
-namespace {
+namespace windows_impl {
 
 inline Size<int> getCircumscribedSize(const Size<int> &source, const Size<int> &fitTo) {
     const auto sd = source.cast<double>();
@@ -67,7 +68,7 @@ inline Size<int> getCircumscribedSize(const Size<int> &source, const Size<int> &
 
 class WindowCapturer {
 public:
-    WindowCapturer(const config::WindowProfile &window_profile, const Size<int> &minimum_size)
+    WindowCapturer(const windows_config::WindowProfile &window_profile, const Size<int> &minimum_size)
         : window_profile(window_profile)
         , minimum_size(minimum_size) {}
 
@@ -160,7 +161,7 @@ private:
         return image;
     }
 
-    const config::WindowProfile window_profile;
+    const windows_config::WindowProfile window_profile;
     const Size<int> minimum_size;
 
     cv::Mat plain_mat;
@@ -188,11 +189,11 @@ private:
     std::chrono::steady_clock::time_point previous;
 };
 
-class RecordingThread : public threading::ThreadBase {
+class RecordingThread : public thread_util::ThreadBase {
 public:
     RecordingThread(
-        const connection::Sender<cv::Mat, uint64_t> &sender,
-        const config::WindowProfile &window_profile,
+        const event_util::Sender<cv::Mat, uint64_t> &sender,
+        const windows_config::WindowProfile &window_profile,
         const Size<int> &minimum_size,
         int fps)
         : sender(sender)
@@ -205,7 +206,7 @@ public:
         time_keeper.setFps(fps);
     }
 
-    void setWindowProfile(const config::WindowProfile &window_profile) {
+    void setWindowProfile(const windows_config::WindowProfile &window_profile) {
         // Don't want to put a guard on the thread, so instead, kill and respawn the thread.
         const auto was_running = isRunning();
         if (was_running) {
@@ -226,7 +227,7 @@ protected:
             time_keeper.waitLap();
             const auto &frame = capturer->capture();
             if (!frame.empty()) {
-                sender->send(frame, chrono::timestamp());
+                sender->send(frame, chrono_util::timestamp());
             }
         }
 
@@ -234,19 +235,17 @@ protected:
     }
 
 private:
-    const connection::Sender<cv::Mat, uint64_t> sender;
+    const event_util::Sender<cv::Mat, uint64_t> sender;
     std::unique_ptr<WindowCapturer> capturer;
     const Size<int> minimum_size;
     TimeKeeper time_keeper;
 };
 
-}  // namespace
-
-namespace recording {
+}  // namespace windows_impl
 
 class WindowRecorder {
 public:
-    explicit WindowRecorder(const connection::Sender<cv::Mat, uint64_t> &sender)
+    explicit WindowRecorder(const event_util::Sender<cv::Mat, uint64_t> &sender)
         : frame_captured(sender) {}
 
     ~WindowRecorder() {
@@ -255,12 +254,12 @@ public:
         }
     }
 
-    void setConfig(const config::WindowRecorder &config) {
+    void setConfig(const windows_config::WindowRecorder &config) {
         if (!recording_thread) {
             assert(config.recording_fps.has_value());
             assert(config.minimum_size.has_value());
             assert(config.window_profile.has_value());
-            recording_thread = std::make_unique<RecordingThread>(
+            recording_thread = std::make_unique<windows_impl::RecordingThread>(
                 frame_captured,
                 config.window_profile.value(),
                 config.minimum_size.value(),
@@ -290,10 +289,8 @@ public:
     }
 
 private:
-    std::unique_ptr<RecordingThread> recording_thread;
-    connection::Sender<cv::Mat, uint64_t> frame_captured;
+    std::unique_ptr<windows_impl::RecordingThread> recording_thread;
+    event_util::Sender<cv::Mat, uint64_t> frame_captured;
 };
 
-}  // namespace recording
-
-#endif  // RUNNER_WINDOW_RECORDER_H_
+}  // namespace uma::windows

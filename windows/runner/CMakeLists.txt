@@ -21,7 +21,7 @@ set(SOURCE_FILES
         "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
         "Runner.rc"
         "runner.exe.manifest"
-        "${NATIVE_EXTENSION_DIR}/src/native_api.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/core/native_api.cpp"
         "${NATIVE_EXTENSION_DIR}/src/condition/serializer.cpp"
         "${NATIVE_EXTENSION_DIR}/src/util/logger_util.cpp"
         )

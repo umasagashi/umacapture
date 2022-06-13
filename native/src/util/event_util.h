@@ -8,7 +8,9 @@
 #include "util/logger_util.h"
 #include "util/thread_util.h"
 
-namespace {
+namespace uma::event_util {
+
+namespace event_util_impl {
 
 template<typename... Args>
 class SenderInterface {
@@ -90,7 +92,7 @@ private:
     const int id;
 };
 
-class EventRunnerThread : public threading::ThreadBase {
+class EventRunnerThread : public thread_util::ThreadBase {
 public:
     EventRunnerThread(
         const std::shared_ptr<EventProcessorInterface> &processor,
@@ -179,9 +181,9 @@ private:
     std::shared_ptr<EventRunnerThread> runner;
 };
 
-class EventRunnerController : public EventRunnerInterface {
+class EventRunnerControllerImpl : public EventRunnerInterface {
 public:
-    ~EventRunnerController() override { assert_(!is_running); }
+    ~EventRunnerControllerImpl() override { assert_(!is_running); }
 
     void add(const std::shared_ptr<EventRunnerInterface> &runner) {
         assert_(!isRunning());
@@ -213,44 +215,42 @@ private:
     bool is_running = false;
 };
 
-}  // namespace
-
-namespace connection {
+}  // namespace event_util_impl
 
 template<typename... Args>
-using Sender = std::shared_ptr<::SenderInterface<Args...>>;
+using Sender = std::shared_ptr<event_util_impl::SenderInterface<Args...>>;
 
 template<typename... Args>
-using Listener = std::shared_ptr<::ListenerInterface<Args...>>;
+using Listener = std::shared_ptr<event_util_impl::ListenerInterface<Args...>>;
 
 template<typename... Args>
-using Connection = std::shared_ptr<::ConnectionInterface<Args...>>;
-
-using EventProcessor = std::shared_ptr<::EventProcessorInterface>;
-using EventRunner = std::shared_ptr<::EventRunnerInterface>;
+using Connection = std::shared_ptr<event_util_impl::ConnectionInterface<Args...>>;
 
 template<typename... Args>
-using QueuedConnection = std::shared_ptr<::QueuedConnectionImpl<Args...>>;
+using QueuedConnection = std::shared_ptr<event_util_impl::QueuedConnectionImpl<Args...>>;
 
 template<typename... Args>
 inline Connection<Args...> makeDirectConnection() {
-    return std::make_shared<DirectConnectionImpl<Args...>>();
+    return std::make_shared<event_util_impl::DirectConnectionImpl<Args...>>();
 }
 
 template<typename... Args>
 [[maybe_unused]] inline QueuedConnection<Args...> makeQueuedConnection() {
-    return std::make_shared<QueuedConnectionImpl<Args...>>();
+    return std::make_shared<event_util_impl::QueuedConnectionImpl<Args...>>();
 }
 
-namespace event_runner {
-
-using SingleThreadMultiEventRunner = std::shared_ptr<::SingleThreadMultiEventRunnerImpl>;
+using EventProcessor = std::shared_ptr<event_util_impl::EventProcessorInterface>;
+using EventRunner = std::shared_ptr<event_util_impl::EventRunnerInterface>;
+using SingleThreadMultiEventRunner = std::shared_ptr<event_util_impl::SingleThreadMultiEventRunnerImpl>;
+using EventRunnerController = std::shared_ptr<event_util_impl::EventRunnerControllerImpl>;
 
 inline SingleThreadMultiEventRunner
 makeSingleThreadRunner(const std::function<void()> &finalizer, const std::string &name) {
-    return std::make_shared<SingleThreadMultiEventRunnerImpl>(finalizer, name);
+    return std::make_shared<event_util_impl::SingleThreadMultiEventRunnerImpl>(finalizer, name);
 }
 
-}  // namespace event_runner
+inline EventRunnerController makeRunnerController() {
+    return std::make_shared<event_util_impl::EventRunnerControllerImpl>();
+}
 
-}  // namespace connection
+}  // namespace uma::event_util

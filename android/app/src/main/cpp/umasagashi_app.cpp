@@ -10,10 +10,9 @@
 #include <opencv2/opencv.hpp>
 
 #include "util/logger_util.h"
+#include "core/native_api.h"
 
-#include "native_api.h"
-
-namespace {
+namespace uma::android {
 
 class JavaVMInstance {
 public:
@@ -125,7 +124,7 @@ inline JavaVMInstance java_vm;
 extern "C" {
 
 jint JNI_OnLoad(JavaVM *vm, void *) {
-    logger_util::init();
+    uma::logger_util::init();
 
     log_debug("");
 
@@ -136,28 +135,29 @@ jint JNI_OnLoad(JavaVM *vm, void *) {
     vlog_error(1, 2, 3);
     vlog_fatal(1, 2, 3);
 
-    java_vm.setVM(vm);
-    NativeApi::instance().setNotifyCallback([&](const auto &arg) { java_vm.notifyPlatform(arg); });
-    NativeApi::instance().setDetachCallback([&]() { java_vm.detachThisThread(); });
+    uma::android::java_vm.setVM(vm);
+    uma::app::NativeApi::instance().setDetachCallback([&]() { uma::android::java_vm.detachThisThread(); });
+    uma::app::NativeApi::instance().setNotifyCallback(
+            [&](const auto &arg) { uma::android::java_vm.notifyPlatform(arg); });
     return JNI_VERSION_1_6;
 }
 
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_startEventLoop(JNIEnv *, jobject thiz, jstring config) {
     log_debug("");
-    java_vm.setServiceInstance(thiz);
-    NativeApi::instance().startEventLoop(java_vm.newStdString(config));
+    uma::android::java_vm.setServiceInstance(thiz);
+    uma::app::NativeApi::instance().startEventLoop(uma::android::java_vm.newStdString(config));
 
 }
 
 JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_joinEventLoop(JNIEnv *, jobject) {
     log_debug("");
-    NativeApi::instance().joinEventLoop();
+    uma::app::NativeApi::instance().joinEventLoop();
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_isRunning(JNIEnv *, jobject) {
-    return NativeApi::instance().isRunning();
+    return uma::app::NativeApi::instance().isRunning();
 }
 
 JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_updateNativeFrame(
@@ -173,7 +173,7 @@ JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_
 
     log_trace("");
 
-    auto raw_mat = java_vm.wrapAsMat(frame, width, height, row_stride);
+    auto raw_mat = uma::android::java_vm.wrapAsMat(frame, width, height, row_stride);
 
     const cv::Size scaled_size = {scaled_width, scaled_height};
     if (buffer_mat.size() != scaled_size) {
@@ -183,19 +183,20 @@ JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_
 
     auto mat = cv::Mat(scaled_size, CV_8UC3);
     cv::cvtColor(buffer_mat, mat, cv::COLOR_RGBA2BGR);
-    NativeApi::instance().updateFrame(mat, chrono::timestamp());  // TODO: take timestamp in android.
+    uma::app::NativeApi::instance().updateFrame(mat,
+                                                uma::chrono_util::timestamp());  // TODO: take timestamp in android.
 }
 
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_notifyCaptureStarted(JNIEnv *, jobject) {
     log_debug("");
-    NativeApi::instance().notifyCaptureStarted();
+    uma::app::NativeApi::instance().notifyCaptureStarted();
 }
 
 JNIEXPORT void JNICALL
 Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_notifyCaptureStopped(JNIEnv *, jobject) {
     log_debug("");
-    NativeApi::instance().notifyCaptureStopped();
+    uma::app::NativeApi::instance().notifyCaptureStopped();
 }
 
 }  // extern "C"

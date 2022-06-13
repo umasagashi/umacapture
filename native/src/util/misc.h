@@ -6,18 +6,17 @@
 #include <iostream>
 #include <sstream>
 
-namespace uma {
+namespace uma::chrono_util {
 
-namespace chrono {
+using time_unit = std::chrono::milliseconds;
 
 inline uint64_t timestamp() {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch())
-        .count();
+    return std::chrono::duration_cast<time_unit>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
-}  // namespace chrono
+}  // namespace uma::chrono_util
 
-namespace io {
+namespace uma::io_util {
 
 inline std::string read(const std::filesystem::path &path) {
     std::ifstream file(path);
@@ -33,9 +32,7 @@ inline void write(const std::filesystem::path &path, const std::string &text) {
     file.close();
 }
 
-}  // namespace io
-
-}
+}  // namespace uma::io_util
 
 #ifdef NDEBUG
 #define assert_(expression) ((void) 0)

@@ -5,9 +5,11 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
+namespace uma::video {
+
 class VideoLoader {
 public:
-    explicit VideoLoader(const connection::Sender<cv::Mat, uint64> &on_frame_captured)
+    explicit VideoLoader(const event_util::Sender<cv::Mat, uint64> &on_frame_captured)
         : on_frame_captured(on_frame_captured) {
         std::filesystem::create_directories("./temp");
     }
@@ -47,5 +49,7 @@ private:
         cv::imwrite(stream.str(), mat);
     }
 
-    const connection::Sender<cv::Mat, uint64> on_frame_captured{};
+    const event_util::Sender<cv::Mat, uint64> on_frame_captured{};
 };
+
+}  // namespace uma::video

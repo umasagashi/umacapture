@@ -4,14 +4,14 @@
 #include <flutter/generated_plugin_registrant.h>
 
 #include "runner/platform_channel.h"
-#include "util/json_utils.h"
+#include "util/json_util.h"
 #include "util/logger_util.h"
 
 #include "flutter_window.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject &project)
     : project_(project) {
-    logger_util::init();
+    uma::logger_util::init();
 
     vlog_trace(1, 2, 3);
     vlog_debug(1, 2, 3);
@@ -42,8 +42,8 @@ bool FlutterWindow::OnCreate() {
     }
     RegisterPlugins(flutter_controller_->engine());
 
-    platform_channel = std::make_shared<channel::PlatformChannel>(flutter_controller_->engine(), GetHandle());
-    native_controller = std::make_unique<NativeController>(platform_channel);
+    platform_channel = std::make_shared<uma::windows::PlatformChannel>(flutter_controller_->engine(), GetHandle());
+    native_controller = std::make_unique<uma::windows::NativeController>(platform_channel);
 
     SetChildContent(flutter_controller_->view()->GetNativeWindow());
     return true;

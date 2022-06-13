@@ -15,7 +15,7 @@ set(NATIVE_EXTENSION_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../../native")
 
 set(SOURCE_FILES
         umasagashi_app.cpp
-        "${NATIVE_EXTENSION_DIR}/src/native_api.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/core/native_api.cpp"
         "${NATIVE_EXTENSION_DIR}/src/condition/serializer.cpp"
         )
 

@@ -13,8 +13,8 @@ set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
 set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
 
 set(SOURCE_FILES
-        src/cli.cpp
-        src/native_api.cpp
+        src/core/cli.cpp
+        src/core/native_api.cpp
         src/condition/serializer.cpp
         src/util/logger_util.cpp
         )

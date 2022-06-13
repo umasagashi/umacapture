@@ -6,10 +6,10 @@
 #include <thread>
 #include <utility>
 
-#include "util/common.h"
 #include "util/logger_util.h"
+#include "util/misc.h"
 
-namespace threading {
+namespace uma::thread_util {
 
 class ThreadBase {
 public:
@@ -139,4 +139,4 @@ private:
     const std::function<void()> on_canceled;
 };
 
-}  // namespace threading
+}  // namespace uma::thread_util

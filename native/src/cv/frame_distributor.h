@@ -5,16 +5,16 @@
 #include "chara_detail/chara_detail_scene_context.h"
 #include "condition/condition.h"
 #include "cv/frame.h"
-#include "util/eventpp_util.h"
+#include "util/event_util.h"
 
-namespace uma {
+namespace uma::distributor {
 
 class FrameDistributor {
 public:
     FrameDistributor(
-        const std::vector<std::shared_ptr<chara_detail::CharaDetailSceneContext>> &scene_contexts,
-        const connection::Listener<Frame> &frame_supplier,
-        const connection::Sender<Frame> &on_no_target)
+        const std::vector<std::shared_ptr<SceneContext>> &scene_contexts,
+        const event_util::Listener<Frame> &frame_supplier,
+        const event_util::Sender<Frame> &on_no_target)
         : scene_contexts(scene_contexts)
         , on_no_target(on_no_target)
         , frame_supplier(frame_supplier) {
@@ -35,9 +35,9 @@ private:
         }
     }
 
-    std::vector<std::shared_ptr<chara_detail::CharaDetailSceneContext>> scene_contexts;
-    const connection::Listener<Frame> frame_supplier;
-    const connection::Sender<Frame> on_no_target;
+    std::vector<std::shared_ptr<SceneContext>> scene_contexts;
+    const event_util::Listener<Frame> frame_supplier;
+    const event_util::Sender<Frame> on_no_target;
 };
 
-}
+}  // namespace uma::distributor

@@ -5,20 +5,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "util/common.h"
-
-namespace uma {
-
-namespace json_utils {
-
-using Json = nlohmann::ordered_json;
-
-template<typename T>
-using AsType = nlohmann::detail::identity_tag<T>;
-
-}  // namespace json_utils
-
-}
+#include "util/misc.h"
 
 namespace nlohmann {
 
@@ -81,9 +68,12 @@ struct adl_serializer<std::optional<T>> {
 
 }  // namespace nlohmann
 
-namespace uma {
+namespace uma::json_util {
 
-namespace json_utils {
+using Json = nlohmann::ordered_json;
+
+template<typename T>
+using AsType = nlohmann::detail::identity_tag<T>;
 
 template<typename T>
 void optional_to_json(Json &json, const std::string &key, const std::optional<T> &value) {
@@ -108,12 +98,14 @@ void optional_from_json(const Json &json, const std::string &key, std::optional<
 }
 
 template<typename T>
-[[maybe_unused]] std::optional<T> optional_from_json(const Json &json, const std::string &key, AsType<const std::optional<T>>) {
+[[maybe_unused]] std::optional<T>
+optional_from_json(const Json &json, const std::string &key, AsType<const std::optional<T>>) {
     return optional_from_json_impl<T>(json, key);
 }
 
 template<typename T>
-[[maybe_unused]] std::optional<T> optional_from_json(const Json &json, const std::string &key, AsType<std::optional<T>>) {
+[[maybe_unused]] std::optional<T>
+optional_from_json(const Json &json, const std::string &key, AsType<std::optional<T>>) {
     return optional_from_json_impl<T>(json, key);
 }
 
@@ -160,32 +152,31 @@ inline std::string trim(const std::string &key) {
 }
 
 // Internal use.
-#define INTERNAL_EXTENDED_JSON_TO(v1) json_utils::extended_to_json(json, json_utils::trim(#v1), obj.v1);
-//#define INTERNAL_EXTENDED_JSON_FROM(v1) json_utils::extended_from_json(json, #v1, obj.v1);
+#define INTERNAL_EXTENDED_JSON_TO(v1) uma::json_util::extended_to_json(json, uma::json_util::trim(#v1), obj.v1);
 #define INTERNAL_EXTENDED_JSON_FROM_NDC(v1) \
-    json_utils::extended_from_json(json, json_utils::trim(#v1), nlohmann::detail::identity_tag<decltype(v1)>()),
+    uma::json_util::extended_from_json(json, uma::json_util::trim(#v1), uma::json_util::AsType<decltype(v1)>()),
 #define INTERNAL_EXTENDED_JSON_ENUM(v1) {v1, #v1},
 
 // A serializer for default constructible types.
 //#define EXTENDED_JSON_TYPE(Type, ...) \
-//    friend void to_json(Json &json, const Type &obj) { \
+//    friend void to_json(uma::json_util::Json &json, const Type &obj) { \
 //        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_TO, __VA_ARGS__)) \
 //    } \
-//    friend void from_json(const Json &json, Type &obj) { \
+//    friend void from_json(const uma::json_util::Json &json, Type &obj) { \
 //        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_FROM, __VA_ARGS__)) \
 //    }
 
 // A serializer for default constructible types with no parameters to store.
 #define EXTENDED_JSON_TYPE_NO_ARGS_DC(Type, ...) \
-    friend void to_json(json_utils::Json &json, const Type &obj) {} \
-    friend void from_json(const json_utils::Json &json, Type &obj) {}
+    friend void to_json(uma::json_util::Json &json, const Type &obj) {} \
+    friend void from_json(const uma::json_util::Json &json, Type &obj) {}
 
 // A serializer for non default constructible types.
 #define EXTENDED_JSON_TYPE_NDC(Type, ...) \
-    friend void to_json(json_utils::Json &json, const Type &obj) { \
+    friend void to_json(uma::json_util::Json &json, const Type &obj) { \
         NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_TO, __VA_ARGS__)) \
     } \
-    friend Type from_json(const json_utils::Json &json, nlohmann::detail::identity_tag<Type>) { \
+    friend Type from_json(const uma::json_util::Json &json, uma::json_util::AsType<Type>) { \
         return Type{NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_FROM_NDC, __VA_ARGS__))}; \
     }
 
@@ -197,20 +188,18 @@ inline std::string trim(const std::string &key) {
 // A helper to make a serializable object streamable.
 #define EXTENDED_JSON_TYPE_PRINTABLE(Type) \
     inline std::ostream &operator<<(std::ostream &outs, const Type &obj) { \
-        return outs << #Type << json_utils::Json(obj); \
+        return outs << #Type << uma::json_util::Json(obj); \
     }
 
 // A helper to make a serializable single-parameter-template object streamable.
 #define EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Type) \
     template<typename T> \
     inline std::ostream &operator<<(std::ostream &outs, const Type<T> &obj) { \
-        return outs << #Type << "<" << typeid(T).name() << ">" << json_utils::Json(obj); \
+        return outs << #Type << "<" << typeid(T).name() << ">" << uma::json_util::Json(obj); \
     }
 
-inline json_utils::Json read(const std::filesystem::path &path) {
-    return json_utils::Json::parse(io::read(path));
+inline json_util::Json read(const std::filesystem::path &path) {
+    return json_util::Json::parse(io_util::read(path));
 }
 
-}  // namespace json_utils
-
-}
+}  // namespace uma::json_util

@@ -12,11 +12,10 @@
 #include <minimal_uuid4/minimal_uuid4.h>
 
 #include "chara_detail/chara_detail_scene_context.h"
+#include "core/native_api.h"
 #include "util/logger_util.h"
 
-#include "native_api.h"
-
-namespace uma {
+namespace uma::chara_detail {
 
 namespace {
 
@@ -49,9 +48,6 @@ inline bool readyAfterUpdate(T &subject, const Frame &frame) {
 }
 
 }  // namespace
-
-namespace chara_detail {
-
 namespace path_config {
 inline constexpr auto skill_dir = "skill";
 inline constexpr auto factor_dir = "factor";
@@ -254,7 +250,7 @@ public:
         : scan_parameters(scan_parameters)
         , image_dir(image_dir) {
         current_scan = this->scan_parameters.begin();
-        NativeApi::instance().mkdir(image_dir);
+        app::NativeApi::instance().mkdir(image_dir);
     }
 
     void addTabButton(const Frame &frame) {
@@ -449,7 +445,7 @@ public:
         const StationaryFrameCatcher &stationary_catcher,
         double initial_scroll_threshold,
         double minimum_scroll_threshold,
-        const connection::Sender<> &on_scroll_ready)
+        const event_util::Sender<> &on_scroll_ready)
         : offset_estimator(offset_estimator)
         , stationary_catcher(stationary_catcher)
         , scraping_box(scraping_box)
@@ -458,7 +454,7 @@ public:
         , on_scroll_ready(on_scroll_ready) {}
 
     void update(const Frame &frame) override {
-//        vlog_debug(is_scrolling, frame.size().width(), frame.size().height());
+        //        vlog_debug(is_scrolling, frame.size().width(), frame.size().height());
         assert_(state == Updatable);
 
         if (is_scrolling) {
@@ -513,7 +509,7 @@ private:
         previous_descriptor = current_fragment;
     }
 
-    const connection::Sender<> on_scroll_ready;
+    const event_util::Sender<> on_scroll_ready;
 
     const ScrollAreaOffsetEstimator offset_estimator;
     const double initial_scroll;
@@ -560,7 +556,7 @@ public:
     SceneScraper(
         const SceneScraperConfig &config,
         const std::shared_ptr<PageScrapingBox> &scraping_box,
-        const connection::Sender<> &scroll_ready_notifier)
+        const event_util::Sender<> &scroll_ready_notifier)
         : config(config)
         , scraping_box(scraping_box)
         , on_scroll_ready(scroll_ready_notifier) {}
@@ -626,7 +622,7 @@ private:
         }
     }
 
-    const connection::Sender<> on_scroll_ready;
+    const event_util::Sender<> on_scroll_ready;
 
     const SceneScraperConfig config;
 
@@ -702,13 +698,13 @@ private:
 class CharaDetailSceneScraper {
 public:
     CharaDetailSceneScraper(
-        const connection::Listener<> &on_opened,
-        const connection::Listener<Frame, SceneInfo> &on_updated,
-        const connection::Listener<> &on_closed,
-        const connection::Sender<> &on_closed_before_completed,
-        const connection::Sender<> &on_scroll_ready,
-        const connection::Sender<> &on_page_ready,
-        const connection::Sender<std::string> &on_completed,
+        const event_util::Listener<> &on_opened,
+        const event_util::Listener<Frame, SceneInfo> &on_updated,
+        const event_util::Listener<> &on_closed,
+        const event_util::Sender<> &on_closed_before_completed,
+        const event_util::Sender<> &on_scroll_ready,
+        const event_util::Sender<> &on_page_ready,
+        const event_util::Sender<std::string> &on_completed,
         const CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir)
         : on_updated(on_updated)
@@ -779,7 +775,7 @@ public:
             checkForCompleted();
         }
 
-//        log_debug("delay: {}", chrono::timestamp() - frame.timestamp());
+        //        log_debug("delay: {}", chrono::timestamp() - frame.timestamp());
     }
 
     void release() {
@@ -812,14 +808,14 @@ private:
         }
     }
 
-    const connection::Listener<> on_opened;
-    const connection::Listener<Frame, SceneInfo> on_updated;
-    const connection::Listener<> on_closed;
+    const event_util::Listener<> on_opened;
+    const event_util::Listener<Frame, SceneInfo> on_updated;
+    const event_util::Listener<> on_closed;
 
-    const connection::Sender<> on_closed_before_completed;
-    const connection::Sender<> on_scroll_ready;  // When user can start scrolling.
-    const connection::Sender<> on_page_ready;  // When each page is ready.
-    const connection::Sender<std::string> on_completed;  // When all three pages are ready.
+    const event_util::Sender<> on_closed_before_completed;
+    const event_util::Sender<> on_scroll_ready;  // When user can start scrolling.
+    const event_util::Sender<> on_page_ready;  // When each page is ready.
+    const event_util::Sender<std::string> on_completed;  // When all three pages are ready.
 
     const CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
@@ -835,6 +831,4 @@ private:
     ReadyState state = Null;
 };
 
-}  // namespace chara_detail
-
-}
+}  // namespace uma::chara_detail

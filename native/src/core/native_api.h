@@ -16,28 +16,18 @@
 
 #include "cv/frame.h"
 #include "cv/frame_distributor.h"
-#include "util/eventpp_util.h"
-#include "util/json_utils.h"
+#include "util/event_util.h"
+#include "util/json_util.h"
 
-namespace uma {
+namespace uma::chara_detail {
+class CharaDetailSceneScraper;
+}
 
-namespace native_config {
-
-struct NativeConfig {
-    std::optional<std::string> version;
-
-    EXTENDED_JSON_TYPE_NDC(NativeConfig, version);
-};
-
-}  // namespace native_config
+namespace uma::app {
 
 using MessageCallback = void(const std::string &);
 using PathCallback = void(const std::filesystem::path &);
 using VoidCallback = void();
-
-namespace chara_detail {
-class CharaDetailSceneScraper;
-}
 
 class NativeApi {
 public:
@@ -56,10 +46,6 @@ public:
     void notifyCaptureStopped();
 
     void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }
-    //    void detachThisThread() const {
-    //        log_debug("");
-    //        detach_callback();
-    //    }
 
     void setMkdirCallback(const std::function<PathCallback> &method) { mkdir_callback = method; }
     void mkdir(const std::filesystem::path &path) const {
@@ -84,10 +70,10 @@ private:
     std::function<VoidCallback> detach_callback = []() {};
     std::function<PathCallback> mkdir_callback = [](const auto &path) { std::filesystem::create_directories(path); };
 
-    connection::Sender<Frame> on_frame_captured;
+    event_util::Sender<Frame> on_frame_captured;
+    event_util::EventRunnerController event_runners;
 
-    std::unique_ptr<EventRunnerController> event_runners;
-    std::unique_ptr<FrameDistributor> frame_distributor;
+    std::unique_ptr<distributor::FrameDistributor> frame_distributor;
     std::unique_ptr<chara_detail::CharaDetailSceneScraper> chara_detail_scene_scraper;
 
 public:
@@ -99,4 +85,4 @@ public:
     }
 };
 
-}
+}  // namespace uma::app

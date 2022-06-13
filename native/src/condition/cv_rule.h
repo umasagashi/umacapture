@@ -6,9 +6,17 @@
 #include "condition/rule.h"
 #include "cv/frame.h"
 #include "types/range.h"
-#include "util/json_utils.h"
+#include "util/json_util.h"
 
-namespace uma {
+namespace uma::state {
+
+struct LengthState {
+    std::optional<double> length;
+};
+
+}  // namespace uma::state
+
+namespace uma::rule {
 
 class LineMeasurer {
 public:
@@ -28,17 +36,7 @@ private:
     const Range<Color> color_deviation;
 };
 
-namespace state {
-
-struct LengthState {
-    std::optional<double> length;
-};
-
-}  // namespace state
-
-namespace rule {
-
-class PointColor : public rule::Rule<Frame, state::Empty> {
+class PointColor : public Rule<Frame, state::Empty> {
 public:
     PointColor(const Point<double> &point, const Range<Color> &color_range) noexcept
         : point(point)
@@ -53,7 +51,7 @@ private:
     const Range<Color> color_range;
 };
 
-class LineLength : public rule::Rule<Frame, state::Empty> {
+class LineLength : public Rule<Frame, state::Empty> {
 public:
     LineLength(const LineMeasurer &line_measurer, const Range<double> &length_range) noexcept
         : line_measurer(line_measurer)
@@ -71,7 +69,7 @@ private:
     const Range<double> length_range;
 };
 
-class StableLineLength : public rule::Rule<Frame, state::LengthState> {
+class StableLineLength : public Rule<Frame, state::LengthState> {
 public:
     StableLineLength(const LineMeasurer &line_measurer, const Range<double> &length_range) noexcept
         : line_measurer(line_measurer)
@@ -95,6 +93,4 @@ private:
     const Range<double> length_range;
 };
 
-}  // namespace rule
-
-}
+}  // namespace uma::rule

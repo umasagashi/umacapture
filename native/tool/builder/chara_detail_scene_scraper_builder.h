@@ -3,7 +3,7 @@
 #include "builder/builder_util.h"
 #include "chara_detail/chara_detail_scene_scraper.h"
 
-namespace tool {
+namespace uma::tool {
 
 class CharaDetailSceneScraperBuilder {
 public:
@@ -62,4 +62,4 @@ private:
     }
 };
 
-}  // namespace tool
+}  // namespace uma::tool

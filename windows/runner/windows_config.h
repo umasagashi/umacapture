@@ -1,18 +1,15 @@
-#ifndef RUNNER_WINDOWS_CONFIG_H
-#define RUNNER_WINDOWS_CONFIG_H
+#pragma once
 
-#include "../../native/src/util/json_utils.h"
+#include "util/json_util.h"
 
 #include "window_recorder.h"
 
-namespace config {
+namespace uma::windows::windows_config {
 
 struct WindowsConfig {
-    std::optional<config::WindowRecorder> window_recorder;
+    std::optional<WindowRecorder> window_recorder;
 
     EXTENDED_JSON_TYPE_NDC(WindowsConfig, window_recorder);
 };
 
-}  // namespace config
-
-#endif  //RUNNER_WINDOWS_CONFIG_H
+}  // namespace uma::windows::windows_config
