@@ -13,11 +13,42 @@ namespace uma::event_util {
 namespace event_util_impl {
 
 template<typename... Args>
-class SenderInterface {
+class ConnectionInterface;
+
+template<typename... Args>
+struct DirectConnectionBuilder {
+    std::shared_ptr<ConnectionInterface<Args...>> build() { return makeDirectConnection<Args...>(); }
+};
+
+template<template<typename...> typename Builder, std::size_t first, typename... Args, std::size_t... indices>
+Builder<std::tuple_element_t<first + indices, std::tuple<Args...>>...> _subset_dummy(std::index_sequence<indices...>);
+
+template<template<typename...> typename Builder, std::size_t first, std::size_t n, typename... Args>
+using SubsetArgs = decltype(_subset_dummy<Builder, first, Args...>(std::make_index_sequence<n>{}));
+
+template<typename... Args>
+class SenderBase {
 public:
-    virtual ~SenderInterface() = default;
+    virtual ~SenderBase() = default;
 
     virtual void send(Args... args) = 0;
+
+    template<
+        typename... LeftArgs,
+        std::size_t first = sizeof...(LeftArgs),
+        std::size_t n = sizeof...(Args) - sizeof...(LeftArgs)>
+    inline auto bindLeft(LeftArgs... left_args) {
+        const auto connection = SubsetArgs<DirectConnectionBuilder, first, n, Args...>().build();
+        connection->listen([=](const auto &...right_args) { send(left_args..., right_args...); });
+        return connection;
+    }
+
+    template<typename... RightArgs, std::size_t n = sizeof...(Args) - sizeof...(RightArgs)>
+    [[maybe_unused]] inline auto bindRight(RightArgs... right_args) {
+        const auto connection = SubsetArgs<DirectConnectionBuilder, 0, n, Args...>().build();
+        connection->listen([=](const auto &...left_args) { send(left_args..., right_args...); });
+        return connection;
+    }
 };
 
 template<typename... Args>
@@ -39,7 +70,7 @@ public:
 };
 
 template<typename... Args>
-class ConnectionInterface : public SenderInterface<Args...>, public ListenerInterface<Args...> {};
+class ConnectionInterface : public SenderBase<Args...>, public ListenerInterface<Args...> {};
 
 template<typename... Args>
 class DirectConnectionImpl : public ConnectionInterface<Args...> {
@@ -61,7 +92,7 @@ public:
         : notifier(nullptr)
         , id(0) {}
 
-    QueuedConnectionImpl(const std::shared_ptr<SenderInterface<int>> &notifier, int id)
+    QueuedConnectionImpl(const std::shared_ptr<SenderBase<int>> &notifier, int id)
         : notifier(notifier)
         , id(id) {}
 
@@ -88,7 +119,7 @@ public:
 
 private:
     eventpp::EventQueue<int, void(Args...)> connection;
-    const std::shared_ptr<SenderInterface<int>> notifier;
+    const std::shared_ptr<SenderBase<int>> notifier;
     const int id;
 };
 
@@ -218,7 +249,7 @@ private:
 }  // namespace event_util_impl
 
 template<typename... Args>
-using Sender = std::shared_ptr<event_util_impl::SenderInterface<Args...>>;
+using Sender = std::shared_ptr<event_util_impl::SenderBase<Args...>>;
 
 template<typename... Args>
 using Listener = std::shared_ptr<event_util_impl::ListenerInterface<Args...>>;
@@ -232,6 +263,13 @@ using QueuedConnection = std::shared_ptr<event_util_impl::QueuedConnectionImpl<A
 template<typename... Args>
 inline Connection<Args...> makeDirectConnection() {
     return std::make_shared<event_util_impl::DirectConnectionImpl<Args...>>();
+}
+
+template<typename... Args, typename Listener>
+[[maybe_unused]] inline Connection<Args...> makeDirectConnection(Listener listener) {
+    const auto connection = makeDirectConnection<Args...>();
+    connection->listen(listener);
+    return connection;
 }
 
 template<typename... Args>

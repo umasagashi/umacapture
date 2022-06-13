@@ -37,6 +37,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto chara_detail_opened_connection = scraper_runner->makeConnection<>();
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>();
 
+    chara_detail_opened_connection->listen([this]() { notifyCharaDetailStarted(); });
+
     {
         const auto scene_context = std::make_shared<chara_detail::CharaDetailSceneContext>(
             condition::serializer::conditionFromJson(config_json["chara_detail"]["scene_context"]),
@@ -56,18 +58,23 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto stitcher_runner = event_util::makeSingleThreadRunner(detach_callback, "stitcher");
     event_runners->add(stitcher_runner);
 
-    // TODO: Connect.
-    const auto closed_before_completed_connection = event_util::makeDirectConnection<>();
-    closed_before_completed_connection->listen([]() { log_info("on_closed_before_completed"); });
+    const auto closed_before_completed_connection = event_util::makeDirectConnection<std::string>();
+    closed_before_completed_connection->listen([this](const std::string &id) { notifyCharaDetailFinished(id, false); });
 
-    const auto scroll_ready_connection = event_util::makeDirectConnection<>();
-    scroll_ready_connection->listen([]() { log_info("on_scroll_ready"); });
+    const auto scroll_ready_connection = event_util::makeDirectConnection<int>();
+    scroll_ready_connection->listen([this](int index) { notifyScrollReady(index); });
 
-    const auto page_ready_connection = event_util::makeDirectConnection<>();
-    page_ready_connection->listen([]() { log_info("on_page_ready"); });
+    const auto scroll_updated_connection = event_util::makeDirectConnection<int, double>();
+    scroll_updated_connection->listen([this](int index, double progress) { notifyScrollUpdated(index, progress); });
+
+    const auto page_ready_connection = event_util::makeDirectConnection<int>();
+    page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
     const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
-    stitch_ready_connection->listen([](const std::string &id) { log_info("on_stitch_ready: {}", id); });
+    stitch_ready_connection->listen([this](const std::string &id) {
+        // for debug
+        notifyCharaDetailFinished(id, true);
+    });
 
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
@@ -75,6 +82,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         chara_detail_closed_connection,
         closed_before_completed_connection,
         scroll_ready_connection,
+        scroll_updated_connection,
         page_ready_connection,
         stitch_ready_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::CharaDetailSceneScraperConfig>(),
@@ -105,16 +113,6 @@ void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     // TODO: Count number of queued frames.
     // If background threads are not keeping up, frame has to be discarded rather than queued.
     on_frame_captured->send({image, timestamp});
-}
-
-void NativeApi::notifyCaptureStarted() {
-    log_debug("");
-    notify(json_util::Json{{"type", "onCaptureStarted"}}.dump());
-}
-
-void NativeApi::notifyCaptureStopped() {
-    log_debug("");
-    notify(json_util::Json{{"type", "onCaptureStopped"}}.dump());
 }
 
 [[maybe_unused]] void NativeApi::_dummyForSuppressingUnusedWarning() {

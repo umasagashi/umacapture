@@ -42,8 +42,26 @@ public:
     void updateFrame(const cv::Mat &image, uint64 timestamp);
 
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
-    void notifyCaptureStarted();
-    void notifyCaptureStopped();
+
+    void notifyError(const std::string &message) {
+        notify(json_util::Json{{"type", "onError"}, {"message", message}}.dump());
+    }
+
+    void notifyCaptureStarted() { notify(json_util::Json{{"type", "onCaptureStarted"}}.dump()); }
+    void notifyCaptureStopped() { notify(json_util::Json{{"type", "onCaptureStopped"}}.dump()); }
+
+    void notifyScrollReady(int index) { notify(json_util::Json{{"type", "onScrollReady"}, {"index", index}}.dump()); }
+
+    void notifyScrollUpdated(int index, double progress) {
+        notify(json_util::Json{{"type", "onScrollUpdated"}, {"index", index}, {"progress", progress}}.dump());
+    }
+
+    void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
+
+    void notifyCharaDetailStarted() { notify(json_util::Json{{"type", "onCharaDetailStarted"}}.dump()); }
+    void notifyCharaDetailFinished(const std::string &id, bool success) {
+        notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", id}, {"success", success}}.dump());
+    }
 
     void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }
 

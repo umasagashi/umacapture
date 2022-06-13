@@ -48,6 +48,7 @@ inline bool readyAfterUpdate(T &subject, const Frame &frame) {
 }
 
 }  // namespace
+
 namespace path_config {
 inline constexpr auto skill_dir = "skill";
 inline constexpr auto factor_dir = "factor";
@@ -76,6 +77,14 @@ public:
 
     [[nodiscard]] bool hasScrollbar(const Frame &frame) const { return findScrollbar(frame).has_value(); }
 
+    [[nodiscard]] std::optional<double> position(const Frame &frame) const {
+        const auto margin = scanMargin(frame);
+        if (!margin) {
+            return std::nullopt;
+        }
+        return margin->first / (margin->second + margin->first);
+    }
+
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const {
         const auto &from_line = findScrollbar(from.frame);
         const auto &to_line = findScrollbar(to.frame);
@@ -99,16 +108,24 @@ public:
 
 private:
     [[nodiscard]] std::optional<Line1D<double>> findScrollbar(const Frame &frame) const {
+        const auto margin = scanMargin(frame);
+        if (!margin) {
+            return std::nullopt;
+        }
+        const auto &scan_line = frame.anchor().absolute(scroll_bar_scan_line).vertical();
+        return Line1D<double>{
+            scan_line.pointAt(margin->first),
+            scan_line.pointAt(1. - margin->second),
+        };
+    }
+
+    [[nodiscard]] std::optional<std::pair<double, double>> scanMargin(const Frame &frame) const {
         const auto &upper_margin = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line);
         const auto &lower_margin = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line.reversed());
         if (!upper_margin || upper_margin.value() == 1. || !lower_margin || lower_margin.value() == 1.) {
             return std::nullopt;  // Bar not found.
         }
-        const auto &scan_line = frame.anchor().absolute(scroll_bar_scan_line).vertical();
-        return Line1D<double>{
-            scan_line.pointAt(upper_margin.value()),
-            scan_line.pointAt(1. - lower_margin.value()),
-        };
+        return std::make_pair(upper_margin.value(), lower_margin.value());
     }
 
     const Range<Color> scroll_bar_bg_color_range;
@@ -222,6 +239,10 @@ public:
         const ScrollBarOffsetEstimator &scroll_bar_offset_estimator, const ImageOffsetEstimator &image_offset_estimator)
         : scroll_bar_offset_estimator(scroll_bar_offset_estimator)
         , image_offset_estimator(image_offset_estimator) {}
+
+    [[nodiscard]] std::optional<double> position(const FrameDescriptor &descriptor) const {
+        return scroll_bar_offset_estimator.position(descriptor.frame);
+    }
 
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const {
         const auto guess = scroll_bar_offset_estimator.estimate(from, to);
@@ -445,13 +466,15 @@ public:
         const StationaryFrameCatcher &stationary_catcher,
         double initial_scroll_threshold,
         double minimum_scroll_threshold,
-        const event_util::Sender<> &on_scroll_ready)
+        const event_util::Sender<> &on_scroll_ready,
+        const event_util::Sender<double> &on_scroll_updated)
         : offset_estimator(offset_estimator)
         , stationary_catcher(stationary_catcher)
         , scraping_box(scraping_box)
         , initial_scroll(initial_scroll_threshold)
         , minimum_scroll(minimum_scroll_threshold)
-        , on_scroll_ready(on_scroll_ready) {}
+        , on_scroll_ready(on_scroll_ready)
+        , on_scroll_updated(on_scroll_updated) {}
 
     void update(const Frame &frame) override {
         //        vlog_debug(is_scrolling, frame.size().width(), frame.size().height());
@@ -491,6 +514,7 @@ private:
         scraping_box->addScrollArea(valid_frame);
         previous_descriptor = {valid_frame, initial_descriptor.scroll_bar_length};
         is_scrolling = true;
+        on_scroll_updated->send(offset_estimator.position(previous_descriptor).value_or(0.0));
     }
 
     void updateScrolling(const Frame &frame) {
@@ -498,6 +522,11 @@ private:
         const auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
         if (offset.value_or(-1.0) <= minimum_scroll) {
             return;
+        }
+
+        const auto position = offset_estimator.position(previous_descriptor);
+        if (position) {
+            on_scroll_updated->send(position.value());
         }
 
         scraping_box->addScrollArea(frame, std::lround(offset.value()));
@@ -510,6 +539,7 @@ private:
     }
 
     const event_util::Sender<> on_scroll_ready;
+    const event_util::Sender<double> on_scroll_updated;
 
     const ScrollAreaOffsetEstimator offset_estimator;
     const double initial_scroll;
@@ -556,10 +586,12 @@ public:
     SceneScraper(
         const SceneScraperConfig &config,
         const std::shared_ptr<PageScrapingBox> &scraping_box,
-        const event_util::Sender<> &scroll_ready_notifier)
+        const event_util::Sender<> &on_scroll_ready,
+        const event_util::Sender<double> &on_scroll_updated)
         : config(config)
         , scraping_box(scraping_box)
-        , on_scroll_ready(scroll_ready_notifier) {}
+        , on_scroll_ready(on_scroll_ready)
+        , on_scroll_updated(on_scroll_updated) {}
 
     void update(const Frame &frame) {
         if (state == Null) {
@@ -601,7 +633,8 @@ private:
                 stationary_catcher,
                 config.initial_scroll_threshold * initial_frame.height(),
                 config.minimum_scroll_threshold * initial_frame.height(),
-                on_scroll_ready);
+                on_scroll_ready,
+                on_scroll_updated);
         } else {
             scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(scraping_box, stationary_catcher);
         }
@@ -623,6 +656,7 @@ private:
     }
 
     const event_util::Sender<> on_scroll_ready;
+    const event_util::Sender<double> on_scroll_updated;
 
     const SceneScraperConfig config;
 
@@ -701,9 +735,10 @@ public:
         const event_util::Listener<> &on_opened,
         const event_util::Listener<Frame, SceneInfo> &on_updated,
         const event_util::Listener<> &on_closed,
-        const event_util::Sender<> &on_closed_before_completed,
-        const event_util::Sender<> &on_scroll_ready,
-        const event_util::Sender<> &on_page_ready,
+        const event_util::Sender<std::string> &on_closed_before_completed,
+        const event_util::Sender<int> &on_scroll_ready,
+        const event_util::Sender<int, double> &on_scroll_updated,
+        const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<std::string> &on_completed,
         const CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir)
@@ -712,6 +747,7 @@ public:
         , on_closed(on_closed)
         , on_closed_before_completed(on_closed_before_completed)
         , on_scroll_ready(on_scroll_ready)
+        , on_scroll_updated(on_scroll_updated)
         , on_page_ready(on_page_ready)
         , on_completed(on_completed)
         , config(config)
@@ -725,7 +761,7 @@ public:
         this->on_closed->listen([this]() {
             std::cout << "on_closed" << std::endl;
             if (!ready()) {
-                this->on_closed_before_completed->send();
+                this->on_closed_before_completed->send(std::string{current_uuid});
             }
             this->release();
         });
@@ -739,11 +775,23 @@ public:
         scraping_box = std::make_shared<SceneScrapingBox>(
             config.skill_scans, config.factor_scans, config.campaign_scans, scraping_root_dir / current_uuid);
 
-        skill_scraper = std::make_unique<SceneScraper>(config.common, scraping_box->skill_box(), on_scroll_ready);
+        skill_scraper = std::make_unique<SceneScraper>(
+            config.common,
+            scraping_box->skill_box(),
+            on_scroll_ready->bindLeft(TabPage::SkillPage),
+            on_scroll_updated->bindLeft(TabPage::SkillPage));
 
-        factor_scraper = std::make_unique<SceneScraper>(config.common, scraping_box->factor_box(), on_scroll_ready);
+        factor_scraper = std::make_unique<SceneScraper>(
+            config.common,
+            scraping_box->factor_box(),
+            on_scroll_ready->bindLeft(TabPage::FactorPage),
+            on_scroll_updated->bindLeft(TabPage::FactorPage));
 
-        campaign_scraper = std::make_unique<SceneScraper>(config.common, scraping_box->campaign_box(), on_scroll_ready);
+        campaign_scraper = std::make_unique<SceneScraper>(
+            config.common,
+            scraping_box->campaign_box(),
+            on_scroll_ready->bindLeft(TabPage::CampaignPage),
+            on_scroll_updated->bindLeft(TabPage::CampaignPage));
 
         base_frame_catcher = std::make_unique<BaseFrameCatcher>(
             StationaryFrameCatcher{
@@ -766,7 +814,7 @@ public:
 
         const auto tab_scraper = tabScraper(scene_info.tab_page);
         if (updateUntilReady(tab_scraper, frame)) {
-            on_page_ready->send();
+            on_page_ready->send(scene_info.tab_page);
             checkForCompleted();
         }
 
@@ -812,9 +860,10 @@ private:
     const event_util::Listener<Frame, SceneInfo> on_updated;
     const event_util::Listener<> on_closed;
 
-    const event_util::Sender<> on_closed_before_completed;
-    const event_util::Sender<> on_scroll_ready;  // When user can start scrolling.
-    const event_util::Sender<> on_page_ready;  // When each page is ready.
+    const event_util::Sender<std::string> on_closed_before_completed;
+    const event_util::Sender<int> on_scroll_ready;  // When user can start scrolling.
+    const event_util::Sender<int, double> on_scroll_updated;  // When user scrolling.
+    const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<std::string> on_completed;  // When all three pages are ready.
 
     const CharaDetailSceneScraperConfig config;

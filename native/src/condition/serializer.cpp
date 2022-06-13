@@ -31,15 +31,14 @@ Builder<Base> Builder<Base>::create() {
 
 ConditionBase conditionFromJson(const json_util::Json &json) {
     const auto type = json.at("type").get<std::string>();
-    spdlog::enable_backtrace(CONDITION_BUILDERS.size());
+    log_trace("Deserialize target: {}", type);
     for (const auto &builder : CONDITION_BUILDERS) {
         if (builder.match(type)) {
-            spdlog::disable_backtrace();
+            log_trace("Builder found: {}", builder.typeName());
             return builder.build(json);
         }
-        log_error(builder.typeName());
+        log_trace(" - skipping builder: {}", builder.typeName());
     }
-    spdlog::dump_backtrace();
     log_error("Unknown type: {}", type);
     throw std::invalid_argument(type);
 }
