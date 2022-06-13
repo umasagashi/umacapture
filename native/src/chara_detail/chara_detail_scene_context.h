@@ -14,7 +14,7 @@ namespace uma::chara_detail {
 using TabCondition = condition::ParallelCondition<Frame, rule::LogicalOr>;
 
 enum TabPage {
-    SkillPage,
+    SkillPage = 0,
     FactorPage,
     CampaignPage,
 };

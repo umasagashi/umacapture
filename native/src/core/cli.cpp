@@ -51,7 +51,7 @@ void captureFromScreen() {
     const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
 
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
+    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
     const auto config = createConfig();
@@ -73,7 +73,7 @@ void captureFromVideo(const std::filesystem::path &path) {
     const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
 
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
+    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
     const auto config = createConfig();

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:umasagashi_app/src/core/utils.dart';
 
 import '../gui/capture.dart';
 import '../gui/toast.dart';
@@ -39,10 +40,33 @@ class PlatformController {
   void _handleMessage(String message) {
     final messageJson = jsonDecode(message) as Map;
     final messageType = messageJson['type'].toString();
-    if (messageType == 'onCaptureStarted') {
-      _onCaptureStarted();
-    } else if (messageType == 'onCaptureStopped') {
-      _onCaptureStopped();
+    switch (messageType) {
+      case 'onError':
+        _onError(messageJson['message'].toString());
+        break;
+      case 'onCaptureStarted':
+        _onCaptureStarted();
+        break;
+      case 'onCaptureStopped':
+        _onCaptureStopped();
+        break;
+      case 'onScrollReady':
+        _onScrollReady(messageJson['index']);
+        break;
+      case 'onScrollUpdated':
+        _onScrollUpdated(messageJson['index'], messageJson['progress']);
+        break;
+      case 'onPageReady':
+        _onPageReady(messageJson['index']);
+        break;
+      case 'onCharaDetailStarted':
+        _onCharaDetailStarted();
+        break;
+      case 'onCharaDetailFinished':
+        _onCharaDetailFinished(messageJson['id'], messageJson['success']);
+        break;
+      default:
+        throw UnimplementedError(messageType);
     }
   }
 
@@ -54,6 +78,30 @@ class PlatformController {
   void _onCaptureStopped() {
     _ref.read(capturingStateProvider.notifier).update((state) => false);
     sendToast(ToastData.info('Screen capture stopped.'));
+  }
+
+  void _onError(String message) {
+    sendToast(ToastData.info('Error: $message'));
+  }
+
+  void _onScrollReady(int index) {
+    sendToast(ToastData.info('Scroll ready: $index'));
+  }
+
+  void _onScrollUpdated(int index, double progress) {
+    logger.d('Scroll updated: $index, $progress');
+  }
+
+  void _onPageReady(int index) {
+    sendToast(ToastData.info('Page ready: $index'));
+  }
+
+  void _onCharaDetailStarted() {
+    sendToast(ToastData.info('Chara Detail opened.'));
+  }
+
+  void _onCharaDetailFinished(String id, bool success) {
+    sendToast(ToastData.info('Chara Detail closed: $id, $success'));
   }
 
   void sendToast(ToastData data) => _streamController.sink.add(data);
