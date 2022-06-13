@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace stds {
+namespace uma::stds {
 
 template<typename T>
 inline T identical(const T &arg) {
@@ -70,4 +70,4 @@ inline std::optional<T> find_transformed_if(const Container &container, Function
 }
 #pragma clang diagnostic pop
 
-}  // namespace stds
+}  // namespace uma::stds

@@ -6,28 +6,29 @@
 #include <flutter/flutter_view_controller.h>
 #include <runner/win32_window.h>
 
+#include "core/native_api.h"
 #include "runner/platform_channel.h"
 #include "runner/window_recorder.h"
 #include "runner/windows_config.h"
 #include "util/logger_util.h"
 
-#include "native_api.h"
+namespace uma::windows {
 
 class NativeController {
 public:
-    explicit NativeController(const std::shared_ptr<channel::PlatformChannel> &platform_channel)
+    explicit NativeController(const std::shared_ptr<PlatformChannel> &platform_channel)
         : channel(platform_channel) {
-        const auto recorder_runner_impl = connection::event_runner::makeSingleThreadRunner(nullptr, "recorder");
+        const auto recorder_runner_impl = event_util::makeSingleThreadRunner(nullptr, "recorder");
         const auto connection = recorder_runner_impl->makeConnection<cv::Mat, uint64>();
 
         recorder_runner = recorder_runner_impl;
-        window_recorder = std::make_unique<recording::WindowRecorder>(connection);
+        window_recorder = std::make_unique<WindowRecorder>(connection);
 
         channel->addMethodCallHandler("setConfig", [this](const auto &config_string) {
             vlog_debug(config_string.length());
             native_config = config_string;
-            const auto config_json = json_utils::Json::parse(native_config);
-            const auto windows_config = config_json["platform"]["windows"].get<config::WindowsConfig>();
+            const auto config_json = json_util::Json::parse(native_config);
+            const auto windows_config = config_json["platform"]["windows"].get<windows_config::WindowsConfig>();
             if (windows_config.window_recorder.has_value()) {
                 window_recorder->setConfig(windows_config.window_recorder.value());
             }
@@ -37,9 +38,10 @@ public:
 
         channel->addMethodCallHandler("stopCapture", [this]() { joinEventLoop(); });
 
-        NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
+        app::NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
 
-        connection->listen([](const auto &frame, const auto &ts) { NativeApi::instance().updateFrame(frame, ts); });
+        connection->listen(
+            [](const auto &frame, const auto &ts) { app::NativeApi::instance().updateFrame(frame, ts); });
     }
 
     ~NativeController() {
@@ -59,10 +61,10 @@ private:
             return;
         }
 
-        NativeApi::instance().startEventLoop(native_config);
+        app::NativeApi::instance().startEventLoop(native_config);
         recorder_runner->start();
         window_recorder->startRecord();
-        NativeApi::instance().notifyCaptureStarted();  // In Windows, start operation will never be canceled.
+        app::NativeApi::instance().notifyCaptureStarted();  // In Windows, start operation will never be canceled.
     }
 
     void joinEventLoop() {
@@ -75,13 +77,15 @@ private:
 
         window_recorder->stopRecord();
         recorder_runner->join();
-        NativeApi::instance().joinEventLoop();
-        NativeApi::instance().notifyCaptureStopped();
+        app::NativeApi::instance().joinEventLoop();
+        app::NativeApi::instance().notifyCaptureStopped();
     }
 
-    std::shared_ptr<channel::PlatformChannel> channel;
-    std::unique_ptr<recording::WindowRecorder> window_recorder;
-    connection::EventRunner recorder_runner;
+    std::shared_ptr<PlatformChannel> channel;
+    std::unique_ptr<WindowRecorder> window_recorder;
+    event_util::EventRunner recorder_runner;
 
     std::string native_config;
 };
+
+}  // namespace uma::windows

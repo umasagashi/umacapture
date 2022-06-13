@@ -7,9 +7,9 @@
 #include "condition/cv_rule.h"
 #include "cv/frame.h"
 #include "cv/frame_distributor.h"
-#include "util/json_utils.h"
+#include "util/json_util.h"
 
-namespace tool {
+namespace uma::tool {
 
 class CharaDetailSceneContextBuilder {
 public:
@@ -103,4 +103,4 @@ private:
     }
 };
 
-}  // namespace tool
+}  // namespace uma::tool

@@ -33,8 +33,8 @@ private:
     // The Flutter instance hosted by this window.
     std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
 
-    std::shared_ptr<channel::PlatformChannel> platform_channel;
-    std::unique_ptr<NativeController> native_controller;
+    std::shared_ptr<uma::windows::PlatformChannel> platform_channel;
+    std::unique_ptr<uma::windows::NativeController> native_controller;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

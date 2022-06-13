@@ -15,9 +15,7 @@
 #include <spdlog/sinks/android_sink.h>
 #endif
 
-namespace uma {
-
-namespace logger_util {
+namespace uma::logger_util {
 
 template<typename Mutex>
 class CallbackSink : public spdlog::sinks::base_sink<Mutex> {
@@ -58,7 +56,7 @@ inline void init() {
     spdlog::set_level(spdlog::level::trace);  // Do not change this. Change the macro defined on top.
 }
 
-}  // namespace logger_util
+}  // namespace uma::logger_util
 
 #define INTERNAL_EXPAND_NAME(var) #var "={}, "
 #define INTERNAL_VLOG(...) NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXPAND_NAME, __VA_ARGS__)), __VA_ARGS__
@@ -81,5 +79,3 @@ inline void init() {
 #define log_fatal(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 #pragma clang diagnostic pop
-
-}

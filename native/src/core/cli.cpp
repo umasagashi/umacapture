@@ -9,54 +9,55 @@
 #include "builder/chara_detail_scene_context_builder.h"
 #include "builder/chara_detail_scene_scraper_builder.h"
 #include "condition/serializer.h"
+#include "core/native_api.h"
 #include "cv/video_loader.h"
-#include "util/common.h"
-#include "util/json_utils.h"
+#include "util/json_util.h"
 #include "util/logger_util.h"
+#include "util/misc.h"
 
-#include "native_api.h"
+namespace uma::cli {
 
 template<typename T, typename ToJson, typename FromJson>
 void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJson) {
     std::filesystem::create_directories(path.parent_path());
 
     auto context = T().build();
-    json_utils::Json json = toJson(context);
-    io::write(path, json.dump(2));
+    json_util::Json json = toJson(context);
+    io_util::write(path, json.dump(2));
 
-    json_utils::Json reconstructed_json = toJson(fromJson(json_utils::Json::parse(io::read(path))));
+    json_util::Json reconstructed_json = toJson(fromJson(json_util::Json::parse(io_util::read(path))));
     log_debug(reconstructed_json.dump(2));
     assert_(json == reconstructed_json);
 }
 
-json_utils::Json createConfig() {
+json_util::Json createConfig() {
     const std::filesystem::path config_dir = "../../assets/config";
     return {
         {
             "chara_detail",
             {
-                {"scene_context", json_utils::read(config_dir / "chara_detail/scene_context.json")},
-                {"scene_scraper", json_utils::read(config_dir / "chara_detail/scene_scraper.json")},
+                {"scene_context", json_util::read(config_dir / "chara_detail/scene_context.json")},
+                {"scene_scraper", json_util::read(config_dir / "chara_detail/scene_scraper.json")},
                 {"scraping_dir", (std::filesystem::current_path() / "scraping").generic_string()},
             },
         },
-        {"platform", json_utils::read(config_dir / "platform.json")},
+        {"platform", json_util::read(config_dir / "platform.json")},
     };
 }
 
 void captureFromScreen() {
-    const auto recorder_runner = connection::event_runner::makeSingleThreadRunner(nullptr, "recorder");
+    const auto recorder_runner = event_util::makeSingleThreadRunner(nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
-    const auto window_recorder = std::make_unique<recording::WindowRecorder>(connection);
+    const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
 
-    auto &api = NativeApi::instance();
+    auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
     const auto config = createConfig();
     api.startEventLoop(config.dump());
 
-    const auto windows_config = config["platform"]["windows"].get<config::WindowsConfig>();
+    const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
     window_recorder->setConfig(windows_config.window_recorder.value());
 
     recorder_runner->start();
@@ -68,10 +69,10 @@ void captureFromScreen() {
 }
 
 void captureFromVideo(const std::filesystem::path &path) {
-    const auto recorder_runner = connection::event_runner::makeSingleThreadRunner(nullptr, "recorder");
+    const auto recorder_runner = event_util::makeSingleThreadRunner(nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
 
-    auto &api = NativeApi::instance();
+    auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { std::cout << "notify: " << message << std::endl; });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
@@ -80,7 +81,7 @@ void captureFromVideo(const std::filesystem::path &path) {
 
     recorder_runner->start();
 
-    auto video = VideoLoader(connection);
+    auto video = video::VideoLoader(connection);
     video.run(path);
 
     while (api.isRunning()) {
@@ -88,8 +89,10 @@ void captureFromVideo(const std::filesystem::path &path) {
     }
 }
 
+}  // namespace uma::cli
+
 int main(int argc, char **argv) {
-    logger_util::init();
+    uma::logger_util::init();
 
     vlog_trace(1, 2, 3);
     vlog_debug(1, 2, 3);
@@ -117,23 +120,23 @@ int main(int argc, char **argv) {
         vlog_debug(assets_dir.string(), video_path.string());
 
         if (build_command->parsed()) {
-            buildJson<tool::CharaDetailSceneContextBuilder>(
+            uma::cli::buildJson<uma::tool::CharaDetailSceneContextBuilder>(
                 assets_dir / "chara_detail" / "scene_context.json",
                 [](const auto &obj) { return obj->toJson(); },
-                [](const auto &json) { return serializer::conditionFromJson(json); });
+                [](const auto &json) { return uma::condition::serializer::conditionFromJson(json); });
 
-            buildJson<tool::CharaDetailSceneScraperBuilder>(
+            uma::cli::buildJson<uma::tool::CharaDetailSceneScraperBuilder>(
                 assets_dir / "chara_detail" / "scene_scraper.json",
                 [](const auto &obj) { return obj; },
                 [](const auto &json) { return json; });
         }
 
         if (capture_command->parsed()) {
-            captureFromScreen();
+            uma::cli::captureFromScreen();
         }
 
         if (video_command->parsed()) {
-            captureFromVideo(video_path);
+            uma::cli::captureFromVideo(video_path);
         }
     } catch (std::exception &e) {
         std::cerr << e.what() << std::endl;

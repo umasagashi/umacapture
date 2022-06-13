@@ -5,7 +5,7 @@
 #include "condition/cv_rule.h"
 #include "cv/frame.h"
 
-namespace tool {
+namespace uma::tool {
 
 using ConditionBase = std::shared_ptr<condition::Condition<Frame>>;
 
@@ -104,4 +104,4 @@ stableLineCheck(int threshold, const Line<double> &line, const Range<Color> &p1_
     return stableLineCheck(threshold, line, p1_color, length, flat_deviation);
 }
 
-}  // namespace tool
+}  // namespace uma::tool

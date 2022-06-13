@@ -2,11 +2,9 @@
 
 #include <string>
 
-#include "util/json_utils.h"
+#include "util/json_util.h"
 
-namespace uma {
-
-namespace condition {
+namespace uma::condition {
 
 template<typename InputType>
 class Condition {
@@ -23,10 +21,8 @@ public:
 
     [[maybe_unused]] [[nodiscard]] virtual std::string typeName() const = 0;
 
-    // static Condition<InputType> *fromJson(const json_utils::Json &j);
-    [[nodiscard]] virtual json_utils::Json toJson() const = 0;
+    // static Condition<InputType> *fromJson(const json_util::Json &j);
+    [[nodiscard]] virtual json_util::Json toJson() const = 0;
 };
 
-}  // namespace condition
-
-}
+}  // namespace uma::condition

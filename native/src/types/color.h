@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "util/json_utils.h"
+#include "util/json_util.h"
 
 namespace uma {
 
@@ -50,4 +50,4 @@ private:
 };
 EXTENDED_JSON_TYPE_PRINTABLE(Color)
 
-}
+}  // namespace uma

@@ -10,9 +10,7 @@
 #include "condition/serializer.h"
 #include "util/stds.h"
 
-namespace uma {
-
-namespace condition {
+namespace uma::condition {
 
 template<typename Base, typename InputType, typename RuleType, typename StateType>
 [[nodiscard]] std::string typeNameOf() {
@@ -45,18 +43,18 @@ public:
 
     [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
 
-    static Condition<InputType> *fromJson(const json_utils::Json &json) {
+    static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new PlainCondition<InputType, RuleType, StateType>{
-            json_utils::extended_from_json(json, "rule", json_utils::AsType<decltype(rule)>()),
-            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(condition_name)>()),
+            json_util::extended_from_json(json, "rule", json_util::AsType<decltype(rule)>()),
+            json_util::extended_from_json(json, "name", json_util::AsType<decltype(condition_name)>()),
         };
     }
 
-    [[nodiscard]] json_utils::Json toJson() const {
-        json_utils::Json json;
-        json_utils::extended_to_json(json, "name", condition_name);
-        json_utils::extended_to_json(json, "type", typeName());
-        json_utils::extended_to_json(json, "rule", rule);
+    [[nodiscard]] json_util::Json toJson() const {
+        json_util::Json json;
+        json_util::extended_to_json(json, "name", condition_name);
+        json_util::extended_to_json(json, "type", typeName());
+        json_util::extended_to_json(json, "rule", rule);
         return json;
     }
 
@@ -100,20 +98,20 @@ public:
 
     [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
 
-    static Condition<InputType> *fromJson(const json_utils::Json &json) {
+    static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new NestedCondition<InputType, RuleType, StateType>{
-            json_utils::extended_from_json(json, "rule", json_utils::AsType<decltype(rule)>()),
+            json_util::extended_from_json(json, "rule", json_util::AsType<decltype(rule)>()),
             serializer::conditionFromJson(json.at("child")),
-            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(condition_name)>()),
+            json_util::extended_from_json(json, "name", json_util::AsType<decltype(condition_name)>()),
         };
     }
 
-    [[nodiscard]] json_utils::Json toJson() const {
-        json_utils::Json json;
-        json_utils::extended_to_json(json, "name", condition_name);
-        json_utils::extended_to_json(json, "type", typeName());
-        json_utils::extended_to_json(json, "rule", rule);
-        json_utils::extended_to_json(json, "child", child->toJson());
+    [[nodiscard]] json_util::Json toJson() const {
+        json_util::Json json;
+        json_util::extended_to_json(json, "name", condition_name);
+        json_util::extended_to_json(json, "type", typeName());
+        json_util::extended_to_json(json, "rule", rule);
+        json_util::extended_to_json(json, "child", child->toJson());
         return json;
     }
 
@@ -169,20 +167,20 @@ public:
 
     [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
 
-    static Condition<InputType> *fromJson(const json_utils::Json &json) {
+    static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new ParallelCondition<InputType, RuleType, StateType>{
-            json_utils::extended_from_json(json, "rule", json_utils::AsType<decltype(rule)>()),
+            json_util::extended_from_json(json, "rule", json_util::AsType<decltype(rule)>()),
             serializer::conditionArrayFromJson(json.at("children")),
-            json_utils::extended_from_json(json, "name", json_utils::AsType<decltype(condition_name)>()),
+            json_util::extended_from_json(json, "name", json_util::AsType<decltype(condition_name)>()),
         };
     }
 
-    [[nodiscard]] json_utils::Json toJson() const {
-        json_utils::Json json;
-        json_utils::extended_to_json(json, "name", condition_name);
-        json_utils::extended_to_json(json, "type", typeName());
-        json_utils::extended_to_json(json, "rule", rule);
-        json_utils::extended_to_json(json, "children", serializer::conditionArrayToJson(children));
+    [[nodiscard]] json_util::Json toJson() const {
+        json_util::Json json;
+        json_util::extended_to_json(json, "name", condition_name);
+        json_util::extended_to_json(json, "type", typeName());
+        json_util::extended_to_json(json, "rule", rule);
+        json_util::extended_to_json(json, "children", serializer::conditionArrayToJson(children));
         return json;
     }
 
@@ -195,6 +193,4 @@ private:
     bool met_ = false;
 };
 
-}  // namespace condition
-
-}
+}  // namespace uma::condition

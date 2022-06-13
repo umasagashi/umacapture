@@ -5,7 +5,7 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
-#include "util/json_utils.h"
+#include "util/json_util.h"
 
 namespace uma {
 
@@ -253,4 +253,4 @@ private:
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Rect)
 
-}
+}  // namespace uma

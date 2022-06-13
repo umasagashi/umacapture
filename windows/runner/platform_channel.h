@@ -1,5 +1,4 @@
-#ifndef RUNNER_PLATFORM_CHANNEL_H_
-#define RUNNER_PLATFORM_CHANNEL_H_
+#pragma once
 
 #include <optional>
 
@@ -7,7 +6,9 @@
 #include <flutter/method_channel.h>
 #include <flutter/standard_method_codec.h>
 
-#include "util/eventpp_util.h"
+#include "util/event_util.h"
+
+namespace uma::windows {
 
 namespace {
 
@@ -15,8 +16,6 @@ const UINT MESSAGE_QUEUE_ID = 0xA000;
 const char *CHANNEL = "dev.flutter.umasagashi_app/capturing_channel";
 
 }  // namespace
-
-namespace channel {
 
 class PlatformChannel {
 public:
@@ -39,7 +38,7 @@ public:
                 }
             });
 
-        const auto notify_connection = connection::makeQueuedConnection<std::string>();
+        const auto notify_connection = event_util::makeQueuedConnection<std::string>();
         on_notify = notify_connection;
         message_processor = notify_connection;
         notify_connection->listen([this](const std::string &message) {
@@ -73,10 +72,8 @@ private:
     HWND flutter_handle;
     std::unique_ptr<flutter::MethodChannel<>> channel;
     std::map<std::string, std::function<void(const std::string &)>> method_map;
-    connection::Sender<std::string> on_notify;
-    connection::EventProcessor message_processor;
+    event_util::Sender<std::string> on_notify;
+    event_util::EventProcessor message_processor;
 };
 
-}  // namespace channel
-
-#endif  // RUNNER_PLATFORM_CHANNEL_H_
+}  // namespace uma::windows

@@ -11,8 +11,8 @@
 #include "types/color.h"
 #include "types/range.h"
 #include "types/shape.h"
-#include "util/common.h"
-#include "util/json_utils.h"
+#include "util/json_util.h"
+#include "util/misc.h"
 #include "util/stds.h"
 
 namespace uma {
@@ -273,4 +273,4 @@ private:
     FrameAnchor anchor_;
 };
 
-}
+}  // namespace uma
