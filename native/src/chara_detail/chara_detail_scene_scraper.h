@@ -16,6 +16,8 @@
 
 #include "native_api.h"
 
+namespace uma {
+
 namespace {
 
 inline bool closeEnough(const std::vector<double> &a, const std::vector<double> &b, double threshold) {
@@ -309,7 +311,9 @@ private:
         std::ostringstream stream;
         stream << path_config::scroll_area_prefix << std::setw(path_config::scroll_area_digits) << std::setfill('0')
                << image_count++ << path_config::scroll_area_suffix;
-        frame.save(image_dir / stream.str());
+        const auto path = image_dir / stream.str();
+        frame.save(path);
+        log_debug(path.string());
     }
 
     const std::filesystem::path image_dir;
@@ -454,6 +458,7 @@ public:
         , on_scroll_ready(on_scroll_ready) {}
 
     void update(const Frame &frame) override {
+//        vlog_debug(is_scrolling, frame.size().width(), frame.size().height());
         assert_(state == Updatable);
 
         if (is_scrolling) {
@@ -831,3 +836,5 @@ private:
 };
 
 }  // namespace chara_detail
+
+}

@@ -15,6 +15,8 @@
 #include "util/json_utils.h"
 #include "util/stds.h"
 
+namespace uma {
+
 namespace {
 
 struct BGR {
@@ -270,3 +272,5 @@ private:
     uint64 timestamp_;
     FrameAnchor anchor_;
 };
+
+}

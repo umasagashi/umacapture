@@ -4,6 +4,8 @@
 
 #include "util/json_utils.h"
 
+namespace uma {
+
 class Color {
 public:
     Color(int r, int g, int b) noexcept
@@ -47,3 +49,5 @@ private:
     int b_;
 };
 EXTENDED_JSON_TYPE_PRINTABLE(Color)
+
+}

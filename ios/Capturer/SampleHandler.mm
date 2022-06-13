@@ -7,7 +7,10 @@
 
 #import <Foundation/Foundation.h>
 
-#import "../../native/src/native_api.h"
+#import "util/json_utils.h"
+
+#import "native_api.h"
+#import "util/logger_util.h"
 
 #import "ImageConverter.h"
 #import "SampleHandler.h"
@@ -27,8 +30,7 @@ ImageConverter *imageConverter = nil;
     return [root URLByAppendingPathComponent:name];
 }
 
-- (bool)resetDirectory:(NSURL *)directory {
-    [[NSFileManager defaultManager] removeItemAtURL:directory error:nil];
+- (bool)createDirectory:(NSURL *)directory {
     auto result = [[NSFileManager defaultManager] createDirectoryAtURL:directory
                                            withIntermediateDirectories:YES
                                                             attributes:nil
@@ -37,33 +39,44 @@ ImageConverter *imageConverter = nil;
 }
 
 - (void)broadcastStartedWithSetupInfo:(NSDictionary<NSString *,NSObject *> *)setupInfo {
-    NSLog(@"[UMABE]: broadcastStarted");
+    uma::NativeApi::instance().setLoggingCallback([](const auto &message){
+        NSString *buf = [NSString stringWithCString:message.c_str()
+                                           encoding:[NSString defaultCStringEncoding]];
+        NSLog(buf);
+    });
+    uma::logger_util::init();
     
+    vlog_trace(1, 2, 3);
+    vlog_debug(1, 2, 3);
+    vlog_info(1, 2, 3);
+    vlog_warning(1, 2, 3);
+    vlog_error(1, 2, 3);
+    vlog_fatal(1, 2, 3);
+    
+    uma::NativeApi::instance().setMkdirCallback([self](const auto &message){
+        NSString *buf = [NSString stringWithCString:message.c_str()
+                                           encoding:[NSString defaultCStringEncoding]];
+        NSURL *url = [NSURL fileURLWithPath:buf];
+        const auto ret = [self createDirectory:url];
+        vlog_debug(ret);
+    });
+
     auto userDefaults = [[NSUserDefaults alloc] initWithSuiteName: APP_GROUP];
     NSString *config = [userDefaults objectForKey:@"config"];
-    NSLog(@"[UMABE]: %@", config);
+    auto configJson = uma::json_utils::Json::parse([config cStringUsingEncoding:NSUTF8StringEncoding]);
     
     NSURL *imageDirectory = [self getSharedDirectoryURL:@"images"];
-    [self resetDirectory:imageDirectory];
+//    [self resetDirectory:imageDirectory];
+    [[NSFileManager defaultManager] removeItemAtURL:imageDirectory error:nil];
     
-    NSString *dirConfig = [NSString stringWithFormat:@"{ \"directory\": \"%@\"}", imageDirectory.path];
-    NSLog(@"[UMABE]: dir - %@", dirConfig);
-    
-    NativeApi::instance().setConfig([config cStringUsingEncoding:NSUTF8StringEncoding]);
-    NativeApi::instance().setConfig([dirConfig cStringUsingEncoding:NSUTF8StringEncoding]);
+    configJson["chara_detail"]["scraping_dir"] = [imageDirectory.path cStringUsingEncoding:NSUTF8StringEncoding];
     
     cv::Size minimumSize = {540, 960};
     assert(imageConverter == nil);
     imageConverter = [[ImageConverter alloc] initWithMinimumSize:minimumSize];
     
-    std::function<void(const std::string &)> callback = [=](const std::string &message) {
-        NSString *buf = [NSString stringWithCString:message.c_str()
-                                           encoding:[NSString defaultCStringEncoding]];
-        NSLog(@"[UMABE]: Callback: %@", buf);
-    };
-    NativeApi::instance().setCallback(callback);
-    
-    NativeApi::instance().startEventLoop();
+    uma::NativeApi::instance().startEventLoop(configJson.dump(0));
+    log_debug("finished");
 }
 
 - (void)broadcastPaused {
@@ -76,10 +89,9 @@ ImageConverter *imageConverter = nil;
 }
 
 - (void)broadcastFinished {
-    NSLog(@"[UMABE]: broadcastFinished before");
-    NativeApi::instance().joinEventLoop();
+    log_debug("");
+    uma::NativeApi::instance().joinEventLoop();
     imageConverter = nil;
-    NSLog(@"[UMABE]: broadcastFinished after");
 }
 
 int counter_for_debug = 0;
@@ -87,10 +99,12 @@ int counter_for_debug = 0;
 - (void)processSampleBuffer:(CMSampleBufferRef)sampleBuffer withType:(RPSampleBufferType)sampleBufferType {
     switch (sampleBufferType) {
         case RPSampleBufferTypeVideo: {
-            if (counter_for_debug++ > 100) {  // delay for debug
-                cv::Mat mat = [imageConverter convertToMat:sampleBuffer];
-                NativeApi::instance().updateFrame(mat);
+            if (counter_for_debug++ % 10 != 0) {  // TODO: Check the queue size. This is reqired to prevent OOM in debug build.
+                break;
             }
+            const auto ts = uma::chrono::timestamp();
+            cv::Mat mat = [imageConverter convertToMat:sampleBuffer];
+            uma::NativeApi::instance().updateFrame(mat, ts);
             break;
         }
         case RPSampleBufferTypeAudioApp:

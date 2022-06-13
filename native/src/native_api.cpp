@@ -5,6 +5,8 @@
 
 #include "native_api.h"
 
+namespace uma {
+
 NativeApi::NativeApi() = default;  // Do not use Native::instance() in this constructor.
 
 NativeApi::~NativeApi() {
@@ -12,6 +14,7 @@ NativeApi::~NativeApi() {
 }
 
 void NativeApi::startEventLoop(const std::string &native_config) {
+    log_debug("");
     vlog_debug(native_config.length(), isRunning());
     if (isRunning()) {
         return;
@@ -128,4 +131,6 @@ void NativeApi::notifyCaptureStopped() {
     notifyCaptureStopped();
     std::cout << (frame_distributor == nullptr);
     std::cout << (chara_detail_scene_scraper == nullptr);
+}
+
 }

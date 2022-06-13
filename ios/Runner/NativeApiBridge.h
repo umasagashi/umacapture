@@ -6,15 +6,11 @@
 
 @interface NativeApiBridge : NSObject
 
+-(void)initializeNative;
+
 -(void)setConfig:(NSString *)config;
 
--(void)updateFrame:(UIImage *)image;
-
--(void)setCallback:(void (^)(NSString *))method;
-
--(void)startEventLoop;
-
--(void)joinEventLoop;
+-(void)setNotifyCallback:(void (^)(NSString *))method;
 
 @end
 

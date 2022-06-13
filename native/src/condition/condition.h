@@ -4,6 +4,8 @@
 
 #include "util/json_utils.h"
 
+namespace uma {
+
 namespace condition {
 
 template<typename InputType>
@@ -26,3 +28,5 @@ public:
 };
 
 }  // namespace condition
+
+}

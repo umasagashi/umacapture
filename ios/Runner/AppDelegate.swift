@@ -18,9 +18,14 @@ class AppDelegate: FlutterAppDelegate {
         if let root = fileManager.containerURL(forSecurityApplicationGroupIdentifier: APP_GROUP) {
             let source = root.appendingPathComponent(path)
             let dest = URL(fileURLWithPath: appDirectory!).appendingPathComponent(path)
+            NSLog("src: \(source.path)")
+            NSLog("dst: \(dest)")
+            NSLog("remove")
             try? fileManager.removeItem(at: dest)
+//            try? fileManager.createDirectory(atPath: dest.path, withIntermediateDirectories: true)
+            NSLog("copy")
             try? fileManager.copyItem(atPath: source.path, toPath: dest.path)
-            NSLog("copied: \(source.path) to \(dest)")
+            NSLog("finished")
         }
     }
     
@@ -55,9 +60,9 @@ class AppDelegate: FlutterAppDelegate {
         api.setConfig(config)
         
         if let d = config.data(using: String.Encoding.utf8) {
-            if let items = try? JSONSerialization.jsonObject(with: d) as? [String: Any] {
-                let directory = items["directory"] as? String
-                NSLog("directory: \(directory ?? "nil")")
+            if let items = try? JSONSerialization.jsonObject(with: d) as? Dictionary<String, Any> {
+                let directory = (items["chara_detail"] as! Dictionary<String, Any>)["scraping_dir"] as! String;
+                NSLog("directory: \(directory)")
                 appDirectory = directory
             }
         }
@@ -65,13 +70,16 @@ class AppDelegate: FlutterAppDelegate {
         let userDefaults = UserDefaults(suiteName: APP_GROUP)
         userDefaults?.set(config, forKey: "config")
         userDefaults?.synchronize()
+
+        copySharedContainer(path: "images")
     }
     
     override func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
     ) -> Bool {
-        NSLog("AppDelegate: application")
+        api.initializeNative();
+
         GeneratedPluginRegistrant.register(with: self)
         
         let controller = window?.rootViewController as! FlutterViewController
@@ -86,13 +94,12 @@ class AppDelegate: FlutterAppDelegate {
             }
         })
         
-        api.setCallback({ (message: String?) in
+        api.setNotifyCallback({ (message: String?) in
             DispatchQueue.main.async {
                 channel.invokeMethod("notify", arguments: message)
             }
         });
         
-        api.startEventLoop()
         
         return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }

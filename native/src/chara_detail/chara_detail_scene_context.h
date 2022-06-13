@@ -8,6 +8,8 @@
 #include "util/json_utils.h"
 #include "util/stds.h"
 
+namespace uma {
+
 namespace {
 
 using TabCondition = condition::ParallelCondition<Frame, rule::LogicalOr>;
@@ -112,3 +114,5 @@ private:
 };
 
 }  // namespace chara_detail
+
+}

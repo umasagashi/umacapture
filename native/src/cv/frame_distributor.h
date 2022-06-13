@@ -7,6 +7,8 @@
 #include "cv/frame.h"
 #include "util/eventpp_util.h"
 
+namespace uma {
+
 class FrameDistributor {
 public:
     FrameDistributor(
@@ -37,3 +39,5 @@ private:
     const connection::Listener<Frame> frame_supplier;
     const connection::Sender<Frame> on_no_target;
 };
+
+}

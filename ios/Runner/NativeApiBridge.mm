@@ -2,7 +2,8 @@
 #import <opencv2/opencv.hpp>
 #import <opencv2/imgcodecs/ios.h>
 
-#import "../../native/src/native_api.h"
+#import "native_api.h"
+#import "util/logger_util.h"
 
 #import <Flutter/FlutterAppDelegate.h>
 #import "Runner-Swift.h"
@@ -12,35 +13,34 @@
 
 @implementation NativeApiBridge
 
--(void)setConfig:(NSString *)config {
-//    NSLog(@"setConfig: %@", config);
-    NativeApi::instance().setConfig([config cStringUsingEncoding:NSUTF8StringEncoding]);
-}
-
--(void)updateFrame:(UIImage *)image {
-    //    NSLog(@"updateFrame:");
-    cv::Mat mat;
-    UIImageToMat(image, mat);
-    cv::cvtColor(mat, mat, cv::COLOR_BGR2RGB);
-    NativeApi::instance().updateFrame(mat);
-}
-
--(void)setCallback:(void (^)(NSString *))method {
-    std::function<void(const std::string &)> callback = [=](const std::string &message) {
+-(void)initializeNative {
+    uma::NativeApi::instance().setLoggingCallback([](const auto &message){
         NSString *buf = [NSString stringWithCString:message.c_str()
                                            encoding:[NSString defaultCStringEncoding]];
-        //        NSLog(@"Callback: %@", buf);
+        NSLog(buf);
+    });
+    uma::logger_util::init();
+    
+    vlog_trace(1, 2, 3);
+    vlog_debug(1, 2, 3);
+    vlog_info(1, 2, 3);
+    vlog_warning(1, 2, 3);
+    vlog_error(1, 2, 3);
+    vlog_fatal(1, 2, 3);
+}
+
+-(void)setConfig:(NSString *)config {
+    vlog_debug(config.length);
+//    uma::NativeApi::instance().setConfig([config cStringUsingEncoding:NSUTF8StringEncoding]);
+}
+
+-(void)setNotifyCallback:(void (^)(NSString *))method {
+    log_debug("");
+    uma::NativeApi::instance().setNotifyCallback([=](const std::string &message) {
+        NSString *buf = [NSString stringWithCString:message.c_str()
+                                           encoding:[NSString defaultCStringEncoding]];
         method(buf);
-    };
-    NativeApi::instance().setCallback(callback);
-}
-
--(void)startEventLoop {
-    NativeApi::instance().startEventLoop();
-}
-
--(void)joinEventLoop {
-    NativeApi::instance().joinEventLoop();
+    });
 }
 
 @end

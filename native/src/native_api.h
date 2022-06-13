@@ -19,6 +19,8 @@
 #include "util/eventpp_util.h"
 #include "util/json_utils.h"
 
+namespace uma {
+
 namespace native_config {
 
 struct NativeConfig {
@@ -96,3 +98,5 @@ public:
         return app;
     }
 };
+
+}

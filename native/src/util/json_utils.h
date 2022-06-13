@@ -7,6 +7,8 @@
 
 #include "util/common.h"
 
+namespace uma {
+
 namespace json_utils {
 
 using Json = nlohmann::ordered_json;
@@ -15,6 +17,8 @@ template<typename T>
 using AsType = nlohmann::detail::identity_tag<T>;
 
 }  // namespace json_utils
+
+}
 
 namespace nlohmann {
 
@@ -76,6 +80,8 @@ struct adl_serializer<std::optional<T>> {
 };
 
 }  // namespace nlohmann
+
+namespace uma {
 
 namespace json_utils {
 
@@ -206,3 +212,5 @@ inline json_utils::Json read(const std::filesystem::path &path) {
 }
 
 }  // namespace json_utils
+
+}
