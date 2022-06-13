@@ -4,6 +4,8 @@
 #include "util/json_utils.h"
 #include "util/stds.h"
 
+namespace uma {
+
 namespace state {
 
 struct Empty {};
@@ -77,3 +79,5 @@ public:
 
 #pragma clang diagnostic pop
 }  // namespace rule
+
+}

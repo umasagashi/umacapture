@@ -8,6 +8,8 @@
 #include "types/range.h"
 #include "util/json_utils.h"
 
+namespace uma {
+
 class LineMeasurer {
 public:
     [[maybe_unused]] LineMeasurer(const Line<double> &line, const Range<Color> &color_deviation) noexcept
@@ -94,3 +96,5 @@ private:
 };
 
 }  // namespace rule
+
+}

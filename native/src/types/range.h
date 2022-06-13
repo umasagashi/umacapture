@@ -2,6 +2,8 @@
 
 #include "util/json_utils.h"
 
+namespace uma {
+
 template<typename T>
 class Range {
 public:
@@ -23,3 +25,5 @@ private:
     T max_;
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Range)
+
+}

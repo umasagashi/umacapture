@@ -2,6 +2,8 @@
 
 #include "native_api.h"
 
+namespace uma {
+
 namespace logger_util {
 
 template<typename Mutex>
@@ -16,3 +18,5 @@ template class CallbackSink<std::mutex>;
 template class CallbackSink<spdlog::details::null_mutex>;
 
 }  // namespace logger_util
+
+}

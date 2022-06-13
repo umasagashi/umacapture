@@ -7,6 +7,8 @@
 
 #include "util/json_utils.h"
 
+namespace uma {
+
 enum LayoutAnchor {
     ScreenStart,
     ScreenEnd,
@@ -250,3 +252,5 @@ private:
     Point<T> bottom_right_;
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Rect)
+
+}

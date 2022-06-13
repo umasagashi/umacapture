@@ -7,6 +7,8 @@
 #include "cv/frame.h"
 #include "util/json_utils.h"
 
+namespace uma {
+
 namespace serializer {
 
 using ConditionBase = std::shared_ptr<condition::Condition<Frame>>;
@@ -38,3 +40,5 @@ std::vector<ConditionBase> conditionArrayFromJson(const json_utils::Json &j);
 json_utils::Json conditionArrayToJson(const std::vector<ConditionBase> &conditions);
 
 }  // namespace serializer
+
+}

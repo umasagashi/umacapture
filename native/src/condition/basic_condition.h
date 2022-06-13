@@ -10,6 +10,8 @@
 #include "condition/serializer.h"
 #include "util/stds.h"
 
+namespace uma {
+
 namespace condition {
 
 template<typename Base, typename InputType, typename RuleType, typename StateType>
@@ -194,3 +196,5 @@ private:
 };
 
 }  // namespace condition
+
+}

@@ -6,6 +6,8 @@
 #include <iostream>
 #include <sstream>
 
+namespace uma {
+
 namespace chrono {
 
 inline uint64_t timestamp() {
@@ -32,6 +34,8 @@ inline void write(const std::filesystem::path &path, const std::string &text) {
 }
 
 }  // namespace io
+
+}
 
 #ifdef NDEBUG
 #define assert_(expression) ((void) 0)

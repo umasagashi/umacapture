@@ -4,6 +4,8 @@
 
 #include "serializer.h"
 
+namespace uma {
+
 namespace serializer {
 
 namespace {
@@ -58,3 +60,5 @@ json_utils::Json conditionArrayToJson(const std::vector<ConditionBase> &conditio
 }
 
 }  // namespace serializer
+
+}

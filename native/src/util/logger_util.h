@@ -15,6 +15,8 @@
 #include <spdlog/sinks/android_sink.h>
 #endif
 
+namespace uma {
+
 namespace logger_util {
 
 template<typename Mutex>
@@ -79,3 +81,5 @@ inline void init() {
 #define log_fatal(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 #pragma clang diagnostic pop
+
+}
