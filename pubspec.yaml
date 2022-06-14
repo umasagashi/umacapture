@@ -29,6 +29,8 @@ dependencies:
   package_info_plus: ^1.4.2
   audioplayers: ^1.0.0-rc.4
   elegant_notification: ^1.5.4
+  recase: ^4.0.0
+  percent_indicator: ^4.2.1
 
 
 dev_dependencies:
@@ -48,3 +50,7 @@ flutter:
     - assets/config/platform.json
     - assets/config/chara_detail/scene_context.json
     - assets/config/chara_detail/scene_scraper.json
+
+    - assets/sound/attention_weak.wav
+    - assets/sound/attention_normal.wav
+    - assets/sound/error.wav
