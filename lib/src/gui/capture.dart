@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:percent_indicator/circular_percent_indicator.dart';
 
 import '../core/platform_controller.dart';
 import '../preference/storage_box.dart';
@@ -33,6 +34,10 @@ final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider((ref) {
     values: AutoCopyMode.values,
     defaultValue: AutoCopyMode.disabled,
   );
+});
+
+final charaDetailScrollProgress = StateProvider.family<double, int>((ref, tab) {
+  return 0.0;
 });
 
 class StackedIndicator extends StatelessWidget {
@@ -135,6 +140,41 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
   }
 }
 
+class _ScrollStateWidget extends ConsumerStatefulWidget {
+  final String header;
+  final StateProvider<double> provider;
+
+  const _ScrollStateWidget({
+    Key? key,
+    required this.header,
+    required this.provider,
+  }) : super(key: key);
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _ScrollStateWidgetState();
+}
+
+class _ScrollStateWidgetState extends ConsumerState<_ScrollStateWidget> {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final progress = ref.watch(widget.provider);
+    return SizedBox(
+      width: 100,
+      child: CircularPercentIndicator(
+        radius: 25.0,
+        lineWidth: 5.0,
+        percent: progress,
+        header: Text(widget.header),
+        center: Text("${(progress * 100).toInt()}%"),
+        footer: Text(progress == 1 ? 'Completed' : (progress == 0 ? 'Not Started' : 'Scrolling')),
+        backgroundColor: Color.lerp(theme.colorScheme.surface, theme.colorScheme.onSurface, 0.1)!,
+        progressColor: progress == 1 ? Colors.green : Colors.orange,
+      ),
+    );
+  }
+}
+
 class _WindowsCaptureWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -149,6 +189,15 @@ class _WindowsCaptureWidget extends ConsumerWidget {
             onFalsePressed: () => ref.watch(platformControllerProvider).startCapture(),
             onTruePressed: () => ref.watch(platformControllerProvider).stopCapture(),
             provider: capturingStateProvider,
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              _ScrollStateWidget(header: 'Skill', provider: charaDetailScrollProgress(0)),
+              _ScrollStateWidget(header: 'Factor', provider: charaDetailScrollProgress(1)),
+              _ScrollStateWidget(header: 'Campaign', provider: charaDetailScrollProgress(2)),
+            ],
           ),
           const Divider(),
           Flex(

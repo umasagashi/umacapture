@@ -1,17 +1,8 @@
-import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/platform_controller.dart';
 import '../core/utils.dart';
-
-final _toastStreamsProvider = Provider<List<Stream<ToastData>>>((ref) {
-  return [
-    ref.watch(platformControllerProvider).stream,
-  ];
-});
 
 enum ToastType {
   success,
@@ -35,36 +26,16 @@ class ToastData {
   ToastData.error(this.description) : type = ToastType.error;
 }
 
-class ToastLayer extends ConsumerStatefulWidget {
-  const ToastLayer({Key? key}) : super(key: key);
+class Toaster {
+  final double narrowWidth;
+  final Duration duration;
 
-  static Widget asSibling({required Widget child}) {
-    return Column(
-      children: [
-        Expanded(child: child),
-        const ToastLayer(),
-      ],
-    );
-  }
+  Toaster({
+    this.narrowWidth = 600.0,
+    required this.duration,
+  });
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _ToastLayerState();
-}
-
-class _ToastLayerState extends ConsumerState<ToastLayer> {
-  final StreamSubscriptionController _subscriptions = StreamSubscriptionController();
-
-  @override
-  Widget build(BuildContext context) {
-    _subscriptions.update<ToastData>(
-      streams: ref.watch(_toastStreamsProvider),
-      onData: (data) => _showToast(context, data),
-    );
-    return Container();
-    // return TextButton(child: const Text('test'), onPressed: () => _showToast(context, ToastData.error('message')));
-  }
-
-  IconData getIcon(ToastData data) {
+  IconData _getIcon(ToastData data) {
     switch (data.type) {
       case ToastType.success:
         return Icons.check_circle;
@@ -79,7 +50,7 @@ class _ToastLayerState extends ConsumerState<ToastLayer> {
     }
   }
 
-  Color getColor(ToastData data) {
+  Color _getColor(ToastData data) {
     switch (data.type) {
       case ToastType.success:
         return Colors.green.shade500;
@@ -94,14 +65,13 @@ class _ToastLayerState extends ConsumerState<ToastLayer> {
     }
   }
 
-  void _showToast(BuildContext context, ToastData data) {
+  void showToast(BuildContext context, ToastData data) {
     final snackBar = ScaffoldMessenger.of(context);
     final parentSize = MediaQuery.of(context).size;
-    final barWidth = min(parentSize.width - 20.0, 600.0);
-    final isNarrow = barWidth < 600.0;
-    final icon = getIcon(data);
-    final color = getColor(data);
-    const duration = Duration(seconds: 5);
+    final barWidth = min(parentSize.width - 20.0, narrowWidth);
+    final isNarrow = barWidth < narrowWidth;
+    final icon = _getIcon(data);
+    final color = _getColor(data);
 
     snackBar.showSnackBar(
       SnackBar(
