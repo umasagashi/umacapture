@@ -28,7 +28,7 @@ using CallbackSinkMt = CallbackSink<std::mutex>;
 using CallbackSinkSt = CallbackSink<spdlog::details::null_mutex>;
 
 inline void init() {
-    const auto logger_name = "uma_log";
+    const auto logger_name = "uma::log";
 
 #if defined(__ANDROID__)
     spdlog::sinks_init_list sinks = {

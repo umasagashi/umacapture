@@ -2,12 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:umasagashi_app/src/core/utils.dart';
 
+import '../core/notification_controller.dart';
 import '../gui/capture.dart';
-import '../gui/toast.dart';
-
-// import '../preference/platform_config.dart';
 import 'platform_channel.dart';
 
 final platformControllerProvider = Provider<PlatformController>((ref) {
@@ -20,16 +17,17 @@ final capturingStateProvider = StateProvider<bool>((ref) {
 
 class PlatformController {
   final Ref _ref;
-  final StreamController<ToastData> _streamController;
+  final StreamController<NotificationData> _notificationStreamController;
   final PlatformChannel _platformChannel;
 
   PlatformController(Ref ref, Map<String, dynamic> config)
       : _ref = ref,
-        _streamController = StreamController<ToastData>.broadcast(),
+        _notificationStreamController = StreamController<NotificationData>.broadcast(),
         _platformChannel = PlatformChannel() {
     _platformChannel.setCallback((message) => _handleMessage(message));
     _platformChannel.setConfig(jsonEncode(config));
 
+    // No need to watch providers, since this feature only runs at start up.
     final autoStart = ref.read(autoStartCaptureStateProvider);
     final isCapturing = ref.read(capturingStateProvider);
     if (autoStart && !isCapturing) {
@@ -72,41 +70,41 @@ class PlatformController {
 
   void _onCaptureStarted() {
     _ref.read(capturingStateProvider.notifier).update((state) => true);
-    sendToast(ToastData.info('Screen capture started.'));
+    notify(NotificationData.onCaptureStarted());
   }
 
   void _onCaptureStopped() {
     _ref.read(capturingStateProvider.notifier).update((state) => false);
-    sendToast(ToastData.info('Screen capture stopped.'));
+    notify(NotificationData.onCaptureStopped());
   }
 
   void _onError(String message) {
-    sendToast(ToastData.info('Error: $message'));
+    notify(NotificationData.onError(message));
   }
 
   void _onScrollReady(int index) {
-    sendToast(ToastData.info('Scroll ready: $index'));
+    notify(NotificationData.onScrollReady(index));
   }
 
   void _onScrollUpdated(int index, double progress) {
-    logger.d('Scroll updated: $index, $progress');
+    notify(NotificationData.onScrollUpdated(index, progress));
   }
 
   void _onPageReady(int index) {
-    sendToast(ToastData.info('Page ready: $index'));
+    notify(NotificationData.onPageReady(index));
   }
 
   void _onCharaDetailStarted() {
-    sendToast(ToastData.info('Chara Detail opened.'));
+    notify(NotificationData.onCharaDetailStarted());
   }
 
   void _onCharaDetailFinished(String id, bool success) {
-    sendToast(ToastData.info('Chara Detail closed: $id, $success'));
+    notify(NotificationData.onCharaDetailFinished(id, success));
   }
 
-  void sendToast(ToastData data) => _streamController.sink.add(data);
+  void notify(NotificationData data) => _notificationStreamController.sink.add(data);
 
-  Stream<ToastData> get stream => _streamController.stream;
+  Stream<NotificationData> get notificationStream => _notificationStreamController.stream;
 
   // void setConfig(String config) => _platformChannel.setConfig(config);
 

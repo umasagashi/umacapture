@@ -7,6 +7,7 @@ enum SettingsEntryKey {
   sidebarExtended,
   autoStartCapture,
   autoCopyClipboard,
+  soundEffect,
 }
 
 final storageBoxProvider = Provider<StorageBox>((ref) {

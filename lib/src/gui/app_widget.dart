@@ -8,11 +8,11 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app/pages.dart';
 import '../app/route.gr.dart';
+import '../core/notification_controller.dart';
 import '../preference/storage_box.dart';
 import '../preference/window_state.dart';
 import '../state/notifier.dart';
 import '../state/settings_state.dart';
-import 'toast.dart';
 
 final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
   final box = ref.watch(storageBoxProvider);
@@ -109,7 +109,7 @@ class _ResponsiveScaffold extends StatelessWidget {
         return Scaffold(
           appBar: wide ? null : AppBar(title: Text(Pages.at(router.activeIndex).label)),
           drawer: wide ? null : const _Drawer(),
-          body: ToastLayer.asSibling(
+          body: NotificationLayer.asSibling(
             child: Row(
               children: [
                 if (wide) _Sidebar(),

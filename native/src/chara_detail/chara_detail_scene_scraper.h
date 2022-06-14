@@ -82,7 +82,7 @@ public:
         if (!margin) {
             return std::nullopt;
         }
-        return margin->first / (margin->second + margin->first);
+        return 1.0 - margin->second;
     }
 
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const {
