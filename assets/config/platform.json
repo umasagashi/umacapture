@@ -5,7 +5,7 @@
                 "height": 960,
                 "width": 540
             },
-            "recording_fps": 5,
+            "recording_fps": 40,
             "window_profile": {
                 "window_class": "UnityWndClass",
                 "window_title": "umamusume",

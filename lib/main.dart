@@ -32,7 +32,10 @@ Future<Directory> getDirectory() async {
 }
 
 Future<JsonMap> loadNativeConfig(String appName) async {
-  JsonMap config = {"chara_detail": {}};
+  JsonMap config = {
+    "chara_detail": {},
+    "video_mode": false,
+  };
 
   await Future.wait([
     getDirectory()

@@ -30,7 +30,7 @@ void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJs
     assert_(json == reconstructed_json);
 }
 
-json_util::Json createConfig() {
+json_util::Json createConfig(bool video_mode) {
     const std::filesystem::path config_dir = "../../assets/config";
     return {
         {
@@ -42,11 +42,12 @@ json_util::Json createConfig() {
             },
         },
         {"platform", json_util::read(config_dir / "platform.json")},
-    };
+        {"video_mode", video_mode}};
 }
 
 void captureFromScreen() {
-    const auto recorder_runner = event_util::makeSingleThreadRunner(nullptr, "recorder");
+    const auto recorder_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
     const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
 
@@ -54,7 +55,7 @@ void captureFromScreen() {
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
-    const auto config = createConfig();
+    const auto config = createConfig(false);
     api.startEventLoop(config.dump());
 
     const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
@@ -69,14 +70,15 @@ void captureFromScreen() {
 }
 
 void captureFromVideo(const std::filesystem::path &path) {
-    const auto recorder_runner = event_util::makeSingleThreadRunner(nullptr, "recorder");
+    const auto recorder_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
     connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
 
-    const auto config = createConfig();
+    const auto config = createConfig(true);
     api.startEventLoop(config.dump());
 
     recorder_runner->start();

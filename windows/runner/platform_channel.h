@@ -38,7 +38,7 @@ public:
                 }
             });
 
-        const auto notify_connection = event_util::makeQueuedConnection<std::string>();
+        const auto notify_connection = event_util::makeQueuedConnection<std::string>(event_util::QueueLimitMode::NoLimit);
         on_notify = notify_connection;
         message_processor = notify_connection;
         notify_connection->listen([this](const std::string &message) {
