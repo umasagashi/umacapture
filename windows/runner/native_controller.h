@@ -18,7 +18,7 @@ class NativeController {
 public:
     explicit NativeController(const std::shared_ptr<PlatformChannel> &platform_channel)
         : channel(platform_channel) {
-        const auto recorder_runner_impl = event_util::makeSingleThreadRunner(nullptr, "recorder");
+        const auto recorder_runner_impl = event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
         const auto connection = recorder_runner_impl->makeConnection<cv::Mat, uint64>();
 
         recorder_runner = recorder_runner_impl;

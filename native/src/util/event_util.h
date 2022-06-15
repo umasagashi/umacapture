@@ -10,15 +10,19 @@
 
 namespace uma::event_util {
 
+enum QueueLimitMode {
+    NoLimit,
+    Discard,
+    Block,
+};
+
 namespace event_util_impl {
 
 template<typename... Args>
 class ConnectionInterface;
 
 template<typename... Args>
-struct DirectConnectionBuilder {
-    std::shared_ptr<ConnectionInterface<Args...>> build() { return makeDirectConnection<Args...>(); }
-};
+struct DirectConnectionBuilder;
 
 template<template<typename...> typename Builder, std::size_t first, typename... Args, std::size_t... indices>
 Builder<std::tuple_element_t<first + indices, std::tuple<Args...>>...> _subset_dummy(std::index_sequence<indices...>);
@@ -88,17 +92,28 @@ private:
 template<typename... Args>
 class QueuedConnectionImpl : public ConnectionInterface<Args...>, public EventProcessorInterface {
 public:
-    QueuedConnectionImpl()
-        : notifier(nullptr)
+    explicit QueuedConnectionImpl(QueueLimitMode queue_limit_mode)
+        : queue_limit_mode(queue_limit_mode)
+        , notifier(nullptr)
         , id(0) {}
 
-    QueuedConnectionImpl(const std::shared_ptr<SenderBase<int>> &notifier, int id)
-        : notifier(notifier)
+    QueuedConnectionImpl(QueueLimitMode queue_limit_mode, const std::shared_ptr<SenderBase<int>> &notifier, int id)
+        : queue_limit_mode(queue_limit_mode)
+        , notifier(notifier)
         , id(id) {}
 
     ~QueuedConnectionImpl() override = default;
 
     void send(Args... args) override {
+        if (!ready()) {
+            switch (queue_limit_mode) {
+                case Discard: return;
+                case Block: waitUntilReady(); break;
+                case NoLimit: break;
+                default: throw std::logic_error("Unimplemented.");
+            }
+        }
+
         // TODO: This should be synchronized.
         connection.enqueue(0, args...);
         if (notifier != nullptr) {
@@ -118,6 +133,17 @@ public:
     }
 
 private:
+    [[nodiscard]] bool ready() const { return connection.size() < queue_limit_size; }
+
+    void waitUntilReady() {
+        while (!ready()) {
+            waitFor(10);
+        }
+    }
+
+    const QueueLimitMode queue_limit_mode;
+    const size_t queue_limit_size = 3;
+
     eventpp::EventQueue<int, void(Args...)> connection;
     const std::shared_ptr<SenderBase<int>> notifier;
     const int id;
@@ -168,11 +194,13 @@ class SingleThreadMultiEventRunnerImpl : public EventRunnerInterface {
 public:
     ~SingleThreadMultiEventRunnerImpl() override { assert_(runner == nullptr); }
 
-    SingleThreadMultiEventRunnerImpl(const std::function<void()> &finalizer, const std::string &name)
-        : notifier(std::make_shared<QueuedConnectionImpl<int>>())
+    SingleThreadMultiEventRunnerImpl(
+        QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name)
+        : queue_limit_mode(queue_limit_mode)
+        , notifier(std::make_shared<QueuedConnectionImpl<int>>(QueueLimitMode::NoLimit))
         , finalizer(finalizer)
         , name(name) {
-        notifier->listen([this](int index) {
+        notifier->listen([this](const int &index) {
             assert_(isRunning());
             processors[index]->processOne();
         });
@@ -181,8 +209,8 @@ public:
     template<typename... Args>
     std::shared_ptr<ConnectionInterface<Args...>> makeConnection() {
         assert_(!isRunning());
-        auto connection =
-            std::make_shared<QueuedConnectionImpl<Args...>>(notifier, static_cast<int>(processors.size()));
+        auto connection = std::make_shared<QueuedConnectionImpl<Args...>>(
+            queue_limit_mode, notifier, static_cast<int>(processors.size()));
         processors.emplace_back(connection);
         return connection;
     }
@@ -207,6 +235,7 @@ private:
     const std::shared_ptr<QueuedConnectionImpl<int>> notifier;
     const std::function<void(void)> finalizer;
     const std::string name;
+    const QueueLimitMode queue_limit_mode;
 
     std::vector<std::shared_ptr<EventProcessorInterface>> processors;
     std::shared_ptr<EventRunnerThread> runner;
@@ -246,6 +275,13 @@ private:
     bool is_running = false;
 };
 
+template<typename... Args>
+struct DirectConnectionBuilder {
+    std::shared_ptr<ConnectionInterface<Args...>> build() const {
+        return std::make_shared<event_util_impl::DirectConnectionImpl<Args...>>();
+    }
+};
+
 }  // namespace event_util_impl
 
 template<typename... Args>
@@ -273,8 +309,8 @@ template<typename... Args, typename Listener>
 }
 
 template<typename... Args>
-[[maybe_unused]] inline QueuedConnection<Args...> makeQueuedConnection() {
-    return std::make_shared<event_util_impl::QueuedConnectionImpl<Args...>>();
+[[maybe_unused]] inline QueuedConnection<Args...> makeQueuedConnection(QueueLimitMode queue_limit_mode) {
+    return std::make_shared<event_util_impl::QueuedConnectionImpl<Args...>>(queue_limit_mode);
 }
 
 using EventProcessor = std::shared_ptr<event_util_impl::EventProcessorInterface>;
@@ -282,9 +318,9 @@ using EventRunner = std::shared_ptr<event_util_impl::EventRunnerInterface>;
 using SingleThreadMultiEventRunner = std::shared_ptr<event_util_impl::SingleThreadMultiEventRunnerImpl>;
 using EventRunnerController = std::shared_ptr<event_util_impl::EventRunnerControllerImpl>;
 
-inline SingleThreadMultiEventRunner
-makeSingleThreadRunner(const std::function<void()> &finalizer, const std::string &name) {
-    return std::make_shared<event_util_impl::SingleThreadMultiEventRunnerImpl>(finalizer, name);
+inline SingleThreadMultiEventRunner makeSingleThreadRunner(
+    QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name) {
+    return std::make_shared<event_util_impl::SingleThreadMultiEventRunnerImpl>(queue_limit_mode, finalizer, name);
 }
 
 inline EventRunnerController makeRunnerController() {

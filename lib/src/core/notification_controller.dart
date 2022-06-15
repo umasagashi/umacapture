@@ -96,7 +96,6 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
   }
 
   void _showNotification(BuildContext context, NotificationData data) {
-    logger.d('showNotification: ${data.type}');
     switch (data.type) {
       case NotificationType.onError:
         _showToast(context, ToastData.error(data.info['description']));

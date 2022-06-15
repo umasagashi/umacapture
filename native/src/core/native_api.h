@@ -79,7 +79,7 @@ public:
 
 private:
     void notify(const std::string &message) {
-        log_debug(message);
+        log_trace(message);
         notify_callback(message);
     }
 

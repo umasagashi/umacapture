@@ -33,7 +33,6 @@ class PlatformChannel {
   Future<dynamic> callbackFromPlatform(MethodCall call) {
     switch (call.method) {
       case 'notify':
-        logger.d('notify ${call.arguments.toString()}');
         callbackMethod!(call.arguments.toString());
         return Future.value('called from platform!');
       default:

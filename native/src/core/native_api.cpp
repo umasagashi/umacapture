@@ -14,23 +14,27 @@ NativeApi::~NativeApi() {
 }
 
 void NativeApi::startEventLoop(const std::string &native_config) {
-    log_debug("");
     vlog_debug(native_config.length(), isRunning());
     if (isRunning()) {
         return;
     }
 
+    const auto config_json = json_util::Json::parse(native_config);
+    const bool video_mode = config_json["video_mode"].get<bool>();
+    vlog_debug(video_mode);
+
+    const auto queue_limit_mode = video_mode ? event_util::QueueLimitMode::Block : event_util::QueueLimitMode::Discard;
+
     assert_(event_runners == nullptr);
     event_runners = event_util::makeRunnerController();
 
-    const auto config_json = json_util::Json::parse(native_config);
-
-    const auto distributor_runner = event_util::makeSingleThreadRunner(detach_callback, "distributor");
+    const auto distributor_runner =
+        event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "distributor");
     event_runners->add(distributor_runner);
     const auto frame_captured_connection = distributor_runner->makeConnection<Frame>();
     on_frame_captured = frame_captured_connection;
 
-    const auto scraper_runner = event_util::makeSingleThreadRunner(detach_callback, "scraper");
+    const auto scraper_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "scraper");
     event_runners->add(scraper_runner);
 
     const auto chara_detail_updated_connection = scraper_runner->makeConnection<Frame, chara_detail::SceneInfo>();
@@ -55,7 +59,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             nullptr);
     }
 
-    const auto stitcher_runner = event_util::makeSingleThreadRunner(detach_callback, "stitcher");
+    const auto stitcher_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "stitcher");
     event_runners->add(stitcher_runner);
 
     const auto closed_before_completed_connection = event_util::makeDirectConnection<std::string>();
@@ -110,8 +114,6 @@ bool NativeApi::isRunning() const {
 }
 
 void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
-    // TODO: Count number of queued frames.
-    // If background threads are not keeping up, frame has to be discarded rather than queued.
     on_frame_captured->send({image, timestamp});
 }
 

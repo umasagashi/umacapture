@@ -90,7 +90,7 @@ private:
 	};
 
 	using BufferedItemList = typename SelectQueueList<
-		BufferedItem<QueuedEvent_>, 
+		BufferedItem<QueuedEvent_>,
 		Policies_,
 		HasTemplateQueueList<Policies_>::value
 	>::Type;
@@ -151,7 +151,7 @@ public:
 		super::operator = (other);
 		return *this;
 	}
-	
+
 	EventQueueBase & operator = (EventQueueBase && other) noexcept
 	{
 		super::operator = (std::move(other));
@@ -196,7 +196,7 @@ public:
 	{
 		return queueList.empty() && (queueEmptyCounter.load(std::memory_order_acquire) == 0);
 	}
-	
+
 	void clearEvents()
 	{
 		if(! queueList.empty()) {
@@ -243,11 +243,11 @@ public:
 
 				std::lock_guard<Mutex> queueListLock(freeListMutex);
 				freeList.splice(freeList.end(), tempList);
-				
+
 				return true;
 			}
 		}
-		
+
 		return false;
 	}
 
@@ -277,11 +277,11 @@ public:
 
 				std::lock_guard<Mutex> queueListLock(freeListMutex);
 				freeList.splice(freeList.end(), tempList);
-				
+
 				return true;
 			}
 		}
-		
+
 		return false;
 	}
 
@@ -313,7 +313,7 @@ public:
 							typename MakeIndexSequence<sizeof...(Args)>::Type()
 						);
 						it->clear();
-						
+
 						auto tempIt = it;
 						++it;
 						idleList.splice(idleList.end(), tempList, tempIt);
@@ -331,15 +331,15 @@ public:
 				if(! idleList.empty()) {
 					std::lock_guard<Mutex> queueListLock(freeListMutex);
 					freeList.splice(freeList.end(), idleList);
-					
+
 					return true;
 				}
 			}
 		}
-		
+
 		return false;
 	}
-	
+
 	template <typename Predictor>
 	bool processUntil(Predictor && predictor)
 	{
@@ -371,7 +371,7 @@ public:
 							typename MakeIndexSequence<sizeof...(Args)>::Type()
 						);
 						it->clear();
-						
+
 						auto tempIt = it;
 						++it;
 						idleList.splice(idleList.end(), tempList, tempIt);
@@ -386,15 +386,15 @@ public:
 				if(! idleList.empty()) {
 					std::lock_guard<Mutex> queueListLock(freeListMutex);
 					freeList.splice(freeList.end(), idleList);
-					
+
 					return true;
 				}
 			}
 		}
-		
+
 		return false;
 	}
-	
+
 	void wait() const
 	{
 		std::unique_lock<Mutex> queueListLock(queueListMutex);
@@ -428,7 +428,7 @@ public:
 	{
 		if(! queueList.empty()) {
 			std::lock_guard<Mutex> queueListLock(queueListMutex);
-			
+
 			if(! queueList.empty()) {
 				*queuedEvent = queueList.front().get();
 				return true;
@@ -465,6 +465,15 @@ public:
 		return false;
 	}
 
+    /**
+     * NOTE: This method was added for umasagashi.
+     * This patch is not belong to the original rights holders, but I do not claim any rights.
+     */
+    size_t size() const
+    {
+        return queueList.size();
+    }
+
 protected:
 	bool doCanProcess() const
 	{
@@ -487,7 +496,7 @@ protected:
 	{
 		return doInvokeFuncWithQueuedEventHelper(std::forward<F>(func), std::get<Indexes>(item.arguments)...);
 	}
-	
+
 	template <typename F>
 	auto doInvokeFuncWithQueuedEventHelper(F && func, Args ...args) const
 		-> typename std::enable_if<! CanInvoke<F>::value, bool>::type

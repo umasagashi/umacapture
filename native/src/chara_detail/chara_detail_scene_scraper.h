@@ -752,22 +752,19 @@ public:
         , on_completed(on_completed)
         , config(config)
         , scraping_root_dir(scraping_dir) {
-        this->on_opened->listen([this]() {
-            std::cout << "on_opened" << std::endl;
-            this->build();
-        });
-        this->on_updated->listen(
-            [this](const Frame &frame, const SceneInfo &scene_info) { this->update(frame, scene_info); });
+        this->on_opened->listen([this]() { build(); });
+        this->on_updated->listen([this](const auto &frame, const auto &info) { update(frame, info); });
         this->on_closed->listen([this]() {
-            std::cout << "on_closed" << std::endl;
+            log_debug("on_closed");
             if (!ready()) {
                 this->on_closed_before_completed->send(std::string{current_uuid});
             }
-            this->release();
+            release();
         });
     }
 
     void build() {
+        log_debug("");
         assert_(state == Null);
 
         current_uuid = uuid_generator.uuid4().str();
@@ -808,6 +805,8 @@ public:
     }
 
     void update(const Frame &frame, const SceneInfo &scene_info) {
+        vlog_trace("");
+
         if (ready()) {  // After ready, do nothing until scene is closed.
             return;
         }
@@ -823,7 +822,7 @@ public:
             checkForCompleted();
         }
 
-        //        log_debug("delay: {}", chrono::timestamp() - frame.timestamp());
+        log_trace("delay={}", chrono_util::timestamp() - frame.timestamp());
     }
 
     void release() {
