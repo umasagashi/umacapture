@@ -46,11 +46,11 @@
         }
       },
       "bottom_right": {
-        "x": 1.0,
-        "y": 1.5352,
+        "x": 0.0,
+        "y": -0.2426,
         "anchor": {
-          "h": "IntersectStart",
-          "v": "IntersectStart"
+          "h": "IntersectPixelEnd",
+          "v": "IntersectLogicalEnd"
         }
       }
     },
@@ -67,8 +67,8 @@
         "x": -0.0222,
         "y": 0.0,
         "anchor": {
-          "h": "IntersectEnd",
-          "v": "IntersectEnd"
+          "h": "IntersectLogicalEnd",
+          "v": "IntersectPixelEnd"
         }
       }
     },
@@ -98,7 +98,7 @@
         "y": -0.0092,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectEnd"
+          "v": "IntersectLogicalEnd"
         }
       }
     },

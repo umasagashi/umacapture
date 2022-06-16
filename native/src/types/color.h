@@ -22,6 +22,14 @@ public:
     [[nodiscard]] inline int g() const { return g_; }
     [[nodiscard]] inline int b() const { return b_; }
 
+    [[nodiscard]] inline cv::Scalar toCVScalar() const {
+        return {
+            static_cast<double>(b_),
+            static_cast<double>(g_),
+            static_cast<double>(r_),
+        };
+    }
+
     inline bool operator<=(const Color &other) const {
         return (r_ <= other.r_) && (g_ <= other.g_) && (b_ <= other.b_);
     }

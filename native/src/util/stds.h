@@ -51,6 +51,15 @@ inline bool any_of(const Container &container) {
     return std::any_of(container.begin(), container.end(), identical<bool>);
 }
 
+template<typename Container>
+inline void sort(Container &container) {
+    std::sort(container.begin(), container.end());
+}
+
+inline bool starts_with(const std::string &subject, const std::string &query) {
+    return subject.substr(0, query.length()) == query;
+}
+
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "UnusedParameter"
 #pragma ide diagnostic ignored "UnusedLocalVariable"
