@@ -1,0 +1,128 @@
+{
+  "stretch_range": {
+    "p1": {
+      "x": 0.0,
+      "y": 1.1407,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectStart"
+      }
+    },
+    "p2": {
+      "x": 0.0,
+      "y": -0.3759,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectLogicalEnd"
+      }
+    }
+  },
+  "scroll_area_cropping_rect": {
+    "top_left": {
+      "x": 0.0222,
+      "y": 0.0,
+      "anchor": {
+        "h": "ScreenStart",
+        "v": "ScreenStart"
+      }
+    },
+    "bottom_right": {
+      "x": -0.0222,
+      "y": 0.0,
+      "anchor": {
+        "h": "ScreenLogicalEnd",
+        "v": "ScreenPixelEnd"
+      }
+    }
+  },
+  "scroll_area_rect": {
+    "top_left": {
+      "x": 0.0,
+      "y": 0.8278,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectStart"
+      }
+    },
+    "bottom_right": {
+      "x": 0.0,
+      "y": -0.2426,
+      "anchor": {
+        "h": "IntersectPixelEnd",
+        "v": "IntersectLogicalEnd"
+      }
+    }
+  },
+  "scroll_bar_fill_rect": {
+    "top_left": {
+      "x": -0.0417,
+      "y": 0.0,
+      "anchor": {
+        "h": "IntersectLogicalEnd",
+        "v": "IntersectStart"
+      }
+    },
+    "bottom_right": {
+      "x": -0.0241,
+      "y": 0.0,
+      "anchor": {
+        "h": "IntersectLogicalEnd",
+        "v": "IntersectPixelEnd"
+      }
+    }
+  },
+  "scroll_area_upper_fill_rect": {
+    "top_left": {
+      "x": 0.0315,
+      "y": 0.8204,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectStart"
+      }
+    },
+    "bottom_right": {
+      "x": 0.9667,
+      "y": 0.8278,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectStart"
+      }
+    }
+  },
+  "scroll_area_lower_fill_rect": {
+    "top_left": {
+      "x": 0.0315,
+      "y": -0.2463,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectLogicalEnd"
+      }
+    },
+    "bottom_right": {
+      "x": 0.9667,
+      "y": -0.2352,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectLogicalEnd"
+      }
+    }
+  },
+  "tab_button_rect": {
+    "top_left": {
+      "x": 0.0222,
+      "y": 0.7296,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectStart"
+      }
+    },
+    "bottom_right": {
+      "x": 0.9759,
+      "y": 0.8074,
+      "anchor": {
+        "h": "IntersectStart",
+        "v": "IntersectStart"
+      }
+    }
+  }
+}

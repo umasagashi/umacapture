@@ -168,8 +168,8 @@
                 "x": -0.6501,
                 "y": -0.2148,
                 "anchor": {
-                  "h": "IntersectEnd",
-                  "v": "IntersectEnd"
+                  "h": "IntersectLogicalEnd",
+                  "v": "IntersectLogicalEnd"
                 }
               },
               "color_range": {
@@ -195,16 +195,16 @@
                     "x": -0.6501,
                     "y": -0.2148,
                     "anchor": {
-                      "h": "IntersectEnd",
-                      "v": "IntersectEnd"
+                      "h": "IntersectLogicalEnd",
+                      "v": "IntersectLogicalEnd"
                     }
                   },
                   "p2": {
                     "x": -0.6501,
                     "y": -0.187,
                     "anchor": {
-                      "h": "IntersectEnd",
-                      "v": "IntersectEnd"
+                      "h": "IntersectLogicalEnd",
+                      "v": "IntersectLogicalEnd"
                     }
                   }
                 },

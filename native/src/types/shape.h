@@ -11,11 +11,14 @@ namespace uma {
 
 enum LayoutAnchor {
     ScreenStart,
-    ScreenEnd,
+    ScreenLogicalEnd,
+    ScreenPixelEnd,
     IntersectStart,
-    IntersectEnd,
+    IntersectLogicalEnd,
+    IntersectPixelEnd,
 };
-EXTENDED_JSON_TYPE_ENUM(LayoutAnchor, ScreenStart, ScreenEnd, IntersectStart, IntersectEnd)
+EXTENDED_JSON_TYPE_ENUM(
+    LayoutAnchor, ScreenStart, ScreenLogicalEnd, ScreenPixelEnd, IntersectStart, IntersectLogicalEnd, IntersectPixelEnd)
 
 class Anchor {
 public:
@@ -28,14 +31,16 @@ public:
         , v_(both) {}
 
     Anchor() noexcept
-        : h_(LayoutAnchor::ScreenStart)
-        , v_(LayoutAnchor::ScreenStart) {}
+        : h_(ScreenStart)
+        , v_(ScreenStart) {}
 
     [[nodiscard]] inline LayoutAnchor h() const { return h_; }
     [[nodiscard]] inline LayoutAnchor v() const { return v_; }
 
     inline bool operator==(const Anchor &other) const { return (h_ == other.h_) && (v_ == other.v_); }
     inline bool operator==(const LayoutAnchor &other) const { return (h_ == other) && (v_ == other); }
+
+    [[nodiscard]] inline bool isAbsolute() const { return h_ == ScreenStart && v_ == ScreenStart; }
 
     EXTENDED_JSON_TYPE_NDC(Anchor, h_, v_);
 
@@ -56,7 +61,7 @@ public:
     Point(T x, T y) noexcept
         : x_(x)
         , y_(y)
-        , anchor_(LayoutAnchor::ScreenStart) {}
+        , anchor_(ScreenStart) {}
 
     Point() noexcept = default;
 
@@ -65,6 +70,11 @@ public:
     [[nodiscard]] inline T x() const { return x_; }
     [[nodiscard]] inline T y() const { return y_; }
     [[nodiscard]] inline Anchor anchor() const { return anchor_; }
+
+    [[maybe_unused]] [[nodiscard]] inline cv::Point_<T> toCVPoint() const {
+        assert_(anchor_.isAbsolute());
+        return {x_, y_};
+    }
 
     inline Point<T> &operator=(const Point<T> &other) = default;
 
@@ -129,15 +139,15 @@ public:
 
     inline Size<T> &operator=(const Size<T> &other) = default;
 
-    inline bool operator!=(const Size<T> &other) const {
-        return (width_ != other.width_) || (height_ != other.height_);
+    inline bool operator==(const Size<T> &other) const {
+        return (width_ == other.width_) && (height_ == other.height_);
     }
 
-    inline bool operator==(const Size<T> &other) const {
-        return (width_ == other.width_) || (height_ == other.height_);
-    }
+    inline bool operator!=(const Size<T> &other) const { return !(*this == other); }
 
     inline Size<T> operator-(const Size<T> &other) const { return {width_ - other.width_, height_ - other.height_}; }
+    inline Size<T> operator+(const Size<T> &other) const { return {width_ + other.width_, height_ + other.height_}; }
+    inline Size<T> operator/(const Size<T> &other) const { return {width_ / other.width_, height_ / other.height_}; }
 
     inline Size<T> operator/(const T &other) const { return {width_ / other, height_ / other}; }
     inline Size<T> operator*(const T &other) const { return {width_ * other, height_ * other}; }
@@ -234,6 +244,10 @@ public:
 
     [[nodiscard]] inline const Point<T> &topLeft() const { return top_left_; }
     [[nodiscard]] inline const Point<T> &bottomRight() const { return bottom_right_; }
+
+    [[maybe_unused]] [[nodiscard]] inline cv::Rect_<T> toCVRect() const {
+        return {top_left_.toCVPoint(), bottom_right_.toCVPoint()};
+    }
 
     [[nodiscard]] inline T left() const { return top_left_.x(); }
     [[nodiscard]] inline T top() const { return top_left_.y(); }

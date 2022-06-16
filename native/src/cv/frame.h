@@ -87,6 +87,17 @@ public:
 
     static FrameAnchor fixed(const Size<int> &size) { return {size, {{0, 0}, size.toPoint()}}; }
 
+    static FrameAnchor stretched(const Size<int> &frame_size, const Size<int> &screen_size) {
+        const auto screen_anchor = intersect(screen_size);
+        return {
+            frame_size,
+            {
+                screen_anchor.intersection_.topLeft(),
+                screen_anchor.intersection_.bottomRight() + (frame_size - screen_size).toPoint(),
+            },
+        };
+    }
+
     [[nodiscard]] inline Point<double> absolute(const Point<double> &point) const {
         return {
             point.x() + offset_h[point.anchor().h()],
@@ -115,64 +126,84 @@ public:
         return {mapToFrame(rect.topLeft()), mapToFrame(rect.bottomRight())};
     }
 
+    [[nodiscard]] inline Rect<int> intersection() const { return intersection_; }
+
     //    [[nodiscard]] static Size<int> baseSize() { return base_size; }
     //    static void setBaseSize(const Size<int> &size) { base_size = size; }
 
 private:
     FrameAnchor(const Size<int> frame_size, const Rect<int> &intersection)
         : unit_size(intersection.width())
+        , intersection_(intersection)
         , offset_h()
         , offset_v() {
         const double scale = 1. / unit_size;
-        offset_h[LayoutAnchor::ScreenStart] = 0.0;
-        offset_h[LayoutAnchor::ScreenEnd] = scale * (frame_size.width() - 1);
-        offset_h[LayoutAnchor::IntersectStart] = scale * intersection.left();
-        offset_h[LayoutAnchor::IntersectEnd] = scale * (intersection.right() - 1);
+        offset_h[ScreenStart] = 0.0;
+        offset_h[ScreenLogicalEnd] = scale * frame_size.width();
+        offset_h[ScreenPixelEnd] = scale * (frame_size.width() - 1);
 
-        offset_v[LayoutAnchor::ScreenStart] = 0;
-        offset_v[LayoutAnchor::ScreenEnd] = scale * (frame_size.height() - 1);
-        offset_v[LayoutAnchor::IntersectStart] = scale * intersection.top();
-        offset_v[LayoutAnchor::IntersectEnd] = scale * (intersection.bottom() - 1);
+        offset_h[IntersectStart] = scale * intersection.left();
+        offset_h[IntersectLogicalEnd] = scale * intersection.right();
+        offset_h[IntersectPixelEnd] = scale * (intersection.right() - 1);
+
+        offset_v[ScreenStart] = 0;
+        offset_v[ScreenLogicalEnd] = scale * frame_size.height();
+        offset_v[ScreenPixelEnd] = scale * (frame_size.height() - 1);
+
+        offset_v[IntersectStart] = scale * intersection.top();
+        offset_v[IntersectLogicalEnd] = scale * intersection.bottom();
+        offset_v[IntersectPixelEnd] = scale * (intersection.bottom() - 1);
     }
 
     int unit_size;
-    std::array<double, 4> offset_h;
-    std::array<double, 4> offset_v;
+    std::array<double, 6> offset_h;
+    std::array<double, 6> offset_v;
+    Rect<int> intersection_;
 
     inline static Size<int> base_size = {540, 960};
 };
 
+struct FrameInfo {
+    Rect<int> intersection;
+    EXTENDED_JSON_TYPE_NDC(FrameInfo, intersection);
+};
+
 class Frame {
 public:
+    Frame()
+        : image(cv::Mat())
+        , timestamp_(0)
+        , anchor_(FrameAnchor::fixed({0, 0})) {}
+
+    explicit Frame(const cv::Mat &image)
+        : image(image)
+        , timestamp_(1)
+        , anchor_(FrameAnchor::intersect(image.size())) {
+        assert_(!this->image.empty());
+        assert_(this->image.type() == CV_8UC3);
+    }
+
     Frame(const cv::Mat &image, uint64 timestamp)
         : image(image)
         , timestamp_(timestamp)
         , anchor_(FrameAnchor::intersect(image.size())) {
         assert_(!this->image.empty());
         assert_(this->image.type() == CV_8UC3);
-        assert_(this->image.channels() == 3);
-        assert_(this->image.depth() == CV_8U);
-        assert_(this->image.elemSize() == 3);
-        assert_(this->image.elemSize1() == 1);
-        assert_(this->image.isContinuous());
     }
 
-    Frame(const cv::Mat &image, uint64 timestamp, const FrameAnchor &anchor)
-        : image(image)
-        , timestamp_(timestamp)
-        , anchor_(anchor) {
-        assert_(!this->image.empty());
-        assert_(this->image.type() == CV_8UC3);
-        assert_(this->image.channels() == 3);
-        assert_(this->image.depth() == CV_8U);
-        assert_(this->image.elemSize() == 3);
-        assert_(this->image.elemSize1() == 1);
+    inline static Frame fixed(const cv::Mat &image, uint64 timestamp) {
+        return {image, timestamp, FrameAnchor::fixed({image.size()})};
     }
 
-    Frame()
-        : image(cv::Mat())
-        , timestamp_(0)
-        , anchor_(FrameAnchor::fixed({0, 0})) {}
+    inline static Frame fixed(const cv::Mat &image) { return fixed(image, 1); }
+
+    inline static Frame stretched(const cv::Mat &image, uint64 timestamp, const Size<int> &screen_size) {
+        return {image, timestamp, FrameAnchor::stretched({image.size()}, screen_size)};
+    }
+
+    inline static Frame stretched(const cv::Mat &image, const Size<int> &screen_size) {
+        return stretched(image, 1, screen_size);
+    }
 
     [[nodiscard]] inline bool empty() const { return image.empty(); }
 
@@ -246,14 +277,49 @@ public:
 
     [[nodiscard]] inline uint64 timestamp() const { return timestamp_; }
 
-    [[nodiscard]] inline Frame copy(const Rect<double> &rect) const {
+    [[nodiscard]] inline Frame copy(const Rect<double> &rect) const { return view(rect).close(); }
+
+    [[nodiscard]] inline Frame view(const Rect<double> &rect) const {
         const auto &r = anchor_.mapToFrame(rect);
-        return copy(r.left(), r.top(), r.width(), r.height());
+        return view(r.left(), r.top(), r.width(), r.height());
+    }
+
+    [[nodiscard]] inline Frame close() const { return {image.clone(), timestamp_, anchor_}; }
+
+    void fill(const Rect<double> &rect, const Color &color) {
+        const auto &r = anchor_.mapToFrame(rect);
+        cv::rectangle(image, r.toCVRect(), color.toCVScalar(), cv::FILLED);
+    }
+
+    void paste(const Rect<double> &rect, const Frame &source) {
+        const auto &dest_rect = anchor_.mapToFrame(rect);
+        cv::Mat mat;
+        if (dest_rect.size() == source.size()) {
+            mat = source.image;
+        } else {
+            cv::resize(source.image, mat, dest_rect.size().toCVSize(), 0, 0, cv::INTER_LINEAR);
+        }
+        mat.copyTo(image(dest_rect.toCVRect()));
     }
 
     void save(const std::filesystem::path &path) const { cv::imwrite(path.generic_string(), image); }
 
+    void dump(const std::filesystem::path &path) const {
+        save(path);
+        std::filesystem::path info_path = path;
+        info_path.replace_extension(".json");
+        json_util::write(info_path, FrameInfo{anchor().intersection()});
+    }
+
 private:
+    Frame(const cv::Mat &image, uint64 timestamp, const FrameAnchor &anchor)
+        : image(image)
+        , timestamp_(timestamp)
+        , anchor_(anchor) {
+        assert_(!this->image.empty());
+        assert_(this->image.type() == CV_8UC3);
+    }
+
     [[nodiscard]] inline Color colorAt(int x, int y) const { return bgrAt(x, y).toColor(); }
 
     [[nodiscard]] inline const BGR &bgrAt(int x, int y) const {
@@ -262,10 +328,10 @@ private:
         return image.ptr<BGR>(y)[x];
     }
 
-    [[nodiscard]] inline Frame copy(int x, int y, int width, int height) const {
+    [[nodiscard]] inline Frame view(int x, int y, int width, int height) const {
         assert_(0 <= y && (y + height) <= image.size().height);
         assert_(0 <= x && (x + width) <= image.size().width);
-        return {image({x, y, width, height}).clone(), timestamp_, FrameAnchor::fixed({width, height})};
+        return fixed(image({x, y, width, height}), timestamp_);
     }
 
     cv::Mat image;

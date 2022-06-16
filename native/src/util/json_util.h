@@ -202,4 +202,8 @@ inline json_util::Json read(const std::filesystem::path &path) {
     return json_util::Json::parse(io_util::read(path));
 }
 
+inline void write(const std::filesystem::path &path, const json_util::Json &json, int indent = -1) {
+    io_util::write(path, json.dump(indent));
+}
+
 }  // namespace uma::json_util
