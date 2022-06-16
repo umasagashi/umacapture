@@ -13,10 +13,13 @@ const Range<Color> flat_deviation = {Color(-10), Color(10)};
 const Range<double> full_length = {1.0, 1.0};
 const Range<double> half_length = {0.4, 0.6};
 
-const LayoutAnchor IS = LayoutAnchor::IntersectStart;
-const LayoutAnchor IE = LayoutAnchor::IntersectEnd;
-const LayoutAnchor SS = LayoutAnchor::ScreenStart;
-const LayoutAnchor SE = LayoutAnchor::ScreenEnd;
+const LayoutAnchor IS = IntersectStart;
+const LayoutAnchor ILE = IntersectLogicalEnd;
+const LayoutAnchor IPE = IntersectPixelEnd;
+
+const LayoutAnchor SS = ScreenStart;
+const LayoutAnchor SLE = ScreenLogicalEnd;
+const LayoutAnchor SPE = ScreenPixelEnd;
 
 inline Range<Color> anyColor() {
     return {{0, 0, 0}, {255, 255, 255}};

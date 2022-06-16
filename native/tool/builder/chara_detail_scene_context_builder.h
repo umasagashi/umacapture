@@ -33,7 +33,7 @@ private:
 
     [[nodiscard]] ConditionBase closeButton() const {
         return stableLineCheck(
-            50, lineToY({-0.6501, -0.2148, IE}, -0.1870), colorRange({250, 251, 250}, 30), {0.75, 1.0});
+            50, lineToY({-0.6501, -0.2148, ILE}, -0.1870), colorRange({250, 251, 250}, 30), {0.75, 1.0});
     }
 
     [[nodiscard]] ConditionBase tabBarButtons() const {

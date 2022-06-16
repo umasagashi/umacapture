@@ -21,7 +21,8 @@
 
 namespace uma::chara_detail {
 class CharaDetailSceneScraper;
-}
+class CharaDetailSceneStitcher;
+}  // namespace uma::chara_detail
 
 namespace uma::app {
 
@@ -67,8 +68,14 @@ public:
 
     void setMkdirCallback(const std::function<PathCallback> &method) { mkdir_callback = method; }
     void mkdir(const std::filesystem::path &path) const {
-        log_debug(path.generic_string());
+        log_debug(path.string());
         mkdir_callback(path);
+    }
+
+    void setRmdirCallback(const std::function<PathCallback> &method) { rmdir_callback = method; }
+    void rmdir(const std::filesystem::path &path) const {
+        log_debug(path.string());
+        rmdir_callback(path);
     }
 
     void setLoggingCallback(const std::function<MessageCallback> &method) { logging_callback = method; }
@@ -87,12 +94,14 @@ private:
     std::function<MessageCallback> logging_callback = [](const auto &message) { std::cout << message << std::flush; };
     std::function<VoidCallback> detach_callback = []() {};
     std::function<PathCallback> mkdir_callback = [](const auto &path) { std::filesystem::create_directories(path); };
+    std::function<PathCallback> rmdir_callback = [](const auto &path) { std::filesystem::remove_all(path); };
 
     event_util::Sender<Frame> on_frame_captured;
     event_util::EventRunnerController event_runners;
 
     std::unique_ptr<distributor::FrameDistributor> frame_distributor;
     std::unique_ptr<chara_detail::CharaDetailSceneScraper> chara_detail_scene_scraper;
+    std::unique_ptr<chara_detail::CharaDetailSceneStitcher> chara_detail_scene_stitcher;
 
 public:
     [[maybe_unused]] void _dummyForSuppressingUnusedWarning();
