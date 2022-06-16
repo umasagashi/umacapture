@@ -50,6 +50,7 @@ flutter:
     - assets/config/platform.json
     - assets/config/chara_detail/scene_context.json
     - assets/config/chara_detail/scene_scraper.json
+    - assets/config/chara_detail/scene_stitcher.json
 
     - assets/sound/attention_weak.wav
     - assets/sound/attention_normal.wav

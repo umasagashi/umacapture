@@ -8,6 +8,7 @@
 
 #include "builder/chara_detail_scene_context_builder.h"
 #include "builder/chara_detail_scene_scraper_builder.h"
+#include "builder/chara_detail_scene_stitcher_builder.h"
 #include "condition/serializer.h"
 #include "core/native_api.h"
 #include "cv/video_loader.h"
@@ -38,11 +39,14 @@ json_util::Json createConfig(bool video_mode) {
             {
                 {"scene_context", json_util::read(config_dir / "chara_detail/scene_context.json")},
                 {"scene_scraper", json_util::read(config_dir / "chara_detail/scene_scraper.json")},
-                {"scraping_dir", (std::filesystem::current_path() / "scraping").generic_string()},
+                {"scene_stitcher", json_util::read(config_dir / "chara_detail/scene_stitcher.json")},
+                {"scraping_dir", (std::filesystem::current_path() / "temp" / "scraping").generic_string()},
             },
         },
         {"platform", json_util::read(config_dir / "platform.json")},
-        {"video_mode", video_mode}};
+        {"video_mode", video_mode},
+        {"storage_dir", (std::filesystem::current_path() / "storage").generic_string()},
+    };
 }
 
 void captureFromScreen() {
@@ -69,7 +73,7 @@ void captureFromScreen() {
     }
 }
 
-void captureFromVideo(const std::filesystem::path &path) {
+void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
@@ -84,7 +88,7 @@ void captureFromVideo(const std::filesystem::path &path) {
     recorder_runner->start();
 
     auto video = video::VideoLoader(connection);
-    video.run(path);
+    video.runBatch(video_path_list);
 
     while (api.isRunning()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -114,12 +118,10 @@ int main(int argc, char **argv) {
         auto capture_command = command.add_subcommand("capture", "run capture mode");
 
         auto video_command = command.add_subcommand("video", "run capture mode from video");
-        std::filesystem::path video_path;
-        video_command->add_option("--video_path", video_path)->required();
+        std::vector<std::filesystem::path> video_path_list;
+        video_command->add_option("--video_path_list", video_path_list)->required();
 
         CLI11_PARSE(command, argc, argv)
-
-        vlog_debug(assets_dir.string(), video_path.string());
 
         if (build_command->parsed()) {
             uma::cli::buildJson<uma::tool::CharaDetailSceneContextBuilder>(
@@ -131,6 +133,11 @@ int main(int argc, char **argv) {
                 assets_dir / "chara_detail" / "scene_scraper.json",
                 [](const auto &obj) { return obj; },
                 [](const auto &json) { return json; });
+
+            uma::cli::buildJson<uma::tool::CharaDetailSceneStitcherBuilder>(
+                assets_dir / "chara_detail" / "scene_stitcher.json",
+                [](const auto &obj) { return obj; },
+                [](const auto &json) { return json; });
         }
 
         if (capture_command->parsed()) {
@@ -138,7 +145,7 @@ int main(int argc, char **argv) {
         }
 
         if (video_command->parsed()) {
-            uma::cli::captureFromVideo(video_path);
+            uma::cli::captureFromVideo(video_path_list);
         }
     } catch (std::exception &e) {
         std::cerr << e.what() << std::endl;

@@ -6,10 +6,6 @@ struct PathEntry {
     PathEntry(const std::string &stem)  // NOLINT(google-explicit-constructor)
         : stem_(stem) {}
 
-    PathEntry(const std::string &stem, const std::string &extension)
-        : stem_(stem)
-        , extension_(extension) {}
-
     [[nodiscard]] std::string stem() const { return stem_; }
     [[nodiscard]] std::string filename() const { return stem_ + extension_; }
     [[nodiscard]] std::string extension() const { return extension_; }
@@ -19,8 +15,6 @@ struct PathEntry {
         stream << stem_ << separator_ << std::setw(digits_n) << std::setfill('0') << number;
         return {stream.str()};
     }
-
-    [[nodiscard]] PathEntry withExtension(const std::string &extension) const { return {stem_, extension}; }
 
 private:
     const std::string stem_;

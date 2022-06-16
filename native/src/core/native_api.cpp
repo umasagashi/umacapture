@@ -1,5 +1,6 @@
 #include "chara_detail/chara_detail_scene_context.h"
 #include "chara_detail/chara_detail_scene_scraper.h"
+#include "chara_detail/chara_detail_scene_stitcher.h"
 #include "util/logger_util.h"
 #include "util/misc.h"
 
@@ -75,11 +76,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
     const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
-    stitch_ready_connection->listen([this](const std::string &id) {
-        // for debug
-        notifyCharaDetailFinished(id, true);
-    });
 
+    const auto scraping_dir = config_json["chara_detail"]["scraping_dir"].get<std::filesystem::path>();
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         chara_detail_updated_connection,
@@ -89,8 +87,26 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         scroll_updated_connection,
         page_ready_connection,
         stitch_ready_connection,
-        config_json["chara_detail"]["scene_scraper"].get<chara_detail::CharaDetailSceneScraperConfig>(),
-        config_json["chara_detail"]["scraping_dir"].get<std::filesystem::path>());
+        config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
+        scraping_dir);
+
+    const auto recognizer_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "recognizer");
+    event_runners->add(recognizer_runner);
+
+    const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
+    recognize_ready_connection->listen([this](const std::string &id) {
+        // for debug
+        notifyCharaDetailFinished(id, true);
+    });
+
+    const auto stitcher_dir = config_json["storage_dir"].get<std::filesystem::path>();
+    chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
+        scraping_dir,
+        stitcher_dir,
+        stitch_ready_connection,
+        recognize_ready_connection,
+        config_json["chara_detail"]["scene_stitcher"]
+            .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>());
 
     event_runners->start();
 }
@@ -107,6 +123,7 @@ void NativeApi::joinEventLoop() {
 
     frame_distributor = nullptr;
     chara_detail_scene_scraper = nullptr;
+    chara_detail_scene_stitcher = nullptr;
 }
 
 bool NativeApi::isRunning() const {
@@ -131,6 +148,7 @@ void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     notifyCaptureStopped();
     std::cout << (frame_distributor == nullptr);
     std::cout << (chara_detail_scene_scraper == nullptr);
+    std::cout << (chara_detail_scene_stitcher == nullptr);
 }
 
 }  // namespace uma::app

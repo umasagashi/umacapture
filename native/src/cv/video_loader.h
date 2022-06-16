@@ -15,17 +15,20 @@ public:
     }
 
     [[maybe_unused]] void runBatch(const std::vector<std::filesystem::path> &files) const {
+        int64 ts = 0;
         for (const auto &path : files) {
-            run(path);
+            ts += run(path, ts);
         }
     }
 
-    void run(const std::filesystem::path &path) const {
+    [[nodiscard]] int64 run(const std::filesystem::path &path, int64 head_ts = 0) const {
+        vlog_info(path.string());
         cv::VideoCapture cap;
         if (!cap.open(path.generic_string())) {
             throw std::runtime_error((std::ostringstream() << "Failed to open: " << path.generic_string()).str());
         }
 
+        int64 last_ts = 0;
         for (int i = 0;; i++) {
             cv::Mat mat;
             if (!cap.read(mat) || mat.empty()) {
@@ -38,14 +41,17 @@ public:
 
             //            save(i, ts, mat);
 
-            on_frame_captured->send(mat, std::llround(ts));
+            last_ts = std::max(last_ts, ts);
+            on_frame_captured->send(mat, std::llround(ts + head_ts));
         }
+        return last_ts;
     }
 
 private:
     void save(int index, uint64 ts, const cv::Mat &mat) const {
         std::ostringstream stream;
-        stream << "./temp/" << std::setw(5) << std::setfill('0') << index << "_" << ts << ".png";
+        stream << "./temp/source_frames/" << std::setw(5) << std::setfill('0') << index << "_" << ts << ".png";
+        app::NativeApi::instance().mkdir("./temp/source_frames");
         cv::imwrite(stream.str(), mat);
     }
 

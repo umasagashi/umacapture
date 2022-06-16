@@ -38,14 +38,19 @@ Future<JsonMap> loadNativeConfig(String appName) async {
   };
 
   await Future.wait([
-    getDirectory()
-        .then((directory) => config["chara_detail"]["scraping_dir"] = '${directory.path}/$appName/capture/scraping'),
+    getDirectory().then((directory) {
+      config["chara_detail"]["scraping_dir"] = '${directory.path}/$appName/temp/capture';
+      config["storage_dir"] = '${directory.path}/$appName/storage/capture';
+    }),
     rootBundle
         .loadString('assets/config/chara_detail/scene_context.json')
         .then((text) => config["chara_detail"]["scene_context"] = jsonDecode(text)),
     rootBundle
         .loadString('assets/config/chara_detail/scene_scraper.json')
         .then((text) => config["chara_detail"]["scene_scraper"] = jsonDecode(text)),
+    rootBundle
+        .loadString('assets/config/chara_detail/scene_stitcher.json')
+        .then((text) => config["chara_detail"]["scene_stitcher"] = jsonDecode(text)),
     rootBundle.loadString('assets/config/platform.json').then((text) => config["platform"] = jsonDecode(text)),
   ]);
 
