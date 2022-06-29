@@ -30,6 +30,7 @@ add_executable(
 target_compile_options(
         ${PROJECT_NAME} PRIVATE
         /wd4068
+        /bigobj
 )
 
 target_compile_definitions(

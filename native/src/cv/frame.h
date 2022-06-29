@@ -87,6 +87,10 @@ public:
 
     static FrameAnchor fixed(const Size<int> &size) { return {size, {{0, 0}, size.toPoint()}}; }
 
+    static FrameAnchor fixed(const Size<int> frame_size, const Rect<int> &intersection) {
+        return {frame_size, intersection};
+    }
+
     static FrameAnchor stretched(const Size<int> &frame_size, const Size<int> &screen_size) {
         const auto screen_anchor = intersect(screen_size);
         return {
@@ -110,11 +114,19 @@ public:
         return {absolute(line.p1()), absolute(line.p2())};
     }
 
+    [[nodiscard]] inline Rect<double> absolute(const Rect<double> &rect) const {
+        return {absolute(rect.topLeft()), absolute(rect.bottomRight())};
+    }
+
     [[nodiscard]] inline Point<int> expand(const Point<double> &point) const { return (point * unit_size).round(); }
 
-    [[nodiscard]] inline Point<double> shrink(const Point<int> &point) const {
+    [[nodiscard]] inline Point<double> mapFromFrame(const Point<int> &point) const {
         return point.cast<double>() / unit_size;
     }
+
+    [[nodiscard]] inline double scaleFromPixels(int v) const { return static_cast<double>(v) / unit_size; }
+
+    [[nodiscard]] inline int scaleToPixels(double v) const { return std::lround(v * unit_size); }
 
     [[nodiscard]] inline Point<int> mapToFrame(const Point<double> &point) const { return expand(absolute(point)); }
 
@@ -205,6 +217,14 @@ public:
         return stretched(image, 1, screen_size);
     }
 
+    inline static Frame open(const std::filesystem::path &path) {
+        std::filesystem::path info_path = path;
+        info_path.replace_extension(".json");
+        const auto frame_info = json_util::read(info_path);
+        const auto image = cv::imread(path.string(), -1);
+        return {image, 1, FrameAnchor::fixed(image.size(), frame_info["intersection"].get<Rect<int>>())};
+    }
+
     [[nodiscard]] inline bool empty() const { return image.empty(); }
 
     Frame(const Frame &other) noexcept = default;
@@ -277,14 +297,14 @@ public:
 
     [[nodiscard]] inline uint64 timestamp() const { return timestamp_; }
 
-    [[nodiscard]] inline Frame copy(const Rect<double> &rect) const { return view(rect).close(); }
+    [[nodiscard]] inline Frame copy(const Rect<double> &rect) const { return view(rect).clone(); }
 
     [[nodiscard]] inline Frame view(const Rect<double> &rect) const {
         const auto &r = anchor_.mapToFrame(rect);
         return view(r.left(), r.top(), r.width(), r.height());
     }
 
-    [[nodiscard]] inline Frame close() const { return {image.clone(), timestamp_, anchor_}; }
+    [[nodiscard]] inline Frame clone() const { return {image.clone(), timestamp_, anchor_}; }
 
     void fill(const Rect<double> &rect, const Color &color) {
         const auto &r = anchor_.mapToFrame(rect);
