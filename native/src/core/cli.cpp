@@ -3,9 +3,11 @@
 #include <iostream>
 
 #include <CLI11/CLI11.hpp>
+#include <minimal_uuid4/minimal_uuid4.h>
 #include <runner/window_recorder.h>
 #include <runner/windows_config.h>
 
+#include "builder/chara_detail_recognizer_builder.h"
 #include "builder/chara_detail_scene_context_builder.h"
 #include "builder/chara_detail_scene_scraper_builder.h"
 #include "builder/chara_detail_scene_stitcher_builder.h"
@@ -40,12 +42,15 @@ json_util::Json createConfig(bool video_mode) {
                 {"scene_context", json_util::read(config_dir / "chara_detail/scene_context.json")},
                 {"scene_scraper", json_util::read(config_dir / "chara_detail/scene_scraper.json")},
                 {"scene_stitcher", json_util::read(config_dir / "chara_detail/scene_stitcher.json")},
+                {"recognizer", json_util::read(config_dir / "chara_detail/recognizer.json")},
                 {"scraping_dir", (std::filesystem::current_path() / "temp" / "scraping").generic_string()},
             },
         },
         {"platform", json_util::read(config_dir / "platform.json")},
         {"video_mode", video_mode},
         {"storage_dir", (std::filesystem::current_path() / "storage").generic_string()},
+        {"module_dir", "../../sandbox"},
+        {"trainer_id", minimal_uuid4::Generator().uuid4().str()},
     };
 }
 
@@ -136,6 +141,11 @@ int main(int argc, char **argv) {
 
             uma::cli::buildJson<uma::tool::CharaDetailSceneStitcherBuilder>(
                 assets_dir / "chara_detail" / "scene_stitcher.json",
+                [](const auto &obj) { return obj; },
+                [](const auto &json) { return json; });
+
+            uma::cli::buildJson<uma::tool::CharaDetailRecognizerBuilder>(
+                assets_dir / "chara_detail" / "recognizer.json",
                 [](const auto &obj) { return obj; },
                 [](const auto &json) { return json; });
         }
