@@ -1,3 +1,4 @@
+#include "chara_detail/chara_detail_recognizer.h"
 #include "chara_detail/chara_detail_scene_context.h"
 #include "chara_detail/chara_detail_scene_scraper.h"
 #include "chara_detail/chara_detail_scene_stitcher.h"
@@ -94,10 +95,6 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     event_runners->add(recognizer_runner);
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
-    recognize_ready_connection->listen([this](const std::string &id) {
-        // for debug
-        notifyCharaDetailFinished(id, true);
-    });
 
     const auto stitcher_dir = config_json["storage_dir"].get<std::filesystem::path>();
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
@@ -107,6 +104,20 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         recognize_ready_connection,
         config_json["chara_detail"]["scene_stitcher"]
             .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>());
+
+    const auto chara_detail_completed_connection = recognizer_runner->makeConnection<std::string>();
+    chara_detail_completed_connection->listen([this](const std::string &id) {
+        // for debug
+        notifyCharaDetailFinished(id, true);
+    });
+
+    chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
+        config_json["trainer_id"].get<std::string>(),
+        stitcher_dir,
+        config_json["module_dir"].get<std::filesystem::path>(),
+        recognize_ready_connection,
+        chara_detail_completed_connection,
+        config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
 
     event_runners->start();
 }
@@ -124,6 +135,7 @@ void NativeApi::joinEventLoop() {
     frame_distributor = nullptr;
     chara_detail_scene_scraper = nullptr;
     chara_detail_scene_stitcher = nullptr;
+    chara_detail_recognizer = nullptr;
 }
 
 bool NativeApi::isRunning() const {
@@ -149,6 +161,7 @@ void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     std::cout << (frame_distributor == nullptr);
     std::cout << (chara_detail_scene_scraper == nullptr);
     std::cout << (chara_detail_scene_stitcher == nullptr);
+    std::cout << (chara_detail_recognizer == nullptr);
 }
 
 }  // namespace uma::app

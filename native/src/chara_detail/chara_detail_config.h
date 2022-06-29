@@ -1,5 +1,12 @@
 #pragma once
 
+#include <sstream>
+#include <string>
+
+#include "types/color.h"
+#include "types/range.h"
+#include "types/shape.h"
+
 namespace uma::chara_detail {
 
 struct PathEntry {
@@ -116,5 +123,261 @@ struct CharaDetailSceneStitcherConfig {
 };
 
 }  // namespace stitcher_config
+
+namespace recognizer_config {
+
+struct EvaluationValueConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(EvaluationValueConfig, module_path, position);
+};
+
+struct StatusValueConfig {
+    std::string module_path;
+    std::array<Rect<double>, 5> positions;
+
+    EXTENDED_JSON_TYPE_NDC(StatusValueConfig, module_path, positions);
+};
+
+struct AptitudeConfig {
+    std::string module_path;
+    std::array<Rect<double>, 10> positions;
+
+    EXTENDED_JSON_TYPE_NDC(AptitudeConfig, module_path, positions);
+};
+
+struct StatusHeaderConfig {
+    EvaluationValueConfig evaluation;
+    StatusValueConfig status;
+    AptitudeConfig aptitude;
+
+    EXTENDED_JSON_TYPE_NDC(StatusHeaderConfig, evaluation, status, aptitude);
+};
+
+struct SkillLevelConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(SkillLevelConfig, module_path, position);
+};
+
+struct SkillTabConfig {
+    std::string module_path;
+    Range<Color> bg_color;
+    Rect<double> area;
+    Rect<double> left_rect;
+    Rect<double> right_rect;
+    double vertical_delta;
+    double vertical_margin;
+    double vertical_gap;
+    SkillLevelConfig skill_level;
+
+    EXTENDED_JSON_TYPE_NDC(
+        SkillTabConfig,
+        module_path,
+        bg_color,
+        area,
+        left_rect,
+        right_rect,
+        vertical_delta,
+        vertical_margin,
+        vertical_gap,
+        skill_level);
+};
+
+struct FactorRankConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(FactorRankConfig, module_path, position);
+};
+
+struct FactorTabConfig {
+    std::string module_path;
+    Range<Color> bg_color;
+    Rect<double> area;
+    Rect<double> left_rect;
+    Rect<double> right_rect;
+    double vertical_delta;
+    double vertical_margin;
+    double vertical_factor_gap;
+    double vertical_chara_gap;
+    FactorRankConfig factor_rank;
+
+    EXTENDED_JSON_TYPE_NDC(
+        FactorTabConfig,
+        module_path,
+        bg_color,
+        area,
+        left_rect,
+        right_rect,
+        vertical_delta,
+        vertical_margin,
+        vertical_factor_gap,
+        vertical_chara_gap,
+        factor_rank);
+};
+
+struct SupportCardLevelConfig {
+    std::string module_path;
+    std::array<Rect<double>, 6> positions;
+
+    EXTENDED_JSON_TYPE_NDC(SupportCardLevelConfig, module_path, positions);
+};
+
+struct SupportCardRankConfig {
+    std::string module_path;
+    std::array<Rect<double>, 6> positions;
+
+    EXTENDED_JSON_TYPE_NDC(SupportCardRankConfig, module_path, positions);
+};
+
+struct SupportCardConfig {
+    std::string module_path;
+    Point<double> scan_point;
+    std::array<Rect<double>, 6> positions;
+    SupportCardLevelConfig level;
+    SupportCardRankConfig rank;
+    double vertical_delta;
+
+    EXTENDED_JSON_TYPE_NDC(SupportCardConfig, module_path, scan_point, positions, level, rank, vertical_delta);
+};
+
+struct CharaRankConfig {
+    std::string module_path;
+    std::array<Rect<double>, 3> parent1;
+    std::array<Rect<double>, 3> parent2;
+
+    EXTENDED_JSON_TYPE_NDC(CharaRankConfig, module_path, parent1, parent2);
+};
+
+struct FamilyTreeConfig {
+    std::string module_path;
+    Point<double> scan_point;
+    std::array<Rect<double>, 3> parent1;
+    std::array<Rect<double>, 3> parent2;
+    CharaRankConfig chara_rank;
+    double vertical_delta;
+
+    EXTENDED_JSON_TYPE_NDC(FamilyTreeConfig, module_path, scan_point, parent1, parent2, chara_rank, vertical_delta);
+};
+
+struct FansValueConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(FansValueConfig, module_path, position);
+};
+
+struct ScenarioConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(ScenarioConfig, module_path, position);
+};
+
+struct TrainedDateConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(TrainedDateConfig, module_path, position);
+};
+
+struct CampaignRecordConfig {
+    Point<double> scan_point;
+    double vertical_gap;
+    FansValueConfig fans_value;
+    ScenarioConfig scenario;
+    TrainedDateConfig trained_date;
+    double vertical_delta;
+
+    EXTENDED_JSON_TYPE_NDC(
+        CampaignRecordConfig, scan_point, vertical_gap, fans_value, scenario, trained_date, vertical_delta);
+};
+
+struct RaceTitleConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(RaceTitleConfig, module_path, position);
+};
+
+struct RacePlaceConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(RacePlaceConfig, module_path, position);
+};
+
+struct RaceTurnConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(RaceTurnConfig, module_path, position);
+};
+
+struct RacePositionConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(RacePositionConfig, module_path, position);
+};
+
+struct RaceStrategyConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(RaceStrategyConfig, module_path, position);
+};
+
+struct RaceWeatherConfig {
+    std::string module_path;
+    Rect<double> position;
+
+    EXTENDED_JSON_TYPE_NDC(RaceWeatherConfig, module_path, position);
+};
+
+struct RaceConfig {
+    Point<double> scan_point;
+    double vertical_delta;
+//    double vertical_gap;
+    RaceTitleConfig title;
+    RacePlaceConfig place;
+    RaceTurnConfig turn;
+    RacePositionConfig position;
+    RaceStrategyConfig strategy;
+    RaceWeatherConfig weather;
+
+    EXTENDED_JSON_TYPE_NDC(RaceConfig, scan_point,vertical_delta,title, place, turn, position, strategy, weather);
+};
+
+struct CampaignTabCommonConfig {
+    Rect<double> area;
+    Range<Color> bg_color;
+
+    EXTENDED_JSON_TYPE_NDC(CampaignTabCommonConfig, area, bg_color);
+};
+
+struct CampaignTabConfig {
+    CampaignTabCommonConfig common;
+    SupportCardConfig support_card;
+    FamilyTreeConfig family_tree;
+    CampaignRecordConfig campaign_record;
+    RaceConfig race;
+
+    EXTENDED_JSON_TYPE_NDC(CampaignTabConfig, common, support_card, family_tree, campaign_record, race);
+};
+
+struct CharaDetailRecognizerConfig {
+    StatusHeaderConfig status_header;
+    SkillTabConfig skill_tab;
+    FactorTabConfig factor_tab;
+    CampaignTabConfig campaign_tab;
+
+    EXTENDED_JSON_TYPE_NDC(CharaDetailRecognizerConfig, status_header, skill_tab, factor_tab, campaign_tab);
+};
+
+}  // namespace recognizer_config
 
 }  // namespace uma::chara_detail

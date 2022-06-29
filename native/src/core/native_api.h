@@ -22,6 +22,7 @@
 namespace uma::chara_detail {
 class CharaDetailSceneScraper;
 class CharaDetailSceneStitcher;
+class CharaDetailRecognizer;
 }  // namespace uma::chara_detail
 
 namespace uma::app {
@@ -102,6 +103,7 @@ private:
     std::unique_ptr<distributor::FrameDistributor> frame_distributor;
     std::unique_ptr<chara_detail::CharaDetailSceneScraper> chara_detail_scene_scraper;
     std::unique_ptr<chara_detail::CharaDetailSceneStitcher> chara_detail_scene_stitcher;
+    std::unique_ptr<chara_detail::CharaDetailRecognizer> chara_detail_recognizer;
 
 public:
     [[maybe_unused]] void _dummyForSuppressingUnusedWarning();
