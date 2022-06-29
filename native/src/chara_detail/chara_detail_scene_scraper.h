@@ -267,10 +267,10 @@ public:
 
         const auto &anchor = frame.anchor();
         const Point<int> &top_left = {0, frame.height() - offset_pixels};
-        const Point<double> &scaled_top_left = anchor.shrink(top_left);
+        const Point<double> &scaled_top_left = anchor.mapFromFrame(top_left);
 
         for (int y_pixels = top_left.y(); y_pixels < frame.height(); y_pixels++) {
-            const double scaled_y = anchor.shrink({0, y_pixels}).y();
+            const double scaled_y = anchor.scaleFromPixels(y_pixels);
             if (!frame.isIn(current_scan->color_range, {current_scan->x, scaled_y})) {
                 current_length_pixels = 0;
             } else {
@@ -278,13 +278,13 @@ public:
                 if (++current_length_pixels >= length_pixels) {
                     current_length_pixels = 0;
                     if (++current_scan == scan_parameters.end()) {
-                        saveIncremental(frame.copy({scaled_top_left, {1., scaled_y}}));
+                        saveIncremental(frame.view({scaled_top_left, {1., scaled_y}}));
                         return;
                     }
                 }
             }
         }
-        saveIncremental(frame.copy({scaled_top_left, anchor.shrink(frame.rect().bottomRight())}));
+        saveIncremental(frame.view({scaled_top_left, anchor.mapFromFrame(frame.rect().bottomRight())}));
     }
 
     void addScrollArea(const Frame &frame) {
@@ -387,7 +387,7 @@ public:
     [[nodiscard]] inline Frame fullSizeFrame() const { return previous_frame; }
 
     [[nodiscard]] inline Frame croppedFrame() const {
-        return target_rect.empty() ? previous_frame : previous_frame.copy(target_rect);
+        return target_rect.empty() ? previous_frame : previous_frame.view(target_rect);
     }
 
 private:
@@ -565,7 +565,7 @@ private:
     void build(const Frame &frame) {
         assert_(state == Null);
 
-        const auto initial_frame = frame.copy(config.scroll_area_rect);
+        const auto initial_frame = frame.view(config.scroll_area_rect);
         log_debug("{}, {}", initial_frame.size().width(), initial_frame.size().height());
 
         const auto scroll_bar_offset_estimator =

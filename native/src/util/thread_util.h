@@ -3,6 +3,7 @@
 #include <atomic>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <utility>
 

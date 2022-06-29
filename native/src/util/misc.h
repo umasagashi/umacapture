@@ -14,6 +14,15 @@ inline uint64_t timestamp() {
     return std::chrono::duration_cast<time_unit>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+inline std::string utc() {
+    const auto ts = std::time(nullptr);
+    const auto tm = std::gmtime(&ts);
+
+    std::ostringstream stream;
+    stream << std::put_time(tm, "%Y-%m-%dT%H:%M:%SZ");
+    return stream.str();
+}
+
 }  // namespace uma::chrono_util
 
 namespace uma::io_util {

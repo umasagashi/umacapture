@@ -71,6 +71,9 @@ public:
     [[nodiscard]] inline T y() const { return y_; }
     [[nodiscard]] inline Anchor anchor() const { return anchor_; }
 
+    [[nodiscard]] inline Point<T> withX(T x) const { return {x, y_, anchor_}; }
+    [[nodiscard]] inline Point<T> withY(T y) const { return {x_, y, anchor_}; }
+
     [[maybe_unused]] [[nodiscard]] inline cv::Point_<T> toCVPoint() const {
         assert_(anchor_.isAbsolute());
         return {x_, y_};
@@ -258,6 +261,14 @@ public:
     [[nodiscard]] inline T height() const { return bottom_right_.y() - top_left_.y(); }
 
     [[nodiscard]] inline Size<T> size() const { return {width(), height()}; }
+
+    inline Rect<T> operator+(const Point<T> &other) const {
+        assert_(other.anchor() == ScreenStart);
+        return {
+            top_left_ + Point<T>{other.x(), other.y(), top_left_.anchor()},
+            bottom_right_ + Point<T>{other.x(), other.y(), bottom_right_.anchor()},
+        };
+    }
 
     EXTENDED_JSON_TYPE_NDC(Rect, top_left_, bottom_right_);
 

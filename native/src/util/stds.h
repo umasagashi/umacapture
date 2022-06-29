@@ -21,6 +21,13 @@ inline OutContainer transformed(const InContainer &container, Function func) {
     return out;
 }
 
+template<typename OutContainer, typename InContainer, typename Function>
+inline OutContainer transformed_inplace(const InContainer &container, Function func) {
+    OutContainer out;
+    std::transform(container.begin(), container.end(), out.begin(), func);
+    return out;
+}
+
 template<typename Container, typename Predicate>
 inline typename Container::const_iterator find_if(const Container &container, Predicate pred) {
     return std::find_if(container.begin(), container.end(), pred);
@@ -58,6 +65,14 @@ inline void sort(Container &container) {
 
 inline bool starts_with(const std::string &subject, const std::string &query) {
     return subject.substr(0, query.length()) == query;
+}
+
+template<size_t start, size_t end, typename T, size_t in_n>
+inline auto slice(const std::array<T, in_n> &array) {
+    static_assert((end - start) <= in_n);
+    std::array<T, end - start> out;
+    std::copy(array.cbegin() + start, array.cbegin() + end, out.begin());
+    return out;
 }
 
 #pragma clang diagnostic push

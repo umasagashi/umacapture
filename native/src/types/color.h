@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include <opencv2/opencv.hpp>
+
 #include "util/json_util.h"
 
 namespace uma {
