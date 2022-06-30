@@ -1,8 +1,8 @@
 {
   "status_header": {
     "evaluation": {
-      "module_path": "modules/evaluation_value/prediction.onnx",
-      "position": {
+      "module_path": "evaluation_value/prediction.onnx",
+      "rect": {
         "top_left": {
           "x": 0.1389,
           "y": 0.3722,
@@ -22,8 +22,8 @@
       }
     },
     "status": {
-      "module_path": "modules/status_value/prediction.onnx",
-      "positions": [
+      "module_path": "status_value/prediction.onnx",
+      "rects": [
         {
           "top_left": {
             "x": 0.1074,
@@ -117,8 +117,8 @@
       ]
     },
     "aptitude": {
-      "module_path": "modules/aptitude/prediction.onnx",
-      "positions": [
+      "module_path": "aptitude/prediction.onnx",
+      "rects": [
         {
           "top_left": {
             "x": 0.3407,
@@ -303,7 +303,7 @@
     }
   },
   "skill_tab": {
-    "module_path": "modules/skill/prediction.onnx",
+    "module_path": "skill/prediction.onnx",
     "bg_color": {
       "min": {
         "r": 235,
@@ -340,7 +340,7 @@
         "y": 0.02410000000000001,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       },
       "bottom_right": {
@@ -348,7 +348,7 @@
         "y": 0.051899999999999946,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       }
     },
@@ -358,7 +358,7 @@
         "y": 0.02410000000000001,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       },
       "bottom_right": {
@@ -366,7 +366,7 @@
         "y": 0.051899999999999946,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       }
     },
@@ -374,8 +374,8 @@
     "vertical_margin": 0.0,
     "vertical_gap": 0.03710000000000002,
     "skill_level": {
-      "module_path": "modules/skill_level/prediction.onnx",
-      "position": {
+      "module_path": "skill_level/prediction.onnx",
+      "rect": {
         "top_left": {
           "x": 0.3518,
           "y": 0.02410000000000001,
@@ -396,7 +396,7 @@
     }
   },
   "factor_tab": {
-    "module_path": "modules/factor/prediction.onnx",
+    "module_path": "factor/prediction.onnx",
     "bg_color": {
       "min": {
         "r": 235,
@@ -433,7 +433,7 @@
         "y": 0.014799999999999924,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       },
       "bottom_right": {
@@ -441,7 +441,7 @@
         "y": 0.04259999999999997,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       }
     },
@@ -451,7 +451,7 @@
         "y": 0.014799999999999924,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       },
       "bottom_right": {
@@ -459,7 +459,7 @@
         "y": 0.04259999999999997,
         "anchor": {
           "h": "IntersectStart",
-          "v": "IntersectStart"
+          "v": "ScreenStart"
         }
       }
     },
@@ -468,8 +468,8 @@
     "vertical_factor_gap": 0.012900000000000023,
     "vertical_chara_gap": 0.05930000000000013,
     "factor_rank": {
-      "module_path": "modules/factor_rank/prediction.onnx",
-      "position": {
+      "module_path": "factor_rank/prediction.onnx",
+      "rect": {
         "top_left": {
           "x": 0.0889,
           "y": 0.044499999999999984,
@@ -484,6 +484,50 @@
           "anchor": {
             "h": "ScreenStart",
             "v": "ScreenStart"
+          }
+        }
+      }
+    },
+    "trainee_icon": {
+      "icon": {
+        "module_path": "character/prediction.onnx",
+        "rect": {
+          "top_left": {
+            "x": 0.05,
+            "y": -0.0018000000000000238,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          },
+          "bottom_right": {
+            "x": 0.1815,
+            "y": 0.12959999999999994,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          }
+        }
+      },
+      "rank": {
+        "module_path": "character_rank/prediction.onnx",
+        "rect": {
+          "top_left": {
+            "x": 0.1333,
+            "y": -0.014800000000000035,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          },
+          "bottom_right": {
+            "x": 0.1833,
+            "y": 0.03520000000000001,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
           }
         }
       }
@@ -523,7 +567,7 @@
       }
     },
     "support_card": {
-      "module_path": "modules/support_card/prediction.onnx",
+      "module_path": "support_card/prediction.onnx",
       "scan_point": {
         "x": 0.3148,
         "y": 0.0,
@@ -532,7 +576,7 @@
           "v": "ScreenStart"
         }
       },
-      "positions": [
+      "rects": [
         {
           "top_left": {
             "x": 0.0685,
@@ -643,8 +687,8 @@
         }
       ],
       "level": {
-        "module_path": "modules/support_card_level/prediction.onnx",
-        "positions": [
+        "module_path": "support_card_level/prediction.onnx",
+        "rects": [
           {
             "top_left": {
               "x": 0.1463,
@@ -756,8 +800,8 @@
         ]
       },
       "rank": {
-        "module_path": "modules/support_card_rank/prediction.onnx",
-        "positions": [
+        "module_path": "support_card_rank/prediction.onnx",
+        "rects": [
           {
             "top_left": {
               "x": 0.0556,
@@ -871,7 +915,7 @@
       "vertical_delta": 0.19819999999999993
     },
     "family_tree": {
-      "module_path": "modules/character/prediction.onnx",
+      "module_path": "character/prediction.onnx",
       "scan_point": {
         "x": 0.3148,
         "y": 0.0,
@@ -993,7 +1037,7 @@
         }
       ],
       "chara_rank": {
-        "module_path": "modules/character_rank/prediction.onnx",
+        "module_path": "character_rank/prediction.onnx",
         "parent1": [
           {
             "top_left": {
@@ -1120,8 +1164,8 @@
       },
       "vertical_gap": 0.044399999999999995,
       "fans_value": {
-        "module_path": "modules/fans_value/prediction.onnx",
-        "position": {
+        "module_path": "fans_value/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.2926,
             "y": 0.0,
@@ -1141,8 +1185,8 @@
         }
       },
       "scenario": {
-        "module_path": "modules/scenario/prediction.onnx",
-        "position": {
+        "module_path": "scenario/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.2926,
             "y": 0.0,
@@ -1162,8 +1206,8 @@
         }
       },
       "trained_date": {
-        "module_path": "modules/trained_date/prediction.onnx",
-        "position": {
+        "module_path": "trained_date/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.2926,
             "y": 0.0,
@@ -1195,8 +1239,8 @@
       },
       "vertical_delta": 0.17410000000000014,
       "title": {
-        "module_path": "modules/race_title/prediction.onnx",
-        "position": {
+        "module_path": "race_title/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.1574,
             "y": 0.009300000000000086,
@@ -1216,8 +1260,8 @@
         }
       },
       "place": {
-        "module_path": "modules/race_place/prediction.onnx",
-        "position": {
+        "module_path": "race_place/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.0685,
             "y": 0.07220000000000004,
@@ -1237,8 +1281,8 @@
         }
       },
       "turn": {
-        "module_path": "modules/race_turn/prediction.onnx",
-        "position": {
+        "module_path": "race_turn/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.4463,
             "y": 0.11299999999999999,
@@ -1258,8 +1302,8 @@
         }
       },
       "position": {
-        "module_path": "modules/race_position/prediction.onnx",
-        "position": {
+        "module_path": "race_position/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.7944,
             "y": 0.007400000000000073,
@@ -1279,8 +1323,8 @@
         }
       },
       "strategy": {
-        "module_path": "modules/race_strategy/prediction.onnx",
-        "position": {
+        "module_path": "race_strategy/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.1833,
             "y": 0.11299999999999999,
@@ -1300,8 +1344,8 @@
         }
       },
       "weather": {
-        "module_path": "modules/race_weather/prediction.onnx",
-        "position": {
+        "module_path": "race_weather/prediction.onnx",
+        "rect": {
           "top_left": {
             "x": 0.5907,
             "y": 0.07410000000000005,

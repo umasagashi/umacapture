@@ -49,7 +49,7 @@ json_util::Json createConfig(bool video_mode) {
         {"platform", json_util::read(config_dir / "platform.json")},
         {"video_mode", video_mode},
         {"storage_dir", (std::filesystem::current_path() / "storage").generic_string()},
-        {"module_dir", "../../sandbox"},
+        {"module_dir", "../../sandbox/modules"},
         {"trainer_id", minimal_uuid4::Generator().uuid4().str()},
     };
 }
