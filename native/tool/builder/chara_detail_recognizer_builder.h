@@ -19,17 +19,15 @@ public:
     }
 
 private:
-    [[nodiscard]] std::string getModulePath(const std::string &key) const {
-        return std::string("modules/") + key + "/prediction.onnx";
-    }
+    [[nodiscard]] std::string getModulePath(const std::string &key) const { return key + "/prediction.onnx"; }
 
     [[nodiscard]] StatusHeaderConfig statusHeader() const {
         return {
-            EvaluationValueConfig{
+            {
                 getModulePath("evaluation_value"),
                 Rect<double>{{0.1389, 0.3722, IS}, {0.2556, 0.4000, IS}},
             },
-            StatusValueConfig{
+            {
                 getModulePath("status_value"),
                 {
                     Rect<double>{{0.1074, 0.4833, IS}, {0.1944, 0.5111, IS}},
@@ -39,7 +37,7 @@ private:
                     Rect<double>{{0.8481, 0.4833, IS}, {0.9352, 0.5111, IS}},
                 },
             },
-            AptitudeConfig{
+            {
                 getModulePath("aptitude"),
                 {
                     Rect<double>{{0.3407, 0.5648, IS}, {0.3685, 0.5926, IS}},
@@ -62,8 +60,8 @@ private:
     [[nodiscard]] SkillTabConfig skillTab() const {
         const double top_offset = 0.8685 - 0.8444;
         const double bottom_offset = 0.8963 - 0.8444;
-        const auto left_rect = Rect<double>{{0.1019, top_offset, IS}, {0.4296, bottom_offset, IS}};
-        const auto right_rect = Rect<double>{{0.5667, top_offset, IS}, {0.8944, bottom_offset, IS}};
+        const auto left_rect = Rect<double>{{0.1019, top_offset, {IS, SS}}, {0.4296, bottom_offset, {IS, SS}}};
+        const auto right_rect = Rect<double>{{0.5667, top_offset, {IS, SS}}, {0.8944, bottom_offset, {IS, SS}}};
         return {
             getModulePath("skill"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
@@ -73,21 +71,19 @@ private:
             0.9352 - 0.8444,
             0.0,
             0.9519 - 0.9148,
-            SkillLevelConfig{
+            {
                 getModulePath("skill_level"),
-                Rect<double>{
-                    {0.4537 - left_rect.left(), top_offset},
-                    {0.4815 - left_rect.left(), bottom_offset},
-                },
+                Rect<double>{{0.4537 - left_rect.left(), top_offset}, {0.4815 - left_rect.left(), bottom_offset}},
             },
         };
     }
 
     [[nodiscard]] FactorTabConfig factorTab() const {
-        const double top_offset = 0.9259 - 0.9111;
-        const double bottom_offset = 0.9537 - 0.9111;
-        const auto left_rect = Rect<double>{{0.2426, top_offset, IS}, {0.5519, bottom_offset, IS}};
-        const auto right_rect = Rect<double>{{0.6259, top_offset, IS}, {0.9352, bottom_offset, IS}};
+        const double scan_top = 0.9111;
+        const double top_offset = 0.9259 - scan_top;
+        const double bottom_offset = 0.9537 - scan_top;
+        const auto left_rect = Rect<double>{{0.2426, top_offset, {IS, SS}}, {0.5519, bottom_offset, {IS, SS}}};
+        const auto right_rect = Rect<double>{{0.6259, top_offset, {IS, SS}}, {0.9352, bottom_offset, {IS, SS}}};
         return {
             getModulePath("factor"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
@@ -98,11 +94,20 @@ private:
             0.9019 - 0.8278,
             0.9981 - 0.9852,
             1.3704 - 1.3111,
-            FactorRankConfig{
+            {
                 getModulePath("factor_rank"),
                 Rect<double>{
-                    {0.3315 - left_rect.left(), 0.9556 - 0.9111},
-                    {0.4259 - left_rect.left(), 0.9833 - 0.9111},
+                    {0.3315 - left_rect.left(), 0.9556 - scan_top, SS},
+                    {0.4259 - left_rect.left(), 0.9833 - scan_top, SS}},
+            },
+            {
+                {
+                    getModulePath("character"),
+                    Rect<double>{{0.0500, 0.9093 - scan_top, {IS, SS}}, {0.1815, 1.0407 - scan_top, {IS, SS}}},
+                },
+                {
+                    getModulePath("character_rank"),
+                    Rect<double>{{0.1333, 0.8963 - scan_top, {IS, SS}}, {0.1833, 0.9463 - scan_top, {IS, SS}}},
                 },
             },
         };
@@ -110,7 +115,7 @@ private:
 
     [[nodiscard]] CampaignTabConfig campaignTab() const {
         return {
-            CampaignTabCommonConfig{
+            {
                 Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
                 Range<Color>{{218, 218, 218}, {248, 248, 248}},
             },
@@ -143,7 +148,7 @@ private:
                 Rect<double>{{0.6815, icon_top, {IS, SS}}, {0.7759, icon_bottom, {IS, SS}}},
                 Rect<double>{{0.8352, icon_top, {IS, SS}}, {0.9296, icon_bottom, {IS, SS}}},
             },
-            SupportCardLevelConfig{
+            {
                 getModulePath("support_card_level"),
                 {
                     Rect<double>{{0.1463, label_top, {IS, SS}}, {0.1741, label_bottom, {IS, SS}}},
@@ -154,7 +159,7 @@ private:
                     Rect<double>{{0.9130, label_top_friend, {IS, SS}}, {0.9407, label_bottom_friend, {IS, SS}}},
                 },
             },
-            SupportCardRankConfig{
+            {
                 getModulePath("support_card_rank"),
                 {
                     Rect<double>{{0.0556, label_top, {IS, SS}}, {0.1167, label_bottom, {IS, SS}}},
@@ -203,7 +208,7 @@ private:
                 Rect<double>{{0.7963, grand_upper_top, {IS, SS}}, {0.9111, grand_upper_bottom, {IS, SS}}},
                 Rect<double>{{0.7963, grand_lower_top, {IS, SS}}, {0.9111, grand_lower_bottom, {IS, SS}}},
             },
-            CharaRankConfig{
+            {
                 getModulePath("character_rank"),
                 {
                     Rect<double>{{0.1889, parent_rank_top, {IS, SS}}, {0.2574, parent_rank_bottom, {IS, SS}}},
@@ -224,15 +229,15 @@ private:
         return {
             Point<double>{0.2537, 0.0000, {IS, SS}},
             1.0037 - 0.9593,
-            FansValueConfig{
+            {
                 getModulePath("fans_value"),
                 Rect<double>{{0.2926, 1.0167 - 1.0167, {IS, SS}}, {0.5278, 1.0444 - 1.0167, {IS, SS}}},
             },
-            ScenarioConfig{
+            {
                 getModulePath("scenario"),
                 Rect<double>{{0.2926, 1.1296 - 1.1296, {IS, SS}}, {0.7648, 1.1574 - 1.1296, {IS, SS}}},
             },
-            TrainedDateConfig{
+            {
                 getModulePath("trained_date"),
                 Rect<double>{{0.2926, 1.2778 - 1.2778, {IS, SS}}, {0.5537, 1.3056 - 1.2778, {IS, SS}}},
             },
@@ -245,27 +250,27 @@ private:
         return {
             Point<double>{0.2074, 0.0000, {IS, SS}},
             1.1000 - 0.9259,
-            RaceTitleConfig{
+            {
                 getModulePath("race_title"),
                 Rect<double>{{0.1574, 0.9352 - scan_top, {IS, SS}}, {0.7481, 0.9648 - scan_top, {IS, SS}}},
             },
-            RacePlaceConfig{
+            {
                 getModulePath("race_place"),
                 Rect<double>{{0.0685, 0.9981 - scan_top, {IS, SS}}, {0.5852, 1.0259 - scan_top, {IS, SS}}},
             },
-            RaceTurnConfig{
+            {
                 getModulePath("race_turn"),
                 Rect<double>{{0.4463, 1.0389 - scan_top, {IS, SS}}, {0.7815, 1.0667 - scan_top, {IS, SS}}},
             },
-            RacePositionConfig{
+            {
                 getModulePath("race_position"),
                 Rect<double>{{0.7944, 0.9333 - scan_top, {IS, SS}}, {0.9259, 1.0648 - scan_top, {IS, SS}}},
             },
-            RaceStrategyConfig{
+            {
                 getModulePath("race_strategy"),
                 Rect<double>{{0.1833, 1.0389 - scan_top, {IS, SS}}, {0.2407, 1.0667 - scan_top, {IS, SS}}},
             },
-            RaceWeatherConfig{
+            {
                 getModulePath("race_weather"),
                 Rect<double>{{0.5907, 1.0000 - scan_top, {IS, SS}}, {0.6926, 1.0278 - scan_top, {IS, SS}}},
             },

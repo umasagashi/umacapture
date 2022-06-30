@@ -62,6 +62,8 @@ public:
         prediction = std::make_unique<Ort::Experimental::Session>(env, path_str, session_options);
         const auto input_shape = prediction->GetInputShapes()[0];
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
+
+        labels = json_util::read(path.parent_path() / "config.json")["labels"];
     }
 
     PredictionType predict(const Frame &frame) const {
@@ -76,11 +78,14 @@ public:
         return {prediction->Run(prediction->GetInputNames(), input_tensors, prediction->GetOutputNames())};
     }
 
+    std::string toString(const PredictionType &predicted) const { return predicted.toString(labels); }
+
 private:
     Ort::Env env;
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Experimental::Session> prediction;
     Size<int> input_size;
+    json_util::Json labels;
 };
 
 }  // namespace uma::recognizer

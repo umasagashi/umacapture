@@ -126,40 +126,33 @@ struct CharaDetailSceneStitcherConfig {
 
 namespace recognizer_config {
 
-struct EvaluationValueConfig {
+struct BasicModuleConfig {
     std::string module_path;
-    Rect<double> position;
+    Rect<double> rect;
 
-    EXTENDED_JSON_TYPE_NDC(EvaluationValueConfig, module_path, position);
+    EXTENDED_JSON_TYPE_NDC(BasicModuleConfig, module_path, rect);
 };
 
 struct StatusValueConfig {
     std::string module_path;
-    std::array<Rect<double>, 5> positions;
+    std::array<Rect<double>, 5> rects;
 
-    EXTENDED_JSON_TYPE_NDC(StatusValueConfig, module_path, positions);
+    EXTENDED_JSON_TYPE_NDC(StatusValueConfig, module_path, rects);
 };
 
 struct AptitudeConfig {
     std::string module_path;
-    std::array<Rect<double>, 10> positions;
+    std::array<Rect<double>, 10> rects;
 
-    EXTENDED_JSON_TYPE_NDC(AptitudeConfig, module_path, positions);
+    EXTENDED_JSON_TYPE_NDC(AptitudeConfig, module_path, rects);
 };
 
 struct StatusHeaderConfig {
-    EvaluationValueConfig evaluation;
+    BasicModuleConfig evaluation;
     StatusValueConfig status;
     AptitudeConfig aptitude;
 
     EXTENDED_JSON_TYPE_NDC(StatusHeaderConfig, evaluation, status, aptitude);
-};
-
-struct SkillLevelConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(SkillLevelConfig, module_path, position);
 };
 
 struct SkillTabConfig {
@@ -171,7 +164,7 @@ struct SkillTabConfig {
     double vertical_delta;
     double vertical_margin;
     double vertical_gap;
-    SkillLevelConfig skill_level;
+    BasicModuleConfig skill_level;
 
     EXTENDED_JSON_TYPE_NDC(
         SkillTabConfig,
@@ -186,11 +179,11 @@ struct SkillTabConfig {
         skill_level);
 };
 
-struct FactorRankConfig {
-    std::string module_path;
-    Rect<double> position;
+struct TraineeIconConfig {
+    BasicModuleConfig icon;
+    BasicModuleConfig rank;
 
-    EXTENDED_JSON_TYPE_NDC(FactorRankConfig, module_path, position);
+    EXTENDED_JSON_TYPE_NDC(TraineeIconConfig, icon, rank);
 };
 
 struct FactorTabConfig {
@@ -203,7 +196,9 @@ struct FactorTabConfig {
     double vertical_margin;
     double vertical_factor_gap;
     double vertical_chara_gap;
-    FactorRankConfig factor_rank;
+    BasicModuleConfig factor_rank;
+
+    TraineeIconConfig trainee_icon;
 
     EXTENDED_JSON_TYPE_NDC(
         FactorTabConfig,
@@ -216,32 +211,33 @@ struct FactorTabConfig {
         vertical_margin,
         vertical_factor_gap,
         vertical_chara_gap,
-        factor_rank);
+        factor_rank,
+        trainee_icon);
 };
 
 struct SupportCardLevelConfig {
     std::string module_path;
-    std::array<Rect<double>, 6> positions;
+    std::array<Rect<double>, 6> rects;
 
-    EXTENDED_JSON_TYPE_NDC(SupportCardLevelConfig, module_path, positions);
+    EXTENDED_JSON_TYPE_NDC(SupportCardLevelConfig, module_path, rects);
 };
 
 struct SupportCardRankConfig {
     std::string module_path;
-    std::array<Rect<double>, 6> positions;
+    std::array<Rect<double>, 6> rects;
 
-    EXTENDED_JSON_TYPE_NDC(SupportCardRankConfig, module_path, positions);
+    EXTENDED_JSON_TYPE_NDC(SupportCardRankConfig, module_path, rects);
 };
 
 struct SupportCardConfig {
     std::string module_path;
     Point<double> scan_point;
-    std::array<Rect<double>, 6> positions;
+    std::array<Rect<double>, 6> rects;
     SupportCardLevelConfig level;
     SupportCardRankConfig rank;
     double vertical_delta;
 
-    EXTENDED_JSON_TYPE_NDC(SupportCardConfig, module_path, scan_point, positions, level, rank, vertical_delta);
+    EXTENDED_JSON_TYPE_NDC(SupportCardConfig, module_path, scan_point, rects, level, rank, vertical_delta);
 };
 
 struct CharaRankConfig {
@@ -263,93 +259,29 @@ struct FamilyTreeConfig {
     EXTENDED_JSON_TYPE_NDC(FamilyTreeConfig, module_path, scan_point, parent1, parent2, chara_rank, vertical_delta);
 };
 
-struct FansValueConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(FansValueConfig, module_path, position);
-};
-
-struct ScenarioConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(ScenarioConfig, module_path, position);
-};
-
-struct TrainedDateConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(TrainedDateConfig, module_path, position);
-};
-
 struct CampaignRecordConfig {
     Point<double> scan_point;
     double vertical_gap;
-    FansValueConfig fans_value;
-    ScenarioConfig scenario;
-    TrainedDateConfig trained_date;
+    BasicModuleConfig fans_value;
+    BasicModuleConfig scenario;
+    BasicModuleConfig trained_date;
     double vertical_delta;
 
     EXTENDED_JSON_TYPE_NDC(
         CampaignRecordConfig, scan_point, vertical_gap, fans_value, scenario, trained_date, vertical_delta);
 };
 
-struct RaceTitleConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(RaceTitleConfig, module_path, position);
-};
-
-struct RacePlaceConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(RacePlaceConfig, module_path, position);
-};
-
-struct RaceTurnConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(RaceTurnConfig, module_path, position);
-};
-
-struct RacePositionConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(RacePositionConfig, module_path, position);
-};
-
-struct RaceStrategyConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(RaceStrategyConfig, module_path, position);
-};
-
-struct RaceWeatherConfig {
-    std::string module_path;
-    Rect<double> position;
-
-    EXTENDED_JSON_TYPE_NDC(RaceWeatherConfig, module_path, position);
-};
-
 struct RaceConfig {
     Point<double> scan_point;
     double vertical_delta;
-//    double vertical_gap;
-    RaceTitleConfig title;
-    RacePlaceConfig place;
-    RaceTurnConfig turn;
-    RacePositionConfig position;
-    RaceStrategyConfig strategy;
-    RaceWeatherConfig weather;
+    BasicModuleConfig title;
+    BasicModuleConfig place;
+    BasicModuleConfig turn;
+    BasicModuleConfig position;
+    BasicModuleConfig strategy;
+    BasicModuleConfig weather;
 
-    EXTENDED_JSON_TYPE_NDC(RaceConfig, scan_point,vertical_delta,title, place, turn, position, strategy, weather);
+    EXTENDED_JSON_TYPE_NDC(RaceConfig, scan_point, vertical_delta, title, place, turn, position, strategy, weather);
 };
 
 struct CampaignTabCommonConfig {
