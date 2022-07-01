@@ -35,12 +35,14 @@ Future<JsonMap> loadNativeConfig(String appName) async {
   JsonMap config = {
     "chara_detail": {},
     "video_mode": false,
+    "trainer_id": "trainer_id",
   };
 
   await Future.wait([
     getDirectory().then((directory) {
       config["chara_detail"]["scraping_dir"] = '${directory.path}/$appName/temp/capture';
-      config["storage_dir"] = '${directory.path}/$appName/storage/capture';
+      config["storage_dir"] = '${directory.path}/$appName/storage';
+      config["module_dir"] = '${directory.path}/$appName/modules';
     }),
     rootBundle
         .loadString('assets/config/chara_detail/scene_context.json')
@@ -51,6 +53,9 @@ Future<JsonMap> loadNativeConfig(String appName) async {
     rootBundle
         .loadString('assets/config/chara_detail/scene_stitcher.json')
         .then((text) => config["chara_detail"]["scene_stitcher"] = jsonDecode(text)),
+    rootBundle
+        .loadString('assets/config/chara_detail/recognizer.json')
+        .then((text) => config["chara_detail"]["recognizer"] = jsonDecode(text)),
     rootBundle.loadString('assets/config/platform.json').then((text) => config["platform"] = jsonDecode(text)),
   ]);
 

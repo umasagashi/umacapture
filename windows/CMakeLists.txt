@@ -41,6 +41,7 @@ function(APPLY_STANDARD_SETTINGS TARGET)
             /wd4459
             /wd4819
             /wd5054
+            /bigobj
             )
     target_compile_options(${TARGET} PRIVATE /EHsc)
     target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
