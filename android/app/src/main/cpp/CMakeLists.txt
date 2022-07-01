@@ -12,6 +12,7 @@ project(umasagashi_app)
 set(CMAKE_CXX_STANDARD 17)
 
 set(NATIVE_EXTENSION_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../../native")
+set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../onnxruntime")
 
 set(SOURCE_FILES
         umasagashi_app.cpp
@@ -36,6 +37,7 @@ add_library( # Sets the name of the library.
 target_include_directories(${PROJECT_NAME} PRIVATE
         "${NATIVE_EXTENSION_DIR}/src"
         "${NATIVE_EXTENSION_DIR}/vendor"
+        "${ONNX_DIR}/headers"
         )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
@@ -74,4 +76,7 @@ target_link_libraries( # Specifies the target library.
 
         # Links the target library to the log library
         # included in the NDK.
-        ${log-lib})
+        ${log-lib}
+
+        "${ONNX_DIR}/jni/${ANDROID_NDK_ABI_NAME}/libonnxruntime.so"
+        )
