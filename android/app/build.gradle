@@ -46,10 +46,22 @@ android {
                 cppFlags '-std=c++17'
             }
         }
+        ndk {
+            // Flutter does not seem to support x86 in the release build.
+            abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+        }
+        sourceSets {
+            main {
+                jniLibs.srcDirs += '../onnxruntime/jni'
+            }
+        }
     }
 
     buildTypes {
         release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig signingConfigs.debug

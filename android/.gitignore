@@ -16,3 +16,6 @@ key.properties
 
 # OpenCV
 /sdk/*
+
+# ONNX Runtime
+/onnxruntime/*
