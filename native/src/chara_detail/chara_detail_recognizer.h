@@ -469,7 +469,6 @@ public:
             1.0);
 
         const auto top_offset = Point<double>{0, top.value()};
-        const auto &anchor = frame.anchor();
 
         record.family.parent1 = recognizeParent(frame, top_offset, config.parent1, config.chara_rank.parent1, history);
         record.family.parent2 = recognizeParent(frame, top_offset, config.parent2, config.chara_rank.parent2, history);

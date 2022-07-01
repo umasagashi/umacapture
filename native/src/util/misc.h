@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -15,11 +16,17 @@ inline uint64_t timestamp() {
 }
 
 inline std::string utc() {
-    const auto ts = std::time(nullptr);
-    const auto tm = std::gmtime(&ts);
+    const time_t unix_ts = std::time(nullptr);
+    std::tm datetime{};
+
+#if defined(__ANDROID__)
+    gmtime_r(&unix_ts, &datetime);
+#else
+    gmtime_s(&datetime, &unix_ts);
+#endif
 
     std::ostringstream stream;
-    stream << std::put_time(tm, "%Y-%m-%dT%H:%M:%SZ");
+    stream << std::put_time(&datetime, "%Y-%m-%dT%H:%M:%SZ");
     return stream.str();
 }
 
