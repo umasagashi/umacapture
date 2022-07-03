@@ -103,7 +103,7 @@ private:
             {
                 {
                     getModulePath("character"),
-                    Rect<double>{{0.0500, 0.9093 - scan_top, {IS, SS}}, {0.1815, 1.0407 - scan_top, {IS, SS}}},
+                    Rect<double>{{0.0481, 0.9056 - scan_top, {IS, SS}}, {0.1852, 1.0426 - scan_top, {IS, SS}}},
                 },
                 {
                     getModulePath("character_rank"),

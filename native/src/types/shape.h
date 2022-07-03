@@ -270,6 +270,28 @@ public:
         };
     }
 
+    [[nodiscard]] inline Rect<T> united(const Rect<T> &other) const {
+        assert_(topLeft().anchor() == other.topLeft().anchor());
+        assert_(bottomRight().anchor() == other.bottomRight().anchor());
+        return {
+            {std::min(left(), other.left()), std::min(top(), other.top())},
+            {std::max(right(), other.right()), std::max(bottom(), other.bottom())},
+        };
+    }
+
+    [[nodiscard]] inline Rect<T> margined(T margin_left, T margin_top, T margin_right, T margin_bottom) const {
+        return {
+            {left() - margin_left, top() - margin_top},
+            {right() + margin_right, bottom() + margin_bottom},
+        };
+    }
+
+    [[nodiscard]] inline Rect<T> margined(T horizontal, T vertical) const {
+        return margined(horizontal, vertical, horizontal, vertical);
+    }
+
+    [[nodiscard]] inline Rect<T> margined(T all) const { return margined(all, all, all, all); }
+
     EXTENDED_JSON_TYPE_NDC(Rect, top_left_, bottom_right_);
 
 private:
