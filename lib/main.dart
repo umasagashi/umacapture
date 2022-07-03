@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:umasagashi_app/src/gui/capture.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'main.mapper.g.dart' show initializeJsonMapper;
@@ -13,8 +14,6 @@ import 'src/core/json_adapter.dart';
 import 'src/core/platform_controller.dart';
 import 'src/core/utils.dart';
 import 'src/gui/app_widget.dart';
-
-// import 'src/preference/platform_config.dart';
 import 'src/preference/storage_box.dart';
 import 'src/preference/window_state.dart';
 
@@ -98,7 +97,14 @@ void main() async {
   runApp(ProviderScope(
     observers: [ProviderLogger()],
     overrides: [
-      platformControllerProvider.overrideWithProvider(Provider((ref) => PlatformController(ref, nativeConfig))),
+      platformControllerProvider.overrideWithProvider(Provider((ref) {
+        final controller = PlatformController(ref, nativeConfig);
+        // No need to use watch, since this only needs to be checked once at startup.
+        if (ref.read(autoStartCaptureStateProvider)) {
+          controller.startCapture();
+        }
+        return controller;
+      })),
     ],
     child: App(),
   ));
