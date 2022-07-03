@@ -279,6 +279,10 @@ private:
     recognizer::Model<IndexPrediction> skill_level_model;
 };
 
+struct CropInfo {
+    Rect<double> trainee_icon;
+};
+
 class FactorTabRecognizer {
 public:
     FactorTabRecognizer(const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
@@ -288,7 +292,8 @@ public:
         , character_model(module_root_dir / config.trainee_icon.icon.module_path)
         , character_rank_model(module_root_dir / config.trainee_icon.rank.module_path) {}
 
-    void recognize(const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
+    void recognize(
+        const Frame &frame, record::CharaDetailRecord &record, CropInfo &crop_info, PredictionHistory &history) const {
         double current_y = frame.anchor().absolute(config.area).top() + config.vertical_margin;
 
         const auto self = recognizeOne(frame, current_y, history);
@@ -297,11 +302,12 @@ public:
 
         record.factors = {self, parent1, parent2};
 
-        record.trainee = recognizeTrainee(frame, history);
+        record.trainee = recognizeTrainee(frame, crop_info, history);
     }
 
 private:
-    [[nodiscard]] record::Character recognizeTrainee(const Frame &frame, PredictionHistory &history) const {
+    [[nodiscard]] record::Character
+    recognizeTrainee(const Frame &frame, CropInfo &crop_info, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
         const auto &scan_top = findNext(
             frame,
@@ -310,17 +316,12 @@ private:
                 anchor.absolute(config.area).top() + config.vertical_margin,
             });
 
-        const auto icon = predict(
-            character_model,
-            frame,
-            anchor.absolute(config.trainee_icon.icon.rect) + Point<double>{0, scan_top.value()},
-            history);
+        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + Point<double>{0, scan_top.value()};
+        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + Point<double>{0, scan_top.value()};
+        crop_info.trainee_icon = chara_rect;
 
-        const auto rank = predict(
-            character_rank_model,
-            frame,
-            anchor.absolute(config.trainee_icon.rank.rect) + Point<double>{0, scan_top.value()},
-            history);
+        const auto icon = predict(character_model, frame, chara_rect, history);
+        const auto rank = predict(character_rank_model, frame, rank_rect, history);
 
         record::Character character{};
         character.icon = icon.icon;
@@ -719,6 +720,8 @@ public:
         recognizer_impl::PredictionHistory factor_tab_history;
         recognizer_impl::PredictionHistory campaign_tab_history;
 
+        recognizer_impl::CropInfo crop_info;
+
         auto started = std::chrono::steady_clock::now();
 
         record::CharaDetailRecord record;
@@ -732,7 +735,7 @@ public:
 
         status_header_recognizer.recognize(skill_frame, record, status_header_history);
         skill_tab_recognizer.recognize(skill_frame, record, skill_tab_history);
-        factor_tab_recognizer.recognize(factor_frame, record, factor_tab_history);
+        factor_tab_recognizer.recognize(factor_frame, record, crop_info, factor_tab_history);
         campaign_tab_recognizer.recognize(campaign_frame, record, campaign_tab_history);
 
         auto elapsed =
@@ -750,6 +753,9 @@ public:
                 {"campaign_tab", campaign_tab_history.toJson()},
             },
             2);
+
+        factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
+            .save(record_dir / "trainee.jpg");
 
         on_recognize_completed->send(id);
     }

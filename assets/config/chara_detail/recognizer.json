@@ -493,16 +493,16 @@
         "module_path": "character/prediction.onnx",
         "rect": {
           "top_left": {
-            "x": 0.05,
-            "y": -0.0018000000000000238,
+            "x": 0.0481,
+            "y": -0.00550000000000006,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
             }
           },
           "bottom_right": {
-            "x": 0.1815,
-            "y": 0.12959999999999994,
+            "x": 0.1852,
+            "y": 0.13149999999999995,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
