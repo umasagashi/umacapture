@@ -3,35 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:umasagashi_app/src/state/notifier.dart';
 
 import 'app_widget.dart';
-
-class ListCard extends StatelessWidget {
-  final String? title;
-  final List<Widget> children;
-
-  const ListCard({
-    Key? key,
-    this.title,
-    required this.children,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
-      child: Column(
-        children: [
-          if (title != null)
-            ListTile(
-              tileColor: theme.colorScheme.surfaceVariant,
-              title: Text(title!, style: theme.textTheme.headline5),
-            ),
-          ...children,
-        ],
-      ),
-    );
-  }
-}
+import 'common.dart';
 
 class ToggleButtonWidget<T> extends ConsumerWidget {
   final String title;
@@ -92,15 +64,8 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
       title: Text(title),
       subtitle: Text(description),
       trailing: PopupMenuButton<T>(
-        child: Container(
-          alignment: Alignment.center,
-          margin: const EdgeInsets.symmetric(vertical: 8),
-          width: 100,
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onBackground)),
-          ),
-          child: Text(name(current)),
-        ),
+        // disable tool tip
+        tooltip: '',
         initialValue: current,
         itemBuilder: (BuildContext context) => <PopupMenuEntry<T>>[
           for (final item in values)
@@ -110,7 +75,15 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
             ),
         ],
         onSelected: (T item) => ref.read(provider.notifier).setValue(item),
-        tooltip: '', // disable tool tip
+        child: Container(
+          alignment: Alignment.center,
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          width: 100,
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onBackground)),
+          ),
+          child: Text(name(current)),
+        ),
       ),
       onTap: () => ref.read(provider.notifier).next(),
     );

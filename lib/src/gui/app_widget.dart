@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:umasagashi_app/src/core/platform_controller.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app/pages.dart';
@@ -241,6 +242,10 @@ class App extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Ensure that the controller is created at app startup.
+    // If not, Auto Start option will not work.
+    ref.read(platformControllerProvider);
+
     final themeMode = ref.watch(themeSettingProvider);
     return MaterialApp.router(
       title: 'umasagashi',

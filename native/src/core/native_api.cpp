@@ -65,7 +65,10 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     event_runners->add(stitcher_runner);
 
     const auto closed_before_completed_connection = event_util::makeDirectConnection<std::string>();
-    closed_before_completed_connection->listen([this](const std::string &id) { notifyCharaDetailFinished(id, false); });
+    closed_before_completed_connection->listen([this](const std::string &id) {
+        notifyCharaDetailFinished(id, false);
+        notifyError("Closed before completed.");
+    });
 
     const auto scroll_ready_connection = event_util::makeDirectConnection<int>();
     scroll_ready_connection->listen([this](int index) { notifyScrollReady(index); });
