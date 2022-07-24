@@ -2,8 +2,6 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
-import '../core/utils.dart';
-
 enum ToastType {
   success,
   info,
@@ -11,19 +9,20 @@ enum ToastType {
   error,
 }
 
-class ToastData {
+class ToastData<T> {
   final ToastType type;
   final String description;
+  final VoidCallback? onTap;
 
-  ToastData({required this.type, required this.description});
+  ToastData({required this.type, required this.description, this.onTap});
 
-  ToastData.success(this.description) : type = ToastType.success;
+  ToastData.success(this.description, this.onTap) : type = ToastType.success;
 
-  ToastData.info(this.description) : type = ToastType.info;
+  ToastData.info(this.description, this.onTap) : type = ToastType.info;
 
-  ToastData.warning(this.description) : type = ToastType.warning;
+  ToastData.warning(this.description, this.onTap) : type = ToastType.warning;
 
-  ToastData.error(this.description) : type = ToastType.error;
+  ToastData.error(this.description, this.onTap) : type = ToastType.error;
 }
 
 class Toaster {
@@ -90,8 +89,8 @@ class Toaster {
           ),
           style: ButtonStyle(overlayColor: MaterialStateProperty.all<Color>(Colors.transparent)),
           onPressed: () {
-            logger.d('ToastLayer.onPressed');
             snackBar.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
+            data.onTap?.call();
           },
         ),
         backgroundColor: color,
