@@ -206,9 +206,22 @@ struct Metadata {
     RecordId record_id;
     std::string trainer_id;
     std::string captured_date;
+    std::string last_modified_date;
+    std::optional<int> strategy;
     std::optional<int> relation_bonus;
+    std::optional<bool> is_archived;
 
-    EXTENDED_JSON_TYPE_NDC(Metadata, version, region, record_id, trainer_id, captured_date, relation_bonus);
+    EXTENDED_JSON_TYPE_NDC(
+        Metadata,
+        version,
+        region,
+        record_id,
+        trainer_id,
+        captured_date,
+        last_modified_date,
+        strategy,
+        relation_bonus,
+        is_archived);
 };
 
 struct CharaDetailRecord {

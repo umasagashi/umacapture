@@ -724,25 +724,29 @@ public:
 
         auto started = std::chrono::steady_clock::now();
 
+        const auto timestamp = chrono_util::utc();
         record::CharaDetailRecord record;
-        record.metadata = {
-            "1.0.0",
-            "JPN",
-            {id},
-            trainer_id,
-            chrono_util::utc(),
-        };
 
         status_header_recognizer.recognize(skill_frame, record, status_header_history);
         skill_tab_recognizer.recognize(skill_frame, record, skill_tab_history);
         factor_tab_recognizer.recognize(factor_frame, record, crop_info, factor_tab_history);
         campaign_tab_recognizer.recognize(campaign_frame, record, campaign_tab_history);
 
+        record.metadata = {
+            "1.0.0",
+            "JPN",
+            {id},
+            trainer_id,
+            timestamp,
+            timestamp,
+            record.races.front().strategy,
+        };
+
         auto elapsed =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
         vlog_debug(elapsed);
 
-        json_util::write(record_dir / "record.json", record, 2);
+        json_util::write(record_dir / "record.json", record, 4);
 
         json_util::write(
             record_dir / "prediction.json",
@@ -752,7 +756,7 @@ public:
                 {"factor_tab", factor_tab_history.toJson()},
                 {"campaign_tab", campaign_tab_history.toJson()},
             },
-            2);
+            4);
 
         factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
             .save(record_dir / "trainee.jpg");
