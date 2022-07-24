@@ -242,6 +242,70 @@ class _ColumnSpecDialogState extends ConsumerState<_ColumnSpecDialog> {
   }
 }
 
+class _CharaDetailExportButton extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.labelLarge;
+    const height = 40.0;
+    return SizedBox(
+      height: 30,
+      child: PopupMenuButton<int>(
+        padding: EdgeInsets.zero,
+        icon: const Icon(Icons.download),
+        tooltip: "$tr_chara_detail.export.button_tooltip".tr(),
+        splashRadius: 24,
+        position: PopupMenuPosition.under,
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        itemBuilder: (BuildContext context) {
+          final title = "$tr_chara_detail.export.dialog_title".tr();
+          return [
+            PopupMenuItem(
+              height: height,
+              onTap: () {
+                CsvExporter(title, "records.csv", ref).export(onSuccess: (path) {
+                  _recordExportEventController.sink.add(path);
+                });
+              },
+              child: Tooltip(
+                message: "$tr_chara_detail.export.csv.tooltip".tr(),
+                child: Text("$tr_chara_detail.export.csv.label".tr(), style: style),
+              ),
+            ),
+            PopupMenuItem(
+              height: height,
+              onTap: () {
+                JsonExporter(title, "records.json", ref).export(onSuccess: (path) {
+                  _recordExportEventController.sink.add(path);
+                });
+              },
+              child: Tooltip(
+                message: "$tr_chara_detail.export.json.tooltip".tr(),
+                child: Text("$tr_chara_detail.export.json.label".tr(), style: style),
+              ),
+            ),
+            PopupMenuItem(
+              height: height,
+              onTap: () {
+                ZipExporter(title, "records.zip", ref).export(onSuccess: (path) {
+                  _recordExportEventController.sink.add(path);
+                });
+              },
+              child: Tooltip(
+                message: "$tr_chara_detail.export.zip.tooltip".tr(),
+                child: Text("$tr_chara_detail.export.zip.label".tr(), style: style),
+              ),
+            ),
+          ];
+        },
+      ),
+    );
+  }
+}
+
 class _ColumnSpecTagWidget extends ConsumerStatefulWidget {
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _ColumnSpecTagWidgetState();
@@ -300,26 +364,40 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
     final theme = Theme.of(context);
     return Padding(
       padding: EdgeInsets.zero,
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final spec in specs) buildSpecChip(context, resource, spec),
-            ActionChip(
-              label: Icon(Icons.add, color: theme.colorScheme.onPrimary),
-              tooltip: "$tr_chara_detail.add_column_button_tooltip".tr(),
-              backgroundColor: theme.colorScheme.primary,
-              shape: const CircleBorder().copyWith(side: theme.chipTheme.shape?.side),
-              side: BorderSide.none,
-              labelPadding: EdgeInsets.zero,
-              onPressed: () {
-                _ColumnBuilderDialog.show(context);
-              },
+      child: Stack(
+        alignment: Alignment.bottomRight,
+        children: [
+          Align(
+            alignment: Alignment.topLeft,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final spec in specs) buildSpecChip(context, resource, spec),
+                ActionChip(
+                  label: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+                  tooltip: "$tr_chara_detail.add_column_button_tooltip".tr(),
+                  backgroundColor: theme.colorScheme.primary,
+                  shape: const CircleBorder().copyWith(side: theme.chipTheme.shape?.side),
+                  side: BorderSide.none,
+                  labelPadding: EdgeInsets.zero,
+                  onPressed: () {
+                    _ColumnBuilderDialog.show(context);
+                  },
+                ),
+                const Opacity(
+                  // Spacing widget for export button.
+                  opacity: 0,
+                  child: Chip(
+                    padding: EdgeInsets.zero,
+                    label: SizedBox(width: 16),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+          _CharaDetailExportButton(),
+        ],
       ),
     );
   }
@@ -598,68 +676,9 @@ class _CharaDetailDataTableLoaderLayer extends ConsumerWidget {
   }
 
   Widget data(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final style = theme.textTheme.labelLarge;
-    const height = 40.0;
     return Column(
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _ColumnSpecTagWidget(),
-            PopupMenuButton<int>(
-              icon: const Icon(Icons.download),
-              tooltip: "$tr_chara_detail.export.button_tooltip".tr(),
-              splashRadius: 24,
-              position: PopupMenuPosition.under,
-              shape: RoundedRectangleBorder(
-                side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              itemBuilder: (BuildContext context) {
-                final title = "$tr_chara_detail.export.dialog_title".tr();
-                return [
-                  PopupMenuItem(
-                    height: height,
-                    onTap: () {
-                      CsvExporter(title, "records.csv", ref).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
-                    },
-                    child: Tooltip(
-                      message: "$tr_chara_detail.export.csv.tooltip".tr(),
-                      child: Text("$tr_chara_detail.export.csv.label".tr(), style: style),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    height: height,
-                    onTap: () {
-                      JsonExporter(title, "records.json", ref).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
-                    },
-                    child: Tooltip(
-                      message: "$tr_chara_detail.export.json.tooltip".tr(),
-                      child: Text("$tr_chara_detail.export.json.label".tr(), style: style),
-                    ),
-                  ),
-                  PopupMenuItem(
-                    height: height,
-                    onTap: () {
-                      ZipExporter(title, "records.zip", ref).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
-                    },
-                    child: Tooltip(
-                      message: "$tr_chara_detail.export.zip.tooltip".tr(),
-                      child: Text("$tr_chara_detail.export.zip.label".tr(), style: style),
-                    ),
-                  ),
-                ];
-              },
-            )
-          ],
-        ),
+        _ColumnSpecTagWidget(),
         const SizedBox(height: 8),
         _CharaDetailDataTablePreCheckLayer(),
       ],
