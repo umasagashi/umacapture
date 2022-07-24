@@ -14,8 +14,8 @@ enum SoundType {
 final soundSettingProvider = StateNotifierProvider.family<SoundSettingNotifier, SoundSetting, SoundType>((ref, type) {
   final box = ref.watch(storageBoxProvider);
   return SoundSettingNotifier(
-    path: StorageEntry(box: box, key: (SettingsEntryKey.soundEffect.name + type.name + 'Path').camelCase),
-    volume: StorageEntry(box: box, key: (SettingsEntryKey.soundEffect.name + type.name + 'Volume').camelCase),
+    path: StorageEntry(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Path").camelCase),
+    volume: StorageEntry(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Volume").camelCase),
     defaultValue: SoundSetting.defaultValueOf(type),
   );
 });
@@ -77,5 +77,8 @@ class SoundEffect {
     return SoundEffect._(player);
   }
 
-  void play() => _player.resume();
+  void play() {
+    _player.stop();
+    _player.resume();
+  }
 }
