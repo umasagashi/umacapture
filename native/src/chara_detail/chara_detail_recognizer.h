@@ -734,6 +734,7 @@ public:
 
         record.metadata = {
             "1.0.0",
+            "1.0.0",
             "JPN",
             {id},
             trainer_id,
