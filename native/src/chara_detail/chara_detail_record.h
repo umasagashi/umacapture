@@ -201,7 +201,8 @@ struct RecordId {
 };
 
 struct Metadata {
-    std::string version;
+    std::string format_version;
+    std::string recognizer_version;
     std::string region;
     RecordId record_id;
     std::string trainer_id;
@@ -213,7 +214,8 @@ struct Metadata {
 
     EXTENDED_JSON_TYPE_NDC(
         Metadata,
-        version,
+        format_version,
+        recognizer_version,
         region,
         record_id,
         trainer_id,

@@ -238,7 +238,8 @@ class RecordId extends JsonEquatable {
 @jsonSerializable
 @Json(ignoreNullMembers: true)
 class Metadata extends JsonEquatable {
-  final String version;
+  final String formatVersion;
+  final String recognizerVersion;
   final String region;
   final RecordId recordId;
   final String trainerId;
@@ -249,7 +250,8 @@ class Metadata extends JsonEquatable {
   final bool? isArchived;
 
   const Metadata(
-    this.version,
+    this.formatVersion,
+    this.recognizerVersion,
     this.region,
     this.recordId,
     this.trainerId,
@@ -263,7 +265,8 @@ class Metadata extends JsonEquatable {
   @override
   @JsonProperty(ignore: true)
   List<Object?> properties() => [
-        version,
+        formatVersion,
+        recognizerVersion,
         region,
         recordId,
         trainerId,
