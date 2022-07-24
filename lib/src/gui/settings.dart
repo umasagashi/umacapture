@@ -1,9 +1,16 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:umasagashi_app/src/state/notifier.dart';
+import 'package:recase/recase.dart';
 
-import 'app_widget.dart';
-import 'common.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/gui/app_widget.dart';
+import '/src/gui/capture.dart';
+import '/src/gui/common.dart';
+import '/src/state/notifier.dart';
+
+// ignore: constant_identifier_names
+const tr_settings = "pages.settings";
 
 class ToggleButtonWidget<T> extends ConsumerWidget {
   final String title;
@@ -120,49 +127,83 @@ class SwitchWidget extends ConsumerWidget {
   }
 }
 
-class _BrightnessWidget extends ToggleButtonWidget<ThemeMode> {
-  static const _iconMap = <ThemeMode, Widget>{
-    ThemeMode.light: Icon(Icons.wb_sunny),
-    ThemeMode.dark: Icon(Icons.brightness_3),
-    ThemeMode.system: Icon(Icons.brightness_auto),
+class _BrightnessWidget extends ConsumerWidget {
+  static final _iconMap = <ThemeMode, Widget>{
+    ThemeMode.light: Tooltip(
+      message: "$tr_settings.style.brightness.choice.light".tr(),
+      child: const Icon(Icons.wb_sunny),
+    ),
+    ThemeMode.dark: Tooltip(
+      message: "$tr_settings.style.brightness.choice.dark".tr(),
+      child: const Icon(Icons.brightness_3),
+    ),
+    ThemeMode.system: Tooltip(
+      message: "$tr_settings.style.brightness.choice.system".tr(),
+      child: const Icon(Icons.brightness_auto),
+    ),
   };
 
-  _BrightnessWidget({
-    Key? key,
-  }) : super(
-          key: key,
-          title: 'Brightness',
-          description: 'Change the brightness of this app.',
-          icon: (mode) => _iconMap[mode]!,
-          provider: themeSettingProvider,
-        );
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ToggleButtonWidget<ThemeMode>(
+      title: "$tr_settings.style.brightness.title".tr(),
+      description: "$tr_settings.style.brightness.description".tr(),
+      icon: (mode) => _iconMap[mode]!,
+      provider: themeSettingProvider,
+    );
+  }
 }
 
-class SettingsPage extends ConsumerStatefulWidget {
+class StyleSettingsGroup extends ConsumerWidget {
+  const StyleSettingsGroup({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_settings.style.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        _BrightnessWidget(),
+      ],
+    );
+  }
+}
+
+class CaptureSettingsGroup extends ConsumerWidget {
+  const CaptureSettingsGroup({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_settings.capture.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        SwitchWidget(
+          title: "$tr_settings.capture.auto_start.title".tr(),
+          description: "$tr_settings.capture.auto_start.description".tr(),
+          provider: autoStartCaptureStateProvider,
+        ),
+        DropdownButtonWidget<CharaDetailRecordImageMode?>(
+          title: "$tr_settings.capture.auto_copy.title".tr(),
+          description: "$tr_settings.capture.auto_copy.description".tr(),
+          name: (e) => "$tr_settings.capture.auto_copy.choice.${(e?.name ?? "disabled").snakeCase}".tr(),
+          provider: autoCopyClipboardStateProvider,
+        ),
+      ],
+    );
+  }
+}
+
+class SettingsPage extends ConsumerWidget {
   const SettingsPage({Key? key}) : super(key: key);
 
   @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _SettingsPageState();
-}
-
-class _SettingsPageState extends ConsumerState<SettingsPage> with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return Scaffold(
-      body: ListView(
-        children: [
-          ListCard(
-            title: 'Theme',
-            children: [
-              _BrightnessWidget(),
-            ],
-          ),
-        ],
-      ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const ListTilePageRootWidget(
+      children: [
+        StyleSettingsGroup(),
+        CaptureSettingsGroup(),
+      ],
     );
   }
 }

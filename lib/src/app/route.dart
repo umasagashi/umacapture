@@ -1,9 +1,10 @@
 import 'package:auto_route/auto_route.dart';
 
-import '../gui/app_widget.dart';
-import '../gui/capture.dart';
-import '../gui/dummy.dart';
-import '../gui/settings.dart';
+import '/src/gui/app_widget.dart';
+import '/src/gui/capture.dart';
+import '/src/gui/chara_detail.dart';
+import '/src/gui/dummy.dart';
+import '/src/gui/settings.dart';
 
 @MaterialAutoRouter(
   replaceInRouteName: 'Page,Route',
@@ -14,7 +15,7 @@ import '../gui/settings.dart';
       children: <AutoRoute>[
         AutoRoute(page: DashboardPage, initial: true),
         AutoRoute(page: CapturePage),
-        AutoRoute(page: SearchPage),
+        AutoRoute(page: CharaDetailPage),
         AutoRoute(page: SettingsPage),
         AutoRoute(page: GuidePage),
       ],

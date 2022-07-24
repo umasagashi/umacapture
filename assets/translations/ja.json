@@ -1,0 +1,274 @@
+{
+    "pages": {
+        "dashboard": {
+            "title": "ダッシュボード"
+        },
+        "capture": {
+            "title": "キャプチャ",
+            "duplicated_message": "このウマ娘はすでにキャプチャ済みです。",
+            "capture_control": {
+                "title": "コントロール",
+                "start_capture_button": "キャプチャ開始",
+                "stop_capture_button": "キャプチャ停止",
+                "capture_completed_message": "キャプチャに成功しました。ここをクリックすると管理画面に移動します。",
+                "error": {
+                    "closed_before_completed": "[キャプチャ失敗] このウマ娘は既にキャプチャ済みです。"
+                },
+                "progress": {
+                    "skill": "スキル",
+                    "factor": "因子",
+                    "campaign": "育成情報",
+                    "completed": "完了",
+                    "not_started": "待機中",
+                    "scrolling": "スクロール中"
+                },
+                "additional_info": {
+                    "start_capture": "開始ボタンを押してキャプチャを開始してください。",
+                    "show_chara_detail": "ゲーム画面のキャプチャ中です。殿堂入りウマ娘の詳細画面を表示してください。",
+                    "scroll": "殿堂入りウマ娘のキャプチャ中です。3タブとも100%になるまでスクロールしてください。",
+                    "error": "エラーが発生しました。キャプチャをやり直してください。",
+                    "unknown": ""
+                }
+            }
+        },
+        "chara_detail": {
+            "title": "殿堂入り管理",
+            "no_record_message": "ウマ娘が登録されていません。キャプチャタブから登録してください。",
+            "no_column_message": "表示する列がありません。上のボタンから列を追加してください。",
+            "no_row_message": "該当するウマ娘は見つかりませんでした。",
+            "loading_error": "ロード中にエラーが発生しました。\n注意：エラーメッセージにはユーザー名が含まれます。",
+            "add_column_button_tooltip": "表示列を新規追加",
+            "export": {
+                "button_tooltip": "エクスポート",
+                "dialog_title": "保存先を指定してください。",
+                "csv": {
+                    "label": "CSV",
+                    "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート"
+                },
+                "json": {
+                    "label": "JSON",
+                    "tooltip": "全ウマ娘をテキストJSON形式でエクスポート"
+                },
+                "zip": {
+                    "label": "ZIP",
+                    "tooltip": "ストレージの生データをZIP形式でエクスポート"
+                }
+            },
+            "column_spec": {
+                "dialog": {
+                    "title": "表示項目の選択",
+                    "close_button": {
+                        "tooltip": "追加せずにキャンセル"
+                    },
+                    "description": "Tips: 長押しするとフィルタカスタマイズ画面に移動します。"
+                }
+            },
+            "column_category": {
+                "trainee": "育成ウマ",
+                "status": "ステータス",
+                "aptitude": "適性",
+                "skill": "スキル",
+                "factor": "因子",
+                "support_card": "サポートカード",
+                "family": "継承ウマ",
+                "campaign": "戦績",
+                "race": "出走履歴"
+            },
+            "column_predicate": {
+                "dialog": {
+                    "title": "フィルタカスタマイズ",
+                    "ok_button": {
+                        "label": "OK",
+                        "tooltip": "この設定でテーブルに反映"
+                    },
+                    "delete_button": {
+                        "label": "列を削除",
+                        "tooltip": "この列をテーブルから削除"
+                    },
+                    "close_button": {
+                        "tooltip": "反映せずにキャンセル"
+                    }
+                },
+                "ranged_label": {
+                    "range": "表示範囲",
+                    "min": "最小値",
+                    "max": "最大値"
+                },
+                "ranged_integer": {
+                    "range": "表示範囲",
+                    "min": "最小値",
+                    "max": "最大値"
+                },
+                "skill": {
+                    "mode": {
+                        "label": "モード",
+                        "description": "複数のスキルが選択されている時の動作を選びます。複数選択している時のみ変更できます。",
+                        "all": {
+                            "label": "すべて",
+                            "description": "現在の動作：選択されているスキルのすべてを所持するウマ娘のみを表示"
+                        },
+                        "any": {
+                            "label": "いずれか",
+                            "description": "現在の動作：選択されているスキルのうち、少なくとも 1 つ以上を所持するウマ娘のみを表示"
+                        },
+                        "count": {
+                            "label": "個数",
+                            "description": "現在の動作：選択されているスキルのうち、少なくとも {count} つ以上を所持するウマ娘のみを表示"
+                        }
+                    },
+                    "show": {
+                        "label": "表示",
+                        "description": "条件に該当するスキルのうち、テーブルのセルに表示するスキルの上限数を指定します。この個数を超えた分は表示が省略されます。",
+                        "title": "表示上限数"
+                    },
+                    "selection": {
+                        "label": "選択",
+                        "description": "選択されているスキルを所持するウマ娘のみがテーブルに表示されます。複数のスキルが選択されている時の動作は下で変更できます。",
+                        "tags": {
+                            "description": "選択されている属性のスキルのみが下に表示されます。この選択はフィルタおよびテーブルには反映されません。（注意：属性は不正確なことがあります）"
+                        },
+                        "no_skill_message": "該当なし"
+                    }
+                },
+                "character": {
+                    "selection": {
+                        "label": "選択",
+                        "description": "選択されているウマ娘のみがテーブルに表示されます。"
+                    }
+                }
+            },
+            "columns": {
+                "character": {
+                    "title": "ウマ娘",
+                    "description": "育成ウマ娘"
+                },
+                "evaluation": {
+                    "title": "評価点",
+                    "description": "評価点"
+                },
+                "chara_rank": {
+                    "title": "ランク",
+                    "description": "評価ランク"
+                },
+                "status": {
+                    "speed": {
+                        "title": "スピード",
+                        "description": "スピード"
+                    },
+                    "stamina": {
+                        "title": "スタミナ",
+                        "description": "スタミナ"
+                    },
+                    "power": {
+                        "title": "パワー",
+                        "description": "パワー"
+                    },
+                    "guts": {
+                        "title": "根性",
+                        "description": "根性"
+                    },
+                    "intelligence": {
+                        "title": "賢さ",
+                        "description": "賢さ"
+                    }
+                },
+                "aptitude": {
+                    "turf_ground": {
+                        "title": "芝",
+                        "description": "芝適性"
+                    },
+                    "dirt_ground": {
+                        "title": "ダート",
+                        "description": "ダート適性"
+                    },
+                    "short_range": {
+                        "title": "短距離",
+                        "description": "短距離適性"
+                    },
+                    "mile_range": {
+                        "title": "マイル",
+                        "description": "マイル適性"
+                    },
+                    "middle_range": {
+                        "title": "中距離",
+                        "description": "中距離適性"
+                    },
+                    "long_range": {
+                        "title": "長距離",
+                        "description": "長距離適性"
+                    },
+                    "lead_pace": {
+                        "title": "逃げ",
+                        "description": "逃げ適性"
+                    },
+                    "with_pace": {
+                        "title": "先行",
+                        "description": "先行適性"
+                    },
+                    "off_pace": {
+                        "title": "差し",
+                        "description": "差し適性"
+                    },
+                    "late_charge": {
+                        "title": "追込",
+                        "description": "追込適性"
+                    }
+                },
+                "skill": {
+                    "title": "スキル",
+                    "description": "所持スキル"
+                }
+            },
+            "context_menu": {
+                "preview": "プレビュー",
+                "copy_skill": "スキル画面をコピー",
+                "copy_factor": "因子画面をコピー",
+                "open_in_explorer": "フォルダを開く"
+            },
+            "preview": {
+                "dialog": {
+                    "title": "プレビュー",
+                    "close_button": {
+                        "tooltip": "閉じる"
+                    }
+                }
+            }
+        },
+        "settings": {
+            "title": "設定",
+            "style": {
+                "title": "スタイル設定",
+                "brightness": {
+                    "title": "明るさ",
+                    "description": "アプリの明るさを変更します。",
+                    "choice": {
+                        "light": "ライトモード",
+                        "dark": "ダークモード",
+                        "system": "システム設定"
+                    }
+                }
+            },
+            "capture": {
+                "title": "キャプチャ設定",
+                "auto_start": {
+                    "title": "オートスタート",
+                    "description": "アプリ起動時にキャプチャを開始します。次回アプリ起動時から有効です。"
+                },
+                "auto_copy": {
+                    "title": "オートコピー",
+                    "description": "キャプチャ成功時にクリップボードに指定した画像をコピーします。",
+                    "choice": {
+                        "none": "オフ",
+                        "skill_plain": "スキル画面",
+                        "factor_plain": "因子画面",
+                        "campaign_plain": "育成情報画面"
+                    }
+                }
+            }
+        }
+    },
+    "toast": {
+        "clipboard_paste": "クリップボードに画像をコピーしました。",
+        "record_export": "ファイルを保存しました。"
+    }
+}
