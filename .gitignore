@@ -45,4 +45,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Generated files
+lib/generated/
+lib/*.g.dart
+
+# Sandbox for developping
 /sandbox/
