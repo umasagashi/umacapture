@@ -328,7 +328,7 @@ public:
         save(path);
         std::filesystem::path info_path = path;
         info_path.replace_extension(".json");
-        json_util::write(info_path, FrameInfo{anchor().intersection()});
+        json_util::write(info_path, FrameInfo{anchor().intersection()}, 4);
     }
 
 private:
