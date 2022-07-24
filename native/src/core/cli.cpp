@@ -36,20 +36,21 @@ void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJs
 json_util::Json createConfig(bool video_mode) {
     const std::filesystem::path config_dir = "../../assets/config";
     return {
-        {
-            "chara_detail",
-            {
-                {"scene_context", json_util::read(config_dir / "chara_detail/scene_context.json")},
-                {"scene_scraper", json_util::read(config_dir / "chara_detail/scene_scraper.json")},
-                {"scene_stitcher", json_util::read(config_dir / "chara_detail/scene_stitcher.json")},
-                {"recognizer", json_util::read(config_dir / "chara_detail/recognizer.json")},
-                {"scraping_dir", (std::filesystem::current_path() / "temp" / "scraping").generic_string()},
-            },
-        },
+        {"chara_detail",
+         {
+             {"scene_context", json_util::read(config_dir / "chara_detail" / "scene_context.json")},
+             {"scene_scraper", json_util::read(config_dir / "chara_detail" / "scene_scraper.json")},
+             {"scene_stitcher", json_util::read(config_dir / "chara_detail" / "scene_stitcher.json")},
+             {"recognizer", json_util::read(config_dir / "chara_detail" / "recognizer.json")},
+         }},
         {"platform", json_util::read(config_dir / "platform.json")},
         {"video_mode", video_mode},
-        {"storage_dir", (std::filesystem::current_path() / "storage").generic_string()},
-        {"module_dir", "../../sandbox/modules"},
+        {"directory",
+         {
+             {"temp_dir", (std::filesystem::current_path() / "temp").string()},
+             {"storage_dir", (std::filesystem::current_path() / "storage").string()},
+             {"modules_dir", "../../sandbox/modules"},
+         }},
         {"trainer_id", minimal_uuid4::Generator().uuid4().str()},
     };
 }

@@ -67,7 +67,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto closed_before_completed_connection = event_util::makeDirectConnection<std::string>();
     closed_before_completed_connection->listen([this](const std::string &id) {
         notifyCharaDetailFinished(id, false);
-        notifyError("Closed before completed.");
+        notifyError("closed_before_completed");
     });
 
     const auto scroll_ready_connection = event_util::makeDirectConnection<int>();
@@ -81,7 +81,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
 
-    const auto scraping_dir = config_json["chara_detail"]["scraping_dir"].get<std::filesystem::path>();
+    const auto scraping_dir = config_json["directory"]["temp_dir"].get<std::filesystem::path>() / "chara_detail";
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         chara_detail_updated_connection,
@@ -99,7 +99,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
 
-    const auto stitcher_dir = config_json["storage_dir"].get<std::filesystem::path>();
+    const auto stitcher_dir = config_json["directory"]["storage_dir"].get<std::filesystem::path>() / "chara_detail";
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
         stitcher_dir,
@@ -117,7 +117,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
         stitcher_dir,
-        config_json["module_dir"].get<std::filesystem::path>(),
+        config_json["directory"]["modules_dir"].get<std::filesystem::path>(),
         recognize_ready_connection,
         chara_detail_completed_connection,
         config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());

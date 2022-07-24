@@ -1,18 +1,19 @@
 import 'package:flutter/services.dart';
 
-import 'utils.dart';
+import '/src/core/callback.dart';
+import '/src/core/utils.dart';
 
-typedef CallbackMethod = void Function(String);
+typedef PlatformCallback = StringCallback;
 
 class PlatformChannel {
   static const channel = MethodChannel('dev.flutter.umasagashi_app/capturing_channel');
-  CallbackMethod? callbackMethod;
+  PlatformCallback? callbackMethod;
 
   PlatformChannel() {
     channel.setMethodCallHandler(callbackFromPlatform);
   }
 
-  void setCallback(CallbackMethod method) {
+  void setCallback(PlatformCallback method) {
     callbackMethod = method;
   }
 

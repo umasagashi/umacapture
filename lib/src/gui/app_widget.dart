@@ -1,19 +1,20 @@
 import 'package:auto_route/auto_route.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:umasagashi_app/src/core/platform_controller.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '../app/pages.dart';
-import '../app/route.gr.dart';
-import '../core/notification_controller.dart';
-import '../preference/storage_box.dart';
-import '../preference/window_state.dart';
-import '../state/notifier.dart';
-import '../state/settings_state.dart';
+import '/src/app/pages.dart';
+import '/src/app/route.gr.dart';
+import '/src/core/notification_controller.dart';
+import '/src/core/platform_controller.dart';
+import '/src/preference/storage_box.dart';
+import '/src/preference/window_state.dart';
+import '/src/state/notifier.dart';
+import '/src/state/settings_state.dart';
 
 final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
   final box = ref.watch(storageBoxProvider);
@@ -48,7 +49,7 @@ class _Sidebar extends ConsumerWidget {
               NavigationRailDestination(
                 icon: pageLabel.unselectedIcon,
                 selectedIcon: pageLabel.selectedIcon,
-                label: Text(pageLabel.label),
+                label: Text(pageLabel.label, style: const TextStyle(fontSize: 16)),
                 padding: EdgeInsets.zero,
               ),
           ],
@@ -103,12 +104,20 @@ class _ResponsiveScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final router = AutoTabsRouter.of(context); // router can stay outside of LayoutBuilder.
+    final theme = Theme.of(context);
     return LayoutBuilder(
       builder: (BuildContext context, BoxConstraints constraints) {
         // To keep the state, child has to be placed on the same layer in both layouts.
         final wide = constraints.maxWidth >= 900;
         return Scaffold(
-          appBar: wide ? null : AppBar(title: Text(Pages.at(router.activeIndex).label)),
+          appBar: wide
+              ? null
+              : AppBar(
+                  title: Text(
+                    Pages.at(router.activeIndex).label,
+                    style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary),
+                  ),
+                ),
           drawer: wide ? null : const _Drawer(),
           body: NotificationLayer.asSibling(
             child: Row(
@@ -198,12 +207,18 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.only(top: 0.5),
+      padding: const EdgeInsets.only(top: 1),
+      color: theme.colorScheme.surface.blend(Colors.black, 50),
       child: Scaffold(
-        appBar: const _WindowTitleBar(
-          icon: Icon(Icons.circle_outlined),
-          title: Text('umasagashi'),
+        appBar: _WindowTitleBar(
+          icon: SizedBox(
+            width: 24,
+            height: 24,
+            child: Image.asset("assets/image/app_icon.png", filterQuality: FilterQuality.medium),
+          ),
+          title: const Text('umasagashi'),
         ),
         body: widget.child,
       ),
@@ -240,48 +255,73 @@ class App extends ConsumerWidget {
 
   final _router = AppRouter();
 
+  ThemeData modifyTheme(ThemeData base) {
+    return base.copyWith(
+      tooltipTheme: base.tooltipTheme.copyWith(
+        waitDuration: const Duration(milliseconds: 100),
+        showDuration: Duration.zero,
+      ),
+      chipTheme: base.chipTheme.copyWith(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide.none),
+        side: BorderSide(
+          width: 0.5,
+          color: base.chipTheme.selectedColor ?? base.colorScheme.primaryContainer,
+        ),
+        elevation: 0,
+        pressElevation: 0,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // Ensure that the controller is created at app startup.
     // If not, Auto Start option will not work.
     ref.read(platformControllerProvider);
 
+    final theme = FlexThemeData.light(
+      scheme: FlexScheme.blue,
+      surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+      blendLevel: 20,
+      appBarOpacity: 0.95,
+      subThemesData: const FlexSubThemesData(
+        blendOnLevel: 20,
+        blendOnColors: false,
+        navigationRailMutedUnselectedLabel: false,
+        navigationRailMutedUnselectedIcon: false,
+        navigationRailLabelType: NavigationRailLabelType.none,
+      ),
+      visualDensity: FlexColorScheme.comfortablePlatformDensity,
+      useMaterial3: true,
+      fontFamily: GoogleFonts.notoSans().fontFamily,
+    );
+
+    final darkTheme = FlexThemeData.dark(
+      scheme: FlexScheme.blue,
+      surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+      blendLevel: 15,
+      appBarStyle: FlexAppBarStyle.background,
+      appBarOpacity: 0.90,
+      subThemesData: const FlexSubThemesData(
+        blendOnLevel: 30,
+        navigationRailMutedUnselectedLabel: false,
+        navigationRailMutedUnselectedIcon: false,
+        navigationRailLabelType: NavigationRailLabelType.none,
+      ),
+      visualDensity: FlexColorScheme.comfortablePlatformDensity,
+      useMaterial3: true,
+      fontFamily: GoogleFonts.notoSans().fontFamily,
+    );
+
     final themeMode = ref.watch(themeSettingProvider);
     return MaterialApp.router(
       title: 'umasagashi',
-      theme: FlexThemeData.light(
-        scheme: FlexScheme.blue,
-        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-        blendLevel: 20,
-        appBarOpacity: 0.95,
-        subThemesData: const FlexSubThemesData(
-          blendOnLevel: 20,
-          blendOnColors: false,
-          navigationRailMutedUnselectedLabel: false,
-          navigationRailMutedUnselectedIcon: false,
-          navigationRailLabelType: NavigationRailLabelType.none,
-        ),
-        visualDensity: FlexColorScheme.comfortablePlatformDensity,
-        useMaterial3: true,
-        fontFamily: GoogleFonts.notoSans().fontFamily,
-      ),
-      darkTheme: FlexThemeData.dark(
-        scheme: FlexScheme.blue,
-        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-        blendLevel: 15,
-        appBarStyle: FlexAppBarStyle.background,
-        appBarOpacity: 0.90,
-        subThemesData: const FlexSubThemesData(
-          blendOnLevel: 30,
-          navigationRailMutedUnselectedLabel: false,
-          navigationRailMutedUnselectedIcon: false,
-          navigationRailLabelType: NavigationRailLabelType.none,
-        ),
-        visualDensity: FlexColorScheme.comfortablePlatformDensity,
-        useMaterial3: true,
-        fontFamily: GoogleFonts.notoSans().fontFamily,
-      ),
+      theme: modifyTheme(theme),
+      darkTheme: modifyTheme(darkTheme),
       themeMode: themeMode,
+      localizationsDelegates: context.localizationDelegates,
+      supportedLocales: context.supportedLocales,
+      locale: context.locale,
       routerDelegate: _router.delegate(),
       routeInformationParser: _router.defaultRouteParser(),
     );

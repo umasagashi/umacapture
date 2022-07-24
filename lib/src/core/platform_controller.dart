@@ -2,9 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:umasagashi_app/src/core/utils.dart';
 
-import 'platform_channel.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/core/platform_channel.dart';
+import '/src/core/utils.dart';
 
 final platformControllerProvider = Provider<PlatformController>((ref) {
   throw Exception('Must override before use');
@@ -50,6 +51,14 @@ final pageReadyEventProvider = StreamProvider<int>((ref) {
     _pageReadyEventController = StreamController();
   }
   return _pageReadyEventController.stream;
+});
+
+StreamController<String> _charaDetailRecordCapturedEventController = StreamController();
+final charaDetailRecordCapturedEventProvider = StreamProvider<String>((ref) {
+  if (_charaDetailRecordCapturedEventController.hasListener) {
+    _charaDetailRecordCapturedEventController = StreamController();
+  }
+  return _charaDetailRecordCapturedEventController.stream;
 });
 
 class CharaDetailLink {
@@ -141,6 +150,9 @@ class PlatformController {
         _platformChannel = PlatformChannel() {
     _platformChannel.setCallback((message) => _handleMessage(message));
     _platformChannel.setConfig(jsonEncode(config));
+
+    // This is not required, but we will need storage later anyway, so start it up.
+    ref.read(charaDetailRecordStorageLoader);
   }
 
   void _handleMessage(String message) {
@@ -174,6 +186,7 @@ class PlatformController {
         captureState.update((state) => state.reset());
         break;
       case 'onCharaDetailFinished':
+        _charaDetailRecordCapturedEventController.sink.add(data['id']);
         if (data['success']) {
           captureState.update((state) => state.success(id: data['id']));
         }

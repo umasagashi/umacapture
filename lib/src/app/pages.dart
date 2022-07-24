@@ -1,7 +1,8 @@
 import 'package:auto_route/auto_route.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
-import 'route.gr.dart';
+import '/src/app/route.gr.dart';
 
 class PageLabel {
   final PageRouteInfo route;
@@ -18,36 +19,30 @@ class PageLabel {
 }
 
 class Pages {
-  static const labels = <PageLabel>[
+  static final labels = <PageLabel>[
     PageLabel(
-      route: DashboardRoute(),
-      label: 'Dashboard',
-      selectedIcon: Icon(Icons.dashboard),
-      unselectedIcon: Icon(Icons.dashboard_outlined),
+      route: const DashboardRoute(),
+      label: "pages.dashboard.title".tr(),
+      selectedIcon: const Icon(Icons.dashboard),
+      unselectedIcon: const Icon(Icons.dashboard_outlined),
     ),
     PageLabel(
-      route: CaptureRoute(),
-      label: 'Capture',
-      selectedIcon: Icon(Icons.videocam),
-      unselectedIcon: Icon(Icons.videocam_outlined),
+      route: const CaptureRoute(),
+      label: "pages.capture.title".tr(),
+      selectedIcon: const Icon(Icons.videocam),
+      unselectedIcon: const Icon(Icons.videocam_outlined),
     ),
     PageLabel(
-      route: SearchRoute(),
-      label: 'Search',
-      selectedIcon: Icon(Icons.search),
-      unselectedIcon: Icon(Icons.search_outlined),
+      route: const CharaDetailRoute(),
+      label: "pages.chara_detail.title".tr(),
+      selectedIcon: const Icon(Icons.manage_search),
+      unselectedIcon: const Icon(Icons.manage_search_outlined),
     ),
     PageLabel(
-      route: SettingsRoute(),
-      label: 'Settings',
-      selectedIcon: Icon(Icons.settings),
-      unselectedIcon: Icon(Icons.settings_outlined),
-    ),
-    PageLabel(
-      route: GuideRoute(),
-      label: 'Guide',
-      selectedIcon: Icon(Icons.help),
-      unselectedIcon: Icon(Icons.help_outline),
+      route: const SettingsRoute(),
+      label: "pages.settings.title".tr(),
+      selectedIcon: const Icon(Icons.settings),
+      unselectedIcon: const Icon(Icons.settings_outlined),
     ),
   ];
 

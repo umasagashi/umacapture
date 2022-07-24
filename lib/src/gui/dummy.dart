@@ -4,10 +4,6 @@ class DashboardPage extends DummyPage {
   const DashboardPage({Key? key}) : super(key: key, title: 'Dashboard');
 }
 
-class SearchPage extends DummyPage {
-  const SearchPage({Key? key}) : super(key: key, title: 'Search');
-}
-
 class GuidePage extends DummyPage {
   const GuidePage({Key? key}) : super(key: key, title: 'Guide');
 }

@@ -1,26 +1,22 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:auto_route/auto_route.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
-import 'package:umasagashi_app/src/core/utils.dart';
 
-import '../core/platform_controller.dart';
-import '../preference/storage_box.dart';
-import '../state/notifier.dart';
-import '../state/settings_state.dart';
-import 'common.dart';
-import 'settings.dart';
+import '/src/app/route.gr.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/core/platform_controller.dart';
+import '/src/gui/common.dart';
+import '/src/gui/settings.dart';
+import '/src/preference/storage_box.dart';
+import '/src/state/notifier.dart';
+import '/src/state/settings_state.dart';
 
-@jsonSerializable
-enum AutoCopyMode {
-  disabled,
-  skill,
-  factor,
-  campaign,
-}
+// ignore: constant_identifier_names
+const tr_capture = "pages.capture";
 
 final autoStartCaptureStateProvider = BooleanNotifierProvider((ref) {
   final box = ref.watch(storageBoxProvider);
@@ -32,10 +28,10 @@ final autoStartCaptureStateProvider = BooleanNotifierProvider((ref) {
 
 final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider((ref) {
   final box = ref.watch(storageBoxProvider);
-  return ExclusiveItemsNotifier<AutoCopyMode>(
+  return ExclusiveItemsNotifier<CharaDetailRecordImageMode>(
     entry: StorageEntry(box: box, key: SettingsEntryKey.autoCopyClipboard.name),
-    values: AutoCopyMode.values,
-    defaultValue: AutoCopyMode.disabled,
+    values: CharaDetailRecordImageMode.values,
+    defaultValue: CharaDetailRecordImageMode.none,
   );
 });
 
@@ -80,8 +76,8 @@ class StackedIndicator extends StatelessWidget {
 class _TwoStateButton extends ConsumerStatefulWidget {
   final Widget trueWidget;
   final Widget falseWidget;
-  final void Function() onTruePressed;
-  final void Function() onFalsePressed;
+  final VoidCallback onTruePressed;
+  final VoidCallback onFalsePressed;
   final bool elevateWhen;
   final Provider<bool> provider;
 
@@ -161,6 +157,16 @@ class _ScrollStateWidget extends ConsumerWidget {
     return Colors.orange;
   }
 
+  String _progressText() {
+    if (progress == 0) {
+      return "$tr_capture.capture_control.progress.not_started".tr();
+    }
+    if (progress == 1) {
+      return "$tr_capture.capture_control.progress.completed".tr();
+    }
+    return "$tr_capture.capture_control.progress.scrolling".tr();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -172,7 +178,7 @@ class _ScrollStateWidget extends ConsumerWidget {
         percent: progress,
         header: Text(header),
         center: Text("${(progress * 100).toInt()}%"),
-        footer: Text(progress == 1 ? 'Completed' : (progress == 0 ? 'Not Started' : 'Scrolling')),
+        footer: Text(_progressText()),
         backgroundColor: Color.lerp(theme.colorScheme.surface, theme.colorScheme.onSurface, 0.1)!,
         progressColor: _progressColor(),
       ),
@@ -186,9 +192,21 @@ class _CharaDetailStateWidget extends ConsumerWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _ScrollStateWidget(header: 'Skill', progress: state.skillTabProgress, disable: state.error != null),
-        _ScrollStateWidget(header: 'Factor', progress: state.factorTabProgress, disable: state.error != null),
-        _ScrollStateWidget(header: 'Campaign', progress: state.campaignTabProgress, disable: state.error != null),
+        _ScrollStateWidget(
+          header: "$tr_capture.capture_control.progress.skill".tr(),
+          progress: state.skillTabProgress,
+          disable: state.error != null,
+        ),
+        _ScrollStateWidget(
+          header: "$tr_capture.capture_control.progress.factor".tr(),
+          progress: state.factorTabProgress,
+          disable: state.error != null,
+        ),
+        _ScrollStateWidget(
+          header: "$tr_capture.capture_control.progress.campaign".tr(),
+          progress: state.campaignTabProgress,
+          disable: state.error != null,
+        ),
       ],
     );
   }
@@ -210,7 +228,7 @@ class _CharaDetailStateWidget extends ConsumerWidget {
               ),
               padding: const EdgeInsets.all(16),
               child: Text(
-                "Last capture failed. Reason: ${state.error!}",
+                "$tr_capture.capture_control.error.${state.error!}".tr(),
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: theme.colorScheme.onErrorContainer,
@@ -223,18 +241,46 @@ class _CharaDetailStateWidget extends ConsumerWidget {
     );
   }
 
-  Widget? _buildLink(WidgetRef ref) {
-    final state = ref.watch(charaDetailCaptureStateProvider);
-    final controller = ref.watch(platformControllerProvider);
-    return TextButton.icon(
-      icon: Image.file(
-        File("${controller.storageDir}/${state.link!.id}/trainee.jpg"),
-        width: 42,
-      ),
-      label: const Text("Capture completed. Click here to see the character."),
+  Widget? _buildLink(BuildContext context, WidgetRef ref) {
+    return TextButton(
+      child: Text("$tr_capture.capture_control.capture_completed_message".tr()),
       onPressed: () {
-        logger.d("Clicked: ${state.link!.id}");
+        AutoTabsRouter.of(context).navigate(const CharaDetailRoute());
       },
+    );
+  }
+
+  String additionalInfoText(WidgetRef ref) {
+    final isCapturing = ref.watch(capturingStateProvider);
+    if (!isCapturing) {
+      return "$tr_capture.capture_control.additional_info.start_capture".tr();
+    }
+    final captureState = ref.watch(charaDetailCaptureStateProvider);
+    if (captureState.error != null) {
+      return "$tr_capture.capture_control.additional_info.error".tr();
+    }
+    if (!captureState.isCapturing) {
+      return "$tr_capture.capture_control.additional_info.show_chara_detail".tr();
+    }
+    if (captureState.link == null) {
+      return "$tr_capture.capture_control.additional_info.scroll".tr();
+    }
+    return "$tr_capture.capture_control.additional_info.unknown".tr();
+  }
+
+  Widget additionalInfoWidget(WidgetRef ref) {
+    return Flex(
+      direction: Axis.horizontal,
+      children: [
+        Flexible(
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Center(
+              child: Text(additionalInfoText(ref)),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -254,90 +300,50 @@ class _CharaDetailStateWidget extends ConsumerWidget {
         ),
         AnimatedSwitcher(
           duration: animationDuration,
-          child: state.link != null ? _buildLink(ref) : Container(),
+          child: (state.link != null && state.error == null) ? _buildLink(context, ref) : Container(),
         ),
+        const Divider(),
+        additionalInfoWidget(ref),
       ],
     );
   }
 }
 
-class _WindowsCaptureWidget extends ConsumerWidget {
+class CaptureControlGroup extends ConsumerWidget {
+  const CaptureControlGroup({Key? key}) : super(key: key);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          _TwoStateButton(
+    return ListCard(
+      title: "$tr_capture.capture_control.title".tr(),
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: _TwoStateButton(
             elevateWhen: false,
-            falseWidget: const Text('Start Capture'),
-            trueWidget: const Text('Stop Capture'),
+            falseWidget: Text("$tr_capture.capture_control.start_capture_button".tr()),
+            trueWidget: Text("$tr_capture.capture_control.stop_capture_button".tr()),
             onFalsePressed: () => ref.watch(platformControllerProvider).startCapture(),
             onTruePressed: () => ref.watch(platformControllerProvider).stopCapture(),
             provider: capturingStateProvider,
           ),
-          const SizedBox(height: 10),
-          _CharaDetailStateWidget(),
-          const Divider(),
-          Flex(
-            direction: Axis.horizontal,
-            children: const [
-              Flexible(
-                child: Text(
-                  'Press the Start button to start capturing.'
-                  ' App will automatically find the window of Uma Musume.'
-                  ' See the Guide for more information.',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+        ),
+        _CharaDetailStateWidget(),
+      ],
     );
   }
 }
 
-class CapturePage extends ConsumerStatefulWidget {
+class CapturePage extends ConsumerWidget {
   const CapturePage({Key? key}) : super(key: key);
 
   @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _CapturePageState();
-}
-
-class _CapturePageState extends ConsumerState<CapturePage> with AutomaticKeepAliveClientMixin {
-  @override
-  bool get wantKeepAlive => true;
-
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
-    return Scaffold(
-      body: ListView(
-        children: [
-          ListCard(
-            title: 'Capture Control',
-            children: [
-              _WindowsCaptureWidget(),
-            ],
-          ),
-          ListCard(
-            title: 'Capture Settings',
-            children: [
-              SwitchWidget(
-                title: 'Auto Start',
-                description: 'Start capturing at app startup. Effective from the next session.',
-                provider: autoStartCaptureStateProvider,
-              ),
-              DropdownButtonWidget<AutoCopyMode>(
-                title: 'Auto Copy',
-                description: 'Copy the captured image to the clipboard when capturing completed.',
-                name: (e) => e.name,
-                provider: autoCopyClipboardStateProvider,
-              ),
-            ],
-          ),
-        ],
-      ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    return const ListTilePageRootWidget(
+      children: [
+        CaptureControlGroup(),
+        CaptureSettingsGroup(),
+      ],
     );
   }
 }
