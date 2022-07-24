@@ -1,6 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
+import 'package:quiver/iterables.dart';
+import 'package:tuple/tuple.dart';
 
 class CurrentPlatform {
   static bool isWindows() {
@@ -55,9 +59,75 @@ class ProviderLogger extends ProviderObserver {
     Object? newValue,
     ProviderContainer container,
   ) {
+    final String p = previousValue.toString();
+    final String n = newValue.toString();
+    const limit = 300;
     logger.d(
-      'provider: ${provider.name ?? provider.runtimeType}, '
-      'value: $previousValue -> $newValue',
+      "provider: ${provider.name ?? provider.runtimeType}, "
+      "value: ${p.length < limit ? p : "${p.substring(0, limit)}..."}"
+      " -> ${n.length < limit ? n : "${n.substring(0, limit)}..."}",
     );
+  }
+}
+
+extension IntIterableExtension on Iterable<int> {
+  int sum() => fold(0, (p, e) => p + e);
+}
+
+extension BoolIterableExtension on Iterable<bool> {
+  int countTrue() => where((e) => e).length;
+
+  bool anyIn() {
+    return any((e) => e);
+  }
+
+  bool everyIn() {
+    return every((e) => e);
+  }
+}
+
+extension ListExtension<T> on List<T> {
+  List<T> partial(int start, int end) {
+    return sublist(start, math.min(length, end));
+  }
+
+  Iterable<T> insertSeparator(T separator) sync* {
+    final it = iterator;
+    if (it.moveNext()) {
+      yield it.current;
+    }
+    while (it.moveNext()) {
+      yield separator;
+      yield it.current;
+    }
+  }
+}
+
+extension List2DExtension<T> on List<List<T>> {
+  List<List<T>> transpose() {
+    if (isEmpty) {
+      return [[]];
+    }
+    final d0 = length;
+    final d1 = this[0].length;
+    return intRange(d1).map((i1) => intRange(d0).map((i0) => this[i0][i1]).toList()).toList();
+  }
+}
+
+Iterable<int> intRange(int stop) sync* {
+  for (final e in range(stop)) {
+    yield e as int;
+  }
+}
+
+Iterable<Tuple2<T1, T2>> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {
+  for (final e in zip([it1, it2])) {
+    yield Tuple2<T1, T2>(e[0] as T1, e[1] as T2);
+  }
+}
+
+Iterable<Tuple3<T1, T2, T3>> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2, Iterable<T3> it3) sync* {
+  for (final e in zip([it1, it2, it3])) {
+    yield Tuple3<T1, T2, T3>(e[0] as T1, e[1] as T2, e[2] as T3);
   }
 }
