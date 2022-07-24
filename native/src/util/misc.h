@@ -20,13 +20,13 @@ inline std::string utc() {
     std::tm datetime{};
 
 #if defined(__ANDROID__)
-    gmtime_r(&unix_ts, &datetime);
+    localtime_r(&unix_ts, &datetime);
 #else
-    gmtime_s(&datetime, &unix_ts);
+    localtime_s(&datetime, &unix_ts);
 #endif
 
     std::ostringstream stream;
-    stream << std::put_time(&datetime, "%Y-%m-%dT%H:%M:%SZ");
+    stream << std::put_time(&datetime, "%FT%T%z");
     return stream.str();
 }
 
