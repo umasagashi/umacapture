@@ -286,7 +286,11 @@ final currentGridProvider = Provider<Grid>((ref) {
   final records = zip2(recordList, rowConditions).where((row) => row.item2).map((row) => row.item1);
 
   final rows = zip2(plutoCells, records)
-      .map((row) => PlutoRowWithRawData.create(cells: Map.fromEntries(row.item1), data: row.item2))
+      .map((row) => PlutoRowWithRawData.create(
+            cells: Map.fromEntries(row.item1),
+            data: row.item2,
+            sortKey: DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
+          ))
       .toList();
 
   return Grid(columns, rows);

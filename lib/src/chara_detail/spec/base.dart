@@ -195,8 +195,8 @@ extension PlutoRowWithRawData on PlutoRow {
 
   void setUserData<T>(T value) => _userData[this] = value;
 
-  static PlutoRow create({required cells, data}) {
-    final row = PlutoRow(cells: cells);
+  static PlutoRow create({required cells, required int sortKey, required data}) {
+    final row = PlutoRow(cells: cells, sortIdx: sortKey);
     if (data != null) {
       row.setUserData(data);
     }
