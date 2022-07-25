@@ -65,7 +65,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
       field: id,
       type: PlutoColumnType.number(),
       enableContextMenu: false,
-      // enableDropToResize: true,
+      enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
@@ -159,7 +159,7 @@ class RangedLabelColumnSelectorState extends ConsumerState<RangedLabelColumnSele
             tooltip: FlutterSliderTooltip(
               alwaysShowTooltip: true,
               disableAnimation: true,
-              custom: (value) => Chip(label: Text(labels[value.toInt()]), elevation: 2),
+              custom: (value) => Chip(label: Text(labels[value.toInt()])),
             ),
             values: [
               (spec.predicate.min ?? 0).toDouble(),

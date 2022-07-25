@@ -78,7 +78,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
       field: id,
       type: PlutoColumnType.number(),
       enableContextMenu: false,
-      // enableDropToResize: true,
+      enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {

@@ -24,7 +24,7 @@ class FactorCriteria {
 }
 
 int _extractStar(List<Factor> factors, Factor query) {
-  return factors.firstWhere((e) => e.id == query.id, orElse: () => Factor(0, 0)).star;
+  return factors.firstWhere((e) => e.id == query.id, orElse: () => const Factor(0, 0)).star;
 }
 
 List<int> _extractStarSet(FactorSet factorSet, Factor query, bool traineeOnly) {
@@ -139,7 +139,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       field: id,
       type: PlutoColumnType.text(),
       enableContextMenu: false,
-      enableDropToResize: true,
+      enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {

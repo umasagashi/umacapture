@@ -122,9 +122,12 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
       type: numberMode ? PlutoColumnType.number() : PlutoColumnType.text(),
       textAlign: numberMode ? PlutoColumnTextAlign.right : PlutoColumnTextAlign.left,
       enableContextMenu: false,
-      // enableDropToResize: true,
+      enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
+      renderer: (PlutoColumnRendererContext context) {
+        return Text(context.cell.value.toString());
+      },
     );
   }
 

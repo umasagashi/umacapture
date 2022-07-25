@@ -32,6 +32,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final int valueMin;
   final int valueMax;
   final IsInRangeIntegerPredicate predicate;
+  final numberFormatter = NumberFormat("#,###");
 
   @override
   final String id;
@@ -78,9 +79,12 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       type: PlutoColumnType.number(),
       textAlign: PlutoColumnTextAlign.right,
       enableContextMenu: false,
-      // enableDropToResize: true,
+      enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
+      renderer: (PlutoColumnRendererContext context) {
+        return Text(numberFormatter.format(context.cell.value.toInt()));
+      },
     );
   }
 
@@ -132,6 +136,7 @@ class RangedIntegerColumnSelectorState extends ConsumerState<RangedIntegerColumn
 
   @override
   Widget build(BuildContext context) {
+    final numberFormatter = NumberFormat("#,###");
     return Column(
       children: [
         Row(
@@ -163,7 +168,7 @@ class RangedIntegerColumnSelectorState extends ConsumerState<RangedIntegerColumn
             tooltip: FlutterSliderTooltip(
               alwaysShowTooltip: true,
               disableAnimation: true,
-              custom: (value) => Chip(label: Text(value.toInt().toString()), elevation: 2),
+              custom: (value) => Chip(label: Text(numberFormatter.format(value.toInt()).toString())),
             ),
             values: [
               (spec.predicate.min ?? spec.valueMin).toDouble(),

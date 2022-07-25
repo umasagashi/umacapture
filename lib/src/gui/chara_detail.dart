@@ -248,9 +248,11 @@ class _CharaDetailExportButton extends ConsumerWidget {
     final theme = Theme.of(context);
     final style = theme.textTheme.labelLarge;
     const height = 40.0;
+    const encoding = "Shift_JIS";
     return SizedBox(
       height: 30,
       child: PopupMenuButton<int>(
+        enabled: ref.watch(charaDetailRecordStorageProvider).isNotEmpty,
         padding: EdgeInsets.zero,
         icon: const Icon(Icons.download),
         tooltip: "$tr_chara_detail.export.button_tooltip".tr(),
@@ -266,7 +268,7 @@ class _CharaDetailExportButton extends ConsumerWidget {
             PopupMenuItem(
               height: height,
               onTap: () {
-                CsvExporter(title, "records.csv", ref).export(onSuccess: (path) {
+                CsvExporter(title, "records.csv", ref, encoding).export(onSuccess: (path) {
                   _recordExportEventController.sink.add(path);
                 });
               },
@@ -465,25 +467,28 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
                   final imageMode = CharaDetailRecordImageMode.values[index + 1];
                   return LayoutBuilder(
                     builder: (BuildContext context, BoxConstraints constraints) {
-                      return ExtendedImage.file(
-                        File(storage.imagePathOf(widget.record, imageMode)),
-                        filterQuality: FilterQuality.medium,
-                        fit: BoxFit.contain,
-                        mode: ExtendedImageMode.gesture,
-                        onDoubleTap: (_) => storage.copyToClipboard(widget.record, imageMode),
-                        initGestureConfigHandler: (ExtendedImageState state) {
-                          final h = state.extendedImageInfo!.image.width / constraints.maxWidth;
-                          final v = state.extendedImageInfo!.image.height / constraints.maxHeight;
-                          final r = math.max(h, v);
-                          const f = 0.95;
-                          return GestureConfig(
-                            maxScale: (r / h) * f,
-                            initialScale: r,
-                            minScale: math.min(f, r * f),
-                            initialAlignment: InitialAlignment.topCenter,
-                            reverseMousePointerScrollDirection: true,
-                          );
-                        },
+                      return GestureDetector(
+                        onSecondaryTap: () => Navigator.of(context).pop(),
+                        child: ExtendedImage.file(
+                          File(storage.imagePathOf(widget.record, imageMode)),
+                          filterQuality: FilterQuality.medium,
+                          fit: BoxFit.contain,
+                          mode: ExtendedImageMode.gesture,
+                          onDoubleTap: (_) => storage.copyToClipboard(widget.record, imageMode),
+                          initGestureConfigHandler: (ExtendedImageState state) {
+                            final h = state.extendedImageInfo!.image.width / constraints.maxWidth;
+                            final v = state.extendedImageInfo!.image.height / constraints.maxHeight;
+                            final r = math.max(h, v);
+                            const f = 0.95;
+                            return GestureConfig(
+                              maxScale: (r / h) * f,
+                              initialScale: r,
+                              minScale: math.min(f, r * f),
+                              initialAlignment: InitialAlignment.topCenter,
+                              reverseMousePointerScrollDirection: true,
+                            );
+                          },
+                        ),
                       );
                     },
                   );
@@ -525,8 +530,11 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
 extension PlutoGridStateManagerExtension on PlutoGridStateManager {
   void autoFitColumns() {
     final context = gridKey!.currentContext!;
-    for (var col in columns) {
+    for (final col in columns) {
+      final enabled = col.enableDropToResize;
+      col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
       autoFitColumn(context, col);
+      col.enableDropToResize = enabled;
     }
   }
 }
