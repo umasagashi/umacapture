@@ -239,8 +239,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
 final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
   final builders = await ref.watch(_columnBuilderLoader.future);
   final List<ColumnSpec> specs = [
-    for (final b in builders)
-      b.build(),
+    for (final b in builders) b.build(),
   ];
   return ColumnSpecSelection(specs);
 });
@@ -288,8 +287,9 @@ final currentGridProvider = Provider<Grid>((ref) {
       .map((row) => PlutoRowWithRawData.create(
             cells: Map.fromEntries(row.item1),
             data: row.item2,
-            sortKey: DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
+            sortKey: -DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
           ))
+      .sorted((a, b) => a.sortIdx!.compareTo(b.sortIdx!))
       .toList();
 
   return Grid(columns, rows);

@@ -55,6 +55,7 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
     _listenForPlaySound(scrollReadyEventProvider, SoundType.attentionWeak);
     _listenForPlaySound(pageReadyEventProvider, SoundType.attentionNormal);
     _listenForPlaySound(errorEventProvider, SoundType.error);
+    _listenForPlaySound(duplicatedCharaEventProvider, SoundType.error);
 
     _listenForToast(clipboardPasteEventProvider, "$tr_toast.clipboard_paste".tr());
     _listenForToast<String>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {

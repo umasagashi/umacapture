@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../preference/storage_box.dart';
+import '/src/preference/storage_box.dart';
 
 enum SettingsEntryKey {
   themeMode,

@@ -5,14 +5,14 @@
         },
         "capture": {
             "title": "キャプチャ",
-            "duplicated_message": "このウマ娘はすでにキャプチャ済みです。",
             "capture_control": {
                 "title": "コントロール",
                 "start_capture_button": "キャプチャ開始",
                 "stop_capture_button": "キャプチャ停止",
                 "capture_completed_message": "キャプチャに成功しました。ここをクリックすると管理画面に移動します。",
                 "error": {
-                    "closed_before_completed": "[キャプチャ失敗] このウマ娘は既にキャプチャ済みです。"
+                    "closed_before_completed": "[エラー] キャプチャ完了前に詳細画面をロストしました。",
+                    "duplicated_character": "[エラー] このウマ娘はすでにキャプチャ済みです。"
                 },
                 "progress": {
                     "skill": "スキル",

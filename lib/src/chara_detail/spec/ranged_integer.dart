@@ -83,7 +83,10 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
-        return Text(numberFormatter.format(context.cell.value.toInt()));
+        return Text(
+          numberFormatter.format(context.cell.value.toInt()),
+          textAlign: TextAlign.center
+        );
       },
     );
   }
