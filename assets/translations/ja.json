@@ -240,12 +240,16 @@
                 "title": "スタイル設定",
                 "brightness": {
                     "title": "明るさ",
-                    "description": "アプリの明るさを変更します。",
+                    "description": "UIの明るさを変更します。",
                     "choice": {
                         "light": "ライトモード",
                         "dark": "ダークモード",
                         "system": "システム設定"
                     }
+                },
+                "font_bold": {
+                    "title": "太字モード",
+                    "description": "UIに太字を使います。"
                 }
             },
             "capture": {

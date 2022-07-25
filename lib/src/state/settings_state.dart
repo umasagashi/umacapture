@@ -4,6 +4,7 @@ import '../preference/storage_box.dart';
 
 enum SettingsEntryKey {
   themeMode,
+  fontBold,
   sidebarExtended,
   autoStartCapture,
   autoCopyClipboard,

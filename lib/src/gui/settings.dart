@@ -164,6 +164,11 @@ class StyleSettingsGroup extends ConsumerWidget {
       padding: EdgeInsets.zero,
       children: [
         _BrightnessWidget(),
+        SwitchWidget(
+          title: "$tr_settings.style.font_bold.title".tr(),
+          description: "$tr_settings.style.font_bold.description".tr(),
+          provider: fontBoldSettingProvider,
+        ),
       ],
     );
   }
