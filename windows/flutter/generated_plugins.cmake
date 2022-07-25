@@ -4,6 +4,7 @@
 
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
+  charset_converter
   pasteboard
   screen_retriever
   url_launcher_windows
