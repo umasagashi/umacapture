@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:badges/badges.dart';
 import "package:collection/collection.dart";
 import 'package:easy_localization/easy_localization.dart';
 import 'package:extended_image/extended_image.dart';
@@ -18,7 +19,9 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -247,62 +250,78 @@ class _CharaDetailExportButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final style = theme.textTheme.labelLarge;
-    const height = 40.0;
+    const menuHeight = 40.0;
+    const buttonSize = 30.0;
     const encoding = "Shift_JIS";
+    final exporting = ref.watch(exportingStateProvider);
     return SizedBox(
-      height: 30,
-      child: PopupMenuButton<int>(
-        enabled: ref.watch(charaDetailRecordStorageProvider).isNotEmpty,
-        padding: EdgeInsets.zero,
-        icon: const Icon(Icons.download),
-        tooltip: "$tr_chara_detail.export.button_tooltip".tr(),
-        splashRadius: 24,
-        position: PopupMenuPosition.under,
-        shape: RoundedRectangleBorder(
-          side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        itemBuilder: (BuildContext context) {
-          final title = "$tr_chara_detail.export.dialog_title".tr();
-          return [
-            PopupMenuItem(
-              height: height,
-              onTap: () {
-                CsvExporter(title, "records.csv", ref, encoding).export(onSuccess: (path) {
-                  _recordExportEventController.sink.add(path);
-                });
-              },
-              child: Tooltip(
-                message: "$tr_chara_detail.export.csv.tooltip".tr(),
-                child: Text("$tr_chara_detail.export.csv.label".tr(), style: style),
+      height: buttonSize,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Disabled(
+            disabled: exporting,
+            child: PopupMenuButton<int>(
+              enabled: ref.watch(charaDetailRecordStorageProvider).isNotEmpty,
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.download),
+              tooltip: "$tr_chara_detail.export.button_tooltip".tr(),
+              splashRadius: 24,
+              position: PopupMenuPosition.under,
+              shape: RoundedRectangleBorder(
+                side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
+                borderRadius: BorderRadius.circular(8),
               ),
-            ),
-            PopupMenuItem(
-              height: height,
-              onTap: () {
-                JsonExporter(title, "records.json", ref).export(onSuccess: (path) {
-                  _recordExportEventController.sink.add(path);
-                });
+              itemBuilder: (BuildContext context) {
+                final title = "$tr_chara_detail.export.dialog_title".tr();
+                return [
+                  PopupMenuItem(
+                    height: menuHeight,
+                    onTap: () {
+                      CsvExporter(title, "records.csv", ref, encoding).export(onSuccess: (path) {
+                        _recordExportEventController.sink.add(path);
+                      });
+                    },
+                    child: Tooltip(
+                      message: "$tr_chara_detail.export.csv.tooltip".tr(),
+                      child: Text("$tr_chara_detail.export.csv.label".tr(), style: style),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    height: menuHeight,
+                    onTap: () {
+                      JsonExporter(title, "records.json", ref).export(onSuccess: (path) {
+                        _recordExportEventController.sink.add(path);
+                      });
+                    },
+                    child: Tooltip(
+                      message: "$tr_chara_detail.export.json.tooltip".tr(),
+                      child: Text("$tr_chara_detail.export.json.label".tr(), style: style),
+                    ),
+                  ),
+                  PopupMenuItem(
+                    height: menuHeight,
+                    onTap: () {
+                      ZipExporter(title, "records.zip", ref).export(onSuccess: (path) {
+                        _recordExportEventController.sink.add(path);
+                      });
+                    },
+                    child: Tooltip(
+                      message: "$tr_chara_detail.export.zip.tooltip".tr(),
+                      child: Text("$tr_chara_detail.export.zip.label".tr(), style: style),
+                    ),
+                  ),
+                ];
               },
-              child: Tooltip(
-                message: "$tr_chara_detail.export.json.tooltip".tr(),
-                child: Text("$tr_chara_detail.export.json.label".tr(), style: style),
-              ),
             ),
-            PopupMenuItem(
-              height: height,
-              onTap: () {
-                ZipExporter(title, "records.zip", ref).export(onSuccess: (path) {
-                  _recordExportEventController.sink.add(path);
-                });
-              },
-              child: Tooltip(
-                message: "$tr_chara_detail.export.zip.tooltip".tr(),
-                child: Text("$tr_chara_detail.export.zip.label".tr(), style: style),
-              ),
+          ),
+          if (exporting)
+            const SizedBox(
+              width: buttonSize,
+              height: buttonSize,
+              child: CircularProgressIndicator(),
             ),
-          ];
-        },
+        ],
       ),
     );
   }
@@ -316,7 +335,7 @@ class _ColumnSpecTagWidget extends ConsumerStatefulWidget {
 class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
   ColumnSpec? hoveredSpec;
 
-  Widget buildSpecChip(BuildContext context, BuildResource resource, ColumnSpec spec) {
+  Widget buildSpecChip(BuildContext context, BuildResource resource, ColumnSpec spec, int? count) {
     final theme = Theme.of(context);
     return DragTarget<ColumnSpec>(
       builder: (context, candidateData, rejectedData) {
@@ -335,13 +354,28 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
             opacity: 0.6,
             child: Chip(label: spec.tag(resource)),
           ),
-          child: ActionChip(
-            label: spec.tag(resource),
-            tooltip: spec.description,
-            backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
-            onPressed: () {
-              _ColumnSpecDialog.show(context, spec);
-            },
+          child: Badge(
+            showBadge: count != null,
+            badgeColor: theme.chipTheme.selectedColor!,
+            position: BadgePosition.topEnd(top: -8, end: -8),
+            shape: BadgeShape.square,
+            borderRadius: BorderRadius.circular(8),
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            alignment: Alignment.center,
+            ignorePointer: true,
+            badgeContent: Text(
+              "$count",
+              style: theme.textTheme.labelSmall,
+              textAlign: TextAlign.center,
+            ),
+            child: ActionChip(
+              label: spec.tag(resource),
+              tooltip: spec.description,
+              backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
+              onPressed: () {
+                _ColumnSpecDialog.show(context, spec);
+              },
+            ),
           ),
         );
       },
@@ -361,11 +395,13 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recordCount = ref.watch(charaDetailRecordStorageProvider).length;
     final specs = ref.watch(currentColumnSpecsProvider);
     final resource = ref.watch(buildResourceProvider);
-    final theme = Theme.of(context);
+    final filteredCounts = ref.watch(currentGridProvider).filteredCounts;
     return Padding(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
       child: Stack(
         alignment: Alignment.bottomRight,
         children: [
@@ -375,7 +411,8 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final spec in specs) buildSpecChip(context, resource, spec),
+                for (final col in zip2(specs, filteredCounts))
+                  buildSpecChip(context, resource, col.item1, col.item2 == recordCount ? null : col.item2),
                 ActionChip(
                   label: Icon(Icons.add, color: theme.colorScheme.onPrimary),
                   tooltip: "$tr_chara_detail.add_column_button_tooltip".tr(),
@@ -620,7 +657,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
               _CharaDetailPreviewDialog.show(context, record);
             },
           ),
-          if (grid.columns.isEmpty) Text("$tr_chara_detail.no_row_message".tr()),
+          if (grid.rows.isEmpty) Text("$tr_chara_detail.no_row_message".tr()),
         ],
       ),
     );
@@ -659,6 +696,7 @@ class _CharaDetailDataTableLoaderLayer extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: const [
           CircularProgressIndicator(),
+          SizedBox(height: 8),
           Text("Loading"),
         ],
       ),

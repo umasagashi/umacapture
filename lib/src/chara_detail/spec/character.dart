@@ -67,7 +67,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   PlutoCell plutoCell(BuildResource resource, int value) {
     return PlutoCellWithUserData.create(
       value: resource.charaCardInfo[value].sortKey,
-      data: resource.charaCardImageMap[value],
+      data: value,
     );
   }
 
@@ -82,8 +82,8 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
-        final path = context.cell.getUserData<String>()!;
-        return Image.file(File(path));
+        final record = context.row.getUserData<CharaDetailRecord>()!;
+        return Image.file(File("${resource.recordRootDirectory}/${record.traineeIconPath}"));
       },
     );
   }

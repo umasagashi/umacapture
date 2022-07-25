@@ -253,15 +253,16 @@ final buildResourceProvider = Provider<BuildResource>((ref) {
     labelMap: ref.watch(labelMapProvider),
     skillInfo: ref.watch(skillInfoProvider),
     charaCardInfo: ref.watch(charaCardInfoProvider),
-    charaCardImageMap: ref.watch(charaCardIconMapProvider),
+    recordRootDirectory: ref.watch(pathInfoProvider).charaDetail,
   );
 });
 
 class Grid {
   final List<PlutoColumn> columns;
   final List<PlutoRow> rows;
+  final List<int> filteredCounts;
 
-  Grid(this.columns, this.rows);
+  Grid(this.columns, this.rows, this.filteredCounts);
 }
 
 final currentGridProvider = Provider<Grid>((ref) {
@@ -269,10 +270,11 @@ final currentGridProvider = Provider<Grid>((ref) {
   final specList = ref.watch(currentColumnSpecsProvider);
   final resource = ref.watch(buildResourceProvider);
 
-  final columns = specList.map((spec) => spec.plutoColumn(resource)).toList();
-
   final columnValues = specList.map((spec) => spec.parse(recordList)).toList();
   final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(e.item2)).toList();
+
+  final filteredCounts = columnConditions.map((e) => e.countTrue()).toList();
+  final columns = specList.map((spec) => spec.plutoColumn(resource)).toList();
 
   final rowValues = columnValues.transpose();
   final rowConditions = columnConditions.transpose().map((e) => e.everyIn()).toList();
@@ -292,5 +294,5 @@ final currentGridProvider = Provider<Grid>((ref) {
       .sorted((a, b) => a.sortIdx!.compareTo(b.sortIdx!))
       .toList();
 
-  return Grid(columns, rows);
+  return Grid(columns, rows, filteredCounts);
 });
