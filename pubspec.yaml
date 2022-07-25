@@ -18,6 +18,7 @@ dependencies:
   archive: ^3.3.1
   audioplayers: ^1.0.1
   auto_route: ^4.2.1
+  charset_converter: ^2.1.0
   collection: ^1.16.0
   csv: ^5.0.1
   dart_json_mapper: ^2.2.4+2
@@ -32,6 +33,7 @@ dependencies:
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   image: ^3.2.0
+  intl: ^0.17.0
   logger: ^1.1.0
   package_info_plus: ^1.4.2
   pasteboard: ^0.2.0
@@ -55,6 +57,7 @@ dev_dependencies:
   auto_route_generator: ^4.2.0
   build_runner: ^2.2.0
   flutter_lints: ^2.0.1
+  flutter_oss_licenses: ^2.0.1
   hive_generator: ^1.1.3
 
 

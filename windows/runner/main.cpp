@@ -8,10 +8,14 @@
 
 int APIENTRY
 wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t *command_line, _In_ int show_command) {
-    HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"umasagashi_app");
-    if (hwnd != nullptr) {
-        ::ShowWindow(hwnd, SW_NORMAL);
-        ::SetForegroundWindow(hwnd);
+    HANDLE mutex_ = ::CreateMutex(nullptr, TRUE, L"umasagashi_app_mutex");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(mutex_);
+        HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"umasagashi_app");
+        if (hwnd != nullptr) {
+            ::ShowWindow(hwnd, SW_NORMAL);
+            ::SetForegroundWindow(hwnd);
+        }
         return EXIT_FAILURE;
     }
 

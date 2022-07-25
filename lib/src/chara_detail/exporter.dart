@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
+import 'package:charset_converter/charset_converter.dart';
 import 'package:csv/csv.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:file_picker/file_picker.dart';
@@ -34,7 +35,9 @@ abstract class Exporter {
 }
 
 class CsvExporter extends Exporter {
-  CsvExporter(super.dialogTitle, super.defaultFileName, super.ref);
+  final String encoding;
+
+  CsvExporter(super.dialogTitle, super.defaultFileName, super.ref, this.encoding);
 
   @override
   Future<void> _export(String path) {
@@ -42,7 +45,8 @@ class CsvExporter extends Exporter {
     final grid = ref.watch(currentGridProvider);
     final table = grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData()).toList()).toList();
     table.insert(0, grid.columns.map((e) => e.title).toList());
-    return File(path).writeAsString(const ListToCsvConverter().convert(table));
+    return CharsetConverter.encode(encoding, const ListToCsvConverter().convert(table))
+        .then((content) => File(path).writeAsBytes(content));
   }
 }
 
