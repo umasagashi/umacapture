@@ -332,11 +332,13 @@ class CharaDetailRecord extends JsonEquatable {
   @JsonProperty(ignore: true)
   String get traineeIconPath => "${metadata.recordId.self}/trainee.jpg";
 
-  static Future<CharaDetailRecord> readFromFile(
-    String path, {
-    DeserializationOptions option = const DeserializationOptions(caseStyle: CaseStyle.snake),
-  }) async {
-    return File(path).readAsString().then((body) => JsonMapper.deserialize<CharaDetailRecord>(body, option)!);
+  static Future<CharaDetailRecord?> readFromFile(File file) async {
+    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    return file.readAsString().then((body) => JsonMapper.deserialize<CharaDetailRecord>(body, options));
+  }
+
+  static Future<CharaDetailRecord?> readFromDirectory(Directory directory) async {
+    return readFromFile(File("${directory.path}/record.json"));
   }
 
   bool isSameChara(CharaDetailRecord other) {

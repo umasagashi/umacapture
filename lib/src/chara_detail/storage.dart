@@ -3,12 +3,13 @@ import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
-import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pasteboard/pasteboard.dart';
 
 import '/src/app/providers.dart';
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/core/json_adapter.dart';
 import '/src/core/platform_controller.dart';
 import '/src/gui/capture.dart';
 
@@ -107,7 +108,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
       _duplicatedCharaEventController.sink.add(record.metadata.recordId.self);
       ref
           .watch(charaDetailCaptureStateProvider.notifier)
-          .update((state) => state.fail(message: "$tr_capture.duplicated_message".tr()));
+          .update((state) => state.fail(message: "duplicated_character"));
       return;
     }
     _updateRecordInfo(record);
@@ -121,7 +122,11 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   void addFromFile(String id) {
-    CharaDetailRecord.readFromFile("$directory/$id/record.json").then((e) => add(e));
+    CharaDetailRecord.readFromDirectory(Directory("$directory/$id")).then((e) {
+      if (e != null) {
+        add(e);
+      }
+    });
   }
 
   CharaDetailRecord? getBy({required String id}) {
@@ -146,16 +151,20 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   List<CharaDetailRecord> get records => state;
 }
 
+Future<List<CharaDetailRecord>> _loadCharaDetailRecords(Directory directory) {
+  initializeJsonReflectable();
+  final files = directory
+      .listSync(recursive: false, followLinks: false)
+      .map((e) => CharaDetailRecord.readFromDirectory(Directory(e.path)));
+  return Future.wait(files).then((e) => e.whereNotNull().toList());
+}
+
 final charaDetailRecordStorageLoader = FutureProvider<CharaDetailRecordStorage>((ref) async {
   return ref.watch(pathInfoLoader.future).then((info) async {
     final directory = Directory(info.charaDetail);
     final List<CharaDetailRecord> records = [];
     if (directory.existsSync()) {
-      records.addAll(await Future.wait(
-        directory
-            .listSync(recursive: false, followLinks: false)
-            .map((e) => CharaDetailRecord.readFromFile("${e.path}/record.json")),
-      ));
+      records.addAll(await compute(_loadCharaDetailRecords, directory));
     }
     final storage = CharaDetailRecordStorage(ref: ref, directory: info.charaDetail, records: records);
     ref.watch(charaDetailRecordCapturedEventProvider.stream).listen((e) => storage.addFromFile(e));

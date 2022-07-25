@@ -10,8 +10,6 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:window_manager/window_manager.dart';
 
-import 'main.mapper.g.dart' show initializeJsonMapper;
-
 // ignore: unused_import
 import 'src/core/_json_mapper_dummy.dart';
 import 'src/core/json_adapter.dart';
@@ -96,7 +94,7 @@ void main() async {
 
   WidgetsFlutterBinding.ensureInitialized();
   await EasyLocalization.ensureInitialized();
-  initializeJsonMapper(adapters: [flutterTypesAdapter]);
+  initializeJsonReflectable();
 
   final packageInfo = await PackageInfo.fromPlatform();
   await StorageBox.ensureOpened(packageInfo.appName, reset: false);
