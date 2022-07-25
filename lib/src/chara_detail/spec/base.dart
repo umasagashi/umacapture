@@ -63,13 +63,13 @@ class BuildResource {
   final LabelMap labelMap;
   final List<SkillInfo> skillInfo;
   final List<CharaCardInfo> charaCardInfo;
-  final Map<int, String> charaCardImageMap;
+  final String recordRootDirectory;
 
   BuildResource({
     required this.labelMap,
     required this.skillInfo,
     required this.charaCardInfo,
-    required this.charaCardImageMap,
+    required this.recordRootDirectory,
   });
 }
 
@@ -90,7 +90,7 @@ abstract class ColumnSpec<T> {
 
   PlutoCell plutoCell(BuildResource resource, T value);
 
-  PlutoColumn plutoColumn(BuildResource resource); // This PlutoColumn converts the value T to a Widget.
+  PlutoColumn plutoColumn(BuildResource resource);
 
   Widget tag(BuildResource resource);
 
