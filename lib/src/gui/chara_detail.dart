@@ -646,6 +646,7 @@ final _initialDataLoader = FutureProvider((ref) async {
   ]).then((_) {
     return Future.wait([
       ref.watch(moduleInfoLoaders.future),
+      ref.watch(charaDetailRecordStorageLoader.future),
     ]);
   });
 });

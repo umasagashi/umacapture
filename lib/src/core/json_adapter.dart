@@ -1,6 +1,8 @@
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/material.dart';
 
+import '/main.mapper.g.dart';
+
 class MappingConverter<T, S> implements ICustomConverter<T> {
   final T Function(S map) _fromMap;
   final S Function(T obj) _toMap;
@@ -44,3 +46,7 @@ final flutterTypesAdapter = JsonMapperAdapter(
   },
   valueDecorators: {},
 );
+
+void initializeJsonReflectable() {
+  initializeJsonMapper(adapters: [flutterTypesAdapter]);
+}
