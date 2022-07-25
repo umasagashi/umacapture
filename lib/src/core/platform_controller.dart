@@ -186,8 +186,8 @@ class PlatformController {
         captureState.update((state) => state.reset());
         break;
       case 'onCharaDetailFinished':
-        _charaDetailRecordCapturedEventController.sink.add(data['id']);
         if (data['success']) {
+          _charaDetailRecordCapturedEventController.sink.add(data['id']);
           captureState.update((state) => state.success(id: data['id']));
         }
         break;

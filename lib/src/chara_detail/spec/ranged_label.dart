@@ -70,7 +70,10 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
         final label = context.cell.getUserData<String>()!;
-        return Text(label);
+        return Text(
+          label,
+          textAlign: TextAlign.center,
+        );
       },
     );
   }
