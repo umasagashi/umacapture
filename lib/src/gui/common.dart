@@ -157,12 +157,6 @@ class ErrorMessageWidget extends StatelessWidget {
   }
 }
 
-extension DoubleExtension on double {
-  double multiple(double factor) {
-    return this * factor;
-  }
-}
-
 class SpinBox extends StatefulWidget {
   final int min;
   final int max;
@@ -196,8 +190,8 @@ class _SpinBoxState extends State<SpinBox> {
 
   @override
   Widget build(BuildContext context) {
-    final iconSize = widget.height?.multiple(0.8);
-    final splashRadius = widget.height?.multiple(0.6);
+    final iconSize = widget.height?.multiply(0.8);
+    final splashRadius = widget.height?.multiply(0.6);
     return SizedBox(
       width: widget.width,
       height: widget.height,

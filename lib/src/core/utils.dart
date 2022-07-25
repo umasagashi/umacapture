@@ -70,6 +70,12 @@ class ProviderLogger extends ProviderObserver {
   }
 }
 
+extension DoubleExtension on double {
+  double multiply(double factor) {
+    return this * factor;
+  }
+}
+
 extension IntIterableExtension on Iterable<int> {
   int sum() => fold(0, (p, e) => p + e);
 }

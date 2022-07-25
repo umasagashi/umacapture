@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
@@ -25,6 +27,14 @@ final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeM
   );
 });
 
+final fontBoldSettingProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
+  final box = ref.watch(storageBoxProvider);
+  return BooleanNotifier(
+    entry: StorageEntry(box: box, key: SettingsEntryKey.fontBold.name),
+    defaultValue: true,
+  );
+});
+
 final sidebarExtendedStateProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
   final box = ref.watch(storageBoxProvider);
   return BooleanNotifier(
@@ -36,6 +46,7 @@ final sidebarExtendedStateProvider = StateNotifierProvider<BooleanNotifier, bool
 class _Sidebar extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     final tabsRouter = AutoTabsRouter.of(context);
     final isExtended = ref.watch(sidebarExtendedStateProvider);
     return Stack(
@@ -49,7 +60,7 @@ class _Sidebar extends ConsumerWidget {
               NavigationRailDestination(
                 icon: pageLabel.unselectedIcon,
                 selectedIcon: pageLabel.selectedIcon,
-                label: Text(pageLabel.label, style: const TextStyle(fontSize: 16)),
+                label: Text(pageLabel.label, style: theme.textTheme.titleMedium),
                 padding: EdgeInsets.zero,
               ),
           ],
@@ -60,6 +71,7 @@ class _Sidebar extends ConsumerWidget {
           left: 0,
           right: 0,
           child: TextButton(
+            style: ButtonStyle(shape: MaterialStateProperty.all(const RoundedRectangleBorder())),
             child: Icon(isExtended ? Icons.chevron_left : Icons.chevron_right),
             onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
           ),
@@ -209,6 +221,8 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
+      // The top edge of the window frame is not visible, so 1 pixel padding is added instead.
+      // But 1 pixel is thicker than the others, so the color is mixed with the title bar to make it look better.
       padding: const EdgeInsets.only(top: 1),
       color: theme.colorScheme.surface.blend(Colors.black, 50),
       child: Scaffold(
@@ -218,7 +232,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
             height: 24,
             child: Image.asset("assets/image/app_icon.png", filterQuality: FilterQuality.medium),
           ),
-          title: const Text('umasagashi'),
+          title: Text('umasagashi', style: theme.textTheme.bodyMedium!),
         ),
         body: widget.child,
       ),
@@ -255,13 +269,22 @@ class App extends ConsumerWidget {
 
   final _router = AppRouter();
 
-  ThemeData modifyTheme(ThemeData base) {
+  TextStyle? modifyFontWeight(TextStyle? base, int offset) {
+    return base?.copyWith(
+        fontWeight: FontWeight
+            .values[math.min((base.fontWeight?.index ?? FontWeight.normal.index) + offset, FontWeight.w900.index)]);
+  }
+
+  ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
+    final offset = ref.watch(fontBoldSettingProvider) ? 3 : 0;
     return base.copyWith(
       tooltipTheme: base.tooltipTheme.copyWith(
+        textStyle: modifyFontWeight(base.tooltipTheme.textStyle, offset),
         waitDuration: const Duration(milliseconds: 100),
         showDuration: Duration.zero,
       ),
       chipTheme: base.chipTheme.copyWith(
+        labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide.none),
         side: BorderSide(
           width: 0.5,
@@ -269,6 +292,23 @@ class App extends ConsumerWidget {
         ),
         elevation: 0,
         pressElevation: 0,
+      ),
+      textTheme: base.textTheme.copyWith(
+        displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
+        displayMedium: modifyFontWeight(base.textTheme.displayMedium, offset),
+        displaySmall: modifyFontWeight(base.textTheme.displaySmall, offset),
+        headlineLarge: modifyFontWeight(base.textTheme.headlineLarge, offset),
+        headlineMedium: modifyFontWeight(base.textTheme.headlineMedium, offset),
+        headlineSmall: modifyFontWeight(base.textTheme.headlineSmall, offset),
+        titleLarge: modifyFontWeight(base.textTheme.titleLarge, offset),
+        titleMedium: modifyFontWeight(base.textTheme.titleMedium, offset),
+        titleSmall: modifyFontWeight(base.textTheme.titleSmall, offset),
+        bodyLarge: modifyFontWeight(base.textTheme.bodyLarge, offset),
+        bodyMedium: modifyFontWeight(base.textTheme.bodyMedium, offset),
+        bodySmall: modifyFontWeight(base.textTheme.bodySmall, offset),
+        labelLarge: modifyFontWeight(base.textTheme.labelLarge, offset),
+        labelMedium: modifyFontWeight(base.textTheme.labelMedium, offset),
+        labelSmall: modifyFontWeight(base.textTheme.labelSmall, offset),
       ),
     );
   }
@@ -293,7 +333,7 @@ class App extends ConsumerWidget {
       ),
       visualDensity: FlexColorScheme.comfortablePlatformDensity,
       useMaterial3: true,
-      fontFamily: GoogleFonts.notoSans().fontFamily,
+      fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
     );
 
     final darkTheme = FlexThemeData.dark(
@@ -310,14 +350,14 @@ class App extends ConsumerWidget {
       ),
       visualDensity: FlexColorScheme.comfortablePlatformDensity,
       useMaterial3: true,
-      fontFamily: GoogleFonts.notoSans().fontFamily,
+      fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
     );
 
     final themeMode = ref.watch(themeSettingProvider);
     return MaterialApp.router(
       title: 'umasagashi',
-      theme: modifyTheme(theme),
-      darkTheme: modifyTheme(darkTheme),
+      theme: modifyTheme(ref, theme),
+      darkTheme: modifyTheme(ref, darkTheme),
       themeMode: themeMode,
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,

@@ -239,9 +239,8 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
 final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
   final builders = await ref.watch(_columnBuilderLoader.future);
   final List<ColumnSpec> specs = [
-    builders[0].build(),
-    builders[1].build(),
-    builders[2].build(),
+    for (final b in builders)
+      b.build(),
   ];
   return ColumnSpecSelection(specs);
 });
