@@ -5,6 +5,7 @@ import 'hive_adapter.dart';
 enum StorageBoxKey {
   settings,
   windowState,
+  trainerId,
 }
 
 extension _BoxKeyExtension on StorageBoxKey {
