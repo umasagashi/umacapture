@@ -334,16 +334,70 @@ class CaptureControlGroup extends ConsumerWidget {
   }
 }
 
-class CapturePage extends ConsumerWidget {
-  const CapturePage({Key? key}) : super(key: key);
+class _CapturePageLoaderLayer extends ConsumerWidget {
+  Widget loading() {
+    return SingleTileWidget(
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: const [
+            CircularProgressIndicator(),
+            SizedBox(height: 8),
+            Text("Loading"),
+          ],
+        ),
+      ),
+    );
+  }
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget error(errorMessage, stackTrace, theme) {
+    return SingleTileWidget(
+      child: Center(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              "$tr_capture.loading_error".tr(),
+              style: TextStyle(color: theme.colorScheme.error),
+              textAlign: TextAlign.center,
+            ),
+            const Divider(),
+            Text(errorMessage.toString()),
+            const Divider(),
+            Text(stackTrace.toString()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget data(BuildContext context, WidgetRef ref) {
     return const ListTilePageRootWidget(
       children: [
         CaptureControlGroup(),
         CaptureSettingsGroup(),
       ],
     );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final loader = ref.watch(platformControllerLoader);
+    return loader.when(
+      loading: () => loading(),
+      error: (errorMessage, stackTrace) => error(errorMessage, stackTrace, theme),
+      data: (_) => data(context, ref),
+    );
+  }
+}
+
+class CapturePage extends ConsumerWidget {
+  const CapturePage({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return _CapturePageLoaderLayer();
   }
 }

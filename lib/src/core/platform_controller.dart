@@ -1,15 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
+import '/src/app/providers.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_channel.dart';
 import '/src/core/utils.dart';
-
-final platformControllerProvider = Provider<PlatformController>((ref) {
-  throw Exception('Must override before use');
-});
+import '/src/gui/capture.dart';
+import '/src/preference/storage_box.dart';
 
 final capturingStateProvider = Provider<bool>((ref) {
   return ref.watch(captureTriggeredEventProvider).when(
@@ -135,6 +136,69 @@ class CharaDetailCaptureState {
 
 final charaDetailCaptureStateProvider = StateProvider<CharaDetailCaptureState>((ref) {
   return CharaDetailCaptureState();
+});
+
+final trainerIdProvider = Provider<String>((ref) {
+  final box = StorageBox(StorageBoxKey.trainerId);
+  const key = "trainer_id";
+  var id = box.pull<String>(key);
+  if (id == null) {
+    id = const Uuid().v4();
+    box.push(key, id);
+    logger.i("Trainer ID generated: $id");
+  } else {
+    logger.i("Trainer ID loaded: $id");
+  }
+  return id;
+});
+
+typedef JsonMap = Map<String, dynamic>;
+
+final platformConfigLoader = FutureProvider<JsonMap>((ref) async {
+  JsonMap config = {
+    "chara_detail": {},
+    "directory": {},
+    "video_mode": false,
+    "trainer_id": ref.watch(trainerIdProvider),
+  };
+
+  await Future.wait([
+    ref.watch(pathInfoLoader.future).then((directory) {
+      config["directory"]["temp_dir"] = directory.temp;
+      config["directory"]["storage_dir"] = directory.storage;
+      config["directory"]["modules_dir"] = directory.modules;
+    }),
+    rootBundle
+        .loadString('assets/config/chara_detail/scene_context.json')
+        .then((text) => config["chara_detail"]["scene_context"] = jsonDecode(text)),
+    rootBundle
+        .loadString('assets/config/chara_detail/scene_scraper.json')
+        .then((text) => config["chara_detail"]["scene_scraper"] = jsonDecode(text)),
+    rootBundle
+        .loadString('assets/config/chara_detail/scene_stitcher.json')
+        .then((text) => config["chara_detail"]["scene_stitcher"] = jsonDecode(text)),
+    rootBundle
+        .loadString('assets/config/chara_detail/recognizer.json')
+        .then((text) => config["chara_detail"]["recognizer"] = jsonDecode(text)),
+    rootBundle.loadString('assets/config/platform.json').then((text) => config["platform"] = jsonDecode(text)),
+  ]);
+
+  return config;
+});
+
+final platformControllerLoader = FutureProvider<PlatformController>((ref) {
+  logger.d("platformControllerLoader");
+  return ref.watch(platformConfigLoader.future).then((config) {
+    final controller = PlatformController(ref, config);
+    if (ref.read(autoStartCaptureStateProvider)) {
+      controller.startCapture();
+    }
+    return controller;
+  });
+});
+
+final platformControllerProvider = Provider<PlatformController>((ref) {
+  return ref.watch(platformControllerLoader).value!;
 });
 
 class PlatformController {

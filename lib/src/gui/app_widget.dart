@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:umasagashi_app/src/gui/chara_detail.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/src/app/pages.dart';
@@ -264,8 +265,8 @@ class AppWidget extends StatelessWidget {
   }
 }
 
-class App extends ConsumerWidget {
-  App({Key? key}) : super(key: key);
+class ApplicationWidget extends ConsumerWidget {
+  ApplicationWidget({Key? key}) : super(key: key);
 
   final _router = AppRouter();
 
@@ -317,7 +318,10 @@ class App extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Ensure that the controller is created at app startup.
     // If not, Auto Start option will not work.
-    ref.read(platformControllerProvider);
+    ref.read(platformControllerLoader);
+
+    // Also, start up loaders here.
+    ref.read(charaDetailInitialDataLoader);
 
     final theme = FlexThemeData.light(
       scheme: FlexScheme.blue,

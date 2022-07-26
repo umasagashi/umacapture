@@ -15,6 +15,8 @@ class PathInfo {
 
   const PathInfo(this.data);
 
+  String get temp => "$data/temp";
+
   String get storage => "$data/storage";
 
   String get modules => "$data/modules";

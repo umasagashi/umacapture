@@ -121,6 +121,32 @@ class _SingleTilePageRootWidgetState extends ConsumerState<SingleTilePageRootWid
   }
 }
 
+class SingleTileWidget extends ConsumerWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? margin;
+  final EdgeInsetsGeometry? padding;
+
+  const SingleTileWidget({
+    Key? key,
+    required this.child,
+    this.margin = const EdgeInsets.all(8),
+    this.padding = const EdgeInsets.all(8),
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Scaffold(
+      body: Card(
+        margin: margin ?? EdgeInsets.zero,
+        child: Padding(
+          padding: padding ?? EdgeInsets.zero,
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
 class ErrorMessageWidget extends StatelessWidget {
   final String message;
 
