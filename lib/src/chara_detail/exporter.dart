@@ -8,6 +8,7 @@ import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '/src/app/providers.dart';
 import '/src/chara_detail/chara_detail_record.dart';
@@ -36,14 +37,18 @@ abstract class Exporter {
   Exporter(this.dialogTitle, this.defaultFileName, this.ref);
 
   void export({StringCallback? onSuccess}) {
-    FilePicker.platform.saveFile(dialogTitle: dialogTitle, fileName: defaultFileName).then((path) {
-      if (path != null) {
-        ref.read(exportingStateProvider.notifier).update((_) => true);
-        _export(path).then((_) {
-          ref.read(exportingStateProvider.notifier).update((_) => false);
-          onSuccess?.call(path);
-        });
-      }
+    getDownloadsDirectory().then((initialDirectory) {
+      FilePicker.platform
+          .saveFile(dialogTitle: dialogTitle, fileName: defaultFileName, initialDirectory: initialDirectory?.path)
+          .then((path) {
+        if (path != null) {
+          ref.read(exportingStateProvider.notifier).update((_) => true);
+          _export(path).then((_) {
+            ref.read(exportingStateProvider.notifier).update((_) => false);
+            onSuccess?.call(path);
+          });
+        }
+      });
     });
   }
 
@@ -85,11 +90,19 @@ class CsvExporter extends Exporter {
   }
 }
 
+@jsonSerializable
+class JsonExportData {
+  final List<CharaDetailRecord> charaDetail;
+  final LabelMap labels;
+
+  JsonExportData(this.charaDetail, this.labels);
+}
+
 class _JsonExporterArgs {
   final File outputFile;
-  final List<CharaDetailRecord> records;
+  final JsonExportData data;
 
-  _JsonExporterArgs(this.outputFile, this.records);
+  _JsonExporterArgs(this.outputFile, this.data);
 }
 
 class JsonExporter extends Exporter {
@@ -98,13 +111,14 @@ class JsonExporter extends Exporter {
   static void _run(_JsonExporterArgs args) {
     initializeJsonReflectable();
     final options = SerializationOptions(caseStyle: CaseStyle.snake, indent: " " * 4);
-    args.outputFile.writeAsStringSync(JsonMapper.serialize(args.records, options));
+    args.outputFile.writeAsStringSync(JsonMapper.serialize(args.data, options));
   }
 
   @override
   Future<dynamic> _export(String path) {
     final records = ref.read(charaDetailRecordStorageProvider);
-    return compute(_run, _JsonExporterArgs(File(path), records));
+    final labelMap = ref.read(labelMapProvider);
+    return compute(_run, _JsonExporterArgs(File(path), JsonExportData(records, labelMap)));
   }
 }
 
@@ -122,6 +136,7 @@ class ZipExporter extends Exporter {
     final encoder = ZipFileEncoder();
     encoder.create(args.outputFile.path);
     encoder.addDirectory(Directory(args.pathInfo.charaDetail));
+    encoder.addFile(File("${args.pathInfo.modules}/labels.json"));
     encoder.close();
   }
 
