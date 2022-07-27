@@ -509,6 +509,10 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
             Padding(
               padding: const EdgeInsets.all(4),
               child: ExtendedImageGesturePageView.builder(
+                itemCount: 3,
+                controller: controller,
+                scrollDirection: Axis.horizontal,
+                canScrollPage: (_) => true,
                 itemBuilder: (BuildContext context, int index) {
                   final storage = ref.read(charaDetailRecordStorageProvider.notifier);
                   final imageMode = CharaDetailRecordImageMode.values[index + 1];
@@ -528,7 +532,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
                             final r = math.max(h, v);
                             const f = 0.95;
                             return GestureConfig(
-                              maxScale: (r / h) * f,
+                              maxScale: math.max(((r / h) * f), r),
                               initialScale: r,
                               minScale: math.min(f, r * f),
                               initialAlignment: InitialAlignment.topCenter,
@@ -540,9 +544,6 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
                     },
                   );
                 },
-                itemCount: 3,
-                controller: controller,
-                scrollDirection: Axis.horizontal,
               ),
             ),
             Row(
