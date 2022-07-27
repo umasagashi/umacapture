@@ -330,7 +330,10 @@ class CharaDetailRecord extends JsonEquatable {
       ];
 
   @JsonProperty(ignore: true)
-  String get traineeIconPath => "${metadata.recordId.self}/trainee.jpg";
+  String get id => metadata.recordId.self;
+
+  @JsonProperty(ignore: true)
+  String get traineeIconPath => "$id/trainee.jpg";
 
   static Future<CharaDetailRecord?> readFromFile(File file) async {
     const options = DeserializationOptions(caseStyle: CaseStyle.snake);

@@ -677,7 +677,7 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
   }
 }
 
-final _initialDataLoader = FutureProvider((ref) async {
+final charaDetailInitialDataLoader = FutureProvider((ref) async {
   return Future.wait([
     ref.watch(pathInfoLoader.future),
   ]).then((_) {
@@ -735,7 +735,7 @@ class _CharaDetailDataTableLoaderLayer extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final loader = ref.watch(_initialDataLoader);
+    final loader = ref.watch(charaDetailInitialDataLoader);
     return loader.when(
       loading: () => loading(),
       error: (errorMessage, stackTrace) => error(errorMessage, stackTrace, theme),

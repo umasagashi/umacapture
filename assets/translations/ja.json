@@ -5,6 +5,7 @@
         },
         "capture": {
             "title": "キャプチャ",
+            "loading_error": "ロード中にエラーが発生しました。\n注意：エラーメッセージにはユーザー名が含まれます。",
             "capture_control": {
                 "title": "コントロール",
                 "start_capture_button": "キャプチャ開始",
@@ -135,6 +136,8 @@
                         "label": "選択",
                         "description": "選択されているウマ娘のみがテーブルに表示されます。"
                     }
+                },
+                "factor": {
                 }
             },
             "columns": {
@@ -217,6 +220,10 @@
                 "skill": {
                     "title": "スキル",
                     "description": "所持スキル"
+                },
+                "factor": {
+                    "title": "因子",
+                    "description": "所持因子"
                 }
             },
             "context_menu": {

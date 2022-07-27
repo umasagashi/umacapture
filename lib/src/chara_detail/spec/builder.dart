@@ -3,17 +3,20 @@ import 'dart:io';
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/app/providers.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/character.dart';
+import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
 
 // ignore: constant_identifier_names
@@ -34,14 +37,15 @@ final moduleInfoLoaders = FutureProvider((ref) async {
   });
 });
 
-Future<T> _loadFromJson<T>(Ref ref, String fileName) async {
-  final path = await ref.watch(pathInfoLoader.future);
+Future<T> _loadFromJson<T>(String path) async {
+  initializeJsonReflectable();
   const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-  return File("${path.modules}/$fileName").readAsString().then((e) => JsonMapper.deserialize<T>(e, options)!);
+  return File(path).readAsString().then((e) => JsonMapper.deserialize<T>(e, options)!);
 }
 
 final _labelMapLoader = FutureProvider<LabelMap>((ref) async {
-  return _loadFromJson<Map<String, dynamic>>(ref, "labels.json")
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<Map<String, dynamic>>, "${path.modules}/labels.json")
       .then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v))));
 });
 
@@ -50,7 +54,8 @@ final labelMapProvider = Provider<LabelMap>((ref) {
 });
 
 final _skillInfoLoader = FutureProvider<List<SkillInfo>>((ref) async {
-  return _loadFromJson<List<SkillInfo>>(ref, "skill_info.json")
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<List<SkillInfo>>, "${path.modules}/skill_info.json")
       .then((e) => e.sorted((a, b) => a.sortKey.compareTo(b.sortKey)));
 });
 
@@ -64,7 +69,8 @@ final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
 });
 
 final _skillTagLoader = FutureProvider<List<SkillTag>>((ref) async {
-  return _loadFromJson<List<SkillTag>>(ref, "skill_tag.json");
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<List<SkillTag>>, "${path.modules}/skill_tag.json");
 });
 
 final skillTagProvider = Provider<List<SkillTag>>((ref) {
@@ -72,11 +78,13 @@ final skillTagProvider = Provider<List<SkillTag>>((ref) {
 });
 
 final _charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
-  return _loadFromJson<List<int>>(ref, "rank_border.json");
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<List<int>>, "${path.modules}/rank_border.json");
 });
 
 final _charaCardInfoLoader = FutureProvider<List<CharaCardInfo>>((ref) async {
-  return _loadFromJson<List<CharaCardInfo>>(ref, "character_card_info.json");
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<List<CharaCardInfo>>, "${path.modules}/character_card_info.json");
 });
 
 final charaCardInfoProvider = Provider<List<CharaCardInfo>>((ref) {
@@ -228,6 +236,12 @@ final _columnBuilderLoader = FutureProvider<List<ColumnBuilder>>((ref) async {
       description: "$tr_columns.skill.description".tr(),
       category: ColumnCategory.skill,
       parser: SkillParser(),
+    ),
+    FactorColumnBuilder(
+      title: "$tr_columns.factor.title".tr(),
+      description: "$tr_columns.factor.description".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
     ),
   ];
 });

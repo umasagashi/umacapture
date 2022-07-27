@@ -32,7 +32,6 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final int valueMin;
   final int valueMax;
   final IsInRangeIntegerPredicate predicate;
-  final numberFormatter = NumberFormat("#,###");
 
   @override
   final String id;
@@ -73,6 +72,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
 
   @override
   PlutoColumn plutoColumn(BuildResource resource) {
+    final numberFormatter = NumberFormat("#,###");
     return PlutoColumn(
       title: title,
       field: id,
