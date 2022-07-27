@@ -73,7 +73,8 @@ class SoundEffect {
   static load(SoundSetting setting) async {
     final player = AudioPlayer();
     await player.setReleaseMode(ReleaseMode.stop);
-    await player.setPlayerMode(PlayerMode.lowLatency);
+    // TODO: This does not work on android.
+    // await player.setPlayerMode(PlayerMode.lowLatency);
     await player.setSourceAsset(setting.path);
     await player.setVolume(setting.volume);
     return SoundEffect._(player);
