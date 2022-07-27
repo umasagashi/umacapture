@@ -7,6 +7,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
@@ -14,6 +15,15 @@ import '/src/chara_detail/spec/ranged_integer.dart';
 
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
+
+class RangedLabelCellData implements Exportable<String> {
+  final String label;
+
+  RangedLabelCellData(this.label);
+
+  @override
+  String get csv => label;
+}
 
 @jsonSerializable
 class RangedLabelColumnSpec extends ColumnSpec<int> {
@@ -54,7 +64,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
     final labels = resource.labelMap[labelKey]!;
     return PlutoCellWithUserData.create(
       value: value,
-      data: labels[value],
+      data: RangedLabelCellData(labels[value]),
     );
   }
 
@@ -69,9 +79,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
-        final label = context.cell.getUserData<String>()!;
+        final data = context.cell.getUserData<RangedLabelCellData>()!;
         return Text(
-          label,
+          data.label,
           textAlign: TextAlign.center,
         );
       },

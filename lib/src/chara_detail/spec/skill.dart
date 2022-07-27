@@ -1,3 +1,4 @@
+import 'package:csv/csv.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
@@ -63,6 +65,16 @@ class AggregateSkillPredicate extends Predicate<List<Skill>> {
   }
 }
 
+class SkillCellData<T> implements Exportable<String> {
+  final List<String> skills;
+  final T label;
+
+  SkillCellData(this.skills, this.label);
+
+  @override
+  String get csv => const ListToCsvConverter().convert([skills]);
+}
+
 @jsonSerializable
 class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final Parser<List<Skill>> parser;
@@ -100,16 +112,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   PlutoCell plutoCell(BuildResource resource, List<Skill> value) {
     final labels = resource.labelMap[labelKey]!;
     final foundSkills = predicate.extract(value);
+    final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.showCount == 0) {
       return PlutoCellWithUserData.create(
         value: foundSkills.length,
-        data: foundSkills,
+        data: SkillCellData(skillNames, foundSkills.length),
       );
     }
-    final desc = foundSkills.partial(0, predicate.showCount).map((e) => labels[e.id]).join(", ");
+    final desc = skillNames.partial(0, predicate.showCount).join(", ");
     return PlutoCellWithUserData.create(
-      value: "(${foundSkills.length}) $desc",
-      data: foundSkills,
+      // Since autoFitColumn is not accurate, reserve few characters larger.
+      value: "$desc${"M" * (desc.length * 0.15).toInt()}",
+      data: SkillCellData(skillNames, desc),
     );
   }
 
@@ -126,7 +140,8 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
-        return Text(context.cell.value.toString());
+        final data = context.cell.getUserData<SkillCellData>()!;
+        return Text(data.label);
       },
     );
   }

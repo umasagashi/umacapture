@@ -19,7 +19,7 @@ dependencies:
   audioplayers: ^1.0.1
   auto_route: ^4.2.1
   badges: ^2.0.3
-  charset_converter: ^2.1.0
+  charset: ^1.0.1
   collection: ^1.16.0
   csv: ^5.0.1
   dart_json_mapper: ^2.2.4+2

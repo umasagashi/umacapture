@@ -252,7 +252,7 @@ class _CharaDetailExportButton extends ConsumerWidget {
     final style = theme.textTheme.labelLarge;
     const menuHeight = 40.0;
     const buttonSize = 30.0;
-    const encoding = "Shift_JIS";
+    const encoding = CharCodec.shiftJis;
     final exporting = ref.watch(exportingStateProvider);
     return SizedBox(
       height: buttonSize,
@@ -368,13 +368,16 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
               style: theme.textTheme.labelSmall,
               textAlign: TextAlign.center,
             ),
-            child: ActionChip(
-              label: spec.tag(resource),
-              tooltip: spec.description,
-              backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
-              onPressed: () {
-                _ColumnSpecDialog.show(context, spec);
-              },
+            child: GestureDetector(
+              onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec),
+              child: ActionChip(
+                label: spec.tag(resource),
+                tooltip: spec.description,
+                backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
+                onPressed: () {
+                  _ColumnSpecDialog.show(context, spec);
+                },
+              ),
             ),
           ),
         );

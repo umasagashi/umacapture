@@ -1,7 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
-import 'package:charset_converter/charset_converter.dart';
+import 'package:charset/charset.dart';
 import 'package:csv/csv.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:file_picker/file_picker.dart';
@@ -20,6 +21,10 @@ import '/src/core/utils.dart';
 final exportingStateProvider = StateProvider<bool>((ref) {
   return false;
 });
+
+abstract class Exportable<T> {
+  T get csv;
+}
 
 abstract class Exporter {
   final String dialogTitle;
@@ -42,22 +47,41 @@ abstract class Exporter {
     });
   }
 
-  Future<void> _export(String path);
+  Future<dynamic> _export(String path);
+}
+
+enum CharCodec {
+  shiftJis,
+  utf8Bom,
+  utf16leBom,
 }
 
 class CsvExporter extends Exporter {
-  final String encoding;
+  final CharCodec encoding;
 
   CsvExporter(super.dialogTitle, super.defaultFileName, super.ref, this.encoding);
 
+  List<int> encode(String content) {
+    switch (encoding) {
+      case CharCodec.shiftJis:
+        return const ShiftJISEncoder().convert(content);
+      case CharCodec.utf8Bom:
+        return [0xEF, 0xBB, 0xBF, ...utf8.encode(content)];
+      case CharCodec.utf16leBom:
+        return const Utf16Encoder().encodeUtf16Le(content, true);
+    }
+  }
+
   @override
-  Future<void> _export(String path) async {
+  Future<dynamic> _export(String path) async {
     logger.d(path);
     final grid = ref.watch(currentGridProvider);
-    final table = grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData()).toList()).toList();
-    table.insert(0, grid.columns.map((e) => e.title).toList());
-    final content = CharsetConverter.encode(encoding, const ListToCsvConverter().convert(table));
-    return content.then((e) => File(path).writeAsBytes(e));
+    final table = [
+      grid.columns.map((e) => e.title).toList(),
+      ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()!.csv).toList()).toList(),
+    ];
+    final content = const ListToCsvConverter().convert(table);
+    return File(path).writeAsBytes(encode(content));
   }
 }
 
@@ -78,7 +102,7 @@ class JsonExporter extends Exporter {
   }
 
   @override
-  Future<void> _export(String path) {
+  Future<dynamic> _export(String path) {
     final records = ref.read(charaDetailRecordStorageProvider);
     return compute(_run, _JsonExporterArgs(File(path), records));
   }
@@ -102,7 +126,7 @@ class ZipExporter extends Exporter {
   }
 
   @override
-  Future<void> _export(String path) {
+  Future<dynamic> _export(String path) {
     final info = ref.read(pathInfoProvider);
     return compute(_run, _ZipExporterArgs(File(path), info));
   }

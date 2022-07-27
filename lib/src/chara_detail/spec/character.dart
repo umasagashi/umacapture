@@ -8,6 +8,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
@@ -29,6 +30,15 @@ class CharacterCardPredicate extends Predicate<int> {
   bool apply(int value) {
     return !rejects.contains(value);
   }
+}
+
+class CharacterCardCellData implements Exportable<String> {
+  final String name;
+
+  CharacterCardCellData(this.name);
+
+  @override
+  String get csv => name;
 }
 
 @jsonSerializable
@@ -65,9 +75,10 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
 
   @override
   PlutoCell plutoCell(BuildResource resource, int value) {
+    final card = resource.charaCardInfo[value];
     return PlutoCellWithUserData.create(
-      value: resource.charaCardInfo[value].sortKey,
-      data: value,
+      value: card.sortKey,
+      data: CharacterCardCellData(card.names.first),
     );
   }
 

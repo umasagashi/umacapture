@@ -7,6 +7,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
 
@@ -24,6 +25,15 @@ class IsInRangeIntegerPredicate extends Predicate<int> {
   bool apply(int value) {
     return (min ?? value) <= value && value <= (max ?? value);
   }
+}
+
+class RangedIntegerCellData implements Exportable<int> {
+  final int value;
+
+  RangedIntegerCellData(this.value);
+
+  @override
+  int get csv => value;
 }
 
 @jsonSerializable
@@ -66,7 +76,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   PlutoCell plutoCell(BuildResource resource, int value) {
     return PlutoCellWithUserData.create(
       value: value,
-      data: value,
+      data: RangedIntegerCellData(value),
     );
   }
 
@@ -83,10 +93,8 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
-        return Text(
-          numberFormatter.format(context.cell.value.toInt()),
-          textAlign: TextAlign.center
-        );
+        final data = context.cell.getUserData<RangedIntegerCellData>()!;
+        return Text(numberFormatter.format(data.value), textAlign: TextAlign.center);
       },
     );
   }

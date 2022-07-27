@@ -2,12 +2,14 @@ import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
+import 'package:quiver/iterables.dart';
 import 'package:uuid/uuid.dart';
 
-import '../../core/utils.dart';
-import '../chara_detail_record.dart';
-import 'base.dart';
-import 'parser.dart';
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/parser.dart';
+import '/src/core/utils.dart';
 
 @jsonSerializable
 enum FactorSelection { anyOf, allOf, sumOf }
@@ -21,6 +23,16 @@ class FactorCriteria {
   int? count;
 
   FactorCriteria({required this.star, this.count});
+}
+
+class FactorCellData<T> implements Exportable<List<String>> {
+  final List<String> factors;
+  final T label;
+
+  FactorCellData(this.factors, this.label);
+
+  @override
+  List<String> get csv => factors;
 }
 
 int _extractStar(List<Factor> factors, Factor query) {
@@ -126,9 +138,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   @override
   PlutoCell plutoCell(BuildResource resource, FactorSet value) {
     final labels = resource.labelMap[labelKey]!;
+    final factorNames = concat([value.self, value.parent1, value.parent2]).map((e) => labels[e.id]).toList();
+    final desc = factorNames.partial(0, 3).join(", ");
     return PlutoCellWithUserData.create(
-      value: value.self.partial(0, 3).map((e) => labels[e.id]).join(","),
-      data: value,
+      // Since autoFitColumn is not accurate, reserve few characters larger.
+      value: "$desc${"M" * (desc.length * 0.15).toInt()}",
+      data: FactorCellData(factorNames, desc),
     );
   }
 
@@ -143,7 +158,8 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       enableColumnDrag: false,
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
-        return Text(context.cell.value);
+        final data = context.cell.getUserData<FactorCellData>()!;
+        return Text(data.label);
       },
     );
   }
