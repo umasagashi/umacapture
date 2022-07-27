@@ -12,13 +12,6 @@
 FlutterWindow::FlutterWindow(const flutter::DartProject &project)
     : project_(project) {
     uma::logger_util::init();
-
-    vlog_trace(1, 2, 3);
-    vlog_debug(1, 2, 3);
-    vlog_info(1, 2, 3);
-    vlog_warning(1, 2, 3);
-    vlog_error(1, 2, 3);
-    vlog_fatal(1, 2, 3);
 }
 
 FlutterWindow::~FlutterWindow() = default;

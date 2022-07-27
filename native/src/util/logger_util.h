@@ -45,7 +45,7 @@ inline void init() {
 #else
     spdlog::sinks_init_list sinks = {
         std::make_shared<spdlog::sinks::stdout_color_sink_mt>(),
-        std::make_shared<spdlog::sinks::basic_file_sink_mt>("./sandbox/log.txt", true),  // TODO: Path.
+//        std::make_shared<spdlog::sinks::basic_file_sink_mt>("./sandbox/log.txt", true),  // TODO: Path.
     };
     spdlog::set_default_logger(std::make_shared<spdlog::logger>(logger_name, sinks));
     spdlog::set_pattern("%^%L%$ %T.%f [%t] [%!:%#] %v");
