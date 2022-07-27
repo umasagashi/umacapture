@@ -127,7 +127,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   PlutoCell plutoCell(BuildResource resource, FactorSet value) {
     final labels = resource.labelMap[labelKey]!;
     return PlutoCellWithUserData.create(
-      value: labels[value.self.first.id],
+      value: value.self.partial(0, 3).map((e) => labels[e.id]).join(","),
       data: value,
     );
   }

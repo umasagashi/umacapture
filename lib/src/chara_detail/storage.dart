@@ -94,7 +94,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   void _updateIconMapNotifier() {
-    final iconMap = charaCardMap.map((k, v) => MapEntry(k, "$directory/${v.metadata.recordId.self}/trainee.jpg"));
+    final iconMap = charaCardMap.map((k, v) => MapEntry(k, "$directory/${v.id}/trainee.jpg"));
     ref.read(charaCardIconMapProvider.notifier).update((e) => Map.from(iconMap));
   }
 
@@ -103,9 +103,10 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   void add(CharaDetailRecord record) {
-    if (state.firstWhereOrNull((e) => record.isSameChara(e)) != null) {
-      Directory("$directory/${record.metadata.recordId.self}").delete(recursive: true);
-      _duplicatedCharaEventController.sink.add(record.metadata.recordId.self);
+    final duplicated = state.firstWhereOrNull((e) => record.isSameChara(e));
+    if (duplicated != null && duplicated.id != record.id) {
+      Directory("$directory/${record.id}").delete(recursive: true);
+      _duplicatedCharaEventController.sink.add(record.id);
       ref
           .watch(charaDetailCaptureStateProvider.notifier)
           .update((state) => state.fail(message: "duplicated_character"));
@@ -130,11 +131,11 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   CharaDetailRecord? getBy({required String id}) {
-    return state.firstWhereOrNull((e) => e.metadata.recordId.self == id);
+    return state.firstWhereOrNull((e) => e.id == id);
   }
 
   String recordPathOf(CharaDetailRecord record) {
-    return "$directory/${record.metadata.recordId.self}";
+    return "$directory/${record.id}";
   }
 
   String imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
