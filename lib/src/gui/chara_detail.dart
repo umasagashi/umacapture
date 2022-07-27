@@ -65,6 +65,8 @@ class _Dialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final controller = ScrollController();
+
     return Card(
       margin: EdgeInsets.zero,
       child: Column(
@@ -89,10 +91,15 @@ class _Dialog extends ConsumerWidget {
           ),
           if (usePageView)
             Expanded(
-              child: SingleChildScrollView(
-                controller: ScrollController(),
-                padding: const EdgeInsets.all(8),
-                child: content,
+              child: Scrollbar(
+                thumbVisibility: true,
+                trackVisibility: true,
+                controller: controller,
+                child: SingleChildScrollView(
+                  controller: controller,
+                  padding: const EdgeInsets.all(8),
+                  child: content,
+                ),
               ),
             ),
           if (!usePageView) content,
@@ -633,6 +640,14 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
             rows: grid.rows,
             mode: PlutoGridMode.select,
             configuration: PlutoGridConfiguration(
+              enterKeyAction: PlutoGridEnterKeyAction.none,
+              scrollbar: const PlutoGridScrollbarConfig(
+                isAlwaysShown: true,
+                scrollbarRadius: Radius.circular(8),
+                scrollbarRadiusWhileDragging: Radius.circular(8),
+                scrollbarThickness: 12,
+                scrollbarThicknessWhileDragging: 12,
+              ),
               style: PlutoGridStyleConfig(
                 enableCellBorderVertical: false,
                 gridBackgroundColor: theme.colorScheme.surface,
@@ -646,7 +661,6 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
                 columnTextStyle: theme.textTheme.titleSmall!,
                 cellTextStyle: theme.textTheme.bodyMedium!,
               ),
-              enterKeyAction: PlutoGridEnterKeyAction.none,
             ),
             onLoaded: (PlutoGridOnLoadedEvent event) {
               event.stateManager.autoFitColumns();
