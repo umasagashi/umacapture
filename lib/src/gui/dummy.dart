@@ -28,14 +28,9 @@ class _DummyPageState extends ConsumerState<DummyPage> with AutomaticKeepAliveCl
     return Scaffold(
       body: Center(
         child: Column(
-          children: [
-            Text(widget.title),
-            const Expanded(
-              child: TextField(
-                keyboardType: TextInputType.multiline,
-                maxLines: null,
-              ),
-            ),
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Text("Under Construction"),
           ],
         ),
       ),
