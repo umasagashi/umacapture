@@ -171,9 +171,7 @@ class FactorColumnSelector extends ConsumerStatefulWidget {
 class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
   @override
   Widget build(BuildContext context) {
-    // ref.watch(currentColumnSpecsProvider.notifier).update(widget.spec);
-    // Navigator.of(context).pop();
-    return Text(widget.spec.title);
+    return const Text("Under Construction");
   }
 }
 
@@ -197,7 +195,7 @@ class FactorColumnBuilder implements ColumnBuilder {
   });
 
   @override
-  ColumnSpec<FactorSet> build( ) {
+  ColumnSpec<FactorSet> build() {
     return FactorColumnSpec(
       id: const Uuid().v4(),
       title: title,
