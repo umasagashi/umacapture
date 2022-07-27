@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.umasagashi" "\0"
-            VALUE "FileDescription", "umasagashi_app" "\0"
+            VALUE "FileDescription", "umacapture" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "umasagashi_app" "\0"
+            VALUE "InternalName", "umacapture" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2022 com.umasagashi. All rights reserved." "\0"
-            VALUE "OriginalFilename", "umasagashi_app.exe" "\0"
-            VALUE "ProductName", "umasagashi_app" "\0"
+            VALUE "OriginalFilename", "umacapture.exe" "\0"
+            VALUE "ProductName", "umacapture" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

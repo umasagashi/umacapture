@@ -1,4 +1,4 @@
-package com.umasagashi.umasagashi_app;
+package com.umasagashi.umacapture;
 
 import android.app.ActivityManager;
 import android.content.Context;
@@ -19,7 +19,7 @@ public class MainActivity extends FlutterActivity {
     private static final int SCREEN_CAPTURE_REQUEST_CODE = 10001;
 
     static {
-        System.loadLibrary("umasagashi_app");
+        System.loadLibrary("umacapture");
     }
 
     private PlatformChannel platform;

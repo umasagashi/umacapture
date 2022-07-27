@@ -8,10 +8,10 @@
 
 int APIENTRY
 wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t *command_line, _In_ int show_command) {
-    HANDLE mutex_ = ::CreateMutex(nullptr, TRUE, L"umasagashi_app_mutex");
+    HANDLE mutex_ = ::CreateMutex(nullptr, TRUE, L"umacapture_mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mutex_);
-        HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"umasagashi_app");
+        HWND hwnd = ::FindWindow(L"FLUTTER_RUNNER_WIN32_WINDOW", L"umacapture");
         if (hwnd != nullptr) {
             ::ShowWindow(hwnd, SW_NORMAL);
             ::SetForegroundWindow(hwnd);
@@ -38,7 +38,7 @@ wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev, _In_ wchar_t *command
     FlutterWindow window(project);
     Win32Window::Point origin(10, 10);
     Win32Window::Size size(1280, 720);
-    if (!window.CreateAndShow(L"umasagashi_app", origin, size)) {
+    if (!window.CreateAndShow(L"umacapture", origin, size)) {
         return EXIT_FAILURE;
     }
     window.SetQuitOnClose(true);

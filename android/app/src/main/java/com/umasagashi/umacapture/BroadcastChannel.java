@@ -1,4 +1,4 @@
-package com.umasagashi.umasagashi_app;
+package com.umasagashi.umacapture;
 
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -9,7 +9,7 @@ import android.os.Bundle;
 import java.util.function.Consumer;
 
 public class BroadcastChannel {
-    private static final String CHANNEL = "dev.flutter.umasagashi_app/broadcast/";
+    private static final String CHANNEL = "dev.flutter.umasagashi/broadcast/";
     private static final String ARGUMENT_NAME = "message";
 
     private static class ActionReceiver extends BroadcastReceiver {

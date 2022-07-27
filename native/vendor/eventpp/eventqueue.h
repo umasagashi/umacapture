@@ -466,7 +466,7 @@ public:
 	}
 
     /**
-     * NOTE: This method was added for umasagashi.
+     * NOTE: This method was added for umacapture.
      * This patch is not belong to the original rights holders, but I do not claim any rights.
      */
     size_t size() const

@@ -1,12 +1,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.umasagashi.umasagashi_app">
+    package="com.umasagashi.umacapture">
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
 
     <application
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:label="umasagashi_app">
+        android:label="umacapture">
 
         <service
             android:name=".ScreenCaptureService"

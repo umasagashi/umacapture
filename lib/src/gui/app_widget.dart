@@ -7,13 +7,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:umasagashi_app/src/gui/chara_detail.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/src/app/pages.dart';
 import '/src/app/route.gr.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
+import '/src/gui/chara_detail.dart';
 import '/src/preference/storage_box.dart';
 import '/src/preference/window_state.dart';
 import '/src/state/notifier.dart';
@@ -233,7 +233,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
             height: 24,
             child: Image.asset("assets/image/app_icon.png", filterQuality: FilterQuality.medium),
           ),
-          title: Text('umasagashi', style: theme.textTheme.bodyMedium!),
+          title: Text('umacapture', style: theme.textTheme.bodyMedium!),
         ),
         body: widget.child,
       ),
@@ -359,7 +359,7 @@ class ApplicationWidget extends ConsumerWidget {
 
     final themeMode = ref.watch(themeSettingProvider);
     return MaterialApp.router(
-      title: 'umasagashi',
+      title: 'umacapture',
       theme: modifyTheme(ref, theme),
       darkTheme: modifyTheme(ref, darkTheme),
       themeMode: themeMode,

@@ -13,7 +13,7 @@ namespace uma::windows {
 namespace {
 
 const UINT MESSAGE_QUEUE_ID = 0xA000;
-const char *CHANNEL = "dev.flutter.umasagashi_app/capturing_channel";
+const char *CHANNEL = "dev.flutter.umasagashi/capturing_channel";
 
 }  // namespace
 

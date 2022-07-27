@@ -7,7 +7,7 @@
 cmake_minimum_required(VERSION 3.18.1)
 
 # Declares and names the project.
-project(umasagashi_app)
+project(umacapture)
 
 set(CMAKE_CXX_STANDARD 17)
 
@@ -15,7 +15,7 @@ set(NATIVE_EXTENSION_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../../native")
 set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../onnxruntime")
 
 set(SOURCE_FILES
-        umasagashi_app.cpp
+        umacapture.cpp
         "${NATIVE_EXTENSION_DIR}/src/core/native_api.cpp"
         "${NATIVE_EXTENSION_DIR}/src/condition/serializer.cpp"
         )

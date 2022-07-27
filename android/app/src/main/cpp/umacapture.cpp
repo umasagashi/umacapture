@@ -20,7 +20,7 @@ public:
         assert_(vm == nullptr);
         vm = v;
         JNIEnv *e = env();
-        jclass service_class = e->FindClass("com/umasagashi/umasagashi_app/ScreenCaptureService");
+        jclass service_class = e->FindClass("com/umasagashi/umacapture/ScreenCaptureService");
         notify_method = e->GetMethodID(service_class, "notifyPlatform", "(Ljava/lang/String;)V");
     }
 
@@ -143,24 +143,24 @@ jint JNI_OnLoad(JavaVM *vm, void *) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_startEventLoop(JNIEnv *, jobject thiz, jstring config) {
+Java_com_umasagashi_umacapture_ScreenCaptureService_startEventLoop(JNIEnv *, jobject thiz, jstring config) {
     log_debug("");
     uma::android::java_vm.setServiceInstance(thiz);
     uma::app::NativeApi::instance().startEventLoop(uma::android::java_vm.newStdString(config));
 
 }
 
-JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_joinEventLoop(JNIEnv *, jobject) {
+JNIEXPORT void JNICALL Java_com_umasagashi_umacapture_ScreenCaptureService_joinEventLoop(JNIEnv *, jobject) {
     log_debug("");
     uma::app::NativeApi::instance().joinEventLoop();
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_isRunning(JNIEnv *, jobject) {
+Java_com_umasagashi_umacapture_ScreenCaptureService_isRunning(JNIEnv *, jobject) {
     return uma::app::NativeApi::instance().isRunning();
 }
 
-JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_updateNativeFrame(
+JNIEXPORT void JNICALL Java_com_umasagashi_umacapture_ScreenCaptureService_updateNativeFrame(
         JNIEnv *,
         jobject,
         jobject frame,
@@ -188,13 +188,13 @@ JNIEXPORT void JNICALL Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_
 }
 
 JNIEXPORT void JNICALL
-Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_notifyCaptureStarted(JNIEnv *, jobject) {
+Java_com_umasagashi_umacapture_ScreenCaptureService_notifyCaptureStarted(JNIEnv *, jobject) {
     log_debug("");
     uma::app::NativeApi::instance().notifyCaptureStarted();
 }
 
 JNIEXPORT void JNICALL
-Java_com_umasagashi_umasagashi_1app_ScreenCaptureService_notifyCaptureStopped(JNIEnv *, jobject) {
+Java_com_umasagashi_umacapture_ScreenCaptureService_notifyCaptureStopped(JNIEnv *, jobject) {
     log_debug("");
     uma::app::NativeApi::instance().notifyCaptureStopped();
 }

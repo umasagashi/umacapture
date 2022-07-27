@@ -1,4 +1,4 @@
-package com.umasagashi.umasagashi_app;
+package com.umasagashi.umacapture;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
@@ -28,8 +28,8 @@ import io.flutter.Log;
 
 public class ScreenCaptureService extends Service implements ImageReader.OnImageAvailableListener {
     private static final String LOG_TAG = "ScreenCapture";
-    private static final String VIRTUAL_DISPLAY_ID = "umasagashi_app_virtual_display";
-    private static final String NOTIFICATION_CHANNEL_ID = "umasagashi_app_capture";
+    private static final String VIRTUAL_DISPLAY_ID = "umacapture_virtual_display";
+    private static final String NOTIFICATION_CHANNEL_ID = "umacapture_capture";
     private static final int REQUEST_CODE = 1234;
 
     private static final String NOTIFICATION_TITLE = "Title Here";

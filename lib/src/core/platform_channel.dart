@@ -6,7 +6,7 @@ import '/src/core/utils.dart';
 typedef PlatformCallback = StringCallback;
 
 class PlatformChannel {
-  static const channel = MethodChannel('dev.flutter.umasagashi_app/capturing_channel');
+  static const channel = MethodChannel('dev.flutter.umasagashi/capturing_channel');
   PlatformCallback? callbackMethod;
 
   PlatformChannel() {

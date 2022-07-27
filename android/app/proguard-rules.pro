@@ -3,4 +3,4 @@
 -keep class io.flutter.util.**  { *; }
 -keep class io.flutter.view.**  { *; }
 -keep class io.flutter.**  { *; }
--keep class com.umasagashi.umasagashi_app.** { *; }
+-keep class com.umasagashi.umacapture.** { *; }

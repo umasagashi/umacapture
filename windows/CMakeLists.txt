@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.14)
-project(umasagashi_app LANGUAGES CXX)
+project(umacapture LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-set(BINARY_NAME "umasagashi_app")
+set(BINARY_NAME "umacapture")
 
 cmake_policy(SET CMP0063 NEW)
 

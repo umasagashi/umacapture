@@ -1,4 +1,4 @@
-package com.umasagashi.umasagashi_app;
+package com.umasagashi.umacapture;
 
 import androidx.core.util.Consumer;
 
@@ -10,7 +10,7 @@ import io.flutter.plugin.common.BinaryMessenger;
 import io.flutter.plugin.common.MethodChannel;
 
 public class PlatformChannel {
-    private static final String CHANNEL = "dev.flutter.umasagashi_app/capturing_channel";
+    private static final String CHANNEL = "dev.flutter.umasagashi/capturing_channel";
     private final MethodChannel channel;
 
     private Map<String, Consumer<String>> methodMap;
