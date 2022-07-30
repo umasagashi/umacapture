@@ -19,7 +19,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
-import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
@@ -208,7 +207,9 @@ class _ColumnSpecDialogState extends ConsumerState<_ColumnSpecDialog> {
   @override
   void initState() {
     super.initState();
-    setState(() => spec = widget.originalSpec);
+    setState(() {
+      spec = widget.originalSpec;
+    });
   }
 
   @override
@@ -268,6 +269,7 @@ class _CharaDetailExportButton extends ConsumerWidget {
         children: [
           Disabled(
             disabled: exporting,
+            tooltip: "$tr_chara_detail.export.disabled_tooltip".tr(),
             child: PopupMenuButton<int>(
               enabled: ref.watch(charaDetailRecordStorageProvider).isNotEmpty,
               padding: EdgeInsets.zero,
@@ -454,12 +456,13 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
 
 class _CharaDetailPreviewDialog extends ConsumerStatefulWidget {
   final CharaDetailRecord record;
+  final int initialPage;
 
-  const _CharaDetailPreviewDialog(this.record);
+  const _CharaDetailPreviewDialog({required this.record, required this.initialPage});
 
-  static void show(BuildContext context, CharaDetailRecord record) {
+  static void show(BuildContext context, CharaDetailRecord record, int initialPage) {
     Future.delayed(Duration.zero, () {
-      _Dialog.show(context, _CharaDetailPreviewDialog(record));
+      _Dialog.show(context, _CharaDetailPreviewDialog(record: record, initialPage: initialPage));
     });
   }
 
@@ -492,7 +495,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
   void initState() {
     super.initState();
     setState(() {
-      controller = ExtendedPageController(initialPage: 0);
+      controller = ExtendedPageController(initialPage: widget.initialPage);
     });
   }
 
@@ -582,13 +585,16 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
       autoFitColumn(context, col);
+      if (maxWidth != null && col.width > maxWidth!) {
+        resizeColumn(col, -col.width / 2);
+      }
       col.enableDropToResize = enabled;
     }
   }
 }
 
 class _CharaDetailDataTableWidget extends ConsumerWidget {
-  void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record) {
+  void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
     final storage = ref.read(charaDetailRecordStorageProvider.notifier);
     final rect = offset & const Size(1, 1);
@@ -604,7 +610,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
       items: [
         PopupMenuItem(
           height: height,
-          onTap: () => _CharaDetailPreviewDialog.show(context, record),
+          onTap: () => _CharaDetailPreviewDialog.show(context, record, initialPage),
           child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
         PopupMenuItem(
@@ -668,11 +674,13 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
             },
             onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
               final record = event.row!.getUserData<CharaDetailRecord>()!;
-              showPopup(context, ref, event.offset!, record);
+              final spec = event.cell?.column.getUserData();
+              showPopup(context, ref, event.offset!, record, spec?.tabIdx ?? 0);
             },
             onSelected: (PlutoGridOnSelectedEvent event) {
               final record = event.row!.getUserData<CharaDetailRecord>()!;
-              _CharaDetailPreviewDialog.show(context, record);
+              final spec = event.cell?.column.getUserData();
+              _CharaDetailPreviewDialog.show(context, record, spec?.tabIdx ?? 0);
             },
           ),
           if (grid.rows.isEmpty) Text("$tr_chara_detail.no_row_message".tr()),

@@ -255,3 +255,35 @@ class _SpinBoxState extends State<SpinBox> {
     );
   }
 }
+
+class Disabled extends StatelessWidget {
+  final bool disabled;
+  final String tooltip;
+  final Widget child;
+
+  const Disabled({
+    super.key,
+    required this.disabled,
+    required this.tooltip,
+    required this.child,
+  });
+
+  Widget wrappedChild() {
+    return IgnorePointer(
+      ignoring: disabled,
+      child: Opacity(
+        opacity: disabled ? 0.5 : 1,
+        child: child,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (disabled) {
+      return Tooltip(message: tooltip, child: wrappedChild());
+    } else {
+      return wrappedChild();
+    }
+  }
+}

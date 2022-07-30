@@ -45,11 +45,12 @@ class CurrentPlatform {
 }
 
 final logger = Logger(
-    printer: PrettyPrinter(
-  printEmojis: false,
-  printTime: true,
-  lineLength: 80,
-));
+  printer: PrettyPrinter(
+    printEmojis: false,
+    printTime: true,
+    lineLength: 80,
+  ),
+);
 
 class ProviderLogger extends ProviderObserver {
   @override
@@ -76,10 +77,6 @@ extension DoubleExtension on double {
   }
 }
 
-extension IntIterableExtension on Iterable<int> {
-  int sum() => fold(0, (p, e) => p + e);
-}
-
 extension BoolIterableExtension on Iterable<bool> {
   int countTrue() => where((e) => e).length;
 
@@ -89,6 +86,14 @@ extension BoolIterableExtension on Iterable<bool> {
 
   bool everyIn() {
     return every((e) => e);
+  }
+}
+
+extension SetExtension<T> on Set<T> {
+  bool addAllWithSizeCheck(Iterable<T> elements) {
+    final previous = length;
+    addAll(elements);
+    return previous != length;
   }
 }
 
@@ -107,6 +112,14 @@ extension ListExtension<T> on List<T> {
       yield it.current;
     }
   }
+
+  void addIfNotNull(T? value) {
+    if (value != null) {
+      add(value);
+    }
+  }
+
+  Map<K, T> toMap<K>(K Function(T) key) => Map<K, T>.fromEntries(map((e) => MapEntry(key(e), e)));
 }
 
 extension List2DExtension<T> on List<List<T>> {

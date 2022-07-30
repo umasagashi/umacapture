@@ -135,6 +135,11 @@ class FactorSet extends JsonEquatable {
 
   @override
   List<Object?> properties() => [self, parent1, parent2];
+
+  @JsonProperty(ignore: true)
+  List<Factor> get flattened => [...self, ...parent1, ...parent2];
+
+  List<List<Factor>> toList() => [self, parent1, parent2];
 }
 
 @jsonSerializable
