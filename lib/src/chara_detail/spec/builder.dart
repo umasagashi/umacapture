@@ -27,6 +27,8 @@ final moduleInfoLoaders = FutureProvider((ref) async {
     ref.watch(_labelMapLoader.future),
     ref.watch(_skillInfoLoader.future),
     ref.watch(_skillTagLoader.future),
+    ref.watch(_factorInfoLoader.future),
+    ref.watch(_factorTagLoader.future),
     ref.watch(_charaRankBorderLoader.future),
     ref.watch(_charaCardInfoLoader.future),
   ]).then((_) {
@@ -56,7 +58,7 @@ final labelMapProvider = Provider<LabelMap>((ref) {
 final _skillInfoLoader = FutureProvider<List<SkillInfo>>((ref) async {
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<SkillInfo>>, "${path.modules}/skill_info.json")
-      .then((e) => e.sorted((a, b) => a.sortKey.compareTo(b.sortKey)));
+      .then((e) => e.sortedBy<num>((e) => e.sortKey));
 });
 
 final skillInfoProvider = Provider<List<SkillInfo>>((ref) {
@@ -68,13 +70,39 @@ final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
   return ref.watch(skillInfoProvider).where((e) => skillSet.contains(e.sid)).toList();
 });
 
-final _skillTagLoader = FutureProvider<List<SkillTag>>((ref) async {
+final _skillTagLoader = FutureProvider<List<Tag>>((ref) async {
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<SkillTag>>, "${path.modules}/skill_tag.json");
+  return compute(_loadFromJson<List<Tag>>, "${path.modules}/skill_tag.json");
 });
 
-final skillTagProvider = Provider<List<SkillTag>>((ref) {
+final skillTagProvider = Provider<List<Tag>>((ref) {
   return ref.watch(_skillTagLoader).value!;
+});
+
+final _factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
+  final path = await ref.watch(pathInfoLoader.future);
+  final skillInfo = (await ref.watch(_skillInfoLoader.future)).toMap((e) => e.sid);
+  return compute(_loadFromJson<List<FactorInfo>>, "${path.modules}/factor_info.json")
+      .then((info) => info.map((e) => e.copyWith(skillInfo: skillInfo[e.skillSid])).toList())
+      .then((e) => e.sortedBy<num>((e) => e.sortKey));
+});
+
+final factorInfoProvider = Provider<List<FactorInfo>>((ref) {
+  return ref.watch(_factorInfoLoader).value!;
+});
+
+final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
+  final factorSet = ref.watch(availableFactorSetProvider);
+  return ref.watch(factorInfoProvider).where((e) => factorSet.contains(e.sid)).toList();
+});
+
+final _factorTagLoader = FutureProvider<List<Tag>>((ref) async {
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<List<Tag>>, "${path.modules}/factor_tag.json");
+});
+
+final factorTagProvider = Provider<List<Tag>>((ref) {
+  return ref.watch(_factorTagLoader).value!;
 });
 
 final _charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
@@ -103,7 +131,7 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
   return ref
       .watch(charaCardInfoProvider)
       .where((e) => iconMap.containsKey(e.sid))
-      .sorted((a, b) => a.sortKey.compareTo(b.sortKey))
+      .sortedBy<num>((e) => e.sortKey)
       .map((e) => AvailableCharaCardInfo(e, iconMap[e.sid]!))
       .toList();
 });
@@ -300,12 +328,11 @@ final currentGridProvider = Provider<Grid>((ref) {
   final records = zip2(recordList, rowConditions).where((row) => row.item2).map((row) => row.item1);
 
   final rows = zip2(plutoCells, records)
-      .map((row) => PlutoRowWithRawData.create(
+      .map((row) => PlutoRow(
             cells: Map.fromEntries(row.item1),
-            data: row.item2,
-            sortKey: -DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
-          ))
-      .sorted((a, b) => a.sortIdx!.compareTo(b.sortIdx!))
+            sortIdx: -DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
+          )..setUserData(row.item2))
+      .sortedBy<num>((e) => e.sortIdx!)
       .toList();
 
   return Grid(columns, rows, filteredCounts);

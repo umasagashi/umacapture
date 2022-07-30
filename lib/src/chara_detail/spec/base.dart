@@ -32,11 +32,11 @@ abstract class ColumnBuilder {
 }
 
 @jsonSerializable
-class SkillTag {
+class Tag {
   final String id;
   final String name;
 
-  SkillTag(this.id, this.name);
+  Tag(this.id, this.name);
 }
 
 @jsonSerializable
@@ -48,6 +48,41 @@ class SkillInfo {
   final Set<String> tags;
 
   SkillInfo(this.sid, this.sortKey, this.names, this.descriptions, this.tags);
+}
+
+@jsonSerializable
+class FactorInfo {
+  final int sid;
+  final int sortKey;
+  final List<String> names;
+  final List<String> descriptions;
+  final Set<String> tags;
+  final int? skillSid;
+  final SkillInfo? skillInfo;
+
+  FactorInfo({
+    required this.sid,
+    required this.sortKey,
+    required this.names,
+    required this.descriptions,
+    required this.tags,
+    this.skillSid,
+    this.skillInfo,
+  });
+
+  FactorInfo copyWith({
+    SkillInfo? skillInfo,
+  }) {
+    return FactorInfo(
+      sid: sid,
+      sortKey: sortKey,
+      names: names,
+      descriptions: descriptions,
+      tags: tags,
+      skillSid: skillSid,
+      skillInfo: skillInfo ?? this.skillInfo,
+    );
+  }
 }
 
 @jsonSerializable
@@ -83,6 +118,8 @@ abstract class ColumnSpec<T> {
   String get title;
 
   String get description;
+
+  int get tabIdx => 0;
 
   List<T> parse(List<CharaDetailRecord> records);
 
@@ -178,14 +215,6 @@ extension PlutoCellWithUserData on PlutoCell {
   T? getUserData<T>() => _userData[this] as T?;
 
   void setUserData<T>(T value) => _userData[this] = value;
-
-  static PlutoCell create({required value, data}) {
-    final cell = PlutoCell(value: value);
-    if (data != null) {
-      cell.setUserData(data);
-    }
-    return cell;
-  }
 }
 
 extension PlutoRowWithRawData on PlutoRow {
@@ -194,12 +223,12 @@ extension PlutoRowWithRawData on PlutoRow {
   T? getUserData<T>() => _userData[this] as T?;
 
   void setUserData<T>(T value) => _userData[this] = value;
+}
 
-  static PlutoRow create({required cells, required int sortKey, required data}) {
-    final row = PlutoRow(cells: cells, sortIdx: sortKey);
-    if (data != null) {
-      row.setUserData(data);
-    }
-    return row;
-  }
+extension PlutoColumnWithUserData on PlutoColumn {
+  static final _userData = Expando();
+
+  T? getUserData<T>() => _userData[this] as T?;
+
+  void setUserData<T>(T value) => _userData[this] = value;
 }

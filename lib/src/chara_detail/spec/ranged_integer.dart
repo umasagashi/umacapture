@@ -27,13 +27,13 @@ class IsInRangeIntegerPredicate extends Predicate<int> {
   }
 }
 
-class RangedIntegerCellData implements Exportable<int> {
+class RangedIntegerCellData implements Exportable {
   final int value;
 
   RangedIntegerCellData(this.value);
 
   @override
-  int get csv => value;
+  String get csv => value.toString();
 }
 
 @jsonSerializable
@@ -74,10 +74,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
 
   @override
   PlutoCell plutoCell(BuildResource resource, int value) {
-    return PlutoCellWithUserData.create(
-      value: value,
-      data: RangedIntegerCellData(value),
-    );
+    return PlutoCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 
   @override

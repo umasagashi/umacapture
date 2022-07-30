@@ -32,7 +32,7 @@ class CharacterCardPredicate extends Predicate<int> {
   }
 }
 
-class CharacterCardCellData implements Exportable<String> {
+class CharacterCardCellData implements Exportable {
   final String name;
 
   CharacterCardCellData(this.name);
@@ -76,10 +76,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   @override
   PlutoCell plutoCell(BuildResource resource, int value) {
     final card = resource.charaCardInfo[value];
-    return PlutoCellWithUserData.create(
-      value: card.sortKey,
-      data: CharacterCardCellData(card.names.first),
-    );
+    return PlutoCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
   }
 
   @override

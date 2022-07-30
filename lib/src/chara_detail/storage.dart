@@ -11,6 +11,7 @@ import '/src/app/providers.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/utils.dart';
 import '/src/gui/capture.dart';
 
 // ignore: constant_identifier_names
@@ -37,6 +38,10 @@ final charaCardIconMapProvider = StateProvider<Map<int, String>>((ref) {
 });
 
 final availableSkillSetProvider = StateProvider<Set<int>>((ref) {
+  return {};
+});
+
+final availableFactorSetProvider = StateProvider<Set<int>>((ref) {
   return {};
 });
 
@@ -68,6 +73,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   final String directory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
   final Set<int> skillSet = {};
+  final Set<int> factorSet = {};
 
   CharaDetailRecordStorage({required this.ref, required this.directory, required List<CharaDetailRecord> records})
       : super(records) {
@@ -86,10 +92,12 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
       }
     }
 
-    final previous = skillSet.length;
-    skillSet.addAll(record.skills.map((e) => e.id));
-    if (previous != skillSet.length) {
+    if (skillSet.addAllWithSizeCheck(record.skills.map((e) => e.id))) {
       _updateSkillSetNotifier();
+    }
+
+    if (factorSet.addAllWithSizeCheck(record.factors.flattened.map((e) => e.id))) {
+      _updateFactorSetNotifier();
     }
   }
 
@@ -100,6 +108,10 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
 
   void _updateSkillSetNotifier() {
     ref.read(availableSkillSetProvider.notifier).update((e) => Set.from(skillSet));
+  }
+
+  void _updateFactorSetNotifier() {
+    ref.read(availableFactorSetProvider.notifier).update((e) => Set.from(factorSet));
   }
 
   void add(CharaDetailRecord record) {

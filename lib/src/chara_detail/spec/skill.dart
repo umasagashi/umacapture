@@ -22,30 +22,29 @@ enum SkillSelection { anyOf, allOf, sumOf }
 
 @jsonSerializable
 class AggregateSkillPredicate extends Predicate<List<Skill>> {
-  List<Skill> query;
-  SkillSelection selectionMode;
-  int count;
-  int showCount;
+  final List<int> query;
+  final SkillSelection selection;
+  final int min;
+  final int show;
 
   AggregateSkillPredicate({
     required this.query,
-    required this.selectionMode,
-    required this.count,
-    required this.showCount,
+    required this.selection,
+    required this.min,
+    required this.show,
   });
 
   AggregateSkillPredicate.any()
       : query = [],
-        selectionMode = SkillSelection.anyOf,
-        count = 1,
-        showCount = 3;
+        selection = SkillSelection.anyOf,
+        min = 1,
+        show = 3;
 
   List<Skill> extract(List<Skill> value) {
     if (query.isEmpty) {
       return value;
     }
-    final querySkills = query.map((e) => e.id).toList();
-    return value.where((e) => querySkills.contains(e.id)).toList();
+    return value.where((e) => query.contains(e.id)).toList();
   }
 
   @override
@@ -54,18 +53,32 @@ class AggregateSkillPredicate extends Predicate<List<Skill>> {
     if (query.length < 2) {
       return foundSkills.isNotEmpty;
     }
-    switch (selectionMode) {
+    switch (selection) {
       case SkillSelection.anyOf:
         return foundSkills.isNotEmpty;
       case SkillSelection.allOf:
         return foundSkills.length == query.length;
       case SkillSelection.sumOf:
-        return foundSkills.length >= count;
+        return foundSkills.length >= min;
     }
+  }
+
+  AggregateSkillPredicate copyWith({
+    List<int>? query,
+    SkillSelection? selection,
+    int? min,
+    int? show,
+  }) {
+    return AggregateSkillPredicate(
+      query: List.from(query ?? this.query),
+      selection: selection ?? this.selection,
+      min: min ?? this.min,
+      show: show ?? this.show,
+    );
   }
 }
 
-class SkillCellData<T> implements Exportable<String> {
+class SkillCellData<T> implements Exportable {
   final List<String> skills;
   final T label;
 
@@ -113,23 +126,19 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     final labels = resource.labelMap[labelKey]!;
     final foundSkills = predicate.extract(value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
-    if (predicate.showCount == 0) {
-      return PlutoCellWithUserData.create(
-        value: foundSkills.length,
-        data: SkillCellData(skillNames, foundSkills.length),
-      );
+    if (predicate.show == 0) {
+      return PlutoCell(value: foundSkills.length)..setUserData(SkillCellData(skillNames, foundSkills.length));
     }
-    final desc = skillNames.partial(0, predicate.showCount).join(", ");
-    return PlutoCellWithUserData.create(
+    final desc = skillNames.partial(0, predicate.show).join(", ");
+    return PlutoCell(
       // Since autoFitColumn is not accurate, reserve few characters larger.
       value: "$desc${"M" * (desc.length * 0.15).toInt()}",
-      data: SkillCellData(skillNames, desc),
-    );
+    )..setUserData(SkillCellData(skillNames, desc));
   }
 
   @override
   PlutoColumn plutoColumn(BuildResource resource) {
-    final numberMode = predicate.showCount == 0;
+    final numberMode = predicate.show == 0;
     return PlutoColumn(
       title: title,
       field: id,
@@ -162,46 +171,24 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
       title: title,
       description: description,
       parser: parser,
-      predicate: predicate ?? this.predicate,
+      predicate: predicate ?? this.predicate.copyWith(),
     );
   }
 }
 
-class Disabled extends StatelessWidget {
-  final bool disabled;
-  final Widget child;
+class NoteCard extends ConsumerWidget {
+  final Widget description;
+  final List<Widget> children;
 
-  const Disabled({super.key, required this.disabled, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      ignoring: disabled,
-      child: Opacity(
-        opacity: disabled ? 0.5 : 1,
-        child: child,
-      ),
-    );
-  }
-}
-
-class _SkillTagSelector extends ConsumerStatefulWidget {
-  final ValueChanged<Set<String>> onChanged;
-
-  const _SkillTagSelector({required this.onChanged});
+  const NoteCard({
+    Key? key,
+    required this.description,
+    required this.children,
+  }) : super(key: key);
 
   @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _SkillTagSelectorState();
-}
-
-class _SkillTagSelectorState extends ConsumerState<_SkillTagSelector> {
-  final Set<String> selectedTags = {};
-
-  @override
-  Widget build(BuildContext context) {
-    final tags = ref.watch(skillTagProvider);
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-
     return Padding(
       padding: const EdgeInsets.all(8),
       child: Container(
@@ -217,34 +204,9 @@ class _SkillTagSelectorState extends ConsumerState<_SkillTagSelector> {
             children: [
               Padding(
                 padding: const EdgeInsets.only(left: 4, right: 4, bottom: 12),
-                child: Text("$tr_skill.selection.tags.description".tr()),
+                child: description,
               ),
-              Align(
-                alignment: Alignment.topLeft,
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final tag in tags)
-                      FilterChip(
-                        label: Text(tag.name),
-                        backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceVariant,
-                        showCheckmark: false,
-                        selected: selectedTags.contains(tag.id),
-                        onSelected: (selected) {
-                          setState(() {
-                            if (selected) {
-                              selectedTags.add(tag.id);
-                            } else {
-                              selectedTags.remove(tag.id);
-                            }
-                            widget.onChanged(selectedTags);
-                          });
-                        },
-                      ),
-                  ],
-                ),
-              ),
+              ...children,
             ],
           ),
         ),
@@ -253,10 +215,56 @@ class _SkillTagSelectorState extends ConsumerState<_SkillTagSelector> {
   }
 }
 
+class SkillTagSelector extends ConsumerStatefulWidget {
+  final ValueChanged<Set<String>> onChanged;
+
+  const SkillTagSelector({Key? key, required this.onChanged}) : super(key: key);
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _SkillTagSelectorState();
+}
+
+class _SkillTagSelectorState extends ConsumerState<SkillTagSelector> {
+  final Set<String> selectedTags = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final tags = ref.watch(skillTagProvider);
+    final theme = Theme.of(context);
+
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final tag in tags)
+            FilterChip(
+              label: Text(tag.name),
+              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceVariant,
+              showCheckmark: false,
+              selected: selectedTags.contains(tag.id),
+              onSelected: (selected) {
+                setState(() {
+                  if (selected) {
+                    selectedTags.add(tag.id);
+                  } else {
+                    selectedTags.remove(tag.id);
+                  }
+                  widget.onChanged(selectedTags);
+                });
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SkillSelector extends ConsumerStatefulWidget {
   final Set<String> selectedTags;
-  final List<Skill> query;
-  final ValueChanged<List<Skill>> onChanged;
+  final List<int> query;
+  final ValueChanged<List<int>> onChanged;
 
   const _SkillSelector({required this.selectedTags, required this.query, required this.onChanged});
 
@@ -265,13 +273,13 @@ class _SkillSelector extends ConsumerStatefulWidget {
 }
 
 class _SkillSelectorState extends ConsumerState<_SkillSelector> {
-  late List<Skill> query = [];
+  late List<int> query = [];
 
   @override
   void initState() {
     super.initState();
     setState(() {
-      query = widget.query;
+      query = List.from(widget.query);
     });
   }
 
@@ -294,11 +302,9 @@ class _SkillSelectorState extends ConsumerState<_SkillSelector> {
       onSelected: (selected) {
         setState(() {
           if (selected) {
-            assert(query.every((e) => e.id != label.sid));
-            query.add(Skill(id: label.sid));
+            query.add(label.sid);
           } else {
-            assert(query.any((e) => e.id == label.sid));
-            query.removeWhere((e) => e.id == label.sid);
+            query.remove(label.sid);
           }
           widget.onChanged(query);
         });
@@ -309,7 +315,7 @@ class _SkillSelectorState extends ConsumerState<_SkillSelector> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selected = query.map((e) => e.id).toSet();
+    final selected = query.toSet();
     final labels = getInfo(ref);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -326,7 +332,7 @@ class _SkillSelectorState extends ConsumerState<_SkillSelector> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                if (labels.isEmpty) Text("$tr_skill.selection.no_skill_message".tr()),
+                if (labels.isEmpty) Text("$tr_skill.selection.not_found_message".tr()),
                 for (final label in labels) skillChip(label, theme, selected.contains(label.sid)),
               ],
             ),
@@ -341,8 +347,11 @@ class SkillColumnSelector extends ConsumerStatefulWidget {
   final SkillColumnSpec originalSpec;
   final OnSpecChanged onChanged;
 
-  const SkillColumnSelector({Key? key, required SkillColumnSpec spec, required this.onChanged})
-      : originalSpec = spec,
+  const SkillColumnSelector({
+    Key? key,
+    required SkillColumnSpec spec,
+    required this.onChanged,
+  })  : originalSpec = spec,
         super(key: key);
 
   @override
@@ -357,7 +366,26 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
   void initState() {
     super.initState();
     setState(() {
-      spec = widget.originalSpec;
+      spec = widget.originalSpec.copyWith();
+    });
+  }
+
+  void updatePredicate({
+    List<int>? query,
+    SkillSelection? selection,
+    int? min,
+    int? show,
+  }) {
+    setState(() {
+      spec = spec.copyWith(
+        predicate: spec.predicate.copyWith(
+          query: query,
+          selection: selection,
+          min: min,
+          show: show,
+        ),
+      );
+      widget.onChanged(spec);
     });
   }
 
@@ -375,28 +403,23 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
     required SkillSelection mode,
   }) {
     final theme = Theme.of(context);
-    final selected = spec.predicate.selectionMode == mode;
+    final selected = spec.predicate.selection == mode;
     return ChoiceChip(
       label: Text(label),
       backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
       selected: selected,
-      onSelected: (_) {
-        setState(() {
-          spec.predicate.selectionMode = mode;
-          spec = spec.copyWith(predicate: spec.predicate);
-        });
-      },
+      onSelected: (_) => updatePredicate(selection: mode),
     );
   }
 
   Widget modeDescriptionWidget() {
-    switch (spec.predicate.selectionMode) {
+    switch (spec.predicate.selection) {
       case SkillSelection.anyOf:
         return Text("$tr_skill.mode.any.description".tr());
       case SkillSelection.allOf:
         return Text("$tr_skill.mode.all.description".tr());
       case SkillSelection.sumOf:
-        return Text("$tr_skill.mode.count.description".tr(namedArgs: {"count": spec.predicate.count.toString()}));
+        return Text("$tr_skill.mode.count.description".tr(namedArgs: {"count": spec.predicate.min.toString()}));
     }
   }
 
@@ -412,6 +435,7 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
         ),
         Disabled(
           disabled: spec.predicate.query.length < 2,
+          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
           child: Column(
             children: [
               Padding(
@@ -426,20 +450,15 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
                       modeChipWidget(label: "$tr_skill.mode.any.label".tr(), mode: SkillSelection.anyOf),
                       modeChipWidget(label: "$tr_skill.mode.count.label".tr(), mode: SkillSelection.sumOf),
                       Disabled(
-                        disabled: spec.predicate.selectionMode != SkillSelection.sumOf,
+                        disabled: spec.predicate.selection != SkillSelection.sumOf,
+                        tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
                         child: SpinBox(
                           width: 120,
                           height: 30,
                           min: 1,
                           max: spec.predicate.query.length,
-                          value: spec.predicate.count,
-                          onChanged: (value) {
-                            logger.d(value);
-                            setState(() {
-                              spec.predicate.count = value;
-                              spec = spec.copyWith(predicate: spec.predicate);
-                            });
-                          },
+                          value: spec.predicate.min,
+                          onChanged: (value) => updatePredicate(min: value),
                         ),
                       ),
                     ],
@@ -493,14 +512,8 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
                     height: 30,
                     min: 0,
                     max: 100,
-                    value: spec.predicate.showCount,
-                    onChanged: (value) {
-                      logger.d(value);
-                      setState(() {
-                        spec.predicate.showCount = value;
-                        spec = spec.copyWith(predicate: spec.predicate);
-                      });
-                    },
+                    value: spec.predicate.show,
+                    onChanged: (value) => updatePredicate(show: value),
                   ),
                 ],
               ),
@@ -516,20 +529,20 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
     return Column(
       children: [
         headingWidget("$tr_skill.selection.label".tr()),
-        _SkillTagSelector(
-          onChanged: (tags) {
-            setState(() => selectedTags = tags);
-          },
+        NoteCard(
+          description: Text("$tr_skill.selection.tags.description".tr()),
+          children: [
+            SkillTagSelector(
+              onChanged: (tags) {
+                setState(() => selectedTags = tags);
+              },
+            )
+          ],
         ),
         _SkillSelector(
           selectedTags: selectedTags,
           query: spec.predicate.query,
-          onChanged: (query) {
-            setState(() {
-              spec.predicate.query = query;
-              spec = spec.copyWith(predicate: spec.predicate);
-            });
-          },
+          onChanged: (query) => updatePredicate(query: query),
         ),
         const SizedBox(height: 32),
         headingWidget("$tr_skill.mode.label".tr()),

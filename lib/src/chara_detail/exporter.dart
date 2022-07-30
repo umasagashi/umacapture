@@ -23,8 +23,8 @@ final exportingStateProvider = StateProvider<bool>((ref) {
   return false;
 });
 
-abstract class Exportable<T> {
-  T get csv;
+abstract class Exportable {
+  String get csv;
 }
 
 abstract class Exporter {

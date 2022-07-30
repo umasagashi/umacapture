@@ -16,7 +16,7 @@ import '/src/chara_detail/spec/ranged_integer.dart';
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
 
-class RangedLabelCellData implements Exportable<String> {
+class RangedLabelCellData implements Exportable {
   final String label;
 
   RangedLabelCellData(this.label);
@@ -62,10 +62,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   @override
   PlutoCell plutoCell(BuildResource resource, int value) {
     final labels = resource.labelMap[labelKey]!;
-    return PlutoCellWithUserData.create(
-      value: value,
-      data: RangedLabelCellData(labels[value]),
-    );
+    return PlutoCell(value: value)..setUserData(RangedLabelCellData(labels[value]));
   }
 
   @override
