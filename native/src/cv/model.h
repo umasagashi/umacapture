@@ -56,14 +56,13 @@ struct Prediction {
 template<typename PredictionType>
 class Model {
 public:
-    explicit Model(const std::filesystem::path &path)
-        : input_size(-1, -1) {
+    [[maybe_unused]] Model(const std::filesystem::path &path, const std::string &name)
+        : model_name(name)
+        , input_size(-1, -1) {
         std::filesystem::path::string_type path_str = path;
         prediction = std::make_unique<Ort::Experimental::Session>(env, path_str, session_options);
         const auto input_shape = prediction->GetInputShapes()[0];
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
-
-        labels = json_util::read(path.parent_path() / "config.json")["labels"];
     }
 
     PredictionType predict(const Frame &frame) const {
@@ -78,14 +77,14 @@ public:
         return {prediction->Run(prediction->GetInputNames(), input_tensors, prediction->GetOutputNames())};
     }
 
-    std::string toString(const PredictionType &predicted) const { return predicted.toString(labels); }
+    [[nodiscard]] const std::string &name() const { return model_name; }
 
 private:
+    const std::string model_name;
     Ort::Env env;
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Experimental::Session> prediction;
     Size<int> input_size;
-    json_util::Json labels;
 };
 
 }  // namespace uma::recognizer

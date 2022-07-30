@@ -19,14 +19,7 @@ struct IndexPrediction : public recognizer::Prediction {
 
     [[nodiscard]] auto confidence() const { return at<float>(1); }
 
-    [[nodiscard]] std::string toString(const json_util::Json &labels) const {
-        if (labels.empty()) {
-            return std::to_string(result());
-        } else {
-            assert_(labels.contains("name"));
-            return labels["name"][result()].get<std::string>();
-        }
-    }
+    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
 };
 
 struct Chara {
@@ -34,6 +27,8 @@ struct Chara {
     int chara;
     int card;
     bool rental;
+
+    EXTENDED_JSON_TYPE_NDC(Chara, icon, chara, card, rental);
 };
 
 struct CharaPrediction : public recognizer::Prediction {
@@ -56,20 +51,7 @@ struct CharaPrediction : public recognizer::Prediction {
 
     [[nodiscard]] auto confidence() const { return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7)}); }
 
-    [[nodiscard]] std::string toString(const json_util::Json &labels) const {
-        const auto &r = result();
-        const auto chara_text = labels["character"][r.chara].get<std::string>();
-        const auto card_text = labels["card"][r.card].get<std::string>();
-        const auto chara_text_in_card_text = card_text.substr(card_text.length() - chara_text.length());
-        std::string text = card_text;
-        if (chara_text_in_card_text != chara_text) {
-            text += "(" + chara_text + ")";
-        }
-        if (r.rental) {
-            text += "[RENTAL]";
-        }
-        return text;
-    }
+    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
 };
 
 struct RacePlace {
@@ -77,6 +59,8 @@ struct RacePlace {
     int ground;
     int distance;
     int variation;
+
+    EXTENDED_JSON_TYPE_NDC(RacePlace, place, ground, distance, variation);
 };
 
 struct RacePlacePrediction : public recognizer::Prediction {
@@ -88,25 +72,11 @@ struct RacePlacePrediction : public recognizer::Prediction {
 
     [[nodiscard]] int variation() const { return static_cast<int>(at<int64_t>(6)); }
 
-    [[nodiscard]] RacePlace result() const {
-        return {
-            place(),
-            ground(),
-            distance(),
-            variation(),
-        };
-    }
+    [[nodiscard]] RacePlace result() const { return {place(), ground(), distance(), variation()}; }
 
     [[nodiscard]] auto confidence() const { return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7)}); }
 
-    [[nodiscard]] std::string toString(const json_util::Json &labels) const {
-        const auto &r = result();
-        const auto place_text = labels["place"][r.place].get<std::string>();
-        const auto ground_text = labels["ground"][r.ground].get<std::string>();
-        const auto distance_text = labels["distance"][r.distance].get<std::string>();
-        const auto variation_text = labels["variation"][r.variation].get<std::string>();
-        return place_text + " " + ground_text + " " + distance_text + " " + variation_text;
-    }
+    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
 };
 
 struct DateTimePrediction : public recognizer::Prediction {
@@ -117,21 +87,21 @@ struct DateTimePrediction : public recognizer::Prediction {
 
     [[nodiscard]] auto confidence() const { return at<float>(1); }
 
-    [[nodiscard]] std::string toString(const json_util::Json &labels) const { return result(); }
+    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
 };
 
 struct PredictionRecord {
+    std::string model;
     Rect<int> rect;
-    std::string text;
-    double confidence;
+    json_util::Json prediction;
 
-    EXTENDED_JSON_TYPE_NDC(PredictionRecord, rect, text, confidence);
+    EXTENDED_JSON_TYPE_NDC(PredictionRecord, model, rect, prediction);
 };
 
 class PredictionHistory {
 public:
-    void add(const Rect<int> &rect, const std::string &text, double confidence) {
-        records.push_back({rect, text, confidence});
+    void add(const std::string &model, const Rect<int> &rect, const json_util::Json &prediction) {
+        records.push_back({model, rect, prediction});
     }
 
     [[nodiscard]] json_util::Json toJson() const { return records; }
@@ -147,7 +117,7 @@ inline auto predict(
     const Rect<double> &position,
     PredictionHistory &history) {
     const auto &predicted = model.predict(frame.view(position));
-    history.add(frame.anchor().mapToFrame(position), model.toString(predicted), predicted.confidence());
+    history.add(model.name(), frame.anchor().mapToFrame(position), predicted.toJson());
     return predicted.result();
 }
 
@@ -188,12 +158,12 @@ inline auto predict(
 
 class StatusHeaderRecognizer {
 public:
-    StatusHeaderRecognizer(
+    [[maybe_unused]] StatusHeaderRecognizer(
         const std::filesystem::path &module_root_dir, const recognizer_config::StatusHeaderConfig &config)
         : config(config)
-        , evaluation_value_model(module_root_dir / config.evaluation.module_path)
-        , status_value_model(module_root_dir / config.status.module_path)
-        , aptitude_model(module_root_dir / config.aptitude.module_path) {}
+        , evaluation_value_model(module_root_dir / config.evaluation.module_path, "evaluation_value")
+        , status_value_model(module_root_dir / config.status.module_path, "status_value")
+        , aptitude_model(module_root_dir / config.aptitude.module_path, "aptitude") {}
 
     void recognize(const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
         record.evaluation_value = predict(evaluation_value_model, frame, config.evaluation.rect, history);
@@ -211,10 +181,11 @@ private:
 
 class SkillTabRecognizer {
 public:
-    SkillTabRecognizer(const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config)
+    [[maybe_unused]] SkillTabRecognizer(
+        const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config)
         : config(config)
-        , skill_model(module_root_dir / config.module_path)
-        , skill_level_model(module_root_dir / config.skill_level.module_path) {}
+        , skill_model(module_root_dir / config.module_path, "skill")
+        , skill_level_model(module_root_dir / config.skill_level.module_path, "skill_level") {}
 
     void recognize(const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
         const auto anchor = frame.anchor();
@@ -285,12 +256,13 @@ struct CropInfo {
 
 class FactorTabRecognizer {
 public:
-    FactorTabRecognizer(const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
+    [[maybe_unused]] FactorTabRecognizer(
+        const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
         : config(config)
-        , factor_model(module_root_dir / config.module_path)
-        , factor_rank_model(module_root_dir / config.factor_rank.module_path)
-        , character_model(module_root_dir / config.trainee_icon.icon.module_path)
-        , character_rank_model(module_root_dir / config.trainee_icon.rank.module_path) {}
+        , factor_model(module_root_dir / config.module_path, "factor")
+        , factor_rank_model(module_root_dir / config.factor_rank.module_path, "factor_rank")
+        , character_model(module_root_dir / config.trainee_icon.icon.module_path, "character")
+        , character_rank_model(module_root_dir / config.trainee_icon.rank.module_path, "character_rank") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, CropInfo &crop_info, PredictionHistory &history) const {
@@ -393,15 +365,15 @@ private:
 
 class SupportCardRecognizer {
 public:
-    SupportCardRecognizer(
+    [[maybe_unused]] SupportCardRecognizer(
         const std::filesystem::path &module_root_dir,
         const recognizer_config::SupportCardConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , support_card_model(module_root_dir / config.module_path)
-        , support_card_rank_model(module_root_dir / config.rank.module_path)
-        , support_card_level_model(module_root_dir / config.level.module_path) {}
+        , support_card_model(module_root_dir / config.module_path, "support_card")
+        , support_card_rank_model(module_root_dir / config.rank.module_path, "support_card_rank")
+        , support_card_level_model(module_root_dir / config.level.module_path, "support_card_level") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -452,14 +424,14 @@ private:
 
 class FamilyTreeRecognizer {
 public:
-    FamilyTreeRecognizer(
+    [[maybe_unused]] FamilyTreeRecognizer(
         const std::filesystem::path &module_root_dir,
         const recognizer_config::FamilyTreeConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , character_model(module_root_dir / config.module_path)
-        , character_rank_model(module_root_dir / config.chara_rank.module_path) {}
+        , character_model(module_root_dir / config.module_path, "character")
+        , character_rank_model(module_root_dir / config.chara_rank.module_path, "character_rank") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -522,15 +494,15 @@ private:
 
 class CampaignRecordRecognizer {
 public:
-    CampaignRecordRecognizer(
+    [[maybe_unused]] CampaignRecordRecognizer(
         const std::filesystem::path &module_root_dir,
         const recognizer_config::CampaignRecordConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , fans_value_model(module_root_dir / config.fans_value.module_path)
-        , scenario_model(module_root_dir / config.scenario.module_path)
-        , trained_date_model(module_root_dir / config.trained_date.module_path) {}
+        , fans_value_model(module_root_dir / config.fans_value.module_path, "fans_value")
+        , scenario_model(module_root_dir / config.scenario.module_path, "scenario")
+        , trained_date_model(module_root_dir / config.trained_date.module_path, "trained_date") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -580,18 +552,18 @@ private:
 
 class RaceRecordRecognizer {
 public:
-    RaceRecordRecognizer(
+    [[maybe_unused]] RaceRecordRecognizer(
         const std::filesystem::path &module_root_dir,
         const recognizer_config::RaceConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , title_model(module_root_dir / config.title.module_path)
-        , place_model(module_root_dir / config.place.module_path)
-        , weather_model(module_root_dir / config.weather.module_path)
-        , strategy_model(module_root_dir / config.strategy.module_path)
-        , turn_model(module_root_dir / config.turn.module_path)
-        , position_model(module_root_dir / config.position.module_path) {}
+        , title_model(module_root_dir / config.title.module_path, "race_title")
+        , place_model(module_root_dir / config.place.module_path, "race_place")
+        , weather_model(module_root_dir / config.weather.module_path, "race_weather")
+        , strategy_model(module_root_dir / config.strategy.module_path, "race_strategy")
+        , turn_model(module_root_dir / config.turn.module_path, "race_turn")
+        , position_model(module_root_dir / config.position.module_path, "race_position") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -658,7 +630,7 @@ private:
 
 class CampaignTabRecognizer {
 public:
-    CampaignTabRecognizer(
+    [[maybe_unused]] CampaignTabRecognizer(
         const std::filesystem::path &module_root_dir, const recognizer_config::CampaignTabConfig &config)
         : config(config)
         , support_card_recognizer(module_root_dir, config.support_card, config.common)
