@@ -6,14 +6,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:recase/recase.dart';
-import 'package:umacapture/src/chara_detail/spec/builder.dart';
-import 'package:umacapture/src/chara_detail/spec/skill.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/spec/skill.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
@@ -75,7 +75,7 @@ class AggregateFactorSetPredicate extends Predicate<FactorSet> {
         count = FactorCount.starOnly,
         starMin = 1,
         starCount = 1,
-        showMin = 10,
+        showMin = 3,
         showSum = true;
 
   List<Factor> _extractFactorList(FactorSet factorSet, int targetId) {
@@ -322,12 +322,14 @@ class _FactorSelector extends ConsumerStatefulWidget {
 
 class _FactorSelectorState extends ConsumerState<_FactorSelector> {
   late List<int> query = [];
+  late bool collapsed;
 
   @override
   void initState() {
     super.initState();
     setState(() {
       query = List.from(widget.query);
+      collapsed = true;
     });
   }
 
@@ -369,11 +371,35 @@ class _FactorSelectorState extends ConsumerState<_FactorSelector> {
     );
   }
 
+  Widget expandButton(ThemeData theme) {
+    return Align(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: ActionChip(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          avatar: const Icon(Icons.expand_more),
+          label: Text("$tr_factor.expand.tooltip".tr()),
+          side: BorderSide.none,
+          backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          onPressed: () {
+            setState(() {
+              collapsed = false;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final selected = query.toSet();
     final labels = getInfo(ref);
+    final needCollapse = collapsed && labels.length > 30;
+    final collapsedLabels = needCollapse ? labels.partial(0, 30) : labels;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -388,13 +414,16 @@ class _FactorSelectorState extends ConsumerState<_FactorSelector> {
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (labels.isEmpty) Text("$tr_factor.selection.not_found_message".tr()),
-                for (final label in labels) factorChip(label, theme, selected.contains(label.sid)),
+                for (final label in collapsedLabels) factorChip(label, theme, selected.contains(label.sid)),
+                if (needCollapse) Text("${labels.length - collapsedLabels.length} more"),
               ],
             ),
           ),
         ),
+        if (needCollapse) expandButton(theme),
       ],
     );
   }
@@ -605,10 +634,6 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text("$tr_factor.mode.description".tr()),
-        ),
         Column(
           children: [
             modeDescriptionWidget(),
@@ -620,7 +645,7 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
               children: [
                 SpinBox(
                   width: 100,
-                  height: 24,
+                  height: 30,
                   min: 1,
                   max: spec.predicate.query.length * 9,
                   value: spec.predicate.starMin,
@@ -636,7 +661,7 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
                   tooltip: "$tr_factor.mode.count.value.count.disabled_tooltip".tr(),
                   child: SpinBox(
                     width: 100,
-                    height: 24,
+                    height: 30,
                     min: 1,
                     max: spec.predicate.query.length * 3,
                     value: spec.predicate.starCount,

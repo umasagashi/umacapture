@@ -42,6 +42,7 @@
             "export": {
                 "button_tooltip": "エクスポート",
                 "dialog_title": "保存先を指定してください。",
+                "disabled_tooltip": "エクスポート中です。",
                 "csv": {
                     "label": "CSV",
                     "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート"
@@ -109,38 +110,46 @@
                 "skill": {
                     "selection": {
                         "label": "選択",
-                        "description": "選択されているスキルを所持するウマ娘がテーブルに表示されます。複数選択されている時の動作は下で変更できます。",
+                        "description": "選択されているスキルを所持するウマ娘がテーブルに表示されます。",
                         "tags": {
                             "description": "選択されている属性のスキルが下に表示されます。この選択はフィルタおよびテーブルには反映されません。（注意：属性は不正確なことがあります）"
                         },
                         "not_found_message": "該当なし"
                     },
                     "mode": {
-                        "label": "モード",
-                        "description": "複数のスキルが選択されている時の動作を選びます。複数選択している時のみ変更できます。",
-                        "all": {
+                        "label": "対象",
+                        "disabled_tooltip": "複数のスキルを選択している時だけ変更できます。",
+                        "template": "現在の条件：選択したスキルの{selection}を所持するウマ娘を表示",
+                        "all_of": {
                             "label": "すべて",
-                            "description": "現在の動作：選択されているスキルすべてを所持するウマ娘を表示"
+                            "description": "すべて"
                         },
-                        "any": {
+                        "any_of": {
                             "label": "いずれか",
-                            "description": "現在の動作：選択されているスキルのうち、少なくとも 1 つ以上を所持するウマ娘を表示"
+                            "description": "いずれか"
+                        },
+                        "sum_of": {
+                            "label": "個数",
+                            "description": "うち {count} 個以上"
                         },
                         "count": {
                             "label": "個数",
-                            "description": "現在の動作：選択されているスキルのうち、少なくとも {count} つ以上を所持するウマ娘を表示"
+                            "disabled_tooltip": "【@:pages.chara_detail.column_predicate.skill.mode.sum_of.label】を選択している時だけ変更できます。"
                         }
                     },
                     "show": {
                         "label": "表示",
                         "description": "条件に該当するスキルのうち、テーブルのセルに表示するスキルの上限数を指定します。この個数を超えた分は表示が省略されます。",
                         "title": "表示上限数"
+                    },
+                    "expand": {
+                        "tooltip": "全部を表示"
                     }
                 },
                 "factor": {
                     "selection": {
                         "label": "選択",
-                        "description": "選択されている因子を所持するウマ娘がテーブルに表示されます。複数選択されている時の動作は下で変更できます。",
+                        "description": "選択されている因子を所持するウマ娘がテーブルに表示されます。",
                         "tags": {
                             "description": "選択されている属性の因子が下に表示されます。この選択はフィルタおよびテーブルには反映されません。（注意：属性は不正確なことがあります）",
                             "skill_tags": {
@@ -152,8 +161,7 @@
                     },
                     "mode": {
                         "label": "モード",
-                        "description": "因子の星数・所持数の検索条件を指定します。",
-                        "template": "現在の条件：選択した因子の{selection}で、{subject}で{count}の因子を所持するウマ娘を表示",
+                        "template": "現在の条件：選択した因子の{selection}が、{subject}で{count}ウマ娘を表示",
                         "selection": {
                             "label": "対象",
                             "disabled_tooltip": "複数の因子を選択している時だけ変更できます。",
@@ -178,25 +186,25 @@
                             },
                             "family": {
                                 "label": "家系全体",
-                                "description": "親の因子を含む家系全体"
+                                "description": "親を含む家系全体"
                             }
                         },
                         "count": {
                             "label": "条件",
                             "star_only": {
-                                "label": "星数",
-                                "description": "星{star}以上"
+                                "label": "星合計",
+                                "description": "星{star}以上の"
                             },
                             "star_and_count": {
-                                "label": "星数と因子数",
-                                "description": "星{star}以上を{count}個以上",
-                                "disabled_tooltip":"【合計】または【家系全体】を選択している時だけ選べます。"
+                                "label": "星数 × 因子数",
+                                "description": "星{star}以上を{count}個以上所持する",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.selection.sum_of.label】または【@:pages.chara_detail.column_predicate.factor.mode.count.star_and_count.label】を選択している時だけ選べます。"
                             },
                             "value": {
                                 "star": "星数",
                                 "count": {
-                                    "label":"因子数",
-                                    "disabled_tooltip": "【星数と因子数】を選択している時だけ変更できます。"
+                                    "label": "因子数",
+                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.count.star_and_count.label】を選択している時だけ変更できます。"
                                 }
                             }
                         }
@@ -205,6 +213,9 @@
                         "label": "表示",
                         "description": "条件に該当する因子のうち、テーブルのセルに表示する因子の上限数を指定します。この個数を超えた分は表示が省略されます。",
                         "title": "表示上限数"
+                    },
+                    "expand": {
+                        "tooltip": "全部を表示"
                     }
                 }
             },

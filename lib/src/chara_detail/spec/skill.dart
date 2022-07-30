@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
+import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -274,12 +275,14 @@ class _SkillSelector extends ConsumerStatefulWidget {
 
 class _SkillSelectorState extends ConsumerState<_SkillSelector> {
   late List<int> query = [];
+  late bool collapsed;
 
   @override
   void initState() {
     super.initState();
     setState(() {
       query = List.from(widget.query);
+      collapsed = true;
     });
   }
 
@@ -312,11 +315,35 @@ class _SkillSelectorState extends ConsumerState<_SkillSelector> {
     );
   }
 
+  Widget expandButton(ThemeData theme) {
+    return Align(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: ActionChip(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          avatar: const Icon(Icons.expand_more),
+          label: Text("$tr_skill.expand.tooltip".tr()),
+          side: BorderSide.none,
+          backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          onPressed: () {
+            setState(() {
+              collapsed = false;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final selected = query.toSet();
     final labels = getInfo(ref);
+    final needCollapse = collapsed && labels.length > 30;
+    final collapsedLabels = needCollapse ? labels.partial(0, 30) : labels;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -331,13 +358,16 @@ class _SkillSelectorState extends ConsumerState<_SkillSelector> {
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (labels.isEmpty) Text("$tr_skill.selection.not_found_message".tr()),
-                for (final label in labels) skillChip(label, theme, selected.contains(label.sid)),
+                for (final label in collapsedLabels) skillChip(label, theme, selected.contains(label.sid)),
+                if (needCollapse) Text("${labels.length - collapsedLabels.length} more"),
               ],
             ),
           ),
         ),
+        if (needCollapse) expandButton(theme),
       ],
     );
   }
@@ -413,75 +443,123 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
   }
 
   Widget modeDescriptionWidget() {
-    switch (spec.predicate.selection) {
-      case SkillSelection.anyOf:
-        return Text("$tr_skill.mode.any.description".tr());
-      case SkillSelection.allOf:
-        return Text("$tr_skill.mode.all.description".tr());
-      case SkillSelection.sumOf:
-        return Text("$tr_skill.mode.count.description".tr(namedArgs: {"count": spec.predicate.min.toString()}));
-    }
+    final theme = Theme.of(context);
+    final selection = "$tr_skill.mode.${spec.predicate.selection.name.snakeCase}.description".tr(namedArgs: {
+      "count": spec.predicate.min.toString(),
+    });
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.primaryContainer.withOpacity(0.2),
+            border: Border.all(color: theme.colorScheme.primaryContainer),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(8),
+          child: Text("$tr_skill.mode.template".tr(namedArgs: {"selection": selection})),
+        ),
+      ),
+    );
+  }
+
+  Widget choiceChipWidget({
+    required String label,
+    bool disabled = false,
+    String tooltip = "",
+    required bool selected,
+    required VoidCallback onSelected,
+  }) {
+    final theme = Theme.of(context);
+    return Disabled(
+      disabled: disabled,
+      tooltip: tooltip,
+      child: ChoiceChip(
+        label: Text(label),
+        backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
+        selected: selected,
+        onSelected: (_) => onSelected(),
+      ),
+    );
+  }
+
+  Widget choiceLine({
+    required Widget label,
+    required List<Widget> children,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            label,
+            ...children,
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget selectionChoiceWidget() {
+    return choiceLine(
+      label: Text("$tr_skill.mode.label".tr()),
+      children: [
+        choiceChipWidget(
+          label: "$tr_skill.mode.all_of.label".tr(),
+          disabled: spec.predicate.query.length <= 1,
+          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
+          selected: spec.predicate.selection == SkillSelection.allOf,
+          onSelected: () => updatePredicate(selection: SkillSelection.allOf),
+        ),
+        choiceChipWidget(
+          label: "$tr_skill.mode.any_of.label".tr(),
+          disabled: spec.predicate.query.length <= 1,
+          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
+          selected: spec.predicate.selection == SkillSelection.anyOf,
+          onSelected: () => updatePredicate(selection: SkillSelection.anyOf),
+        ),
+        choiceChipWidget(
+          label: "$tr_skill.mode.sum_of.label".tr(),
+          disabled: spec.predicate.query.length <= 1,
+          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
+          selected: spec.predicate.selection == SkillSelection.sumOf,
+          onSelected: () => updatePredicate(selection: SkillSelection.sumOf),
+        ),
+      ],
+    );
   }
 
   Widget modeSelectionWidget(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Text("$tr_skill.mode.description".tr()),
-        ),
-        Disabled(
-          disabled: spec.predicate.query.length < 2,
-          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      modeChipWidget(label: "$tr_skill.mode.all.label".tr(), mode: SkillSelection.allOf),
-                      modeChipWidget(label: "$tr_skill.mode.any.label".tr(), mode: SkillSelection.anyOf),
-                      modeChipWidget(label: "$tr_skill.mode.count.label".tr(), mode: SkillSelection.sumOf),
-                      Disabled(
-                        disabled: spec.predicate.selection != SkillSelection.sumOf,
-                        tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
-                        child: SpinBox(
-                          width: 120,
-                          height: 30,
-                          min: 1,
-                          max: spec.predicate.query.length,
-                          value: spec.predicate.min,
-                          onChanged: (value) => updatePredicate(min: value),
-                        ),
-                      ),
-                    ],
+        Column(
+          children: [
+            modeDescriptionWidget(),
+            selectionChoiceWidget(),
+            choiceLine(
+              label: Text("$tr_skill.mode.count.label".tr()),
+              children: [
+                Disabled(
+                  disabled: spec.predicate.selection != SkillSelection.sumOf,
+                  tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
+                  child: SpinBox(
+                    width: 100,
+                    height: 30,
+                    min: 1,
+                    max: spec.predicate.query.length,
+                    value: spec.predicate.min,
+                    onChanged: (value) => updatePredicate(min: value),
                   ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Align(
-                  alignment: Alignment.topLeft,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer.withOpacity(0.2),
-                      border: Border.all(color: theme.colorScheme.primaryContainer),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: const EdgeInsets.all(8),
-                    child: modeDescriptionWidget(),
-                  ),
-                ),
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ],
     );
