@@ -119,6 +119,13 @@ extension ListExtension<T> on List<T> {
     }
   }
 
+  T? getOrNull(int? index) {
+    if (index != null) {
+      return this[index];
+    }
+    return null;
+  }
+
   Map<K, T> toMap<K>(K Function(T) key) => Map<K, T>.fromEntries(map((e) => MapEntry(key(e), e)));
 }
 

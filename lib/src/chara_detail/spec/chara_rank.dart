@@ -16,7 +16,6 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
   CharaRankColumnSpec({
     required super.id,
     required super.title,
-    required super.description,
     required super.parser,
     required super.labelKey,
     required super.predicate,
@@ -34,7 +33,6 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
     return CharaRankColumnSpec(
       id: id,
       title: title,
-      description: description,
       parser: parser,
       labelKey: labelKey,
       predicate: predicate ?? this.predicate,
@@ -50,14 +48,10 @@ class CharaRankColumnBuilder implements ColumnBuilder {
   final String title;
 
   @override
-  final String description;
-
-  @override
   final ColumnCategory category;
 
   CharaRankColumnBuilder({
     required this.title,
-    required this.description,
     required this.category,
     required this.parser,
   });
@@ -67,7 +61,6 @@ class CharaRankColumnBuilder implements ColumnBuilder {
     return CharaRankColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      description: description,
       parser: parser,
       labelKey: labelKey,
       predicate: IsInRangeIntegerPredicate(),

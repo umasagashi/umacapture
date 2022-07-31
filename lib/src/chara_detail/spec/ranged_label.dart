@@ -12,6 +12,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
+import '/src/core/utils.dart';
 
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
@@ -41,13 +42,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   @override
   final String title;
 
-  @override
-  final String description;
-
   RangedLabelColumnSpec({
     required this.id,
     required this.title,
-    required this.description,
     required this.parser,
     required this.labelKey,
     required this.predicate,
@@ -90,6 +87,15 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
+  String tooltip(BuildResource resource) {
+    if (predicate.min == null && predicate.max == null) {
+      return "Any";
+    }
+    final labels = resource.labelMap[labelKey]!;
+    return "Range: [${labels.getOrNull(predicate.min) ?? "Any"}, ${labels.getOrNull(predicate.max) ?? "Any"}]";
+  }
+
+  @override
   Widget tag(BuildResource resource) {
     return Text(title);
   }
@@ -103,16 +109,10 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
     return RangedLabelColumnSpec(
       id: id,
       title: title,
-      description: description,
       parser: parser,
       labelKey: labelKey,
       predicate: predicate ?? this.predicate,
     );
-  }
-
-  @override
-  String toString() {
-    return "$RangedLabelColumnSpec(predicate: {min: ${predicate.min}, max: ${predicate.max}})";
   }
 }
 
@@ -205,14 +205,10 @@ class AptitudeColumnBuilder implements ColumnBuilder {
   final String title;
 
   @override
-  final String description;
-
-  @override
   final ColumnCategory category;
 
   AptitudeColumnBuilder({
     required this.title,
-    required this.description,
     required this.category,
     required this.parser,
   });
@@ -222,7 +218,6 @@ class AptitudeColumnBuilder implements ColumnBuilder {
     return RangedLabelColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      description: description,
       parser: parser,
       labelKey: labelKey,
       predicate: IsInRangeIntegerPredicate(),

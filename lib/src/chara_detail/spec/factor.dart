@@ -168,16 +168,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final String title;
 
   @override
-  final String description;
-
-  @override
   @JsonProperty(ignore: true)
   int get tabIdx => 1;
 
   FactorColumnSpec({
     required this.id,
     required this.title,
-    required this.description,
     required this.parser,
     required this.predicate,
   });
@@ -232,6 +228,39 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
+  String tooltip(BuildResource resource) {
+    if (predicate.query.isEmpty) {
+      return "Any";
+    }
+
+    const sep = "\n";
+    String modeText = "$sep${"-" * 10}";
+
+    if (predicate.query.length >= 2) {
+      final selection = "$tr_factor.mode.selection.${predicate.selection.name.snakeCase}.label".tr();
+      modeText += "$sep${"$tr_factor.mode.selection.label".tr()}: $selection";
+    }
+
+    final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.label".tr();
+    modeText += "$sep${"$tr_factor.mode.subject.label".tr()}: $subject";
+
+    if (predicate.query.length >= 2) {
+      final count = "$tr_factor.mode.count.${predicate.count.name.snakeCase}.label".tr();
+      modeText += "$sep${"$tr_factor.mode.count.label".tr()}: $count";
+    }
+
+    modeText += "$sep${"$tr_factor.mode.count.value.star".tr()}: ${predicate.starMin}";
+
+    if (predicate.count == FactorCount.starAndCount) {
+      modeText += "$sep${"$tr_factor.mode.count.value.count.label".tr()}: ${predicate.starCount}";
+    }
+
+    final labels = resource.labelMap[labelKey]!;
+    final factors = predicate.query.map((e) => labels[e]);
+    return "${factors.join(sep)}$modeText";
+  }
+
+  @override
   Widget tag(BuildResource resource) {
     return Text(title);
   }
@@ -245,7 +274,6 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     return FactorColumnSpec(
       id: id,
       title: title,
-      description: description,
       parser: parser,
       predicate: (predicate ?? this.predicate).copyWith(),
     );
@@ -758,14 +786,10 @@ class FactorColumnBuilder implements ColumnBuilder {
   final String title;
 
   @override
-  final String description;
-
-  @override
   final ColumnCategory category;
 
   FactorColumnBuilder({
     required this.title,
-    required this.description,
     required this.category,
     required this.parser,
   });
@@ -775,7 +799,6 @@ class FactorColumnBuilder implements ColumnBuilder {
     return FactorColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      description: description,
       parser: parser,
       predicate: AggregateFactorSetPredicate.any(),
     );

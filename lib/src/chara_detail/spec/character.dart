@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -55,13 +56,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   @override
   final String title;
 
-  @override
-  final String description;
-
   CharacterCardColumnSpec({
     required this.id,
     required this.title,
-    required this.description,
     required this.parser,
     required this.predicate,
   });
@@ -100,6 +97,22 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
+  String tooltip(BuildResource resource) {
+    final rejects = predicate.rejects.toSet();
+    final cards = resource.charaCardInfo.sortedBy<num>((e) => e.sortKey);
+    const sep = "\n";
+    if (predicate.rejects.isEmpty) {
+      return "Any";
+    } else if (predicate.rejects.length > cards.length / 2) {
+      final accepted = cards.where((e) => !rejects.contains(e.sid));
+      return "${"$tr_character.tooltip.accept".tr()}:$sep${accepted.map((e) => e.names.first).join(sep)}";
+    } else {
+      final rejected = cards.where((e) => rejects.contains(e.sid));
+      return "${"$tr_character.tooltip.reject".tr()}:$sep${rejected.map((e) => e.names.first).join(sep)}";
+    }
+  }
+
+  @override
   Widget tag(BuildResource resource) {
     return Text(title);
   }
@@ -113,15 +126,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
     return CharacterCardColumnSpec(
       id: id,
       title: title,
-      description: description,
       parser: parser,
       predicate: predicate ?? this.predicate,
     );
-  }
-
-  @override
-  String toString() {
-    return "$CharacterCardColumnSpec(predicate: $predicate})";
   }
 }
 
@@ -249,14 +256,10 @@ class CharacterCardColumnBuilder implements ColumnBuilder {
   final String title;
 
   @override
-  final String description;
-
-  @override
   final ColumnCategory category;
 
   CharacterCardColumnBuilder({
     required this.title,
-    required this.description,
     required this.category,
     required this.parser,
   });
@@ -266,7 +269,6 @@ class CharacterCardColumnBuilder implements ColumnBuilder {
     return CharacterCardColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      description: description,
       parser: parser,
       predicate: CharacterCardPredicate.any(),
     );

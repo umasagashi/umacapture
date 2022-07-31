@@ -104,13 +104,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   @override
   final String title;
 
-  @override
-  final String description;
-
   SkillColumnSpec({
     required this.id,
     required this.title,
-    required this.description,
     required this.parser,
     required this.predicate,
   });
@@ -160,6 +156,29 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
+  String tooltip(BuildResource resource) {
+    if (predicate.query.isEmpty) {
+      return "Any";
+    }
+
+    const sep = "\n";
+    String modeText = "";
+
+    if (predicate.query.length >= 2) {
+      final selection = "$tr_skill.mode.${predicate.selection.name.snakeCase}.label".tr();
+      modeText += "$sep${"-" * 10}";
+      modeText += "$sep${"$tr_skill.mode.label".tr()}: $selection";
+      if (predicate.selection == SkillSelection.sumOf) {
+        modeText += "$sep${"$tr_skill.mode.count.label".tr()}: ${predicate.min}";
+      }
+    }
+
+    final labels = resource.labelMap[labelKey]!;
+    final skills = predicate.query.map((e) => labels[e]);
+    return "${skills.join(sep)}$modeText";
+  }
+
+  @override
   Widget tag(BuildResource resource) {
     return Text(title);
   }
@@ -173,7 +192,6 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     return SkillColumnSpec(
       id: id,
       title: title,
-      description: description,
       parser: parser,
       predicate: predicate ?? this.predicate.copyWith(),
     );
@@ -643,14 +661,10 @@ class SkillColumnBuilder implements ColumnBuilder {
   final String title;
 
   @override
-  final String description;
-
-  @override
   final ColumnCategory category;
 
   SkillColumnBuilder({
     required this.title,
-    required this.description,
     required this.category,
     required this.parser,
   });
@@ -660,7 +674,6 @@ class SkillColumnBuilder implements ColumnBuilder {
     return SkillColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      description: description,
       parser: parser,
       predicate: AggregateSkillPredicate.any(),
     );

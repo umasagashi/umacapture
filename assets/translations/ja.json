@@ -105,6 +105,10 @@
                     "selection": {
                         "label": "選択",
                         "description": "選択されているウマ娘がテーブルに表示されます。"
+                    },
+                    "tooltip": {
+                        "accept": "含む",
+                        "reject": "含まない"
                     }
                 },
                 "skill": {

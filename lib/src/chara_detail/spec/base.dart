@@ -25,8 +25,6 @@ enum ColumnCategory {
 abstract class ColumnBuilder {
   String get title;
 
-  String get description;
-
   ColumnCategory get category;
 
   ColumnSpec build();
@@ -130,8 +128,7 @@ abstract class ColumnSpec<T> {
 
   String get title;
 
-  String get description;
-
+  @JsonProperty(ignore: true)
   int get tabIdx => 0;
 
   List<T> parse(BuildResource resource, List<CharaDetailRecord> records);
@@ -141,6 +138,8 @@ abstract class ColumnSpec<T> {
   PlutoCell plutoCell(BuildResource resource, T value);
 
   PlutoColumn plutoColumn(BuildResource resource);
+
+  String tooltip(BuildResource resource);
 
   Widget tag(BuildResource resource);
 

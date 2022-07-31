@@ -142,6 +142,7 @@ class _ColumnBuilderDialog extends ConsumerWidget {
                 },
               ),
             ),
+          if (targets.isEmpty) const Text("Under Construction"),
         ],
       ),
     );
@@ -383,7 +384,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<_ColumnSpecTagWidget> {
               onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec),
               child: ActionChip(
                 label: spec.tag(resource),
-                tooltip: spec.description,
+                tooltip: spec.tooltip(resource),
                 backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
                 onPressed: () {
                   _ColumnSpecDialog.show(context, spec);

@@ -145,13 +145,11 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
-      description: "$tr_columns.character.description".tr(),
       category: ColumnCategory.trainee,
       parser: CharaCardParser(),
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.evaluation.title".tr(),
-      description: "$tr_columns.evaluation.description".tr(),
       category: ColumnCategory.trainee,
       parser: EvaluationValueParser(),
       valueMin: 0,
@@ -159,13 +157,11 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     CharaRankColumnBuilder(
       title: "$tr_columns.chara_rank.title".tr(),
-      description: "$tr_columns.chara_rank.description".tr(),
       category: ColumnCategory.trainee,
       parser: EvaluationValueParser(),
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.speed.title".tr(),
-      description: "$tr_columns.status.speed.description".tr(),
       category: ColumnCategory.status,
       parser: StatusSpeedParser(),
       valueMin: 0,
@@ -173,7 +169,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.stamina.title".tr(),
-      description: "$tr_columns.status.stamina.description".tr(),
       category: ColumnCategory.status,
       parser: StatusStaminaParser(),
       valueMin: 0,
@@ -181,7 +176,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.power.title".tr(),
-      description: "$tr_columns.status.power.description".tr(),
       category: ColumnCategory.status,
       parser: StatusPowerParser(),
       valueMin: 0,
@@ -189,7 +183,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.guts.title".tr(),
-      description: "$tr_columns.status.guts.description".tr(),
       category: ColumnCategory.status,
       parser: StatusGutsParser(),
       valueMin: 0,
@@ -197,7 +190,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.intelligence.title".tr(),
-      description: "$tr_columns.status.intelligence.description".tr(),
       category: ColumnCategory.status,
       parser: StatusIntelligenceParser(),
       valueMin: 0,
@@ -205,73 +197,61 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.turf_ground.title".tr(),
-      description: "$tr_columns.aptitude.turf_ground.description".tr(),
       category: ColumnCategory.aptitude,
       parser: TurfGroundAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.dirt_ground.title".tr(),
-      description: "$tr_columns.aptitude.dirt_ground.description".tr(),
       category: ColumnCategory.aptitude,
       parser: DirtGroundAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.short_range.title".tr(),
-      description: "$tr_columns.aptitude.short_range.description".tr(),
       category: ColumnCategory.aptitude,
       parser: ShortRangeAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.mile_range.title".tr(),
-      description: "$tr_columns.aptitude.mile_range.description".tr(),
       category: ColumnCategory.aptitude,
       parser: MileRangeAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.middle_range.title".tr(),
-      description: "$tr_columns.aptitude.middle_range.description".tr(),
       category: ColumnCategory.aptitude,
       parser: MiddleRangeAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.long_range.title".tr(),
-      description: "$tr_columns.aptitude.long_range.description".tr(),
       category: ColumnCategory.aptitude,
       parser: LongRangeAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.lead_pace.title".tr(),
-      description: "$tr_columns.aptitude.lead_pace.description".tr(),
       category: ColumnCategory.aptitude,
       parser: LeadPaceAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.with_pace.title".tr(),
-      description: "$tr_columns.aptitude.with_pace.description".tr(),
       category: ColumnCategory.aptitude,
       parser: WithPaceAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.off_pace.title".tr(),
-      description: "$tr_columns.aptitude.off_pace.description".tr(),
       category: ColumnCategory.aptitude,
       parser: OffPaceAptitudeParser(),
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.late_charge.title".tr(),
-      description: "$tr_columns.aptitude.late_charge.description".tr(),
       category: ColumnCategory.aptitude,
       parser: LateChargeAptitudeParser(),
     ),
     SkillColumnBuilder(
       title: "$tr_columns.skill.title".tr(),
-      description: "$tr_columns.skill.description".tr(),
       category: ColumnCategory.skill,
       parser: SkillParser(),
     ),
     FactorColumnBuilder(
       title: "$tr_columns.factor.title".tr(),
-      description: "$tr_columns.factor.description".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
     ),

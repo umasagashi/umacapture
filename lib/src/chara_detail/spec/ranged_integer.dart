@@ -52,13 +52,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   @override
   final String title;
 
-  @override
-  final String description;
-
   RangedIntegerColumnSpec({
     required this.id,
     required this.title,
-    required this.description,
     required this.parser,
     required this.valueMin,
     required this.valueMax,
@@ -100,6 +96,14 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
+  String tooltip(BuildResource resource) {
+    if (predicate.min == null && predicate.max == null) {
+      return "Any";
+    }
+    return "Range: [${predicate.min ?? "Any"}, ${predicate.max ?? "Any"}]";
+  }
+
+  @override
   Widget tag(BuildResource resource) {
     return Text(title);
   }
@@ -113,7 +117,6 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
     return RangedIntegerColumnSpec(
       id: id,
       title: title,
-      description: description,
       parser: parser,
       valueMin: valueMin,
       valueMax: valueMax,
@@ -212,14 +215,10 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
   final String title;
 
   @override
-  final String description;
-
-  @override
   final ColumnCategory category;
 
   RangedIntegerColumnBuilder({
     required this.title,
-    required this.description,
     required this.category,
     required this.parser,
     required this.valueMin,
@@ -231,7 +230,6 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
     return RangedIntegerColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      description: description,
       parser: parser,
       valueMin: valueMin,
       valueMax: valueMax,
