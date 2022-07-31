@@ -2,7 +2,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:window_manager/window_manager.dart';
 
 // ignore: unused_import
@@ -39,11 +38,9 @@ void setupWindowManager() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await EasyLocalization.ensureInitialized();
   initializeJsonReflectable();
-
-  final packageInfo = await PackageInfo.fromPlatform();
-  await StorageBox.ensureOpened(packageInfo.appName, reset: false);
+  await StorageBox.ensureOpened(reset: false);
+  await EasyLocalization.ensureInitialized();
 
   // LicenseRegistry.addLicense(() async* {
   //   final license = await rootBundle.loadString('google_fonts/OFL.txt');

@@ -11,28 +11,42 @@ final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
 });
 
 class PathInfo {
-  final String data;
+  final String documentDir;
+  final String supportDir;
 
-  const PathInfo(this.data);
+  const PathInfo({
+    required this.documentDir,
+    required this.supportDir,
+  });
 
-  String get temp => "$data/temp";
+  String get temp => "$documentDir/temp";
 
-  String get storage => "$data/storage";
+  String get storage => "$documentDir/storage";
 
-  String get modules => "$data/modules";
+  String get modules => "$supportDir/modules";
 
   String get charaDetail => "$storage/chara_detail";
+
+  @override
+  String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';
 }
 
 final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
   final appName = (await ref.watch(packageInfoLoader.future)).appName;
-  late Directory directory;
+  late final Directory documentDir;
   if (CurrentPlatform.isAndroid()) {
-    directory = await getExternalStorageDirectories(type: StorageDirectory.documents).then((e) => e!.first);
+    // To make it easier for users to export manually.
+    documentDir = await getExternalStorageDirectories(type: StorageDirectory.documents).then((e) => e!.first);
   } else {
-    directory = await getApplicationDocumentsDirectory();
+    documentDir = await getApplicationDocumentsDirectory();
   }
-  return PathInfo("${directory.absolute.path}/$appName");
+  late final Directory supportDir;
+  supportDir = await getApplicationSupportDirectory();
+  final info = PathInfo(
+    documentDir: "${documentDir.absolute.path}/$appName",
+    supportDir: supportDir.absolute.path,
+  );
+  return info;
 });
 
 final pathInfoProvider = Provider<PathInfo>((ref) {
