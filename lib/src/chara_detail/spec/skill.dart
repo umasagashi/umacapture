@@ -22,7 +22,7 @@ const tr_skill = "pages.chara_detail.column_predicate.skill";
 enum SkillSelection { anyOf, allOf, sumOf }
 
 @jsonSerializable
-class AggregateSkillPredicate{
+class AggregateSkillPredicate {
   final List<int> query;
   final SkillSelection selection;
   final int min;
@@ -96,6 +96,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final AggregateSkillPredicate predicate;
 
   @override
+  ColumnSpecType get type => ColumnSpecType.skill;
+
+  @override
   final String id;
 
   @override
@@ -110,15 +113,15 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     required this.description,
     required this.parser,
     required this.predicate,
-  }) : super(ColumnSpecType.skill);
+  });
 
   @override
-  List<List<Skill>> parse(List<CharaDetailRecord> records) {
+  List<List<Skill>> parse(BuildResource resource, List<CharaDetailRecord> records) {
     return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
   @override
-  List<bool> evaluate(List<List<Skill>> values) {
+  List<bool> evaluate(BuildResource resource, List<List<Skill>> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 

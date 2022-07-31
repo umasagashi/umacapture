@@ -33,6 +33,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   final IsInRangeIntegerPredicate predicate;
 
   @override
+  ColumnSpecType get type => ColumnSpecType.rangedLabel;
+
+  @override
   final String id;
 
   @override
@@ -48,15 +51,15 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
     required this.parser,
     required this.labelKey,
     required this.predicate,
-  }) : super(ColumnSpecType.rangedLabel);
+  });
 
   @override
-  List<int> parse(List<CharaDetailRecord> records) {
+  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(List<int> values) {
+  List<bool> evaluate(BuildResource resource, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
@@ -208,39 +211,6 @@ class AptitudeColumnBuilder implements ColumnBuilder {
   final ColumnCategory category;
 
   AptitudeColumnBuilder({
-    required this.title,
-    required this.description,
-    required this.category,
-    required this.parser,
-  });
-
-  @override
-  RangedLabelColumnSpec build() {
-    return RangedLabelColumnSpec(
-      id: const Uuid().v4(),
-      title: title,
-      description: description,
-      parser: parser,
-      labelKey: labelKey,
-      predicate: IsInRangeIntegerPredicate(),
-    );
-  }
-}
-
-class CharaRankColumnBuilder implements ColumnBuilder {
-  final Parser parser;
-  final String labelKey = "character_rank.name";
-
-  @override
-  final String title;
-
-  @override
-  final String description;
-
-  @override
-  final ColumnCategory category;
-
-  CharaRankColumnBuilder({
     required this.title,
     required this.description,
     required this.category,

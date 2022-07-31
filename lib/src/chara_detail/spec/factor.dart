@@ -159,6 +159,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final AggregateFactorSetPredicate predicate;
 
   @override
+  ColumnSpecType get type => ColumnSpecType.factor;
+
+  @override
   final String id;
 
   @override
@@ -177,15 +180,15 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     required this.description,
     required this.parser,
     required this.predicate,
-  }) : super(ColumnSpecType.factor);
+  });
 
   @override
-  List<FactorSet> parse(List<CharaDetailRecord> records) {
+  List<FactorSet> parse(BuildResource resource, List<CharaDetailRecord> records) {
     return List<FactorSet>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(List<FactorSet> values) {
+  List<bool> evaluate(BuildResource resource, List<FactorSet> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 

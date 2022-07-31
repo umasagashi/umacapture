@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
-// ignore: unused_import
-import 'src/core/_json_mapper_dummy.dart';
 import 'src/core/json_adapter.dart';
 import 'src/core/utils.dart';
 import 'src/gui/app_widget.dart';

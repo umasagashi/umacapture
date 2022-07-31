@@ -5,7 +5,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 @jsonSerializable
 enum ParserType {
   evaluationValue,
-  charaRank,
   charaCard,
   statusSpeed,
   statusStamina,
@@ -29,9 +28,7 @@ enum ParserType {
 @jsonSerializable
 @Json(discriminatorProperty: 'type')
 abstract class Parser {
-  final ParserType type;
-
-  Parser(this.type);
+  ParserType get type;
 
   // TODO: This should use generics, but will cause serialize to fail.
   dynamic parse(CharaDetailRecord record);
@@ -40,29 +37,18 @@ abstract class Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.evaluationValue)
 class EvaluationValueParser extends Parser {
-  EvaluationValueParser() : super(ParserType.evaluationValue);
+  @override
+  ParserType get type => ParserType.evaluationValue;
 
   @override
   int parse(CharaDetailRecord record) => record.evaluationValue;
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ParserType.charaRank)
-class CharaRankParser extends Parser {
-  final List<int> borders;
-
-  CharaRankParser(this.borders) : super(ParserType.charaRank);
-
-  @override
-  int parse(CharaDetailRecord record) {
-    return borders.indexWhere((e) => e >= record.evaluationValue);
-  }
-}
-
-@jsonSerializable
 @Json(discriminatorValue: ParserType.charaCard)
 class CharaCardParser extends Parser {
-  CharaCardParser() : super(ParserType.charaCard);
+  @override
+  ParserType get type => ParserType.charaCard;
 
   @override
   int parse(CharaDetailRecord record) => record.trainee.card;
@@ -71,7 +57,8 @@ class CharaCardParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.statusSpeed)
 class StatusSpeedParser extends Parser {
-  StatusSpeedParser() : super(ParserType.statusSpeed);
+  @override
+  ParserType get type => ParserType.statusSpeed;
 
   @override
   int parse(CharaDetailRecord record) => record.status.speed;
@@ -80,7 +67,8 @@ class StatusSpeedParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.statusStamina)
 class StatusStaminaParser extends Parser {
-  StatusStaminaParser() : super(ParserType.statusStamina);
+  @override
+  ParserType get type => ParserType.statusStamina;
 
   @override
   int parse(CharaDetailRecord record) => record.status.stamina;
@@ -89,7 +77,8 @@ class StatusStaminaParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.statusPower)
 class StatusPowerParser extends Parser {
-  StatusPowerParser() : super(ParserType.statusPower);
+  @override
+  ParserType get type => ParserType.statusPower;
 
   @override
   int parse(CharaDetailRecord record) => record.status.power;
@@ -98,7 +87,8 @@ class StatusPowerParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.statusGuts)
 class StatusGutsParser extends Parser {
-  StatusGutsParser() : super(ParserType.statusGuts);
+  @override
+  ParserType get type => ParserType.statusGuts;
 
   @override
   int parse(CharaDetailRecord record) => record.status.guts;
@@ -107,7 +97,8 @@ class StatusGutsParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.statusIntelligence)
 class StatusIntelligenceParser extends Parser {
-  StatusIntelligenceParser() : super(ParserType.statusIntelligence);
+  @override
+  ParserType get type => ParserType.statusIntelligence;
 
   @override
   int parse(CharaDetailRecord record) => record.status.intelligence;
@@ -116,7 +107,8 @@ class StatusIntelligenceParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesTurf)
 class TurfGroundAptitudeParser extends Parser {
-  TurfGroundAptitudeParser() : super(ParserType.aptitudesTurf);
+  @override
+  ParserType get type => ParserType.aptitudesTurf;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.ground.turf;
@@ -125,7 +117,8 @@ class TurfGroundAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesDirt)
 class DirtGroundAptitudeParser extends Parser {
-  DirtGroundAptitudeParser() : super(ParserType.aptitudesDirt);
+  @override
+  ParserType get type => ParserType.aptitudesDirt;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.ground.dirt;
@@ -134,7 +127,8 @@ class DirtGroundAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesShortRange)
 class ShortRangeAptitudeParser extends Parser {
-  ShortRangeAptitudeParser() : super(ParserType.aptitudesShortRange);
+  @override
+  ParserType get type => ParserType.aptitudesShortRange;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.shortRange;
@@ -143,7 +137,8 @@ class ShortRangeAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesMileRange)
 class MileRangeAptitudeParser extends Parser {
-  MileRangeAptitudeParser() : super(ParserType.aptitudesMileRange);
+  @override
+  ParserType get type => ParserType.aptitudesMileRange;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.mileRange;
@@ -152,7 +147,8 @@ class MileRangeAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesMiddleRange)
 class MiddleRangeAptitudeParser extends Parser {
-  MiddleRangeAptitudeParser() : super(ParserType.aptitudesMiddleRange);
+  @override
+  ParserType get type => ParserType.aptitudesMiddleRange;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.middleRange;
@@ -161,7 +157,8 @@ class MiddleRangeAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesLongRange)
 class LongRangeAptitudeParser extends Parser {
-  LongRangeAptitudeParser() : super(ParserType.aptitudesLongRange);
+  @override
+  ParserType get type => ParserType.aptitudesLongRange;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.longRange;
@@ -170,7 +167,8 @@ class LongRangeAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesLeadPace)
 class LeadPaceAptitudeParser extends Parser {
-  LeadPaceAptitudeParser() : super(ParserType.aptitudesLeadPace);
+  @override
+  ParserType get type => ParserType.aptitudesLeadPace;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.leadPace;
@@ -179,7 +177,8 @@ class LeadPaceAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesWithPace)
 class WithPaceAptitudeParser extends Parser {
-  WithPaceAptitudeParser() : super(ParserType.aptitudesWithPace);
+  @override
+  ParserType get type => ParserType.aptitudesWithPace;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.withPace;
@@ -188,7 +187,8 @@ class WithPaceAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesOffPace)
 class OffPaceAptitudeParser extends Parser {
-  OffPaceAptitudeParser() : super(ParserType.aptitudesOffPace);
+  @override
+  ParserType get type => ParserType.aptitudesOffPace;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.offPace;
@@ -197,7 +197,8 @@ class OffPaceAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.aptitudesLateCharge)
 class LateChargeAptitudeParser extends Parser {
-  LateChargeAptitudeParser() : super(ParserType.aptitudesLateCharge);
+  @override
+  ParserType get type => ParserType.aptitudesLateCharge;
 
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.lateCharge;
@@ -206,7 +207,8 @@ class LateChargeAptitudeParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.skill)
 class SkillParser extends Parser {
-  SkillParser() : super(ParserType.skill);
+  @override
+  ParserType get type => ParserType.skill;
 
   @override
   List<Skill> parse(CharaDetailRecord record) => record.skills;
@@ -215,7 +217,8 @@ class SkillParser extends Parser {
 @jsonSerializable
 @Json(discriminatorValue: ParserType.factor)
 class FactorSetParser extends Parser {
-  FactorSetParser() : super(ParserType.factor);
+  @override
+  ParserType get type => ParserType.factor;
 
   @override
   FactorSet parse(CharaDetailRecord record) => record.factors;

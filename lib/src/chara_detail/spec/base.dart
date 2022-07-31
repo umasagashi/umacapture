@@ -100,12 +100,14 @@ class BuildResource {
   final List<SkillInfo> skillInfo;
   final List<CharaCardInfo> charaCardInfo;
   final String recordRootDirectory;
+  final List<int> charaRankBorder;
 
   BuildResource({
     required this.labelMap,
     required this.skillInfo,
     required this.charaCardInfo,
     required this.recordRootDirectory,
+    required this.charaRankBorder,
   });
 }
 
@@ -113,6 +115,7 @@ class BuildResource {
 enum ColumnSpecType {
   rangedInteger,
   rangedLabel,
+  characterRank,
   characterCard,
   skill,
   factor,
@@ -121,9 +124,7 @@ enum ColumnSpecType {
 @jsonSerializable
 @Json(discriminatorProperty: 'type')
 abstract class ColumnSpec<T> {
-  final ColumnSpecType type;
-
-  ColumnSpec(this.type);
+  ColumnSpecType get type;
 
   String get id;
 
@@ -133,9 +134,9 @@ abstract class ColumnSpec<T> {
 
   int get tabIdx => 0;
 
-  List<T> parse(List<CharaDetailRecord> records);
+  List<T> parse(BuildResource resource, List<CharaDetailRecord> records);
 
-  List<bool> evaluate(List<T> values);
+  List<bool> evaluate(BuildResource resource, List<T> values);
 
   PlutoCell plutoCell(BuildResource resource, T value);
 
@@ -198,7 +199,6 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
   }
 
   void replaceById(ColumnSpec spec) {
-    logger.d("replaceById: $spec");
     final index = state.indexWhere((e) => e.id == spec.id);
     if (index != -1) {
       state.removeAt(index);

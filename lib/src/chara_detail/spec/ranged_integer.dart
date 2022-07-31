@@ -15,7 +15,7 @@ import '/src/chara_detail/spec/parser.dart';
 const tr_ranged_integer = "pages.chara_detail.column_predicate.ranged_integer";
 
 @jsonSerializable
-class IsInRangeIntegerPredicate  {
+class IsInRangeIntegerPredicate {
   int? min;
   int? max;
 
@@ -44,6 +44,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final IsInRangeIntegerPredicate predicate;
 
   @override
+  ColumnSpecType get type => ColumnSpecType.rangedInteger;
+
+  @override
   final String id;
 
   @override
@@ -60,15 +63,15 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
     required this.valueMin,
     required this.valueMax,
     required this.predicate,
-  }) : super(ColumnSpecType.rangedInteger);
+  });
 
   @override
-  List<int> parse(List<CharaDetailRecord> records) {
+  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(List<int> values) {
+  List<bool> evaluate(BuildResource resource, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 

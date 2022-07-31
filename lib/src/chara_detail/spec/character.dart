@@ -47,6 +47,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   final CharacterCardPredicate predicate;
 
   @override
+  ColumnSpecType get type => ColumnSpecType.characterCard;
+
+  @override
   final String id;
 
   @override
@@ -61,15 +64,15 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
     required this.description,
     required this.parser,
     required this.predicate,
-  }) : super(ColumnSpecType.characterCard);
+  });
 
   @override
-  List<int> parse(List<CharaDetailRecord> records) {
+  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(List<int> values) {
+  List<bool> evaluate(BuildResource resource, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 

@@ -9,6 +9,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/app/providers.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/parser.dart';
@@ -34,7 +35,6 @@ final moduleInfoLoaders = FutureProvider((ref) async {
     ref.watch(_charaCardInfoLoader.future),
   ]).then((_) {
     return Future.wait([
-      ref.watch(_columnBuilderLoader.future),
       ref.watch(_currentColumnSpecsLoader.future),
     ]);
   });
@@ -111,6 +111,10 @@ final _charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
   return compute(_loadFromJson<List<int>>, "${path.modules}/rank_border.json");
 });
 
+final charaRankBorderProvider = Provider<List<int>>((ref) {
+  return ref.watch(_charaRankBorderLoader).value!;
+});
+
 final _charaCardInfoLoader = FutureProvider<List<CharaCardInfo>>((ref) async {
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<CharaCardInfo>>, "${path.modules}/character_card_info.json");
@@ -137,8 +141,7 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
       .toList();
 });
 
-final _columnBuilderLoader = FutureProvider<List<ColumnBuilder>>((ref) async {
-  final charaRankBorder = await ref.watch(_charaRankBorderLoader.future);
+final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -158,7 +161,7 @@ final _columnBuilderLoader = FutureProvider<List<ColumnBuilder>>((ref) async {
       title: "$tr_columns.chara_rank.title".tr(),
       description: "$tr_columns.chara_rank.description".tr(),
       category: ColumnCategory.trainee,
-      parser: CharaRankParser(charaRankBorder),
+      parser: EvaluationValueParser(),
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.speed.title".tr(),
@@ -275,10 +278,6 @@ final _columnBuilderLoader = FutureProvider<List<ColumnBuilder>>((ref) async {
   ];
 });
 
-final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
-  return ref.watch(_columnBuilderLoader).value!;
-});
-
 final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
   final entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
   return ColumnSpecSelection(entry);
@@ -294,6 +293,7 @@ final buildResourceProvider = Provider<BuildResource>((ref) {
     skillInfo: ref.watch(skillInfoProvider),
     charaCardInfo: ref.watch(charaCardInfoProvider),
     recordRootDirectory: ref.watch(pathInfoProvider).charaDetail,
+    charaRankBorder: ref.watch(charaRankBorderProvider),
   );
 });
 
@@ -310,8 +310,8 @@ final currentGridProvider = Provider<Grid>((ref) {
   final specList = ref.watch(currentColumnSpecsProvider);
   final resource = ref.watch(buildResourceProvider);
 
-  final columnValues = specList.map((spec) => spec.parse(recordList)).toList();
-  final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(e.item2)).toList();
+  final columnValues = specList.map((spec) => spec.parse(resource, recordList)).toList();
+  final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(resource, e.item2)).toList();
 
   final filteredCounts = columnConditions.map((e) => e.countTrue()).toList();
   final columns = specList.map((spec) => spec.plutoColumn(resource)).toList();
