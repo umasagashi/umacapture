@@ -18,6 +18,7 @@ import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
+import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_columns = "pages.chara_detail.columns";
@@ -279,11 +280,8 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
 });
 
 final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
-  final builders = await ref.watch(_columnBuilderLoader.future);
-  final List<ColumnSpec> specs = [
-    for (final b in builders) b.build(),
-  ];
-  return ColumnSpecSelection(specs);
+  final entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
+  return ColumnSpecSelection(entry);
 });
 
 final currentColumnSpecsProvider = StateNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>((ref) {

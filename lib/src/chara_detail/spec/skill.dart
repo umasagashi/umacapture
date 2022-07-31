@@ -22,7 +22,7 @@ const tr_skill = "pages.chara_detail.column_predicate.skill";
 enum SkillSelection { anyOf, allOf, sumOf }
 
 @jsonSerializable
-class AggregateSkillPredicate extends Predicate<List<Skill>> {
+class AggregateSkillPredicate{
   final List<int> query;
   final SkillSelection selection;
   final int min;
@@ -48,7 +48,6 @@ class AggregateSkillPredicate extends Predicate<List<Skill>> {
     return value.where((e) => query.contains(e.id)).toList();
   }
 
-  @override
   bool apply(List<Skill> value) {
     final foundSkills = extract(value);
     if (query.length < 2) {
@@ -90,8 +89,9 @@ class SkillCellData<T> implements Exportable {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: ColumnSpecType.skill)
 class SkillColumnSpec extends ColumnSpec<List<Skill>> {
-  final Parser<List<Skill>> parser;
+  final Parser parser;
   final String labelKey = "skill.name";
   final AggregateSkillPredicate predicate;
 
@@ -110,11 +110,11 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     required this.description,
     required this.parser,
     required this.predicate,
-  });
+  }) : super(ColumnSpecType.skill);
 
   @override
   List<List<Skill>> parse(List<CharaDetailRecord> records) {
-    return records.map(parser.parse).toList();
+    return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
   @override
@@ -634,7 +634,7 @@ class SkillColumnSelectorState extends ConsumerState<SkillColumnSelector> {
 }
 
 class SkillColumnBuilder implements ColumnBuilder {
-  final Parser<List<Skill>> parser;
+  final Parser parser;
 
   @override
   final String title;

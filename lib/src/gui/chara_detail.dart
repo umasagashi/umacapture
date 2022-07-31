@@ -325,10 +325,12 @@ class _CharaDetailExportButton extends ConsumerWidget {
             ),
           ),
           if (exporting)
-            const SizedBox(
-              width: buttonSize,
-              height: buttonSize,
-              child: CircularProgressIndicator(),
+            const IgnorePointer(
+              child: SizedBox(
+                width: buttonSize,
+                height: buttonSize,
+                child: CircularProgressIndicator(),
+              ),
             ),
         ],
       ),

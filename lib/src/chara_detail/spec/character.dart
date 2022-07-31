@@ -17,7 +17,7 @@ import '/src/chara_detail/spec/parser.dart';
 const tr_character = "pages.chara_detail.column_predicate.character";
 
 @jsonSerializable
-class CharacterCardPredicate extends Predicate<int> {
+class CharacterCardPredicate {
   List<int> rejects;
 
   CharacterCardPredicate({
@@ -26,7 +26,6 @@ class CharacterCardPredicate extends Predicate<int> {
 
   CharacterCardPredicate.any() : rejects = [];
 
-  @override
   bool apply(int value) {
     return !rejects.contains(value);
   }
@@ -42,8 +41,9 @@ class CharacterCardCellData implements Exportable {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: ColumnSpecType.characterCard)
 class CharacterCardColumnSpec extends ColumnSpec<int> {
-  final Parser<int> parser;
+  final Parser parser;
   final CharacterCardPredicate predicate;
 
   @override
@@ -61,11 +61,11 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
     required this.description,
     required this.parser,
     required this.predicate,
-  });
+  }) : super(ColumnSpecType.characterCard);
 
   @override
   List<int> parse(List<CharaDetailRecord> records) {
-    return records.map(parser.parse).toList();
+    return List<int>.from(records.map(parser.parse));
   }
 
   @override
@@ -240,7 +240,7 @@ class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumn
 }
 
 class CharacterCardColumnBuilder implements ColumnBuilder {
-  final Parser<int> parser;
+  final Parser parser;
 
   @override
   final String title;

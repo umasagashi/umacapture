@@ -5,6 +5,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/utils.dart';
+import '/src/preference/storage_box.dart';
 
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
@@ -109,9 +110,20 @@ class BuildResource {
 }
 
 @jsonSerializable
+enum ColumnSpecType {
+  rangedInteger,
+  rangedLabel,
+  characterCard,
+  skill,
+  factor,
+}
+
+@jsonSerializable
 @Json(discriminatorProperty: 'type')
 abstract class ColumnSpec<T> {
-  String? type;
+  final ColumnSpecType type;
+
+  ColumnSpec(this.type);
 
   String get id;
 
@@ -134,16 +146,13 @@ abstract class ColumnSpec<T> {
   Widget selector({required BuildResource resource, required OnSpecChanged onChanged});
 }
 
-@jsonSerializable
-@Json(discriminatorProperty: 'type')
-abstract class Predicate<T> {
-  String? type;
-
-  bool apply(T value);
-}
-
 class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
-  ColumnSpecSelection(super.state);
+  final StorageEntry<String> entry;
+
+  ColumnSpecSelection(this.entry) : super([]) {
+    final data = entry.pull();
+    state = data == null ? [] : JsonMapper.deserialize<List<ColumnSpec>>(data) ?? [];
+  }
 
   void update(ColumnSpec spec) {
     assert(state.contains(spec));
@@ -202,6 +211,7 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
 
   void rebuild() {
     state = [...state];
+    entry.push(JsonMapper.serialize(state));
   }
 
   void saveState(String path) {

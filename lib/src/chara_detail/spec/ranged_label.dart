@@ -26,8 +26,9 @@ class RangedLabelCellData implements Exportable {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: ColumnSpecType.rangedLabel)
 class RangedLabelColumnSpec extends ColumnSpec<int> {
-  final Parser<int> parser;
+  final Parser parser;
   final String labelKey;
   final IsInRangeIntegerPredicate predicate;
 
@@ -47,11 +48,11 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
     required this.parser,
     required this.labelKey,
     required this.predicate,
-  });
+  }) : super(ColumnSpecType.rangedLabel);
 
   @override
   List<int> parse(List<CharaDetailRecord> records) {
-    return records.map(parser.parse).toList();
+    return List<int>.from(records.map(parser.parse));
   }
 
   @override
@@ -194,7 +195,7 @@ class RangedLabelColumnSelectorState extends ConsumerState<RangedLabelColumnSele
 }
 
 class AptitudeColumnBuilder implements ColumnBuilder {
-  final Parser<int> parser;
+  final Parser parser;
   final String labelKey = "aptitude.name";
 
   @override
@@ -227,7 +228,7 @@ class AptitudeColumnBuilder implements ColumnBuilder {
 }
 
 class CharaRankColumnBuilder implements ColumnBuilder {
-  final Parser<int> parser;
+  final Parser parser;
   final String labelKey = "character_rank.name";
 
   @override

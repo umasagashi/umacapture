@@ -29,16 +29,8 @@ enum FactorSubject { trainee, family }
 @jsonSerializable
 enum FactorCount { starOnly, starAndCount }
 
-// @jsonSerializable
-// class FactorCriteria {
-//   int star;
-//   int? count;
-//
-//   FactorCriteria({required this.star, this.count});
-// }
-
 @jsonSerializable
-class AggregateFactorSetPredicate extends Predicate<FactorSet> {
+class AggregateFactorSetPredicate {
   List<int> query;
   FactorSelection selection;
   FactorSubject subject;
@@ -48,7 +40,7 @@ class AggregateFactorSetPredicate extends Predicate<FactorSet> {
   int showMin;
   bool showSum;
 
-  bool get isStarAndCountAllowed => selection == FactorSelection.sumOf || subject == FactorSubject.family;
+  bool isStarAndCountAllowed() => selection == FactorSelection.sumOf || subject == FactorSubject.family;
 
   AggregateFactorSetPredicate({
     required this.query,
@@ -60,7 +52,7 @@ class AggregateFactorSetPredicate extends Predicate<FactorSet> {
     required this.showMin,
     required this.showSum,
   }) {
-    if (!isStarAndCountAllowed) {
+    if (!isStarAndCountAllowed()) {
       count = FactorCount.starOnly;
     }
     if (query.length <= 1 && selection == FactorSelection.sumOf) {
@@ -111,7 +103,6 @@ class AggregateFactorSetPredicate extends Predicate<FactorSet> {
     }
   }
 
-  @override
   bool apply(FactorSet value) {
     if (query.isEmpty) {
       return true;
@@ -161,8 +152,9 @@ class FactorCellData implements Exportable {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: ColumnSpecType.factor)
 class FactorColumnSpec extends ColumnSpec<FactorSet> {
-  final Parser<FactorSet> parser;
+  final Parser parser;
   final String labelKey = "factor.name";
   final AggregateFactorSetPredicate predicate;
 
@@ -185,11 +177,11 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     required this.description,
     required this.parser,
     required this.predicate,
-  });
+  }) : super(ColumnSpecType.factor);
 
   @override
   List<FactorSet> parse(List<CharaDetailRecord> records) {
-    return records.map(parser.parse).toList();
+    return List<FactorSet>.from(records.map(parser.parse));
   }
 
   @override
@@ -621,7 +613,7 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
         ),
         choiceChipWidget(
           label: "$tr_factor.mode.count.star_and_count.label".tr(),
-          disabled: !spec.predicate.isStarAndCountAllowed,
+          disabled: !spec.predicate.isStarAndCountAllowed(),
           tooltip: "$tr_factor.mode.count.star_and_count.disabled_tooltip".tr(),
           selected: spec.predicate.count == FactorCount.starAndCount,
           onSelected: () => updatePredicate(count: FactorCount.starAndCount),

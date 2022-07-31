@@ -139,12 +139,11 @@ final charaDetailCaptureStateProvider = StateProvider<CharaDetailCaptureState>((
 });
 
 final trainerIdProvider = Provider<String>((ref) {
-  final box = StorageBox(StorageBoxKey.trainerId);
-  const key = "trainer_id";
-  var id = box.pull<String>(key);
+  final entry = StorageBox(StorageBoxKey.trainerId).entry<String>("trainer_id");
+  var id = entry.pull();
   if (id == null) {
     id = const Uuid().v4();
-    box.push(key, id);
+    entry.push(id);
     logger.i("Trainer ID generated: $id");
   } else {
     logger.i("Trainer ID loaded: $id");
