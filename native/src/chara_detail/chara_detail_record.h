@@ -26,14 +26,14 @@ struct CharacterStatus {
 
     CharacterStatus() = default;
 
-    CharacterStatus(int speed, int stamina, int power, int guts, int intelligence)
+    [[maybe_unused]] CharacterStatus(int speed, int stamina, int power, int guts, int intelligence)
         : speed(speed)
         , stamina(stamina)
         , power(power)
         , guts(guts)
         , intelligence(intelligence) {}
 
-    CharacterStatus(const std::array<int, 5> &status)  // NOLINT(google-explicit-constructor)
+    [[maybe_unused]] CharacterStatus(const std::array<int, 5> &status)  // NOLINT(google-explicit-constructor)
         : speed(status[0])
         , stamina(status[1])
         , power(status[2])
@@ -49,7 +49,7 @@ struct GroundAptitude {
 
     GroundAptitude() = default;
 
-    GroundAptitude(int turf, int dirt)
+    [[maybe_unused]] GroundAptitude(int turf, int dirt)
         : turf(turf)
         , dirt(dirt) {}
 
@@ -68,7 +68,7 @@ struct DistanceAptitude {
 
     DistanceAptitude() = default;
 
-    DistanceAptitude(int short_range, int mile_range, int middle_range, int long_range)
+    [[maybe_unused]] DistanceAptitude(int short_range, int mile_range, int middle_range, int long_range)
         : short_range(short_range)
         , mile_range(mile_range)
         , middle_range(middle_range)
@@ -91,7 +91,7 @@ struct StyleAptitude {
 
     StyleAptitude() = default;
 
-    StyleAptitude(int lead_pace, int with_pace, int off_pace, int late_charge)
+    [[maybe_unused]] StyleAptitude(int lead_pace, int with_pace, int off_pace, int late_charge)
         : lead_pace(lead_pace)
         , with_pace(with_pace)
         , off_pace(off_pace)
@@ -113,12 +113,12 @@ struct AptitudeSet {
 
     AptitudeSet() = default;
 
-    AptitudeSet(GroundAptitude ground, DistanceAptitude distance, StyleAptitude style)
+    [[maybe_unused]] AptitudeSet(GroundAptitude ground, DistanceAptitude distance, StyleAptitude style)
         : ground(ground)
         , distance(distance)
         , style(style) {}
 
-    AptitudeSet(const std::array<int, 10> &aptitudes)  // NOLINT(google-explicit-constructor)
+    [[maybe_unused]] AptitudeSet(const std::array<int, 10> &aptitudes)  // NOLINT(google-explicit-constructor)
         : ground(stds::slice<0, 2>(aptitudes))
         , distance(stds::slice<2, 6>(aptitudes))
         , style(stds::slice<6, 10>(aptitudes)) {}
@@ -202,28 +202,26 @@ struct RecordId {
 
 struct Metadata {
     std::string format_version;
-    std::string recognizer_version;
     std::string region;
     RecordId record_id;
     std::string trainer_id;
     std::string captured_date;
-    std::string last_modified_date;
+    std::string recognizer_version;
+    std::string stage;
     std::optional<int> strategy;
     std::optional<int> relation_bonus;
-    std::optional<bool> is_archived;
 
     EXTENDED_JSON_TYPE_NDC(
         Metadata,
         format_version,
-        recognizer_version,
         region,
         record_id,
         trainer_id,
         captured_date,
-        last_modified_date,
+        recognizer_version,
+        stage,
         strategy,
-        relation_bonus,
-        is_archived);
+        relation_bonus);
 };
 
 struct CharaDetailRecord {

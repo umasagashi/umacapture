@@ -244,42 +244,39 @@ class RecordId extends JsonEquatable {
 @Json(ignoreNullMembers: true)
 class Metadata extends JsonEquatable {
   final String formatVersion;
-  final String recognizerVersion;
   final String region;
   final RecordId recordId;
   final String trainerId;
   final String capturedDate;
-  final String lastModifiedDate;
+  final String recognizerVersion;
+  final String stage;
   final int? strategy;
   final int? relationBonus;
-  final bool? isArchived;
 
   const Metadata(
     this.formatVersion,
-    this.recognizerVersion,
     this.region,
     this.recordId,
     this.trainerId,
     this.capturedDate,
-    this.lastModifiedDate,
+    this.recognizerVersion,
+    this.stage,
     this.strategy,
     this.relationBonus,
-    this.isArchived,
   );
 
   @override
   @JsonProperty(ignore: true)
   List<Object?> properties() => [
         formatVersion,
-        recognizerVersion,
         region,
         recordId,
         trainerId,
         capturedDate,
-        lastModifiedDate,
+        recognizerVersion,
+        stage,
         strategy,
         relationBonus,
-        isArchived,
       ];
 }
 

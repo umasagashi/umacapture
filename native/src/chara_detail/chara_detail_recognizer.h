@@ -14,6 +14,14 @@ namespace uma::chara_detail {
 
 namespace recognizer_impl {
 
+struct VersionInfo {
+    std::string format_version;
+    std::string region;
+    std::string recognizer_version;
+
+    EXTENDED_JSON_TYPE_NDC(VersionInfo, format_version, region, recognizer_version);
+};
+
 struct IndexPrediction : public recognizer::Prediction {
     [[nodiscard]] int result() const { return static_cast<int>(at<int64_t>(0)); }
 
@@ -668,6 +676,7 @@ public:
         const recognizer_config::CharaDetailRecognizerConfig &config)
         : trainer_id(trainer_id)
         , record_root_dir(record_root_dir)
+        , module_root_dir(module_root_dir)
         , on_recognize_ready(on_recognize_ready)
         , on_recognize_completed(on_recognize_completed)
         , config(config)
@@ -704,14 +713,17 @@ public:
         factor_tab_recognizer.recognize(factor_frame, record, crop_info, factor_tab_history);
         campaign_tab_recognizer.recognize(campaign_frame, record, campaign_tab_history);
 
+        const auto version_info =
+            json_util::read(module_root_dir / "version_info.json").get<recognizer_impl::VersionInfo>();
+
         record.metadata = {
-            "1.0.0",
-            "1.0.0",
-            "JPN",
+            version_info.format_version,
+            version_info.region,
             {id},
             trainer_id,
             timestamp,
-            timestamp,
+            version_info.recognizer_version,
+            "active",
             record.races.front().strategy,
         };
 
@@ -740,6 +752,7 @@ public:
 private:
     const std::string trainer_id;
     const std::filesystem::path record_root_dir;
+    const std::filesystem::path module_root_dir;
     const recognizer_config::CharaDetailRecognizerConfig config;
 
     const recognizer_impl::StatusHeaderRecognizer status_header_recognizer;

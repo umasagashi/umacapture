@@ -306,9 +306,7 @@ public:
 
 private:
     void saveIncremental(const Frame &frame) {
-        const auto path = image_dir / path_config.scroll_area.withNumber(image_count++, 5).filename();
-        frame.save(path);
-        log_debug(path.string());
+        frame.save(image_dir / path_config.scroll_area.withNumber(image_count++, 5).filename());
     }
 
     const std::filesystem::path image_dir;
