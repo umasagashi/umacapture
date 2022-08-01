@@ -25,7 +25,7 @@ class PathInfo {
 
   String get modules => "$supportDir/modules";
 
-  String get charaDetail => "$storage/chara_detail";
+  String get charaDetail => "$storage/chara_detail/active";
 
   @override
   String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';

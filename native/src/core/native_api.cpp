@@ -99,7 +99,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
 
-    const auto stitcher_dir = config_json["directory"]["storage_dir"].get<std::filesystem::path>() / "chara_detail";
+    const auto stitcher_dir =
+        config_json["directory"]["storage_dir"].get<std::filesystem::path>() / "chara_detail" / "active";
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
         stitcher_dir,
