@@ -273,16 +273,21 @@ public:
             const double scaled_y = anchor.scaleFromPixels(y_pixels);
             if (!frame.isIn(current_scan->color_range, {current_scan->x, scaled_y})) {
                 current_length_pixels = 0;
-            } else {
-                const auto length_pixels = anchor.expand({0., current_scan->length}).y();
-                if (++current_length_pixels >= length_pixels) {
-                    current_length_pixels = 0;
-                    if (++current_scan == scan_parameters.end()) {
-                        saveIncremental(frame.view({scaled_top_left, {1., scaled_y}}));
-                        return;
-                    }
-                }
+                continue;
             }
+            const int length_pixels = anchor.expand({0., current_scan->length}).y();
+            if (++current_length_pixels < length_pixels) {
+                continue;
+            }
+            current_length_pixels = 0;
+            if (++current_scan != scan_parameters.end()) {
+                continue;
+            }
+            const Rect<double> rect = {scaled_top_left, {1., scaled_y}};
+            if (!rect.empty()) {
+                saveIncremental(frame.view(rect));
+            }
+            return;
         }
         saveIncremental(frame.view({scaled_top_left, anchor.mapFromFrame(frame.rect().bottomRight())}));
     }
