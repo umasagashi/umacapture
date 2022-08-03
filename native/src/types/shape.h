@@ -241,7 +241,7 @@ public:
 
     Rect() noexcept = default;
 
-    [[nodiscard]] inline bool empty() const { return top_left_.empty() && bottom_right_.empty(); }
+    [[nodiscard]] inline bool empty() const { return width() == 0 || height() == 0; }
 
     inline Rect &operator=(const Rect &other) = default;
 
