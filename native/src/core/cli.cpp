@@ -101,6 +101,25 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
     }
 }
 
+void stitchFromImages(const std::string &id) {
+    const auto recorder_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
+
+    auto &api = app::NativeApi::instance();
+    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
+
+    const auto config = createConfig(true);
+    api.startEventLoop(config.dump());
+
+    recorder_runner->start();
+
+    api.stitch(id);
+
+    while (api.isRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
 }  // namespace uma::cli
 
 int main(int argc, char **argv) {
@@ -126,6 +145,10 @@ int main(int argc, char **argv) {
         auto video_command = command.add_subcommand("video", "run capture mode from video");
         std::vector<std::filesystem::path> video_path_list;
         video_command->add_option("--video_path_list", video_path_list)->required();
+
+        auto stitch_command = command.add_subcommand("stitch", "run capture mode from scraped images");
+        std::string id;
+        stitch_command->add_option("--id", id)->required();
 
         CLI11_PARSE(command, argc, argv)
 
@@ -157,6 +180,10 @@ int main(int argc, char **argv) {
 
         if (video_command->parsed()) {
             uma::cli::captureFromVideo(video_path_list);
+        }
+
+        if (stitch_command->parsed()) {
+            uma::cli::stitchFromImages(id);
         }
     } catch (std::exception &e) {
         std::cerr << e.what() << std::endl;
