@@ -65,13 +65,10 @@ public:
 
     Point() noexcept = default;
 
-    [[nodiscard]] inline bool empty() const { return x_ == 0 && y_ == 0; }
-
     [[nodiscard]] inline T x() const { return x_; }
     [[nodiscard]] inline T y() const { return y_; }
     [[nodiscard]] inline Anchor anchor() const { return anchor_; }
 
-    [[nodiscard]] inline Point<T> withX(T x) const { return {x, y_, anchor_}; }
     [[nodiscard]] inline Point<T> withY(T y) const { return {x_, y, anchor_}; }
 
     [[maybe_unused]] [[nodiscard]] inline cv::Point_<T> toCVPoint() const {
@@ -270,27 +267,12 @@ public:
         };
     }
 
-    [[nodiscard]] inline Rect<T> united(const Rect<T> &other) const {
-        assert_(topLeft().anchor() == other.topLeft().anchor());
-        assert_(bottomRight().anchor() == other.bottomRight().anchor());
-        return {
-            {std::min(left(), other.left()), std::min(top(), other.top())},
-            {std::max(right(), other.right()), std::max(bottom(), other.bottom())},
-        };
-    }
-
     [[nodiscard]] inline Rect<T> margined(T margin_left, T margin_top, T margin_right, T margin_bottom) const {
         return {
             {left() - margin_left, top() - margin_top},
             {right() + margin_right, bottom() + margin_bottom},
         };
     }
-
-    [[nodiscard]] inline Rect<T> margined(T horizontal, T vertical) const {
-        return margined(horizontal, vertical, horizontal, vertical);
-    }
-
-    [[nodiscard]] inline Rect<T> margined(T all) const { return margined(all, all, all, all); }
 
     EXTENDED_JSON_TYPE_NDC(Rect, top_left_, bottom_right_);
 

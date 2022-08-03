@@ -160,6 +160,7 @@ void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     setNotifyCallback({});
     setDetachCallback({});
     setMkdirCallback({});
+    setRmdirCallback({});
     setLoggingCallback({});
     notifyCaptureStarted();
     notifyCaptureStopped();
