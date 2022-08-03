@@ -80,6 +80,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
     const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
+    on_stitch_ready = stitch_ready_connection;
 
     const auto scraping_dir = config_json["directory"]["temp_dir"].get<std::filesystem::path>() / "chara_detail";
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(

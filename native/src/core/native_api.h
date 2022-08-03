@@ -43,6 +43,8 @@ public:
 
     void updateFrame(const cv::Mat &image, uint64 timestamp);
 
+    void stitch(const std::string &id) { on_stitch_ready->send(id); }
+
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
 
     void notifyError(const std::string &message) {
@@ -96,6 +98,9 @@ private:
     std::function<VoidCallback> detach_callback = []() {};
     std::function<PathCallback> mkdir_callback = [](const auto &path) { std::filesystem::create_directories(path); };
     std::function<PathCallback> rmdir_callback = [](const auto &path) { std::filesystem::remove_all(path); };
+
+    // debug interface
+    event_util::Sender<std::string> on_stitch_ready;
 
     event_util::Sender<Frame> on_frame_captured;
     event_util::EventRunnerController event_runners;
