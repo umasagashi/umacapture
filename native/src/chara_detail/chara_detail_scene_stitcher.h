@@ -77,8 +77,7 @@ private:
         const PathEntry &path_entry) {
         // Stitch scroll area.
         auto scroll_area = Frame::fixed(scroll_area_stitcher.stitch(input_dir));
-        const auto background_color = scroll_area.colorAt({0.1, 0.0, {ScreenStart, ScreenPixelEnd}});
-        //        const auto background_color = Color{0, 255, 0};
+        const auto background_color = scroll_area.colorAt({0.5, 0.0, {ScreenStart, ScreenPixelEnd}});
 
         // Fill scroll bar.
         scroll_area.fill(config.scroll_bar_fill_rect, background_color);

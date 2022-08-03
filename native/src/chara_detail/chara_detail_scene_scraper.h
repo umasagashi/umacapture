@@ -458,7 +458,6 @@ public:
         , on_scroll_updated(on_scroll_updated) {}
 
     void update(const Frame &frame) override {
-        //        vlog_debug(is_scrolling, frame.size().width(), frame.size().height());
         assert_(state == Updatable);
 
         if (is_scrolling) {
