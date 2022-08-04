@@ -23,6 +23,7 @@ dependencies:
   collection: ^1.16.0
   csv: ^5.0.1
   dart_json_mapper: ^2.2.4+2
+  dio: ^4.0.6
   easy_localization: ^3.0.1
   equatable: ^2.0.3
   extended_image: ^6.2.1

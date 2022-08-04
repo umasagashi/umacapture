@@ -1,16 +1,31 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:archive/archive_io.dart';
+import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dio/dio.dart';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:recase/recase.dart';
+import 'package:tuple/tuple.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/app/providers.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/json_adapter.dart';
 import '/src/core/platform_channel.dart';
 import '/src/core/utils.dart';
 import '/src/gui/capture.dart';
+import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
+
+// ignore: constant_identifier_names
+const tr_toast = "toast";
+
+const latestModuleUrl = "https://umasagashi.pages.dev/data/umacapture";
 
 final capturingStateProvider = Provider<bool>((ref) {
   return ref.watch(captureTriggeredEventProvider).when(
@@ -60,6 +75,110 @@ final charaDetailRecordCapturedEventProvider = StreamProvider<String>((ref) {
     _charaDetailRecordCapturedEventController = StreamController();
   }
   return _charaDetailRecordCapturedEventController.stream;
+});
+
+StreamController<ToastData> _moduleVersionCheckEventController = StreamController();
+final moduleVersionCheckEventProvider = StreamProvider<ToastData>((ref) {
+  if (_moduleVersionCheckEventController.hasListener) {
+    _moduleVersionCheckEventController = StreamController();
+  }
+  return _moduleVersionCheckEventController.stream;
+});
+
+@jsonSerializable
+class VersionInfo {
+  final String formatVersion;
+  final String region;
+  final String recognizerVersion;
+
+  @JsonProperty(ignore: true)
+  int get version => DateTime.parse(recognizerVersion).millisecondsSinceEpoch;
+
+  VersionInfo(this.formatVersion, this.region, this.recognizerVersion);
+
+  static Future<VersionInfo?> loadFromFile(File path) async {
+    if (!path.existsSync()) {
+      return Future.value(null);
+    }
+    initializeJsonReflectable();
+    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    try {
+      return await path.readAsString().then((content) => JsonMapper.deserialize<VersionInfo>(content, options));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static Future<VersionInfo?> download(Uri url) async {
+    initializeJsonReflectable();
+    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    try {
+      return await Dio()
+          .get(url.toString())
+          .then((response) => JsonMapper.deserialize<VersionInfo>(response.toString(), options));
+    } catch (e) {
+      return null;
+    }
+  }
+}
+
+enum VersionCheck {
+  noUpdateRequired,
+  updated,
+  latestVersionNotAvailable,
+  noVersionAvailable,
+}
+
+Future<void> extractArchive(Tuple2<File, Directory> args) {
+  final stream = InputFileStream(args.item1.path);
+  final archive = ZipDecoder().decodeBuffer(stream);
+  extractArchiveToDisk(archive, args.item2.path);
+  return stream.close();
+}
+
+VersionCheck _sendModuleVersionCheckToast(ToastType type, VersionCheck code) {
+  _moduleVersionCheckEventController.sink.add(
+    ToastData(type, "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
+  );
+  return code;
+}
+
+final moduleVersionCheckLoader = FutureProvider<VersionCheck>((ref) async {
+  final pathInfo = await ref.watch(pathInfoLoader.future);
+
+  final local = await compute(VersionInfo.loadFromFile, File("${pathInfo.modules}/version_info.json"));
+  final latest = await compute(VersionInfo.download, Uri.parse("$latestModuleUrl/version_info.json"));
+  logger.i("local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
+
+  if (local == null && latest == null) {
+    return _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
+  }
+  if (latest == null) {
+    return _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
+  }
+  // Rollback is allowed.
+  if (local?.version == latest.version) {
+    return _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
+  }
+
+  final downloadPath = "${pathInfo.temp}/modules.zip";
+  try {
+    await Dio().download("$latestModuleUrl/modules.zip", downloadPath);
+    await compute(extractArchive, Tuple2(File(downloadPath), Directory(pathInfo.supportDir)));
+    File(downloadPath).delete();
+  } catch (e) {
+    if (local == null) {
+      return _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
+    } else {
+      return _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
+    }
+  }
+
+  return _sendModuleVersionCheckToast(ToastType.success, VersionCheck.updated);
+});
+
+final moduleUpdaterLoader = FutureProvider<VersionInfo?>((ref) async {
+  return Future.value();
 });
 
 class CharaDetailLink {
@@ -185,8 +304,12 @@ final platformConfigLoader = FutureProvider<JsonMap>((ref) async {
   return config;
 });
 
-final platformControllerLoader = FutureProvider<PlatformController>((ref) {
-  logger.d("platformControllerLoader");
+final platformControllerLoader = FutureProvider<PlatformController?>((ref) async {
+  final versionCheck = await ref.watch(moduleVersionCheckLoader.future);
+  if (versionCheck == VersionCheck.noVersionAvailable) {
+    logger.e("Platform controller creation was aborted because module version info was not available.");
+    return null;
+  }
   return ref.watch(platformConfigLoader.future).then((config) {
     final controller = PlatformController(ref, config);
     if (ref.read(autoStartCaptureStateProvider)) {
@@ -196,8 +319,8 @@ final platformControllerLoader = FutureProvider<PlatformController>((ref) {
   });
 });
 
-final platformControllerProvider = Provider<PlatformController>((ref) {
-  return ref.watch(platformControllerLoader).value!;
+final platformControllerProvider = Provider<PlatformController?>((ref) {
+  return ref.watch(platformControllerLoader).value;
 });
 
 class PlatformController {

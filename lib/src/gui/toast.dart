@@ -9,25 +9,25 @@ enum ToastType {
   error,
 }
 
-class ToastData<T> {
+class ToastData {
   final ToastType type;
   final String description;
   final VoidCallback? onTap;
 
-  ToastData({required this.type, required this.description, this.onTap});
+  ToastData(this.type, this.description, [this.onTap]);
 
-  ToastData.success(this.description, this.onTap) : type = ToastType.success;
+  ToastData.success(this.description, [this.onTap]) : type = ToastType.success;
 
-  ToastData.info(this.description, this.onTap) : type = ToastType.info;
+  ToastData.info(this.description, [this.onTap]) : type = ToastType.info;
 
-  ToastData.warning(this.description, this.onTap) : type = ToastType.warning;
+  ToastData.warning(this.description, [this.onTap]) : type = ToastType.warning;
 
-  ToastData.error(this.description, this.onTap) : type = ToastType.error;
+  ToastData.error(this.description, [this.onTap]) : type = ToastType.error;
 }
 
 class Toaster {
   final double narrowWidth;
-  final Duration duration;
+  final Map<ToastType, Duration> duration;
 
   Toaster({
     this.narrowWidth = 600.0,
@@ -76,7 +76,12 @@ class Toaster {
       SnackBar(
         width: barWidth,
         padding: const EdgeInsets.symmetric(vertical: 10),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+        backgroundColor: color,
         behavior: SnackBarBehavior.floating,
+        dismissDirection: isNarrow ? DismissDirection.horizontal : DismissDirection.down,
+        duration: duration[data.type]!,
+        action: isNarrow ? null : SnackBarAction(textColor: Colors.white, label: 'CLOSE', onPressed: () {}),
         content: TextButton.icon(
           icon: Icon(icon, color: Colors.white),
           label: Padding(
@@ -93,11 +98,6 @@ class Toaster {
             data.onTap?.call();
           },
         ),
-        backgroundColor: color,
-        duration: duration,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        dismissDirection: isNarrow ? DismissDirection.horizontal : DismissDirection.down,
-        action: isNarrow ? null : SnackBarAction(textColor: Colors.white, label: 'CLOSE', onPressed: () {}),
       ),
     );
   }

@@ -251,6 +251,10 @@ class _CharaDetailStateWidget extends ConsumerWidget {
   }
 
   String additionalInfoText(WidgetRef ref) {
+    final notAvailable = ref.watch(platformControllerProvider) == null;
+    if (notAvailable) {
+      return "$tr_capture.capture_control.additional_info.not_available".tr();
+    }
     final isCapturing = ref.watch(capturingStateProvider);
     if (!isCapturing) {
       return "$tr_capture.capture_control.additional_info.start_capture".tr();
@@ -319,13 +323,17 @@ class CaptureControlGroup extends ConsumerWidget {
       children: [
         Padding(
           padding: const EdgeInsets.all(8),
-          child: _TwoStateButton(
-            elevateWhen: false,
-            falseWidget: Text("$tr_capture.capture_control.start_capture_button".tr()),
-            trueWidget: Text("$tr_capture.capture_control.stop_capture_button".tr()),
-            onFalsePressed: () => ref.watch(platformControllerProvider).startCapture(),
-            onTruePressed: () => ref.watch(platformControllerProvider).stopCapture(),
-            provider: capturingStateProvider,
+          child: Disabled(
+            disabled: ref.watch(platformControllerProvider) == null,
+            tooltip: "$tr_capture.capture_control.disabled_tooltip".tr(),
+            child: _TwoStateButton(
+              elevateWhen: false,
+              falseWidget: Text("$tr_capture.capture_control.start_capture_button".tr()),
+              trueWidget: Text("$tr_capture.capture_control.stop_capture_button".tr()),
+              onFalsePressed: () => ref.watch(platformControllerProvider)?.startCapture(),
+              onTruePressed: () => ref.watch(platformControllerProvider)?.stopCapture(),
+              provider: capturingStateProvider,
+            ),
           ),
         ),
         _CharaDetailStateWidget(),
