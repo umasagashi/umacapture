@@ -11,7 +11,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:recase/recase.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/app/providers.dart';
@@ -628,7 +627,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => launchUrl(Uri.file(storage.recordPathOf(record))),
+          onTap: () => openDirectory(Directory(storage.recordPathOf(record))),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
       ],

@@ -3,11 +3,11 @@ import 'dart:io';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/utils.dart';
 import '/src/gui/chara_detail.dart';
 import '/src/gui/sound_player.dart';
 import '/src/gui/toast.dart';
@@ -59,7 +59,7 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
 
     _listenForToast(clipboardPasteEventProvider, "$tr_toast.clipboard_paste".tr());
     _listenForToast<String>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {
-      launchUrl(Uri.file(File(path).parent.path));
+      openDirectory(File(path).parent);
     });
 
     return Container();
