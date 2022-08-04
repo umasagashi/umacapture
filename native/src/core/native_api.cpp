@@ -25,6 +25,10 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const bool video_mode = config_json["video_mode"].get<bool>();
     vlog_debug(video_mode);
 
+    log_debug("modules_dir={}", config_json["directory"]["modules_dir"].get<std::string>());
+    log_debug("storage_dir={}", config_json["directory"]["storage_dir"].get<std::string>());
+    log_debug("temp_dir={}", config_json["directory"]["temp_dir"].get<std::string>());
+
     const auto queue_limit_mode = video_mode ? event_util::QueueLimitMode::Block : event_util::QueueLimitMode::Discard;
 
     assert_(event_runners == nullptr);
@@ -82,7 +86,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
     on_stitch_ready = stitch_ready_connection;
 
-    const auto scraping_dir = config_json["directory"]["temp_dir"].get<std::filesystem::path>() / "chara_detail";
+    const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         chara_detail_updated_connection,
@@ -101,7 +105,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
 
     const auto stitcher_dir =
-        config_json["directory"]["storage_dir"].get<std::filesystem::path>() / "chara_detail" / "active";
+        json_util::decodePath(config_json["directory"]["storage_dir"]) / "chara_detail" / "active";
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
         stitcher_dir,
@@ -119,7 +123,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
         stitcher_dir,
-        config_json["directory"]["modules_dir"].get<std::filesystem::path>(),
+        json_util::decodePath(config_json["directory"]["modules_dir"]),
         recognize_ready_connection,
         chara_detail_completed_connection,
         config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
