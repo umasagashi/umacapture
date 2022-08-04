@@ -32,7 +32,12 @@ class NotificationLayer extends ConsumerStatefulWidget {
 }
 
 class _NotificationLayerState extends ConsumerState<NotificationLayer> {
-  final Toaster _toaster = Toaster(duration: const Duration(seconds: 3));
+  final Toaster _toaster = Toaster(duration: {
+    ToastType.success: const Duration(seconds: 5),
+    ToastType.info: const Duration(seconds: 8),
+    ToastType.warning: const Duration(seconds: 10),
+    ToastType.error: const Duration(seconds: 15),
+  });
 
   void _showToast(BuildContext context, ToastData data) => _toaster.showToast(context, data);
 
@@ -46,7 +51,13 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
 
   void _listenForToast<T>(StreamProvider<T> provider, String message, [Callback<T>? onTap]) {
     ref.listen<AsyncValue<T>>(provider, (_, current) {
-      current.whenData((T data) => _showToast(context, ToastData<T>.success(message, onTap?.bind(data))));
+      current.whenData((T data) => _showToast(context, ToastData.success(message, onTap?.bind(data))));
+    });
+  }
+
+  void _listenForToastData<T>(StreamProvider<ToastData> provider) {
+    ref.listen<AsyncValue<ToastData>>(provider, (_, current) {
+      current.whenData((ToastData data) => _showToast(context, data));
     });
   }
 
@@ -57,6 +68,7 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
     _listenForPlaySound(errorEventProvider, SoundType.error);
     _listenForPlaySound(duplicatedCharaEventProvider, SoundType.error);
 
+    _listenForToastData(moduleVersionCheckEventProvider);
     _listenForToast(clipboardPasteEventProvider, "$tr_toast.clipboard_paste".tr());
     _listenForToast<String>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {
       openDirectory(File(path).parent);

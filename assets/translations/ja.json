@@ -10,6 +10,7 @@
                 "title": "コントロール",
                 "start_capture_button": "キャプチャ開始",
                 "stop_capture_button": "キャプチャ停止",
+                "disabled_tooltip": "ロード中にエラーが発生しました。キャプチャ機能は利用できません。",
                 "capture_completed_message": "キャプチャに成功しました。ここをクリックすると管理画面に移動します。",
                 "error": {
                     "closed_before_completed": "[エラー] キャプチャ完了前に詳細画面をロストしました。",
@@ -28,6 +29,7 @@
                     "show_chara_detail": "ゲーム画面のキャプチャ中です。殿堂入りウマ娘の詳細画面を表示してください。",
                     "scroll": "殿堂入りウマ娘のキャプチャ中です。3タブとも100%になるまでスクロールしてください。",
                     "error": "エラーが発生しました。キャプチャをやり直してください。",
+                    "not_available": "ロード中にエラーが発生しました。キャプチャ機能は利用できません。",
                     "unknown": ""
                 }
             }
@@ -363,6 +365,12 @@
     },
     "toast": {
         "clipboard_paste": "クリップボードに画像をコピーしました。",
-        "record_export": "ファイルを保存しました。"
+        "record_export": "ファイルを保存しました。",
+        "module_version_check": {
+            "no_version_available": "認識モジュールの取得に失敗しました。キャプチャ機能は利用できません。",
+            "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",
+            "no_update_required": "認識モジュールは最新版です。",
+            "updated": "認識モジュールを最新版に更新しました。"
+        }
     }
 }
