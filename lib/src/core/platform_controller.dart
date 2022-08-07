@@ -92,7 +92,7 @@ class VersionInfo {
   final String recognizerVersion;
 
   @JsonProperty(ignore: true)
-  int get version => DateTime.parse(recognizerVersion).millisecondsSinceEpoch;
+  DateTime get version => DateTime.parse(recognizerVersion);
 
   VersionInfo(this.formatVersion, this.region, this.recognizerVersion);
 
@@ -138,12 +138,12 @@ Future<void> extractArchive(Tuple2<File, Directory> args) {
 
 VersionCheck _sendModuleVersionCheckToast(ToastType type, VersionCheck code) {
   _moduleVersionCheckEventController.sink.add(
-    ToastData(type, "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
+    ToastData(type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
   );
   return code;
 }
 
-final moduleVersionCheckLoader = FutureProvider<VersionCheck>((ref) async {
+final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   final pathInfo = await ref.watch(pathInfoLoader.future);
 
   final local = await compute(VersionInfo.loadFromFile, File("${pathInfo.modules}/version_info.json"));
@@ -151,14 +151,17 @@ final moduleVersionCheckLoader = FutureProvider<VersionCheck>((ref) async {
   logger.i("local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
   if (local == null && latest == null) {
-    return _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
+    _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
+    return null;
   }
   if (latest == null) {
-    return _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
+    _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
+    return local!.version;
   }
   // Rollback is allowed.
   if (local?.version == latest.version) {
-    return _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
+    _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
+    return latest.version;
   }
 
   final downloadPath = "${pathInfo.temp}/modules.zip";
@@ -168,17 +171,15 @@ final moduleVersionCheckLoader = FutureProvider<VersionCheck>((ref) async {
     File(downloadPath).delete();
   } catch (e) {
     if (local == null) {
-      return _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
+      _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
     } else {
-      return _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
+      _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
     }
+    return local?.version;
   }
 
-  return _sendModuleVersionCheckToast(ToastType.success, VersionCheck.updated);
-});
-
-final moduleUpdaterLoader = FutureProvider<VersionInfo?>((ref) async {
-  return Future.value();
+  _sendModuleVersionCheckToast(ToastType.success, VersionCheck.updated);
+  return latest.version;
 });
 
 class CharaDetailLink {
@@ -305,9 +306,8 @@ final platformConfigLoader = FutureProvider<JsonMap>((ref) async {
 });
 
 final platformControllerLoader = FutureProvider<PlatformController?>((ref) async {
-  final versionCheck = await ref.watch(moduleVersionCheckLoader.future);
-  if (versionCheck == VersionCheck.noVersionAvailable) {
-    logger.e("Platform controller creation was aborted because module version info was not available.");
+  final moduleVersion = await ref.watch(moduleVersionLoader.future);
+  if (moduleVersion == null) {
     return null;
   }
   return ref.watch(platformConfigLoader.future).then((config) {
@@ -377,6 +377,9 @@ class PlatformController {
           captureState.update((state) => state.success(id: data['id']));
         }
         break;
+      case 'onCharaDetailUpdated':
+        _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
+        break;
       default:
         throw UnimplementedError(dataType);
     }
@@ -385,6 +388,8 @@ class PlatformController {
   void startCapture() => _platformChannel.startCapture();
 
   void stopCapture() => _platformChannel.stopCapture();
+
+  void updateRecord(String id) => _platformChannel.updateRecord(id);
 
   String get storageDir => nativeConfig["storage_dir"];
 }

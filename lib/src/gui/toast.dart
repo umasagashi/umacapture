@@ -11,85 +11,65 @@ enum ToastType {
 
 class ToastData {
   final ToastType type;
-  final String description;
+  final String? description;
+  final Widget? label;
+  final Duration? duration;
   final VoidCallback? onTap;
 
-  ToastData(this.type, this.description, [this.onTap]);
-
-  ToastData.success(this.description, [this.onTap]) : type = ToastType.success;
-
-  ToastData.info(this.description, [this.onTap]) : type = ToastType.info;
-
-  ToastData.warning(this.description, [this.onTap]) : type = ToastType.warning;
-
-  ToastData.error(this.description, [this.onTap]) : type = ToastType.error;
+  ToastData(this.type, {this.description, this.label, this.duration, this.onTap}) {
+    assert(description != null || label != null);
+  }
 }
 
 class Toaster {
   final double narrowWidth;
-  final Map<ToastType, Duration> duration;
+  final Map<ToastType, Duration> durationMap = {
+    ToastType.success: const Duration(seconds: 5),
+    ToastType.info: const Duration(seconds: 5),
+    ToastType.warning: const Duration(seconds: 10),
+    ToastType.error: const Duration(seconds: 10),
+  };
+  final Map<ToastType, IconData> iconMap = {
+    ToastType.success: Icons.check_circle,
+    ToastType.info: Icons.info,
+    ToastType.warning: Icons.warning,
+    ToastType.error: Icons.dangerous,
+  };
+  final Map<ToastType, Color> colorMap = {
+    ToastType.success: Colors.green.shade500,
+    ToastType.info: Colors.blue.shade500,
+    ToastType.warning: Colors.orange.shade500,
+    ToastType.error: Colors.red.shade400,
+  };
 
   Toaster({
     this.narrowWidth = 600.0,
-    required this.duration,
   });
-
-  IconData _getIcon(ToastData data) {
-    switch (data.type) {
-      case ToastType.success:
-        return Icons.check_circle;
-      case ToastType.info:
-        return Icons.info;
-      case ToastType.warning:
-        return Icons.warning;
-      case ToastType.error:
-        return Icons.dangerous;
-      default:
-        throw ArgumentError.value(data.type);
-    }
-  }
-
-  Color _getColor(ToastData data) {
-    switch (data.type) {
-      case ToastType.success:
-        return Colors.green.shade500;
-      case ToastType.info:
-        return Colors.blue.shade500;
-      case ToastType.warning:
-        return Colors.orange.shade500;
-      case ToastType.error:
-        return Colors.red.shade400;
-      default:
-        throw ArgumentError.value(data.type);
-    }
-  }
 
   void showToast(BuildContext context, ToastData data) {
     final snackBar = ScaffoldMessenger.of(context);
     final parentSize = MediaQuery.of(context).size;
     final barWidth = min(parentSize.width - 20.0, narrowWidth);
     final isNarrow = barWidth < narrowWidth;
-    final icon = _getIcon(data);
-    final color = _getColor(data);
 
     snackBar.showSnackBar(
       SnackBar(
         width: barWidth,
         padding: const EdgeInsets.symmetric(vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        backgroundColor: color,
+        backgroundColor: colorMap[data.type],
         behavior: SnackBarBehavior.floating,
         dismissDirection: isNarrow ? DismissDirection.horizontal : DismissDirection.down,
-        duration: duration[data.type]!,
+        duration: data.duration ?? durationMap[data.type]!,
         action: isNarrow ? null : SnackBarAction(textColor: Colors.white, label: 'CLOSE', onPressed: () {}),
         content: TextButton.icon(
-          icon: Icon(icon, color: Colors.white),
+          icon: Icon(iconMap[data.type], color: Colors.white),
           label: Padding(
             padding: const EdgeInsets.only(left: 10),
             child: Align(
               heightFactor: 1,
               alignment: Alignment.centerLeft,
-              child: Text(data.description, style: const TextStyle(color: Colors.white, fontSize: 16)),
+              child: data.label ?? Text(data.description!, style: const TextStyle(color: Colors.white, fontSize: 16)),
             ),
           ),
           style: ButtonStyle(overlayColor: MaterialStateProperty.all<Color>(Colors.transparent)),

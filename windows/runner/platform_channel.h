@@ -38,7 +38,8 @@ public:
                 }
             });
 
-        const auto notify_connection = event_util::makeQueuedConnection<std::string>(event_util::QueueLimitMode::NoLimit);
+        const auto notify_connection =
+            event_util::makeQueuedConnection<std::string>(event_util::QueueLimitMode::NoLimit);
         on_notify = notify_connection;
         message_processor = notify_connection;
         notify_connection->listen([this](const std::string &message) {
@@ -61,7 +62,7 @@ public:
 
     std::optional<LRESULT> handleMessage(HWND, UINT message, WPARAM, LPARAM) {
         if (message == MESSAGE_QUEUE_ID) {
-            message_processor->processAll();
+            message_processor->processIf([]() { return true; });
             return 0;
         } else {
             return {std::nullopt};

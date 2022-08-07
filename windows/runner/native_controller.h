@@ -18,7 +18,8 @@ class NativeController {
 public:
     explicit NativeController(const std::shared_ptr<PlatformChannel> &platform_channel)
         : channel(platform_channel) {
-        const auto recorder_runner_impl = event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
+        const auto recorder_runner_impl =
+            event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
         const auto connection = recorder_runner_impl->makeConnection<cv::Mat, uint64>();
 
         recorder_runner = recorder_runner_impl;
@@ -38,6 +39,8 @@ public:
 
         channel->addMethodCallHandler("stopCapture", [this]() { joinEventLoop(); });
 
+        channel->addMethodCallHandler("updateRecord", [this](const auto &id) { updateRecord(id); });
+
         app::NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
 
         connection->listen(
@@ -45,22 +48,22 @@ public:
     }
 
     ~NativeController() {
+        log_debug("");
         if (recorder_runner) {
             joinEventLoop();
             recorder_runner = nullptr;
             window_recorder = nullptr;
+            app::NativeApi::instance().joinEventLoop();
         }
     }
 
 private:
     void startEventLoop() {
         log_debug("");
-
         assert_(recorder_runner);
         if (recorder_runner->isRunning()) {
             return;
         }
-
         app::NativeApi::instance().startEventLoop(native_config);
         recorder_runner->start();
         window_recorder->startRecord();
@@ -69,16 +72,16 @@ private:
 
     void joinEventLoop() {
         log_debug("");
-
-        assert_(recorder_runner);
-        if (!recorder_runner->isRunning()) {
-            return;
-        }
-
+        // The recorder will be terminated, but the event loop will remain.
         window_recorder->stopRecord();
         recorder_runner->join();
-        app::NativeApi::instance().joinEventLoop();
         app::NativeApi::instance().notifyCaptureStopped();
+    }
+
+    void updateRecord(const std::string &id) {
+        log_debug("");
+        app::NativeApi::instance().startEventLoop(native_config);
+        app::NativeApi::instance().updateRecord(id);
     }
 
     std::shared_ptr<PlatformChannel> channel;

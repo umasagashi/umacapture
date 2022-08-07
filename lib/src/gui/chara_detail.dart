@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:badges/badges.dart';
@@ -9,6 +8,7 @@ import 'package:extended_image/extended_image.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:percent_indicator/percent_indicator.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
@@ -526,7 +526,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
                       return GestureDetector(
                         onSecondaryTap: () => Navigator.of(context).pop(),
                         child: ExtendedImage.file(
-                          File(storage.imagePathOf(widget.record, imageMode)),
+                          storage.imagePathOf(widget.record, imageMode),
                           filterQuality: FilterQuality.medium,
                           fit: BoxFit.contain,
                           mode: ExtendedImageMode.gesture,
@@ -627,7 +627,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => openDirectory(Directory(storage.recordPathOf(record))),
+          onTap: () => openDirectory(storage.recordPathOf(record)),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
       ],
@@ -693,8 +693,39 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
 }
 
 class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
+  Widget regenerationProgressWidget(BuildContext context, Progress regenerationProgress) {
+    final theme = Theme.of(context);
+    return Expanded(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          CircularPercentIndicator(
+            radius: 32.0,
+            lineWidth: 6.0,
+            animation: true,
+            animateFromLastPercent: true,
+            animationDuration: 200,
+            percent: regenerationProgress.progress,
+            center: Text("${regenerationProgress.percent}%"),
+            footer: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text("$tr_chara_detail.regenerating_message".tr()),
+            ),
+            backgroundColor: theme.colorScheme.secondaryContainer,
+            progressColor: theme.colorScheme.primary,
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final regenerationProgress = ref.watch(charaDetailRecordRegenerationControllerProvider);
+    if (!regenerationProgress.isEmpty) {
+      return regenerationProgressWidget(context, regenerationProgress);
+    }
     if (ref.watch(charaDetailRecordStorageProvider).isEmpty) {
       return Expanded(child: ErrorMessageWidget(message: "$tr_chara_detail.no_record_message".tr()));
     }

@@ -112,7 +112,10 @@ public:
         records.push_back({model, rect, prediction});
     }
 
-    [[nodiscard]] json_util::Json toJson() const { return records; }
+    [[nodiscard]] json_util::Json toJson() const {
+        vlog_debug(records.size());
+        return records;
+    }
 
 private:
     std::vector<PredictionRecord> records;
@@ -673,22 +676,27 @@ public:
         const std::filesystem::path &module_root_dir,
         const event_util::Listener<std::string> &on_recognize_ready,
         const event_util::Sender<std::string> &on_recognize_completed,
+        const event_util::Listener<std::string> &on_update_requested,
+        const event_util::Sender<std::string> &on_update_completed,
         const recognizer_config::CharaDetailRecognizerConfig &config)
         : trainer_id(trainer_id)
         , record_root_dir(record_root_dir)
         , module_root_dir(module_root_dir)
         , on_recognize_ready(on_recognize_ready)
         , on_recognize_completed(on_recognize_completed)
+        , on_update_requested(on_update_requested)
+        , on_update_completed(on_update_completed)
         , config(config)
         , status_header_recognizer(module_root_dir, config.status_header)
         , skill_tab_recognizer(module_root_dir, config.skill_tab)
         , factor_tab_recognizer(module_root_dir, config.factor_tab)
         , campaign_tab_recognizer(module_root_dir, config.campaign_tab) {
-        this->on_recognize_ready->listen([this](const auto &id) { this->recognize(id); });
+        this->on_recognize_ready->listen([this](const auto &id) { this->recognize(id, false); });
+        this->on_update_requested->listen([this](const auto &id) { this->recognize(id, true); });
     }
 
-    void recognize(const std::string &id) {
-        vlog_debug(id, record_root_dir.string());
+    void recognize(const std::string &id, bool isUpdateMode) {
+        vlog_debug(id, isUpdateMode);
 
         const auto &record_dir = record_root_dir / id;
 
@@ -716,16 +724,22 @@ public:
         const auto version_info =
             json_util::read(module_root_dir / "version_info.json").get<recognizer_impl::VersionInfo>();
 
-        record.metadata = {
-            version_info.format_version,
-            version_info.region,
-            {id},
-            trainer_id,
-            timestamp,
-            version_info.recognizer_version,
-            "active",
-            record.races.front().strategy,
-        };
+        if (isUpdateMode) {
+            const auto old_record = json_util::read(record_dir / "record.json").get<record::CharaDetailRecord>();
+            record.metadata = old_record.metadata;
+            record.metadata.recognizer_version = version_info.recognizer_version;
+        } else {
+            record.metadata = {
+                version_info.format_version,
+                version_info.region,
+                {id},
+                trainer_id,
+                timestamp,
+                version_info.recognizer_version,
+                "active",
+                record.races.front().strategy,
+            };
+        }
 
         auto elapsed =
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
@@ -746,7 +760,11 @@ public:
         factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
             .save(record_dir / "trainee.jpg");
 
-        on_recognize_completed->send(id);
+        if (isUpdateMode) {
+            on_update_completed->send(id);
+        } else {
+            on_recognize_completed->send(id);
+        }
     }
 
 private:
@@ -762,6 +780,9 @@ private:
 
     const event_util::Listener<std::string> on_recognize_ready;
     const event_util::Sender<std::string> on_recognize_completed;
+
+    const event_util::Listener<std::string> on_update_requested;
+    const event_util::Sender<std::string> on_update_completed;
 };
 
 }  // namespace uma::chara_detail
