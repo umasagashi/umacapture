@@ -67,6 +67,11 @@ public:
         notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", id}, {"success", success}}.dump());
     }
 
+    void updateRecord(const std::string &id);
+    void notifyCharaDetailUpdated(const std::string &id) {
+        notify(json_util::Json{{"type", "onCharaDetailUpdated"}, {"id", id}}.dump());
+    }
+
     void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }
 
     void setMkdirCallback(const std::function<PathCallback> &method) { mkdir_callback = method; }
@@ -101,6 +106,9 @@ private:
 
     // debug interface
     event_util::Sender<std::string> on_stitch_ready;
+    event_util::Sender<std::string> on_recognize_ready;
+
+    event_util::Sender<std::string> on_update_ready;
 
     event_util::Sender<Frame> on_frame_captured;
     event_util::EventRunnerController event_runners;

@@ -69,7 +69,7 @@ public:
 
     virtual void waitFor(int milliseconds) const = 0;
 
-    virtual void processAll() = 0;
+    virtual void processIf(const std::function<bool()> &predicate) = 0;
     virtual void processOne() = 0;
 };
 
@@ -125,7 +125,7 @@ public:
 
     void waitFor(int milliseconds) const override { connection.waitFor(std::chrono::milliseconds(milliseconds)); }
 
-    void processAll() override { connection.process(); }
+    void processIf(const std::function<bool()> &predicate) override { connection.processIf(predicate); }
 
     void processOne() override {
         while (!connection.processOne()) {
@@ -165,7 +165,7 @@ protected:
 
         while (isRunning()) {
             processor->waitFor(loopTimeoutMilliseconds);
-            processor->processAll();
+            processor->processIf([&]() { return isRunning(); });
         }
 
         if (detach) {
@@ -224,7 +224,9 @@ public:
 
     void join() override {
         vlog_debug(isRunning());
-        assert_(isRunning());
+        if (runner == nullptr) {
+            return;
+        }
         runner->join();
         runner = nullptr;
     }
@@ -261,7 +263,9 @@ public:
 
     void join() override {
         vlog_debug(isRunning());
-        assert_(isRunning());
+        if (!isRunning()) {
+            return;
+        }
         for (const auto &r : runners) {
             r->join();
         }

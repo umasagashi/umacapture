@@ -27,7 +27,7 @@ const tr_columns = "pages.chara_detail.columns";
 
 final moduleInfoLoaders = FutureProvider((ref) async {
   return Future.wait([
-    ref.watch(moduleVersionCheckLoader.future),
+    ref.watch(moduleVersionLoader.future),
   ]).then((_) {
     return Future.wait([
       ref.watch(_labelMapLoader.future),
@@ -52,7 +52,7 @@ Future<T> _loadFromJson<T>(String path) async {
 }
 
 final _labelMapLoader = FutureProvider<LabelMap>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<Map<String, dynamic>>, "${path.modules}/labels.json")
       .then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v))));
@@ -63,7 +63,7 @@ final labelMapProvider = Provider<LabelMap>((ref) {
 });
 
 final _skillInfoLoader = FutureProvider<List<SkillInfo>>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<SkillInfo>>, "${path.modules}/skill_info.json")
       .then((e) => e.sortedBy<num>((e) => e.sortKey));
@@ -79,7 +79,7 @@ final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
 });
 
 final _skillTagLoader = FutureProvider<List<Tag>>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<Tag>>, "${path.modules}/skill_tag.json");
 });
@@ -89,7 +89,7 @@ final skillTagProvider = Provider<List<Tag>>((ref) {
 });
 
 final _factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   final skillInfo = (await ref.watch(_skillInfoLoader.future)).toMap((e) => e.sid);
   return compute(_loadFromJson<List<FactorInfo>>, "${path.modules}/factor_info.json")
@@ -107,7 +107,7 @@ final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
 });
 
 final _factorTagLoader = FutureProvider<List<Tag>>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<Tag>>, "${path.modules}/factor_tag.json");
 });
@@ -117,7 +117,7 @@ final factorTagProvider = Provider<List<Tag>>((ref) {
 });
 
 final _charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<int>>, "${path.modules}/rank_border.json");
 });
@@ -127,7 +127,7 @@ final charaRankBorderProvider = Provider<List<int>>((ref) {
 });
 
 final _charaCardInfoLoader = FutureProvider<List<CharaCardInfo>>((ref) async {
-  await ref.watch(moduleVersionCheckLoader.future);
+  await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<CharaCardInfo>>, "${path.modules}/character_card_info.json");
 });

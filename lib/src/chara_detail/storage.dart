@@ -45,6 +45,58 @@ final availableFactorSetProvider = StateProvider<Set<int>>((ref) {
   return {};
 });
 
+class Progress {
+  final int total;
+  final int count;
+
+  Progress({this.count = 0, required this.total});
+
+  static Progress get none => Progress(count: 0, total: 0);
+
+  double get progress => count / total;
+
+  int get percent => (progress * 100).toInt();
+
+  bool get isEmpty => total == 0;
+
+  bool get isCompleted => count >= total;
+
+  Progress increment() {
+    return Progress(count: count + 1, total: total);
+  }
+}
+
+class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
+  final Ref ref;
+
+  CharaDetailRecordRegenerationController(this.ref) : super(Progress.none);
+
+  Future<void> start(List<CharaDetailRecord> records) async {
+    final platformController = await ref.read(platformControllerLoader.future);
+    for (final record in records) {
+      platformController!.updateRecord(record.id);
+    }
+    state = Progress(total: records.length);
+  }
+
+  Future<void> updated(String id) async {
+    await ref.read(charaDetailRecordStorageProvider.notifier).reload(id);
+    state = state.increment();
+    if (state.isCompleted) {
+      Future.delayed(const Duration(milliseconds: 200), () {
+        state = Progress.none;
+        ref.read(charaDetailRecordStorageProvider.notifier).forceRebuild();
+      });
+    }
+    return Future.value();
+  }
+}
+
+final charaDetailRecordRegenerationControllerProvider =
+    StateNotifierProvider<CharaDetailRecordRegenerationController, Progress>((ref) {
+  return CharaDetailRecordRegenerationController(ref);
+});
+
 @jsonSerializable
 enum CharaDetailRecordImageMode {
   none,
@@ -146,25 +198,67 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     return state.firstWhereOrNull((e) => e.id == id);
   }
 
-  String recordPathOf(CharaDetailRecord record) {
-    return "$directory/${record.id}";
+  void replaceBy(CharaDetailRecord record, {required String id}) {
+    final index = state.indexWhere((e) => e.id == id);
+    assert(index != -1);
+    state[index] = record;
   }
 
-  String imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
+  Directory recordPathOf(CharaDetailRecord record) {
+    return Directory("$directory/${record.id}");
+  }
+
+  File imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
-    return "${recordPathOf(record)}/${image.fileName}";
+    return File("${recordPathOf(record)}/${image.fileName}");
   }
 
   void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
-    Pasteboard.writeFiles([imagePath]).then((_) => _clipboardPasteEventController.sink.add(imagePath));
+    Pasteboard.writeFiles([imagePath.path]).then((_) => _clipboardPasteEventController.sink.add(imagePath.path));
   }
 
   List<CharaDetailRecord> get records => state;
+
+  Future<void> checkRecordVersion() async {
+    logger.d("checkRecordVersion");
+    final moduleVersion = await ref.read(moduleVersionLoader.future);
+    if (moduleVersion == null) {
+      return Future.value();
+    }
+    final obsoletedRecords = state.where((r) => r.isObsoleted(moduleVersion)).toList();
+    if (obsoletedRecords.isNotEmpty) {
+      ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start(obsoletedRecords);
+    }
+  }
+
+  Future<void> reload(String id) async {
+    logger.d("reload: $id");
+    final record = await compute(_loadCharaDetailRecord, Directory("$directory/$id"));
+    replaceBy(record!, id: id);
+  }
+
+  void forceRebuild() {
+    logger.d("forceRebuild");
+    charaCardMap.clear();
+    skillSet.clear();
+    factorSet.clear();
+    for (var e in state) {
+      _updateRecordInfo(e, update: false);
+    }
+    _updateIconMapNotifier();
+    _updateSkillSetNotifier();
+    state = [...state];
+  }
 }
 
-Future<List<CharaDetailRecord>> _loadCharaDetailRecords(Directory directory) {
+Future<CharaDetailRecord?> _loadCharaDetailRecord(Directory directory) {
+  initializeJsonReflectable();
+  return CharaDetailRecord.readFromDirectory(Directory(directory.path));
+}
+
+Future<List<CharaDetailRecord>> _loadAllCharaDetailRecord(Directory directory) {
   initializeJsonReflectable();
   final files = directory
       .listSync(recursive: false, followLinks: false)
@@ -173,16 +267,16 @@ Future<List<CharaDetailRecord>> _loadCharaDetailRecords(Directory directory) {
 }
 
 final charaDetailRecordStorageLoader = FutureProvider<CharaDetailRecordStorage>((ref) async {
-  return ref.watch(pathInfoLoader.future).then((info) async {
-    final directory = Directory(info.charaDetail);
-    final List<CharaDetailRecord> records = [];
-    if (directory.existsSync()) {
-      records.addAll(await compute(_loadCharaDetailRecords, directory));
-    }
-    final storage = CharaDetailRecordStorage(ref: ref, directory: info.charaDetail, records: records);
-    ref.watch(charaDetailRecordCapturedEventProvider.stream).listen((e) => storage.addFromFile(e));
-    return storage;
-  });
+  final pathInfo = await ref.watch(pathInfoLoader.future);
+  final directory = Directory(pathInfo.charaDetail);
+  final List<CharaDetailRecord> records = [];
+  if (directory.existsSync()) {
+    records.addAll(await compute(_loadAllCharaDetailRecord, directory));
+  }
+  final storage = CharaDetailRecordStorage(ref: ref, directory: pathInfo.charaDetail, records: records);
+  ref.watch(charaDetailRecordCapturedEventProvider.stream).listen((e) => storage.addFromFile(e));
+  storage.checkRecordVersion();
+  return storage;
 });
 
 final charaDetailRecordStorageProvider =

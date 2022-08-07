@@ -364,4 +364,10 @@ class CharaDetailRecord extends JsonEquatable {
       equality.equals(races, other.races),
     ].everyIn();
   }
+
+  bool isObsoleted(DateTime moduleVersion) {
+    final recordVersion = DateTime.parse(metadata.recognizerVersion);
+    final capturedDate = DateTime.parse(metadata.capturedDate);
+    return recordVersion != moduleVersion && capturedDate.isAfter(moduleVersion);
+  }
 }

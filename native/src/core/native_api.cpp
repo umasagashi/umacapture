@@ -12,12 +12,15 @@ namespace uma::app {
 NativeApi::NativeApi() = default;  // Do not use Native::instance() in this constructor.
 
 NativeApi::~NativeApi() {
+    // TODO: The event loop must be joined before this instance is deleted.
+    //  Otherwise, for some reason, memory management will not work properly.
     assert_(!isRunning());
 }
 
 void NativeApi::startEventLoop(const std::string &native_config) {
     vlog_debug(native_config.length(), isRunning());
     if (isRunning()) {
+        // TODO: Should be rebuilt when config is changed.
         return;
     }
 
@@ -65,7 +68,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             nullptr);
     }
 
-    const auto stitcher_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "stitcher");
+    const auto stitcher_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::NoLimit, detach_callback, "stitcher");
     event_runners->add(stitcher_runner);
 
     const auto closed_before_completed_connection = event_util::makeDirectConnection<std::string>();
@@ -87,6 +91,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     on_stitch_ready = stitch_ready_connection;
 
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
+
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         chara_detail_updated_connection,
@@ -99,13 +104,19 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir);
 
-    const auto recognizer_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "recognizer");
+    const auto recognizer_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::NoLimit, detach_callback, "recognizer");
     event_runners->add(recognizer_runner);
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
+    on_recognize_ready = recognize_ready_connection;
+
+    const auto update_ready_connection = recognizer_runner->makeConnection<std::string>();
+    on_update_ready = update_ready_connection;
 
     const auto stitcher_dir =
         json_util::decodePath(config_json["directory"]["storage_dir"]) / "chara_detail" / "active";
+
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
         stitcher_dir,
@@ -114,18 +125,20 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         config_json["chara_detail"]["scene_stitcher"]
             .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>());
 
-    const auto chara_detail_completed_connection = recognizer_runner->makeConnection<std::string>();
-    chara_detail_completed_connection->listen([this](const std::string &id) {
-        // for debug
-        notifyCharaDetailFinished(id, true);
-    });
+    const auto recognize_completed_connection = event_util::makeDirectConnection<std::string>();
+    recognize_completed_connection->listen([this](const auto &id) { notifyCharaDetailFinished(id, true); });
+
+    const auto update_completed_connection = event_util::makeDirectConnection<std::string>();
+    update_completed_connection->listen([this](const auto &id) { notifyCharaDetailUpdated(id); });
 
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
         stitcher_dir,
         json_util::decodePath(config_json["directory"]["modules_dir"]),
         recognize_ready_connection,
-        chara_detail_completed_connection,
+        recognize_completed_connection,
+        update_ready_connection,
+        update_completed_connection,
         config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
 
     event_runners->start();
@@ -155,6 +168,11 @@ void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     on_frame_captured->send({image, timestamp});
 }
 
+void NativeApi::updateRecord(const std::string &id) {
+    assert_(isRunning());
+    on_update_ready->send(id);
+}
+
 [[maybe_unused]] void NativeApi::_dummyForSuppressingUnusedWarning() {
     log_fatal("Do not use this method.");
     NativeApi::instance();
@@ -168,10 +186,12 @@ void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
     setLoggingCallback({});
     notifyCaptureStarted();
     notifyCaptureStopped();
+    updateRecord({});
     std::cout << (frame_distributor == nullptr);
     std::cout << (chara_detail_scene_scraper == nullptr);
     std::cout << (chara_detail_scene_stitcher == nullptr);
     std::cout << (chara_detail_recognizer == nullptr);
+    std::cout << (on_recognize_ready == nullptr);
 }
 
 }  // namespace uma::app

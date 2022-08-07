@@ -60,17 +60,39 @@ target_include_directories(
 
 add_dependencies(${BINARY_NAME} flutter_assemble)
 
-add_custom_command(
-        TARGET ${BINARY_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
-        copy
+# TODO: Should use TARGET_RUNTIME_DLLS. (cmake 3.21 or later)
+set(SYSTEM_DLL_DIR "C:/Windows/System32")
+set(
+        DEPENDENT_DLLS
+
+        # ONNX Runtime
+        ${ONNX_DIR}/lib/onnxruntime.dll
+
+        # OpenCV
         $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
         $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
-        $<TARGET_FILE_DIR:${BINARY_NAME}>
+
+        # VC++ Redistributable
+        $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/vcruntime140d.dll>
+        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/vcruntime140.dll>
+
+        $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/vcruntime140_1d.dll>
+        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/vcruntime140_1.dll>
+
+        $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/msvcp140d.dll>
+        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/msvcp140.dll>
+
+        $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/concrt140d.dll>
+        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/concrt140.dll>
+
+        # For debug mode build for non-developer
+        $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/ucrtbased.dll>
 )
 
 add_custom_command(
         TARGET ${BINARY_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
         copy
-        ${ONNX_DIR}/lib/onnxruntime.dll
+        ${DEPENDENT_DLLS}
         $<TARGET_FILE_DIR:${BINARY_NAME}>
+        COMMAND_EXPAND_LISTS
 )

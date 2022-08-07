@@ -32,12 +32,7 @@ class NotificationLayer extends ConsumerStatefulWidget {
 }
 
 class _NotificationLayerState extends ConsumerState<NotificationLayer> {
-  final Toaster _toaster = Toaster(duration: {
-    ToastType.success: const Duration(seconds: 5),
-    ToastType.info: const Duration(seconds: 8),
-    ToastType.warning: const Duration(seconds: 10),
-    ToastType.error: const Duration(seconds: 15),
-  });
+  final Toaster _toaster = Toaster();
 
   void _showToast(BuildContext context, ToastData data) => _toaster.showToast(context, data);
 
@@ -51,7 +46,16 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
 
   void _listenForToast<T>(StreamProvider<T> provider, String message, [Callback<T>? onTap]) {
     ref.listen<AsyncValue<T>>(provider, (_, current) {
-      current.whenData((T data) => _showToast(context, ToastData.success(message, onTap?.bind(data))));
+      current.whenData((T data) {
+        _showToast(
+          context,
+          ToastData(
+            ToastType.success,
+            description: message,
+            onTap: onTap?.bind(data),
+          ),
+        );
+      });
     });
   }
 

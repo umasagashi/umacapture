@@ -17,18 +17,20 @@ class PlatformChannel {
     callbackMethod = method;
   }
 
-  Future<void> setConfig(String config) async {
-    logger.d('setConfig: ${config.length}');
-    return await channel.invokeMethod('setConfig', config);
+  Future<void> setConfig(String config) {
+    return channel.invokeMethod('setConfig', config);
   }
 
-  Future<void> startCapture() async {
-    logger.d('startCapture');
-    return await channel.invokeMethod('startCapture');
+  Future<void> startCapture() {
+    return channel.invokeMethod('startCapture');
   }
 
-  Future<void> stopCapture() async {
-    return await channel.invokeMethod('stopCapture');
+  Future<void> stopCapture() {
+    return channel.invokeMethod('stopCapture');
+  }
+
+  Future<void> updateRecord(String id) {
+    return channel.invokeMethod('updateRecord', id);
   }
 
   Future<dynamic> callbackFromPlatform(MethodCall call) {

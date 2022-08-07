@@ -276,16 +276,16 @@ public:
 
     void startRecord() {
         log_debug("");
-        assert(recording_thread);
-
-        recording_thread->start();
+        if (recording_thread) {
+            recording_thread->start();
+        }
     }
 
     void stopRecord() {
         log_debug("");
-        assert(recording_thread);
-
-        recording_thread->join();
+        if (recording_thread) {
+            recording_thread->join();
+        }
     }
 
 private:
