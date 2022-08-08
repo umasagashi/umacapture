@@ -1,0 +1,10 @@
+app_id: bb3e45c0-725c-428e-aeb4-0076a37d4873
+display_name: umacapture
+publisher_name: umasagashi
+publisher_url: https://github.com/umasagashi
+create_desktop_icon: true
+privileges_required: lowest
+script_template: inno_template.iss
+locales:
+  - ja
+  - en
