@@ -1,7 +1,11 @@
 {
     "pages": {
         "dashboard": {
-            "title": "ダッシュボード"
+            "title": "ダッシュボード",
+            "app_updater": {
+                "title": "アプリ更新",
+                "subtitle": "アプリの更新が利用可能です。ここをクリックすると更新をダウンロードします。"
+            }
         },
         "capture": {
             "title": "キャプチャ",
@@ -41,6 +45,7 @@
             "no_row_message": "該当するウマ娘は見つかりませんでした。",
             "loading_error": "ロード中にエラーが発生しました。\n注意：エラーメッセージにはユーザー名が含まれます。",
             "add_column_button_tooltip": "表示列を新規追加",
+            "regenerating_message": "認識結果を更新しています",
             "export": {
                 "button_tooltip": "エクスポート",
                 "dialog_title": "保存先を指定してください。",
@@ -360,6 +365,14 @@
                         "campaign_plain": "育成情報画面"
                     }
                 }
+            },
+            "version_check": {
+                "title": "バージョン情報",
+                "subtitle": "現在のバージョン",
+                "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
+                "is_latest": "（最新版）",
+                "is_updatable": "（{version} に更新可能）",
+                "unknown_version": "不明"
             }
         }
     },

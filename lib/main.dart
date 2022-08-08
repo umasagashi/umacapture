@@ -50,9 +50,9 @@ void main() async {
 
   runApp(
     ProviderScope(
-      observers: [
-        // if (kDebugMode) ProviderLogger(),
-      ],
+      // observers: [
+      //   if (kDebugMode) ProviderLogger(),
+      // ],
       // EasyLocalization must be placed at the root. Otherwise, hot reload will not work for some reason.
       child: EasyLocalization(
         path: "assets/translations",
