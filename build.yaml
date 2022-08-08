@@ -1,6 +1,18 @@
+builders:
+  distribution_info:
+    import: "package:umacapture/distribution_info.dart"
+    builder_factories: [ "distributionInfoBuilder" ]
+    build_extensions: { "pubspec.yaml": [ "assets/version_info.json" ] }
+    build_to: source
+    auto_apply: root_package
+
 targets:
   $default:
     builders:
+      distribution_info:
+        generate_for:
+          - pubspec.yaml
+
       dart_json_mapper:
         generate_for:
           # here should be listed entry point files having 'void main()' function
