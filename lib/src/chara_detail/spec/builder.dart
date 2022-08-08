@@ -7,7 +7,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 
-import '/src/app/providers.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
@@ -19,6 +18,7 @@ import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 

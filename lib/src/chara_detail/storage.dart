@@ -7,10 +7,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pasteboard/pasteboard.dart';
 
-import '/src/app/providers.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/capture.dart';
 
@@ -44,27 +44,6 @@ final availableSkillSetProvider = StateProvider<Set<int>>((ref) {
 final availableFactorSetProvider = StateProvider<Set<int>>((ref) {
   return {};
 });
-
-class Progress {
-  final int total;
-  final int count;
-
-  Progress({this.count = 0, required this.total});
-
-  static Progress get none => Progress(count: 0, total: 0);
-
-  double get progress => count / total;
-
-  int get percent => (progress * 100).toInt();
-
-  bool get isEmpty => total == 0;
-
-  bool get isCompleted => count >= total;
-
-  Progress increment() {
-    return Progress(count: count + 1, total: total);
-  }
-}
 
 class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
   final Ref ref;
@@ -222,7 +201,6 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   List<CharaDetailRecord> get records => state;
 
   Future<void> checkRecordVersion() async {
-    logger.d("checkRecordVersion");
     final moduleVersion = await ref.read(moduleVersionLoader.future);
     if (moduleVersion == null) {
       return Future.value();
@@ -234,13 +212,11 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   Future<void> reload(String id) async {
-    logger.d("reload: $id");
     final record = await compute(_loadCharaDetailRecord, Directory("$directory/$id"));
     replaceBy(record!, id: id);
   }
 
   void forceRebuild() {
-    logger.d("forceRebuild");
     charaCardMap.clear();
     skillSet.clear();
     factorSet.clear();

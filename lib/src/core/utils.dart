@@ -159,6 +159,27 @@ Iterable<Tuple3<T1, T2, T3>> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2
   }
 }
 
-Future<void> openDirectory(Directory directory) {
-  return Process.run("start", [directory.absolute.path.replaceAll("\\", "/")], runInShell: true);
+Future<void> openEntity(FileSystemEntity entity) {
+  return Process.run("start", [entity.absolute.path.replaceAll("\\", "/")], runInShell: true);
+}
+
+class Progress {
+  final int total;
+  final int count;
+
+  Progress({this.count = 0, required this.total});
+
+  static Progress get none => Progress(count: 0, total: 0);
+
+  double get progress => count / total;
+
+  int get percent => (progress * 100).toInt();
+
+  bool get isEmpty => total == 0;
+
+  bool get isCompleted => count >= total;
+
+  Progress increment() {
+    return Progress(count: count + 1, total: total);
+  }
 }

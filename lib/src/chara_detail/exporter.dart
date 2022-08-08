@@ -10,13 +10,13 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '/src/app/providers.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
 final exportingStateProvider = StateProvider<bool>((ref) {

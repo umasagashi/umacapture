@@ -13,12 +13,12 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
-import '/src/app/providers.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
@@ -627,7 +627,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => openDirectory(storage.recordPathOf(record)),
+          onTap: () => openEntity(storage.recordPathOf(record)),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
       ],

@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class DashboardPage extends DummyPage {
-  const DashboardPage({Key? key}) : super(key: key, title: 'Dashboard');
-}
-
 class GuidePage extends DummyPage {
   const GuidePage({Key? key}) : super(key: key, title: 'Guide');
 }

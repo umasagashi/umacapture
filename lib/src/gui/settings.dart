@@ -1,9 +1,12 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
 
 import '/src/chara_detail/storage.dart';
+import '/src/core/platform_controller.dart';
+import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
@@ -199,6 +202,63 @@ class CaptureSettingsGroup extends ConsumerWidget {
   }
 }
 
+class VersionCheckGroup extends ConsumerWidget {
+  const VersionCheckGroup({Key? key}) : super(key: key);
+
+  String moduleVersion(WidgetRef ref) {
+    return ref.watch(moduleVersionLoader).when(
+          loading: () => "checking...",
+          error: (e, __) => "ERROR: $e",
+          data: (data) => data?.toLocal().toString() ?? "$tr_settings.version_check.unknown_version".tr(),
+        );
+  }
+
+  String parseAppVersionText(VersionCheckResult result) {
+    String text = result.local?.toString() ?? "$tr_settings.version_check.unknown_version".tr();
+    if (result.isLatest) {
+      text += "$tr_settings.version_check.is_latest".tr();
+    }
+    if (result.isUpdatable) {
+      text += "$tr_settings.version_check.is_updatable".tr(namedArgs: {"version": result.latest.toString()});
+    }
+    return text;
+  }
+
+  String appVersion(WidgetRef ref) {
+    return ref.watch(appVersionCheckLoader).when(
+          loading: () => "checking...",
+          error: (e, __) => "ERROR: $e",
+          data: (data) => parseAppVersionText(data),
+        );
+  }
+
+  String versionString(WidgetRef ref) {
+    return "$tr_settings.version_check.description".tr(namedArgs: {
+      "app_version": appVersion(ref),
+      "module_version": moduleVersion(ref),
+    });
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_settings.version_check.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        ListTile(
+          isThreeLine: true,
+          title: Text("$tr_settings.version_check.subtitle".tr()),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: Text(versionString(ref)),
+          ),
+          onTap: () => Pasteboard.writeText(versionString(ref)),
+        ),
+      ],
+    );
+  }
+}
+
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({Key? key}) : super(key: key);
 
@@ -208,6 +268,7 @@ class SettingsPage extends ConsumerWidget {
       children: [
         StyleSettingsGroup(),
         CaptureSettingsGroup(),
+        VersionCheckGroup(),
       ],
     );
   }

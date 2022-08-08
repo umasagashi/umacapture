@@ -13,10 +13,11 @@ import 'package:recase/recase.dart';
 import 'package:tuple/tuple.dart';
 import 'package:uuid/uuid.dart';
 
-import '/src/app/providers.dart';
+import '/const.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/platform_channel.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/toast.dart';
@@ -24,8 +25,6 @@ import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_toast = "toast";
-
-const latestModuleUrl = "https://umasagashi.pages.dev/data/umacapture";
 
 final capturingStateProvider = Provider<bool>((ref) {
   return ref.watch(captureTriggeredEventProvider).when(
@@ -147,7 +146,7 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   final pathInfo = await ref.watch(pathInfoLoader.future);
 
   final local = await compute(VersionInfo.loadFromFile, File("${pathInfo.modules}/version_info.json"));
-  final latest = await compute(VersionInfo.download, Uri.parse("$latestModuleUrl/version_info.json"));
+  final latest = await compute(VersionInfo.download, Uri.parse(Const.moduleVersionInfoUrl));
   logger.i("local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
   if (local == null && latest == null) {
@@ -160,13 +159,13 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   }
   // Rollback is allowed.
   if (local?.version == latest.version) {
-    _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
+    // _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
     return latest.version;
   }
 
   final downloadPath = "${pathInfo.temp}/modules.zip";
   try {
-    await Dio().download("$latestModuleUrl/modules.zip", downloadPath);
+    await Dio().download(Const.moduleZipUrl, downloadPath);
     await compute(extractArchive, Tuple2(File(downloadPath), Directory(pathInfo.supportDir)));
     File(downloadPath).delete();
   } catch (e) {

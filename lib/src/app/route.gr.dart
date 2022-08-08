@@ -16,7 +16,7 @@ import 'package:flutter/material.dart' as _i7;
 import '../gui/app_widget.dart' as _i1;
 import '../gui/capture.dart' as _i3;
 import '../gui/chara_detail.dart' as _i4;
-import '../gui/dummy.dart' as _i2;
+import '../gui/dashboard.dart' as _i2;
 import '../gui/settings.dart' as _i5;
 
 class AppRouter extends _i6.RootStackRouter {
@@ -44,10 +44,6 @@ class AppRouter extends _i6.RootStackRouter {
     SettingsRoute.name: (routeData) {
       return _i6.MaterialPageX<dynamic>(
           routeData: routeData, child: const _i5.SettingsPage());
-    },
-    GuideRoute.name: (routeData) {
-      return _i6.MaterialPageX<dynamic>(
-          routeData: routeData, child: const _i2.GuidePage());
     }
   };
 
@@ -61,9 +57,7 @@ class AppRouter extends _i6.RootStackRouter {
           _i6.RouteConfig(CharaDetailRoute.name,
               path: 'chara-detail-page', parent: AppWidget.name),
           _i6.RouteConfig(SettingsRoute.name,
-              path: 'settings-page', parent: AppWidget.name),
-          _i6.RouteConfig(GuideRoute.name,
-              path: 'guide-page', parent: AppWidget.name)
+              path: 'settings-page', parent: AppWidget.name)
         ])
       ];
 }
@@ -108,12 +102,4 @@ class SettingsRoute extends _i6.PageRouteInfo<void> {
   const SettingsRoute() : super(SettingsRoute.name, path: 'settings-page');
 
   static const String name = 'SettingsRoute';
-}
-
-/// generated route for
-/// [_i2.GuidePage]
-class GuideRoute extends _i6.PageRouteInfo<void> {
-  const GuideRoute() : super(GuideRoute.name, path: 'guide-page');
-
-  static const String name = 'GuideRoute';
 }
