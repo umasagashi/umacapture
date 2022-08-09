@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
@@ -42,6 +43,14 @@ final sidebarExtendedStateProvider = StateNotifierProvider<BooleanNotifier, bool
     entry: StorageEntry(box: box, key: SettingsEntryKey.sidebarExtended.name),
     defaultValue: true,
   );
+});
+
+StreamController<void> applicationWidgetRebuildEventController = StreamController();
+final _applicationWidgetRebuildEventProvider = StreamProvider<void>((ref) {
+  if (applicationWidgetRebuildEventController.hasListener) {
+    applicationWidgetRebuildEventController = StreamController();
+  }
+  return applicationWidgetRebuildEventController.stream;
 });
 
 class _Sidebar extends ConsumerWidget {
@@ -265,11 +274,16 @@ class AppWidget extends StatelessWidget {
   }
 }
 
-class ApplicationWidget extends ConsumerWidget {
+class ApplicationWidget extends ConsumerStatefulWidget {
+  final router = AppRouter();
+
   ApplicationWidget({Key? key}) : super(key: key);
 
-  final _router = AppRouter();
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => ApplicationWidgetState();
+}
 
+class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {
     return base?.copyWith(
         fontWeight: FontWeight
@@ -315,13 +329,16 @@ class ApplicationWidget extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     // Ensure that the controller is created at app startup.
     // If not, Auto Start option will not work.
     ref.read(platformControllerLoader);
 
     // Also, start up loaders here.
     ref.read(charaDetailInitialDataLoader);
+
+    // Rebuild this widget when requested.
+    ref.listen(_applicationWidgetRebuildEventProvider, (_, __) => setState(() {}));
 
     final theme = FlexThemeData.light(
       scheme: FlexScheme.blue,
@@ -366,8 +383,8 @@ class ApplicationWidget extends ConsumerWidget {
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-      routerDelegate: _router.delegate(),
-      routeInformationParser: _router.defaultRouteParser(),
+      routerDelegate: widget.router.delegate(),
+      routeInformationParser: widget.router.defaultRouteParser(),
     );
   }
 }
