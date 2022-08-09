@@ -14,10 +14,10 @@ import '/src/app/route.gr.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/gui/chara_detail.dart';
+import '/src/preference/notifier.dart';
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 import '/src/preference/window_state.dart';
-import '/src/state/notifier.dart';
-import '/src/state/settings_state.dart';
 
 final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
   final box = ref.watch(storageBoxProvider);

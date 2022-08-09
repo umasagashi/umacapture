@@ -2,8 +2,8 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
 
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
-import '/src/state/settings_state.dart';
 
 enum SoundType {
   attentionWeak,

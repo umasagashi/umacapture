@@ -5,12 +5,11 @@ import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
 
 import '/src/chara_detail/storage.dart';
-import '/src/core/platform_controller.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
-import '/src/state/notifier.dart';
+import '/src/preference/notifier.dart';
 
 // ignore: constant_identifier_names
 const tr_settings = "pages.settings";
@@ -213,22 +212,11 @@ class VersionCheckGroup extends ConsumerWidget {
         );
   }
 
-  String parseAppVersionText(VersionCheckResult result) {
-    String text = result.local?.toString() ?? "$tr_settings.version_check.unknown_version".tr();
-    if (result.isLatest) {
-      text += "$tr_settings.version_check.is_latest".tr();
-    }
-    if (result.isUpdatable) {
-      text += "$tr_settings.version_check.is_updatable".tr(namedArgs: {"version": result.latest.toString()});
-    }
-    return text;
-  }
-
   String appVersion(WidgetRef ref) {
     return ref.watch(appVersionCheckLoader).when(
           loading: () => "checking...",
           error: (e, __) => "ERROR: $e",
-          data: (data) => parseAppVersionText(data),
+          data: (data) => data.local.toString(),
         );
   }
 
@@ -251,6 +239,13 @@ class VersionCheckGroup extends ConsumerWidget {
           subtitle: Padding(
             padding: const EdgeInsets.only(left: 8),
             child: Text(versionString(ref)),
+          ),
+          trailing: const Align(
+            widthFactor: 1,
+            child: Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Icon(Icons.paste),
+            ),
           ),
           onTap: () => Pasteboard.writeText(versionString(ref)),
         ),

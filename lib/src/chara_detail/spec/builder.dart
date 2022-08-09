@@ -17,9 +17,9 @@ import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
-import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/core/version_check.dart';
 import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names

@@ -4,7 +4,12 @@
             "title": "ダッシュボード",
             "app_updater": {
                 "title": "アプリ更新",
-                "subtitle": "アプリの更新が利用可能です。ここをクリックすると更新をダウンロードします。"
+                "subtitle": "アプリの更新が利用可能です。ここをクリックして更新をダウンロードします。",
+                "downloading": {
+                    "template": "ダウンロード中。完了すると{file}が開きます。",
+                    "exe": "インストーラー",
+                    "zip": "ダウンロードフォルダ"
+                }
             }
         },
         "capture": {
@@ -370,8 +375,6 @@
                 "title": "バージョン情報",
                 "subtitle": "現在のバージョン",
                 "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
-                "is_latest": "（最新版）",
-                "is_updatable": "（{version} に更新可能）",
                 "unknown_version": "不明"
             }
         }
