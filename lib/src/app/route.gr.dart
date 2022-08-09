@@ -15,7 +15,7 @@ import 'package:flutter/material.dart' as _i7;
 
 import '../gui/app_widget.dart' as _i1;
 import '../gui/capture.dart' as _i3;
-import '../gui/chara_detail.dart' as _i4;
+import '../gui/chara_detail/page.dart' as _i4;
 import '../gui/dashboard.dart' as _i2;
 import '../gui/settings.dart' as _i5;
 

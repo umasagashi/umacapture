@@ -14,7 +14,7 @@ import '/src/app/pages.dart';
 import '/src/app/route.gr.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
-import '/src/gui/chara_detail.dart';
+import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
