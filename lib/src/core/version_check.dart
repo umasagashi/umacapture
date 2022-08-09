@@ -149,7 +149,7 @@ final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async 
 
   final entry = ref.read(storageBoxProvider).entry<DateTime>(SettingsEntryKey.lastAppVersionCheck.name);
   final lastChecked = entry.pull();
-  if (lastChecked != null && DateTime.now().difference(lastChecked).inSeconds <= 30) {
+  if (lastChecked != null && DateTime.now().difference(lastChecked).inHours <= 20) {
     logger.i("App version check skipped. last=${lastChecked.toLocal().toString()}");
     return AppVersionCheckResult(local: local, latest: local, isSkipped: true);
   }
