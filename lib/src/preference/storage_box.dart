@@ -10,6 +10,7 @@ enum StorageBoxKey {
   windowState,
   trainerId,
   columnSpec,
+  versionCheck,
 }
 
 extension _BoxKeyExtension on StorageBoxKey {

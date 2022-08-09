@@ -18,7 +18,7 @@ import '/src/core/json_adapter.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
-import '/src/preference/settings_state.dart';
+import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_toast = "toast";
@@ -142,12 +142,16 @@ class AppVersionCheckResult {
   bool get isUpdatable => local != latest;
 }
 
+enum VersionCheckEntryKey {
+  lastAppVersionChecked,
+}
+
 final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
   final local = await rootBundle
       .loadString("assets/version_info.json")
       .then((info) => Version.parse(jsonDecode(info)['version']));
 
-  final entry = ref.read(storageBoxProvider).entry<DateTime>(SettingsEntryKey.lastAppVersionCheck.name);
+  final entry = StorageBox(StorageBoxKey.versionCheck).entry<DateTime>(VersionCheckEntryKey.lastAppVersionChecked.name);
   final lastChecked = entry.pull();
   if (lastChecked != null && DateTime.now().difference(lastChecked).inHours <= 20) {
     logger.i("App version: local=$local, last_checked=${lastChecked.toLocal()}");
