@@ -184,19 +184,19 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     state[index] = record;
   }
 
-  Directory recordPathOf(CharaDetailRecord record) {
-    return Directory("$directory/${record.id}");
+  String recordPathOf(CharaDetailRecord record) {
+    return "$directory/${record.id}";
   }
 
-  File imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
+  String imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
-    return File("${recordPathOf(record)}/${image.fileName}");
+    return "${recordPathOf(record)}/${image.fileName}";
   }
 
   void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
-    Pasteboard.writeFiles([imagePath.path]).then((_) => _clipboardPasteEventController.sink.add(imagePath.path));
+    Pasteboard.writeFiles([imagePath]).then((_) => _clipboardPasteEventController.sink.add(imagePath));
   }
 
   List<CharaDetailRecord> get records => state;

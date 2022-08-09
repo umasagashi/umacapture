@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:badges/badges.dart';
@@ -526,7 +527,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<_CharaDetailPreviewDi
                       return GestureDetector(
                         onSecondaryTap: () => Navigator.of(context).pop(),
                         child: ExtendedImage.file(
-                          storage.imagePathOf(widget.record, imageMode),
+                          File(storage.imagePathOf(widget.record, imageMode)),
                           filterQuality: FilterQuality.medium,
                           fit: BoxFit.contain,
                           mode: ExtendedImageMode.gesture,
@@ -627,7 +628,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => openEntity(storage.recordPathOf(record)),
+          onTap: () => openEntity(Directory(storage.recordPathOf(record))),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
       ],
