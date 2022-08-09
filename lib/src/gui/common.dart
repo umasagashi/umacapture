@@ -287,3 +287,86 @@ class Disabled extends StatelessWidget {
     }
   }
 }
+
+class CardDialog extends ConsumerWidget {
+  static void show(BuildContext context, Widget dialog) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: dialog,
+        );
+      },
+    );
+  }
+
+  final String dialogTitle;
+  final String closeButtonTooltip;
+  final Widget content;
+  final Widget? bottom;
+  final bool usePageView;
+
+  const CardDialog({
+    Key? key,
+    required this.dialogTitle,
+    required this.closeButtonTooltip,
+    required this.content,
+    this.bottom,
+    this.usePageView = true,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final controller = ScrollController();
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Column(
+        children: [
+          ListTile(
+            tileColor: theme.colorScheme.primary,
+            shape: Border(bottom: BorderSide(color: theme.dividerColor)),
+            title: Text(
+              dialogTitle,
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: theme.colorScheme.onPrimary,
+              ),
+            ),
+            trailing: Tooltip(
+              message: closeButtonTooltip,
+              child: IconButton(
+                icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
+                splashRadius: 24,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ),
+          ),
+          if (usePageView)
+            Expanded(
+              child: Scrollbar(
+                thumbVisibility: true,
+                trackVisibility: true,
+                controller: controller,
+                child: SingleChildScrollView(
+                  controller: controller,
+                  padding: const EdgeInsets.all(8),
+                  child: content,
+                ),
+              ),
+            ),
+          if (!usePageView) content,
+          if (bottom != null)
+            Container(
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: theme.dividerColor)),
+              ),
+              padding: const EdgeInsets.all(8),
+              child: bottom,
+            ),
+        ],
+      ),
+    );
+  }
+}

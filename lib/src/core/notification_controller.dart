@@ -10,7 +10,7 @@ import '/src/core/platform_controller.dart';
 import '/src/core/sound_player.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
-import '/src/gui/chara_detail.dart';
+import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
