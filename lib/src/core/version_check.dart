@@ -94,7 +94,7 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
 
   final local = await compute(ModuleVersionInfo.loadFromFile, File("${pathInfo.modules}/version_info.json"));
   final latest = await compute(ModuleVersionInfo.download, Uri.parse(Const.moduleVersionInfoUrl));
-  logger.i("local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
+  logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
   if (local == null && latest == null) {
     _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
@@ -150,7 +150,7 @@ final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async 
   final entry = ref.read(storageBoxProvider).entry<DateTime>(SettingsEntryKey.lastAppVersionCheck.name);
   final lastChecked = entry.pull();
   if (lastChecked != null && DateTime.now().difference(lastChecked).inHours <= 20) {
-    logger.i("App version check skipped. last=${lastChecked.toLocal().toString()}");
+    logger.i("App version: local=$local, last_checked=${lastChecked.toLocal()}");
     return AppVersionCheckResult(local: local, latest: local, isSkipped: true);
   }
 
@@ -159,10 +159,10 @@ final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async 
         .get(Const.appVersionInfoUrl)
         .then((response) => Version.parse(jsonDecode(response.toString())['version']));
     entry.push(DateTime.now());
+    logger.i("App version: local=$local, latest=$latest");
     return AppVersionCheckResult(local: local, latest: latest);
   } catch (e) {
     logger.w(e);
   }
-
   return AppVersionCheckResult(local: local, latest: local, isSkipped: true);
 });
