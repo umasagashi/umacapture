@@ -1,30 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
-import 'package:archive/archive_io.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
-import 'package:dio/dio.dart';
-import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:recase/recase.dart';
-import 'package:tuple/tuple.dart';
 import 'package:uuid/uuid.dart';
 
-import '/const.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/json_adapter.dart';
 import '/src/core/platform_channel.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
-import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
-
-// ignore: constant_identifier_names
-const tr_toast = "toast";
 
 final capturingStateProvider = Provider<bool>((ref) {
   return ref.watch(captureTriggeredEventProvider).when(
@@ -74,111 +61,6 @@ final charaDetailRecordCapturedEventProvider = StreamProvider<String>((ref) {
     _charaDetailRecordCapturedEventController = StreamController();
   }
   return _charaDetailRecordCapturedEventController.stream;
-});
-
-StreamController<ToastData> _moduleVersionCheckEventController = StreamController();
-final moduleVersionCheckEventProvider = StreamProvider<ToastData>((ref) {
-  if (_moduleVersionCheckEventController.hasListener) {
-    _moduleVersionCheckEventController = StreamController();
-  }
-  return _moduleVersionCheckEventController.stream;
-});
-
-@jsonSerializable
-class VersionInfo {
-  final String formatVersion;
-  final String region;
-  final String recognizerVersion;
-
-  @JsonProperty(ignore: true)
-  DateTime get version => DateTime.parse(recognizerVersion);
-
-  VersionInfo(this.formatVersion, this.region, this.recognizerVersion);
-
-  static Future<VersionInfo?> loadFromFile(File path) async {
-    if (!path.existsSync()) {
-      return Future.value(null);
-    }
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-    try {
-      return await path.readAsString().then((content) => JsonMapper.deserialize<VersionInfo>(content, options));
-    } catch (e) {
-      return null;
-    }
-  }
-
-  static Future<VersionInfo?> download(Uri url) async {
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-    try {
-      return await Dio()
-          .get(url.toString())
-          .then((response) => JsonMapper.deserialize<VersionInfo>(response.toString(), options));
-    } catch (e) {
-      return null;
-    }
-  }
-}
-
-enum VersionCheck {
-  noUpdateRequired,
-  updated,
-  latestVersionNotAvailable,
-  noVersionAvailable,
-}
-
-Future<void> extractArchive(Tuple2<File, Directory> args) {
-  final stream = InputFileStream(args.item1.path);
-  final archive = ZipDecoder().decodeBuffer(stream);
-  extractArchiveToDisk(archive, args.item2.path);
-  return stream.close();
-}
-
-VersionCheck _sendModuleVersionCheckToast(ToastType type, VersionCheck code) {
-  _moduleVersionCheckEventController.sink.add(
-    ToastData(type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
-  );
-  return code;
-}
-
-final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
-  final pathInfo = await ref.watch(pathInfoLoader.future);
-
-  final local = await compute(VersionInfo.loadFromFile, File("${pathInfo.modules}/version_info.json"));
-  final latest = await compute(VersionInfo.download, Uri.parse(Const.moduleVersionInfoUrl));
-  logger.i("local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
-
-  if (local == null && latest == null) {
-    _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
-    return null;
-  }
-  if (latest == null) {
-    _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
-    return local!.version;
-  }
-  // Rollback is allowed.
-  if (local?.version == latest.version) {
-    // _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
-    return latest.version;
-  }
-
-  final downloadPath = "${pathInfo.temp}/modules.zip";
-  try {
-    await Dio().download(Const.moduleZipUrl, downloadPath);
-    await compute(extractArchive, Tuple2(File(downloadPath), Directory(pathInfo.supportDir)));
-    File(downloadPath).delete();
-  } catch (e) {
-    if (local == null) {
-      _sendModuleVersionCheckToast(ToastType.error, VersionCheck.noVersionAvailable);
-    } else {
-      _sendModuleVersionCheckToast(ToastType.warning, VersionCheck.latestVersionNotAvailable);
-    }
-    return local?.version;
-  }
-
-  _sendModuleVersionCheckToast(ToastType.success, VersionCheck.updated);
-  return latest.version;
 });
 
 class CharaDetailLink {
@@ -305,8 +187,7 @@ final platformConfigLoader = FutureProvider<JsonMap>((ref) async {
 });
 
 final platformControllerLoader = FutureProvider<PlatformController?>((ref) async {
-  final moduleVersion = await ref.watch(moduleVersionLoader.future);
-  if (moduleVersion == null) {
+  if ((await ref.watch(moduleVersionLoader.future)) == null) {
     return null;
   }
   return ref.watch(platformConfigLoader.future).then((config) {

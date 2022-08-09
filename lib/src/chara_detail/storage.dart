@@ -12,6 +12,7 @@ import '/src/core/json_adapter.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
 
 // ignore: constant_identifier_names

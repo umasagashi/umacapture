@@ -16,7 +16,7 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
-bool isInstallerMode() {
+bool _isInstallerMode() {
   return File(Platform.resolvedExecutable)
       .parent
       .listSync(recursive: false, followLinks: false)
@@ -30,16 +30,15 @@ final _downloadProgressProvider = StateProvider<Progress?>((ref) {
 
 class AppUpdaterGroup extends ConsumerWidget {
   final Version version;
+  final bool isInstallerMode = _isInstallerMode();
 
-  const AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
+  AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
 
   void downloadAndOpen(WidgetRef ref) {
     ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: 0, total: 100));
     getDownloadsDirectory().then((downloadDir) {
-      final isInstallerMode_ = isInstallerMode();
-      final downloadUrl = isInstallerMode_
-          ? Const.appExeUrl(version: version.toString())
-          : Const.appZipUrl(version: version.toString());
+      final downloadUrl =
+          isInstallerMode ? Const.appExeUrl(version: version.toString()) : Const.appZipUrl(version: version.toString());
       final downloadPath = "${downloadDir!.path}/${Uri.parse(downloadUrl).pathSegments.last}";
       logger.d("$downloadUrl, $downloadPath");
       Dio().download(
@@ -50,14 +49,44 @@ class AppUpdaterGroup extends ConsumerWidget {
         },
       ).then((_) {
         ref.read(_downloadProgressProvider.notifier).update((_) => null);
-        openEntity(isInstallerMode_ ? File(downloadPath) : File(downloadPath).parent);
+        openEntity(isInstallerMode ? File(downloadPath) : File(downloadPath).parent);
       });
     });
   }
 
+  Widget downloadProgressWidget(BuildContext context, Progress progress) {
+    final theme = Theme.of(context);
+    return Flex(
+      direction: Axis.horizontal,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: CircularPercentIndicator(
+            radius: 32.0,
+            lineWidth: 6.0,
+            animation: true,
+            animateFromLastPercent: true,
+            animationDuration: 200,
+            percent: progress.progress,
+            center: Text("${progress.percent}%"),
+            progressColor: theme.colorScheme.primary,
+            backgroundColor: theme.colorScheme.secondaryContainer,
+          ),
+        ),
+        Flexible(
+          child: Text("$tr_dashboard.app_updater.downloading.template".tr(namedArgs: {
+            "file": isInstallerMode
+                ? "$tr_dashboard.app_updater.downloading.exe".tr()
+                : "$tr_dashboard.app_updater.downloading.zip".tr(),
+          })),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final downloadProgress = ref.watch(_downloadProgressProvider);
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
@@ -65,19 +94,11 @@ class AppUpdaterGroup extends ConsumerWidget {
       children: [
         ListTile(
           title: Text("$tr_dashboard.app_updater.subtitle".tr()),
-          subtitle: downloadProgress == null
-              ? null
-              : LinearPercentIndicator(
-                  animation: true,
-                  animationDuration: 200,
-                  animateFromLastPercent: true,
-                  lineHeight: 20,
-                  percent: downloadProgress.progress,
-                  center: Text("${downloadProgress.percent}%"),
-                  barRadius: const Radius.circular(8),
-                  progressColor: theme.colorScheme.primary,
-                ),
           onTap: downloadProgress != null ? null : () => downloadAndOpen(ref),
+        ),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: (downloadProgress == null) ? Container() : downloadProgressWidget(context, downloadProgress),
         ),
       ],
     );
@@ -89,10 +110,10 @@ class DashboardPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final VersionCheckResult? result = ref.watch(appVersionCheckLoader).asData?.value;
+    final AppVersionCheckResult? result = ref.watch(appVersionCheckLoader).asData?.value;
     return ListTilePageRootWidget(
       children: [
-        if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest!),
+        if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest),
         const Center(
           child: Text("Under Construction"),
         )

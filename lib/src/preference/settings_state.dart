@@ -9,7 +9,7 @@ enum SettingsEntryKey {
   autoStartCapture,
   autoCopyClipboard,
   soundEffect,
-  appVersionCheck,
+  lastAppVersionCheck,
 }
 
 final storageBoxProvider = Provider<StorageBox>((ref) {

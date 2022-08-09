@@ -11,9 +11,9 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
 import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
+import '/src/preference/notifier.dart';
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
-import '/src/state/notifier.dart';
-import '/src/state/settings_state.dart';
 
 // ignore: constant_identifier_names
 const tr_capture = "pages.capture";
