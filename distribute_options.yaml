@@ -11,7 +11,7 @@ releases:
           target: github
           args:
             repo-owner: umasagashi
-            repo-name: uma_test_123
+            repo-name: umacapture
       - name: zip
         package:
           platform: windows
@@ -20,4 +20,4 @@ releases:
           target: github
           args:
             repo-owner: umasagashi
-            repo-name: uma_test_123
+            repo-name: umacapture
