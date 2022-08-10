@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:extended_image/extended_image.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -94,12 +93,12 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                           initGestureConfigHandler: (ExtendedImageState state) {
                             final h = state.extendedImageInfo!.image.width / constraints.maxWidth;
                             final v = state.extendedImageInfo!.image.height / constraints.maxHeight;
-                            final r = math.max(h, v);
+                            final r = Math.max(h, v);
                             const f = 0.95;
                             return GestureConfig(
-                              maxScale: math.max(((r / h) * f), r),
+                              maxScale: Math.max(((r / h) * f), r),
                               initialScale: r,
-                              minScale: math.min(f, r * f),
+                              minScale: Math.min(f, r * f),
                               initialAlignment: InitialAlignment.topCenter,
                               reverseMousePointerScrollDirection: true,
                             );

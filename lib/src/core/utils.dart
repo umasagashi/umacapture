@@ -183,3 +183,9 @@ class Progress {
     return Progress(count: count + 1, total: total);
   }
 }
+
+class Math {
+  static T min<T extends num>(T a, T b) => math.min(a, b);
+
+  static T max<T extends num>(T a, T b) => math.max(a, b);
+}
