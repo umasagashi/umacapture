@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -232,7 +230,7 @@ class _SpinBoxState extends State<SpinBox> {
             padding: EdgeInsets.zero,
             onPressed: () {
               setState(() {
-                _value = math.max(widget.min, _value - 1);
+                _value = Math.max(widget.min, _value - 1);
                 widget.onChanged(_value);
               });
             },
@@ -245,7 +243,7 @@ class _SpinBoxState extends State<SpinBox> {
             padding: EdgeInsets.zero,
             onPressed: () {
               setState(() {
-                _value = math.min(widget.max, _value + 1);
+                _value = Math.min(widget.max, _value + 1);
                 widget.onChanged(_value);
               });
             },

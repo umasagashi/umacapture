@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -14,6 +13,7 @@ import '/src/app/pages.dart';
 import '/src/app/route.gr.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/utils.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
@@ -287,7 +287,7 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {
     return base?.copyWith(
         fontWeight: FontWeight
-            .values[math.min((base.fontWeight?.index ?? FontWeight.normal.index) + offset, FontWeight.w900.index)]);
+            .values[Math.min((base.fontWeight?.index ?? FontWeight.normal.index) + offset, FontWeight.w900.index)]);
   }
 
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {

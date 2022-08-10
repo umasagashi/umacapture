@@ -1,6 +1,6 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
+
+import '/src/core/utils.dart';
 
 enum ToastType {
   success,
@@ -49,7 +49,7 @@ class Toaster {
   void showToast(BuildContext context, ToastData data) {
     final snackBar = ScaffoldMessenger.of(context);
     final parentSize = MediaQuery.of(context).size;
-    final barWidth = min(parentSize.width - 20.0, narrowWidth);
+    final barWidth = Math.min(parentSize.width - 20.0, narrowWidth);
     final isNarrow = barWidth < narrowWidth;
 
     snackBar.showSnackBar(
