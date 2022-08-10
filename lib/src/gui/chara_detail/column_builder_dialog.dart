@@ -9,6 +9,9 @@ import '/src/chara_detail/spec/builder.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/common.dart';
 
+// ignore: constant_identifier_names
+const tr_chara_detail = "pages.chara_detail";
+
 class ColumnBuilderDialog extends ConsumerWidget {
   const ColumnBuilderDialog({Key? key}) : super(key: key);
 
@@ -16,13 +19,28 @@ class ColumnBuilderDialog extends ConsumerWidget {
     CardDialog.show(context, const ColumnBuilderDialog());
   }
 
-  Widget chipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
+  Widget addAllChipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
+    return ActionChip(
+      label: Text("$tr_chara_detail.column_spec.dialog.add_all_button.label".tr()),
+      tooltip: "$tr_chara_detail.column_spec.dialog.add_all_button.tooltip".tr(),
+      onPressed: () {
+        final specs = ref.read(currentColumnSpecsProvider.notifier);
+        for (final builder in targets) {
+          specs.add(builder.build());
+        }
+        Navigator.of(context).pop();
+      },
+    );
+  }
+
+  Widget builderChipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
     return Align(
       alignment: Alignment.topLeft,
       child: Wrap(
         spacing: 8,
         runSpacing: 8,
         children: [
+          if (targets.length >= 2) addAllChipWidget(context, ref, targets),
           for (final builder in targets)
             GestureDetector(
               onLongPress: () {
@@ -75,7 +93,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             ),
             Padding(
               padding: const EdgeInsets.all(16),
-              child: chipWidget(context, ref, buildersMap[cat] ?? []),
+              child: builderChipWidget(context, ref, buildersMap[cat] ?? []),
             ),
           ],
         ],
