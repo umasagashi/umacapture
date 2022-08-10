@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -103,6 +102,10 @@ extension ListExtension<T> on List<T> {
     return sublist(start, math.min(length, end));
   }
 
+  List<T> truncated(int n) {
+    return sublist(0, length - n);
+  }
+
   Iterable<T> insertSeparator(T separator) sync* {
     final it = iterator;
     if (it.moveNext()) {
@@ -157,10 +160,6 @@ Iterable<Tuple3<T1, T2, T3>> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2
   for (final e in zip([it1, it2, it3])) {
     yield Tuple3<T1, T2, T3>(e[0] as T1, e[1] as T2, e[2] as T3);
   }
-}
-
-Future<void> openEntity(FileSystemEntity entity) {
-  return Process.run("start", [entity.absolute.path.replaceAll("\\", "/")], runInShell: true);
 }
 
 class Progress {

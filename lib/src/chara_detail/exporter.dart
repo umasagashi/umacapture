@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:charset/charset.dart';
@@ -16,6 +15,7 @@ import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
@@ -36,23 +36,23 @@ abstract class Exporter {
 
   Exporter(this.dialogTitle, this.defaultFileName, this.ref);
 
-  void export({StringCallback? onSuccess}) {
+  void export({PathEntityCallback? onSuccess}) {
     getDownloadsDirectory().then((initialDirectory) {
       FilePicker.platform
           .saveFile(dialogTitle: dialogTitle, fileName: defaultFileName, initialDirectory: initialDirectory?.path)
           .then((path) {
         if (path != null) {
           ref.read(exportingStateProvider.notifier).update((_) => true);
-          _export(path).then((_) {
+          _export(FilePath(path)).then((_) {
             ref.read(exportingStateProvider.notifier).update((_) => false);
-            onSuccess?.call(path);
+            onSuccess?.call(FilePath(path));
           });
         }
       });
     });
   }
 
-  Future<dynamic> _export(String path);
+  Future<dynamic> _export(FilePath path);
 }
 
 enum CharCodec {
@@ -78,7 +78,7 @@ class CsvExporter extends Exporter {
   }
 
   @override
-  Future<dynamic> _export(String path) async {
+  Future<dynamic> _export(FilePath path) async {
     logger.d(path);
     final grid = ref.watch(currentGridProvider);
     final table = [
@@ -86,7 +86,7 @@ class CsvExporter extends Exporter {
       ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()!.csv).toList()).toList(),
     ];
     final content = const ListToCsvConverter().convert(table);
-    return File(path).writeAsBytes(encode(content));
+    return path.writeAsBytes(encode(content));
   }
 }
 
@@ -99,10 +99,10 @@ class JsonExportData {
 }
 
 class _JsonExporterArgs {
-  final File outputFile;
+  final FilePath path;
   final JsonExportData data;
 
-  _JsonExporterArgs(this.outputFile, this.data);
+  _JsonExporterArgs(this.path, this.data);
 }
 
 class JsonExporter extends Exporter {
@@ -111,22 +111,22 @@ class JsonExporter extends Exporter {
   static void _run(_JsonExporterArgs args) {
     initializeJsonReflectable();
     final options = SerializationOptions(caseStyle: CaseStyle.snake, indent: " " * 4);
-    args.outputFile.writeAsStringSync(JsonMapper.serialize(args.data, options));
+    args.path.writeAsStringSync(JsonMapper.serialize(args.data, options));
   }
 
   @override
-  Future<dynamic> _export(String path) {
+  Future<dynamic> _export(FilePath path) {
     final records = ref.read(charaDetailRecordStorageProvider);
     final labelMap = ref.read(labelMapProvider);
-    return compute(_run, _JsonExporterArgs(File(path), JsonExportData(records, labelMap)));
+    return compute(_run, _JsonExporterArgs(path, JsonExportData(records, labelMap)));
   }
 }
 
 class _ZipExporterArgs {
-  final File outputFile;
+  final FilePath path;
   final PathInfo pathInfo;
 
-  _ZipExporterArgs(this.outputFile, this.pathInfo);
+  _ZipExporterArgs(this.path, this.pathInfo);
 }
 
 class ZipExporter extends Exporter {
@@ -134,15 +134,15 @@ class ZipExporter extends Exporter {
 
   static void _run(_ZipExporterArgs args) {
     final encoder = ZipFileEncoder();
-    encoder.create(args.outputFile.path);
-    encoder.addDirectory(Directory(args.pathInfo.charaDetail));
-    encoder.addFile(File("${args.pathInfo.modules}/labels.json"));
+    encoder.create(args.path.path);
+    encoder.addDirectory(args.pathInfo.charaDetailActiveDir.toDirectory());
+    encoder.addFile((args.pathInfo.modulesDir.filePath("labels.json")).toFile());
     encoder.close();
   }
 
   @override
-  Future<dynamic> _export(String path) {
+  Future<dynamic> _export(FilePath path) {
     final info = ref.read(pathInfoProvider);
-    return compute(_run, _ZipExporterArgs(File(path), info));
+    return compute(_run, _ZipExporterArgs(path, info));
   }
 }

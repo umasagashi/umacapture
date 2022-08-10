@@ -6,13 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/path_entity.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-StreamController<String> _recordExportEventController = StreamController();
-final recordExportEventProvider = StreamProvider<String>((ref) {
+StreamController<PathEntity> _recordExportEventController = StreamController();
+final recordExportEventProvider = StreamProvider<PathEntity>((ref) {
   if (_recordExportEventController.hasListener) {
     _recordExportEventController = StreamController();
   }

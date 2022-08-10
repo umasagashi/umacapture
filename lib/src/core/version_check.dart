@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
@@ -15,6 +14,7 @@ import 'package:version/version.dart';
 
 import '/const.dart';
 import '/src/core/json_adapter.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
@@ -42,14 +42,14 @@ class ModuleVersionInfo {
 
   ModuleVersionInfo(this.formatVersion, this.region, this.recognizerVersion);
 
-  static Future<ModuleVersionInfo?> loadFromFile(File path) async {
-    if (!path.existsSync()) {
+  static Future<ModuleVersionInfo?> load(FilePath file) async {
+    if (!file.existsSync()) {
       return Future.value(null);
     }
     initializeJsonReflectable();
     const options = DeserializationOptions(caseStyle: CaseStyle.snake);
     try {
-      return await path.readAsString().then((content) => JsonMapper.deserialize<ModuleVersionInfo>(content, options));
+      return await file.readAsString().then((content) => JsonMapper.deserialize<ModuleVersionInfo>(content, options));
     } catch (e) {
       return null;
     }
@@ -75,7 +75,7 @@ enum ModuleVersionCheckResultCode {
   noVersionAvailable,
 }
 
-Future<void> _extractArchive(Tuple2<File, Directory> args) {
+Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
   final stream = InputFileStream(args.item1.path);
   final archive = ZipDecoder().decodeBuffer(stream);
   extractArchiveToDisk(archive, args.item2.path);
@@ -92,7 +92,7 @@ ModuleVersionCheckResultCode _sendModuleVersionCheckToast(ToastType type, Module
 final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   final pathInfo = await ref.watch(pathInfoLoader.future);
 
-  final local = await compute(ModuleVersionInfo.loadFromFile, File("${pathInfo.modules}/version_info.json"));
+  final local = await compute(ModuleVersionInfo.load, pathInfo.modulesDir.filePath("version_info.json"));
   final latest = await compute(ModuleVersionInfo.download, Uri.parse(Const.moduleVersionInfoUrl));
   logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
@@ -110,11 +110,11 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
     return latest.version;
   }
 
-  final downloadPath = "${pathInfo.temp}/modules.zip";
+  final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
     await Dio().download(Const.moduleZipUrl, downloadPath);
-    await compute(_extractArchive, Tuple2(File(downloadPath), Directory(pathInfo.supportDir)));
-    File(downloadPath).delete();
+    await compute(_extractArchive, Tuple2(downloadPath, pathInfo.supportDir));
+    downloadPath.toFile().delete();
   } catch (e) {
     if (local == null) {
       _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);

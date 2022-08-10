@@ -78,7 +78,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => openEntity(storage.recordPathOf(record)),
+          onTap: () => storage.recordPathOf(record).launch(),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
       ],

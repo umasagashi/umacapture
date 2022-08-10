@@ -164,9 +164,9 @@ final platformConfigLoader = FutureProvider<JsonMap>((ref) async {
 
   await Future.wait([
     ref.watch(pathInfoLoader.future).then((directory) {
-      config["directory"]["temp_dir"] = directory.temp;
-      config["directory"]["storage_dir"] = directory.storage;
-      config["directory"]["modules_dir"] = directory.modules;
+      config["directory"]["temp_dir"] = directory.tempDir.path;
+      config["directory"]["storage_dir"] = directory.storageDir.path;
+      config["directory"]["modules_dir"] = directory.modulesDir.path;
     }),
     rootBundle
         .loadString('assets/config/chara_detail/scene_context.json')

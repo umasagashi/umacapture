@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
@@ -9,6 +8,7 @@ import 'package:pasteboard/pasteboard.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/json_adapter.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
@@ -34,7 +34,7 @@ final clipboardPasteEventProvider = StreamProvider<String>((ref) {
   return _clipboardPasteEventController.stream;
 });
 
-final charaCardIconMapProvider = StateProvider<Map<int, String>>((ref) {
+final charaCardIconMapProvider = StateProvider<Map<int, FilePath>>((ref) {
   return {};
 });
 
@@ -102,12 +102,12 @@ extension CharaDetailRecordImageModeExtension on CharaDetailRecordImageMode {
 
 class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   final Ref ref;
-  final String directory;
+  final DirectoryPath rootDirectory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
   final Set<int> skillSet = {};
   final Set<int> factorSet = {};
 
-  CharaDetailRecordStorage({required this.ref, required this.directory, required List<CharaDetailRecord> records})
+  CharaDetailRecordStorage({required this.ref, required this.rootDirectory, required List<CharaDetailRecord> records})
       : super(records) {
     for (var e in records) {
       _updateRecordInfo(e, update: false);
@@ -134,7 +134,8 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   void _updateIconMapNotifier() {
-    final iconMap = charaCardMap.map((k, v) => MapEntry(k, "$directory/${v.id}/trainee.jpg"));
+    final Map<int, FilePath> iconMap =
+        charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath("trainee.jpg")));
     ref.read(charaCardIconMapProvider.notifier).update((e) => Map.from(iconMap));
   }
 
@@ -149,7 +150,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   void add(CharaDetailRecord record) {
     final duplicated = state.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
-      Directory("$directory/${record.id}").delete(recursive: true);
+      (rootDirectory / record.id).deleteSync(recursive: true);
       _duplicatedCharaEventController.sink.add(record.id);
       ref
           .watch(charaDetailCaptureStateProvider.notifier)
@@ -166,12 +167,14 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     }
   }
 
+  void addIfNotNull(CharaDetailRecord? record) {
+    if (record != null) {
+      add(record);
+    }
+  }
+
   void addFromFile(String id) {
-    CharaDetailRecord.readFromDirectory(Directory("$directory/$id")).then((e) {
-      if (e != null) {
-        add(e);
-      }
-    });
+    CharaDetailRecord.load(rootDirectory / id).then((e) => addIfNotNull(e));
   }
 
   CharaDetailRecord? getBy({required String id}) {
@@ -184,19 +187,19 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     state[index] = record;
   }
 
-  String recordPathOf(CharaDetailRecord record) {
-    return "$directory/${record.id}";
+  DirectoryPath recordPathOf(CharaDetailRecord record) {
+    return rootDirectory / record.id;
   }
 
-  String imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
+  FilePath imagePathOf(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
-    return "${recordPathOf(record)}/${image.fileName}";
+    return recordPathOf(record).filePath(image.fileName);
   }
 
   void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
-    Pasteboard.writeFiles([imagePath]).then((_) => _clipboardPasteEventController.sink.add(imagePath));
+    Pasteboard.writeFiles([imagePath.path]).then((_) => _clipboardPasteEventController.sink.add(imagePath.path));
   }
 
   List<CharaDetailRecord> get records => state;
@@ -213,7 +216,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   Future<void> reload(String id) async {
-    final record = await compute(_loadCharaDetailRecord, Directory("$directory/$id"));
+    final record = await compute(_loadCharaDetailRecord, rootDirectory / id);
     replaceBy(record!, id: id);
   }
 
@@ -230,27 +233,25 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 }
 
-Future<CharaDetailRecord?> _loadCharaDetailRecord(Directory directory) {
+Future<CharaDetailRecord?> _loadCharaDetailRecord(DirectoryPath directory) {
   initializeJsonReflectable();
-  return CharaDetailRecord.readFromDirectory(Directory(directory.path));
+  return CharaDetailRecord.load(directory);
 }
 
-Future<List<CharaDetailRecord>> _loadAllCharaDetailRecord(Directory directory) {
+Future<List<CharaDetailRecord>> _loadAllCharaDetailRecord(DirectoryPath directory) {
   initializeJsonReflectable();
-  final files = directory
-      .listSync(recursive: false, followLinks: false)
-      .map((e) => CharaDetailRecord.readFromDirectory(Directory(e.path)));
-  return Future.wait(files).then((e) => e.whereNotNull().toList());
+  final records =
+      directory.listSync(recursive: false, followLinks: false).map((e) => CharaDetailRecord.load(e.asDirectoryPath));
+  return Future.wait(records).then((e) => e.whereNotNull().toList());
 }
 
 final charaDetailRecordStorageLoader = FutureProvider<CharaDetailRecordStorage>((ref) async {
   final pathInfo = await ref.watch(pathInfoLoader.future);
-  final directory = Directory(pathInfo.charaDetail);
   final List<CharaDetailRecord> records = [];
-  if (directory.existsSync()) {
-    records.addAll(await compute(_loadAllCharaDetailRecord, directory));
+  if (pathInfo.charaDetailActiveDir.existsSync()) {
+    records.addAll(await compute(_loadAllCharaDetailRecord, pathInfo.charaDetailActiveDir));
   }
-  final storage = CharaDetailRecordStorage(ref: ref, directory: pathInfo.charaDetail, records: records);
+  final storage = CharaDetailRecordStorage(ref: ref, rootDirectory: pathInfo.charaDetailActiveDir, records: records);
   ref.watch(charaDetailRecordCapturedEventProvider.stream).listen((e) => storage.addFromFile(e));
   storage.checkRecordVersion();
   return storage;
