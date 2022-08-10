@@ -74,7 +74,12 @@
                     "close_button": {
                         "tooltip": "追加せずにキャンセル"
                     },
-                    "description": "Tips: 長押しするとフィルタカスタマイズ画面に移動します。"
+                    "description": "Tips: 長押しするとフィルタカスタマイズ画面に移動します。",
+                    "add_all_button": {
+                        "label": "全部",
+                        "tooltip": "このグループの全項目をまとめて追加します"
+
+                    }
                 }
             },
             "column_category": {
