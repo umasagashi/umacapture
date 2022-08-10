@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:equatable/equatable.dart';
 
+import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 
 @jsonSerializable
@@ -335,15 +334,14 @@ class CharaDetailRecord extends JsonEquatable {
   String get id => metadata.recordId.self;
 
   @JsonProperty(ignore: true)
-  String get traineeIconPath => "$id/trainee.jpg";
+  FilePath get traineeIconPath => DirectoryPath(id).filePath("trainee.jpg");
 
-  static Future<CharaDetailRecord?> readFromFile(File file) async {
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-    return file.readAsString().then((body) => JsonMapper.deserialize<CharaDetailRecord>(body, options));
+  static CharaDetailRecord? deserialize(String content) {
+    return JsonMapper.deserialize<CharaDetailRecord>(content, const DeserializationOptions(caseStyle: CaseStyle.snake));
   }
 
-  static Future<CharaDetailRecord?> readFromDirectory(Directory directory) async {
-    return readFromFile(File("${directory.path}/record.json"));
+  static Future<CharaDetailRecord?> load(DirectoryPath directory) async {
+    return directory.filePath("record.json").readAsString().then((body) => deserialize(body));
   }
 
   bool isSameChara(CharaDetailRecord other) {

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +7,7 @@ import 'package:percent_indicator/percent_indicator.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
@@ -17,8 +16,7 @@ import '/src/gui/common.dart';
 const tr_dashboard = "pages.dashboard";
 
 bool _isInstallerMode() {
-  return File(Platform.resolvedExecutable)
-      .parent
+  return FilePath.resolvedExecutable.parent
       .listSync(recursive: false, followLinks: false)
       .where((e) => Const.uninstallerPattern.hasMatch(e.path))
       .isNotEmpty;
@@ -39,17 +37,17 @@ class AppUpdaterGroup extends ConsumerWidget {
     getDownloadsDirectory().then((downloadDir) {
       final downloadUrl =
           isInstallerMode ? Const.appExeUrl(version: version.toString()) : Const.appZipUrl(version: version.toString());
-      final downloadPath = "${downloadDir!.path}/${Uri.parse(downloadUrl).pathSegments.last}";
+      final FilePath downloadPath = DirectoryPath(downloadDir).filePath(Uri.parse(downloadUrl).pathSegments.last);
       logger.d("$downloadUrl, $downloadPath");
       Dio().download(
         downloadUrl,
-        downloadPath,
+        downloadPath.path,
         onReceiveProgress: (int count, int total) {
           ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: count, total: total));
         },
       ).then((_) {
         ref.read(_downloadProgressProvider.notifier).update((_) => null);
-        openEntity(isInstallerMode ? File(downloadPath) : File(downloadPath).parent);
+        (isInstallerMode ? downloadPath : downloadPath.parent).launch();
       });
     });
   }

@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 
 final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
@@ -11,21 +10,21 @@ final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
 });
 
 class PathInfo {
-  final String documentDir;
-  final String supportDir;
+  final DirectoryPath documentDir;
+  final DirectoryPath supportDir;
 
   const PathInfo({
     required this.documentDir,
     required this.supportDir,
   });
 
-  String get temp => "$documentDir/temp";
+  DirectoryPath get tempDir => documentDir / "temp";
 
-  String get storage => "$documentDir/storage";
+  DirectoryPath get storageDir => documentDir / "storage";
 
-  String get modules => "$supportDir/modules";
+  DirectoryPath get modulesDir => supportDir / "modules";
 
-  String get charaDetail => "$storage/chara_detail/active";
+  DirectoryPath get charaDetailActiveDir => storageDir / "chara_detail" / "active";
 
   @override
   String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';
@@ -33,18 +32,18 @@ class PathInfo {
 
 final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
   final appName = (await ref.watch(packageInfoLoader.future)).appName;
-  late final Directory documentDir;
+  late final DirectoryPath documentDir;
   if (CurrentPlatform.isAndroid()) {
     // To make it easier for users to export manually.
-    documentDir = await getExternalStorageDirectories(type: StorageDirectory.documents).then((e) => e!.first);
+    documentDir =
+        DirectoryPath(await getExternalStorageDirectories(type: StorageDirectory.documents).then((e) => e!.first));
   } else {
-    documentDir = await getApplicationDocumentsDirectory();
+    documentDir = DirectoryPath(await getApplicationDocumentsDirectory());
   }
-  late final Directory supportDir;
-  supportDir = await getApplicationSupportDirectory();
+  final supportDir = DirectoryPath(await getApplicationSupportDirectory());
   final info = PathInfo(
-    documentDir: "${documentDir.absolute.path}/$appName",
-    supportDir: supportDir.absolute.path,
+    documentDir: documentDir / appName,
+    supportDir: supportDir,
   );
   return info;
 });

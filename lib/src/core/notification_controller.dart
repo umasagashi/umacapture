@@ -1,14 +1,12 @@
-import 'dart:io';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sound_player.dart';
-import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/toast.dart';
@@ -75,8 +73,8 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
 
     _listenForToastData(moduleVersionCheckEventProvider);
     _listenForToast(clipboardPasteEventProvider, "$tr_toast.clipboard_paste".tr());
-    _listenForToast<String>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {
-      openEntity(File(path).parent);
+    _listenForToast<PathEntity>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {
+      path.parent.launch();
     });
 
     return Container();

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 
@@ -97,14 +98,14 @@ class BuildResource {
   final LabelMap labelMap;
   final List<SkillInfo> skillInfo;
   final List<CharaCardInfo> charaCardInfo;
-  final String recordRootDirectory;
+  final DirectoryPath recordRootDir;
   final List<int> charaRankBorder;
 
   BuildResource({
     required this.labelMap,
     required this.skillInfo,
     required this.charaCardInfo,
-    required this.recordRootDirectory,
+    required this.recordRootDir,
     required this.charaRankBorder,
   });
 }

@@ -85,7 +85,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                       return GestureDetector(
                         onSecondaryTap: () => Navigator.of(context).pop(),
                         child: ExtendedImage.file(
-                          storage.imagePathOf(widget.record, imageMode),
+                          storage.imagePathOf(widget.record, imageMode).toFile(),
                           filterQuality: FilterQuality.medium,
                           fit: BoxFit.contain,
                           mode: ExtendedImageMode.gesture,

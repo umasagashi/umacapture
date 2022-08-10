@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -91,7 +89,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
-        return Image.file(File("${resource.recordRootDirectory}/${record.traineeIconPath}"));
+        return Image.file((resource.recordRootDir.filePath(record.traineeIconPath)).toFile());
       },
     );
   }
@@ -192,7 +190,7 @@ class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumn
                 alignment: Alignment.bottomCenter,
                 widthFactor: 0.9,
                 heightFactor: 0.9,
-                child: Image.file(File(card.iconPath)),
+                child: Image.file(card.iconPath.toFile()),
               ),
             ),
           ),
