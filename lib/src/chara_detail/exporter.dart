@@ -79,7 +79,6 @@ class CsvExporter extends Exporter {
 
   @override
   Future<dynamic> _export(FilePath path) async {
-    logger.d(path);
     final grid = ref.watch(currentGridProvider);
     final table = [
       grid.columns.map((e) => e.title).toList(),
