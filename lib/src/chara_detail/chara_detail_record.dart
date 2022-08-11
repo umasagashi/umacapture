@@ -138,6 +138,9 @@ class FactorSet extends JsonEquatable {
   @JsonProperty(ignore: true)
   List<Factor> get flattened => [...self, ...parent1, ...parent2];
 
+  @JsonProperty(ignore: true)
+  Set<int> get uniqueIds => flattened.map((e) => e.id).toSet();
+
   List<List<Factor>> toList() => [self, parent1, parent2];
 }
 

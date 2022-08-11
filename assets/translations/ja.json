@@ -78,7 +78,6 @@
                     "add_all_button": {
                         "label": "全部",
                         "tooltip": "このグループの全項目をまとめて追加します"
-
                     }
                 }
             },
@@ -183,7 +182,7 @@
                     "mode": {
                         "label": "モード",
                         "template": "現在の条件：選択した因子の{selection}が、{subject}で{count}ウマ娘を表示",
-                        "selection": {
+                        "logic": {
                             "label": "対象",
                             "disabled_tooltip": "複数の因子を選択している時だけ変更できます。",
                             "all_of": {
@@ -210,7 +209,7 @@
                                 "description": "親を含む家系全体"
                             }
                         },
-                        "count": {
+                        "element": {
                             "label": "条件",
                             "star_only": {
                                 "label": "星合計",
@@ -219,21 +218,35 @@
                             "star_and_count": {
                                 "label": "星数 × 因子数",
                                 "description": "星{star}以上を{count}個以上所持する",
-                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.selection.sum_of.label】または【@:pages.chara_detail.column_predicate.factor.mode.count.star_and_count.label】を選択している時だけ選べます。"
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.logic.sum_of.label】または【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ選べます。"
                             },
                             "value": {
                                 "star": "星数",
                                 "count": {
                                     "label": "因子数",
-                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.count.star_and_count.label】を選択している時だけ変更できます。"
+                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ変更できます。"
                                 }
                             }
                         }
                     },
-                    "show": {
+                    "notation": {
                         "label": "表示",
-                        "description": "条件に該当する因子のうち、テーブルのセルに表示する因子の上限数を指定します。この個数を超えた分は表示が省略されます。",
-                        "title": "表示上限数"
+                        "description": "列の表示方法を指定します。",
+                        "mode": {
+                            "label": "星数表示",
+                            "sum_only": {
+                                "label": "合計のみ"
+                            },
+                            "trainee_and_parents": {
+                                "label": "育成ウマ娘と親合計"
+                            },
+                            "each": {
+                                "label": "個別"
+                            }
+                        },
+                        "max": {
+                            "label": "表示上限数"
+                        }
                     },
                     "expand": {
                         "tooltip": "全部を表示"

@@ -21,85 +21,180 @@ import '/src/gui/common.dart';
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
 @jsonSerializable
-enum FactorSelection { anyOf, allOf, sumOf }
+enum FactorSetLogicMode {
+  anyOf,
+  allOf,
+  sumOf,
+}
 
 @jsonSerializable
-enum FactorSubject { trainee, family }
+enum FactorSearchSubjectMode {
+  trainee,
+  family,
+}
 
 @jsonSerializable
-enum FactorCount { starOnly, starAndCount }
+enum FactorSearchElementMode {
+  starOnly,
+  starAndCount,
+}
+
+@jsonSerializable
+class FactorSearchElement {
+  final FactorSearchElementMode mode;
+  final int min;
+  final int count;
+
+  FactorSearchElement({
+    required this.mode,
+    required this.min,
+    required this.count,
+  });
+
+  FactorSearchElement copyWith({
+    FactorSearchElementMode? mode,
+    int? min,
+    int? count,
+  }) {
+    return FactorSearchElement(
+      mode: mode ?? this.mode,
+      min: min ?? this.min,
+      count: count ?? this.count,
+    );
+  }
+}
+
+@jsonSerializable
+enum FactorNotationMode {
+  sumOnly,
+  traineeAndParents,
+  each,
+}
+
+@jsonSerializable
+class FactorNotation {
+  final FactorNotationMode mode;
+  final int max;
+
+  FactorNotation({
+    required this.mode,
+    required this.max,
+  });
+
+  FactorNotation copyWith({
+    FactorNotationMode? mode,
+    int? max,
+  }) {
+    return FactorNotation(
+      mode: mode ?? this.mode,
+      max: max ?? this.max,
+    );
+  }
+}
+
+class QueriedFactor {
+  final int id;
+  final int self;
+  final int parent1;
+  final int parent2;
+
+  bool get isEmpty => self == 0 && parent1 == 0 && parent2 == 0;
+
+  int count({int min = 0}) {
+    return (self >= min ? self : 0) + (parent1 >= min ? parent1 : 0) + (parent2 >= min ? parent2 : 0);
+  }
+
+  QueriedFactor({
+    required this.id,
+    required this.self,
+    required this.parent1,
+    required this.parent2,
+  });
+
+  static QueriedFactor extractFrom(FactorSet factorSet, int targetId, bool traineeOnly) {
+    return QueriedFactor(
+      id: targetId,
+      self: factorSet.self.firstWhereOrNull((e) => e.id == targetId)?.star ?? 0,
+      parent1: traineeOnly ? 0 : factorSet.parent1.firstWhereOrNull((e) => e.id == targetId)?.star ?? 0,
+      parent2: traineeOnly ? 0 : factorSet.parent2.firstWhereOrNull((e) => e.id == targetId)?.star ?? 0,
+    );
+  }
+
+  String notation(FactorNotationMode mode, {int width = 1}) {
+    late final List<int> segments;
+    switch (mode) {
+      case FactorNotationMode.sumOnly:
+        segments = [self + parent1 + parent2];
+        break;
+      case FactorNotationMode.traineeAndParents:
+        segments = [self, parent1 + parent2];
+        break;
+      case FactorNotationMode.each:
+        segments = [self, parent1, parent2];
+        break;
+    }
+    return segments.map((e) => e.toString().padLeft(width, "0")).join("/");
+  }
+}
 
 @jsonSerializable
 class AggregateFactorSetPredicate {
   List<int> query;
-  FactorSelection selection;
-  FactorSubject subject;
-  FactorCount count;
-  int starMin;
-  int starCount;
-  int showMin;
-  bool showSum;
+  FactorSetLogicMode logic;
+  FactorSearchSubjectMode subject;
+  FactorSearchElement element;
+  FactorNotation notation;
 
-  bool isStarAndCountAllowed() => selection == FactorSelection.sumOf || subject == FactorSubject.family;
+  bool isStarAndCountAllowed() => logic == FactorSetLogicMode.sumOf || subject == FactorSearchSubjectMode.family;
 
   AggregateFactorSetPredicate({
     required this.query,
-    required this.selection,
+    required this.logic,
     required this.subject,
-    required this.count,
-    required this.starMin,
-    required this.starCount,
-    required this.showMin,
-    required this.showSum,
+    required this.element,
+    required this.notation,
   }) {
     if (!isStarAndCountAllowed()) {
-      count = FactorCount.starOnly;
+      element = element.copyWith(mode: FactorSearchElementMode.starOnly);
     }
-    if (query.length <= 1 && selection == FactorSelection.sumOf) {
-      selection = FactorSelection.anyOf;
+    if (query.length <= 1 && logic == FactorSetLogicMode.sumOf) {
+      logic = FactorSetLogicMode.anyOf;
     }
   }
 
   AggregateFactorSetPredicate.any()
       : query = [],
-        selection = FactorSelection.anyOf,
-        subject = FactorSubject.family,
-        count = FactorCount.starOnly,
-        starMin = 1,
-        starCount = 1,
-        showMin = 3,
-        showSum = true;
+        logic = FactorSetLogicMode.anyOf,
+        subject = FactorSearchSubjectMode.family,
+        element = FactorSearchElement(
+          mode: FactorSearchElementMode.starOnly,
+          min: 1,
+          count: 1,
+        ),
+        notation = FactorNotation(
+          mode: FactorNotationMode.sumOnly,
+          max: 3,
+        );
 
-  List<Factor> _extractFactorList(FactorSet factorSet, int targetId) {
-    final List<Factor> factors = [];
-    factors.addIfNotNull(factorSet.self.firstWhereOrNull((e) => e.id == targetId));
-    if (subject == FactorSubject.family) {
-      factors.addIfNotNull(factorSet.parent1.firstWhereOrNull((e) => e.id == targetId));
-      factors.addIfNotNull(factorSet.parent2.firstWhereOrNull((e) => e.id == targetId));
-    }
-    return factors;
+  List<QueriedFactor> extract(FactorSet factorSet) {
+    final targetIds = query.isNotEmpty ? query : factorSet.uniqueIds;
+    final traineeOnly = subject == FactorSearchSubjectMode.trainee;
+    return targetIds.map((e) => QueriedFactor.extractFrom(factorSet, e, traineeOnly)).where((e) => !e.isEmpty).toList();
   }
 
-  List<List<Factor>> extract(FactorSet factorSet) {
-    if (query.isEmpty) {
-      return factorSet.toList();
-    }
-    return query.map((e) => _extractFactorList(factorSet, e)).toList();
-  }
-
-  bool _isAcceptable(List<int> stars) {
-    if (count == FactorCount.starAndCount) {
-      return stars.map((e) => e >= starMin).countTrue() >= starCount;
+  bool _isAcceptable(QueriedFactor factor) {
+    if (element.mode == FactorSearchElementMode.starAndCount) {
+      return factor.count(min: element.min) >= element.count;
     } else {
-      return stars.sum >= starMin;
+      return factor.count() >= element.min;
     }
   }
 
-  bool _isSumAcceptable(List<List<int>> stars) {
-    if (count == FactorCount.starAndCount) {
-      return stars.map((e) => e.sum >= starMin).countTrue() >= starCount;
+  bool _isSumAcceptable(List<QueriedFactor> stars) {
+    if (element.mode == FactorSearchElementMode.starAndCount) {
+      return stars.map((e) => e.count() >= element.min).countTrue() >= element.count;
     } else {
-      return stars.map((e) => e.sum).sum >= starMin;
+      return stars.map((e) => e.count()).sum >= element.min;
     }
   }
 
@@ -108,36 +203,29 @@ class AggregateFactorSetPredicate {
       return true;
     }
     final foundFactors = extract(value);
-    final foundStars = foundFactors.map((tree) => tree.map((e) => e.star).toList()).toList();
-    switch (selection) {
-      case FactorSelection.anyOf:
-        return foundStars.any((e) => _isAcceptable(e));
-      case FactorSelection.allOf:
-        return foundStars.every((e) => _isAcceptable(e));
-      case FactorSelection.sumOf:
-        return _isSumAcceptable(foundStars);
+    switch (logic) {
+      case FactorSetLogicMode.anyOf:
+        return foundFactors.any((e) => _isAcceptable(e));
+      case FactorSetLogicMode.allOf:
+        return foundFactors.every((e) => _isAcceptable(e));
+      case FactorSetLogicMode.sumOf:
+        return _isSumAcceptable(foundFactors);
     }
   }
 
   AggregateFactorSetPredicate copyWith({
     List<int>? query,
-    FactorSelection? selection,
-    FactorSubject? subject,
-    FactorCount? count,
-    int? starMin,
-    int? starCount,
-    int? showMin,
-    bool? showSum,
+    FactorSetLogicMode? logic,
+    FactorSearchSubjectMode? subject,
+    FactorSearchElement? element,
+    FactorNotation? notation,
   }) {
     return AggregateFactorSetPredicate(
       query: List.from(query ?? this.query),
-      selection: selection ?? this.selection,
+      logic: logic ?? this.logic,
       subject: subject ?? this.subject,
-      count: count ?? this.count,
-      starMin: starMin ?? this.starMin,
-      starCount: starCount ?? this.starCount,
-      showMin: showMin ?? this.showMin,
-      showSum: showSum ?? this.showSum,
+      element: (element ?? this.element).copyWith(),
+      notation: (notation ?? this.notation).copyWith(),
     );
   }
 }
@@ -188,26 +276,27 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
-  Iterable<Factor> _mergeStars(Iterable<Factor> factors) {
-    return groupBy(factors, (Factor f) => f.id).entries.map((e) => Factor(e.key, e.value.map((f) => f.star).sum));
-  }
-
   @override
   PlutoCell plutoCell(BuildResource resource, FactorSet value) {
-    final labels = resource.labelMap[labelKey]!;
-    final foundFactors = predicate.extract(value).flattened.toList();
-    final factorNames = (predicate.showSum ? _mergeStars(foundFactors) : foundFactors)
-        .map((e) => "${labels[e.id]}(${e.star})")
-        .toList();
-    if (predicate.showMin == 0) {
-      final star = foundFactors.map((e) => e.star).sum;
-      return PlutoCell(value: star)..setUserData(FactorCellData(star.toString()));
+    final foundFactors = predicate.extract(value);
+    if (predicate.notation.max == 0) {
+      final q = QueriedFactor(
+        id: 0,
+        self: foundFactors.map((e) => e.self).sum,
+        parent1: foundFactors.map((e) => e.parent1).sum,
+        parent2: foundFactors.map((e) => e.parent2).sum,
+      );
+      return PlutoCell(
+        value: q.notation(predicate.notation.mode, width: 3),
+      )..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
     }
-    final desc = factorNames.partial(0, predicate.showMin).join(", ");
+
+    final labels = resource.labelMap[labelKey]!;
+    final notations = foundFactors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
+    final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
-      // Since autoFitColumn is not accurate, reserve few characters larger.
       value: "$desc${"M" * (desc.length * 0.15).toInt()}",
-    )..setUserData(FactorCellData(desc, csv: const ListToCsvConverter().convert([factorNames])));
+    )..setUserData(FactorCellData(desc, csv: const ListToCsvConverter().convert([notations])));
   }
 
   @override
@@ -237,22 +326,22 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     String modeText = "$sep${"-" * 10}";
 
     if (predicate.query.length >= 2) {
-      final selection = "$tr_factor.mode.selection.${predicate.selection.name.snakeCase}.label".tr();
-      modeText += "$sep${"$tr_factor.mode.selection.label".tr()}: $selection";
+      final selection = "$tr_factor.mode.logic.${predicate.logic.name.snakeCase}.label".tr();
+      modeText += "$sep${"$tr_factor.mode.logic.label".tr()}: $selection";
     }
 
     final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.label".tr();
     modeText += "$sep${"$tr_factor.mode.subject.label".tr()}: $subject";
 
     if (predicate.query.length >= 2) {
-      final count = "$tr_factor.mode.count.${predicate.count.name.snakeCase}.label".tr();
-      modeText += "$sep${"$tr_factor.mode.count.label".tr()}: $count";
+      final count = "$tr_factor.mode.element.${predicate.element.mode.name.snakeCase}.label".tr();
+      modeText += "$sep${"$tr_factor.mode.element.label".tr()}: $count";
     }
 
-    modeText += "$sep${"$tr_factor.mode.count.value.star".tr()}: ${predicate.starMin}";
+    modeText += "$sep${"$tr_factor.mode.element.value.star".tr()}: ${predicate.element.min}";
 
-    if (predicate.count == FactorCount.starAndCount) {
-      modeText += "$sep${"$tr_factor.mode.count.value.count.label".tr()}: ${predicate.starCount}";
+    if (predicate.element.mode == FactorSearchElementMode.starAndCount) {
+      modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
     }
 
     final labels = resource.labelMap[labelKey]!;
@@ -482,27 +571,22 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
 
   void updatePredicate({
     List<int>? query,
-    FactorSelection? selection,
-    FactorSubject? subject,
-    FactorCount? count,
-    int? starMin,
-    int? starCount,
-    int? showMin,
-    bool? showSum,
+    FactorSetLogicMode? logic,
+    FactorSearchSubjectMode? subject,
+    FactorSearchElement? element,
+    FactorNotation? notation,
   }) {
     setState(() {
       spec = spec.copyWith(
         predicate: spec.predicate.copyWith(
           query: query,
-          selection: selection,
+          logic: logic,
           subject: subject,
-          count: count,
-          starMin: starMin,
-          starCount: starCount,
-          showMin: showMin,
-          showSum: showSum,
+          element: element,
+          notation: notation,
         ),
       );
+      logger.d(spec.predicate.notation.max);
       widget.onChanged(spec);
     });
   }
@@ -518,11 +602,11 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
 
   Widget modeDescriptionWidget() {
     final theme = Theme.of(context);
-    final selection = "$tr_factor.mode.selection.${spec.predicate.selection.name.snakeCase}.description".tr();
+    final selection = "$tr_factor.mode.logic.${spec.predicate.logic.name.snakeCase}.description".tr();
     final subject = "$tr_factor.mode.subject.${spec.predicate.subject.name.snakeCase}.description".tr();
-    final count = "$tr_factor.mode.count.${spec.predicate.count.name.snakeCase}.description".tr(namedArgs: {
-      "star": spec.predicate.starMin.toString(),
-      "count": spec.predicate.starCount.toString(),
+    final count = "$tr_factor.mode.element.${spec.predicate.element.mode.name.snakeCase}.description".tr(namedArgs: {
+      "star": spec.predicate.element.min.toString(),
+      "count": spec.predicate.element.count.toString(),
     });
     return Padding(
       padding: const EdgeInsets.all(8),
@@ -586,30 +670,30 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     );
   }
 
-  Widget selectionChoiceWidget() {
+  Widget logicChoiceWidget() {
     return choiceLine(
-      label: Text("$tr_factor.mode.selection.label".tr()),
+      label: Text("$tr_factor.mode.logic.label".tr()),
       children: [
         choiceChipWidget(
-          label: "$tr_factor.mode.selection.all_of.label".tr(),
+          label: "$tr_factor.mode.logic.all_of.label".tr(),
           disabled: spec.predicate.query.length <= 1,
-          tooltip: "$tr_factor.mode.selection.disabled_tooltip".tr(),
-          selected: spec.predicate.selection == FactorSelection.allOf,
-          onSelected: () => updatePredicate(selection: FactorSelection.allOf),
+          tooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
+          selected: spec.predicate.logic == FactorSetLogicMode.allOf,
+          onSelected: () => updatePredicate(logic: FactorSetLogicMode.allOf),
         ),
         choiceChipWidget(
-          label: "$tr_factor.mode.selection.any_of.label".tr(),
+          label: "$tr_factor.mode.logic.any_of.label".tr(),
           disabled: spec.predicate.query.length <= 1,
-          tooltip: "$tr_factor.mode.selection.disabled_tooltip".tr(),
-          selected: spec.predicate.selection == FactorSelection.anyOf,
-          onSelected: () => updatePredicate(selection: FactorSelection.anyOf),
+          tooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
+          selected: spec.predicate.logic == FactorSetLogicMode.anyOf,
+          onSelected: () => updatePredicate(logic: FactorSetLogicMode.anyOf),
         ),
         choiceChipWidget(
-          label: "$tr_factor.mode.selection.sum_of.label".tr(),
+          label: "$tr_factor.mode.logic.sum_of.label".tr(),
           disabled: spec.predicate.query.length <= 1,
-          tooltip: "$tr_factor.mode.selection.disabled_tooltip".tr(),
-          selected: spec.predicate.selection == FactorSelection.sumOf,
-          onSelected: () => updatePredicate(selection: FactorSelection.sumOf),
+          tooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
+          selected: spec.predicate.logic == FactorSetLogicMode.sumOf,
+          onSelected: () => updatePredicate(logic: FactorSetLogicMode.sumOf),
         ),
       ],
     );
@@ -621,74 +705,82 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
       children: [
         choiceChipWidget(
           label: "$tr_factor.mode.subject.trainee.label".tr(),
-          selected: spec.predicate.subject == FactorSubject.trainee,
-          onSelected: () => updatePredicate(subject: FactorSubject.trainee),
+          selected: spec.predicate.subject == FactorSearchSubjectMode.trainee,
+          onSelected: () => updatePredicate(subject: FactorSearchSubjectMode.trainee),
         ),
         choiceChipWidget(
           label: "$tr_factor.mode.subject.family.label".tr(),
-          selected: spec.predicate.subject == FactorSubject.family,
-          onSelected: () => updatePredicate(subject: FactorSubject.family),
+          selected: spec.predicate.subject == FactorSearchSubjectMode.family,
+          onSelected: () => updatePredicate(subject: FactorSearchSubjectMode.family),
         ),
       ],
     );
   }
 
-  Widget countChoiceWidget() {
+  Widget elementChoiceWidget() {
     return choiceLine(
-      label: Text("$tr_factor.mode.count.label".tr()),
+      label: Text("$tr_factor.mode.element.label".tr()),
       children: [
         choiceChipWidget(
-          label: "$tr_factor.mode.count.star_only.label".tr(),
-          selected: spec.predicate.count == FactorCount.starOnly,
-          onSelected: () => updatePredicate(count: FactorCount.starOnly),
+          label: "$tr_factor.mode.element.star_only.label".tr(),
+          selected: spec.predicate.element.mode == FactorSearchElementMode.starOnly,
+          onSelected: () {
+            updatePredicate(element: spec.predicate.element.copyWith(mode: FactorSearchElementMode.starOnly));
+          },
         ),
         choiceChipWidget(
-          label: "$tr_factor.mode.count.star_and_count.label".tr(),
+          label: "$tr_factor.mode.element.star_and_count.label".tr(),
           disabled: !spec.predicate.isStarAndCountAllowed(),
-          tooltip: "$tr_factor.mode.count.star_and_count.disabled_tooltip".tr(),
-          selected: spec.predicate.count == FactorCount.starAndCount,
-          onSelected: () => updatePredicate(count: FactorCount.starAndCount),
+          tooltip: "$tr_factor.mode.element.star_and_count.disabled_tooltip".tr(),
+          selected: spec.predicate.element.mode == FactorSearchElementMode.starAndCount,
+          onSelected: () {
+            updatePredicate(element: spec.predicate.element.copyWith(mode: FactorSearchElementMode.starAndCount));
+          },
         ),
       ],
     );
   }
 
-  Widget modeSelectionWidget(BuildContext context) {
+  Widget elementFormWidget(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Column(
           children: [
             modeDescriptionWidget(),
-            selectionChoiceWidget(),
+            logicChoiceWidget(),
             subjectChoiceWidget(),
-            countChoiceWidget(),
+            elementChoiceWidget(),
             choiceLine(
-              label: Text("$tr_factor.mode.count.value.star".tr()),
+              label: Text("$tr_factor.mode.element.value.star".tr()),
               children: [
                 SpinBox(
                   width: 100,
                   height: 30,
                   min: 1,
                   max: spec.predicate.query.length * 9,
-                  value: spec.predicate.starMin,
-                  onChanged: (value) => updatePredicate(starMin: value),
+                  value: spec.predicate.element.min,
+                  onChanged: (value) {
+                    updatePredicate(element: spec.predicate.element.copyWith(min: value));
+                  },
                 ),
               ],
             ),
             choiceLine(
-              label: Text("$tr_factor.mode.count.value.count.label".tr()),
+              label: Text("$tr_factor.mode.element.value.count.label".tr()),
               children: [
                 Disabled(
-                  disabled: spec.predicate.count == FactorCount.starOnly,
-                  tooltip: "$tr_factor.mode.count.value.count.disabled_tooltip".tr(),
+                  disabled: spec.predicate.element.mode == FactorSearchElementMode.starOnly,
+                  tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
                   child: SpinBox(
                     width: 100,
                     height: 30,
                     min: 1,
                     max: spec.predicate.query.length * 3,
-                    value: spec.predicate.starCount,
-                    onChanged: (value) => updatePredicate(starCount: value),
+                    value: spec.predicate.element.count,
+                    onChanged: (value) {
+                      updatePredicate(element: spec.predicate.element.copyWith(count: value));
+                    },
                   ),
                 ),
               ],
@@ -699,7 +791,36 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     );
   }
 
-  Widget showWidget(BuildContext context) {
+  Widget notationChoiceWidget() {
+    return choiceLine(
+      label: Text("$tr_factor.notation.mode.label".tr()),
+      children: [
+        choiceChipWidget(
+          label: "$tr_factor.notation.mode.${FactorNotationMode.sumOnly.name.snakeCase}.label".tr(),
+          selected: spec.predicate.notation.mode == FactorNotationMode.sumOnly,
+          onSelected: () {
+            updatePredicate(notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.sumOnly));
+          },
+        ),
+        choiceChipWidget(
+          label: "$tr_factor.notation.mode.${FactorNotationMode.traineeAndParents.name.snakeCase}.label".tr(),
+          selected: spec.predicate.notation.mode == FactorNotationMode.traineeAndParents,
+          onSelected: () {
+            updatePredicate(notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.traineeAndParents));
+          },
+        ),
+        choiceChipWidget(
+          label: "$tr_factor.notation.mode.${FactorNotationMode.each.name.snakeCase}.label".tr(),
+          selected: spec.predicate.notation.mode == FactorNotationMode.each,
+          onSelected: () {
+            updatePredicate(notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.each));
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget notationFormWidget(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -707,9 +828,10 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
           padding: const EdgeInsets.all(8),
           child: Align(
             alignment: Alignment.topLeft,
-            child: Text("$tr_factor.show.description".tr()),
+            child: Text("$tr_factor.notation.description".tr()),
           ),
         ),
+        notationChoiceWidget(),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Column(
@@ -717,15 +839,17 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text("$tr_factor.show.title".tr()),
+                  Text("$tr_factor.notation.max.label".tr()),
                   const SizedBox(width: 8),
                   SpinBox(
                     width: 120,
                     height: 30,
                     min: 0,
                     max: 100,
-                    value: spec.predicate.showMin,
-                    onChanged: (value) => updatePredicate(showMin: value),
+                    value: spec.predicate.notation.max,
+                    onChanged: (value) {
+                      updatePredicate(notation: spec.predicate.notation.copyWith(max: value));
+                    },
                   ),
                 ],
               ),
@@ -770,10 +894,10 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
         ),
         const SizedBox(height: 32),
         headingWidget("$tr_factor.mode.label".tr()),
-        modeSelectionWidget(context),
+        elementFormWidget(context),
         const SizedBox(height: 32),
-        headingWidget("$tr_factor.show.label".tr()),
-        showWidget(context),
+        headingWidget("$tr_factor.notation.label".tr()),
+        notationFormWidget(context),
       ],
     );
   }
