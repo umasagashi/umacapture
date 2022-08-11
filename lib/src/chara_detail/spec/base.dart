@@ -151,8 +151,16 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
   final StorageEntry<String> entry;
 
   ColumnSpecSelection(this.entry) : super([]) {
-    final data = entry.pull();
-    state = data == null ? [] : JsonMapper.deserialize<List<ColumnSpec>>(data) ?? [];
+    final data = JsonMapper.deserialize<List<dynamic>>(entry.pull()) ?? [];
+    for (final d in data) {
+      try {
+        state.addIfNotNull(JsonMapper.deserialize<ColumnSpec>(d));
+      } catch (e) {
+        // If the specification of the column spec is changed, it may not be able to load.
+        logger.w("Failed to deserialize column spec: error=$e, data=$d");
+      }
+    }
+    state = [...state];
   }
 
   void update(ColumnSpec spec) {
