@@ -2,7 +2,7 @@ builders:
   distribution_info:
     import: "package:umacapture/distribution_info.dart"
     builder_factories: [ "distributionInfoBuilder" ]
-    build_extensions: { "pubspec.yaml": [ "assets/version_info.json" ] }
+    build_extensions: { "pubspec.yaml": [ "assets/version_info.json", "assets/license_info.json" ] }
     build_to: source
     auto_apply: root_package
 
