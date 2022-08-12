@@ -287,7 +287,7 @@ class Disabled extends StatelessWidget {
 }
 
 class CardDialog extends ConsumerWidget {
-  static void show(BuildContext context, Widget dialog) {
+  static Future<void> show(BuildContext context, Widget dialog) async {
     showDialog(
       context: context,
       builder: (BuildContext context) {

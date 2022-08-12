@@ -45,6 +45,8 @@ class CurrentPlatform {
 }
 
 final logger = Logger(
+  level: (kDebugMode) ? Level.verbose : Level.info,
+  filter: ProductionFilter(),
   printer: PrettyPrinter(
     printEmojis: false,
     printTime: true,
@@ -63,7 +65,7 @@ class ProviderLogger extends ProviderObserver {
     final String p = previousValue.toString();
     final String n = newValue.toString();
     const limit = 300;
-    logger.d(
+    logger.v(
       "provider: ${provider.name ?? provider.runtimeType}, "
       "value: ${p.length < limit ? p : "${p.substring(0, limit)}..."}"
       " -> ${n.length < limit ? n : "${n.substring(0, limit)}..."}",
@@ -94,6 +96,18 @@ extension SetExtension<T> on Set<T> {
     final previous = length;
     addAll(elements);
     return previous != length;
+  }
+
+  void toggle(T value, {bool? shouldExists}) {
+    final exists = contains(value);
+    if (shouldExists != null && shouldExists != exists) {
+      throw Exception("value=$value, shouldExists=$shouldExists");
+    }
+    if (exists) {
+      remove(value);
+    } else {
+      add(value);
+    }
   }
 }
 
@@ -131,6 +145,18 @@ extension ListExtension<T> on List<T> {
   }
 
   Map<K, T> toMap<K>(K Function(T) key) => Map<K, T>.fromEntries(map((e) => MapEntry(key(e), e)));
+
+  void toggle(T value, {bool? shouldExists}) {
+    final exists = contains(value);
+    if (shouldExists != null && shouldExists != exists) {
+      throw Exception("value=$value, shouldExists=$shouldExists");
+    }
+    if (exists) {
+      remove(value);
+    } else {
+      add(value);
+    }
+  }
 }
 
 extension List2DExtension<T> on List<List<T>> {
@@ -187,4 +213,30 @@ class Math {
   static T min<T extends num>(T a, T b) => math.min(a, b);
 
   static T max<T extends num>(T a, T b) => math.max(a, b);
+}
+
+class ReadOnlyWidgetRef {
+  final WidgetRef _ref;
+
+  ReadOnlyWidgetRef(WidgetRef ref) : _ref = ref;
+
+  T read<T>(ProviderBase<T> provider) => _ref.read(provider);
+}
+
+abstract class StateProviderLike<T> {
+  ProviderListenable<T> get listenable;
+
+  ProviderBase<StateController<T>> get notifier;
+}
+
+class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
+  final AutoDisposeStateProvider<T> provider;
+
+  AutoDisposeStateProviderLike(this.provider);
+
+  @override
+  ProviderListenable<T> get listenable => provider;
+
+  @override
+  ProviderBase<StateController<T>> get notifier => provider.notifier;
 }

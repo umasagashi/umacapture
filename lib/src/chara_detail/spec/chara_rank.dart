@@ -27,17 +27,6 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
         .map(parser.parse)
         .map((evaluation) => resource.charaRankBorder.indexWhere((border) => border >= evaluation)));
   }
-
-  @override
-  CharaRankColumnSpec copyWith({IsInRangeIntegerPredicate? predicate}) {
-    return CharaRankColumnSpec(
-      id: id,
-      title: title,
-      parser: parser,
-      labelKey: labelKey,
-      predicate: predicate ?? this.predicate,
-    );
-  }
 }
 
 class CharaRankColumnBuilder implements ColumnBuilder {

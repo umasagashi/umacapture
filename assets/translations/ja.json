@@ -157,10 +157,15 @@
                             "disabled_tooltip": "【@:pages.chara_detail.column_predicate.skill.mode.sum_of.label】を選択している時だけ変更できます。"
                         }
                     },
-                    "show": {
+                    "notation": {
                         "label": "表示",
-                        "description": "条件に該当するスキルのうち、テーブルのセルに表示するスキルの上限数を指定します。この個数を超えた分は表示が省略されます。",
-                        "title": "表示上限数"
+                        "description": "列の表示方法を指定します。",
+                        "max": {
+                            "label": "表示上限数"
+                        },
+                        "title": {
+                            "label": "表示名"
+                        }
                     },
                     "expand": {
                         "tooltip": "全部を表示"
@@ -235,17 +240,23 @@
                         "mode": {
                             "label": "星数表示",
                             "sum_only": {
-                                "label": "合計のみ"
+                                "label": "合計のみ",
+                                "tooltip": "( 合計 )"
                             },
                             "trainee_and_parents": {
-                                "label": "育成ウマ娘と親合計"
+                                "label": "育成ウマ娘と親合計",
+                                "tooltip": "( 育成ウマ娘 / 親合計 )"
                             },
                             "each": {
-                                "label": "個別"
+                                "label": "個別",
+                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 )"
                             }
                         },
                         "max": {
                             "label": "表示上限数"
+                        },
+                        "title": {
+                            "label": "表示名"
                         }
                     },
                     "expand": {

@@ -13,6 +13,7 @@ import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/column_spec_dialog.dart';
 
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
@@ -31,7 +32,7 @@ class RangedLabelCellData implements Exportable {
 class RangedLabelColumnSpec extends ColumnSpec<int> {
   final Parser parser;
   final String labelKey;
-  final IsInRangeIntegerPredicate predicate;
+  IsInRangeIntegerPredicate predicate;
 
   @override
   ColumnSpecType get type => ColumnSpecType.rangedLabel;
@@ -40,7 +41,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   final String id;
 
   @override
-  final String title;
+  String title;
 
   RangedLabelColumnSpec({
     required this.id,
@@ -49,6 +50,22 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
     required this.labelKey,
     required this.predicate,
   });
+
+  RangedLabelColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    String? labelKey,
+    IsInRangeIntegerPredicate? predicate,
+  }) {
+    return RangedLabelColumnSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      parser: parser ?? this.parser,
+      labelKey: labelKey ?? this.labelKey,
+      predicate: predicate ?? this.predicate,
+    );
+  }
 
   @override
   List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
@@ -101,46 +118,22 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget selector({required BuildResource resource, required OnSpecChanged onChanged}) {
-    return RangedLabelColumnSelector(spec: this, onChanged: onChanged);
-  }
-
-  RangedLabelColumnSpec copyWith({IsInRangeIntegerPredicate? predicate}) {
-    return RangedLabelColumnSpec(
-      id: id,
-      title: title,
-      parser: parser,
-      labelKey: labelKey,
-      predicate: predicate ?? this.predicate,
-    );
-  }
+  Widget selector() => RangedLabelColumnSelector(specId: id);
 }
 
-class RangedLabelColumnSelector extends ConsumerStatefulWidget {
-  final RangedLabelColumnSpec originalSpec;
-  final OnSpecChanged onChanged;
+final _clonedSpecProvider = SpecProviderAccessor<RangedLabelColumnSpec>();
 
-  const RangedLabelColumnSelector({Key? key, required RangedLabelColumnSpec spec, required this.onChanged})
-      : originalSpec = spec,
-        super(key: key);
+class RangedLabelColumnSelector extends ConsumerWidget {
+  final String specId;
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => RangedLabelColumnSelectorState();
-}
-
-class RangedLabelColumnSelectorState extends ConsumerState<RangedLabelColumnSelector> {
-  late RangedLabelColumnSpec spec;
+  const RangedLabelColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
 
   @override
-  void initState() {
-    super.initState();
-    setState(() {
-      spec = widget.originalSpec;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     return Column(
       children: [
@@ -180,14 +173,13 @@ class RangedLabelColumnSelectorState extends ConsumerState<RangedLabelColumnSele
               (spec.predicate.max ?? labels.length - 1).toDouble(),
             ],
             onDragging: (handlerIndex, start, end) {
-              setState(() {
-                spec = spec.copyWith(
+              _clonedSpecProvider.update(ref, specId, (spec) {
+                return spec.copyWith(
                   predicate: IsInRangeIntegerPredicate(
                     min: start == 0 ? null : start.toInt(),
                     max: end == labels.length - 1 ? null : end.toInt(),
                   ),
                 );
-                widget.onChanged(spec);
               });
             },
           ),
