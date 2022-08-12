@@ -10,19 +10,33 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/gui/chara_detail/column_spec_dialog.dart';
 
 // ignore: constant_identifier_names
 const tr_ranged_integer = "pages.chara_detail.column_predicate.ranged_integer";
 
 @jsonSerializable
 class IsInRangeIntegerPredicate {
-  int? min;
-  int? max;
+  final int? min;
+  final int? max;
 
-  IsInRangeIntegerPredicate({this.min, this.max});
+  IsInRangeIntegerPredicate({
+    this.min,
+    this.max,
+  });
 
   bool apply(int value) {
     return (min ?? value) <= value && value <= (max ?? value);
+  }
+
+  IsInRangeIntegerPredicate copyWith({
+    int? min,
+    int? max,
+  }) {
+    return IsInRangeIntegerPredicate(
+      min: min ?? this.min,
+      max: max ?? this.max,
+    );
   }
 }
 
@@ -50,7 +64,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final String id;
 
   @override
-  final String title;
+  String title;
 
   RangedIntegerColumnSpec({
     required this.id,
@@ -60,6 +74,24 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
     required this.valueMax,
     required this.predicate,
   });
+
+  RangedIntegerColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    int? valueMin,
+    int? valueMax,
+    IsInRangeIntegerPredicate? predicate,
+  }) {
+    return RangedIntegerColumnSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      parser: parser ?? this.parser,
+      valueMin: valueMin ?? this.valueMin,
+      valueMax: valueMax ?? this.valueMax,
+      predicate: predicate ?? this.predicate,
+    );
+  }
 
   @override
   List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
@@ -109,48 +141,23 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget selector({required BuildResource resource, required OnSpecChanged onChanged}) {
-    return RangedIntegerColumnSelector(spec: this, onChanged: onChanged);
-  }
-
-  RangedIntegerColumnSpec copyWith({IsInRangeIntegerPredicate? predicate}) {
-    return RangedIntegerColumnSpec(
-      id: id,
-      title: title,
-      parser: parser,
-      valueMin: valueMin,
-      valueMax: valueMax,
-      predicate: predicate ?? this.predicate,
-    );
-  }
+  Widget selector() => RangedIntegerColumnSelector(specId: id);
 }
 
-class RangedIntegerColumnSelector extends ConsumerStatefulWidget {
-  final RangedIntegerColumnSpec originalSpec;
-  final OnSpecChanged onChanged;
+final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
 
-  const RangedIntegerColumnSelector({Key? key, required RangedIntegerColumnSpec spec, required this.onChanged})
-      : originalSpec = spec,
-        super(key: key);
+class RangedIntegerColumnSelector extends ConsumerWidget {
+  final String specId;
+  final numberFormatter = NumberFormat("#,###");
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => RangedIntegerColumnSelectorState();
-}
-
-class RangedIntegerColumnSelectorState extends ConsumerState<RangedIntegerColumnSelector> {
-  late RangedIntegerColumnSpec spec;
+  RangedIntegerColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
 
   @override
-  void initState() {
-    super.initState();
-    setState(() {
-      spec = widget.originalSpec;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final numberFormatter = NumberFormat("#,###");
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
     return Column(
       children: [
         Row(
@@ -189,14 +196,13 @@ class RangedIntegerColumnSelectorState extends ConsumerState<RangedIntegerColumn
               (spec.predicate.max ?? spec.valueMax).toDouble(),
             ],
             onDragging: (handlerIndex, start, end) {
-              setState(() {
-                spec = spec.copyWith(
+              _clonedSpecProvider.update(ref, specId, (spec) {
+                return spec.copyWith(
                   predicate: IsInRangeIntegerPredicate(
                     min: start == spec.valueMin ? null : start.toInt(),
                     max: end == spec.valueMax ? null : end.toInt(),
                   ),
                 );
-                widget.onChanged(spec);
               });
             },
           ),

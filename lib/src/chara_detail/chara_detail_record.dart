@@ -1,29 +1,9 @@
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
-import 'package:equatable/equatable.dart';
 
+import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
-
-@jsonSerializable
-abstract class JsonEquatable extends Equatable {
-  const JsonEquatable();
-
-  @override
-  @JsonProperty(ignore: true)
-  bool get stringify => true;
-
-  @override
-  @JsonProperty(ignore: true)
-  // ignore: hash_and_equals
-  int get hashCode => runtimeType.hashCode ^ identityHashCode(this);
-
-  @override
-  @JsonProperty(ignore: true)
-  List<Object?> get props => properties();
-
-  List<Object?> properties();
-}
 
 @jsonSerializable
 class Character extends JsonEquatable {
@@ -316,7 +296,6 @@ class CharaDetailRecord extends JsonEquatable {
   );
 
   @override
-  @JsonProperty(ignore: true)
   List<Object?> properties() => [
         metadata,
         trainee,

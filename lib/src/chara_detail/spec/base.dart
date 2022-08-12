@@ -1,9 +1,11 @@
+import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
@@ -32,11 +34,14 @@ abstract class ColumnBuilder {
 }
 
 @jsonSerializable
-class Tag {
+class Tag extends JsonEquatable {
   final String id;
   final String name;
 
-  Tag(this.id, this.name);
+  const Tag(this.id, this.name);
+
+  @override
+  List<Object?> properties() => [id, name];
 }
 
 @jsonSerializable
@@ -120,6 +125,12 @@ enum ColumnSpecType {
   factor,
 }
 
+abstract class ColumnSelectorController {
+  ColumnSpec get spec;
+
+  Widget widget({required BuildResource resource});
+}
+
 @jsonSerializable
 @Json(discriminatorProperty: 'type')
 abstract class ColumnSpec<T> {
@@ -144,7 +155,7 @@ abstract class ColumnSpec<T> {
 
   Widget tag(BuildResource resource);
 
-  Widget selector({required BuildResource resource, required OnSpecChanged onChanged});
+  Widget selector();
 }
 
 class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
@@ -163,33 +174,41 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
     state = [...state];
   }
 
+  ColumnSpec? getById(String id) {
+    return state.firstWhereOrNull((e) => e.id == id);
+  }
+
+  bool contains(String id) {
+    return state.firstWhereOrNull((e) => e.id == id) != null;
+  }
+
   void update(ColumnSpec spec) {
-    assert(state.contains(spec));
+    assert(contains(spec.id));
     rebuild();
   }
 
   void add(ColumnSpec spec) {
-    assert(!state.contains(spec));
+    assert(!contains(spec.id));
     state.add(spec);
     rebuild();
   }
 
   void addOrUpdate(ColumnSpec spec) {
-    if (!state.contains(spec)) {
+    if (!contains(spec.id)) {
       state.add(spec);
     }
     rebuild();
   }
 
-  void remove(ColumnSpec spec) {
-    assert(state.contains(spec));
-    state.remove(spec);
+  void remove(String id) {
+    assert(contains(id));
+    state.removeWhere((e) => e.id == id);
     rebuild();
   }
 
-  void removeIfExists(ColumnSpec spec) {
-    if (state.contains(spec)) {
-      state.remove(spec);
+  void removeIfExists(String id) {
+    if (contains(id)) {
+      state.removeWhere((e) => e.id == id);
       rebuild();
     }
   }

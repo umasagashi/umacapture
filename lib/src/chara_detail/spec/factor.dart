@@ -13,8 +13,9 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
-import '/src/chara_detail/spec/skill.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/column_spec_dialog.dart';
+import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -101,7 +102,11 @@ class QueriedFactor {
   bool get isEmpty => self == 0 && parent1 == 0 && parent2 == 0;
 
   int count({int min = 0}) {
-    return (self >= min ? self : 0) + (parent1 >= min ? parent1 : 0) + (parent2 >= min ? parent2 : 0);
+    return (self >= min ? 1 : 0) + (parent1 >= min ? 1 : 0) + (parent2 >= min ? 1 : 0);
+  }
+
+  int sum() {
+    return self + parent1 + parent2;
   }
 
   QueriedFactor({
@@ -139,27 +144,36 @@ class QueriedFactor {
 
 @jsonSerializable
 class AggregateFactorSetPredicate {
-  List<int> query;
-  FactorSetLogicMode logic;
-  FactorSearchSubjectMode subject;
-  FactorSearchElement element;
-  FactorNotation notation;
+  final List<int> query;
+  final FactorSetLogicMode logic;
+  final FactorSearchSubjectMode subject;
+  final FactorSearchElement element;
+  final FactorNotation notation;
+  final Set<String> factorTags;
+  final Set<String> skillTags;
+
+  bool isLogicAllowed() => query.length >= 2 || logic != FactorSetLogicMode.sumOf;
 
   bool isStarAndCountAllowed() => logic == FactorSetLogicMode.sumOf || subject == FactorSearchSubjectMode.family;
 
   AggregateFactorSetPredicate({
     required this.query,
-    required this.logic,
+    required FactorSetLogicMode logic,
     required this.subject,
-    required this.element,
+    required FactorSearchElement element,
     required this.notation,
-  }) {
-    if (!isStarAndCountAllowed()) {
-      element = element.copyWith(mode: FactorSearchElementMode.starOnly);
-    }
-    if (query.length <= 1 && logic == FactorSetLogicMode.sumOf) {
-      logic = FactorSetLogicMode.anyOf;
-    }
+    required this.factorTags,
+    required this.skillTags,
+  })  : logic = (query.length <= 1 && logic == FactorSetLogicMode.sumOf) ? FactorSetLogicMode.anyOf : logic,
+        element = (logic != FactorSetLogicMode.sumOf && subject != FactorSearchSubjectMode.family)
+            ? element.copyWith(mode: FactorSearchElementMode.starOnly)
+            : element;
+
+  AggregateFactorSetPredicate checked() {
+    return copyWith(
+      logic: isLogicAllowed() ? FactorSetLogicMode.anyOf : logic,
+      element: isStarAndCountAllowed() ? element : element.copyWith(mode: FactorSearchElementMode.starOnly),
+    );
   }
 
   AggregateFactorSetPredicate.any()
@@ -174,7 +188,29 @@ class AggregateFactorSetPredicate {
         notation = FactorNotation(
           mode: FactorNotationMode.sumOnly,
           max: 3,
-        );
+        ),
+        factorTags = {},
+        skillTags = {};
+
+  AggregateFactorSetPredicate copyWith({
+    List<int>? query,
+    FactorSetLogicMode? logic,
+    FactorSearchSubjectMode? subject,
+    FactorSearchElement? element,
+    FactorNotation? notation,
+    Set<String>? factorTags,
+    Set<String>? skillTags,
+  }) {
+    return AggregateFactorSetPredicate(
+      query: query ?? this.query,
+      logic: logic ?? this.logic,
+      subject: subject ?? this.subject,
+      element: element ?? this.element,
+      notation: notation ?? this.notation,
+      factorTags: factorTags ?? this.factorTags,
+      skillTags: skillTags ?? this.skillTags,
+    );
+  }
 
   List<QueriedFactor> extract(FactorSet factorSet) {
     final targetIds = query.isNotEmpty ? query : factorSet.uniqueIds;
@@ -186,15 +222,15 @@ class AggregateFactorSetPredicate {
     if (element.mode == FactorSearchElementMode.starAndCount) {
       return factor.count(min: element.min) >= element.count;
     } else {
-      return factor.count() >= element.min;
+      return factor.sum() >= element.min;
     }
   }
 
   bool _isSumAcceptable(List<QueriedFactor> stars) {
     if (element.mode == FactorSearchElementMode.starAndCount) {
-      return stars.map((e) => e.count() >= element.min).countTrue() >= element.count;
+      return stars.map((e) => e.sum() >= element.min).countTrue() >= element.count;
     } else {
-      return stars.map((e) => e.count()).sum >= element.min;
+      return stars.map((e) => e.sum()).sum >= element.min;
     }
   }
 
@@ -211,22 +247,6 @@ class AggregateFactorSetPredicate {
       case FactorSetLogicMode.sumOf:
         return _isSumAcceptable(foundFactors);
     }
-  }
-
-  AggregateFactorSetPredicate copyWith({
-    List<int>? query,
-    FactorSetLogicMode? logic,
-    FactorSearchSubjectMode? subject,
-    FactorSearchElement? element,
-    FactorNotation? notation,
-  }) {
-    return AggregateFactorSetPredicate(
-      query: List.from(query ?? this.query),
-      logic: logic ?? this.logic,
-      subject: subject ?? this.subject,
-      element: (element ?? this.element).copyWith(),
-      notation: (notation ?? this.notation).copyWith(),
-    );
   }
 }
 
@@ -253,7 +273,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final String id;
 
   @override
-  final String title;
+  String title;
 
   @override
   @JsonProperty(ignore: true)
@@ -265,6 +285,20 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     required this.parser,
     required this.predicate,
   });
+
+  FactorColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    AggregateFactorSetPredicate? predicate,
+  }) {
+    return FactorColumnSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      parser: parser ?? this.parser,
+      predicate: predicate ?? this.predicate,
+    );
+  }
 
   @override
   List<FactorSet> parse(BuildResource resource, List<CharaDetailRecord> records) {
@@ -355,77 +389,28 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  Widget selector({required BuildResource resource, required OnSpecChanged onChanged}) {
-    return FactorColumnSelector(spec: this, onChanged: onChanged);
-  }
-
-  FactorColumnSpec copyWith({AggregateFactorSetPredicate? predicate}) {
-    return FactorColumnSpec(
-      id: id,
-      title: title,
-      parser: parser,
-      predicate: (predicate ?? this.predicate).copyWith(),
-    );
+  Widget selector() {
+    return FactorColumnSelector(specId: id);
   }
 }
 
-class _FactorTagSelector extends ConsumerStatefulWidget {
-  final ValueChanged<Set<String>> onChanged;
+final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
 
-  const _FactorTagSelector({required this.onChanged});
+final _selectedSkillTagsProvider = StateProvider.autoDispose.family<Set<Tag>, String>((ref, specId) {
+  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+  return Set.from(spec.predicate.skillTags);
+});
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _FactorTagSelectorState();
-}
-
-class _FactorTagSelectorState extends ConsumerState<_FactorTagSelector> {
-  final Set<String> selectedTags = {};
-
-  @override
-  Widget build(BuildContext context) {
-    final tags = ref.watch(factorTagProvider);
-    final theme = Theme.of(context);
-
-    return Align(
-      alignment: Alignment.topLeft,
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final tag in tags)
-            FilterChip(
-              label: Text(tag.name),
-              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceVariant,
-              showCheckmark: false,
-              selected: selectedTags.contains(tag.id),
-              onSelected: (selected) {
-                setState(() {
-                  if (selected) {
-                    selectedTags.add(tag.id);
-                  } else {
-                    selectedTags.remove(tag.id);
-                  }
-                  widget.onChanged(selectedTags);
-                });
-              },
-            ),
-        ],
-      ),
-    );
-  }
-}
+final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<Tag>, String>((ref, specId) {
+  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+  return Set.from(spec.predicate.factorTags);
+});
 
 class _FactorSelector extends ConsumerStatefulWidget {
-  final Set<String> selectedFactorTags;
-  final Set<String> selectedSkillTags;
-  final List<int> query;
-  final ValueChanged<List<int>> onChanged;
+  final String specId;
 
   const _FactorSelector({
-    required this.selectedFactorTags,
-    required this.selectedSkillTags,
-    required this.query,
-    required this.onChanged,
+    required this.specId,
   });
 
   @override
@@ -433,27 +418,24 @@ class _FactorSelector extends ConsumerStatefulWidget {
 }
 
 class _FactorSelectorState extends ConsumerState<_FactorSelector> {
-  late List<int> query = [];
   late bool collapsed;
 
   @override
   void initState() {
     super.initState();
-    setState(() {
-      query = List.from(widget.query);
-      collapsed = true;
-    });
+    collapsed = true;
   }
 
   List<FactorInfo> getInfo(WidgetRef ref) {
     final factorInfoList = ref.watch(availableFactorInfoProvider);
-    if (widget.selectedFactorTags.isEmpty && widget.selectedSkillTags.isEmpty) {
+    final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(widget.specId)).map((e) => e.id).toSet();
+    final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(widget.specId)).map((e) => e.id).toSet();
+    if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty) {
       return factorInfoList;
     } else {
       return factorInfoList.where((factor) {
-        final factorContains = factor.tags.containsAll(widget.selectedFactorTags);
-        final skillContains =
-            factor.skillInfo?.tags.containsAll(widget.selectedSkillTags) ?? widget.selectedSkillTags.isEmpty;
+        final factorContains = factor.tags.containsAll(selectedFactorTags);
+        final skillContains = factor.skillInfo?.tags.containsAll(selectedSkillTags) ?? selectedSkillTags.isEmpty;
         return factorContains && skillContains;
       }).toList();
     }
@@ -471,13 +453,12 @@ class _FactorSelectorState extends ConsumerState<_FactorSelector> {
       tooltip: description,
       selected: selected,
       onSelected: (selected) {
-        setState(() {
-          if (selected) {
-            query.add(label.sid);
-          } else {
-            query.remove(label.sid);
-          }
-          widget.onChanged(query);
+        _clonedSpecProvider.update(ref, widget.specId, (spec) {
+          return spec.copyWith(
+            predicate: spec.predicate.copyWith(
+              query: List<int>.from(spec.predicate.query)..toggle(label.sid, shouldExists: !selected),
+            ),
+          );
         });
       },
     );
@@ -508,7 +489,7 @@ class _FactorSelectorState extends ConsumerState<_FactorSelector> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final selected = query.toSet();
+    final selected = _clonedSpecProvider.watch(ref, widget.specId).predicate.query.toSet();
     final labels = getInfo(ref);
     final needCollapse = collapsed && labels.length > 30;
     final collapsedLabels = needCollapse ? labels.partial(0, 30) : labels;
@@ -541,55 +522,13 @@ class _FactorSelectorState extends ConsumerState<_FactorSelector> {
   }
 }
 
-class FactorColumnSelector extends ConsumerStatefulWidget {
-  final FactorColumnSpec originalSpec;
-  final OnSpecChanged onChanged;
+class FactorColumnSelector extends ConsumerWidget {
+  final String specId;
 
   const FactorColumnSelector({
     Key? key,
-    required FactorColumnSpec spec,
-    required this.onChanged,
-  })  : originalSpec = spec,
-        super(key: key);
-
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => FactorColumnSelectorState();
-}
-
-class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
-  late FactorColumnSpec spec;
-  late Set<String> selectedFactorTags = {};
-  late Set<String> selectedSkillTags = {};
-
-  @override
-  void initState() {
-    super.initState();
-    setState(() {
-      spec = widget.originalSpec.copyWith();
-    });
-  }
-
-  void updatePredicate({
-    List<int>? query,
-    FactorSetLogicMode? logic,
-    FactorSearchSubjectMode? subject,
-    FactorSearchElement? element,
-    FactorNotation? notation,
-  }) {
-    setState(() {
-      spec = spec.copyWith(
-        predicate: spec.predicate.copyWith(
-          query: query,
-          logic: logic,
-          subject: subject,
-          element: element,
-          notation: notation,
-        ),
-      );
-      logger.d(spec.predicate.notation.max);
-      widget.onChanged(spec);
-    });
-  }
+    required this.specId,
+  }) : super(key: key);
 
   Widget headingWidget(String title) {
     return Row(
@@ -600,13 +539,14 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     );
   }
 
-  Widget modeDescriptionWidget() {
+  Widget modeDescriptionWidget(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final selection = "$tr_factor.mode.logic.${spec.predicate.logic.name.snakeCase}.description".tr();
-    final subject = "$tr_factor.mode.subject.${spec.predicate.subject.name.snakeCase}.description".tr();
-    final count = "$tr_factor.mode.element.${spec.predicate.element.mode.name.snakeCase}.description".tr(namedArgs: {
-      "star": spec.predicate.element.min.toString(),
-      "count": spec.predicate.element.count.toString(),
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    final selection = "$tr_factor.mode.logic.${predicate.logic.name.snakeCase}.description".tr();
+    final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.description".tr();
+    final count = "$tr_factor.mode.element.${predicate.element.mode.name.snakeCase}.description".tr(namedArgs: {
+      "star": predicate.element.min.toString(),
+      "count": predicate.element.count.toString(),
     });
     return Padding(
       padding: const EdgeInsets.all(8),
@@ -629,9 +569,11 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     );
   }
 
-  Widget choiceChipWidget({
+  Widget choiceChipWidget(
+    BuildContext context, {
     required String label,
     bool disabled = false,
+    String disabledTooltip = "",
     String tooltip = "",
     required bool selected,
     required VoidCallback onSelected,
@@ -639,9 +581,10 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     final theme = Theme.of(context);
     return Disabled(
       disabled: disabled,
-      tooltip: tooltip,
+      tooltip: disabledTooltip,
       child: ChoiceChip(
         label: Text(label),
+        tooltip: tooltip,
         backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
         selected: selected,
         onSelected: (_) => onSelected(),
@@ -670,87 +613,140 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     );
   }
 
-  Widget logicChoiceWidget() {
+  Widget logicChoiceWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return choiceLine(
       label: Text("$tr_factor.mode.logic.label".tr()),
       children: [
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.logic.all_of.label".tr(),
-          disabled: spec.predicate.query.length <= 1,
-          tooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
-          selected: spec.predicate.logic == FactorSetLogicMode.allOf,
-          onSelected: () => updatePredicate(logic: FactorSetLogicMode.allOf),
+          disabled: predicate.query.length <= 1,
+          disabledTooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
+          selected: predicate.logic == FactorSetLogicMode.allOf,
+          onSelected: () {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(logic: FactorSetLogicMode.allOf),
+              );
+            });
+          },
         ),
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.logic.any_of.label".tr(),
-          disabled: spec.predicate.query.length <= 1,
-          tooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
-          selected: spec.predicate.logic == FactorSetLogicMode.anyOf,
-          onSelected: () => updatePredicate(logic: FactorSetLogicMode.anyOf),
+          disabled: predicate.query.length <= 1,
+          disabledTooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
+          selected: predicate.logic == FactorSetLogicMode.anyOf,
+          onSelected: () {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(logic: FactorSetLogicMode.anyOf),
+              );
+            });
+          },
         ),
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.logic.sum_of.label".tr(),
-          disabled: spec.predicate.query.length <= 1,
-          tooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
-          selected: spec.predicate.logic == FactorSetLogicMode.sumOf,
-          onSelected: () => updatePredicate(logic: FactorSetLogicMode.sumOf),
+          disabled: predicate.query.length <= 1,
+          disabledTooltip: "$tr_factor.mode.logic.disabled_tooltip".tr(),
+          selected: predicate.logic == FactorSetLogicMode.sumOf,
+          onSelected: () {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(logic: FactorSetLogicMode.sumOf),
+              );
+            });
+          },
         ),
       ],
     );
   }
 
-  Widget subjectChoiceWidget() {
+  Widget subjectChoiceWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return choiceLine(
       label: Text("$tr_factor.mode.subject.label".tr()),
       children: [
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.subject.trainee.label".tr(),
-          selected: spec.predicate.subject == FactorSearchSubjectMode.trainee,
-          onSelected: () => updatePredicate(subject: FactorSearchSubjectMode.trainee),
+          selected: predicate.subject == FactorSearchSubjectMode.trainee,
+          onSelected: () {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(subject: FactorSearchSubjectMode.trainee),
+              );
+            });
+          },
         ),
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.subject.family.label".tr(),
-          selected: spec.predicate.subject == FactorSearchSubjectMode.family,
-          onSelected: () => updatePredicate(subject: FactorSearchSubjectMode.family),
+          selected: predicate.subject == FactorSearchSubjectMode.family,
+          onSelected: () {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(subject: FactorSearchSubjectMode.family),
+              );
+            });
+          },
         ),
       ],
     );
   }
 
-  Widget elementChoiceWidget() {
+  Widget elementChoiceWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return choiceLine(
       label: Text("$tr_factor.mode.element.label".tr()),
       children: [
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.element.star_only.label".tr(),
-          selected: spec.predicate.element.mode == FactorSearchElementMode.starOnly,
+          selected: predicate.element.mode == FactorSearchElementMode.starOnly,
           onSelected: () {
-            updatePredicate(element: spec.predicate.element.copyWith(mode: FactorSearchElementMode.starOnly));
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(
+                  element: spec.predicate.element.copyWith(mode: FactorSearchElementMode.starOnly),
+                ),
+              );
+            });
           },
         ),
         choiceChipWidget(
+          context,
           label: "$tr_factor.mode.element.star_and_count.label".tr(),
-          disabled: !spec.predicate.isStarAndCountAllowed(),
-          tooltip: "$tr_factor.mode.element.star_and_count.disabled_tooltip".tr(),
-          selected: spec.predicate.element.mode == FactorSearchElementMode.starAndCount,
+          disabled: !predicate.isStarAndCountAllowed(),
+          disabledTooltip: "$tr_factor.mode.element.star_and_count.disabled_tooltip".tr(),
+          selected: predicate.element.mode == FactorSearchElementMode.starAndCount,
           onSelected: () {
-            updatePredicate(element: spec.predicate.element.copyWith(mode: FactorSearchElementMode.starAndCount));
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(
+                  element: spec.predicate.element.copyWith(mode: FactorSearchElementMode.starAndCount),
+                ),
+              );
+            });
           },
         ),
       ],
     );
   }
 
-  Widget elementFormWidget(BuildContext context) {
+  Widget elementFormWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Column(
           children: [
-            modeDescriptionWidget(),
-            logicChoiceWidget(),
-            subjectChoiceWidget(),
-            elementChoiceWidget(),
+            modeDescriptionWidget(context, ref),
+            logicChoiceWidget(context, ref),
+            subjectChoiceWidget(context, ref),
+            elementChoiceWidget(context, ref),
             choiceLine(
               label: Text("$tr_factor.mode.element.value.star".tr()),
               children: [
@@ -758,10 +754,16 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
                   width: 100,
                   height: 30,
                   min: 1,
-                  max: spec.predicate.query.length * 9,
-                  value: spec.predicate.element.min,
+                  max: predicate.query.length * 9,
+                  value: predicate.element.min,
                   onChanged: (value) {
-                    updatePredicate(element: spec.predicate.element.copyWith(min: value));
+                    _clonedSpecProvider.update(ref, specId, (spec) {
+                      return spec.copyWith(
+                        predicate: spec.predicate.copyWith(
+                          element: spec.predicate.element.copyWith(min: value),
+                        ),
+                      );
+                    });
                   },
                 ),
               ],
@@ -770,16 +772,22 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
               label: Text("$tr_factor.mode.element.value.count.label".tr()),
               children: [
                 Disabled(
-                  disabled: spec.predicate.element.mode == FactorSearchElementMode.starOnly,
+                  disabled: predicate.element.mode == FactorSearchElementMode.starOnly,
                   tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
                   child: SpinBox(
                     width: 100,
                     height: 30,
                     min: 1,
-                    max: spec.predicate.query.length * 3,
-                    value: spec.predicate.element.count,
+                    max: predicate.query.length * 3,
+                    value: predicate.element.count,
                     onChanged: (value) {
-                      updatePredicate(element: spec.predicate.element.copyWith(count: value));
+                      _clonedSpecProvider.update(ref, specId, (spec) {
+                        return spec.copyWith(
+                          predicate: spec.predicate.copyWith(
+                            element: spec.predicate.element.copyWith(count: value),
+                          ),
+                        );
+                      });
                     },
                   ),
                 ),
@@ -791,36 +799,89 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
     );
   }
 
-  Widget notationChoiceWidget() {
+  Widget notationChoiceWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return choiceLine(
       label: Text("$tr_factor.notation.mode.label".tr()),
       children: [
         choiceChipWidget(
+          context,
           label: "$tr_factor.notation.mode.${FactorNotationMode.sumOnly.name.snakeCase}.label".tr(),
-          selected: spec.predicate.notation.mode == FactorNotationMode.sumOnly,
+          tooltip: "$tr_factor.notation.mode.${FactorNotationMode.sumOnly.name.snakeCase}.tooltip".tr(),
+          selected: predicate.notation.mode == FactorNotationMode.sumOnly,
           onSelected: () {
-            updatePredicate(notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.sumOnly));
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(
+                  notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.sumOnly),
+                ),
+              );
+            });
           },
         ),
         choiceChipWidget(
+          context,
           label: "$tr_factor.notation.mode.${FactorNotationMode.traineeAndParents.name.snakeCase}.label".tr(),
-          selected: spec.predicate.notation.mode == FactorNotationMode.traineeAndParents,
+          tooltip: "$tr_factor.notation.mode.${FactorNotationMode.traineeAndParents.name.snakeCase}.tooltip".tr(),
+          selected: predicate.notation.mode == FactorNotationMode.traineeAndParents,
           onSelected: () {
-            updatePredicate(notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.traineeAndParents));
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(
+                  notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.traineeAndParents),
+                ),
+              );
+            });
           },
         ),
         choiceChipWidget(
+          context,
           label: "$tr_factor.notation.mode.${FactorNotationMode.each.name.snakeCase}.label".tr(),
-          selected: spec.predicate.notation.mode == FactorNotationMode.each,
+          tooltip: "$tr_factor.notation.mode.${FactorNotationMode.each.name.snakeCase}.tooltip".tr(),
+          selected: predicate.notation.mode == FactorNotationMode.each,
           onSelected: () {
-            updatePredicate(notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.each));
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(
+                  notation: spec.predicate.notation.copyWith(mode: FactorNotationMode.each),
+                ),
+              );
+            });
           },
         ),
       ],
     );
   }
 
-  Widget notationFormWidget(BuildContext context) {
+  Widget notationTitleWidget(WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    final controller = TextEditingController(text: spec.title);
+    return choiceLine(
+      label: Text("$tr_factor.notation.title.label".tr()),
+      children: [
+        IntrinsicWidth(
+          child: TextField(
+            controller: controller,
+            decoration: InputDecoration(
+              isDense: true,
+              isCollapsed: true,
+              contentPadding: const EdgeInsets.all(8).copyWith(right: 16),
+              border: const UnderlineInputBorder(),
+            ),
+            expands: false,
+            onChanged: (value) {
+              _clonedSpecProvider.update(ref, specId, (spec) {
+                return spec.copyWith(title: value);
+              });
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget notationFormWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -831,7 +892,7 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
             child: Text("$tr_factor.notation.description".tr()),
           ),
         ),
-        notationChoiceWidget(),
+        notationChoiceWidget(context, ref),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Column(
@@ -846,9 +907,15 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
                     height: 30,
                     min: 0,
                     max: 100,
-                    value: spec.predicate.notation.max,
+                    value: predicate.notation.max,
                     onChanged: (value) {
-                      updatePredicate(notation: spec.predicate.notation.copyWith(max: value));
+                      _clonedSpecProvider.update(ref, specId, (spec) {
+                        return spec.copyWith(
+                          predicate: spec.predicate.copyWith(
+                            notation: spec.predicate.notation.copyWith(max: value),
+                          ),
+                        );
+                      });
                     },
                   ),
                 ],
@@ -856,20 +923,29 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
             ],
           ),
         ),
+        notationTitleWidget(ref),
       ],
     );
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
         headingWidget("$tr_factor.selection.label".tr()),
         NoteCard(
           description: Text("$tr_factor.selection.tags.description".tr()),
           children: [
-            _FactorTagSelector(
-              onChanged: (tags) => setState(() => selectedFactorTags = tags),
+            TagSelector(
+              candidateTagsProvider: factorTagProvider,
+              selectedTagsProvider: AutoDisposeStateProviderLike(_selectedFactorTagsProvider(specId)),
+              // tags: ref.watch(factorTagProvider),
+              // initialTags: selectedFactorTags,
+              // onChanged: (tags) {
+              //   setState(() {
+              //     selectedFactorTags = Set.from(tags);
+              //   });
+              // },
             ),
             Row(
               children: [
@@ -881,23 +957,26 @@ class FactorColumnSelectorState extends ConsumerState<FactorColumnSelector> {
                 const Expanded(child: Divider()),
               ],
             ),
-            SkillTagSelector(
-              onChanged: (tags) => setState(() => selectedSkillTags = tags),
+            TagSelector(
+              candidateTagsProvider: skillTagProvider,
+              selectedTagsProvider: AutoDisposeStateProviderLike(_selectedSkillTagsProvider(specId)),
+              // tags: ref.watch(skillTagProvider),
+              // initialTags: selectedSkillTags,
+              // onChanged: (tags) {
+              //   setState(() {
+              //     selectedSkillTags = Set.from(tags);
+              //   });
+              // },
             ),
           ],
         ),
-        _FactorSelector(
-          selectedFactorTags: selectedFactorTags,
-          selectedSkillTags: selectedSkillTags,
-          query: spec.predicate.query,
-          onChanged: (query) => updatePredicate(query: query),
-        ),
+        _FactorSelector(specId: specId),
         const SizedBox(height: 32),
         headingWidget("$tr_factor.mode.label".tr()),
-        elementFormWidget(context),
+        elementFormWidget(context, ref),
         const SizedBox(height: 32),
         headingWidget("$tr_factor.notation.label".tr()),
-        notationFormWidget(context),
+        notationFormWidget(context, ref),
       ],
     );
   }

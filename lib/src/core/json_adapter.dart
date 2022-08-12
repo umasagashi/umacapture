@@ -1,4 +1,5 @@
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 
 import '/main.mapper.g.dart';
@@ -27,6 +28,26 @@ extension on String {
   ThemeMode toThemeMode() {
     return ThemeMode.values.firstWhere((e) => e.name == this);
   }
+}
+
+@jsonSerializable
+abstract class JsonEquatable extends Equatable {
+  const JsonEquatable();
+
+  @override
+  @JsonProperty(ignore: true)
+  bool get stringify => true;
+
+  @override
+  @JsonProperty(ignore: true)
+  // ignore: hash_and_equals
+  int get hashCode => runtimeType.hashCode ^ identityHashCode(this);
+
+  @override
+  @JsonProperty(ignore: true)
+  List<Object?> get props => properties();
+
+  List<Object?> properties();
 }
 
 final flutterTypesAdapter = JsonMapperAdapter(

@@ -59,7 +59,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               textAlign: TextAlign.center,
             ),
             child: GestureDetector(
-              onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec),
+              onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
                 label: spec.tag(resource),
                 tooltip: spec.tooltip(resource),

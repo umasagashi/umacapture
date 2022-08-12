@@ -11,19 +11,21 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/core/utils.dart';
+import '/src/gui/chara_detail/column_spec_dialog.dart';
 
 // ignore: constant_identifier_names
 const tr_character = "pages.chara_detail.column_predicate.character";
 
 @jsonSerializable
 class CharacterCardPredicate {
-  List<int> rejects;
+  final Set<int> rejects;
 
   CharacterCardPredicate({
     required this.rejects,
   });
 
-  CharacterCardPredicate.any() : rejects = [];
+  CharacterCardPredicate.any() : rejects = {};
 
   bool apply(int value) {
     return !rejects.contains(value);
@@ -61,6 +63,20 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
     required this.predicate,
   });
 
+  CharacterCardColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    CharacterCardPredicate? predicate,
+  }) {
+    return CharacterCardColumnSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      parser: parser ?? this.parser,
+      predicate: predicate ?? this.predicate,
+    );
+  }
+
   @override
   List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
@@ -96,16 +112,15 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
 
   @override
   String tooltip(BuildResource resource) {
-    final rejects = predicate.rejects.toSet();
     final cards = resource.charaCardInfo.sortedBy<num>((e) => e.sortKey);
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";
     } else if (predicate.rejects.length > cards.length / 2) {
-      final accepted = cards.where((e) => !rejects.contains(e.sid));
+      final accepted = cards.where((e) => !predicate.rejects.contains(e.sid));
       return "${"$tr_character.tooltip.accept".tr()}:$sep${accepted.map((e) => e.names.first).join(sep)}";
     } else {
-      final rejected = cards.where((e) => rejects.contains(e.sid));
+      final rejected = cards.where((e) => predicate.rejects.contains(e.sid));
       return "${"$tr_character.tooltip.reject".tr()}:$sep${rejected.map((e) => e.names.first).join(sep)}";
     }
   }
@@ -116,45 +131,23 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget selector({required BuildResource resource, required OnSpecChanged onChanged}) {
-    return CharacterCardColumnSelector(spec: this, onChanged: onChanged);
-  }
-
-  CharacterCardColumnSpec copyWith({CharacterCardPredicate? predicate}) {
-    return CharacterCardColumnSpec(
-      id: id,
-      title: title,
-      parser: parser,
-      predicate: predicate ?? this.predicate,
-    );
-  }
+  Widget selector() => CharacterCardColumnSelector(specId: id);
 }
 
-class CharacterCardColumnSelector extends ConsumerStatefulWidget {
-  final CharacterCardColumnSpec originalSpec;
-  final OnSpecChanged onChanged;
+final _clonedSpecProvider = SpecProviderAccessor<CharacterCardColumnSpec>();
 
-  const CharacterCardColumnSelector({Key? key, required CharacterCardColumnSpec spec, required this.onChanged})
-      : originalSpec = spec,
-        super(key: key);
+class CharacterCardColumnSelector extends ConsumerWidget {
+  final String specId;
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => CharacterCardColumnSelectorState();
-}
+  const CharacterCardColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
 
-class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumnSelector> {
-  late CharacterCardColumnSpec spec;
-
-  @override
-  void initState() {
-    super.initState();
-    setState(() {
-      spec = widget.originalSpec;
-    });
-  }
-
-  Widget charaChipWidget(ThemeData theme, Set<int> rejected, AvailableCharaCardInfo card) {
+  Widget charaChipWidget(BuildContext context, WidgetRef ref, AvailableCharaCardInfo card) {
+    final theme = Theme.of(context);
     final chipFrameColor = theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer;
+    final rejected = _clonedSpecProvider.watch(ref, specId).predicate.rejects;
     return Stack(
       alignment: Alignment.centerLeft,
       children: [
@@ -169,14 +162,12 @@ class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumn
             showCheckmark: false,
             selected: !rejected.contains(card.cardInfo.sid),
             onSelected: (selected) {
-              setState(() {
-                if (selected) {
-                  spec.predicate.rejects.remove(card.cardInfo.sid);
-                } else {
-                  spec.predicate.rejects.add(card.cardInfo.sid);
-                }
-                spec = spec.copyWith(predicate: spec.predicate);
-                widget.onChanged(spec);
+              _clonedSpecProvider.update(ref, specId, (spec) {
+                return spec.copyWith(
+                  predicate: CharacterCardPredicate(
+                    rejects: Set.from(spec.predicate.rejects)..toggle(card.cardInfo.sid, shouldExists: !selected),
+                  ),
+                );
               });
             },
           ),
@@ -199,10 +190,8 @@ class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumn
     );
   }
 
-  Widget selectionWidget(BuildContext context) {
-    final theme = Theme.of(context);
+  Widget selectionWidget(BuildContext context, WidgetRef ref) {
     final charaCards = ref.watch(availableCharaCardsProvider);
-    final rejected = spec.predicate.rejects.toSet();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -218,7 +207,7 @@ class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumn
               spacing: 8,
               runSpacing: 2,
               children: [
-                for (final card in charaCards) charaChipWidget(theme, rejected, card),
+                for (final card in charaCards) charaChipWidget(context, ref, card),
               ],
             ),
           ),
@@ -237,11 +226,11 @@ class CharacterCardColumnSelectorState extends ConsumerState<CharacterCardColumn
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
         headingWidget("$tr_character.selection.label".tr()),
-        selectionWidget(context),
+        selectionWidget(context, ref),
       ],
     );
   }
