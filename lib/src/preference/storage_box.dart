@@ -32,6 +32,10 @@ class StorageBox {
     _box.put(key, value);
   }
 
+  void delete(String key) {
+    _box.delete(key);
+  }
+
   StorageEntry<T> entry<T>(String key) {
     return StorageEntry<T>(box: this, key: key);
   }
@@ -69,5 +73,9 @@ class StorageEntry<T> {
 
   void push(T value) {
     _box.push<T>(_key, value);
+  }
+
+  void delete() {
+    _box.delete(_key);
   }
 }

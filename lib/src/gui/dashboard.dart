@@ -38,7 +38,7 @@ class AppUpdaterGroup extends ConsumerWidget {
       final downloadUrl =
           isInstallerMode ? Const.appExeUrl(version: version.toString()) : Const.appZipUrl(version: version.toString());
       final FilePath downloadPath = DirectoryPath(downloadDir).filePath(Uri.parse(downloadUrl).pathSegments.last);
-      logger.d("$downloadUrl, $downloadPath");
+      logger.d("$downloadUrl, ${downloadPath.path}");
       Dio().download(
         downloadUrl,
         downloadPath.path,

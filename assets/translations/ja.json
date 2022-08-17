@@ -416,6 +416,10 @@
             "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",
             "no_update_required": "認識モジュールは最新版です。",
             "updated": "認識モジュールを最新版に更新しました。"
+        },
+        "app_version_check": {
+            "new_version_available": "umacapture の更新が利用可能です。",
+            "latest_version_not_available": "アプリバージョンの取得に失敗しました。"
         }
     }
 }

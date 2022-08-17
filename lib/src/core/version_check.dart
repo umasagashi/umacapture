@@ -23,12 +23,12 @@ import '/src/preference/storage_box.dart';
 // ignore: constant_identifier_names
 const tr_toast = "toast";
 
-StreamController<ToastData> _moduleVersionCheckEventController = StreamController();
-final moduleVersionCheckEventProvider = StreamProvider<ToastData>((ref) {
-  if (_moduleVersionCheckEventController.hasListener) {
-    _moduleVersionCheckEventController = StreamController();
+StreamController<ToastData> _versionCheckEventController = StreamController();
+final versionCheckEventProvider = StreamProvider<ToastData>((ref) {
+  if (_versionCheckEventController.hasListener) {
+    _versionCheckEventController = StreamController();
   }
-  return _moduleVersionCheckEventController.stream;
+  return _versionCheckEventController.stream;
 });
 
 @jsonSerializable
@@ -75,18 +75,17 @@ enum ModuleVersionCheckResultCode {
   noVersionAvailable,
 }
 
+void _sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
+  _versionCheckEventController.sink.add(
+    ToastData(type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
+  );
+}
+
 Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
   final stream = InputFileStream(args.item1.path);
   final archive = ZipDecoder().decodeBuffer(stream);
   extractArchiveToDisk(archive, args.item2.path);
   return stream.close();
-}
-
-ModuleVersionCheckResultCode _sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
-  _moduleVersionCheckEventController.sink.add(
-    ToastData(type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
-  );
-  return code;
 }
 
 final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
@@ -106,7 +105,6 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   }
   // Rollback is allowed.
   if (local?.version == latest.version) {
-    // _sendModuleVersionCheckToast(ToastType.info, VersionCheck.noUpdateRequired);
     return latest.version;
   }
 
@@ -131,19 +129,64 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
 class AppVersionCheckResult {
   final Version local;
   final Version latest;
-  final bool isSkipped;
+  final bool hasError;
 
   AppVersionCheckResult({
     required this.local,
     required this.latest,
-    this.isSkipped = false,
+    this.hasError = false,
   });
 
   bool get isUpdatable => local != latest;
 }
 
+enum AppVersionCheckResultCode {
+  noUpdateRequired,
+  newVersionAvailable,
+  latestVersionNotAvailable,
+}
+
+void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
+  _versionCheckEventController.sink.add(
+    ToastData(type, description: "$tr_toast.app_version_check.${code.name.snakeCase}".tr()),
+  );
+}
+
 enum VersionCheckEntryKey {
   lastAppVersionChecked,
+  latestAppVersion,
+}
+
+extension StringExtension on String {
+  Version toVersion() => Version.parse(this);
+}
+
+FutureOr<Version?> _checkLatestAppVersion() async {
+  final box = StorageBox(StorageBoxKey.versionCheck);
+  final lastAppVersionCheckedEntry = box.entry<DateTime>(VersionCheckEntryKey.lastAppVersionChecked.name);
+  final latestAppVersionEntry = box.entry<String>(VersionCheckEntryKey.latestAppVersion.name);
+
+  final durationSinceLastChecked =
+      lastAppVersionCheckedEntry.pull()?.difference(DateTime.now()).abs() ?? const Duration(days: 30);
+  final knownLatestAppVersion = latestAppVersionEntry.pull()?.toVersion();
+  logger.d("last=$durationSinceLastChecked, latest=$knownLatestAppVersion");
+
+  if (durationSinceLastChecked <= const Duration(hours: 20) && knownLatestAppVersion != null) {
+    return knownLatestAppVersion;
+  } else {
+    lastAppVersionCheckedEntry.push(DateTime.now());
+    latestAppVersionEntry.delete();
+    try {
+      final latest = await Dio()
+          .get(Const.appVersionInfoUrl)
+          .then((response) => Version.parse(jsonDecode(response.toString())['version']));
+      latestAppVersionEntry.push(latest.toString());
+      return latest;
+    } catch (e) {
+      logger.w(e);
+      return null;
+    }
+  }
 }
 
 final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
@@ -151,22 +194,17 @@ final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async 
       .loadString("assets/version_info.json")
       .then((info) => Version.parse(jsonDecode(info)['version']));
 
-  final entry = StorageBox(StorageBoxKey.versionCheck).entry<DateTime>(VersionCheckEntryKey.lastAppVersionChecked.name);
-  final lastChecked = entry.pull();
-  if (lastChecked != null && DateTime.now().difference(lastChecked).inHours <= 20) {
-    logger.i("App version: local=$local, last_checked=${lastChecked.toLocal()}");
-    return AppVersionCheckResult(local: local, latest: local, isSkipped: true);
+  final latest = await _checkLatestAppVersion();
+  logger.i("App version: local=$local, latest=$latest");
+
+  if (latest == null) {
+    _sendAppVersionCheckToast(ToastType.warning, AppVersionCheckResultCode.latestVersionNotAvailable);
+    return AppVersionCheckResult(local: local, latest: local, hasError: true);
   }
 
-  try {
-    final latest = await Dio()
-        .get(Const.appVersionInfoUrl)
-        .then((response) => Version.parse(jsonDecode(response.toString())['version']));
-    entry.push(DateTime.now());
-    logger.i("App version: local=$local, latest=$latest");
-    return AppVersionCheckResult(local: local, latest: latest);
-  } catch (e) {
-    logger.w(e);
+  final result = AppVersionCheckResult(local: local, latest: latest);
+  if (result.isUpdatable) {
+    _sendAppVersionCheckToast(ToastType.info, AppVersionCheckResultCode.newVersionAvailable);
   }
-  return AppVersionCheckResult(local: local, latest: local, isSkipped: true);
+  return result;
 });
