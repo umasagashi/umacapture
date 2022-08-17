@@ -1,3 +1,4 @@
+import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 
 import '/src/core/utils.dart';
@@ -15,8 +16,9 @@ class ToastData {
   final Widget? label;
   final Duration? duration;
   final VoidCallback? onTap;
+  final PageRouteInfo? navigateOnTab;
 
-  ToastData(this.type, {this.description, this.label, this.duration, this.onTap}) {
+  ToastData(this.type, {this.description, this.label, this.duration, this.onTap, this.navigateOnTab}) {
     assert(description != null || label != null);
   }
 }
@@ -76,6 +78,9 @@ class Toaster {
           onPressed: () {
             snackBar.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
             data.onTap?.call();
+            if (data.navigateOnTab != null) {
+              AutoTabsRouter.of(context).navigate(data.navigateOnTab!);
+            }
           },
         ),
       ),

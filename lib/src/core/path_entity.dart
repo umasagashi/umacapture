@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 
 class PathEntity {
@@ -73,7 +74,10 @@ class PathEntity {
   @override
   @Deprecated("toString is disabled to prevent implicit conversion. Use path getter instead.")
   String toString() {
-    throw UnimplementedError("toString is disabled to prevent implicit conversion. Use path getter instead.");
+    if (kDebugMode) {
+      throw UnimplementedError("toString is disabled to prevent implicit conversion. Use path getter instead.");
+    }
+    return path;
   }
 }
 
