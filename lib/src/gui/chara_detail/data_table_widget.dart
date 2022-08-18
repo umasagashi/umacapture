@@ -42,10 +42,30 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       col.enableDropToResize = enabled;
     }
   }
+
+  PlutoColumn getColumn(String field) {
+    return columns.where((e) => e.field == field).first;
+  }
+
+  void sortColumn(PlutoColumn col, PlutoColumnSort order) {
+    if (order == PlutoColumnSort.ascending) {
+      sortAscending(col);
+    } else {
+      sortDescending(col);
+    }
+  }
 }
 
-class _CharaDetailDataTableWidget extends ConsumerWidget {
+class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
   const _CharaDetailDataTableWidget({Key? key}) : super(key: key);
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _CharaDetailDataTableWidgetState();
+}
+
+class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTableWidget> {
+  String? sortColumn;
+  PlutoColumnSort sortOrder = PlutoColumnSort.none;
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
@@ -86,7 +106,7 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final grid = ref.watch(currentGridProvider);
     return Expanded(
@@ -124,6 +144,9 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
             ),
             onLoaded: (PlutoGridOnLoadedEvent event) {
               event.stateManager.autoFitColumns();
+              if (sortColumn != null) {
+                event.stateManager.sortColumn(event.stateManager.getColumn(sortColumn!), sortOrder);
+              }
             },
             onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
               final record = event.row!.getUserData<CharaDetailRecord>()!;
@@ -134,6 +157,15 @@ class _CharaDetailDataTableWidget extends ConsumerWidget {
               final record = event.row!.getUserData<CharaDetailRecord>()!;
               final spec = event.cell?.column.getUserData();
               CharaDetailPreviewDialog.show(context, record, spec?.tabIdx ?? 0);
+            },
+            onSorted: (PlutoGridOnSortedEvent event) {
+              if (event.column.sort == PlutoColumnSort.none) {
+                sortColumn = null;
+                sortOrder = PlutoColumnSort.none;
+              } else {
+                sortColumn = event.column.field;
+                sortOrder = event.column.sort;
+              }
             },
           ),
           if (grid.rows.isEmpty) Text("$tr_chara_detail.no_row_message".tr()),
