@@ -112,8 +112,8 @@ class DashboardPage extends ConsumerWidget {
     return ListTilePageRootWidget(
       children: [
         if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest),
-        const Center(
-          child: Text("Under Construction"),
+        Center(
+          child: Text("common.under_construction".tr()),
         )
       ],
     );

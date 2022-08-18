@@ -22,6 +22,12 @@ import '/src/gui/common.dart';
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
 @jsonSerializable
+enum FactorDialogElements {
+  tags,
+  logic,
+}
+
+@jsonSerializable
 enum FactorSetLogicMode {
   anyOf,
   allOf,
@@ -116,13 +122,16 @@ class QueriedFactor {
     required this.parent2,
   });
 
-  static QueriedFactor extractFrom(FactorSet factorSet, int targetId, bool traineeOnly) {
-    return QueriedFactor(
-      id: targetId,
-      self: factorSet.self.firstWhereOrNull((e) => e.id == targetId)?.star ?? 0,
-      parent1: traineeOnly ? 0 : factorSet.parent1.firstWhereOrNull((e) => e.id == targetId)?.star ?? 0,
-      parent2: traineeOnly ? 0 : factorSet.parent2.firstWhereOrNull((e) => e.id == targetId)?.star ?? 0,
-    );
+  static List<QueriedFactor> extract(Iterable<int> targetIds, FactorSet factorSet, bool traineeOnly) {
+    assert(targetIds.isNotEmpty);
+    return targetIds.map((id) {
+      return QueriedFactor(
+        id: id,
+        self: factorSet.self.firstWhereOrNull((e) => e.id == id)?.star ?? 0,
+        parent1: traineeOnly ? 0 : factorSet.parent1.firstWhereOrNull((e) => e.id == id)?.star ?? 0,
+        parent2: traineeOnly ? 0 : factorSet.parent2.firstWhereOrNull((e) => e.id == id)?.star ?? 0,
+      );
+    }).toList();
   }
 
   String notation(FactorNotationMode mode, {int width = 1}) {
@@ -235,12 +244,6 @@ class AggregateFactorSetPredicate {
     ).checked();
   }
 
-  List<QueriedFactor> extract(FactorSet factorSet) {
-    final targetIds = query.isNotEmpty ? query : factorSet.uniqueIds;
-    final traineeOnly = subject == FactorSearchSubjectMode.trainee;
-    return targetIds.map((e) => QueriedFactor.extractFrom(factorSet, e, traineeOnly)).toList();
-  }
-
   bool _isAcceptable(QueriedFactor factor) {
     if (element.mode == FactorSearchElementMode.starAndCount) {
       return factor.count(min: element.star) >= element.count;
@@ -261,7 +264,7 @@ class AggregateFactorSetPredicate {
     if (query.isEmpty) {
       return true;
     }
-    final foundFactors = extract(value);
+    final foundFactors = QueriedFactor.extract(query, value, subject == FactorSearchSubjectMode.trainee);
     switch (logic) {
       case FactorSetLogicMode.anyOf:
         return foundFactors.any((e) => _isAcceptable(e));
@@ -289,6 +292,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final String labelKey = "factor.name";
   final AggregateFactorSetPredicate predicate;
 
+  final bool showAllWhenQueryIsEmpty;
+  final Set<FactorDialogElements> hiddenElements;
+
   @override
   ColumnSpecType get type => ColumnSpecType.factor;
 
@@ -307,6 +313,8 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     required this.title,
     required this.parser,
     required this.predicate,
+    this.showAllWhenQueryIsEmpty = true,
+    this.hiddenElements = const {},
   });
 
   FactorColumnSpec copyWith({
@@ -314,12 +322,16 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     String? title,
     Parser? parser,
     AggregateFactorSetPredicate? predicate,
+    bool? showAllWhenQueryIsEmpty,
+    Set<FactorDialogElements>? hiddenElements,
   }) {
     return FactorColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
+      showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
+      hiddenElements: hiddenElements ?? this.hiddenElements,
     );
   }
 
@@ -333,18 +345,31 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
+  List<QueriedFactor> _extract(FactorSet factorSet) {
+    final traineeOnly = predicate.subject == FactorSearchSubjectMode.trainee;
+    if (predicate.query.isEmpty) {
+      if (!showAllWhenQueryIsEmpty) {
+        return [];
+      } else {
+        return QueriedFactor.extract(factorSet.uniqueIds, factorSet, traineeOnly);
+      }
+    } else {
+      final factorOrder = factorSet.uniqueIds.toList();
+      final found = QueriedFactor.extract(predicate.query, factorSet, traineeOnly).where((e) => !e.isEmpty).toList();
+      // Since found is in query order, sort in order of appearance.
+      return found.sortedBy<num>((e) => factorOrder.indexOfOrNull(e.id) ?? found.length).toList();
+    }
+  }
+
   @override
   PlutoCell plutoCell(BuildResource resource, FactorSet value) {
-    final factorOrder = value.uniqueIds.toList();
-    final found = predicate.extract(value).where((e) => !e.isEmpty);
-    // Since found is in query order, sort in order of appearance.
-    final reordered = found.sortedBy<num>((e) => factorOrder.indexOfOrNull(e.id) ?? found.length).toList();
+    final factors = _extract(value);
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
         id: 0,
-        self: reordered.map((e) => e.self).sum,
-        parent1: reordered.map((e) => e.parent1).sum,
-        parent2: reordered.map((e) => e.parent2).sum,
+        self: factors.map((e) => e.self).sum,
+        parent1: factors.map((e) => e.parent1).sum,
+        parent2: factors.map((e) => e.parent2).sum,
       );
       return PlutoCell(
         value: q.notation(predicate.notation.mode, width: 3),
@@ -352,7 +377,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     }
 
     final labels = resource.labelMap[labelKey]!;
-    final notations = reordered.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
+    final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
       value: "$desc${"M" * (desc.length * 0.15).toInt()}",
@@ -418,20 +443,20 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
 
-final _selectedSkillTagsProvider = StateProvider.autoDispose.family<Set<Tag>, String>((ref, specId) {
+final _selectedSkillTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
   final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
   return Set.from(spec.predicate.skillTags);
 });
 
-final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<Tag>, String>((ref, specId) {
+final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
   final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
   return Set.from(spec.predicate.factorTags);
 });
 
 List<FactorInfo> _watchCandidateFactors(WidgetRef ref, String specId) {
   final factorInfoList = ref.watch(availableFactorInfoProvider);
-  final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).map((e) => e.id).toSet();
-  final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).map((e) => e.id).toSet();
+  final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).toSet();
+  final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).toSet();
   if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty) {
     return factorInfoList;
   } else {
@@ -500,10 +525,11 @@ class _SelectionSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
     return FormGroup(
       title: Text("$tr_factor.selection.label".tr()),
       children: [
-        tagsWidget(),
+        if (!spec.hiddenElements.contains(FactorDialogElements.tags)) tagsWidget(),
         selectorWidget(context, ref),
       ],
     );
@@ -638,11 +664,12 @@ class _ModeSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
     return FormGroup(
       title: Text("$tr_factor.mode.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
-        logicChoiceWidget(context, ref),
+        if (!spec.hiddenElements.contains(FactorDialogElements.logic)) logicChoiceWidget(context, ref),
         subjectChoiceWidget(context, ref),
         elementChoiceWidget(context, ref),
         elementStarWidget(context, ref),
@@ -763,6 +790,9 @@ class FactorColumnBuilder implements ColumnBuilder {
   @override
   final ColumnCategory category;
 
+  @override
+  bool get isFilterColumn => false;
+
   FactorColumnBuilder({
     required this.title,
     required this.category,
@@ -776,6 +806,65 @@ class FactorColumnBuilder implements ColumnBuilder {
       title: title,
       parser: parser,
       predicate: AggregateFactorSetPredicate.any(),
+    );
+  }
+}
+
+class FilterFactorColumnBuilder implements ColumnBuilder {
+  final Parser parser;
+
+  @override
+  final String title;
+
+  @override
+  final ColumnCategory category;
+
+  @override
+  final bool isFilterColumn;
+
+  final Set<String> initialFactorTags;
+  final Set<String> initialSkillTags;
+  final Set<int> initialIds;
+  final int initialStar;
+
+  FilterFactorColumnBuilder({
+    required this.title,
+    required this.category,
+    required this.parser,
+    required this.isFilterColumn,
+    this.initialFactorTags = const {},
+    this.initialSkillTags = const {},
+    required this.initialIds,
+    required this.initialStar,
+  });
+
+  @override
+  ColumnSpec<FactorSet> build() {
+    return FactorColumnSpec(
+      id: const Uuid().v4(),
+      title: title,
+      parser: parser,
+      predicate: AggregateFactorSetPredicate(
+        query: initialIds,
+        logic: FactorSetLogicMode.mixed,
+        subject: FactorSearchSubjectMode.family,
+        element: FactorSearchElement(
+          mode: FactorSearchElementMode.starOnly,
+          star: initialStar,
+          count: 1,
+        ),
+        notation: FactorNotation(
+          mode: FactorNotationMode.sumOnly,
+          max: 3,
+        ),
+        factorTags: initialFactorTags,
+        skillTags: initialSkillTags,
+      ),
+      hiddenElements: {
+        FactorDialogElements.tags,
+        FactorDialogElements.logic,
+      },
+      showAllWhenQueryIsEmpty: false,
     );
   }
 }

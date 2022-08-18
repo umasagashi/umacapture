@@ -292,6 +292,9 @@ class CharacterCardColumnBuilder implements ColumnBuilder {
   @override
   final ColumnCategory category;
 
+  @override
+  bool get isFilterColumn => false;
+
   CharacterCardColumnBuilder({
     required this.title,
     required this.category,

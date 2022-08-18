@@ -153,6 +153,7 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
 });
 
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
+  final factorInfoList = ref.watch(availableFactorInfoProvider);
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -170,6 +171,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.chara_rank.title".tr(),
       category: ColumnCategory.trainee,
       parser: EvaluationValueParser(),
+    ),
+    CharaRankColumnBuilder(
+      title: "$tr_columns.chara_rank.shortcuts.less_than_a.title".tr(),
+      category: ColumnCategory.trainee,
+      parser: EvaluationValueParser(),
+      max: 5,
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.speed.title".tr(),
@@ -256,6 +263,30 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.aptitude,
       parser: LateChargeAptitudeParser(),
     ),
+    AptitudeColumnBuilder(
+      title: "$tr_columns.aptitude.shortcuts.short_range.title".tr(),
+      category: ColumnCategory.aptitude,
+      parser: ShortRangeAptitudeParser(),
+      min: 7,
+    ),
+    AptitudeColumnBuilder(
+      title: "$tr_columns.aptitude.shortcuts.mile_range.title".tr(),
+      category: ColumnCategory.aptitude,
+      parser: MileRangeAptitudeParser(),
+      min: 7,
+    ),
+    AptitudeColumnBuilder(
+      title: "$tr_columns.aptitude.shortcuts.middle_range.title".tr(),
+      category: ColumnCategory.aptitude,
+      parser: MiddleRangeAptitudeParser(),
+      min: 7,
+    ),
+    AptitudeColumnBuilder(
+      title: "$tr_columns.aptitude.shortcuts.long_range.title".tr(),
+      category: ColumnCategory.aptitude,
+      parser: LongRangeAptitudeParser(),
+      min: 7,
+    ),
     SkillColumnBuilder(
       title: "$tr_columns.skill.title".tr(),
       category: ColumnCategory.skill,
@@ -265,6 +296,69 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.factor.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.status.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: false,
+      initialFactorTags: {"factor_status"},
+      initialIds: factorInfoList.where((e) => e.tags.contains("factor_status")).map((e) => e.sid).toSet(),
+      initialStar: 1,
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.aptitude.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: false,
+      initialFactorTags: {"factor_aptitude"},
+      initialIds: factorInfoList.where((e) => e.tags.contains("factor_aptitude")).map((e) => e.sid).toSet(),
+      initialStar: 1,
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.scenario.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: true,
+      initialFactorTags: {"factor_scenario"},
+      initialIds: factorInfoList.where((e) => e.tags.contains("factor_scenario")).map((e) => e.sid).toSet(),
+      initialStar: 1,
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.short_range.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: true,
+      initialFactorTags: {"factor_aptitude"},
+      initialIds: {66},
+      initialStar: 1,
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.mile_range.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: true,
+      initialFactorTags: {"factor_aptitude"},
+      initialIds: {27},
+      initialStar: 1,
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.middle_range.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: true,
+      initialFactorTags: {"factor_aptitude"},
+      initialIds: {73},
+      initialStar: 1,
+    ),
+    FilterFactorColumnBuilder(
+      title: "$tr_columns.factor.shortcuts.long_range.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      isFilterColumn: true,
+      initialFactorTags: {"factor_aptitude"},
+      initialIds: {142},
+      initialStar: 1,
     ),
   ];
 });
