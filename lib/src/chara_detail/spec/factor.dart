@@ -25,7 +25,7 @@ const tr_factor = "pages.chara_detail.column_predicate.factor";
 enum FactorSetLogicMode {
   anyOf,
   allOf,
-  sumOf,
+  mixed,
 }
 
 @jsonSerializable
@@ -43,23 +43,23 @@ enum FactorSearchElementMode {
 @jsonSerializable
 class FactorSearchElement {
   final FactorSearchElementMode mode;
-  final int min;
+  final int star;
   final int count;
 
   FactorSearchElement({
     required this.mode,
-    required this.min,
+    required this.star,
     required this.count,
   });
 
   FactorSearchElement copyWith({
     FactorSearchElementMode? mode,
-    int? min,
+    int? star,
     int? count,
   }) {
     return FactorSearchElement(
       mode: mode ?? this.mode,
-      min: min ?? this.min,
+      star: star ?? this.star,
       count: count ?? this.count,
     );
   }
@@ -152,29 +152,40 @@ class AggregateFactorSetPredicate {
   final Set<String> factorTags;
   final Set<String> skillTags;
 
-  bool isLogicAllowed() => query.length >= 2 || logic != FactorSetLogicMode.sumOf;
+  @JsonProperty(ignore: true)
+  bool get isStarAndCountAllowed {
+    return logic == FactorSetLogicMode.mixed || subject == FactorSearchSubjectMode.family;
+  }
 
-  bool isStarAndCountAllowed() => logic == FactorSetLogicMode.sumOf || subject == FactorSearchSubjectMode.family;
+  @JsonProperty(ignore: true)
+  int get starMaxLimit {
+    if (element.mode == FactorSearchElementMode.starAndCount) {
+      return 3;
+    } else {
+      final maxPerFactor = subject == FactorSearchSubjectMode.trainee ? 3 : 9;
+      return logic == FactorSetLogicMode.mixed ? Math.max(1, query.length) * maxPerFactor : maxPerFactor;
+    }
+  }
+
+  @JsonProperty(ignore: true)
+  int get countMaxLimit {
+    if (element.mode == FactorSearchElementMode.starOnly) {
+      return 1;
+    } else {
+      final maxPerFactor = subject == FactorSearchSubjectMode.trainee ? 1 : 3;
+      return logic == FactorSetLogicMode.mixed ? Math.max(1, query.length) * maxPerFactor : maxPerFactor;
+    }
+  }
 
   AggregateFactorSetPredicate({
     required this.query,
-    required FactorSetLogicMode logic,
+    required this.logic,
     required this.subject,
-    required FactorSearchElement element,
+    required this.element,
     required this.notation,
     required this.factorTags,
     required this.skillTags,
-  })  : logic = (query.length <= 1 && logic == FactorSetLogicMode.sumOf) ? FactorSetLogicMode.anyOf : logic,
-        element = (logic != FactorSetLogicMode.sumOf && subject != FactorSearchSubjectMode.family)
-            ? element.copyWith(mode: FactorSearchElementMode.starOnly)
-            : element;
-
-  AggregateFactorSetPredicate checked() {
-    return copyWith(
-      logic: isLogicAllowed() ? FactorSetLogicMode.anyOf : logic,
-      element: isStarAndCountAllowed() ? element : element.copyWith(mode: FactorSearchElementMode.starOnly),
-    );
-  }
+  });
 
   AggregateFactorSetPredicate.any()
       : query = {},
@@ -182,7 +193,7 @@ class AggregateFactorSetPredicate {
         subject = FactorSearchSubjectMode.family,
         element = FactorSearchElement(
           mode: FactorSearchElementMode.starOnly,
-          min: 1,
+          star: 1,
           count: 1,
         ),
         notation = FactorNotation(
@@ -191,6 +202,18 @@ class AggregateFactorSetPredicate {
         ),
         factorTags = {},
         skillTags = {};
+
+  AggregateFactorSetPredicate checked() {
+    return AggregateFactorSetPredicate(
+      query: query,
+      logic: logic,
+      subject: subject,
+      element: isStarAndCountAllowed ? element : element.copyWith(mode: FactorSearchElementMode.starOnly),
+      notation: notation,
+      factorTags: factorTags,
+      skillTags: skillTags,
+    );
+  }
 
   AggregateFactorSetPredicate copyWith({
     Set<int>? query,
@@ -209,28 +232,28 @@ class AggregateFactorSetPredicate {
       notation: notation ?? this.notation,
       factorTags: factorTags ?? this.factorTags,
       skillTags: skillTags ?? this.skillTags,
-    );
+    ).checked();
   }
 
   List<QueriedFactor> extract(FactorSet factorSet) {
     final targetIds = query.isNotEmpty ? query : factorSet.uniqueIds;
     final traineeOnly = subject == FactorSearchSubjectMode.trainee;
-    return targetIds.map((e) => QueriedFactor.extractFrom(factorSet, e, traineeOnly)).where((e) => !e.isEmpty).toList();
+    return targetIds.map((e) => QueriedFactor.extractFrom(factorSet, e, traineeOnly)).toList();
   }
 
   bool _isAcceptable(QueriedFactor factor) {
     if (element.mode == FactorSearchElementMode.starAndCount) {
-      return factor.count(min: element.min) >= element.count;
+      return factor.count(min: element.star) >= element.count;
     } else {
-      return factor.sum() >= element.min;
+      return factor.sum() >= element.star;
     }
   }
 
-  bool _isSumAcceptable(List<QueriedFactor> stars) {
+  bool _isMixedAcceptable(List<QueriedFactor> factors) {
     if (element.mode == FactorSearchElementMode.starAndCount) {
-      return stars.map((e) => e.sum() >= element.min).countTrue() >= element.count;
+      return factors.map((e) => e.count(min: element.star)).sum >= element.count;
     } else {
-      return stars.map((e) => e.sum()).sum >= element.min;
+      return factors.map((e) => e.sum()).sum >= element.star;
     }
   }
 
@@ -244,8 +267,8 @@ class AggregateFactorSetPredicate {
         return foundFactors.any((e) => _isAcceptable(e));
       case FactorSetLogicMode.allOf:
         return foundFactors.every((e) => _isAcceptable(e));
-      case FactorSetLogicMode.sumOf:
-        return _isSumAcceptable(foundFactors);
+      case FactorSetLogicMode.mixed:
+        return _isMixedAcceptable(foundFactors);
     }
   }
 }
@@ -312,13 +335,16 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
 
   @override
   PlutoCell plutoCell(BuildResource resource, FactorSet value) {
-    final foundFactors = predicate.extract(value);
+    final factorOrder = value.uniqueIds.toList();
+    final found = predicate.extract(value).where((e) => !e.isEmpty);
+    // Since found is in query order, sort in order of appearance.
+    final reordered = found.sortedBy<num>((e) => factorOrder.indexOfOrNull(e.id) ?? found.length).toList();
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
         id: 0,
-        self: foundFactors.map((e) => e.self).sum,
-        parent1: foundFactors.map((e) => e.parent1).sum,
-        parent2: foundFactors.map((e) => e.parent2).sum,
+        self: reordered.map((e) => e.self).sum,
+        parent1: reordered.map((e) => e.parent1).sum,
+        parent2: reordered.map((e) => e.parent2).sum,
       );
       return PlutoCell(
         value: q.notation(predicate.notation.mode, width: 3),
@@ -326,7 +352,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     }
 
     final labels = resource.labelMap[labelKey]!;
-    final notations = foundFactors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
+    final notations = reordered.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
       value: "$desc${"M" * (desc.length * 0.15).toInt()}",
@@ -372,7 +398,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       modeText += "$sep${"$tr_factor.mode.element.label".tr()}: $count";
     }
 
-    modeText += "$sep${"$tr_factor.mode.element.value.star".tr()}: ${predicate.element.min}";
+    modeText += "$sep${"$tr_factor.mode.element.value.star".tr()}: ${predicate.element.star}";
 
     if (predicate.element.mode == FactorSearchElementMode.starAndCount) {
       modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
@@ -496,7 +522,7 @@ class _ModeSelector extends ConsumerWidget {
     final selection = "$tr_factor.mode.logic.${predicate.logic.name.snakeCase}.description".tr();
     final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.description".tr();
     final count = "$tr_factor.mode.element.${predicate.element.mode.name.snakeCase}.description".tr(namedArgs: {
-      "star": predicate.element.min.toString(),
+      "star": predicate.element.star.toString(),
       "count": predicate.element.count.toString(),
     });
     return NoteCard(
@@ -549,7 +575,7 @@ class _ModeSelector extends ConsumerWidget {
       tooltip: false,
       values: FactorSearchElementMode.values,
       selected: predicate.element.mode,
-      disabled: {if (!predicate.isStarAndCountAllowed()) FactorSearchElementMode.starAndCount},
+      disabled: {if (!predicate.isStarAndCountAllowed) FactorSearchElementMode.starAndCount},
       onSelected: (value) {
         _clonedSpecProvider.update(ref, specId, (spec) {
           return spec.copyWith(
@@ -560,7 +586,7 @@ class _ModeSelector extends ConsumerWidget {
     );
   }
 
-  Widget elementValueWidget(BuildContext context, WidgetRef ref) {
+  Widget elementStarWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return FormLine(
       title: Text("$tr_factor.mode.element.value.star".tr()),
@@ -569,12 +595,12 @@ class _ModeSelector extends ConsumerWidget {
           width: 100,
           height: 30,
           min: 1,
-          max: predicate.query.length * 9,
-          value: predicate.element.min,
+          max: predicate.starMaxLimit,
+          value: predicate.element.star,
           onChanged: (value) {
             _clonedSpecProvider.update(ref, specId, (spec) {
               return spec.copyWith(
-                predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(min: value)),
+                predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(star: value)),
               );
             });
           },
@@ -595,7 +621,7 @@ class _ModeSelector extends ConsumerWidget {
             width: 100,
             height: 30,
             min: 1,
-            max: predicate.query.length * 3,
+            max: predicate.countMaxLimit,
             value: predicate.element.count,
             onChanged: (value) {
               _clonedSpecProvider.update(ref, specId, (spec) {
@@ -619,7 +645,7 @@ class _ModeSelector extends ConsumerWidget {
         logicChoiceWidget(context, ref),
         subjectChoiceWidget(context, ref),
         elementChoiceWidget(context, ref),
-        elementValueWidget(context, ref),
+        elementStarWidget(context, ref),
         elementCountWidget(context, ref),
       ],
     );

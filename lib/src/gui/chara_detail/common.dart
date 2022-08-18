@@ -210,14 +210,15 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   Widget chip(BuildContext context, WidgetRef ref, T value) {
     final theme = Theme.of(context);
     final isDisabled = disabled?.contains(value) ?? false;
+    final isSelected = value == selected;
     return Disabled(
       disabled: isDisabled,
       tooltip: isDisabled ? "$prefix.${value.name.snakeCase}.disabled_tooltip".tr() : "",
       child: ChoiceChip(
         label: Text("$prefix.${value.name.snakeCase}.label".tr()),
         tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
-        backgroundColor: value == selected ? null : theme.colorScheme.surfaceVariant,
-        selected: value == selected,
+        backgroundColor: isSelected ? null : theme.colorScheme.surfaceVariant,
+        selected: isSelected,
         onSelected: (_) => onSelected(value),
       ),
     );

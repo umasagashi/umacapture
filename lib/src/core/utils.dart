@@ -157,6 +157,11 @@ extension ListExtension<T> on List<T> {
       add(value);
     }
   }
+
+  int? indexOfOrNull(T element) {
+    final index = indexOf(element);
+    return index == -1 ? null : index;
+  }
 }
 
 extension List2DExtension<T> on List<List<T>> {
