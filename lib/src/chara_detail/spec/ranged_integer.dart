@@ -65,7 +65,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final String id;
 
   @override
-  String title;
+  final String title;
 
   RangedIntegerColumnSpec({
     required this.id,
@@ -145,11 +145,11 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
 
 final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
 
-class RangedIntegerColumnSelector extends ConsumerWidget {
+class _RangedIntegerSelector extends ConsumerWidget {
   final String specId;
   final numberFormatter = NumberFormat("#,###");
 
-  RangedIntegerColumnSelector({
+  _RangedIntegerSelector({
     Key? key,
     required this.specId,
   }) : super(key: key);
@@ -158,7 +158,8 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     return FormGroup(
-      title: Text("$tr_ranged_integer.range".tr()),
+      title: Text("$tr_ranged_integer.range.label".tr()),
+      description: Text("$tr_ranged_integer.range.description".tr()),
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
@@ -170,13 +171,13 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
             step: const FlutterSliderStep(step: 1),
             handler: FlutterSliderHandler(
               child: Tooltip(
-                message: "$tr_ranged_integer.min".tr(),
+                message: "$tr_ranged_integer.range.min".tr(),
                 child: const Icon(Icons.arrow_right),
               ),
             ),
             rightHandler: FlutterSliderHandler(
               child: Tooltip(
-                message: "$tr_ranged_integer.max".tr(),
+                message: "$tr_ranged_integer.range.max".tr(),
                 child: const Icon(Icons.arrow_left),
               ),
             ),
@@ -201,6 +202,58 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
             },
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _NotationSelector extends ConsumerWidget {
+  final String specId;
+
+  const _NotationSelector({
+    required this.specId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    return FormGroup(
+      title: Text("$tr_ranged_integer.notation.label".tr()),
+      description: Text("$tr_ranged_integer.notation.description".tr()),
+      children: [
+        FormLine(
+          title: Text("$tr_ranged_integer.notation.title.label".tr()),
+          children: [
+            DenseTextField(
+              initialText: spec.title,
+              onChanged: (value) {
+                _clonedSpecProvider.update(ref, specId, (spec) {
+                  return spec.copyWith(title: value);
+                });
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class RangedIntegerColumnSelector extends ConsumerWidget {
+  final String specId;
+
+  const RangedIntegerColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      children: [
+        _RangedIntegerSelector(specId: specId),
+        const SizedBox(height: 32),
+        _NotationSelector(specId: specId),
       ],
     );
   }

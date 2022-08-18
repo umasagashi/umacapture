@@ -192,10 +192,10 @@ class _CharaCardChip extends ConsumerWidget {
   }
 }
 
-class CharacterCardColumnSelector extends ConsumerWidget {
+class _CharacterCardSelector extends ConsumerWidget {
   final String specId;
 
-  const CharacterCardColumnSelector({
+  const _CharacterCardSelector({
     Key? key,
     required this.specId,
   }) : super(key: key);
@@ -226,6 +226,58 @@ class CharacterCardColumnSelector extends ConsumerWidget {
             ),
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _NotationSelector extends ConsumerWidget {
+  final String specId;
+
+  const _NotationSelector({
+    required this.specId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    return FormGroup(
+      title: Text("$tr_character.notation.label".tr()),
+      description: Text("$tr_character.notation.description".tr()),
+      children: [
+        FormLine(
+          title: Text("$tr_character.notation.title.label".tr()),
+          children: [
+            DenseTextField(
+              initialText: spec.title,
+              onChanged: (value) {
+                _clonedSpecProvider.update(ref, specId, (spec) {
+                  return spec.copyWith(title: value);
+                });
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class CharacterCardColumnSelector extends ConsumerWidget {
+  final String specId;
+
+  const CharacterCardColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      children: [
+        _CharacterCardSelector(specId: specId),
+        const SizedBox(height: 32),
+        _NotationSelector(specId: specId),
       ],
     );
   }

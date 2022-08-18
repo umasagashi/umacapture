@@ -115,14 +115,34 @@
                     }
                 },
                 "ranged_label": {
-                    "range": "表示範囲",
-                    "min": "最小値",
-                    "max": "最大値"
+                    "range": {
+                        "label": "範囲",
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "min": "最小値",
+                        "max": "最大値"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    }
                 },
                 "ranged_integer": {
-                    "range": "表示範囲",
-                    "min": "最小値",
-                    "max": "最大値"
+                    "range": {
+                        "label": "範囲",
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "min": "最小値",
+                        "max": "最大値"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    }
                 },
                 "character": {
                     "selection": {
@@ -132,6 +152,13 @@
                     "tooltip": {
                         "accept": "含む",
                         "reject": "含まない"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
                     }
                 },
                 "skill": {

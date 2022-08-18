@@ -42,7 +42,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   final String id;
 
   @override
-  String title;
+  final String title;
 
   RangedLabelColumnSpec({
     required this.id,
@@ -122,10 +122,10 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
 
 final _clonedSpecProvider = SpecProviderAccessor<RangedLabelColumnSpec>();
 
-class RangedLabelColumnSelector extends ConsumerWidget {
+class _RangedLabelSelector extends ConsumerWidget {
   final String specId;
 
-  const RangedLabelColumnSelector({
+  const _RangedLabelSelector({
     Key? key,
     required this.specId,
   }) : super(key: key);
@@ -135,7 +135,8 @@ class RangedLabelColumnSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     return FormGroup(
-      title: Text("$tr_ranged_label.range".tr()),
+      title: Text("$tr_ranged_label.range.label".tr()),
+      description: Text("$tr_ranged_label.range.description".tr()),
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
@@ -147,13 +148,13 @@ class RangedLabelColumnSelector extends ConsumerWidget {
             step: const FlutterSliderStep(step: 1),
             handler: FlutterSliderHandler(
               child: Tooltip(
-                message: "$tr_ranged_label.min".tr(),
+                message: "$tr_ranged_label.range.min".tr(),
                 child: const Icon(Icons.arrow_right),
               ),
             ),
             rightHandler: FlutterSliderHandler(
               child: Tooltip(
-                message: "$tr_ranged_label.max".tr(),
+                message: "$tr_ranged_label.range.max".tr(),
                 child: const Icon(Icons.arrow_left),
               ),
             ),
@@ -178,6 +179,58 @@ class RangedLabelColumnSelector extends ConsumerWidget {
             },
           ),
         ),
+      ],
+    );
+  }
+}
+
+class _NotationSelector extends ConsumerWidget {
+  final String specId;
+
+  const _NotationSelector({
+    required this.specId,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    return FormGroup(
+      title: Text("$tr_ranged_label.notation.label".tr()),
+      description: Text("$tr_ranged_label.notation.description".tr()),
+      children: [
+        FormLine(
+          title: Text("$tr_ranged_label.notation.title.label".tr()),
+          children: [
+            DenseTextField(
+              initialText: spec.title,
+              onChanged: (value) {
+                _clonedSpecProvider.update(ref, specId, (spec) {
+                  return spec.copyWith(title: value);
+                });
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class RangedLabelColumnSelector extends ConsumerWidget {
+  final String specId;
+
+  const RangedLabelColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Column(
+      children: [
+        _RangedLabelSelector(specId: specId),
+        const SizedBox(height: 32),
+        _NotationSelector(specId: specId),
       ],
     );
   }
