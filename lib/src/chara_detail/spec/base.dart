@@ -1,5 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
@@ -9,6 +10,9 @@ import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
+
+// ignore: constant_identifier_names
+const tr_common = "pages.chara_detail.column_predicate.common";
 
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
@@ -53,6 +57,12 @@ class SkillInfo {
   final Set<String> tags;
 
   SkillInfo(this.sid, this.sortKey, this.names, this.descriptions, this.tags);
+
+  @JsonProperty(ignore: true)
+  String get label => names.first;
+
+  @JsonProperty(ignore: true)
+  String get tooltip => descriptions.first;
 }
 
 @jsonSerializable
@@ -87,6 +97,18 @@ class FactorInfo {
       skillSid: skillSid,
       skillInfo: skillInfo ?? this.skillInfo,
     );
+  }
+
+  @JsonProperty(ignore: true)
+  String get label => names.first;
+
+  @JsonProperty(ignore: true)
+  String get tooltip {
+    String text = descriptions.first;
+    if (skillInfo != null) {
+      text += "\n${"$tr_common.selector.skill_prefix".tr()}${skillInfo!.descriptions.first}";
+    }
+    return text;
   }
 }
 

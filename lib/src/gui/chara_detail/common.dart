@@ -1,8 +1,15 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:recase/recase.dart';
 
 import '/src/chara_detail/spec/base.dart';
+import '/src/core/callback.dart';
 import '/src/core/utils.dart';
+import '/src/gui/common.dart';
+
+// ignore: constant_identifier_names
+const tr_common = "pages.chara_detail.column_predicate.common";
 
 class FormLine extends ConsumerWidget {
   final Widget title;
@@ -49,6 +56,7 @@ class FormGroup extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
@@ -70,6 +78,36 @@ class FormGroup extends ConsumerWidget {
   }
 }
 
+class DenseTextField extends ConsumerWidget {
+  final TextEditingController controller;
+  final StringCallback onChanged;
+
+  DenseTextField({
+    Key? key,
+    required String initialText,
+    required this.onChanged,
+  })  : controller = TextEditingController(text: initialText),
+        super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return IntrinsicWidth(
+      child: TextFormField(
+        controller: controller,
+        decoration: InputDecoration(
+          isDense: true,
+          isCollapsed: true,
+          contentPadding: const EdgeInsets.all(8).copyWith(right: 16),
+          errorStyle: const TextStyle(fontSize: 0),
+        ),
+        autovalidateMode: AutovalidateMode.always,
+        validator: (value) => (value == null || value.isEmpty) ? "title cannot be empty" : null,
+        onChanged: onChanged,
+      ),
+    );
+  }
+}
+
 class NoteCard extends ConsumerWidget {
   final Widget description;
   final List<Widget> children;
@@ -77,32 +115,32 @@ class NoteCard extends ConsumerWidget {
   const NoteCard({
     Key? key,
     required this.description,
-    required this.children,
+    this.children = const [],
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Container(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primaryContainer.withOpacity(0.2),
-          border: Border.all(color: theme.colorScheme.primaryContainer),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(left: 4, right: 4, bottom: 12),
-                child: description,
-              ),
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer.withOpacity(0.2),
+        border: Border.all(color: theme.colorScheme.primaryContainer),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: description,
+            ),
+            if (children.isNotEmpty) ...[
+              const SizedBox(height: 12),
               ...children,
-            ],
-          ),
+            ]
+          ],
         ),
       ),
     );
@@ -144,6 +182,179 @@ class TagSelector extends ConsumerWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
+  final Widget title;
+  final String prefix;
+  final bool tooltip;
+  final List<T> values;
+  final T selected;
+  final Set<T>? disabled;
+
+  final Callback<T> onSelected;
+
+  const ChoiceFormLine({
+    Key? key,
+    required this.title,
+    required this.prefix,
+    this.tooltip = true,
+    required this.values,
+    required this.selected,
+    this.disabled,
+    required this.onSelected,
+  }) : super(key: key);
+
+  Widget chip(BuildContext context, WidgetRef ref, T value) {
+    final theme = Theme.of(context);
+    final isDisabled = disabled?.contains(value) ?? false;
+    return Disabled(
+      disabled: isDisabled,
+      tooltip: isDisabled ? "$prefix.${value.name.snakeCase}.disabled_tooltip".tr() : "",
+      child: ChoiceChip(
+        label: Text("$prefix.${value.name.snakeCase}.label".tr()),
+        tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
+        backgroundColor: value == selected ? null : theme.colorScheme.surfaceVariant,
+        selected: value == selected,
+        onSelected: (_) => onSelected(value),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FormLine(
+      title: title,
+      children: [
+        for (final value in values) chip(context, ref, value),
+      ],
+    );
+  }
+}
+
+class _SelectorChip extends ConsumerWidget {
+  final Text label;
+  final String tooltip;
+  final bool selected;
+  final ValueChanged<bool> onSelected;
+
+  const _SelectorChip({
+    Key? key,
+    required this.label,
+    required this.tooltip,
+    required this.selected,
+    required this.onSelected,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return FilterChip(
+      label: label,
+      backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
+      showCheckmark: false,
+      tooltip: tooltip,
+      selected: selected,
+      onSelected: onSelected,
+    );
+  }
+}
+
+class _SelectorExpandButton extends ConsumerWidget {
+  final VoidCallback onPressed;
+
+  const _SelectorExpandButton({Key? key, required this.onPressed}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Align(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: ActionChip(
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+          avatar: const Icon(Icons.expand_more),
+          label: Text("$tr_common.selector.expand_button".tr()),
+          side: BorderSide.none,
+          backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          onPressed: onPressed,
+        ),
+      ),
+    );
+  }
+}
+
+class SelectorWidget<T> extends ConsumerStatefulWidget {
+  final Widget description;
+  final List<T> candidates;
+  final Set<int> selected;
+  final Value2Callback<int, bool> onSelected;
+
+  const SelectorWidget({
+    Key? key,
+    required this.description,
+    required this.candidates,
+    required this.selected,
+    required this.onSelected,
+  }) : super(key: key);
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _SelectorWidgetState();
+}
+
+class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
+  late bool collapsed;
+
+  @override
+  void initState() {
+    super.initState();
+    collapsed = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final needCollapse = collapsed && widget.candidates.length > 30;
+    final reduced = needCollapse ? widget.candidates.partial(0, 30) : widget.candidates;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
+          child: widget.description,
+        ),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (widget.candidates.isEmpty) Text("$tr_common.selector.not_found_message".tr()),
+                for (final info in reduced)
+                  _SelectorChip(
+                    label: Text(info.label),
+                    tooltip: info.tooltip,
+                    selected: widget.selected.contains(info.sid),
+                    onSelected: (selected) => widget.onSelected(info.sid, selected),
+                  ),
+                if (needCollapse) Text("${widget.candidates.length - reduced.length} more"),
+              ],
+            ),
+          ),
+        ),
+        if (needCollapse)
+          _SelectorExpandButton(
+            onPressed: () {
+              setState(() => collapsed = false);
+            },
+          ),
+      ],
     );
   }
 }

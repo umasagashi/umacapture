@@ -107,6 +107,13 @@
                         "tooltip": "反映せずにキャンセル"
                     }
                 },
+                "common": {
+                    "selector": {
+                        "not_found_message": "該当なし",
+                        "skill_prefix": "スキル：",
+                        "expand_button": "全部を表示"
+                    }
+                },
                 "ranged_label": {
                     "range": "表示範囲",
                     "min": "最小値",
@@ -133,24 +140,25 @@
                         "description": "選択されているスキルを所持するウマ娘がテーブルに表示されます。",
                         "tags": {
                             "description": "選択されている属性のスキルが下に表示されます。この選択はフィルタおよびテーブルには反映されません。（注意：属性は不正確なことがあります）"
-                        },
-                        "not_found_message": "該当なし"
+                        }
                     },
                     "mode": {
                         "label": "対象",
-                        "disabled_tooltip": "複数のスキルを選択している時だけ変更できます。",
                         "template": "現在の条件：選択したスキルの{selection}を所持するウマ娘を表示",
                         "all_of": {
                             "label": "すべて",
-                            "description": "すべて"
+                            "description": "すべて",
+                            "disabled_tooltip": "複数のスキルを選択している時だけ変更できます。"
                         },
                         "any_of": {
                             "label": "いずれか",
-                            "description": "いずれか"
+                            "description": "いずれか",
+                            "disabled_tooltip": "複数のスキルを選択している時だけ変更できます。"
                         },
                         "sum_of": {
                             "label": "個数",
-                            "description": "うち {count} 個以上"
+                            "description": "うち {count} 個以上",
+                            "disabled_tooltip": "複数のスキルを選択している時だけ変更できます。"
                         },
                         "count": {
                             "label": "個数",
@@ -180,27 +188,27 @@
                             "skill_tags": {
                                 "label": "スキル属性（スキル因子のみ）"
                             }
-                        },
-                        "not_found_message": "該当なし",
-                        "skill_prefix": "スキル："
+                        }
                     },
                     "mode": {
                         "label": "モード",
                         "template": "現在の条件：選択した因子の{selection}が、{subject}で{count}ウマ娘を表示",
                         "logic": {
                             "label": "対象",
-                            "disabled_tooltip": "複数の因子を選択している時だけ変更できます。",
                             "all_of": {
                                 "label": "すべて",
-                                "description": "すべて"
+                                "description": "すべて",
+                                "disabled_tooltip": "複数の因子を選択している時だけ変更できます。"
                             },
                             "any_of": {
                                 "label": "いずれか",
-                                "description": "いずれか"
+                                "description": "いずれか",
+                                "disabled_tooltip": "複数の因子を選択している時だけ変更できます。"
                             },
                             "sum_of": {
                                 "label": "合計",
-                                "description": "星合計"
+                                "description": "星合計",
+                                "disabled_tooltip": "複数の因子を選択している時だけ変更できます。"
                             }
                         },
                         "subject": {
@@ -223,7 +231,7 @@
                             "star_and_count": {
                                 "label": "星数 × 因子数",
                                 "description": "星{star}以上を{count}個以上所持する",
-                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.logic.sum_of.label】または【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ選べます。"
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.logic.sum_of.label】または【@:pages.chara_detail.column_predicate.factor.mode.subject.family.label】を選択している時だけ選べます。"
                             },
                             "value": {
                                 "star": "星数",
@@ -258,9 +266,6 @@
                         "title": {
                             "label": "表示名"
                         }
-                    },
-                    "expand": {
-                        "tooltip": "全部を表示"
                     }
                 }
             },

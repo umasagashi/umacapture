@@ -13,6 +13,7 @@ import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
+import '/src/gui/chara_detail/common.dart';
 
 // ignore: constant_identifier_names
 const tr_character = "pages.chara_detail.column_predicate.character";
@@ -126,9 +127,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget tag(BuildResource resource) {
-    return Text(title);
-  }
+  Widget tag(BuildResource resource) => Text(title);
 
   @override
   Widget selector() => CharacterCardColumnSelector(specId: id);
@@ -136,18 +135,20 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
 
 final _clonedSpecProvider = SpecProviderAccessor<CharacterCardColumnSpec>();
 
-class CharacterCardColumnSelector extends ConsumerWidget {
+class _CharaCardChip extends ConsumerWidget {
   final String specId;
+  final AvailableCharaCardInfo card;
+  final bool selected;
 
-  const CharacterCardColumnSelector({
-    Key? key,
+  const _CharaCardChip({
     required this.specId,
-  }) : super(key: key);
+    required this.card,
+    required this.selected,
+  });
 
-  Widget charaChipWidget(BuildContext context, WidgetRef ref, AvailableCharaCardInfo card) {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final chipFrameColor = theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer;
-    final rejected = _clonedSpecProvider.watch(ref, specId).predicate.rejects;
     return Stack(
       alignment: Alignment.centerLeft,
       children: [
@@ -158,14 +159,14 @@ class CharacterCardColumnSelector extends ConsumerWidget {
               padding: const EdgeInsets.only(left: 36),
               child: Text(card.cardInfo.names.first),
             ),
-            backgroundColor: !rejected.contains(card.cardInfo.sid) ? null : theme.colorScheme.surfaceVariant,
+            backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
             showCheckmark: false,
-            selected: !rejected.contains(card.cardInfo.sid),
+            selected: selected,
             onSelected: (selected) {
               _clonedSpecProvider.update(ref, specId, (spec) {
                 return spec.copyWith(
                   predicate: CharacterCardPredicate(
-                    rejects: Set.from(spec.predicate.rejects)..toggle(card.cardInfo.sid, shouldExists: !selected),
+                    rejects: Set.from(spec.predicate.rejects)..toggle(card.cardInfo.sid, shouldExists: selected),
                   ),
                 );
               });
@@ -174,7 +175,7 @@ class CharacterCardColumnSelector extends ConsumerWidget {
         ),
         IgnorePointer(
           child: CircleAvatar(
-            backgroundColor: chipFrameColor,
+            backgroundColor: theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer,
             radius: 24,
             child: ClipOval(
               child: Align(
@@ -189,16 +190,24 @@ class CharacterCardColumnSelector extends ConsumerWidget {
       ],
     );
   }
+}
 
-  Widget selectionWidget(BuildContext context, WidgetRef ref) {
+class CharacterCardColumnSelector extends ConsumerWidget {
+  final String specId;
+
+  const CharacterCardColumnSelector({
+    Key? key,
+    required this.specId,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final charaCards = ref.watch(availableCharaCardsProvider);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final rejected = _clonedSpecProvider.watch(ref, specId).predicate.rejects;
+    return FormGroup(
+      title: Text("$tr_character.selection.label".tr()),
+      description: Text("$tr_character.selection.description".tr()),
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
-          child: Text("$tr_character.selection.description".tr()),
-        ),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Align(
@@ -207,30 +216,16 @@ class CharacterCardColumnSelector extends ConsumerWidget {
               spacing: 8,
               runSpacing: 2,
               children: [
-                for (final card in charaCards) charaChipWidget(context, ref, card),
+                for (final card in charaCards)
+                  _CharaCardChip(
+                    specId: specId,
+                    card: card,
+                    selected: !rejected.contains(card.cardInfo.sid),
+                  ),
               ],
             ),
           ),
         ),
-      ],
-    );
-  }
-
-  Widget headingWidget(String title) {
-    return Row(
-      children: [
-        Text(title),
-        const Expanded(child: Divider(indent: 8)),
-      ],
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Column(
-      children: [
-        headingWidget("$tr_character.selection.label".tr()),
-        selectionWidget(context, ref),
       ],
     );
   }

@@ -21,7 +21,11 @@ import '/src/gui/common.dart';
 const tr_skill = "pages.chara_detail.column_predicate.skill";
 
 @jsonSerializable
-enum SkillSetLogicMode { anyOf, allOf, sumOf }
+enum SkillSetLogicMode {
+  anyOf,
+  allOf,
+  sumOf,
+}
 
 @jsonSerializable
 class SkillNotation {
@@ -32,7 +36,7 @@ class SkillNotation {
 
 @jsonSerializable
 class AggregateSkillPredicate {
-  final List<int> query;
+  final Set<int> query;
   final SkillSetLogicMode logic;
   final int min;
   final SkillNotation notation;
@@ -47,7 +51,7 @@ class AggregateSkillPredicate {
   });
 
   AggregateSkillPredicate.any()
-      : query = [],
+      : query = {},
         logic = SkillSetLogicMode.anyOf,
         min = 1,
         notation = SkillNotation(
@@ -56,7 +60,7 @@ class AggregateSkillPredicate {
         tags = {};
 
   AggregateSkillPredicate copyWith({
-    List<int>? query,
+    Set<int>? query,
     SkillSetLogicMode? logic,
     int? min,
     SkillNotation? notation,
@@ -118,7 +122,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final String id;
 
   @override
-  String title;
+  final String title;
 
   SkillColumnSpec({
     required this.id,
@@ -209,9 +213,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  Widget tag(BuildResource resource) {
-    return Text(title);
-  }
+  Widget tag(BuildResource resource) => Text(title);
 
   @override
   Widget selector() => SkillColumnSelector(specId: id);
@@ -224,48 +226,50 @@ final _selectedTagsProvider = StateProvider.autoDispose.family<Set<Tag>, String>
   return Set.from(spec.predicate.tags);
 });
 
-class _SkillSelector extends ConsumerStatefulWidget {
+List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
+  final info = ref.watch(availableSkillInfoProvider);
+  final selected = ref.watch(_selectedTagsProvider(specId)).map((e) => e.id).toSet();
+  if (selected.isEmpty) {
+    return info;
+  } else {
+    return info.where((e) => e.tags.containsAll(selected)).toList();
+  }
+}
+
+class _SelectionSelector extends ConsumerWidget {
   final String specId;
 
-  const _SkillSelector({
+  const _SelectionSelector({
     required this.specId,
   });
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _SkillSelectorState();
-}
-
-class _SkillSelectorState extends ConsumerState<_SkillSelector> {
-  late bool collapsed;
-
-  @override
-  void initState() {
-    super.initState();
-    collapsed = true;
+  Widget tagsWidget() {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: NoteCard(
+        description: Text("$tr_skill.selection.tags.description".tr()),
+        children: [
+          TagSelector(
+            candidateTagsProvider: skillTagProvider,
+            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedTagsProvider(specId)),
+          ),
+        ],
+      ),
+    );
   }
 
-  List<SkillInfo> getInfo(WidgetRef ref) {
-    final info = ref.watch(availableSkillInfoProvider);
-    final selected = ref.watch(_selectedTagsProvider(widget.specId)).map((e) => e.id).toSet();
-    if (selected.isEmpty) {
-      return info;
-    } else {
-      return info.where((e) => e.tags.containsAll(selected)).toList();
-    }
-  }
-
-  Widget skillChip(SkillInfo label, ThemeData theme, bool selected) {
-    return FilterChip(
-      label: Text(label.names.first),
-      backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
-      showCheckmark: false,
-      tooltip: label.descriptions.first,
+  Widget selectorWidget(BuildContext context, WidgetRef ref) {
+    final selected = _clonedSpecProvider.watch(ref, specId).predicate.query.toSet();
+    final candidates = _watchCandidateSkills(ref, specId);
+    return SelectorWidget<SkillInfo>(
+      description: Text("$tr_skill.selection.description".tr()),
+      candidates: candidates,
       selected: selected,
-      onSelected: (selected) {
-        _clonedSpecProvider.update(ref, widget.specId, (spec) {
+      onSelected: (sid, selected) {
+        _clonedSpecProvider.update(ref, specId, (spec) {
           return spec.copyWith(
             predicate: spec.predicate.copyWith(
-              query: List<int>.from(spec.predicate.query)..toggle(label.sid, shouldExists: !selected),
+              query: Set.from(spec.predicate.query)..toggle(sid, shouldExists: !selected),
             ),
           );
         });
@@ -273,59 +277,147 @@ class _SkillSelectorState extends ConsumerState<_SkillSelector> {
     );
   }
 
-  Widget expandButton(ThemeData theme) {
-    return Align(
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: ActionChip(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-          avatar: const Icon(Icons.expand_more),
-          label: Text("$tr_skill.expand.tooltip".tr()),
-          side: BorderSide.none,
-          backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          onPressed: () {
-            setState(() {
-              collapsed = false;
-            });
-          },
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FormGroup(
+      title: Text("$tr_skill.selection.label".tr()),
+      children: [
+        tagsWidget(),
+        selectorWidget(context, ref),
+      ],
+    );
+  }
+}
+
+class _ModeSelector extends ConsumerWidget {
+  final String specId;
+
+  const _ModeSelector({
+    required this.specId,
+  });
+
+  Widget descriptionWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    final selection = "$tr_skill.mode.${predicate.logic.name.snakeCase}.description".tr(namedArgs: {
+      "count": predicate.min.toString(),
+    });
+    return NoteCard(
+      description: Text("$tr_skill.mode.template".tr(namedArgs: {
+        "selection": selection,
+      })),
+    );
+  }
+
+  Widget logicChoiceWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    return ChoiceFormLine<SkillSetLogicMode>(
+      title: Text("$tr_skill.mode.label".tr()),
+      prefix: "$tr_skill.mode",
+      tooltip: false,
+      values: SkillSetLogicMode.values,
+      selected: predicate.logic,
+      disabled: predicate.query.length <= 1 ? SkillSetLogicMode.values.toSet() : null,
+      onSelected: (value) {
+        _clonedSpecProvider.update(ref, specId, (spec) {
+          return spec.copyWith(predicate: spec.predicate.copyWith(logic: value));
+        });
+      },
+    );
+  }
+
+  Widget minCountWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    return FormLine(
+      title: Text("$tr_skill.mode.count.label".tr()),
+      children: [
+        Disabled(
+          disabled: predicate.logic != SkillSetLogicMode.sumOf,
+          tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
+          child: SpinBox(
+            width: 100,
+            height: 30,
+            min: 1,
+            max: predicate.query.length,
+            value: predicate.min,
+            onChanged: (value) {
+              _clonedSpecProvider.update(ref, specId, (spec) {
+                return spec.copyWith(predicate: spec.predicate.copyWith(min: value));
+              });
+            },
+          ),
         ),
-      ),
+      ],
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final selected = _clonedSpecProvider.watch(ref, widget.specId).predicate.query.toSet();
-    final labels = getInfo(ref);
-    final needCollapse = collapsed && labels.length > 30;
-    final collapsedLabels = needCollapse ? labels.partial(0, 30) : labels;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FormGroup(
+      title: Text("$tr_skill.mode.label".tr()),
+      description: descriptionWidget(context, ref),
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
-          child: Text("$tr_skill.selection.description".tr()),
+        logicChoiceWidget(context, ref),
+        minCountWidget(context, ref),
+      ],
+    );
+  }
+}
+
+class _NotationSelector extends ConsumerWidget {
+  final String specId;
+
+  const _NotationSelector({
+    required this.specId,
+  });
+
+  Widget notationMaxWidget(WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    return FormLine(
+      title: Text("$tr_skill.notation.max.label".tr()),
+      children: [
+        SpinBox(
+          width: 120,
+          height: 30,
+          min: 0,
+          max: 100,
+          value: predicate.notation.max,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(notation: SkillNotation(max: value)),
+              );
+            });
+          },
         ),
-        Padding(
-          padding: const EdgeInsets.all(8),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                if (labels.isEmpty) Text("$tr_skill.selection.not_found_message".tr()),
-                for (final label in collapsedLabels) skillChip(label, theme, selected.contains(label.sid)),
-                if (needCollapse) Text("${labels.length - collapsedLabels.length} more"),
-              ],
-            ),
-          ),
+      ],
+    );
+  }
+
+  Widget notationTitleWidget(WidgetRef ref) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    return FormLine(
+      title: Text("$tr_skill.notation.title.label".tr()),
+      children: [
+        DenseTextField(
+          initialText: spec.title,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(title: value);
+            });
+          },
         ),
-        if (needCollapse) expandButton(theme),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return FormGroup(
+      title: Text("$tr_skill.notation.label".tr()),
+      description: Text("$tr_skill.notation.description".tr()),
+      children: [
+        notationMaxWidget(ref),
+        notationTitleWidget(ref),
       ],
     );
   }
@@ -339,267 +431,15 @@ class SkillColumnSelector extends ConsumerWidget {
     required this.specId,
   }) : super(key: key);
 
-  Widget headingWidget(String title) {
-    return Row(
-      children: [
-        Text(title),
-        const Expanded(child: Divider(indent: 8)),
-      ],
-    );
-  }
-
-  Widget modeChipWidget(
-    BuildContext context,
-    WidgetRef ref, {
-    required String label,
-    required SkillSetLogicMode mode,
-  }) {
-    final theme = Theme.of(context);
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    final selected = predicate.logic == mode;
-    return ChoiceChip(
-      label: Text(label),
-      backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
-      selected: selected,
-      onSelected: (_) {
-        _clonedSpecProvider.update(ref, specId, (spec) {
-          return spec.copyWith(
-            predicate: spec.predicate.copyWith(logic: mode),
-          );
-        });
-      },
-    );
-  }
-
-  Widget modeDescriptionWidget(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    final selection = "$tr_skill.mode.${predicate.logic.name.snakeCase}.description".tr(namedArgs: {
-      "count": predicate.min.toString(),
-    });
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primaryContainer.withOpacity(0.2),
-            border: Border.all(color: theme.colorScheme.primaryContainer),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          padding: const EdgeInsets.all(8),
-          child: Text("$tr_skill.mode.template".tr(namedArgs: {"selection": selection})),
-        ),
-      ),
-    );
-  }
-
-  Widget choiceChipWidget(
-    BuildContext context, {
-    required String label,
-    bool disabled = false,
-    String tooltip = "",
-    required bool selected,
-    required VoidCallback onSelected,
-  }) {
-    final theme = Theme.of(context);
-    return Disabled(
-      disabled: disabled,
-      tooltip: tooltip,
-      child: ChoiceChip(
-        label: Text(label),
-        backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
-        selected: selected,
-        onSelected: (_) => onSelected(),
-      ),
-    );
-  }
-
-  Widget choiceLine({
-    required Widget label,
-    required List<Widget> children,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            label,
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget selectionChoiceWidget(BuildContext context, WidgetRef ref) {
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    return choiceLine(
-      label: Text("$tr_skill.mode.label".tr()),
-      children: [
-        choiceChipWidget(
-          context,
-          label: "$tr_skill.mode.all_of.label".tr(),
-          disabled: predicate.query.length <= 1,
-          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
-          selected: predicate.logic == SkillSetLogicMode.allOf,
-          onSelected: () {
-            _clonedSpecProvider.update(ref, specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(logic: SkillSetLogicMode.allOf),
-              );
-            });
-          },
-        ),
-        choiceChipWidget(
-          context,
-          label: "$tr_skill.mode.any_of.label".tr(),
-          disabled: predicate.query.length <= 1,
-          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
-          selected: predicate.logic == SkillSetLogicMode.anyOf,
-          onSelected: () {
-            _clonedSpecProvider.update(ref, specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(logic: SkillSetLogicMode.anyOf),
-              );
-            });
-          },
-        ),
-        choiceChipWidget(
-          context,
-          label: "$tr_skill.mode.sum_of.label".tr(),
-          disabled: predicate.query.length <= 1,
-          tooltip: "$tr_skill.mode.disabled_tooltip".tr(),
-          selected: predicate.logic == SkillSetLogicMode.sumOf,
-          onSelected: () {
-            _clonedSpecProvider.update(ref, specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(logic: SkillSetLogicMode.sumOf),
-              );
-            });
-          },
-        ),
-      ],
-    );
-  }
-
-  Widget modeSelectionWidget(BuildContext context, WidgetRef ref) {
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Column(
-          children: [
-            modeDescriptionWidget(context, ref),
-            selectionChoiceWidget(context, ref),
-            choiceLine(
-              label: Text("$tr_skill.mode.count.label".tr()),
-              children: [
-                Disabled(
-                  disabled: predicate.logic != SkillSetLogicMode.sumOf,
-                  tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
-                  child: SpinBox(
-                    width: 100,
-                    height: 30,
-                    min: 1,
-                    max: predicate.query.length,
-                    value: predicate.min,
-                    onChanged: (value) {
-                      _clonedSpecProvider.update(ref, specId, (spec) {
-                        return spec.copyWith(
-                          predicate: spec.predicate.copyWith(min: value),
-                        );
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget notationGroup(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
-    final controller = TextEditingController(text: spec.title);
-    return FormGroup(
-      title: Text("$tr_skill.notation.label".tr()),
-      description: Text("$tr_skill.notation.description".tr()),
-      children: [
-        FormLine(
-          title: Text("$tr_skill.notation.max.label".tr()),
-          children: [
-            SpinBox(
-              width: 120,
-              height: 30,
-              min: 0,
-              max: 100,
-              value: spec.predicate.notation.max,
-              onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(
-                    predicate: spec.predicate.copyWith(notation: SkillNotation(max: value)),
-                  );
-                });
-              },
-            ),
-          ],
-        ),
-        FormLine(
-          title: Text("$tr_skill.notation.title.label".tr()),
-          children: [
-            IntrinsicWidth(
-              child: TextFormField(
-                controller: controller,
-                decoration: InputDecoration(
-                  isDense: true,
-                  isCollapsed: true,
-                  contentPadding: const EdgeInsets.all(8).copyWith(right: 16),
-                  errorStyle: const TextStyle(fontSize: 0),
-                ),
-                autovalidateMode: AutovalidateMode.always,
-                validator: (value) => (value == null || value.isEmpty) ? "title cannot be empty" : null,
-                onChanged: (value) {
-                  if (value.isNotEmpty) {
-                    _clonedSpecProvider.update(ref, specId, (spec) {
-                      return spec.copyWith(title: value);
-                    });
-                  }
-                },
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
-        headingWidget("$tr_skill.selection.label".tr()),
-        NoteCard(
-          description: Text("$tr_skill.selection.tags.description".tr()),
-          children: [
-            TagSelector(
-              candidateTagsProvider: skillTagProvider,
-              selectedTagsProvider: AutoDisposeStateProviderLike(_selectedTagsProvider(specId)),
-            )
-          ],
-        ),
-        _SkillSelector(specId: specId),
+        _SelectionSelector(specId: specId),
         const SizedBox(height: 32),
-        headingWidget("$tr_skill.mode.label".tr()),
-        modeSelectionWidget(context, ref),
+        _ModeSelector(specId: specId),
         const SizedBox(height: 32),
-        notationGroup(ref),
+        _NotationSelector(specId: specId),
       ],
     );
   }
