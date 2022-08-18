@@ -32,6 +32,8 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
 class CharaRankColumnBuilder implements ColumnBuilder {
   final Parser parser;
   final String labelKey = "character_rank.name";
+  final int? min;
+  final int? max;
 
   @override
   final String title;
@@ -39,11 +41,16 @@ class CharaRankColumnBuilder implements ColumnBuilder {
   @override
   final ColumnCategory category;
 
+  @override
+  final bool isFilterColumn;
+
   CharaRankColumnBuilder({
     required this.title,
     required this.category,
     required this.parser,
-  });
+    this.min,
+    this.max,
+  }) : isFilterColumn = min != null || max != null;
 
   @override
   CharaRankColumnSpec build() {
@@ -52,7 +59,10 @@ class CharaRankColumnBuilder implements ColumnBuilder {
       title: title,
       parser: parser,
       labelKey: labelKey,
-      predicate: IsInRangeIntegerPredicate(),
+      predicate: IsInRangeIntegerPredicate(
+        min: min,
+        max: max,
+      ),
     );
   }
 }

@@ -26,38 +26,73 @@ class ColumnBuilderDialog extends ConsumerWidget {
       onPressed: () {
         final specs = ref.read(currentColumnSpecsProvider.notifier);
         for (final builder in targets) {
-          specs.add(builder.build());
+          if (!builder.isFilterColumn) {
+            specs.add(builder.build());
+          }
         }
         Navigator.of(context).pop();
       },
     );
   }
 
-  Widget builderChipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
-    return Align(
-      alignment: Alignment.topLeft,
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          if (targets.length >= 2) addAllChipWidget(context, ref, targets),
-          for (final builder in targets)
-            GestureDetector(
-              onLongPress: () {
-                Navigator.of(context).pop();
-                ColumnSpecDialog.show(context, builder.build());
-              },
-              child: ActionChip(
-                label: Text(builder.title),
-                onPressed: () {
-                  ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build());
-                  Navigator.of(context).pop();
-                },
-              ),
-            ),
-          if (targets.isEmpty) const Text("Under Construction"),
-        ],
+  Widget builderChip(BuildContext context, WidgetRef ref, ColumnBuilder builder) {
+    final theme = Theme.of(context);
+    return GestureDetector(
+      onLongPress: () {
+        final spec = builder.build();
+        ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
+        Navigator.of(context).pop();
+        ColumnSpecDialog.show(context, spec);
+      },
+      child: ActionChip(
+        avatar: builder.isFilterColumn ? const Icon(Icons.search_outlined, size: 16) : null,
+        labelPadding: builder.isFilterColumn ? const EdgeInsets.only(right: 8) : null,
+        backgroundColor: builder.isFilterColumn ? theme.chipTheme.backgroundColor!.withOpacity(0.2) : null,
+        label: Text(builder.title),
+        onPressed: () {
+          ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build());
+          Navigator.of(context).pop();
+        },
       ),
+    );
+  }
+
+  Widget builderChipCategory(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
+    final theme = Theme.of(context);
+    final nonFilterBuilders = targets.where((e) => !e.isFilterColumn).toList();
+    final filterBuilders = targets.where((e) => e.isFilterColumn).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 16,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            if (nonFilterBuilders.length >= 2) addAllChipWidget(context, ref, targets),
+            for (final builder in nonFilterBuilders) builderChip(context, ref, builder),
+          ],
+        ),
+        if (filterBuilders.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 16),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.onSurface.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 16,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text("$tr_chara_detail.column_spec.dialog.filter.label".tr()),
+                for (final builder in filterBuilders) builderChip(context, ref, builder),
+              ],
+            ),
+          ),
+        if (targets.isEmpty) Text("common.under_construction".tr()),
+      ],
     );
   }
 
@@ -93,7 +128,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             ),
             Padding(
               padding: const EdgeInsets.all(16),
-              child: builderChipWidget(context, ref, buildersMap[cat] ?? []),
+              child: builderChipCategory(context, ref, buildersMap[cat] ?? []),
             ),
           ],
         ],

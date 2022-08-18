@@ -74,10 +74,13 @@
                     "close_button": {
                         "tooltip": "追加せずにキャンセル"
                     },
-                    "description": "Tips: 長押しするとフィルタカスタマイズ画面に移動します。",
+                    "description": "Tips: 長押しするとカスタマイズ画面に移動します。",
                     "add_all_button": {
                         "label": "全部",
-                        "tooltip": "このグループの全項目をまとめて追加します"
+                        "tooltip": "このグループの全項目をまとめて追加します（フィルタ除く）"
+                    },
+                    "filter": {
+                        "label": "フィルタ"
                     }
                 }
             },
@@ -90,7 +93,8 @@
                 "support_card": "サポートカード",
                 "family": "継承ウマ",
                 "campaign": "戦績",
-                "race": "出走履歴"
+                "race": "出走履歴",
+                "metadata": "メタデータ"
             },
             "column_predicate": {
                 "dialog": {
@@ -298,88 +302,110 @@
             },
             "columns": {
                 "character": {
-                    "title": "ウマ娘",
-                    "description": "育成ウマ娘"
+                    "title": "ウマ娘"
                 },
                 "evaluation": {
-                    "title": "評価点",
-                    "description": "評価点"
+                    "title": "評価点"
                 },
                 "chara_rank": {
-                    "title": "ランク",
-                    "description": "評価ランク"
+                    "title": "評価ランク",
+                    "shortcuts": {
+                        "less_than_a": {
+                            "title": "評価B以下"
+                        }
+                    }
                 },
                 "status": {
                     "speed": {
-                        "title": "スピード",
-                        "description": "スピード"
+                        "title": "スピード"
                     },
                     "stamina": {
-                        "title": "スタミナ",
-                        "description": "スタミナ"
+                        "title": "スタミナ"
                     },
                     "power": {
-                        "title": "パワー",
-                        "description": "パワー"
+                        "title": "パワー"
                     },
                     "guts": {
-                        "title": "根性",
-                        "description": "根性"
+                        "title": "根性"
                     },
                     "intelligence": {
-                        "title": "賢さ",
-                        "description": "賢さ"
+                        "title": "賢さ"
                     }
                 },
                 "aptitude": {
                     "turf_ground": {
-                        "title": "芝",
-                        "description": "芝適性"
+                        "title": "芝"
                     },
                     "dirt_ground": {
-                        "title": "ダート",
-                        "description": "ダート適性"
+                        "title": "ダート"
                     },
                     "short_range": {
-                        "title": "短距離",
-                        "description": "短距離適性"
+                        "title": "短距離"
                     },
                     "mile_range": {
-                        "title": "マイル",
-                        "description": "マイル適性"
+                        "title": "マイル"
                     },
                     "middle_range": {
-                        "title": "中距離",
-                        "description": "中距離適性"
+                        "title": "中距離"
                     },
                     "long_range": {
-                        "title": "長距離",
-                        "description": "長距離適性"
+                        "title": "長距離"
                     },
                     "lead_pace": {
-                        "title": "逃げ",
-                        "description": "逃げ適性"
+                        "title": "逃げ"
                     },
                     "with_pace": {
-                        "title": "先行",
-                        "description": "先行適性"
+                        "title": "先行"
                     },
                     "off_pace": {
-                        "title": "差し",
-                        "description": "差し適性"
+                        "title": "差し"
                     },
                     "late_charge": {
-                        "title": "追込",
-                        "description": "追込適性"
+                        "title": "追込"
+                    },
+                    "shortcuts": {
+                        "short_range": {
+                            "title": "短距離S"
+                        },
+                        "mile_range": {
+                            "title": "マイルS"
+                        },
+                        "middle_range": {
+                            "title": "中距離S"
+                        },
+                        "long_range": {
+                            "title": "長距離S"
+                        }
                     }
                 },
                 "skill": {
-                    "title": "スキル",
-                    "description": "所持スキル"
+                    "title": "スキル"
                 },
                 "factor": {
                     "title": "因子",
-                    "description": "所持因子"
+                    "shortcuts": {
+                        "status": {
+                            "title": "青因子"
+                        },
+                        "aptitude": {
+                            "title": "赤因子"
+                        },
+                        "scenario": {
+                            "title": "シナリオ因子"
+                        },
+                        "short_range": {
+                            "title": "短距離"
+                        },
+                        "mile_range": {
+                            "title": "マイル"
+                        },
+                        "middle_range": {
+                            "title": "中距離"
+                        },
+                        "long_range": {
+                            "title": "長距離"
+                        }
+                    }
                 }
             },
             "context_menu": {
@@ -453,5 +479,8 @@
             "new_version_available": "umacapture の更新が利用可能です。",
             "latest_version_not_available": "アプリバージョンの取得に失敗しました。"
         }
+    },
+    "common": {
+        "under_construction": "開発中"
     }
 }

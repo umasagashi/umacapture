@@ -270,6 +270,9 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
   @override
   final ColumnCategory category;
 
+  @override
+  bool get isFilterColumn => false;
+
   RangedIntegerColumnBuilder({
     required this.title,
     required this.category,

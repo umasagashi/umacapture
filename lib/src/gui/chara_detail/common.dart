@@ -149,7 +149,7 @@ class NoteCard extends ConsumerWidget {
 
 class TagSelector extends ConsumerWidget {
   final ProviderBase<List<Tag>> candidateTagsProvider;
-  final StateProviderLike<Set<Tag>> selectedTagsProvider;
+  final StateProviderLike<Set<String>> selectedTagsProvider;
 
   const TagSelector({
     Key? key,
@@ -171,12 +171,12 @@ class TagSelector extends ConsumerWidget {
           for (final tag in candidateTags)
             FilterChip(
               label: Text(tag.name),
-              backgroundColor: selectedTags.contains(tag) ? null : theme.colorScheme.surfaceVariant,
+              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceVariant,
               showCheckmark: false,
-              selected: selectedTags.contains(tag),
+              selected: selectedTags.contains(tag.id),
               onSelected: (selected) {
                 ref.read(selectedTagsProvider.notifier).update((tags) {
-                  return Set.from(tags)..toggle(tag, shouldExists: !selected);
+                  return Set.from(tags)..toggle(tag.id, shouldExists: !selected);
                 });
               },
             ),

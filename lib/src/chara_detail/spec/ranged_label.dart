@@ -239,6 +239,7 @@ class RangedLabelColumnSelector extends ConsumerWidget {
 class AptitudeColumnBuilder implements ColumnBuilder {
   final Parser parser;
   final String labelKey = "aptitude.name";
+  final int? min;
 
   @override
   final String title;
@@ -246,11 +247,15 @@ class AptitudeColumnBuilder implements ColumnBuilder {
   @override
   final ColumnCategory category;
 
+  @override
+  final bool isFilterColumn;
+
   AptitudeColumnBuilder({
     required this.title,
     required this.category,
     required this.parser,
-  });
+    this.min,
+  }) : isFilterColumn = min != null;
 
   @override
   RangedLabelColumnSpec build() {
@@ -259,7 +264,9 @@ class AptitudeColumnBuilder implements ColumnBuilder {
       title: title,
       parser: parser,
       labelKey: labelKey,
-      predicate: IsInRangeIntegerPredicate(),
+      predicate: IsInRangeIntegerPredicate(
+        min: min,
+      ),
     );
   }
 }

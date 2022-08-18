@@ -221,14 +221,14 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
 
 final _clonedSpecProvider = SpecProviderAccessor<SkillColumnSpec>();
 
-final _selectedTagsProvider = StateProvider.autoDispose.family<Set<Tag>, String>((ref, specId) {
+final _selectedTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
   final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
   return Set.from(spec.predicate.tags);
 });
 
 List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
   final info = ref.watch(availableSkillInfoProvider);
-  final selected = ref.watch(_selectedTagsProvider(specId)).map((e) => e.id).toSet();
+  final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
   if (selected.isEmpty) {
     return info;
   } else {
@@ -453,6 +453,9 @@ class SkillColumnBuilder implements ColumnBuilder {
 
   @override
   final ColumnCategory category;
+
+  @override
+  bool get isFilterColumn => false;
 
   SkillColumnBuilder({
     required this.title,

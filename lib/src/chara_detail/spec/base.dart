@@ -27,12 +27,15 @@ enum ColumnCategory {
   family,
   campaign,
   race,
+  metadata,
 }
 
 abstract class ColumnBuilder {
   String get title;
 
   ColumnCategory get category;
+
+  bool get isFilterColumn;
 
   ColumnSpec build();
 }
