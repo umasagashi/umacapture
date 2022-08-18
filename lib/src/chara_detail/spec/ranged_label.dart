@@ -14,6 +14,7 @@ import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
+import '/src/gui/chara_detail/common.dart';
 
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
@@ -113,9 +114,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget tag(BuildResource resource) {
-    return Text(title);
-  }
+  Widget tag(BuildResource resource) => Text(title);
 
   @override
   Widget selector() => RangedLabelColumnSelector(specId: id);
@@ -135,14 +134,9 @@ class RangedLabelColumnSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
-    return Column(
+    return FormGroup(
+      title: Text("$tr_ranged_label.range".tr()),
       children: [
-        Row(
-          children: [
-            Text("$tr_ranged_label.range".tr()),
-            const Expanded(child: Divider(indent: 8)),
-          ],
-        ),
         Padding(
           padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
           child: FlutterSlider(
