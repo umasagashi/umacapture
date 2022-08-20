@@ -1,5 +1,5 @@
 class Const {
-  static String get moduleUrlRoot => "https://umasagashi.pages.dev/data/umacapture";
+  static String get moduleUrlRoot => "https://umasagashi.com/data/umacapture";
 
   static String get appUrlRoot => "https://github.com/umasagashi/umacapture/releases/latest/download";
 
