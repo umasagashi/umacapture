@@ -1,10 +1,14 @@
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '/src/preference/settings_state.dart';
 import 'src/core/json_adapter.dart';
 import 'src/core/utils.dart';
+import 'src/core/version_check.dart';
 import 'src/gui/app_widget.dart';
 import 'src/preference/storage_box.dart';
 import 'src/preference/window_state.dart';
@@ -40,21 +44,7 @@ void setupWindowManager() async {
   );
 }
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-  initializeJsonReflectable();
-  await StorageBox.ensureOpened(reset: false);
-  await EasyLocalization.ensureInitialized();
-
-  // LicenseRegistry.addLicense(() async* {
-  //   final license = await rootBundle.loadString('google_fonts/OFL.txt');
-  //   yield LicenseEntryWithLineBreaks(['google_fonts'], license);
-  // });
-
-  if (CurrentPlatform.hasWindowFrame()) {
-    setupWindowManager();
-  }
-
+void run() {
   runApp(
     ProviderScope(
       // observers: [
@@ -71,4 +61,41 @@ void main() async {
       ),
     ),
   );
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  initializeJsonReflectable();
+  await StorageBox.ensureOpened(reset: false);
+  await EasyLocalization.ensureInitialized();
+
+  // LicenseRegistry.addLicense(() async* {
+  //   final license = await rootBundle.loadString('google_fonts/OFL.txt');
+  //   yield LicenseEntryWithLineBreaks(['google_fonts'], license);
+  // });
+
+  if (CurrentPlatform.hasWindowFrame()) {
+    setupWindowManager();
+  }
+
+  final enableErrorLog =
+      StorageBox(StorageBoxKey.settings).entry<bool>(SettingsEntryKey.enableErrorLogging.name).pull();
+  if (kDebugMode || enableErrorLog == false) {
+    logger.i("Error logging is disabled.");
+    run();
+  } else {
+    logger.i("Error logging is enabled.");
+    final appVersion = await loadLocalAppVersion();
+    await SentryFlutter.init(
+      (SentryFlutterOptions options) {
+        if (kDebugMode) {
+          options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
+        } else {
+          options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
+        }
+        options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
+      },
+      appRunner: run,
+    );
+  }
 }

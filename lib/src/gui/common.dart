@@ -1,8 +1,13 @@
+import 'package:easy_localization/easy_localization.dart';
+import 'package:feedback_sentry/feedback_sentry.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/core/notification_controller.dart';
 import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 
 class ListCard extends StatelessWidget {
   final String? title;
@@ -287,16 +292,12 @@ class Disabled extends StatelessWidget {
 }
 
 class CardDialog extends ConsumerWidget {
-  static Future<void> show(BuildContext context, Widget dialog) async {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: dialog,
-        );
-      },
-    );
+  static void show(WidgetRef ref, WidgetBuilder builder) {
+    ref.read(dialogBuilderProvider.notifier).show(builder);
+  }
+
+  static void dismiss(WidgetRef ref) {
+    ref.read(dialogBuilderProvider.notifier).dismiss();
   }
 
   final String dialogTitle;
@@ -337,7 +338,9 @@ class CardDialog extends ConsumerWidget {
               child: IconButton(
                 icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
                 splashRadius: 24,
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () {
+                  CardDialog.dismiss(ref);
+                },
               ),
             ),
           ),
@@ -365,6 +368,130 @@ class CardDialog extends ConsumerWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+OnFeedbackCallback _sendToSentryAndNotify() {
+  // ignore: invalid_use_of_visible_for_testing_member
+  final send = sendToSentry();
+  return (UserFeedback feedback) async {
+    send(feedback);
+    plainToastEventController.sink.add(ToastData(
+      ToastType.success,
+      description: "app.feedback.toast".tr(),
+    ));
+  };
+}
+
+void showFeedbackDialog(BuildContext context) {
+  BetterFeedback.of(context).show(_sendToSentryAndNotify());
+}
+
+class _CustomFeedbackLocalizations implements FeedbackLocalizations {
+  final String prefix = "app.feedback";
+
+  const _CustomFeedbackLocalizations();
+
+  @override
+  String get draw => "$prefix.draw".tr();
+
+  @override
+  String get feedbackDescriptionText => "$prefix.description".tr();
+
+  @override
+  String get navigate => "$prefix.navigate".tr();
+
+  @override
+  String get submitButtonText => "$prefix.submit".tr();
+}
+
+class _CustomFeedbackLocalizationsDelegate extends GlobalFeedbackLocalizationsDelegate {
+  @override
+  Future<FeedbackLocalizations> load(Locale locale) {
+    return SynchronousFuture(const _CustomFeedbackLocalizations());
+  }
+}
+
+class FeedbackLayer extends StatelessWidget {
+  final Widget child;
+
+  const FeedbackLayer({
+    Key? key,
+    required this.child,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return BetterFeedback(
+      localizationsDelegates: [_CustomFeedbackLocalizationsDelegate()],
+      theme: FeedbackThemeData(
+        background: Colors.transparent,
+        feedbackSheetColor: theme.colorScheme.surface,
+        sheetIsDraggable: false, // Not draggable anyway.
+        bottomSheetDescriptionStyle: theme.textTheme.bodyMedium!,
+      ),
+      child: child,
+    );
+  }
+}
+
+class DialogController extends StateNotifier<WidgetBuilder?> {
+  DialogController() : super(null);
+
+  void show(WidgetBuilder builder) {
+    state = builder;
+  }
+
+  void dismiss() {
+    state = null;
+  }
+}
+
+final dialogBuilderProvider = StateNotifierProvider<DialogController, WidgetBuilder?>((ref) {
+  return DialogController();
+});
+
+class DialogLayer extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const DialogLayer({
+    Key? key,
+    required this.child,
+  }) : super(key: key);
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _DialogLayerState();
+}
+
+class _DialogLayerState extends ConsumerState<DialogLayer> {
+  @override
+  Widget build(BuildContext context) {
+    final builder = ref.watch(dialogBuilderProvider);
+    final theme = Theme.of(context);
+    return Stack(
+      alignment: Alignment.center,
+      fit: StackFit.expand,
+      children: [
+        widget.child,
+        if (builder != null) ...[
+          GestureDetector(
+            onTap: () {
+              ref.read(dialogBuilderProvider.notifier).dismiss();
+            },
+            child: Container(
+              color: theme.shadowColor.withOpacity(0.5),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(32),
+            child: Center(
+              child: builder(context),
+            ),
+          ),
+        ]
+      ],
     );
   }
 }

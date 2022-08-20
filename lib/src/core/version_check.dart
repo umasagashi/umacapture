@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:tuple/tuple.dart';
 import 'package:version/version.dart';
 
@@ -110,15 +111,17 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
 
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
-    await Dio().download(Const.moduleZipUrl, downloadPath);
+    await Dio().download(Const.moduleZipUrl, downloadPath.path);
     await compute(_extractArchive, Tuple2(downloadPath, pathInfo.supportDir));
     downloadPath.toFile().delete();
-  } catch (e) {
+  } catch (exception, stackTrace) {
+    logger.e(exception);
     if (local == null) {
       _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
     } else {
       _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
     }
+    await Sentry.captureException(exception, stackTrace: stackTrace);
     return local?.version;
   }
 
@@ -189,11 +192,12 @@ FutureOr<Version?> _checkLatestAppVersion() async {
   }
 }
 
-final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
-  final local = await rootBundle
-      .loadString("assets/version_info.json")
-      .then((info) => Version.parse(jsonDecode(info)['version']));
+Future<Version> loadLocalAppVersion() async {
+  return rootBundle.loadString("assets/version_info.json").then((info) => Version.parse(jsonDecode(info)['version']));
+}
 
+final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
+  final local = await loadLocalAppVersion();
   final latest = await _checkLatestAppVersion();
   logger.i("App version: local=$local, latest=$latest");
 
