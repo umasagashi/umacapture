@@ -196,8 +196,12 @@ Future<Version> loadLocalAppVersion() async {
   return rootBundle.loadString("assets/version_info.json").then((info) => Version.parse(jsonDecode(info)['version']));
 }
 
+final localAppVersionLoader = FutureProvider<Version>((ref) async {
+  return loadLocalAppVersion();
+});
+
 final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
-  final local = await loadLocalAppVersion();
+  final local = await ref.watch(localAppVersionLoader.future);
   final latest = await _checkLatestAppVersion();
   logger.i("App version: local=$local, latest=$latest");
 

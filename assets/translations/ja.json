@@ -475,6 +475,15 @@
                     "description": "エラー発生時にログを自動送信します。変更は次回アプリ起動時から有効です。"
                 }
             },
+            "license": {
+                "title": "ライセンス情報",
+                "subtitle": "サードパーティーライセンス",
+                "description": "クリックするとライセンスを表示します。",
+                "dialog": {
+                    "title": "ライセンス",
+                    "close_button": "閉じる"
+                }
+            },
             "version_check": {
                 "title": "バージョン情報",
                 "subtitle": "現在のバージョン",

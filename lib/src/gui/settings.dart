@@ -1,4 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -230,6 +231,89 @@ class PrivacySettingsGroup extends ConsumerWidget {
   }
 }
 
+class _LicenseMaterialLocalizationsDelegate extends LocalizationsDelegate<MaterialLocalizations> {
+  const _LicenseMaterialLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => locale.languageCode == 'en';
+
+  @override
+  Future<MaterialLocalizations> load(Locale locale) => _LicenseMaterialLocalizations.load(locale);
+
+  @override
+  bool shouldReload(_LicenseMaterialLocalizationsDelegate old) => false;
+
+  @override
+  String toString() => 'LicenseMaterialLocalizations.delegate(en_US)';
+}
+
+class _LicenseMaterialLocalizations extends DefaultMaterialLocalizations {
+  const _LicenseMaterialLocalizations();
+
+  static const LocalizationsDelegate<MaterialLocalizations> delegate = _LicenseMaterialLocalizationsDelegate();
+
+  static Future<MaterialLocalizations> load(Locale locale) {
+    return SynchronousFuture<MaterialLocalizations>(const _LicenseMaterialLocalizations());
+  }
+
+  @override
+  String get licensesPageTitle => "";
+}
+
+class _LicensePageDialog extends ConsumerWidget {
+  const _LicensePageDialog({
+    Key? key,
+  }) : super(key: key);
+
+  static void show(WidgetRef ref) {
+    CardDialog.show(ref, (_) => const _LicensePageDialog());
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return CardDialog(
+      dialogTitle: "$tr_settings.license.dialog.title".tr(),
+      closeButtonTooltip: "$tr_settings.license.dialog.close_button".tr(),
+      usePageView: false,
+      content: Expanded(
+        child: Localizations(
+          delegates: const <LocalizationsDelegate<dynamic>>[
+            _LicenseMaterialLocalizations.delegate,
+            DefaultWidgetsLocalizations.delegate,
+            DefaultMaterialLocalizations.delegate,
+          ],
+          locale: const Locale('en', 'US'),
+          child: LicensePage(
+            applicationVersion: ref.read(localAppVersionLoader).value.toString(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class LicenseGroup extends ConsumerWidget {
+  const LicenseGroup({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_settings.license.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        ListTile(
+          isThreeLine: true,
+          title: Text("$tr_settings.license.subtitle".tr()),
+          subtitle: Text("$tr_settings.license.description".tr()),
+          onTap: () {
+            _LicensePageDialog.show(ref);
+          },
+        ),
+      ],
+    );
+  }
+}
+
 class VersionCheckGroup extends ConsumerWidget {
   const VersionCheckGroup({Key? key}) : super(key: key);
 
@@ -293,6 +377,7 @@ class SettingsPage extends ConsumerWidget {
         StyleSettingsGroup(),
         CaptureSettingsGroup(),
         PrivacySettingsGroup(),
+        LicenseGroup(),
         VersionCheckGroup(),
       ],
     );
