@@ -21,10 +21,8 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
     required this.initialPage,
   }) : super(key: key);
 
-  static void show(BuildContext context, CharaDetailRecord record, int initialPage) {
-    Future.delayed(Duration.zero, () {
-      CardDialog.show(context, CharaDetailPreviewDialog(record: record, initialPage: initialPage));
-    });
+  static void show(WidgetRef ref, CharaDetailRecord record, int initialPage) {
+    CardDialog.show(ref, (_) => CharaDetailPreviewDialog(record: record, initialPage: initialPage));
   }
 
   @override
@@ -83,7 +81,9 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                   return LayoutBuilder(
                     builder: (BuildContext context, BoxConstraints constraints) {
                       return GestureDetector(
-                        onSecondaryTap: () => Navigator.of(context).pop(),
+                        onSecondaryTap: () {
+                          CardDialog.dismiss(ref);
+                        },
                         child: ExtendedImage.file(
                           storage.imagePathOf(widget.record, imageMode).toFile(),
                           filterQuality: FilterQuality.medium,

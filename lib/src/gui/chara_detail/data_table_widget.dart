@@ -83,7 +83,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       items: [
         PopupMenuItem(
           height: height,
-          onTap: () => CharaDetailPreviewDialog.show(context, record, initialPage),
+          onTap: () => CharaDetailPreviewDialog.show(ref, record, initialPage),
           child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
         PopupMenuItem(
@@ -156,7 +156,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
             onSelected: (PlutoGridOnSelectedEvent event) {
               final record = event.row!.getUserData<CharaDetailRecord>()!;
               final spec = event.cell?.column.getUserData();
-              CharaDetailPreviewDialog.show(context, record, spec?.tabIdx ?? 0);
+              CharaDetailPreviewDialog.show(ref, record, spec?.tabIdx ?? 0);
             },
             onSorted: (PlutoGridOnSortedEvent event) {
               if (event.column.sort == PlutoColumnSort.none) {

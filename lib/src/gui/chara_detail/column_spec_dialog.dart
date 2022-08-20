@@ -41,8 +41,8 @@ class ColumnSpecDialog extends ConsumerWidget {
     required this.child,
   }) : super(key: key);
 
-  static void show(BuildContext context, ColumnSpec spec) {
-    CardDialog.show(context, ColumnSpecDialog(specId: spec.id, child: spec.selector()));
+  static void show(WidgetRef ref, ColumnSpec spec) {
+    CardDialog.show(ref, (_) => ColumnSpecDialog(specId: spec.id, child: spec.selector()));
   }
 
   @override
@@ -64,7 +64,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
               onPressed: () {
                 ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
-                Navigator.of(context).pop();
+                CardDialog.dismiss(ref);
               },
             ),
           ),
@@ -76,7 +76,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               onPressed: () {
                 final spec = ref.read(specCloneProvider(specId));
                 ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
-                Navigator.of(context).pop();
+                CardDialog.dismiss(ref);
               },
             ),
           ),

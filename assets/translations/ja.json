@@ -1,4 +1,14 @@
 {
+    "app": {
+        "feedback": {
+            "tooltip": "フィードバックを作成",
+            "description": "気になったことを教えてください。",
+            "navigate": "アプリ操作",
+            "draw": "ペイント",
+            "submit": "フィードバックを送信",
+            "toast": "フィードバックを送信しました。"
+        }
+    },
     "pages": {
         "dashboard": {
             "title": "ダッシュボード",
@@ -456,6 +466,13 @@
                         "factor_plain": "因子画面",
                         "campaign_plain": "育成情報画面"
                     }
+                }
+            },
+            "privacy": {
+                "title": "プライバシー設定",
+                "error_logging": {
+                    "title": "エラーログの送信",
+                    "description": "エラー発生時にログを自動送信します。変更は次回アプリ起動時から有効です。"
                 }
             },
             "version_check": {

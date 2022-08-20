@@ -15,8 +15,8 @@ const tr_chara_detail = "pages.chara_detail";
 class ColumnBuilderDialog extends ConsumerWidget {
   const ColumnBuilderDialog({Key? key}) : super(key: key);
 
-  static void show(BuildContext context) {
-    CardDialog.show(context, const ColumnBuilderDialog());
+  static void show(WidgetRef ref) {
+    CardDialog.show(ref, (_) => const ColumnBuilderDialog());
   }
 
   Widget addAllChipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
@@ -30,7 +30,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             specs.add(builder.build());
           }
         }
-        Navigator.of(context).pop();
+        CardDialog.dismiss(ref);
       },
     );
   }
@@ -41,8 +41,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
       onLongPress: () {
         final spec = builder.build();
         ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
-        Navigator.of(context).pop();
-        ColumnSpecDialog.show(context, spec);
+        CardDialog.dismiss(ref);
+        ColumnSpecDialog.show(ref, spec);
       },
       child: ActionChip(
         avatar: builder.isFilterColumn ? const Icon(Icons.search_outlined, size: 16) : null,
@@ -51,7 +51,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         label: Text(builder.title),
         onPressed: () {
           ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build());
-          Navigator.of(context).pop();
+          CardDialog.dismiss(ref);
         },
       ),
     );

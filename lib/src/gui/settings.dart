@@ -10,6 +10,8 @@ import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
 import '/src/preference/notifier.dart';
+import '/src/preference/settings_state.dart';
+import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_settings = "pages.settings";
@@ -201,6 +203,33 @@ class CaptureSettingsGroup extends ConsumerWidget {
   }
 }
 
+final enableErrorLoggingStateProvider = BooleanNotifierProvider((ref) {
+  final box = ref.watch(storageBoxProvider);
+  return BooleanNotifier(
+    entry: StorageEntry(box: box, key: SettingsEntryKey.enableErrorLogging.name),
+    defaultValue: true,
+  );
+});
+
+class PrivacySettingsGroup extends ConsumerWidget {
+  const PrivacySettingsGroup({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_settings.privacy.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        SwitchWidget(
+          title: "$tr_settings.privacy.error_logging.title".tr(),
+          description: "$tr_settings.privacy.error_logging.description".tr(),
+          provider: enableErrorLoggingStateProvider,
+        ),
+      ],
+    );
+  }
+}
+
 class VersionCheckGroup extends ConsumerWidget {
   const VersionCheckGroup({Key? key}) : super(key: key);
 
@@ -263,6 +292,7 @@ class SettingsPage extends ConsumerWidget {
       children: [
         StyleSettingsGroup(),
         CaptureSettingsGroup(),
+        PrivacySettingsGroup(),
         VersionCheckGroup(),
       ],
     );

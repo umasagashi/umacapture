@@ -65,7 +65,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
                 tooltip: spec.tooltip(resource),
                 backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
                 onPressed: () {
-                  ColumnSpecDialog.show(context, spec);
+                  ColumnSpecDialog.show(ref, spec);
                 },
               ),
             ),
@@ -114,7 +114,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
                   side: BorderSide.none,
                   labelPadding: EdgeInsets.zero,
                   onPressed: () {
-                    ColumnBuilderDialog.show(context);
+                    ColumnBuilderDialog.show(ref);
                   },
                 ),
                 const Opacity(

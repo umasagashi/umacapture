@@ -15,10 +15,18 @@ import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
+import '/src/gui/common.dart';
+import '/src/gui/window_manager_alt.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 import '/src/preference/window_state.dart';
+
+final kIsDesktop = {
+  TargetPlatform.windows,
+  TargetPlatform.linux,
+  TargetPlatform.macOS,
+}.contains(defaultTargetPlatform);
 
 final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
   final box = ref.watch(storageBoxProvider);
@@ -155,41 +163,6 @@ class _ResponsiveScaffold extends StatelessWidget {
   }
 }
 
-class _WindowTitleBar extends StatelessWidget implements PreferredSizeWidget {
-  final Widget icon;
-  final Widget title;
-
-  const _WindowTitleBar({
-    Key? key,
-    required this.icon,
-    required this.title,
-  }) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return WindowCaption(
-      brightness: theme.brightness,
-      backgroundColor: theme.colorScheme.surface,
-      title: Container(
-        transform: Matrix4.translationValues(-16, 0, 0), // Remove fixed padding in WindowCaption.
-        child: Row(
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 4, right: 8),
-              child: FittedBox(child: icon),
-            ),
-            title,
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  Size get preferredSize => const Size.fromHeight(kWindowCaptionHeight);
-}
-
 class _WindowFrame extends ConsumerStatefulWidget {
   final Widget child;
   final WindowStateBox _windowStateBox;
@@ -236,14 +209,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
       padding: const EdgeInsets.only(top: 1),
       color: theme.colorScheme.surface.blend(Colors.black, 50),
       child: Scaffold(
-        appBar: _WindowTitleBar(
-          icon: SizedBox(
-            width: 24,
-            height: 24,
-            child: Image.asset("assets/image/app_icon.png", filterQuality: FilterQuality.medium),
-          ),
-          title: Text('umacapture', style: theme.textTheme.bodyMedium!),
-        ),
+        appBar: const WindowCaptionAlt(),
         body: widget.child,
       ),
     );
@@ -253,23 +219,25 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
 class AppWidget extends StatelessWidget {
   const AppWidget({Key? key}) : super(key: key);
 
+  Widget root(Widget child) {
+    return DialogLayer(
+      child: _ResponsiveScaffold(child: child),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final kIsDesktop = {
-      TargetPlatform.windows,
-      TargetPlatform.linux,
-      TargetPlatform.macOS,
-    }.contains(defaultTargetPlatform);
-
-    return AutoTabsRouter(
-      routes: Pages.routes,
-      builder: (context, child, animation) {
-        if (!kIsWeb && kIsDesktop) {
-          return _WindowFrame(child: _ResponsiveScaffold(child: child));
-        } else {
-          return _ResponsiveScaffold(child: child);
-        }
-      },
+    return FeedbackLayer(
+      child: AutoTabsRouter(
+        routes: Pages.routes,
+        builder: (context, child, animation) {
+          if (!kIsWeb && kIsDesktop) {
+            return _WindowFrame(child: root(child));
+          } else {
+            return root(child);
+          }
+        },
+      ),
     );
   }
 }

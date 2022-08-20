@@ -6,6 +6,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_windows
   pasteboard
   screen_retriever
+  sentry_flutter
   window_manager
 )
 
