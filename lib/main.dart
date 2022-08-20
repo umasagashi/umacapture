@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:window_manager/window_manager.dart';
@@ -63,16 +64,31 @@ void run() {
   );
 }
 
+void setupLicense() {
+  LicenseRegistry.addLicense(() async* {
+    // TODO: This should be separated by OS.
+    yield LicenseEntryWithLineBreaks(
+      ["google_fonts"],
+      await rootBundle.loadString("assets/license/google_fonts/OFL.txt"),
+    );
+    yield LicenseEntryWithLineBreaks(
+      ["opencv"],
+      await rootBundle.loadString("assets/license/opencv/LICENSE.txt"),
+    );
+    yield LicenseEntryWithLineBreaks(
+      ["onnxruntime"],
+      await rootBundle.loadString("assets/license/onnxruntime/LICENSE"),
+    );
+  });
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeJsonReflectable();
   await StorageBox.ensureOpened(reset: false);
   await EasyLocalization.ensureInitialized();
 
-  // LicenseRegistry.addLicense(() async* {
-  //   final license = await rootBundle.loadString('google_fonts/OFL.txt');
-  //   yield LicenseEntryWithLineBreaks(['google_fonts'], license);
-  // });
+  setupLicense();
 
   if (CurrentPlatform.hasWindowFrame()) {
     setupWindowManager();

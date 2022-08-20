@@ -74,8 +74,11 @@ flutter:
   assets:
     - assets/version_info.json
     - assets/license_info.json
+    - assets/license/google_fonts/
+    - assets/license/onnxruntime/
+    - assets/license/opencv/
+    - assets/translations/
     - assets/config/
     - assets/config/chara_detail/
     - assets/sound/
-    - assets/translations/
     - assets/image/
