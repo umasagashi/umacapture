@@ -175,6 +175,14 @@ extension List2DExtension<T> on List<List<T>> {
   }
 }
 
+extension DateTimeExtension on DateTime {
+  bool operator <=(DateTime other) {
+    return isBefore(other) || isAtSameMomentAs(other);
+  }
+
+  String toDateString() => toString().substring(0, 10);
+}
+
 Iterable<int> intRange(int stop) sync* {
   for (final e in range(stop)) {
     yield e as int;

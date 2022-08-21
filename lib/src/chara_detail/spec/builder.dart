@@ -8,6 +8,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
+import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
@@ -359,6 +360,11 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_aptitude"},
       initialIds: {142},
       initialStar: 1,
+    ),
+    DateTimeColumnBuilder(
+      title: "$tr_columns.trained_date.title".tr(),
+      category: ColumnCategory.campaign,
+      parser: TrainedDateParser(),
     ),
   ];
 });

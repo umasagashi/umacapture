@@ -49,6 +49,7 @@ dependencies:
   recase: ^4.0.0
   sentry_flutter: ^6.9.1
   state_notifier: ^0.7.2+1
+  table_calendar: ^3.0.6
   tuple: ^2.0.0
   uuid: ^3.0.6
   version: ^3.0.2

@@ -23,6 +23,7 @@ enum ParserType {
   aptitudesLateCharge,
   skill,
   factor,
+  trainedDate,
 }
 
 @jsonSerializable
@@ -222,4 +223,16 @@ class FactorSetParser extends Parser {
 
   @override
   FactorSet parse(CharaDetailRecord record) => record.factors;
+}
+
+@jsonSerializable
+@Json(discriminatorValue: ParserType.trainedDate)
+class TrainedDateParser extends Parser {
+  @override
+  ParserType get type => ParserType.trainedDate;
+
+  @override
+  DateTime parse(CharaDetailRecord record) {
+    return DateTime.parse(record.trainedDate.replaceAll("/", "-"));
+  }
 }

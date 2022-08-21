@@ -186,7 +186,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
         final data = context.cell.getUserData<SkillCellData>()!;
         return Text(data.label);
       },
-    );
+    )..setUserData(this);
   }
 
   @override

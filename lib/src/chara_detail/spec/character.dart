@@ -108,7 +108,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
         final record = context.row.getUserData<CharaDetailRecord>()!;
         return Image.file((resource.recordRootDir.filePath(record.traineeIconPath)).toFile());
       },
-    );
+    )..setUserData(this);
   }
 
   @override

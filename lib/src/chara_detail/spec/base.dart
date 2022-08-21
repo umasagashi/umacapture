@@ -148,6 +148,7 @@ enum ColumnSpecType {
   characterCard,
   skill,
   factor,
+  datetime,
 }
 
 abstract class ColumnSelectorController {
