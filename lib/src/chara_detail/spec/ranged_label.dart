@@ -101,7 +101,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
           textAlign: TextAlign.center,
         );
       },
-    );
+    )..setUserData(this);
   }
 
   @override

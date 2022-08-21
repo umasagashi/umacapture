@@ -308,6 +308,20 @@
                             "label": "表示名"
                         }
                     }
+                },
+                "datetime": {
+                    "range": {
+                        "label": "範囲",
+                        "description": "範囲内で育成したウマ娘がテーブルに表示されます。",
+                        "reset_button": "リセット"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    }
                 }
             },
             "columns": {
@@ -416,6 +430,9 @@
                             "title": "長距離"
                         }
                     }
+                },
+                "trained_date": {
+                    "title": "育成日"
                 }
             },
             "context_menu": {

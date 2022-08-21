@@ -125,7 +125,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
         return Text(numberFormatter.format(data.value), textAlign: TextAlign.center);
       },
-    );
+    )..setUserData(this);
   }
 
   @override
