@@ -1,4 +1,3 @@
-import 'package:another_xlider/another_xlider.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +11,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -69,23 +69,23 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
+  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(BuildResource resource, List<int> values) {
+  List<bool> evaluate(NonReactiveRef ref, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(BuildResource resource, int value) {
-    final labels = resource.labelMap[labelKey]!;
+  PlutoCell plutoCell(NonReactiveRef ref, int value) {
+    final labels = ref.read(labelMapProvider)[labelKey]!;
     return PlutoCell(value: value)..setUserData(RangedLabelCellData(labels[value]));
   }
 
   @override
-  PlutoColumn plutoColumn(BuildResource resource) {
+  PlutoColumn plutoColumn(NonReactiveRef ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -105,16 +105,16 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  String tooltip(BuildResource resource) {
+  String tooltip(NonReactiveRef ref) {
     if (predicate.min == null && predicate.max == null) {
       return "Any";
     }
-    final labels = resource.labelMap[labelKey]!;
+    final labels = ref.read(labelMapProvider)[labelKey]!;
     return "Range: [${labels.getOrNull(predicate.min) ?? "Any"}, ${labels.getOrNull(predicate.max) ?? "Any"}]";
   }
 
   @override
-  Widget tag(BuildResource resource) => Text(title);
+  Widget label() => Text(title);
 
   @override
   Widget selector() => RangedLabelColumnSelector(specId: id);
@@ -134,45 +134,27 @@ class _RangedLabelSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
+    final records = ref.watch(charaDetailRecordStorageProvider);
+    final range = spec.parse(NonReactiveRef(ref), records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_label.range.label".tr()),
       description: Text("$tr_ranged_label.range.description".tr()),
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
-          child: FlutterSlider(
-            rangeSlider: true,
-            jump: true,
-            min: 0,
-            max: (labels.length - 1).toDouble(),
-            step: const FlutterSliderStep(step: 1),
-            handler: FlutterSliderHandler(
-              child: Tooltip(
-                message: "$tr_ranged_label.range.min".tr(),
-                child: const Icon(Icons.arrow_right),
-              ),
-            ),
-            rightHandler: FlutterSliderHandler(
-              child: Tooltip(
-                message: "$tr_ranged_label.range.max".tr(),
-                child: const Icon(Icons.arrow_left),
-              ),
-            ),
-            tooltip: FlutterSliderTooltip(
-              alwaysShowTooltip: true,
-              disableAnimation: true,
-              custom: (value) => Chip(label: Text(labels[value.toInt()])),
-            ),
-            values: [
-              (spec.predicate.min ?? 0).toDouble(),
-              (spec.predicate.max ?? labels.length - 1).toDouble(),
-            ],
-            onDragging: (handlerIndex, start, end) {
+          child: CustomRangeSlider(
+            min: range.min,
+            max: range.max,
+            step: 1,
+            start: (spec.predicate.min ?? range.min).toDouble(),
+            end: (spec.predicate.max ?? range.max).toDouble(),
+            formatter: (value) => labels[value.toInt()],
+            onChanged: (double start, double end) {
               _clonedSpecProvider.update(ref, specId, (spec) {
                 return spec.copyWith(
                   predicate: IsInRangeIntegerPredicate(
-                    min: start == 0 ? null : start.toInt(),
-                    max: end == labels.length - 1 ? null : end.toInt(),
+                    min: start == range.min ? null : start.toInt(),
+                    max: end == range.max ? null : end.toInt(),
                   ),
                 );
               });

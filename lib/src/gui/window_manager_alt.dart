@@ -1,8 +1,8 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
 class WindowCaptionButtonAlt extends StatefulWidget {
@@ -86,7 +86,6 @@ class _WindowCaptionAltState extends State<WindowCaptionAlt> with WindowListener
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isSentryEnabled = HubAdapter().isEnabled;
     return Container(
       color: theme.colorScheme.surface,
       child: Row(
@@ -109,7 +108,7 @@ class _WindowCaptionAltState extends State<WindowCaptionAlt> with WindowListener
               ),
             ),
           ),
-          if (isSentryEnabled)
+          if (isSentryAvailable())
             WindowCaptionButtonAlt(
               icon: Icon(
                 Icons.feedback_outlined,

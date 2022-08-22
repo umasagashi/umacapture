@@ -25,8 +25,9 @@ class ColumnSpecTagWidget extends ConsumerStatefulWidget {
 class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   ColumnSpec? hoveredSpec;
 
-  Widget buildSpecChip(BuildContext context, BuildResource resource, ColumnSpec spec, int? count) {
+  Widget buildSpecChip(BuildContext context, ColumnSpec spec, int? count) {
     final theme = Theme.of(context);
+    final nrRef = NonReactiveRef(ref);
     return DragTarget<ColumnSpec>(
       builder: (context, candidateData, rejectedData) {
         return Draggable<ColumnSpec>(
@@ -35,14 +36,12 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             color: Colors.transparent,
             child: Opacity(
               opacity: 0.6,
-              child: Chip(
-                label: spec.tag(resource),
-              ),
+              child: Chip(label: spec.label()),
             ),
           ),
           childWhenDragging: Opacity(
             opacity: 0.6,
-            child: Chip(label: spec.tag(resource)),
+            child: Chip(label: spec.label()),
           ),
           child: Badge(
             showBadge: count != null,
@@ -61,8 +60,8 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             child: GestureDetector(
               onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
-                label: spec.tag(resource),
-                tooltip: spec.tooltip(resource),
+                label: spec.label(),
+                tooltip: spec.tooltip(nrRef),
                 backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
                 onPressed: () {
                   ColumnSpecDialog.show(ref, spec);
@@ -91,7 +90,6 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final theme = Theme.of(context);
     final recordCount = ref.watch(charaDetailRecordStorageProvider).length;
     final specs = ref.watch(currentColumnSpecsProvider);
-    final resource = ref.watch(buildResourceProvider);
     final filteredCounts = ref.watch(currentGridProvider).filteredCounts;
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 8),
@@ -105,7 +103,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               runSpacing: 8,
               children: [
                 for (final col in zip2(specs, filteredCounts))
-                  buildSpecChip(context, resource, col.item1, col.item2 == recordCount ? null : col.item2),
+                  buildSpecChip(context, col.item1, col.item2 == recordCount ? null : col.item2),
                 ActionChip(
                   label: Icon(Icons.add, color: theme.colorScheme.onPrimary),
                   tooltip: "$tr_chara_detail.add_column_button_tooltip".tr(),

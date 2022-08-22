@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,14 +13,6 @@ import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_toast = "toast";
-
-StreamController<ToastData> plainToastEventController = StreamController();
-final _plainToastEventProvider = StreamProvider<ToastData>((ref) {
-  if (plainToastEventController.hasListener) {
-    plainToastEventController = StreamController();
-  }
-  return plainToastEventController.stream;
-});
 
 class NotificationLayer extends ConsumerStatefulWidget {
   const NotificationLayer({Key? key}) : super(key: key);
@@ -81,7 +71,7 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
     _listenForPlaySound(errorEventProvider, SoundType.error);
     _listenForPlaySound(duplicatedCharaEventProvider, SoundType.error);
 
-    _listenForToastData(_plainToastEventProvider);
+    _listenForToastData(plainToastEventProvider);
     _listenForToastData(versionCheckEventProvider);
     _listenForToast(clipboardPasteEventProvider, "$tr_toast.clipboard_paste".tr());
     _listenForToast<PathEntity>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {

@@ -12,9 +12,10 @@ import '/src/gui/common.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 final specCloneProvider = StateProvider.autoDispose.family<ColumnSpec, String>((ref, specId) {
-  final spec = ref.watch(currentColumnSpecsProvider.notifier).getById(specId)!;
-  logger.d("specCloneProvider: ${spec.title}");
-  return JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(spec))!;
+  final source = ref.watch(currentColumnSpecsProvider.notifier).getById(specId)!;
+  final cloned = JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(source))!;
+  logger.d("specCloneProvider: ${source.runtimeType}, ${source.title} -> ${cloned.runtimeType}, ${cloned.title}");
+  return cloned;
 });
 
 class SpecProviderAccessor<T extends ColumnSpec> {
