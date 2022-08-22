@@ -7,8 +7,8 @@ import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/json_adapter.dart';
-import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
@@ -124,22 +124,6 @@ class CharaCardInfo {
   CharaCardInfo(this.sid, this.sortKey, this.names);
 }
 
-class BuildResource {
-  final LabelMap labelMap;
-  final List<SkillInfo> skillInfo;
-  final List<CharaCardInfo> charaCardInfo;
-  final DirectoryPath recordRootDir;
-  final List<int> charaRankBorder;
-
-  BuildResource({
-    required this.labelMap,
-    required this.skillInfo,
-    required this.charaCardInfo,
-    required this.recordRootDir,
-    required this.charaRankBorder,
-  });
-}
-
 @jsonSerializable
 enum ColumnSpecType {
   rangedInteger,
@@ -149,12 +133,7 @@ enum ColumnSpecType {
   skill,
   factor,
   datetime,
-}
-
-abstract class ColumnSelectorController {
-  ColumnSpec get spec;
-
-  Widget widget({required BuildResource resource});
+  rating,
 }
 
 @jsonSerializable
@@ -169,17 +148,17 @@ abstract class ColumnSpec<T> {
   @JsonProperty(ignore: true)
   int get tabIdx => 0;
 
-  List<T> parse(BuildResource resource, List<CharaDetailRecord> records);
+  List<T> parse(NonReactiveRef ref, List<CharaDetailRecord> records);
 
-  List<bool> evaluate(BuildResource resource, List<T> values);
+  List<bool> evaluate(NonReactiveRef ref, List<T> values);
 
-  PlutoCell plutoCell(BuildResource resource, T value);
+  PlutoCell plutoCell(NonReactiveRef ref, T value);
 
-  PlutoColumn plutoColumn(BuildResource resource);
+  PlutoColumn plutoColumn(NonReactiveRef ref);
 
-  String tooltip(BuildResource resource);
+  String tooltip(NonReactiveRef ref);
 
-  Widget tag(BuildResource resource);
+  Widget label();
 
   Widget selector();
 }
@@ -189,13 +168,18 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
 
   ColumnSpecSelection(this.entry) : super([]) {
     final data = JsonMapper.deserialize<List<dynamic>>(entry.pull()) ?? [];
+    bool failed = false;
     for (final d in data) {
       try {
         state.addIfNotNull(JsonMapper.deserialize<ColumnSpec>(d));
       } catch (e) {
         // If the specification of the column spec is changed, it may not be able to load.
         logger.w("Failed to deserialize column spec: error=$e, data=$d");
+        failed = true;
       }
+    }
+    if (failed) {
+      Toaster.show(ToastData(ToastType.warning, description: "pages.chara_detail.error.loading_spec".tr()));
     }
     state = [...state];
   }
@@ -267,8 +251,9 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
     entry.push(JsonMapper.serialize(state));
   }
 
-  void saveState(String path) {
-    logger.d(JsonMapper.serialize(state));
+  void clear() {
+    state = [];
+    rebuild();
   }
 }
 

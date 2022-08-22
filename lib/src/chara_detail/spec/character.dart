@@ -11,6 +11,7 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -79,23 +80,24 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
+  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(BuildResource resource, List<int> values) {
+  List<bool> evaluate(NonReactiveRef ref, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(BuildResource resource, int value) {
-    final card = resource.charaCardInfo[value];
+  PlutoCell plutoCell(NonReactiveRef ref, int value) {
+    final card = ref.read(charaCardInfoProvider)[value];
     return PlutoCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
   }
 
   @override
-  PlutoColumn plutoColumn(BuildResource resource) {
+  PlutoColumn plutoColumn(NonReactiveRef ref) {
+    final recordRootDir = ref.read(pathInfoProvider).charaDetailActiveDir;
     return PlutoColumn(
       title: title,
       field: id,
@@ -106,14 +108,14 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
       readOnly: true,
       renderer: (PlutoColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
-        return Image.file((resource.recordRootDir.filePath(record.traineeIconPath)).toFile());
+        return Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
       },
     )..setUserData(this);
   }
 
   @override
-  String tooltip(BuildResource resource) {
-    final cards = resource.charaCardInfo.sortedBy<num>((e) => e.sortKey);
+  String tooltip(NonReactiveRef ref) {
+    final cards = ref.read(charaCardInfoProvider).sortedBy<num>((e) => e.sortKey);
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";
@@ -127,7 +129,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget tag(BuildResource resource) => Text(title);
+  Widget label() => Text(title);
 
   @override
   Widget selector() => CharacterCardColumnSelector(specId: id);

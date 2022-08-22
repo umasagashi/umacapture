@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '/src/core/notification_controller.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 
@@ -377,10 +376,7 @@ OnFeedbackCallback _sendToSentryAndNotify() {
   final send = sendToSentry();
   return (UserFeedback feedback) async {
     send(feedback);
-    plainToastEventController.sink.add(ToastData(
-      ToastType.success,
-      description: "app.feedback.toast".tr(),
-    ));
+    Toaster.show(ToastData(ToastType.success, description: "app.feedback.toast".tr()));
   };
 }
 

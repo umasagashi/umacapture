@@ -1,3 +1,4 @@
+import 'package:another_xlider/another_xlider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -356,6 +357,93 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
             },
           ),
       ],
+    );
+  }
+}
+
+class CustomRangeSlider extends ConsumerStatefulWidget {
+  final double min;
+  final double max;
+  final double step;
+  final double start;
+  final double end;
+  final String Function(double) formatter;
+  final Value2Callback<double, double> onChanged;
+
+  const CustomRangeSlider({
+    Key? key,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.start,
+    required this.end,
+    required this.formatter,
+    required this.onChanged,
+  }) : super(key: key);
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _CustomRangeSliderState();
+}
+
+class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
+  late double start;
+  late double end;
+
+  @override
+  void initState() {
+    super.initState();
+    start = widget.start;
+    end = widget.end;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FlutterSlider(
+      rangeSlider: true,
+      jump: true,
+      min: widget.min,
+      max: widget.max,
+      step: FlutterSliderStep(step: widget.step),
+      handler: FlutterSliderHandler(
+        child: Tooltip(
+          message: "$tr_common.range.min".tr(),
+          child: Icon(
+            Icons.arrow_right,
+            color: theme.colorScheme.onPrimary,
+          ),
+        ),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary,
+          shape: BoxShape.circle,
+        ),
+      ),
+      rightHandler: FlutterSliderHandler(
+        child: Tooltip(
+          message: "$tr_common.range.max".tr(),
+          child: Icon(
+            Icons.arrow_left,
+            color: theme.colorScheme.onPrimary,
+          ),
+        ),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.primary,
+          shape: BoxShape.circle,
+        ),
+      ),
+      tooltip: FlutterSliderTooltip(
+        alwaysShowTooltip: true,
+        disableAnimation: true,
+        custom: (value) => Chip(label: Text(widget.formatter(value))),
+      ),
+      values: [start, end],
+      onDragging: (handlerIndex, start, end) {
+        widget.onChanged(start, end);
+        setState(() {
+          this.start = start;
+          this.end = end;
+        });
+      },
     );
   }
 }

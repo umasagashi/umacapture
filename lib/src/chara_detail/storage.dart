@@ -38,14 +38,6 @@ final charaCardIconMapProvider = StateProvider<Map<int, FilePath>>((ref) {
   return {};
 });
 
-final availableSkillSetProvider = StateProvider<Set<int>>((ref) {
-  return {};
-});
-
-final availableFactorSetProvider = StateProvider<Set<int>>((ref) {
-  return {};
-});
-
 class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
   final Ref ref;
 
@@ -104,47 +96,26 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   final Ref ref;
   final DirectoryPath rootDirectory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
-  final Set<int> skillSet = {};
-  final Set<int> factorSet = {};
 
-  CharaDetailRecordStorage({required this.ref, required this.rootDirectory, required List<CharaDetailRecord> records})
-      : super(records) {
+  CharaDetailRecordStorage({
+    required this.ref,
+    required this.rootDirectory,
+    required List<CharaDetailRecord> records,
+  }) : super(records) {
     for (var e in records) {
-      _updateRecordInfo(e, update: false);
+      _updateRecordInfo(e);
     }
-    _updateIconMapNotifier();
-    _updateSkillSetNotifier();
   }
 
-  void _updateRecordInfo(CharaDetailRecord record, {bool update = true}) {
+  void _updateRecordInfo(CharaDetailRecord record) {
     if (record.evaluationValue > (charaCardMap[record.trainee.card]?.evaluationValue ?? -1)) {
       charaCardMap[record.trainee.card] = record;
-      if (update) {
-        _updateIconMapNotifier();
-      }
-    }
-
-    if (skillSet.addAllWithSizeCheck(record.skills.map((e) => e.id))) {
-      _updateSkillSetNotifier();
-    }
-
-    if (factorSet.addAllWithSizeCheck(record.factors.flattened.map((e) => e.id))) {
-      _updateFactorSetNotifier();
+      ref.read(charaCardIconMapProvider.notifier).update((_) => Map.from(charaCardIconMap));
     }
   }
 
-  void _updateIconMapNotifier() {
-    final Map<int, FilePath> iconMap =
-        charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath("trainee.jpg")));
-    ref.read(charaCardIconMapProvider.notifier).update((e) => Map.from(iconMap));
-  }
-
-  void _updateSkillSetNotifier() {
-    ref.read(availableSkillSetProvider.notifier).update((e) => Set.from(skillSet));
-  }
-
-  void _updateFactorSetNotifier() {
-    ref.read(availableFactorSetProvider.notifier).update((e) => Set.from(factorSet));
+  Map<int, FilePath> get charaCardIconMap {
+    return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath("trainee.jpg")));
   }
 
   void add(CharaDetailRecord record) {
@@ -222,13 +193,9 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
 
   void forceRebuild() {
     charaCardMap.clear();
-    skillSet.clear();
-    factorSet.clear();
     for (var e in state) {
-      _updateRecordInfo(e, update: false);
+      _updateRecordInfo(e);
     }
-    _updateIconMapNotifier();
-    _updateSkillSetNotifier();
     state = [...state];
   }
 }

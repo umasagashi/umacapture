@@ -13,6 +13,7 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -293,6 +294,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final AggregateFactorSetPredicate predicate;
 
   final bool showAllWhenQueryIsEmpty;
+  final bool showAvailableFactorOnly;
   final Set<FactorDialogElements> hiddenElements;
 
   @override
@@ -314,6 +316,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     required this.parser,
     required this.predicate,
     this.showAllWhenQueryIsEmpty = true,
+    this.showAvailableFactorOnly = true,
     this.hiddenElements = const {},
   });
 
@@ -323,6 +326,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     Parser? parser,
     AggregateFactorSetPredicate? predicate,
     bool? showAllWhenQueryIsEmpty,
+    bool? showAvailableFactorOnly,
     Set<FactorDialogElements>? hiddenElements,
   }) {
     return FactorColumnSpec(
@@ -331,17 +335,18 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
+      showAvailableFactorOnly: showAvailableFactorOnly ?? this.showAvailableFactorOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
     );
   }
 
   @override
-  List<FactorSet> parse(BuildResource resource, List<CharaDetailRecord> records) {
+  List<FactorSet> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
     return List<FactorSet>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(BuildResource resource, List<FactorSet> values) {
+  List<bool> evaluate(NonReactiveRef ref, List<FactorSet> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
@@ -362,7 +367,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  PlutoCell plutoCell(BuildResource resource, FactorSet value) {
+  PlutoCell plutoCell(NonReactiveRef ref, FactorSet value) {
     final factors = _extract(value);
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
@@ -376,7 +381,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       )..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
     }
 
-    final labels = resource.labelMap[labelKey]!;
+    final labels = ref.read(labelMapProvider)[labelKey]!;
     final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
@@ -385,7 +390,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  PlutoColumn plutoColumn(BuildResource resource) {
+  PlutoColumn plutoColumn(NonReactiveRef ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -402,7 +407,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  String tooltip(BuildResource resource) {
+  String tooltip(NonReactiveRef ref) {
     if (predicate.query.isEmpty) {
       return "Any";
     }
@@ -429,16 +434,16 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
     }
 
-    final labels = resource.labelMap[labelKey]!;
+    final labels = ref.read(labelMapProvider)[labelKey]!;
     final factors = predicate.query.map((e) => labels[e]);
     return "${factors.join(sep)}$modeText";
   }
 
   @override
-  Widget tag(BuildResource resource) => Text(title);
+  Widget label() => Text(title);
 
   @override
-  Widget selector() => FactorColumnSelector(specId: id);
+  Widget selector() => FactorColumnSelector(specId: id, availableOnly: showAvailableFactorOnly);
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
@@ -453,27 +458,38 @@ final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<String>
   return Set.from(spec.predicate.factorTags);
 });
 
-List<FactorInfo> _watchCandidateFactors(WidgetRef ref, String specId) {
-  final factorInfoList = ref.watch(availableFactorInfoProvider);
-  final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).toSet();
-  final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).toSet();
-  if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty) {
-    return factorInfoList;
-  } else {
-    return factorInfoList.where((factor) {
-      final factorContains = factor.tags.containsAll(selectedFactorTags);
-      final skillContains = factor.skillInfo?.tags.containsAll(selectedSkillTags) ?? selectedSkillTags.isEmpty;
-      return factorContains && skillContains;
-    }).toList();
-  }
-}
-
 class _SelectionSelector extends ConsumerWidget {
   final String specId;
+  final bool availableOnly;
 
   const _SelectionSelector({
     required this.specId,
+    required this.availableOnly,
   });
+
+  List<FactorInfo> _watchCandidateFactors(WidgetRef ref, String specId) {
+    late final List<FactorInfo> factorInfoList;
+    if (availableOnly) {
+      final spec = _clonedSpecProvider.watch(ref, specId);
+      final records = ref.watch(charaDetailRecordStorageProvider);
+      final values =
+          spec.parse(NonReactiveRef(ref), records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
+      factorInfoList = ref.watch(factorInfoProvider).where((e) => values.contains(e.sid)).toList();
+    } else {
+      factorInfoList = ref.watch(factorInfoProvider);
+    }
+    final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).toSet();
+    final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).toSet();
+    if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty) {
+      return factorInfoList;
+    } else {
+      return factorInfoList.where((factor) {
+        final factorContains = factor.tags.containsAll(selectedFactorTags);
+        final skillContains = factor.skillInfo?.tags.containsAll(selectedSkillTags) ?? selectedSkillTags.isEmpty;
+        return factorContains && skillContains;
+      }).toList();
+    }
+  }
 
   Widget tagsWidget() {
     return Padding(
@@ -761,17 +777,19 @@ class _NotationSelector extends ConsumerWidget {
 
 class FactorColumnSelector extends ConsumerWidget {
   final String specId;
+  final bool availableOnly;
 
   const FactorColumnSelector({
     Key? key,
     required this.specId,
+    required this.availableOnly,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
-        _SelectionSelector(specId: specId),
+        _SelectionSelector(specId: specId, availableOnly: availableOnly),
         const SizedBox(height: 32),
         _ModeSelector(specId: specId),
         const SizedBox(height: 32),
@@ -865,6 +883,7 @@ class FilterFactorColumnBuilder implements ColumnBuilder {
         FactorDialogElements.logic,
       },
       showAllWhenQueryIsEmpty: false,
+      showAvailableFactorOnly: false,
     );
   }
 }

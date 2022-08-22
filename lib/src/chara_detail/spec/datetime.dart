@@ -10,6 +10,7 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -92,23 +93,23 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   }
 
   @override
-  List<DateTime> parse(BuildResource resource, List<CharaDetailRecord> records) {
+  List<DateTime> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
     return List<DateTime>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(BuildResource resource, List<DateTime> values) {
+  List<bool> evaluate(NonReactiveRef ref, List<DateTime> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(BuildResource resource, DateTime value) {
+  PlutoCell plutoCell(NonReactiveRef ref, DateTime value) {
     final dateString = value.toDateString();
     return PlutoCell(value: dateString)..setUserData(DateTimeCellData(dateString));
   }
 
   @override
-  PlutoColumn plutoColumn(BuildResource resource) {
+  PlutoColumn plutoColumn(NonReactiveRef ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -124,7 +125,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   }
 
   @override
-  String tooltip(BuildResource resource) {
+  String tooltip(NonReactiveRef ref) {
     if (predicate.min == null && predicate.max == null) {
       return "Any";
     }
@@ -132,7 +133,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   }
 
   @override
-  Widget tag(BuildResource resource) => Text(title);
+  Widget label() => Text(title);
 
   @override
   Widget selector() => _DateTimeSelector(specId: id);
@@ -153,7 +154,17 @@ class _DateTimeSelector extends ConsumerStatefulWidget {
 }
 
 class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
-  DateTime _focusedDay = DateTime.now();
+  late DateTime _focusedDay;
+  late final Range<DateTime> range;
+
+  @override
+  void initState() {
+    super.initState();
+    final spec = _clonedSpecProvider.read(ref, widget.specId);
+    final records = ref.read(charaDetailRecordStorageProvider);
+    range = spec.parse(NonReactiveRef(ref), records).range();
+    _focusedDay = range.max;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -192,8 +203,8 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
                   availableCalendarFormats: const {CalendarFormat.month: 'Month'},
                   availableGestures: AvailableGestures.horizontalSwipe,
                   rangeSelectionMode: RangeSelectionMode.enforced,
-                  firstDay: DateTime(2021, 2, 24),
-                  lastDay: DateTime.now(),
+                  firstDay: range.min,
+                  lastDay: range.max,
                   focusedDay: _focusedDay,
                   rangeStartDay: predicate.min,
                   rangeEndDay: predicate.max,
@@ -201,8 +212,8 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
                     _clonedSpecProvider.update(ref, widget.specId, (spec) {
                       return spec.copyWith(
                         predicate: IsInRangeDateTimePredicate(
-                          min: start,
-                          max: end,
+                          min: start?.asLocal(),
+                          max: end?.asLocal() ?? start?.asLocal(),
                         ),
                       );
                     });

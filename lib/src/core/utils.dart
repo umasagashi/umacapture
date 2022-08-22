@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:quiver/iterables.dart';
+import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:tuple/tuple.dart';
 
 class CurrentPlatform {
@@ -164,6 +166,39 @@ extension ListExtension<T> on List<T> {
   }
 }
 
+class Range<T extends dynamic> {
+  final T min;
+  final T max;
+
+  Range({
+    required this.min,
+    required this.max,
+  });
+
+  Range<double> toDouble() {
+    return Range<double>(
+      min: min.toDouble(),
+      max: max.toDouble(),
+    );
+  }
+}
+
+extension DynamicTypeListExtension<T extends dynamic> on List<T> {
+  Range<T> range() {
+    T min = first;
+    T max = first;
+    for (final T value in this) {
+      if (value.compareTo(min) == -1) {
+        min = value;
+      }
+      if (value.compareTo(max) == 1) {
+        max = value;
+      }
+    }
+    return Range<T>(min: min, max: max);
+  }
+}
+
 extension List2DExtension<T> on List<List<T>> {
   List<List<T>> transpose() {
     if (isEmpty) {
@@ -177,10 +212,12 @@ extension List2DExtension<T> on List<List<T>> {
 
 extension DateTimeExtension on DateTime {
   bool operator <=(DateTime other) {
-    return isBefore(other) || isAtSameMomentAs(other);
+    return compareTo(other) != 1;
   }
 
   String toDateString() => toString().substring(0, 10);
+
+  DateTime asLocal() => DateTime(year, month, day, hour, minute, second, microsecond);
 }
 
 Iterable<int> intRange(int stop) sync* {
@@ -228,10 +265,10 @@ class Math {
   static T max<T extends num>(T a, T b) => math.max(a, b);
 }
 
-class ReadOnlyWidgetRef {
-  final WidgetRef _ref;
+class NonReactiveRef {
+  final dynamic _ref;
 
-  ReadOnlyWidgetRef(WidgetRef ref) : _ref = ref;
+  NonReactiveRef(ref) : _ref = ref;
 
   T read<T>(ProviderBase<T> provider) => _ref.read(provider);
 }
@@ -252,4 +289,14 @@ class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
 
   @override
   ProviderBase<StateController<T>> get notifier => provider.notifier;
+}
+
+bool isSentryAvailable() {
+  return HubAdapter().isEnabled;
+}
+
+FutureOr<void> captureException(exception, stackTrace) {
+  if (isSentryAvailable()) {
+    Sentry.captureException(exception, stackTrace: stackTrace);
+  }
 }

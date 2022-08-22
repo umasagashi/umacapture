@@ -109,6 +109,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final grid = ref.watch(currentGridProvider);
+    if (grid.columns.isEmpty) {
+      return Container();
+    }
     return Expanded(
       child: Stack(
         alignment: Alignment.center,

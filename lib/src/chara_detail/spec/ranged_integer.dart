@@ -1,4 +1,3 @@
-import 'package:another_xlider/another_xlider.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -10,6 +9,8 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
@@ -54,8 +55,6 @@ class RangedIntegerCellData implements Exportable {
 @Json(discriminatorValue: ColumnSpecType.rangedInteger)
 class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final Parser parser;
-  final int valueMin;
-  final int valueMax;
   final IsInRangeIntegerPredicate predicate;
 
   @override
@@ -71,8 +70,6 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
     required this.id,
     required this.title,
     required this.parser,
-    required this.valueMin,
-    required this.valueMax,
     required this.predicate,
   });
 
@@ -88,29 +85,27 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
-      valueMin: valueMin ?? this.valueMin,
-      valueMax: valueMax ?? this.valueMax,
       predicate: predicate ?? this.predicate,
     );
   }
 
   @override
-  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
+  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(BuildResource resource, List<int> values) {
+  List<bool> evaluate(NonReactiveRef ref, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(BuildResource resource, int value) {
+  PlutoCell plutoCell(NonReactiveRef ref, int value) {
     return PlutoCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 
   @override
-  PlutoColumn plutoColumn(BuildResource resource) {
+  PlutoColumn plutoColumn(NonReactiveRef ref) {
     final numberFormatter = NumberFormat("#,###");
     return PlutoColumn(
       title: title,
@@ -129,7 +124,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  String tooltip(BuildResource resource) {
+  String tooltip(NonReactiveRef ref) {
     if (predicate.min == null && predicate.max == null) {
       return "Any";
     }
@@ -137,7 +132,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  Widget tag(BuildResource resource) => Text(title);
+  Widget label() => Text(title);
 
   @override
   Widget selector() => RangedIntegerColumnSelector(specId: id);
@@ -147,7 +142,7 @@ final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
 
 class _RangedIntegerSelector extends ConsumerWidget {
   final String specId;
-  final numberFormatter = NumberFormat("#,###");
+  final formatter = NumberFormat("#,###");
 
   _RangedIntegerSelector({
     Key? key,
@@ -157,45 +152,27 @@ class _RangedIntegerSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
+    final records = ref.watch(charaDetailRecordStorageProvider);
+    final range = spec.parse(NonReactiveRef(ref), records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_integer.range.label".tr()),
       description: Text("$tr_ranged_integer.range.description".tr()),
       children: [
         Padding(
           padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
-          child: FlutterSlider(
-            rangeSlider: true,
-            jump: true,
-            min: spec.valueMin.toDouble(),
-            max: spec.valueMax.toDouble(),
-            step: const FlutterSliderStep(step: 1),
-            handler: FlutterSliderHandler(
-              child: Tooltip(
-                message: "$tr_ranged_integer.range.min".tr(),
-                child: const Icon(Icons.arrow_right),
-              ),
-            ),
-            rightHandler: FlutterSliderHandler(
-              child: Tooltip(
-                message: "$tr_ranged_integer.range.max".tr(),
-                child: const Icon(Icons.arrow_left),
-              ),
-            ),
-            tooltip: FlutterSliderTooltip(
-              alwaysShowTooltip: true,
-              disableAnimation: true,
-              custom: (value) => Chip(label: Text(numberFormatter.format(value.toInt()).toString())),
-            ),
-            values: [
-              (spec.predicate.min ?? spec.valueMin).toDouble(),
-              (spec.predicate.max ?? spec.valueMax).toDouble(),
-            ],
-            onDragging: (handlerIndex, start, end) {
+          child: CustomRangeSlider(
+            min: range.min,
+            max: range.max,
+            step: 1,
+            start: (spec.predicate.min ?? range.min).toDouble(),
+            end: (spec.predicate.max ?? range.max).toDouble(),
+            formatter: (value) => formatter.format(value),
+            onChanged: (double start, double end) {
               _clonedSpecProvider.update(ref, specId, (spec) {
                 return spec.copyWith(
                   predicate: IsInRangeIntegerPredicate(
-                    min: start == spec.valueMin ? null : start.toInt(),
-                    max: end == spec.valueMax ? null : end.toInt(),
+                    min: start == range.min ? null : start.toInt(),
+                    max: end == range.max ? null : end.toInt(),
                   ),
                 );
               });
@@ -261,8 +238,6 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
 
 class RangedIntegerColumnBuilder implements ColumnBuilder {
   final Parser parser;
-  final int valueMin;
-  final int valueMax;
 
   @override
   final String title;
@@ -277,8 +252,6 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
     required this.title,
     required this.category,
     required this.parser,
-    required this.valueMin,
-    required this.valueMax,
   });
 
   @override
@@ -287,8 +260,6 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       parser: parser,
-      valueMin: valueMin,
-      valueMax: valueMax,
       predicate: IsInRangeIntegerPredicate(),
     );
   }

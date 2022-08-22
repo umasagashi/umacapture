@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 
+import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
@@ -20,6 +21,7 @@ import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
@@ -73,11 +75,6 @@ final skillInfoProvider = Provider<List<SkillInfo>>((ref) {
   return ref.watch(_skillInfoLoader).value!;
 });
 
-final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
-  final skillSet = ref.watch(availableSkillSetProvider);
-  return ref.watch(skillInfoProvider).where((e) => skillSet.contains(e.sid)).toList();
-});
-
 final _skillTagLoader = FutureProvider<List<Tag>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
@@ -99,11 +96,6 @@ final _factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
 
 final factorInfoProvider = Provider<List<FactorInfo>>((ref) {
   return ref.watch(_factorInfoLoader).value!;
-});
-
-final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
-  final factorSet = ref.watch(availableFactorSetProvider);
-  return ref.watch(factorInfoProvider).where((e) => factorSet.contains(e.sid)).toList();
 });
 
 final _factorTagLoader = FutureProvider<List<Tag>>((ref) async {
@@ -154,7 +146,7 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
 });
 
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
-  final factorInfoList = ref.watch(availableFactorInfoProvider);
+  final factorInfo = ref.read(factorInfoProvider);
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -165,8 +157,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.evaluation.title".tr(),
       category: ColumnCategory.trainee,
       parser: EvaluationValueParser(),
-      valueMin: 0,
-      valueMax: 40000,
     ),
     CharaRankColumnBuilder(
       title: "$tr_columns.chara_rank.title".tr(),
@@ -183,36 +173,26 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.status.speed.title".tr(),
       category: ColumnCategory.status,
       parser: StatusSpeedParser(),
-      valueMin: 0,
-      valueMax: 1200,
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.stamina.title".tr(),
       category: ColumnCategory.status,
       parser: StatusStaminaParser(),
-      valueMin: 0,
-      valueMax: 1200,
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.power.title".tr(),
       category: ColumnCategory.status,
       parser: StatusPowerParser(),
-      valueMin: 0,
-      valueMax: 1200,
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.guts.title".tr(),
       category: ColumnCategory.status,
       parser: StatusGutsParser(),
-      valueMin: 0,
-      valueMax: 1200,
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.intelligence.title".tr(),
       category: ColumnCategory.status,
       parser: StatusIntelligenceParser(),
-      valueMin: 0,
-      valueMax: 1200,
     ),
     AptitudeColumnBuilder(
       title: "$tr_columns.aptitude.turf_ground.title".tr(),
@@ -304,7 +284,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: FactorSetParser(),
       isFilterColumn: false,
       initialFactorTags: {"factor_status"},
-      initialIds: factorInfoList.where((e) => e.tags.contains("factor_status")).map((e) => e.sid).toSet(),
+      initialIds: factorInfo.where((e) => e.tags.contains("factor_status")).map((e) => e.sid).toSet(),
       initialStar: 1,
     ),
     FilterFactorColumnBuilder(
@@ -313,7 +293,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: FactorSetParser(),
       isFilterColumn: false,
       initialFactorTags: {"factor_aptitude"},
-      initialIds: factorInfoList.where((e) => e.tags.contains("factor_aptitude")).map((e) => e.sid).toSet(),
+      initialIds: factorInfo.where((e) => e.tags.contains("factor_aptitude")).map((e) => e.sid).toSet(),
       initialStar: 1,
     ),
     FilterFactorColumnBuilder(
@@ -322,7 +302,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: FactorSetParser(),
       isFilterColumn: true,
       initialFactorTags: {"factor_scenario"},
-      initialIds: factorInfoList.where((e) => e.tags.contains("factor_scenario")).map((e) => e.sid).toSet(),
+      initialIds: factorInfo.where((e) => e.tags.contains("factor_scenario")).map((e) => e.sid).toSet(),
       initialStar: 1,
     ),
     FilterFactorColumnBuilder(
@@ -378,14 +358,21 @@ final currentColumnSpecsProvider = StateNotifierProvider<ColumnSpecSelection, Li
   return ref.watch(_currentColumnSpecsLoader).value!;
 });
 
-final buildResourceProvider = Provider<BuildResource>((ref) {
-  return BuildResource(
-    labelMap: ref.watch(labelMapProvider),
-    skillInfo: ref.watch(skillInfoProvider),
-    charaCardInfo: ref.watch(charaCardInfoProvider),
-    recordRootDir: ref.watch(pathInfoProvider).charaDetailActiveDir,
-    charaRankBorder: ref.watch(charaRankBorderProvider),
-  );
+class CharaDetailRecordRatingController extends StateNotifier<Map<String, double>> {
+  CharaDetailRecordRatingController(super.state);
+
+  void notify() {
+    state = Map.from(state);
+  }
+
+  void updateWithoutNotify(String recordId, double rating) {
+    state[recordId] = rating;
+  }
+}
+
+final charaDetailRecordRatingProvider =
+    StateNotifierProvider<CharaDetailRecordRatingController, Map<String, double>>((ref) {
+  return CharaDetailRecordRatingController({});
 });
 
 class Grid {
@@ -394,25 +381,23 @@ class Grid {
   final List<int> filteredCounts;
 
   Grid(this.columns, this.rows, this.filteredCounts);
+
+  static Grid get empty => Grid([], [], []);
 }
 
-final currentGridProvider = Provider<Grid>((ref) {
-  final recordList = ref.watch(charaDetailRecordStorageProvider);
-  final specList = ref.watch(currentColumnSpecsProvider);
-  final resource = ref.watch(buildResourceProvider);
-
-  final columnValues = specList.map((spec) => spec.parse(resource, recordList)).toList();
-  final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(resource, e.item2)).toList();
+Grid _buildGrid(NonReactiveRef ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
+  final columnValues = specList.map((spec) => spec.parse(ref, recordList)).toList();
+  final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(ref, e.item2)).toList();
 
   final filteredCounts = columnConditions.map((e) => e.countTrue()).toList();
-  final columns = specList.map((spec) => spec.plutoColumn(resource)).toList();
+  final columns = specList.map((spec) => spec.plutoColumn(ref)).toList();
 
   final rowValues = columnValues.transpose();
   final rowConditions = columnConditions.transpose().map((e) => e.everyIn()).toList();
 
   final plutoCells = zip2(rowValues, rowConditions)
       .where((row) => row.item2)
-      .map((row) => zip2(specList, row.item1).map((c) => MapEntry(c.item1.id, c.item1.plutoCell(resource, c.item2))));
+      .map((row) => zip2(specList, row.item1).map((c) => MapEntry(c.item1.id, c.item1.plutoCell(ref, c.item2))));
 
   final records = zip2(recordList, rowConditions).where((row) => row.item2).map((row) => row.item1);
 
@@ -425,4 +410,24 @@ final currentGridProvider = Provider<Grid>((ref) {
       .toList();
 
   return Grid(columns, rows, filteredCounts);
+}
+
+final currentGridProvider = Provider<Grid>((ref) {
+  final recordList = ref.watch(charaDetailRecordStorageProvider);
+  final specList = ref.watch(currentColumnSpecsProvider);
+
+  final nrRef = NonReactiveRef(ref);
+  try {
+    return _buildGrid(nrRef, recordList, specList);
+  } catch (exception, stackTrace) {
+    logger.e("Failed to build grid.", exception, stackTrace);
+    captureException(exception, stackTrace);
+    // Cannot change state while building.
+    Future.delayed(
+      const Duration(milliseconds: 1),
+      () => ref.read(currentColumnSpecsProvider.notifier).clear(), // TODO: Remove only failed specs.
+    );
+    Toaster.show(ToastData(ToastType.error, description: "pages.chara_detail.error.building_grid".tr()));
+    return Grid.empty;
+  }
 });

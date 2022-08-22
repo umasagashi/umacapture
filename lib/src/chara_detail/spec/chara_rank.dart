@@ -3,9 +3,11 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
+import '/src/core/utils.dart';
 
 @jsonSerializable
 @Json(discriminatorValue: ColumnSpecType.characterRank)
@@ -22,10 +24,27 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
   });
 
   @override
-  List<int> parse(BuildResource resource, List<CharaDetailRecord> records) {
-    return List<int>.from(records
-        .map(parser.parse)
-        .map((evaluation) => resource.charaRankBorder.indexWhere((border) => border >= evaluation)));
+  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+    final charaRankBorder = ref.read(charaRankBorderProvider);
+    return List<int>.from(
+        records.map(parser.parse).map((evaluation) => charaRankBorder.indexWhere((border) => border >= evaluation)));
+  }
+
+  @override
+  CharaRankColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    String? labelKey,
+    IsInRangeIntegerPredicate? predicate,
+  }) {
+    return CharaRankColumnSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      parser: parser ?? this.parser,
+      labelKey: labelKey ?? this.labelKey,
+      predicate: predicate ?? this.predicate,
+    );
   }
 }
 

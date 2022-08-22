@@ -1,7 +1,18 @@
+import 'dart:async';
+
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/utils.dart';
+
+StreamController<ToastData> _plainToastEventController = StreamController();
+final plainToastEventProvider = StreamProvider<ToastData>((ref) {
+  if (_plainToastEventController.hasListener) {
+    _plainToastEventController = StreamController();
+  }
+  return _plainToastEventController.stream;
+});
 
 enum ToastType {
   success,
@@ -24,6 +35,10 @@ class ToastData {
 }
 
 class Toaster {
+  static show(ToastData data) {
+    _plainToastEventController.sink.add(data);
+  }
+
   final double narrowWidth;
   final Map<ToastType, Duration> durationMap = {
     ToastType.success: const Duration(seconds: 5),

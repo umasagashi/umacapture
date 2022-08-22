@@ -9,7 +9,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:tuple/tuple.dart';
 import 'package:version/version.dart';
 
@@ -121,7 +120,7 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
     } else {
       _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
     }
-    await Sentry.captureException(exception, stackTrace: stackTrace);
+    captureException(exception, stackTrace);
     return local?.version;
   }
 

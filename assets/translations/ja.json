@@ -61,6 +61,10 @@
             "loading_error": "ロード中にエラーが発生しました。\n注意：エラーメッセージにはユーザー名が含まれます。",
             "add_column_button_tooltip": "表示列を新規追加",
             "regenerating_message": "認識結果を更新しています",
+            "error": {
+                "building_grid": "テーブルの生成に失敗したため、テーブルをリセットしました。",
+                "loading_spec": "定義ファイルの読み込みに失敗したため、削除された列があります。"
+            },
             "export": {
                 "button_tooltip": "エクスポート",
                 "dialog_title": "保存先を指定してください。",
@@ -126,14 +130,16 @@
                         "not_found_message": "該当なし",
                         "skill_prefix": "スキル：",
                         "expand_button": "全部を表示"
+                    },
+                    "range": {
+                        "min": "最小値",
+                        "max": "最大値"
                     }
                 },
                 "ranged_label": {
                     "range": {
                         "label": "範囲",
-                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
-                        "min": "最小値",
-                        "max": "最大値"
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。"
                     },
                     "notation": {
                         "label": "表示",
@@ -146,9 +152,7 @@
                 "ranged_integer": {
                     "range": {
                         "label": "範囲",
-                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
-                        "min": "最小値",
-                        "max": "最大値"
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。"
                     },
                     "notation": {
                         "label": "表示",
@@ -332,10 +336,10 @@
                     "title": "評価点"
                 },
                 "chara_rank": {
-                    "title": "評価ランク",
+                    "title": "ランク",
                     "shortcuts": {
                         "less_than_a": {
-                            "title": "評価B以下"
+                            "title": "B以下"
                         }
                     }
                 },

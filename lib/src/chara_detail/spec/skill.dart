@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:csv/csv.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -12,6 +13,7 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -146,18 +148,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  List<List<Skill>> parse(BuildResource resource, List<CharaDetailRecord> records) {
+  List<List<Skill>> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
     return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
   @override
-  List<bool> evaluate(BuildResource resource, List<List<Skill>> values) {
+  List<bool> evaluate(NonReactiveRef ref, List<List<Skill>> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(BuildResource resource, List<Skill> value) {
-    final labels = resource.labelMap[labelKey]!;
+  PlutoCell plutoCell(NonReactiveRef ref, List<Skill> value) {
+    final labels = ref.read(labelMapProvider)[labelKey]!;
     final foundSkills = predicate.extract(value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
@@ -173,7 +175,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  PlutoColumn plutoColumn(BuildResource resource) {
+  PlutoColumn plutoColumn(NonReactiveRef ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -190,7 +192,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  String tooltip(BuildResource resource) {
+  String tooltip(NonReactiveRef ref) {
     if (predicate.query.isEmpty) {
       return "Any";
     }
@@ -207,13 +209,13 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
       }
     }
 
-    final labels = resource.labelMap[labelKey]!;
+    final labels = ref.read(labelMapProvider)[labelKey]!;
     final skills = predicate.query.map((e) => labels[e]);
     return "${skills.join(sep)}$modeText";
   }
 
   @override
-  Widget tag(BuildResource resource) => Text(title);
+  Widget label() => Text(title);
 
   @override
   Widget selector() => SkillColumnSelector(specId: id);
@@ -226,22 +228,25 @@ final _selectedTagsProvider = StateProvider.autoDispose.family<Set<String>, Stri
   return Set.from(spec.predicate.tags);
 });
 
-List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
-  final info = ref.watch(availableSkillInfoProvider);
-  final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
-  if (selected.isEmpty) {
-    return info;
-  } else {
-    return info.where((e) => e.tags.containsAll(selected)).toList();
-  }
-}
-
 class _SelectionSelector extends ConsumerWidget {
   final String specId;
 
   const _SelectionSelector({
     required this.specId,
   });
+
+  List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    final records = ref.watch(charaDetailRecordStorageProvider);
+    final values = spec.parse(NonReactiveRef(ref), records).flattened.map((e) => e.id).toSet();
+    final info = ref.watch(skillInfoProvider).where((e) => values.contains(e.sid)).toList();
+    final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
+    if (selected.isEmpty) {
+      return info;
+    } else {
+      return info.where((e) => e.tags.containsAll(selected)).toList();
+    }
+  }
 
   Widget tagsWidget() {
     return Padding(
