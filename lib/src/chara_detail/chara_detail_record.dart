@@ -232,7 +232,7 @@ class Metadata extends JsonEquatable {
   final String capturedDate;
   final String recognizerVersion;
   final String stage;
-  final int? strategy;
+  final int strategy;
   final int? relationBonus;
 
   const Metadata(
