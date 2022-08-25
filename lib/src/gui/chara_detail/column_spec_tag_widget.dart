@@ -27,7 +27,6 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   Widget buildSpecChip(BuildContext context, ColumnSpec spec, int? count) {
     final theme = Theme.of(context);
-    final nrRef = NonReactiveRef(ref);
     return DragTarget<ColumnSpec>(
       builder: (context, candidateData, rejectedData) {
         return Draggable<ColumnSpec>(
@@ -61,7 +60,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
                 label: spec.label(),
-                tooltip: spec.tooltip(nrRef),
+                tooltip: spec.tooltip(RefBase(ref)),
                 backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
                 onPressed: () {
                   ColumnSpecDialog.show(ref, spec);

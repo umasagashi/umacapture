@@ -300,7 +300,7 @@ class CardDialog extends ConsumerWidget {
   }
 
   final String dialogTitle;
-  final String closeButtonTooltip;
+  final String? closeButtonTooltip;
   final Widget content;
   final Widget? bottom;
   final bool usePageView;
@@ -308,7 +308,7 @@ class CardDialog extends ConsumerWidget {
   const CardDialog({
     Key? key,
     required this.dialogTitle,
-    required this.closeButtonTooltip,
+     this.closeButtonTooltip,
     required this.content,
     this.bottom,
     this.usePageView = true,
@@ -318,7 +318,6 @@ class CardDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final controller = ScrollController();
-
     return Card(
       margin: EdgeInsets.zero,
       child: Column(
@@ -332,7 +331,7 @@ class CardDialog extends ConsumerWidget {
                 color: theme.colorScheme.onPrimary,
               ),
             ),
-            trailing: Tooltip(
+            trailing: closeButtonTooltip == null ? null : Tooltip(
               message: closeButtonTooltip,
               child: IconButton(
                 icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
@@ -434,7 +433,7 @@ class FeedbackLayer extends StatelessWidget {
 }
 
 class DialogController extends StateNotifier<WidgetBuilder?> {
-  DialogController() : super(null);
+  DialogController([super.state]);
 
   void show(WidgetBuilder builder) {
     state = builder;

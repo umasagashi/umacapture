@@ -148,18 +148,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  List<List<Skill>> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+  List<List<Skill>> parse(RefBase ref, List<CharaDetailRecord> records) {
     return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
   @override
-  List<bool> evaluate(NonReactiveRef ref, List<List<Skill>> values) {
+  List<bool> evaluate(RefBase ref, List<List<Skill>> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(NonReactiveRef ref, List<Skill> value) {
-    final labels = ref.read(labelMapProvider)[labelKey]!;
+  PlutoCell plutoCell(RefBase ref, List<Skill> value) {
+    final labels = ref.watch(labelMapProvider)[labelKey]!;
     final foundSkills = predicate.extract(value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
@@ -175,7 +175,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  PlutoColumn plutoColumn(NonReactiveRef ref) {
+  PlutoColumn plutoColumn(RefBase ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -192,7 +192,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  String tooltip(NonReactiveRef ref) {
+  String tooltip(RefBase ref) {
     if (predicate.query.isEmpty) {
       return "Any";
     }
@@ -238,7 +238,7 @@ class _SelectionSelector extends ConsumerWidget {
   List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final values = spec.parse(NonReactiveRef(ref), records).flattened.map((e) => e.id).toSet();
+    final values = spec.parse(RefBase(ref), records).flattened.map((e) => e.id).toSet();
     final info = ref.watch(skillInfoProvider).where((e) => values.contains(e.sid)).toList();
     final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
     if (selected.isEmpty) {

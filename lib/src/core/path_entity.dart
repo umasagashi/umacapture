@@ -71,6 +71,8 @@ class PathEntity {
 
   String get path => context.joinAll(segments);
 
+  String get stem => basenameWithoutExtension(segments.last);
+
   @override
   @Deprecated("toString is disabled to prevent implicit conversion. Use path getter instead.")
   String toString() {
@@ -93,7 +95,13 @@ class FilePath extends PathEntity {
 
   Future<String> readAsString() => toFile().readAsString();
 
+  String readAsStringSync() => toFile().readAsStringSync();
+
   Future<File> writeAsBytes(List<int> bytes) => toFile().writeAsBytes(bytes);
+
+  Future<void> writeAsString(String contents) {
+    return parent.create(recursive: true).then((_) => toFile().writeAsString(contents));
+  }
 
   void writeAsStringSync(String contents) => toFile().writeAsStringSync(contents);
 }
@@ -121,6 +129,12 @@ class DirectoryPath extends PathEntity {
   List<PathEntity> listSync({bool recursive = false, bool followLinks = false}) {
     return toDirectory().listSync(recursive: recursive, followLinks: followLinks).map((e) => PathEntity(e)).toList();
   }
+
+  Stream<PathEntity> list({bool recursive = false, bool followLinks = false}) {
+    return toDirectory().list(recursive: recursive, followLinks: followLinks).map((e) => PathEntity(e));
+  }
+
+  Future<void> create({bool recursive = false}) => toDirectory().create(recursive: recursive);
 }
 
 extension DirectoryExtension on Directory {

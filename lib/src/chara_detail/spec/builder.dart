@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -14,6 +16,7 @@ import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
+import '/src/chara_detail/spec/rating.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
@@ -39,6 +42,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_factorTagLoader.future),
       ref.watch(_charaRankBorderLoader.future),
       ref.watch(_charaCardInfoLoader.future),
+      ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
     ]).then((_) {
       return Future.wait([
         ref.watch(_currentColumnSpecsLoader.future),
@@ -145,8 +149,134 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
       .toList();
 });
 
+class _SaveAsString {
+  final FilePath path;
+  final RatingData data;
+
+  _SaveAsString(this.path, this.data);
+
+  static Future<void> _run(_SaveAsString arg) {
+    initializeJsonReflectable();
+    return arg.path.writeAsString(JsonMapper.serialize(arg.data));
+  }
+
+  Future<void> run() {
+    return compute(_SaveAsString._run, this);
+  }
+}
+
+@jsonSerializable
+class RatingData {
+  final String title;
+  final Map<String, double> data;
+
+  RatingData({
+    required this.title,
+    required this.data,
+  });
+
+  @jsonConstructor
+  RatingData.fromJson(
+    @JsonProperty(name: 'title') String title,
+    @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
+    // ignore: prefer_initializing_formals
+  )   : title = title,
+        data = Map<String, double>.from(data);
+
+  RatingData copyWith({
+    String? title,
+    Map<String, double>? data,
+  }) {
+    return RatingData(
+      title: title ?? this.title,
+      data: data ?? this.data,
+    );
+  }
+
+  static RatingData get empty {
+    return RatingData(
+      title: "pages.chara_detail.columns.rating.default_title".tr(),
+      data: {},
+    );
+  }
+}
+
+class CharaDetailRecordRatingController extends StateNotifier<RatingData> {
+  final FilePath path;
+
+  CharaDetailRecordRatingController(this.path, super.state);
+
+  void updateWithoutNotify(String recordId, double rating) {
+    state.data[recordId] = rating;
+  }
+
+  void update(String recordId, double rating) {
+    state.data[recordId] = rating;
+    state = state.copyWith();
+  }
+
+  void updateTitle(String title) {
+    state = state.copyWith(title: title);
+  }
+
+  void save() {
+    _SaveAsString(path, state).run();
+  }
+}
+
+class RatingStorageData {
+  final String key;
+  final String title;
+
+  RatingStorageData({
+    required this.key,
+    required this.title,
+  });
+
+  RatingStorageData copyWith({
+    String? key,
+    String? title,
+  }) {
+    return RatingStorageData(
+      key: key ?? this.key,
+      title: title ?? this.title,
+    );
+  }
+}
+
+Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async {
+  initializeJsonReflectable();
+  return directoryPath
+      .listSync()
+      .map((e) => RatingStorageData(
+            key: e.stem,
+            title: JsonMapper.deserialize<RatingData>(e.asFilePath.readAsStringSync())!.title,
+          ))
+      .toList();
+}
+
+final _charaDetailRecordRatingStorageDataLoader = FutureProvider<List<RatingStorageData>>((ref) {
+  final path = ref.watch(pathInfoProvider).charaDetailRatingDir;
+  return compute(_loadRatings, path);
+});
+
+final charaDetailRecordRatingStorageDataProvider = StateProvider<List<RatingStorageData>>((ref) {
+  return ref.watch(_charaDetailRecordRatingStorageDataLoader).value!;
+});
+
+final charaDetailRecordRatingProvider =
+    StateNotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>((ref, key) {
+  final path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
+  if (!path.existsSync()) {
+    return CharaDetailRecordRatingController(path, RatingData.empty);
+  } else {
+    return CharaDetailRecordRatingController(path, JsonMapper.deserialize<RatingData>(path.readAsStringSync())!);
+  }
+});
+
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
-  final factorInfo = ref.read(factorInfoProvider);
+  final factorInfo = ref.watch(factorInfoProvider);
+  final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -346,6 +476,23 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.campaign,
       parser: TrainedDateParser(),
     ),
+    for (final storage in ratingStorages) ...[
+      RatingColumnBuilder(
+        ref: ref,
+        title: storage.title,
+        columnTitle: storage.title,
+        category: ColumnCategory.metadata,
+        parser: TraineeIdParser(),
+        storageKey: storage.key,
+      ),
+    ],
+    RatingColumnBuilder(
+      ref: ref,
+      title: "$tr_columns.rating.builder_title".tr(),
+      columnTitle: "$tr_columns.rating.default_title".tr(),
+      category: ColumnCategory.metadata,
+      parser: TraineeIdParser(),
+    ),
   ];
 });
 
@@ -358,23 +505,6 @@ final currentColumnSpecsProvider = StateNotifierProvider<ColumnSpecSelection, Li
   return ref.watch(_currentColumnSpecsLoader).value!;
 });
 
-class CharaDetailRecordRatingController extends StateNotifier<Map<String, double>> {
-  CharaDetailRecordRatingController(super.state);
-
-  void notify() {
-    state = Map.from(state);
-  }
-
-  void updateWithoutNotify(String recordId, double rating) {
-    state[recordId] = rating;
-  }
-}
-
-final charaDetailRecordRatingProvider =
-    StateNotifierProvider<CharaDetailRecordRatingController, Map<String, double>>((ref) {
-  return CharaDetailRecordRatingController({});
-});
-
 class Grid {
   final List<PlutoColumn> columns;
   final List<PlutoRow> rows;
@@ -385,7 +515,7 @@ class Grid {
   static Grid get empty => Grid([], [], []);
 }
 
-Grid _buildGrid(NonReactiveRef ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
+Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
   final columnValues = specList.map((spec) => spec.parse(ref, recordList)).toList();
   final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(ref, e.item2)).toList();
 
@@ -416,9 +546,8 @@ final currentGridProvider = Provider<Grid>((ref) {
   final recordList = ref.watch(charaDetailRecordStorageProvider);
   final specList = ref.watch(currentColumnSpecsProvider);
 
-  final nrRef = NonReactiveRef(ref);
   try {
-    return _buildGrid(nrRef, recordList, specList);
+    return _buildGrid(RefBase(ref), recordList, specList);
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);

@@ -90,22 +90,22 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+  List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(NonReactiveRef ref, List<int> values) {
+  List<bool> evaluate(RefBase ref, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(NonReactiveRef ref, int value) {
+  PlutoCell plutoCell(RefBase ref, int value) {
     return PlutoCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 
   @override
-  PlutoColumn plutoColumn(NonReactiveRef ref) {
+  PlutoColumn plutoColumn(RefBase ref) {
     final numberFormatter = NumberFormat("#,###");
     return PlutoColumn(
       title: title,
@@ -124,7 +124,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  String tooltip(NonReactiveRef ref) {
+  String tooltip(RefBase ref) {
     if (predicate.min == null && predicate.max == null) {
       return "Any";
     }
@@ -153,7 +153,7 @@ class _RangedIntegerSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = spec.parse(NonReactiveRef(ref), records).range().toDouble();
+    final range = spec.parse(RefBase(ref), records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_integer.range.label".tr()),
       description: Text("$tr_ranged_integer.range.description".tr()),

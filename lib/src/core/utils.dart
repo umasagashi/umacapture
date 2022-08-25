@@ -1,50 +1,13 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:quiver/iterables.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:tuple/tuple.dart';
-
-class CurrentPlatform {
-  static bool isWindows() {
-    return defaultTargetPlatform == TargetPlatform.windows;
-  }
-
-  static bool isLinux() {
-    return defaultTargetPlatform == TargetPlatform.linux;
-  }
-
-  static bool isMacOS() {
-    return defaultTargetPlatform == TargetPlatform.macOS;
-  }
-
-  static bool isAndroid() {
-    return defaultTargetPlatform == TargetPlatform.android;
-  }
-
-  static bool isIOS() {
-    return defaultTargetPlatform == TargetPlatform.iOS;
-  }
-
-  static bool isWeb() {
-    return kIsWeb;
-  }
-
-  static bool isMobile() {
-    return isAndroid() || isIOS();
-  }
-
-  static bool isDesktop() {
-    return isWindows() || isLinux() || isMacOS();
-  }
-
-  static bool hasWindowFrame() {
-    return !isWeb() && isDesktop();
-  }
-}
 
 final logger = Logger(
   level: (kDebugMode) ? Level.verbose : Level.info,
@@ -53,6 +16,7 @@ final logger = Logger(
     printEmojis: false,
     printTime: true,
     lineLength: 80,
+    colors: false,
   ),
 );
 
@@ -166,6 +130,7 @@ extension ListExtension<T> on List<T> {
   }
 }
 
+@jsonSerializable
 class Range<T extends dynamic> {
   final T min;
   final T max;
@@ -265,12 +230,14 @@ class Math {
   static T max<T extends num>(T a, T b) => math.max(a, b);
 }
 
-class NonReactiveRef {
+class RefBase {
   final dynamic _ref;
 
-  NonReactiveRef(ref) : _ref = ref;
+  RefBase(ref) : _ref = ref;
 
   T read<T>(ProviderBase<T> provider) => _ref.read(provider);
+
+  T watch<T>(ProviderBase<T> provider) => _ref.watch(provider);
 }
 
 abstract class StateProviderLike<T> {

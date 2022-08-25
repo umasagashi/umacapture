@@ -2,8 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '/const.dart';
 import '/src/core/path_entity.dart';
-import '/src/core/utils.dart';
 
 final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
   return PackageInfo.fromPlatform();
@@ -25,6 +25,8 @@ class PathInfo {
   DirectoryPath get modulesDir => supportDir / "modules";
 
   DirectoryPath get charaDetailActiveDir => storageDir / "chara_detail" / "active";
+
+  DirectoryPath get charaDetailRatingDir => storageDir / "chara_detail" / "metadata" / "rating";
 
   @override
   String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';

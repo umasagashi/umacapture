@@ -24,6 +24,7 @@ enum ParserType {
   skill,
   factor,
   trainedDate,
+  traineeId,
 }
 
 @jsonSerializable
@@ -235,4 +236,14 @@ class TrainedDateParser extends Parser {
   DateTime parse(CharaDetailRecord record) {
     return DateTime.parse(record.trainedDate.replaceAll("/", "-"));
   }
+}
+
+@jsonSerializable
+@Json(discriminatorValue: ParserType.traineeId)
+class TraineeIdParser extends Parser {
+  @override
+  ParserType get type => ParserType.traineeId;
+
+  @override
+  String parse(CharaDetailRecord record) => record.id;
 }
