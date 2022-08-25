@@ -1,18 +1,20 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '/const.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
 import '/src/preference/notifier.dart';
-import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
+import '/src/preference/privacy_setting.dart';
 
 // ignore: constant_identifier_names
 const tr_settings = "pages.settings";
@@ -103,8 +105,8 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
 }
 
 class SwitchWidget extends ConsumerWidget {
-  final String title;
-  final String description;
+  final Widget title;
+  final Widget description;
   final StateNotifierProvider<BooleanNotifier, bool> provider;
 
   const SwitchWidget({
@@ -118,8 +120,8 @@ class SwitchWidget extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
       isThreeLine: true,
-      title: Text(title),
-      subtitle: Text(description),
+      title: title,
+      subtitle: description,
       trailing: Align(
         widthFactor: 1,
         child: Switch(
@@ -170,8 +172,8 @@ class StyleSettingsGroup extends ConsumerWidget {
       children: [
         _BrightnessWidget(),
         SwitchWidget(
-          title: "$tr_settings.style.font_bold.title".tr(),
-          description: "$tr_settings.style.font_bold.description".tr(),
+          title: Text("$tr_settings.style.font_bold.title".tr()),
+          description: Text("$tr_settings.style.font_bold.description".tr()),
           provider: fontBoldSettingProvider,
         ),
       ],
@@ -189,8 +191,8 @@ class CaptureSettingsGroup extends ConsumerWidget {
       padding: EdgeInsets.zero,
       children: [
         SwitchWidget(
-          title: "$tr_settings.capture.auto_start.title".tr(),
-          description: "$tr_settings.capture.auto_start.description".tr(),
+          title: Text("$tr_settings.capture.auto_start.title".tr()),
+          description: Text("$tr_settings.capture.auto_start.description".tr()),
           provider: autoStartCaptureStateProvider,
         ),
         DropdownButtonWidget<CharaDetailRecordImageMode?>(
@@ -204,27 +206,36 @@ class CaptureSettingsGroup extends ConsumerWidget {
   }
 }
 
-final enableErrorLoggingStateProvider = BooleanNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
-  return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.enableErrorLogging.name),
-    defaultValue: true,
-  );
-});
-
 class PrivacySettingsGroup extends ConsumerWidget {
   const PrivacySettingsGroup({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     return ListCard(
       title: "$tr_settings.privacy.title".tr(),
       padding: EdgeInsets.zero,
       children: [
         SwitchWidget(
-          title: "$tr_settings.privacy.error_logging.title".tr(),
-          description: "$tr_settings.privacy.error_logging.description".tr(),
-          provider: enableErrorLoggingStateProvider,
+          title: Text(
+            "$tr_settings.privacy.allow_post_user_data.title".tr(),
+          ),
+          description: RichText(
+            text: TextSpan(
+              style: theme.textTheme.bodyMedium!.copyWith(
+                color: theme.textTheme.bodyMedium!.color!.withOpacity(0.8),
+              ),
+              children: [
+                TextSpan(text: "$tr_settings.privacy.allow_post_user_data.description".tr()),
+                TextSpan(
+                  text: "$tr_settings.privacy.allow_post_user_data.sample_link".tr(),
+                  style: const TextStyle(decoration: TextDecoration.underline),
+                  recognizer: TapGestureRecognizer()..onTap = () => launchUrl(Const.sentrySampleUrl),
+                ),
+              ],
+            ),
+          ),
+          provider: allowPostUserDataStateProvider,
         ),
       ],
     );

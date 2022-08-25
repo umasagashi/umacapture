@@ -341,12 +341,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  List<FactorSet> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+  List<FactorSet> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<FactorSet>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(NonReactiveRef ref, List<FactorSet> values) {
+  List<bool> evaluate(RefBase ref, List<FactorSet> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
@@ -367,7 +367,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  PlutoCell plutoCell(NonReactiveRef ref, FactorSet value) {
+  PlutoCell plutoCell(RefBase ref, FactorSet value) {
     final factors = _extract(value);
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
@@ -381,7 +381,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       )..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
     }
 
-    final labels = ref.read(labelMapProvider)[labelKey]!;
+    final labels = ref.watch(labelMapProvider)[labelKey]!;
     final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
@@ -390,7 +390,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  PlutoColumn plutoColumn(NonReactiveRef ref) {
+  PlutoColumn plutoColumn(RefBase ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -407,7 +407,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  String tooltip(NonReactiveRef ref) {
+  String tooltip(RefBase ref) {
     if (predicate.query.isEmpty) {
       return "Any";
     }
@@ -434,7 +434,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
     }
 
-    final labels = ref.read(labelMapProvider)[labelKey]!;
+    final labels = ref.watch(labelMapProvider)[labelKey]!;
     final factors = predicate.query.map((e) => labels[e]);
     return "${factors.join(sep)}$modeText";
   }
@@ -473,7 +473,7 @@ class _SelectionSelector extends ConsumerWidget {
       final spec = _clonedSpecProvider.watch(ref, specId);
       final records = ref.watch(charaDetailRecordStorageProvider);
       final values =
-          spec.parse(NonReactiveRef(ref), records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
+          spec.parse(RefBase(ref), records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
       factorInfoList = ref.watch(factorInfoProvider).where((e) => values.contains(e.sid)).toList();
     } else {
       factorInfoList = ref.watch(factorInfoProvider);

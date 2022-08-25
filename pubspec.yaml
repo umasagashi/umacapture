@@ -32,6 +32,7 @@ dependencies:
   file_picker: ^5.0.1
   flex_color_scheme: ^5.1.0
   flutter_native_splash: ^2.2.7
+  flutter_rating_bar: ^4.0.1
   flutter_riverpod: ^1.0.4
   google_fonts: ^3.0.1
   hive: ^2.2.3
@@ -51,6 +52,7 @@ dependencies:
   state_notifier: ^0.7.2+1
   table_calendar: ^3.0.6
   tuple: ^2.0.0
+  url_launcher: ^6.1.5
   uuid: ^3.0.6
   version: ^3.0.2
   window_manager: ^0.2.5

@@ -6,7 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '/src/preference/settings_state.dart';
+import '/const.dart';
+import '/src/preference/privacy_setting.dart';
 import 'src/core/json_adapter.dart';
 import 'src/core/utils.dart';
 import 'src/core/version_check.dart';
@@ -45,6 +46,24 @@ void setupWindowManager() async {
   );
 }
 
+void setupLicense() {
+  LicenseRegistry.addLicense(() async* {
+    // TODO: This should be separated by OS.
+    yield LicenseEntryWithLineBreaks(
+      ["google_fonts"],
+      await rootBundle.loadString("assets/license/google_fonts/OFL.txt"),
+    );
+    yield LicenseEntryWithLineBreaks(
+      ["opencv"],
+      await rootBundle.loadString("assets/license/opencv/LICENSE.txt"),
+    );
+    yield LicenseEntryWithLineBreaks(
+      ["onnxruntime"],
+      await rootBundle.loadString("assets/license/onnxruntime/LICENSE"),
+    );
+  });
+}
+
 void run() {
   runApp(
     ProviderScope(
@@ -64,24 +83,6 @@ void run() {
   );
 }
 
-void setupLicense() {
-  LicenseRegistry.addLicense(() async* {
-    // TODO: This should be separated by OS.
-    yield LicenseEntryWithLineBreaks(
-      ["google_fonts"],
-      await rootBundle.loadString("assets/license/google_fonts/OFL.txt"),
-    );
-    yield LicenseEntryWithLineBreaks(
-      ["opencv"],
-      await rootBundle.loadString("assets/license/opencv/LICENSE.txt"),
-    );
-    yield LicenseEntryWithLineBreaks(
-      ["onnxruntime"],
-      await rootBundle.loadString("assets/license/onnxruntime/LICENSE"),
-    );
-  });
-}
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeJsonReflectable();
@@ -94,9 +95,7 @@ void main() async {
     setupWindowManager();
   }
 
-  final enableErrorLog =
-      StorageBox(StorageBoxKey.settings).entry<bool>(SettingsEntryKey.enableErrorLogging.name).pull();
-  if (kDebugMode || enableErrorLog == false) {
+  if (allowPostUserData() == PostUserData.deny) {
     logger.i("Error logging is disabled.");
     run();
   } else {

@@ -80,24 +80,24 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+  List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(NonReactiveRef ref, List<int> values) {
+  List<bool> evaluate(RefBase ref, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(NonReactiveRef ref, int value) {
-    final card = ref.read(charaCardInfoProvider)[value];
+  PlutoCell plutoCell(RefBase ref, int value) {
+    final card = ref.watch(charaCardInfoProvider)[value];
     return PlutoCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
   }
 
   @override
-  PlutoColumn plutoColumn(NonReactiveRef ref) {
-    final recordRootDir = ref.read(pathInfoProvider).charaDetailActiveDir;
+  PlutoColumn plutoColumn(RefBase ref) {
+    final recordRootDir = ref.watch(pathInfoProvider).charaDetailActiveDir;
     return PlutoColumn(
       title: title,
       field: id,
@@ -114,8 +114,8 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  String tooltip(NonReactiveRef ref) {
-    final cards = ref.read(charaCardInfoProvider).sortedBy<num>((e) => e.sortKey);
+  String tooltip(RefBase ref) {
+    final cards = ref.watch(charaCardInfoProvider).sortedBy<num>((e) => e.sortKey);
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";

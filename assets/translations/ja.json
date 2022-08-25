@@ -326,6 +326,39 @@
                             "label": "表示名"
                         }
                     }
+                },
+                "rating": {
+                    "cell": {
+                        "description": "クリックして評価"
+                    },
+                    "dialog": {
+                        "title": "レーティング",
+                        "ok_button": {
+                            "label": "OK",
+                            "tooltip": "この設定でテーブルに反映"
+                        },
+                        "close_button": {
+                            "tooltip": "反映せずにキャンセル"
+                        }
+                    },
+                    "range": {
+                        "label": "範囲",
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    },
+                    "storage": {
+                        "label": "データ削除",
+                        "description": "このレーティングデータを完全に削除します。一度削除すると復元はできません。",
+                        "delete": {
+                            "button": "長押しで削除"
+                        }
+                    }
                 }
             },
             "columns": {
@@ -437,6 +470,10 @@
                 },
                 "trained_date": {
                     "title": "育成日"
+                },
+                "rating": {
+                    "default_title": "レーティング",
+                    "builder_title": "レーティング（新規）"
                 }
             },
             "context_menu": {
@@ -491,9 +528,10 @@
             },
             "privacy": {
                 "title": "プライバシー設定",
-                "error_logging": {
-                    "title": "エラーログの送信",
-                    "description": "エラー発生時にログを自動送信します。変更は次回アプリ起動時から有効です。"
+                "allow_post_user_data": {
+                    "title": "利用環境情報の送信許可",
+                    "description": "エラーログやフィードバックなど、お使いの環境情報を送信する機能を有効にします。これをオフにしてもバージョンチェックなどの受信機能は無効化されません。変更は次回アプリ起動時から有効です。",
+                    "sample_link": "データのサンプル"
                 }
             },
             "license": {

@@ -69,23 +69,23 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  List<int> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+  List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<int>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(NonReactiveRef ref, List<int> values) {
+  List<bool> evaluate(RefBase ref, List<int> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(NonReactiveRef ref, int value) {
+  PlutoCell plutoCell(RefBase ref, int value) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
     return PlutoCell(value: value)..setUserData(RangedLabelCellData(labels[value]));
   }
 
   @override
-  PlutoColumn plutoColumn(NonReactiveRef ref) {
+  PlutoColumn plutoColumn(RefBase ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -105,7 +105,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  String tooltip(NonReactiveRef ref) {
+  String tooltip(RefBase ref) {
     if (predicate.min == null && predicate.max == null) {
       return "Any";
     }
@@ -135,7 +135,7 @@ class _RangedLabelSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = spec.parse(NonReactiveRef(ref), records).range().toDouble();
+    final range = spec.parse(RefBase(ref), records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_label.range.label".tr()),
       description: Text("$tr_ranged_label.range.description".tr()),

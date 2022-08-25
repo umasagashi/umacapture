@@ -93,23 +93,23 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   }
 
   @override
-  List<DateTime> parse(NonReactiveRef ref, List<CharaDetailRecord> records) {
+  List<DateTime> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<DateTime>.from(records.map(parser.parse));
   }
 
   @override
-  List<bool> evaluate(NonReactiveRef ref, List<DateTime> values) {
+  List<bool> evaluate(RefBase ref, List<DateTime> values) {
     return values.map((e) => predicate.apply(e)).toList();
   }
 
   @override
-  PlutoCell plutoCell(NonReactiveRef ref, DateTime value) {
+  PlutoCell plutoCell(RefBase ref, DateTime value) {
     final dateString = value.toDateString();
     return PlutoCell(value: dateString)..setUserData(DateTimeCellData(dateString));
   }
 
   @override
-  PlutoColumn plutoColumn(NonReactiveRef ref) {
+  PlutoColumn plutoColumn(RefBase ref) {
     return PlutoColumn(
       title: title,
       field: id,
@@ -125,7 +125,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   }
 
   @override
-  String tooltip(NonReactiveRef ref) {
+  String tooltip(RefBase ref) {
     if (predicate.min == null && predicate.max == null) {
       return "Any";
     }
@@ -160,9 +160,9 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
   @override
   void initState() {
     super.initState();
-    final spec = _clonedSpecProvider.read(ref, widget.specId);
-    final records = ref.read(charaDetailRecordStorageProvider);
-    range = spec.parse(NonReactiveRef(ref), records).range();
+    final spec = _clonedSpecProvider.watch(ref, widget.specId);
+    final records = ref.watch(charaDetailRecordStorageProvider);
+    range = spec.parse(RefBase(ref), records).range();
     _focusedDay = range.max;
   }
 

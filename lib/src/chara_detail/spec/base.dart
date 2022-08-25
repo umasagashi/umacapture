@@ -148,15 +148,15 @@ abstract class ColumnSpec<T> {
   @JsonProperty(ignore: true)
   int get tabIdx => 0;
 
-  List<T> parse(NonReactiveRef ref, List<CharaDetailRecord> records);
+  List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
-  List<bool> evaluate(NonReactiveRef ref, List<T> values);
+  List<bool> evaluate(RefBase ref, List<T> values);
 
-  PlutoCell plutoCell(NonReactiveRef ref, T value);
+  PlutoCell plutoCell(RefBase ref, T value);
 
-  PlutoColumn plutoColumn(NonReactiveRef ref);
+  PlutoColumn plutoColumn(RefBase ref);
 
-  String tooltip(NonReactiveRef ref);
+  String tooltip(RefBase ref);
 
   Widget label();
 

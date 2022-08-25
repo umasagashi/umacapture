@@ -1,9 +1,10 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
-import '/src/core/utils.dart';
 import '/src/gui/common.dart';
+import '/src/preference/privacy_setting.dart';
 
 class WindowCaptionButtonAlt extends StatefulWidget {
   final Widget icon;
@@ -50,17 +51,17 @@ class _WindowCaptionButtonState extends State<WindowCaptionButtonAlt> {
   }
 }
 
-class WindowCaptionAlt extends StatefulWidget implements PreferredSizeWidget {
+class WindowCaptionAlt extends ConsumerStatefulWidget implements PreferredSizeWidget {
   const WindowCaptionAlt({Key? key}) : super(key: key);
 
   @override
-  State<WindowCaptionAlt> createState() => _WindowCaptionAltState();
+  ConsumerState<WindowCaptionAlt> createState() => _WindowCaptionAltState();
 
   @override
   Size get preferredSize => const Size.fromHeight(kWindowCaptionHeight);
 }
 
-class _WindowCaptionAltState extends State<WindowCaptionAlt> with WindowListener {
+class _WindowCaptionAltState extends ConsumerState<WindowCaptionAlt> with WindowListener {
   @override
   void initState() {
     windowManager.addListener(this);
@@ -108,7 +109,7 @@ class _WindowCaptionAltState extends State<WindowCaptionAlt> with WindowListener
               ),
             ),
           ),
-          if (isSentryAvailable())
+          if (isFeedbackAvailable(ref))
             WindowCaptionButtonAlt(
               icon: Icon(
                 Icons.feedback_outlined,
