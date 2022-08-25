@@ -208,7 +208,7 @@ struct Metadata {
     std::string captured_date;
     std::string recognizer_version;
     std::string stage;
-    std::optional<int> strategy;
+    int strategy;
     std::optional<int> relation_bonus;
 
     EXTENDED_JSON_TYPE_NDC(
