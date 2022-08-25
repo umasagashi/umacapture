@@ -111,14 +111,11 @@ class SkillCellData<T> implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.skill)
+@Json(discriminatorValue: "SkillColumnSpec")
 class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final Parser parser;
   final String labelKey = "skill.name";
   final AggregateSkillPredicate predicate;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.skill;
 
   @override
   final String id;

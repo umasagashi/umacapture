@@ -53,13 +53,10 @@ class DateTimeCellData implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.datetime)
+@Json(discriminatorValue: "DateTimeColumnSpec")
 class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   final Parser parser;
   final IsInRangeDateTimePredicate predicate;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.rangedInteger;
 
   @override
   final String id;

@@ -59,15 +59,12 @@ class RatingCellData implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.rating)
+@Json(discriminatorValue: "RatingColumnSpec")
 class RatingColumnSpec extends ColumnSpec<double?> {
   final Parser parser;
   final IsInRangeRatingPredicate predicate;
 
   final String storageKey;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.rating;
 
   @override
   final String id;
