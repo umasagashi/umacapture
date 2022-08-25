@@ -52,13 +52,10 @@ class RangedIntegerCellData implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.rangedInteger)
+@Json(discriminatorValue: "RangedIntegerColumnSpec")
 class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final Parser parser;
   final IsInRangeIntegerPredicate predicate;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.rangedInteger;
 
   @override
   final String id;

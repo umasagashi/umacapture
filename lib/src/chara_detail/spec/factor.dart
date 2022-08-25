@@ -287,7 +287,7 @@ class FactorCellData implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.factor)
+@Json(discriminatorValue: "FactorColumnSpec")
 class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final Parser parser;
   final String labelKey = "factor.name";
@@ -296,9 +296,6 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final bool showAllWhenQueryIsEmpty;
   final bool showAvailableFactorOnly;
   final Set<FactorDialogElements> hiddenElements;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.factor;
 
   @override
   final String id;
@@ -472,8 +469,7 @@ class _SelectionSelector extends ConsumerWidget {
     if (availableOnly) {
       final spec = _clonedSpecProvider.watch(ref, specId);
       final records = ref.watch(charaDetailRecordStorageProvider);
-      final values =
-          spec.parse(RefBase(ref), records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
+      final values = spec.parse(RefBase(ref), records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
       factorInfoList = ref.watch(factorInfoProvider).where((e) => values.contains(e.sid)).toList();
     } else {
       factorInfoList = ref.watch(factorInfoProvider);

@@ -10,11 +10,8 @@ import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/core/utils.dart';
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.characterRank)
+@Json(discriminatorValue: "CharaRankColumnSpec")
 class CharaRankColumnSpec extends RangedLabelColumnSpec {
-  @override
-  ColumnSpecType get type => ColumnSpecType.characterRank;
-
   CharaRankColumnSpec({
     required super.id,
     required super.title,

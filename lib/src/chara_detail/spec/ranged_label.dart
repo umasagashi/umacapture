@@ -29,14 +29,11 @@ class RangedLabelCellData implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.rangedLabel)
+@Json(discriminatorValue: "RangedLabelColumnSpec")
 class RangedLabelColumnSpec extends ColumnSpec<int> {
   final Parser parser;
   final String labelKey;
   IsInRangeIntegerPredicate predicate;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.rangedLabel;
 
   @override
   final String id;

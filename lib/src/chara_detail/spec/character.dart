@@ -44,13 +44,10 @@ class CharacterCardCellData implements Exportable {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: ColumnSpecType.characterCard)
+@Json(discriminatorValue: "CharacterCardColumnSpec")
 class CharacterCardColumnSpec extends ColumnSpec<int> {
   final Parser parser;
   final CharacterCardPredicate predicate;
-
-  @override
-  ColumnSpecType get type => ColumnSpecType.characterCard;
 
   @override
   final String id;

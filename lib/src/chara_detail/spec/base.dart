@@ -125,21 +125,9 @@ class CharaCardInfo {
 }
 
 @jsonSerializable
-enum ColumnSpecType {
-  rangedInteger,
-  rangedLabel,
-  characterRank,
-  characterCard,
-  skill,
-  factor,
-  datetime,
-  rating,
-}
-
-@jsonSerializable
 @Json(discriminatorProperty: 'type')
 abstract class ColumnSpec<T> {
-  ColumnSpecType get type;
+  String get type => runtimeType.toString();
 
   String get id;
 
