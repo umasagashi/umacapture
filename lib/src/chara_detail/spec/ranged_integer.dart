@@ -63,12 +63,16 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   @override
   final String title;
 
+  @override
+  final int tabIdx;
+
   RangedIntegerColumnSpec({
     required this.id,
     required this.title,
     required this.parser,
     required this.predicate,
-  });
+    int? tabIdx,
+  }) : tabIdx = tabIdx ?? 0;
 
   RangedIntegerColumnSpec copyWith({
     String? id,
@@ -83,6 +87,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
+      tabIdx: tabIdx,
     );
   }
 
@@ -235,6 +240,7 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
 
 class RangedIntegerColumnBuilder implements ColumnBuilder {
   final Parser parser;
+  final int? tabIdx;
 
   @override
   final String title;
@@ -249,6 +255,7 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
     required this.title,
     required this.category,
     required this.parser,
+    this.tabIdx,
   });
 
   @override
@@ -258,6 +265,7 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
       title: title,
       parser: parser,
       predicate: IsInRangeIntegerPredicate(),
+      tabIdx: tabIdx,
     );
   }
 }

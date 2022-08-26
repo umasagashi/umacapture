@@ -327,6 +327,23 @@
                         }
                     }
                 },
+                "simple_label": {
+                    "selection": {
+                        "label": "選択",
+                        "description": "選択されている項目に該当するウマ娘がテーブルに表示されます。"
+                    },
+                    "tooltip": {
+                        "accept": "含む",
+                        "reject": "含まない"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    }
+                },
                 "rating": {
                     "cell": {
                         "description": "クリックして評価"
@@ -468,8 +485,14 @@
                         }
                     }
                 },
+                "fans": {
+                    "title": "ファン数"
+                },
                 "trained_date": {
                     "title": "育成日"
+                },
+                "race_strategy": {
+                    "title": "作戦"
                 },
                 "rating": {
                     "default_title": "レーティング",

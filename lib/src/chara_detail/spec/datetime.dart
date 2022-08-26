@@ -157,8 +157,8 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
   @override
   void initState() {
     super.initState();
-    final spec = _clonedSpecProvider.watch(ref, widget.specId);
-    final records = ref.watch(charaDetailRecordStorageProvider);
+    final spec = _clonedSpecProvider.read(ref, widget.specId);
+    final records = ref.read(charaDetailRecordStorageProvider);
     range = spec.parse(RefBase(ref), records).range();
     _focusedDay = range.max;
   }

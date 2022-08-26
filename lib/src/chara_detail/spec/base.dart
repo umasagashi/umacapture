@@ -133,7 +133,6 @@ abstract class ColumnSpec<T> {
 
   String get title;
 
-  @JsonProperty(ignore: true)
   int get tabIdx => 0;
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
