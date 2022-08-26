@@ -40,6 +40,14 @@ class LabelKeys {
   static String get charaRank => "character_rank.name";
 
   static String get raceStrategy => "race_strategy.name";
+
+  static String get campaignScenario => "scenario.name";
+}
+
+enum ColumnBuilderType {
+  normal,
+  filter,
+  add,
 }
 
 abstract class ColumnBuilder {
@@ -47,7 +55,7 @@ abstract class ColumnBuilder {
 
   ColumnCategory get category;
 
-  bool get isFilterColumn;
+  ColumnBuilderType get type => ColumnBuilderType.normal;
 
   ColumnSpec build();
 }
@@ -159,7 +167,7 @@ abstract class ColumnSpec<T> {
 
   Widget label();
 
-  Widget selector();
+  Widget selector(ChangeNotifier onDecided);
 }
 
 class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {

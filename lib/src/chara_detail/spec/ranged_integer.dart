@@ -137,7 +137,12 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => RangedIntegerColumnSelector(specId: id);
+  Widget selector(ChangeNotifier onDecided) {
+    return RangedIntegerColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+    );
+  }
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
@@ -186,16 +191,35 @@ class _RangedIntegerSelector extends ConsumerWidget {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_ranged_integer.notation.label".tr()),
       description: Text("$tr_ranged_integer.notation.description".tr()),
@@ -204,11 +228,9 @@ class _NotationSelector extends ConsumerWidget {
           title: Text("$tr_ranged_integer.notation.title.label".tr()),
           children: [
             DenseTextField(
-              initialText: spec.title,
+              initialText: title,
               onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(title: value);
-                });
+                title = value;
               },
             ),
           ],
@@ -220,10 +242,12 @@ class _NotationSelector extends ConsumerWidget {
 
 class RangedIntegerColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const RangedIntegerColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
   }) : super(key: key);
 
   @override
@@ -232,13 +256,13 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
       children: [
         _RangedIntegerSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId),
+        _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
   }
 }
 
-class RangedIntegerColumnBuilder implements ColumnBuilder {
+class RangedIntegerColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final int? tabIdx;
 
@@ -247,9 +271,6 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
 
   @override
   final ColumnCategory category;
-
-  @override
-  bool get isFilterColumn => false;
 
   RangedIntegerColumnBuilder({
     required this.title,

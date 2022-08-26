@@ -132,7 +132,12 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => _DateTimeSelector(specId: id);
+  Widget selector(ChangeNotifier onDecided) {
+    return DateTimeColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+    );
+  }
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<DateTimeColumnSpec>();
@@ -225,16 +230,35 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_datetime.notation.label".tr()),
       description: Text("$tr_datetime.notation.description".tr()),
@@ -243,11 +267,9 @@ class _NotationSelector extends ConsumerWidget {
           title: Text("$tr_datetime.notation.title.label".tr()),
           children: [
             DenseTextField(
-              initialText: spec.title,
+              initialText: title,
               onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(title: value);
-                });
+                title = value;
               },
             ),
           ],
@@ -259,10 +281,12 @@ class _NotationSelector extends ConsumerWidget {
 
 class DateTimeColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const DateTimeColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
   }) : super(key: key);
 
   @override
@@ -271,13 +295,13 @@ class DateTimeColumnSelector extends ConsumerWidget {
       children: [
         _DateTimeSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId),
+        _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
   }
 }
 
-class DateTimeColumnBuilder implements ColumnBuilder {
+class DateTimeColumnBuilder extends ColumnBuilder {
   final Parser parser;
 
   @override
@@ -285,9 +309,6 @@ class DateTimeColumnBuilder implements ColumnBuilder {
 
   @override
   final ColumnCategory category;
-
-  @override
-  bool get isFilterColumn => false;
 
   DateTimeColumnBuilder({
     required this.title,

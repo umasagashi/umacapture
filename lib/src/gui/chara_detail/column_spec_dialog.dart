@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
@@ -34,16 +35,25 @@ class SpecProviderAccessor<T extends ColumnSpec> {
 
 class ColumnSpecDialog extends ConsumerWidget {
   final String specId;
+  final PlainChangeNotifier onDecided;
   final Widget child;
 
   const ColumnSpecDialog({
     Key? key,
     required this.specId,
+    required this.onDecided,
     required this.child,
   }) : super(key: key);
 
   static void show(WidgetRef ref, ColumnSpec spec) {
-    CardDialog.show(ref, (_) => ColumnSpecDialog(specId: spec.id, child: spec.selector()));
+    CardDialog.show(ref, (_) {
+      final notifier = PlainChangeNotifier();
+      return ColumnSpecDialog(
+        specId: spec.id,
+        onDecided: notifier,
+        child: spec.selector(notifier),
+      );
+    });
   }
 
   @override
@@ -75,6 +85,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_chara_detail.column_predicate.dialog.ok_button.label".tr()),
               onPressed: () {
+                onDecided.notifyListeners();
                 final spec = ref.read(specCloneProvider(specId));
                 ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
                 CardDialog.dismiss(ref);

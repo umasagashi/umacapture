@@ -14,3 +14,11 @@ extension CallbackExtension<T> on Callback<T> {
     return () => this(value);
   }
 }
+
+class PlainChangeNotifier extends ChangeNotifier {
+  @override
+  // ignore: unnecessary_overrides
+  void notifyListeners() {
+    super.notifyListeners();
+  }
+}

@@ -82,7 +82,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   @override
   PlutoCell plutoCell(RefBase ref, int value) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    return PlutoCell(value: value)..setUserData(RangedLabelCellData(labels[value]));
+    return PlutoCell(
+      value: value,
+    )..setUserData(RangedLabelCellData(labels[value]));
   }
 
   @override
@@ -118,7 +120,12 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => RangedLabelColumnSelector(specId: id);
+  Widget selector(ChangeNotifier onDecided) {
+    return RangedLabelColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+    );
+  }
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<RangedLabelColumnSpec>();
@@ -167,16 +174,35 @@ class _RangedLabelSelector extends ConsumerWidget {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_ranged_label.notation.label".tr()),
       description: Text("$tr_ranged_label.notation.description".tr()),
@@ -185,11 +211,9 @@ class _NotationSelector extends ConsumerWidget {
           title: Text("$tr_ranged_label.notation.title.label".tr()),
           children: [
             DenseTextField(
-              initialText: spec.title,
+              initialText: title,
               onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(title: value);
-                });
+                title = value;
               },
             ),
           ],
@@ -201,10 +225,12 @@ class _NotationSelector extends ConsumerWidget {
 
 class RangedLabelColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const RangedLabelColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
   }) : super(key: key);
 
   @override
@@ -213,13 +239,13 @@ class RangedLabelColumnSelector extends ConsumerWidget {
       children: [
         _RangedLabelSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId),
+        _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
   }
 }
 
-class RangedLabelColumnBuilder implements ColumnBuilder {
+class RangedLabelColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String labelKey;
   final int? tabIdx;
@@ -232,7 +258,7 @@ class RangedLabelColumnBuilder implements ColumnBuilder {
   final ColumnCategory category;
 
   @override
-  final bool isFilterColumn;
+  final ColumnBuilderType type;
 
   RangedLabelColumnBuilder({
     required this.title,
@@ -241,7 +267,7 @@ class RangedLabelColumnBuilder implements ColumnBuilder {
     required this.parser,
     this.tabIdx,
     this.min,
-  }) : isFilterColumn = min != null;
+  }) : type = min != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
   RangedLabelColumnSpec build() {

@@ -29,7 +29,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
       onPressed: () {
         final specs = ref.read(currentColumnSpecsProvider.notifier);
         for (final builder in targets) {
-          if (!builder.isFilterColumn) {
+          if (builder.type == ColumnBuilderType.normal) {
             specs.add(builder.build());
           }
         }
@@ -48,7 +48,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
         ColumnSpecDialog.show(ref, spec);
       },
       child: ActionChip(
-        backgroundColor: builder.isFilterColumn ? theme.chipTheme.backgroundColor!.withOpacity(0.2) : null,
+        backgroundColor:
+            builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor!.withOpacity(0.2),
         label: Text(builder.title),
         onPressed: () {
           ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build());
@@ -60,8 +61,10 @@ class ColumnBuilderDialog extends ConsumerWidget {
 
   Widget builderChipCategory(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
     final theme = Theme.of(context);
-    final nonFilterBuilders = targets.where((e) => !e.isFilterColumn).toList();
-    final filterBuilders = targets.where((e) => e.isFilterColumn).toList();
+    final groups = targets.groupListsBy((e) => e.type);
+    final normalBuilders = groups[ColumnBuilderType.normal] ?? [];
+    final filterBuilders = groups[ColumnBuilderType.filter] ?? [];
+    final addBuilders = groups[ColumnBuilderType.add] ?? [];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -70,28 +73,51 @@ class ColumnBuilderDialog extends ConsumerWidget {
           runSpacing: 16,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (nonFilterBuilders.length >= 2) addAllChipWidget(context, ref, targets),
-            for (final builder in nonFilterBuilders) builderChip(context, ref, builder),
+            if (normalBuilders.length >= 2) addAllChipWidget(context, ref, targets),
+            for (final builder in normalBuilders) builderChip(context, ref, builder),
           ],
         ),
-        if (filterBuilders.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(top: 16),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.onSurface.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 16,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                Text("$tr_chara_detail.column_spec.dialog.filter.label".tr()),
-                for (final builder in filterBuilders) builderChip(context, ref, builder),
-              ],
-            ),
-          ),
+        Wrap(
+          spacing: 16,
+          children: [
+            if (filterBuilders.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurface.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 16,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text("$tr_chara_detail.column_spec.dialog.filter.label".tr()),
+                    for (final builder in filterBuilders) builderChip(context, ref, builder),
+                  ],
+                ),
+              ),
+            if (addBuilders.isNotEmpty)
+              Container(
+                margin: const EdgeInsets.only(top: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurface.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 16,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text("$tr_chara_detail.column_spec.dialog.add.label".tr()),
+                    for (final builder in addBuilders) builderChip(context, ref, builder),
+                  ],
+                ),
+              ),
+          ],
+        ),
         if (targets.isEmpty) Text("common.under_construction".tr()),
       ],
     );

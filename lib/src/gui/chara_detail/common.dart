@@ -103,7 +103,7 @@ class DenseTextField extends ConsumerWidget {
         ),
         autovalidateMode: AutovalidateMode.always,
         validator: (value) => (value == null || value.isEmpty) ? "title cannot be empty" : null,
-        onEditingComplete: () => onChanged(controller.text),
+        onChanged: (value) => onChanged(value),
       ),
     );
   }
