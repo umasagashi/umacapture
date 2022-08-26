@@ -186,7 +186,7 @@ class RatingData {
 
   static RatingData get empty {
     return RatingData(
-      title: "pages.chara_detail.columns.rating.default_title".tr(),
+      title: "pages.chara_detail.columns.rating.title".tr(),
       data: {},
     );
   }

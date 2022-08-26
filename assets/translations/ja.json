@@ -95,6 +95,9 @@
                     },
                     "filter": {
                         "label": "フィルタ"
+                    },
+                    "add": {
+                        "label": "新規追加"
                     }
                 }
             },
@@ -488,6 +491,9 @@
                 "fans": {
                     "title": "ファン数"
                 },
+                "campaign_scenario": {
+                    "title": "育成シナリオ"
+                },
                 "trained_date": {
                     "title": "育成日"
                 },
@@ -495,8 +501,7 @@
                     "title": "作戦"
                 },
                 "rating": {
-                    "default_title": "レーティング",
-                    "builder_title": "レーティング（新規）"
+                    "title": "レーティング"
                 }
             },
             "context_menu": {

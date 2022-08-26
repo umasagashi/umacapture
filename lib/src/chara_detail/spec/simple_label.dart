@@ -95,8 +95,10 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
 
   @override
   PlutoCell plutoCell(RefBase ref, int value) {
-    final labels = ref.read(labelMapProvider)[labelKey]!;
-    return PlutoCell(value: value)..setUserData(SimpleLabelCellData(labels[value]));
+    final label = ref.read(labelMapProvider)[labelKey]![value];
+    return PlutoCell(
+      value: label,
+    )..setUserData(SimpleLabelCellData(label));
   }
 
   @override
@@ -104,7 +106,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
     return PlutoColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.number(),
+      type: PlutoColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
@@ -126,12 +128,12 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";
-    } else if (predicate.rejects.length > labels.length / 2) {
+    } else if (predicate.rejects.length >= labels.length / 2) {
       final accepted = indices.where((e) => !predicate.rejects.contains(e));
-      return "${"$tr_simple_label.tooltip.accept".tr()}:$sep${accepted.map((e) => labels[e]).join(sep)}";
+      return "${"$tr_simple_label.tooltip.accept".tr()}:$sep${accepted.map((e) => labels[e].joinLines(" ")).join(sep)}";
     } else {
       final rejected = indices.where((e) => predicate.rejects.contains(e));
-      return "${"$tr_simple_label.tooltip.reject".tr()}:$sep${rejected.map((e) => labels[e]).join(sep)}";
+      return "${"$tr_simple_label.tooltip.reject".tr()}:$sep${rejected.map((e) => labels[e].joinLines(" ")).join(sep)}";
     }
   }
 
@@ -139,7 +141,12 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => SimpleLabelColumnSelector(specId: id);
+  Widget selector(ChangeNotifier onDecided) {
+    return SimpleLabelColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+    );
+  }
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<SimpleLabelColumnSpec>();
@@ -168,11 +175,11 @@ class _SimpleLabelSelector extends ConsumerWidget {
             alignment: Alignment.topLeft,
             child: Wrap(
               spacing: 8,
-              runSpacing: 2,
+              runSpacing: 8,
               children: [
                 for (final index in indices)
                   FilterChip(
-                    label: Text(labels[index]),
+                    label: Text(labels[index].joinLines(" ")),
                     backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceVariant,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
@@ -195,16 +202,35 @@ class _SimpleLabelSelector extends ConsumerWidget {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_simple_label.notation.label".tr()),
       description: Text("$tr_simple_label.notation.description".tr()),
@@ -213,11 +239,9 @@ class _NotationSelector extends ConsumerWidget {
           title: Text("$tr_simple_label.notation.title.label".tr()),
           children: [
             DenseTextField(
-              initialText: spec.title,
+              initialText: title,
               onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(title: value);
-                });
+                title = value;
               },
             ),
           ],
@@ -229,10 +253,12 @@ class _NotationSelector extends ConsumerWidget {
 
 class SimpleLabelColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const SimpleLabelColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
   }) : super(key: key);
 
   @override
@@ -241,16 +267,17 @@ class SimpleLabelColumnSelector extends ConsumerWidget {
       children: [
         _SimpleLabelSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId),
+        _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
   }
 }
 
-class SimpleLabelColumnBuilder implements ColumnBuilder {
+class SimpleLabelColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String labelKey;
   final Set<int>? rejects;
+  final int? tabIdx;
 
   @override
   final String title;
@@ -259,7 +286,7 @@ class SimpleLabelColumnBuilder implements ColumnBuilder {
   final ColumnCategory category;
 
   @override
-  final bool isFilterColumn;
+  final ColumnBuilderType type;
 
   SimpleLabelColumnBuilder({
     required this.title,
@@ -267,7 +294,8 @@ class SimpleLabelColumnBuilder implements ColumnBuilder {
     required this.labelKey,
     required this.parser,
     this.rejects,
-  }) : isFilterColumn = rejects != null;
+    this.tabIdx,
+  }) : type = rejects != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
   SimpleLabelColumnSpec build() {
@@ -277,6 +305,7 @@ class SimpleLabelColumnBuilder implements ColumnBuilder {
       parser: parser,
       labelKey: labelKey,
       predicate: rejects == null ? SimpleLabelPredicate.any() : SimpleLabelPredicate(rejects: rejects!),
+      tabIdx: tabIdx,
     );
   }
 }

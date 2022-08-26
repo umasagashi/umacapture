@@ -308,7 +308,7 @@ class CardDialog extends ConsumerWidget {
   const CardDialog({
     Key? key,
     required this.dialogTitle,
-     this.closeButtonTooltip,
+    this.closeButtonTooltip,
     required this.content,
     this.bottom,
     this.usePageView = true,
@@ -331,16 +331,18 @@ class CardDialog extends ConsumerWidget {
                 color: theme.colorScheme.onPrimary,
               ),
             ),
-            trailing: closeButtonTooltip == null ? null : Tooltip(
-              message: closeButtonTooltip,
-              child: IconButton(
-                icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
-                splashRadius: 24,
-                onPressed: () {
-                  CardDialog.dismiss(ref);
-                },
-              ),
-            ),
+            trailing: closeButtonTooltip == null
+                ? null
+                : Tooltip(
+                    message: closeButtonTooltip,
+                    child: IconButton(
+                      icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
+                      splashRadius: 24,
+                      onPressed: () {
+                        CardDialog.dismiss(ref);
+                      },
+                    ),
+                  ),
           ),
           if (usePageView)
             Expanded(

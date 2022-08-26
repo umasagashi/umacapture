@@ -439,7 +439,13 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => FactorColumnSelector(specId: id, availableOnly: showAvailableFactorOnly);
+  Widget selector(ChangeNotifier onDecided) {
+    return FactorColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+      availableOnly: showAvailableFactorOnly,
+    );
+  }
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
@@ -690,22 +696,42 @@ class _ModeSelector extends ConsumerWidget {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
   });
 
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+    });
+  }
+
   Widget notationChoiceWidget(BuildContext context, WidgetRef ref) {
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
     return ChoiceFormLine<FactorNotationMode>(
       title: Text("$tr_factor.notation.mode.label".tr()),
       prefix: "$tr_factor.notation.mode",
       values: FactorNotationMode.values,
       selected: predicate.notation.mode,
       onSelected: (value) {
-        _clonedSpecProvider.update(ref, specId, (spec) {
+        _clonedSpecProvider.update(ref, widget.specId, (spec) {
           return spec.copyWith(
             predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(mode: value)),
           );
@@ -715,7 +741,7 @@ class _NotationSelector extends ConsumerWidget {
   }
 
   Widget notationMaxWidget(WidgetRef ref) {
-    final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
+    final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
     return FormLine(
       title: Text("$tr_factor.notation.max.label".tr()),
       children: [
@@ -726,7 +752,7 @@ class _NotationSelector extends ConsumerWidget {
           max: 100,
           value: predicate.notation.max,
           onChanged: (value) {
-            _clonedSpecProvider.update(ref, specId, (spec) {
+            _clonedSpecProvider.update(ref, widget.specId, (spec) {
               return spec.copyWith(
                 predicate: spec.predicate.copyWith(
                   notation: spec.predicate.notation.copyWith(max: value),
@@ -740,16 +766,13 @@ class _NotationSelector extends ConsumerWidget {
   }
 
   Widget notationTitleWidget(WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
     return FormLine(
       title: Text("$tr_factor.notation.title.label".tr()),
       children: [
         DenseTextField(
-          initialText: spec.title,
+          initialText: title,
           onChanged: (value) {
-            _clonedSpecProvider.update(ref, specId, (spec) {
-              return spec.copyWith(title: value);
-            });
+            title = value;
           },
         ),
       ],
@@ -757,7 +780,7 @@ class _NotationSelector extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_factor.notation.label".tr()),
       description: Text("$tr_factor.notation.description".tr()),
@@ -772,11 +795,13 @@ class _NotationSelector extends ConsumerWidget {
 
 class FactorColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
   final bool availableOnly;
 
   const FactorColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
     required this.availableOnly,
   }) : super(key: key);
 
@@ -788,13 +813,13 @@ class FactorColumnSelector extends ConsumerWidget {
         const SizedBox(height: 32),
         _ModeSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId),
+        _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
   }
 }
 
-class FactorColumnBuilder implements ColumnBuilder {
+class FactorColumnBuilder extends ColumnBuilder {
   final Parser parser;
 
   @override
@@ -802,9 +827,6 @@ class FactorColumnBuilder implements ColumnBuilder {
 
   @override
   final ColumnCategory category;
-
-  @override
-  bool get isFilterColumn => false;
 
   FactorColumnBuilder({
     required this.title,
@@ -823,8 +845,12 @@ class FactorColumnBuilder implements ColumnBuilder {
   }
 }
 
-class FilterFactorColumnBuilder implements ColumnBuilder {
+class FilteredFactorColumnBuilder extends ColumnBuilder {
   final Parser parser;
+  final Set<String> initialFactorTags;
+  final Set<String> initialSkillTags;
+  final Set<int> initialIds;
+  final int initialStar;
 
   @override
   final String title;
@@ -833,23 +859,18 @@ class FilterFactorColumnBuilder implements ColumnBuilder {
   final ColumnCategory category;
 
   @override
-  final bool isFilterColumn;
+  final ColumnBuilderType type;
 
-  final Set<String> initialFactorTags;
-  final Set<String> initialSkillTags;
-  final Set<int> initialIds;
-  final int initialStar;
-
-  FilterFactorColumnBuilder({
+  FilteredFactorColumnBuilder({
     required this.title,
     required this.category,
     required this.parser,
-    required this.isFilterColumn,
+    bool isFilterColumn = true,
     this.initialFactorTags = const {},
     this.initialSkillTags = const {},
     required this.initialIds,
     required this.initialStar,
-  });
+  }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
   ColumnSpec<FactorSet> build() {

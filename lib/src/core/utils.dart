@@ -185,6 +185,12 @@ extension DateTimeExtension on DateTime {
   DateTime asLocal() => DateTime(year, month, day, hour, minute, second, microsecond);
 }
 
+extension StringExtension on String {
+  String joinLines([String sep = ""]) {
+    return replaceAll("\n", sep);
+  }
+}
+
 Iterable<int> intRange(int stop) sync* {
   for (final e in range(stop)) {
     yield e as int;

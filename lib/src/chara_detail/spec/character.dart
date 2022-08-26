@@ -119,7 +119,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";
-    } else if (predicate.rejects.length > cards.length / 2) {
+    } else if (predicate.rejects.length >= cards.length / 2) {
       final accepted = cards.where((e) => !predicate.rejects.contains(e.sid));
       return "${"$tr_character.tooltip.accept".tr()}:$sep${accepted.map((e) => e.names.first).join(sep)}";
     } else {
@@ -132,7 +132,12 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => CharacterCardColumnSelector(specId: id);
+  Widget selector(ChangeNotifier onDecided) {
+    return CharacterCardColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+    );
+  }
 }
 
 final _clonedSpecProvider = SpecProviderAccessor<CharacterCardColumnSpec>();
@@ -233,16 +238,35 @@ class _CharacterCardSelector extends ConsumerWidget {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_character.notation.label".tr()),
       description: Text("$tr_character.notation.description".tr()),
@@ -251,11 +275,9 @@ class _NotationSelector extends ConsumerWidget {
           title: Text("$tr_character.notation.title.label".tr()),
           children: [
             DenseTextField(
-              initialText: spec.title,
+              initialText: title,
               onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(title: value);
-                });
+                title = value;
               },
             ),
           ],
@@ -267,10 +289,12 @@ class _NotationSelector extends ConsumerWidget {
 
 class CharacterCardColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
 
   const CharacterCardColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
   }) : super(key: key);
 
   @override
@@ -279,13 +303,13 @@ class CharacterCardColumnSelector extends ConsumerWidget {
       children: [
         _CharacterCardSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId),
+        _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
   }
 }
 
-class CharacterCardColumnBuilder implements ColumnBuilder {
+class CharacterCardColumnBuilder extends ColumnBuilder {
   final Parser parser;
 
   @override
@@ -293,9 +317,6 @@ class CharacterCardColumnBuilder implements ColumnBuilder {
 
   @override
   final ColumnCategory category;
-
-  @override
-  bool get isFilterColumn => false;
 
   CharacterCardColumnBuilder({
     required this.title,

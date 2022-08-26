@@ -45,7 +45,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
   }
 }
 
-class CharaRankColumnBuilder implements ColumnBuilder {
+class CharaRankColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final int? min;
   final int? max;
@@ -57,7 +57,7 @@ class CharaRankColumnBuilder implements ColumnBuilder {
   final ColumnCategory category;
 
   @override
-  final bool isFilterColumn;
+  final ColumnBuilderType type;
 
   CharaRankColumnBuilder({
     required this.title,
@@ -65,7 +65,7 @@ class CharaRankColumnBuilder implements ColumnBuilder {
     required this.parser,
     this.min,
     this.max,
-  }) : isFilterColumn = min != null || max != null;
+  }) : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
   CharaRankColumnSpec build() {

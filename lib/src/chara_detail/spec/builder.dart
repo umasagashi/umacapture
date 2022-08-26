@@ -168,7 +168,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.status.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -177,7 +177,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: factorInfo.where((e) => e.tags.contains("factor_status")).map((e) => e.sid).toSet(),
       initialStar: 1,
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.aptitude.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -186,7 +186,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: factorInfo.where((e) => e.tags.contains("factor_aptitude")).map((e) => e.sid).toSet(),
       initialStar: 1,
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.scenario.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -195,7 +195,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: factorInfo.where((e) => e.tags.contains("factor_scenario")).map((e) => e.sid).toSet(),
       initialStar: 1,
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.short_range.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -204,7 +204,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {66},
       initialStar: 1,
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.mile_range.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -213,7 +213,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {27},
       initialStar: 1,
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.middle_range.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -222,7 +222,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {73},
       initialStar: 1,
     ),
-    FilterFactorColumnBuilder(
+    FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.long_range.title".tr(),
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
@@ -235,6 +235,13 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.fans.title".tr(),
       category: ColumnCategory.campaign,
       parser: FansParser(),
+      tabIdx: 2,
+    ),
+    SimpleLabelColumnBuilder(
+      title: "$tr_columns.campaign_scenario.title".tr(),
+      category: ColumnCategory.campaign,
+      labelKey: LabelKeys.campaignScenario,
+      parser: CampaignScenarioParser(),
       tabIdx: 2,
     ),
     DateTimeColumnBuilder(
@@ -256,22 +263,32 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         parser: RaceStrategyParser(),
         rejects: strategies.where((e) => e.index != strategy.index).map((e) => e.index).toSet(),
       ),
-    for (final storage in ratingStorages) ...[
+    if (ratingStorages.isEmpty)
       RatingColumnBuilder(
         ref: ref,
-        title: storage.title,
-        columnTitle: storage.title,
+        title: "$tr_columns.rating.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),
-        storageKey: storage.key,
+        type: ColumnBuilderType.normal,
       ),
-    ],
-    RatingColumnBuilder(
-      ref: ref,
-      title: "$tr_columns.rating.builder_title".tr(),
-      columnTitle: "$tr_columns.rating.default_title".tr(),
-      category: ColumnCategory.metadata,
-      parser: TraineeIdParser(),
-    ),
+    if (ratingStorages.isNotEmpty) ...[
+      for (final storage in ratingStorages) ...[
+        RatingColumnBuilder(
+          ref: ref,
+          title: storage.title,
+          category: ColumnCategory.metadata,
+          parser: TraineeIdParser(),
+          storageKey: storage.key,
+          type: ColumnBuilderType.normal,
+        ),
+      ],
+      RatingColumnBuilder(
+        ref: ref,
+        title: "$tr_columns.rating.title".tr(),
+        category: ColumnCategory.metadata,
+        parser: TraineeIdParser(),
+        type: ColumnBuilderType.add,
+      ),
+    ]
   ];
 });

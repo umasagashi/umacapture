@@ -157,7 +157,13 @@ class RatingColumnSpec extends ColumnSpec<double?> {
   Widget label() => Text(title);
 
   @override
-  Widget selector() => RatingColumnSelector(specId: id, storageKey: storageKey);
+  Widget selector(ChangeNotifier onDecided) {
+    return RatingColumnSelector(
+      specId: id,
+      onDecided: onDecided,
+      storageKey: storageKey,
+    );
+  }
 }
 
 class _RecordRatingDialog extends ConsumerStatefulWidget {
@@ -378,18 +384,48 @@ class _RatingSelector extends ConsumerWidget {
   }
 }
 
-class _NotationSelector extends ConsumerWidget {
+class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
+  final ChangeNotifier onDecided;
   final String storageKey;
 
   const _NotationSelector({
     required this.specId,
+    required this.onDecided,
     required this.storageKey,
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
+}
+
+class _NotationSelectorState extends ConsumerState<_NotationSelector> {
+  late String title;
+
+  @override
+  void initState() {
+    super.initState();
+    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) {
+        return spec.copyWith(title: title);
+      });
+
+      final ratingController = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
+      ratingController.updateTitle(title);
+      ratingController.save();
+
+      final ratingStorageController = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
+      ratingStorageController.update((state) {
+        final index = state.indexWhere((e) => e.key == (widget.storageKey));
+        state[index] = state[index].copyWith(title: title);
+        return [...state];
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return FormGroup(
       title: Text("$tr_rating.notation.label".tr()),
       description: Text("$tr_rating.notation.description".tr()),
@@ -398,21 +434,9 @@ class _NotationSelector extends ConsumerWidget {
           title: Text("$tr_rating.notation.title.label".tr()),
           children: [
             DenseTextField(
-              initialText: spec.title,
+              initialText: title,
               onChanged: (value) {
-                _clonedSpecProvider.update(ref, specId, (spec) {
-                  return spec.copyWith(title: value);
-                });
-                final ratingController = ref.read(charaDetailRecordRatingProvider(storageKey).notifier);
-                ratingController.updateTitle(value);
-                ratingController.save();
-
-                final ratingStorageController = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
-                ratingStorageController.update((state) {
-                  final index = state.indexWhere((e) => e.key == storageKey);
-                  state[index] = state[index].copyWith(title: value);
-                  return [...state];
-                });
+                title = value;
               },
             ),
           ],
@@ -463,11 +487,13 @@ class _StorageController extends ConsumerWidget {
 
 class RatingColumnSelector extends ConsumerWidget {
   final String specId;
+  final ChangeNotifier onDecided;
   final String storageKey;
 
   const RatingColumnSelector({
     Key? key,
     required this.specId,
+    required this.onDecided,
     required this.storageKey,
   }) : super(key: key);
 
@@ -477,7 +503,7 @@ class RatingColumnSelector extends ConsumerWidget {
       children: [
         _RatingSelector(specId: specId),
         const SizedBox(height: 32),
-        _NotationSelector(specId: specId, storageKey: storageKey),
+        _NotationSelector(specId: specId, onDecided: onDecided, storageKey: storageKey),
         const SizedBox(height: 32),
         _StorageController(specId: specId, storageKey: storageKey),
       ],
@@ -485,7 +511,7 @@ class RatingColumnSelector extends ConsumerWidget {
   }
 }
 
-class RatingColumnBuilder implements ColumnBuilder {
+class RatingColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String? storageKey;
   final Ref ref;
@@ -493,20 +519,18 @@ class RatingColumnBuilder implements ColumnBuilder {
   @override
   final String title;
 
-  final String columnTitle;
-
   @override
   final ColumnCategory category;
 
   @override
-  bool get isFilterColumn => false;
+  final ColumnBuilderType type;
 
   RatingColumnBuilder({
     required this.ref,
     required this.title,
-    required this.columnTitle,
     required this.category,
     required this.parser,
+    required this.type,
     this.storageKey,
   });
 
@@ -516,11 +540,11 @@ class RatingColumnBuilder implements ColumnBuilder {
     if (actualKey == null) {
       actualKey = const Uuid().v4();
       final controller = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
-      controller.update((e) => [...e, RatingStorageData(key: actualKey!, title: columnTitle)]);
+      controller.update((e) => [...e, RatingStorageData(key: actualKey!, title: title)]);
     }
     return RatingColumnSpec(
       id: const Uuid().v4(),
-      title: columnTitle,
+      title: title,
       parser: parser,
       predicate: IsInRangeRatingPredicate(),
       storageKey: actualKey,
