@@ -396,6 +396,16 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
     end = widget.end;
   }
 
+  Widget popup(double value) {
+    if (value == widget.min) {
+      return Text("$tr_common.range.popup.same_as_min".tr());
+    } else if (value == widget.max) {
+      return Text("$tr_common.range.popup.same_as_max".tr());
+    } else {
+      return Text(widget.formatter(value));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -407,7 +417,7 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
       step: FlutterSliderStep(step: widget.step),
       handler: FlutterSliderHandler(
         child: Tooltip(
-          message: "$tr_common.range.min".tr(),
+          message: "$tr_common.range.tooltip.min".tr(),
           child: Icon(
             Icons.arrow_right,
             color: theme.colorScheme.onPrimary,
@@ -420,7 +430,7 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
       ),
       rightHandler: FlutterSliderHandler(
         child: Tooltip(
-          message: "$tr_common.range.max".tr(),
+          message: "$tr_common.range.tooltip.max".tr(),
           child: Icon(
             Icons.arrow_left,
             color: theme.colorScheme.onPrimary,
@@ -434,7 +444,7 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
       tooltip: FlutterSliderTooltip(
         alwaysShowTooltip: true,
         disableAnimation: true,
-        custom: (value) => Chip(label: Text(widget.formatter(value))),
+        custom: (value) => Chip(label: popup(value)),
       ),
       values: [start, end],
       onDragging: (handlerIndex, start, end) {

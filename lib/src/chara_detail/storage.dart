@@ -167,6 +167,10 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     return recordPathOf(record).filePath(image.fileName);
   }
 
+  FilePath traineeIconPathOf(CharaDetailRecord record) {
+    return rootDirectory.filePath(record.traineeIconPath);
+  }
+
   void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
