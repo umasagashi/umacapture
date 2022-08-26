@@ -251,7 +251,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.race_winning_count.title".tr(),
-      category: ColumnCategory.campaign,
+      category: ColumnCategory.race,
       parser: RaceWinningCountParser(),
       tabIdx: 2,
     ),

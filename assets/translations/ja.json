@@ -135,8 +135,14 @@
                         "expand_button": "全部を表示"
                     },
                     "range": {
-                        "min": "最小値",
-                        "max": "最大値"
+                        "tooltip": {
+                            "min": "最小値",
+                            "max": "最大値"
+                        },
+                        "popup": {
+                            "same_as_min": "無制限",
+                            "same_as_max": "無制限"
+                        }
                     }
                 },
                 "ranged_label": {

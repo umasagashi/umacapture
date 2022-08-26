@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/callback.dart';
-import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -14,9 +13,7 @@ const tr_chara_detail = "pages.chara_detail";
 
 final specCloneProvider = StateProvider.autoDispose.family<ColumnSpec, String>((ref, specId) {
   final source = ref.watch(currentColumnSpecsProvider.notifier).getById(specId)!;
-  final cloned = JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(source))!;
-  logger.d("specCloneProvider: ${source.runtimeType}, ${source.title} -> ${cloned.runtimeType}, ${cloned.title}");
-  return cloned;
+  return JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(source))!;
 });
 
 class SpecProviderAccessor<T extends ColumnSpec> {

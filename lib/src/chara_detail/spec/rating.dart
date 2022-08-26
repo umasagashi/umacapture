@@ -11,6 +11,7 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -167,17 +168,25 @@ class RatingColumnSpec extends ColumnSpec<double?> {
 }
 
 class _RecordRatingDialog extends ConsumerStatefulWidget {
+  final String recordId;
   final double initialRating;
   final ValueChanged<double> onRatingUpdate;
 
   const _RecordRatingDialog({
     Key? key,
+    required this.recordId,
     required this.initialRating,
     required this.onRatingUpdate,
   }) : super(key: key);
 
-  static void show(WidgetRef ref, double initialRating, ValueChanged<double> onRatingUpdate) {
-    CardDialog.show(ref, (_) => _RecordRatingDialog(initialRating: initialRating, onRatingUpdate: onRatingUpdate));
+  static void show(WidgetRef ref, String recordId, double initialRating, ValueChanged<double> onRatingUpdate) {
+    CardDialog.show(ref, (_) {
+      return _RecordRatingDialog(
+        recordId: recordId,
+        initialRating: initialRating,
+        onRatingUpdate: onRatingUpdate,
+      );
+    });
   }
 
   @override
@@ -196,9 +205,15 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      width: 400,
-      height: 300,
+    final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+    final record = storage.getBy(id: widget.recordId)!;
+    final iconPath = storage.traineeIconPathOf(record);
+    final formatter = NumberFormat("#,###");
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        maxWidth: 400,
+        maxHeight: 400,
+      ),
       child: CardDialog(
         dialogTitle: "$tr_rating.dialog.title".tr(),
         closeButtonTooltip: "$tr_rating.dialog.close_button.tooltip".tr(),
@@ -207,8 +222,9 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text("$rating", style: theme.textTheme.titleLarge),
-              const SizedBox(height: 8),
+              Image.file(iconPath.toFile()),
+              Text(formatter.format(record.evaluationValue), style: theme.textTheme.titleMedium),
+              const SizedBox(height: 16),
               RatingBar.builder(
                 initialRating: widget.initialRating,
                 minRating: 0,
@@ -231,6 +247,8 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                   );
                 },
               ),
+              const SizedBox(height: 8),
+              Text("$rating / 5.0", style: theme.textTheme.titleLarge),
             ],
           ),
         ),
@@ -280,7 +298,7 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
   }
 
   void _showDialog() {
-    _RecordRatingDialog.show(ref, widget.rating!, (rating) {
+    _RecordRatingDialog.show(ref, widget.recordId, widget.rating!, (rating) {
       final controller = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
       controller.update(widget.recordId, rating);
       controller.save();
