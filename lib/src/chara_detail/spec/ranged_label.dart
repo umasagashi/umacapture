@@ -8,7 +8,7 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/storage.dart';
@@ -41,13 +41,17 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   @override
   final String title;
 
+  @override
+  final int tabIdx;
+
   RangedLabelColumnSpec({
     required this.id,
     required this.title,
     required this.parser,
     required this.labelKey,
     required this.predicate,
-  });
+    int? tabIdx,
+  }) : tabIdx = tabIdx ?? 0;
 
   RangedLabelColumnSpec copyWith({
     String? id,
@@ -215,9 +219,10 @@ class RangedLabelColumnSelector extends ConsumerWidget {
   }
 }
 
-class AptitudeColumnBuilder implements ColumnBuilder {
+class RangedLabelColumnBuilder implements ColumnBuilder {
   final Parser parser;
-  final String labelKey = "aptitude.name";
+  final String labelKey;
+  final int? tabIdx;
   final int? min;
 
   @override
@@ -229,10 +234,12 @@ class AptitudeColumnBuilder implements ColumnBuilder {
   @override
   final bool isFilterColumn;
 
-  AptitudeColumnBuilder({
+  RangedLabelColumnBuilder({
     required this.title,
     required this.category,
+    required this.labelKey,
     required this.parser,
+    this.tabIdx,
     this.min,
   }) : isFilterColumn = min != null;
 
@@ -243,6 +250,7 @@ class AptitudeColumnBuilder implements ColumnBuilder {
       title: title,
       parser: parser,
       labelKey: labelKey,
+      tabIdx: tabIdx,
       predicate: IsInRangeIntegerPredicate(
         min: min,
       ),

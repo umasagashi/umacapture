@@ -264,8 +264,8 @@ class RangedIntegerColumnBuilder implements ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       parser: parser,
-      predicate: IsInRangeIntegerPredicate(),
       tabIdx: tabIdx,
+      predicate: IsInRangeIntegerPredicate(),
     );
   }
 }

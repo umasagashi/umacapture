@@ -65,7 +65,6 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   final String title;
 
   @override
-  @JsonProperty(ignore: true)
   int get tabIdx => 2;
 
   DateTimeColumnSpec({

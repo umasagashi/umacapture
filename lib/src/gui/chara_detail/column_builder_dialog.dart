@@ -6,6 +6,7 @@ import 'package:recase/recase.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/common.dart';
 
@@ -21,6 +22,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
 
   Widget addAllChipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
     return ActionChip(
+      avatar: const Icon(Icons.auto_awesome_motion_outlined, size: 16),
+      labelPadding: const EdgeInsets.only(right: 8),
       label: Text("$tr_chara_detail.column_spec.dialog.add_all_button.label".tr()),
       tooltip: "$tr_chara_detail.column_spec.dialog.add_all_button.tooltip".tr(),
       onPressed: () {
@@ -45,8 +48,6 @@ class ColumnBuilderDialog extends ConsumerWidget {
         ColumnSpecDialog.show(ref, spec);
       },
       child: ActionChip(
-        avatar: builder.isFilterColumn ? const Icon(Icons.search_outlined, size: 16) : null,
-        labelPadding: builder.isFilterColumn ? const EdgeInsets.only(right: 8) : null,
         backgroundColor: builder.isFilterColumn ? theme.chipTheme.backgroundColor!.withOpacity(0.2) : null,
         label: Text(builder.title),
         onPressed: () {

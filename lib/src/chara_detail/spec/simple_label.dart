@@ -9,7 +9,7 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -55,13 +55,17 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
   @override
   final String title;
 
+  @override
+  final int tabIdx;
+
   SimpleLabelColumnSpec({
     required this.id,
     required this.title,
     required this.parser,
     required this.labelKey,
     required this.predicate,
-  });
+    int? tabIdx,
+  }) : tabIdx = tabIdx ?? 0;
 
   SimpleLabelColumnSpec copyWith({
     String? id,
@@ -246,7 +250,6 @@ class SimpleLabelColumnSelector extends ConsumerWidget {
 class SimpleLabelColumnBuilder implements ColumnBuilder {
   final Parser parser;
   final String labelKey;
-
   final Set<int>? rejects;
 
   @override

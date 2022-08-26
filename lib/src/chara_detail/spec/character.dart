@@ -9,7 +9,7 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
@@ -54,6 +54,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
 
   @override
   final String title;
+
+  @override
+  int get tabIdx => 0;
 
   CharacterCardColumnSpec({
     required this.id,

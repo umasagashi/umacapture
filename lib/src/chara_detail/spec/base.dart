@@ -30,6 +30,18 @@ enum ColumnCategory {
   metadata,
 }
 
+class LabelKeys {
+  static String get aptitude => "aptitude.name";
+
+  static String get skill => "skill.name";
+
+  static String get factor => "factor.name";
+
+  static String get charaRank => "character_rank.name";
+
+  static String get raceStrategy => "race_strategy.name";
+}
+
 abstract class ColumnBuilder {
   String get title;
 
@@ -133,7 +145,7 @@ abstract class ColumnSpec<T> {
 
   String get title;
 
-  int get tabIdx => 0;
+  int get tabIdx;
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
