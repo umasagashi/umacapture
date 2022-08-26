@@ -3,7 +3,7 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
@@ -47,7 +47,6 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
 
 class CharaRankColumnBuilder implements ColumnBuilder {
   final Parser parser;
-  final String labelKey = "character_rank.name";
   final int? min;
   final int? max;
 
@@ -74,7 +73,7 @@ class CharaRankColumnBuilder implements ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       parser: parser,
-      labelKey: labelKey,
+      labelKey: LabelKeys.charaRank,
       predicate: IsInRangeIntegerPredicate(
         min: min,
         max: max,

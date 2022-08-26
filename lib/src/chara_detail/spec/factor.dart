@@ -11,7 +11,7 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
@@ -290,7 +290,7 @@ class FactorCellData implements Exportable {
 @Json(discriminatorValue: "FactorColumnSpec")
 class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final Parser parser;
-  final String labelKey = "factor.name";
+  final String labelKey = LabelKeys.factor;
   final AggregateFactorSetPredicate predicate;
 
   final bool showAllWhenQueryIsEmpty;
@@ -304,7 +304,6 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final String title;
 
   @override
-  @JsonProperty(ignore: true)
   int get tabIdx => 1;
 
   FactorColumnSpec({

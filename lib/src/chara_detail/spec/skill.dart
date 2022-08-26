@@ -11,7 +11,7 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
@@ -114,7 +114,7 @@ class SkillCellData<T> implements Exportable {
 @Json(discriminatorValue: "SkillColumnSpec")
 class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final Parser parser;
-  final String labelKey = "skill.name";
+  final String labelKey = LabelKeys.skill;
   final AggregateSkillPredicate predicate;
 
   @override
@@ -122,6 +122,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
 
   @override
   final String title;
+
+  @override
+  int get tabIdx => 0;
 
   SkillColumnSpec({
     required this.id,

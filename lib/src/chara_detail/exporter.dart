@@ -11,7 +11,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';

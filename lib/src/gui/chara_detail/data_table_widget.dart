@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/builder.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
@@ -43,8 +44,8 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
     }
   }
 
-  PlutoColumn getColumn(String field) {
-    return columns.where((e) => e.field == field).first;
+  PlutoColumn? getColumn(String field) {
+    return columns.firstWhereOrNull((e) => e.field == field);
   }
 
   void sortColumn(PlutoColumn col, PlutoColumnSort order) {
@@ -52,6 +53,13 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       sortAscending(col);
     } else {
       sortDescending(col);
+    }
+  }
+
+  void sortColumnByField(String columnField, PlutoColumnSort sortOrder) {
+    final col = getColumn(columnField);
+    if (col != null) {
+      sortColumn(col, sortOrder);
     }
   }
 }
@@ -148,7 +156,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
             onLoaded: (PlutoGridOnLoadedEvent event) {
               event.stateManager.autoFitColumns();
               if (sortColumn != null) {
-                event.stateManager.sortColumn(event.stateManager.getColumn(sortColumn!), sortOrder);
+                event.stateManager.sortColumnByField(sortColumn!, sortOrder);
               }
             },
             onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
