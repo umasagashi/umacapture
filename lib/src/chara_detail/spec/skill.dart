@@ -169,8 +169,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     }
     final desc = skillNames.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
-      // Since autoFitColumn is not accurate, reserve few characters larger.
-      value: "$desc${"M" * (desc.length * 0.15).toInt()}",
+      value: desc,
     )..setUserData(SkillCellData(skillNames, desc));
   }
 

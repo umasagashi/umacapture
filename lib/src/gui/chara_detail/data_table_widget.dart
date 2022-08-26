@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -31,12 +33,35 @@ final charaDetailInitialDataLoader = FutureProvider((ref) async {
 });
 
 extension PlutoGridStateManagerExtension on PlutoGridStateManager {
+  void autoFitColumnPrecise(BuildContext context, PlutoColumn column) {
+    final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
+    final maxWidth = values.toSet().map((value) {
+      TextSpan textSpan = TextSpan(
+        style: DefaultTextStyle.of(context).style,
+        text: value,
+      );
+      TextPainter textPainter = TextPainter(
+        text: textSpan,
+        textDirection: ui.TextDirection.ltr,
+      );
+      textPainter.layout();
+      return textPainter.width;
+    }).max;
+
+    EdgeInsets cellPadding = column.cellPadding ?? configuration!.style.defaultCellPadding;
+
+    resizeColumn(
+      column,
+      maxWidth - column.width + (cellPadding.left + cellPadding.right) + 8,
+    );
+  }
+
   void autoFitColumns() {
     final context = gridKey!.currentContext!;
     for (final col in columns) {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
-      autoFitColumn(context, col);
+      autoFitColumnPrecise(context, col);
       if (maxWidth != null && col.width > maxWidth!) {
         resizeColumn(col, -col.width / 2);
       }

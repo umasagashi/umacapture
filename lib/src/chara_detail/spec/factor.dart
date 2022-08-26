@@ -381,7 +381,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
-      value: "$desc${"M" * (desc.length * 0.15).toInt()}",
+      value: desc,
     )..setUserData(FactorCellData(desc, csv: const ListToCsvConverter().convert([notations])));
   }
 
