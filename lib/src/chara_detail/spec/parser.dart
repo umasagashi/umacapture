@@ -160,6 +160,13 @@ class TrainedDateParser extends Parser<DateTime> {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: "RaceWinningCountParser")
+class RaceWinningCountParser extends Parser<int> {
+  @override
+  int parse(CharaDetailRecord record) => record.races.where((e) => e.won).length;
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "CampaignScenarioParser")
 class CampaignScenarioParser extends Parser<int> {
   @override

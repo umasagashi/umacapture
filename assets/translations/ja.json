@@ -497,6 +497,9 @@
                 "trained_date": {
                     "title": "育成日"
                 },
+                "race_winning_count": {
+                    "title": "勝利数"
+                },
                 "race_strategy": {
                     "title": "作戦"
                 },

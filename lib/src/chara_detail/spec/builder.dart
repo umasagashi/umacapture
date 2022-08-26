@@ -249,6 +249,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.campaign,
       parser: TrainedDateParser(),
     ),
+    RangedIntegerColumnBuilder(
+      title: "$tr_columns.race_winning_count.title".tr(),
+      category: ColumnCategory.campaign,
+      parser: RaceWinningCountParser(),
+      tabIdx: 2,
+    ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.race_strategy.title".tr(),
       category: ColumnCategory.metadata,

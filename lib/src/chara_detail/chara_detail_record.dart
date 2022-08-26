@@ -195,6 +195,9 @@ class Race extends JsonEquatable {
     this.position,
   );
 
+  @JsonProperty(ignore: true)
+  bool get won => position == 1;
+
   @override
   List<Object?> properties() => [
         title,
