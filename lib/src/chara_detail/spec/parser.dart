@@ -144,6 +144,13 @@ class FactorSetParser extends Parser<FactorSet> {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: "FansParser")
+class FansParser extends Parser<int> {
+  @override
+  int parse(CharaDetailRecord record) => record.fans;
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "TrainedDateParser")
 class TrainedDateParser extends Parser<DateTime> {
   @override
@@ -160,8 +167,8 @@ class TraineeIdParser extends Parser<String> {
 }
 
 @jsonSerializable
-@Json(discriminatorValue: "StrategyParser")
-class StrategyParser extends Parser<int?> {
+@Json(discriminatorValue: "RaceStrategyParser")
+class RaceStrategyParser extends Parser<int> {
   @override
-  int? parse(CharaDetailRecord record) => record.metadata.strategy;
+  int parse(CharaDetailRecord record) => record.metadata.strategy;
 }

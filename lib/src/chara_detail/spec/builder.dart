@@ -6,6 +6,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
+import 'package:quiver/iterables.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -17,6 +18,7 @@ import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
+import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
@@ -275,6 +277,8 @@ final charaDetailRecordRatingProvider =
 });
 
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
+  final labels = ref.watch(labelMapProvider);
+  final strategies = enumerate(labels["race_strategy.name"]!).toList();
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
   return [
@@ -471,11 +475,31 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {142},
       initialStar: 1,
     ),
+    RangedIntegerColumnBuilder(
+      title: "$tr_columns.fans.title".tr(),
+      category: ColumnCategory.campaign,
+      parser: FansParser(),
+      tabIdx: 2,
+    ),
     DateTimeColumnBuilder(
       title: "$tr_columns.trained_date.title".tr(),
       category: ColumnCategory.campaign,
       parser: TrainedDateParser(),
     ),
+    SimpleLabelColumnBuilder(
+      title: "$tr_columns.race_strategy.title".tr(),
+      category: ColumnCategory.metadata,
+      labelKey: "race_strategy.name",
+      parser: RaceStrategyParser(),
+    ),
+    for (final strategy in strategies)
+      SimpleLabelColumnBuilder(
+        title: strategy.value,
+        category: ColumnCategory.metadata,
+        labelKey: "race_strategy.name",
+        parser: RaceStrategyParser(),
+        rejects: strategies.where((e) => e.index != strategy.index).map((e) => e.index).toSet(),
+      ),
     for (final storage in ratingStorages) ...[
       RatingColumnBuilder(
         ref: ref,

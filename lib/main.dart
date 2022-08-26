@@ -95,7 +95,7 @@ void main() async {
     setupWindowManager();
   }
 
-  if (allowPostUserData() == PostUserData.deny) {
+  if (kDebugMode || allowPostUserData() == PostUserData.deny) {
     logger.i("Error logging is disabled.");
     run();
   } else {
