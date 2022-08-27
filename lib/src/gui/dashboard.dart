@@ -1,13 +1,15 @@
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:markdown/markdown.dart' as md;
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
@@ -15,45 +17,48 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
-bool _isInstallerMode() {
-  return FilePath.resolvedExecutable.parent
-      .listSync(recursive: false, followLinks: false)
-      .where((e) => Const.uninstallerPattern.hasMatch(e.path))
-      .isNotEmpty;
-}
-
 final _downloadProgressProvider = StateProvider<Progress?>((ref) {
   return null;
 });
 
+final _newsMarkdownLoader = FutureProvider<String>((ref) async {
+  try {
+    return Dio().get(Const.newsUrl).then((response) => response.toString());
+  } catch (error, stackTrace) {
+    logger.e("Failed to load news.", error, stackTrace);
+    captureException(error, stackTrace);
+    rethrow;
+  }
+});
+
 class AppUpdaterGroup extends ConsumerWidget {
   final Version version;
-  final bool isInstallerMode = _isInstallerMode();
 
-  AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
+  const AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
 
   void downloadAndOpen(WidgetRef ref) {
     ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: 0, total: 100));
-    getDownloadsDirectory().then((downloadDir) {
-      final downloadUrl =
-          isInstallerMode ? Const.appExeUrl(version: version.toString()) : Const.appZipUrl(version: version.toString());
-      final FilePath downloadPath = DirectoryPath(downloadDir).filePath(Uri.parse(downloadUrl).pathSegments.last);
-      logger.d("$downloadUrl, ${downloadPath.path}");
-      Dio().download(
-        downloadUrl,
-        downloadPath.path,
-        onReceiveProgress: (int count, int total) {
-          ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: count, total: total));
-        },
-      ).then((_) {
-        ref.read(_downloadProgressProvider.notifier).update((_) => null);
-        (isInstallerMode ? downloadPath : downloadPath.parent).launch();
-      });
+    final isInstallerMode = ref.watch(isInstallerModeLoader).asData!.value;
+    final pathInfo = ref.watch(pathInfoProvider);
+    final downloadUrl =
+        isInstallerMode ? Const.appExeUrl(version: version.toString()) : Const.appZipUrl(version: version.toString());
+    final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
+    logger.d("$downloadUrl, ${downloadPath.path}");
+    Dio().download(
+      downloadUrl,
+      downloadPath.path,
+      onReceiveProgress: (int count, int total) {
+        ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: count, total: total));
+      },
+    ).then((_) {
+      ref.read(_downloadProgressProvider.notifier).update((_) => null);
+      (isInstallerMode ? downloadPath : downloadPath.parent).launch();
     });
   }
 
-  Widget downloadProgressWidget(BuildContext context, Progress progress) {
+  Widget downloadProgressWidget(BuildContext context, WidgetRef ref, Progress progress) {
     final theme = Theme.of(context);
+    final isInstallerMode = ref.watch(isInstallerModeLoader).asData!.value;
     return Flex(
       direction: Axis.horizontal,
       mainAxisSize: MainAxisSize.min,
@@ -96,8 +101,50 @@ class AppUpdaterGroup extends ConsumerWidget {
         ),
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
-          child: (downloadProgress == null) ? Container() : downloadProgressWidget(context, downloadProgress),
+          child: (downloadProgress == null) ? Container() : downloadProgressWidget(context, ref, downloadProgress),
         ),
+      ],
+    );
+  }
+}
+
+class NewsGroup extends ConsumerWidget {
+  const NewsGroup({Key? key}) : super(key: key);
+
+  Widget text(String data) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Text(data),
+      ),
+    );
+  }
+
+  Widget markdown(String data) {
+    return Markdown(
+      data: data,
+      shrinkWrap: true,
+      extensionSet: md.ExtensionSet.gitHubFlavored,
+    );
+  }
+
+  Widget body(WidgetRef ref) {
+    final loader = ref.watch(_newsMarkdownLoader);
+    return loader.when(
+      loading: () => text("loading..."),
+      error: (error, _) => text("ERROR: $error"),
+      data: (data) => markdown(data),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_dashboard.news.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        body(ref),
       ],
     );
   }
@@ -112,9 +159,7 @@ class DashboardPage extends ConsumerWidget {
     return ListTilePageRootWidget(
       children: [
         if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest),
-        Center(
-          child: Text("common.under_construction".tr()),
-        )
+        const NewsGroup(),
       ],
     );
   }

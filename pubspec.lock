@@ -396,6 +396,13 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+  flutter_markdown:
+    dependency: "direct main"
+    description:
+      name: flutter_markdown
+      url: "https://pub.dartlang.org"
+    source: hosted
+    version: "0.6.10+5"
   flutter_native_splash:
     dependency: "direct main"
     description:
@@ -590,6 +597,13 @@ packages:
       url: "https://pub.dartlang.org"
     source: hosted
     version: "1.0.2"
+  markdown:
+    dependency: "direct main"
+    description:
+      name: markdown
+      url: "https://pub.dartlang.org"
+    source: hosted
+    version: "5.0.0"
   matcher:
     dependency: transitive
     description:
@@ -1147,7 +1161,7 @@ packages:
       name: window_manager
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "0.2.5"
+    version: "0.2.7"
   xdg_directories:
     dependency: transitive
     description:

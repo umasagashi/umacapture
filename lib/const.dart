@@ -5,6 +5,8 @@ class Const {
 
   static String get appUrlRoot => "https://github.com/umasagashi/umacapture/releases/latest/download";
 
+  static String get newsUrl => "$moduleUrlRoot/news.md";
+
   static String get moduleVersionInfoUrl => "$moduleUrlRoot/version_info.json";
 
   static String get moduleZipUrl => "$moduleUrlRoot/modules.zip";

@@ -12,10 +12,14 @@ final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
 class PathInfo {
   final DirectoryPath documentDir;
   final DirectoryPath supportDir;
+  final DirectoryPath executableDir;
+  final DirectoryPath downloadDir;
 
   const PathInfo({
     required this.documentDir,
     required this.supportDir,
+    required this.executableDir,
+    required this.downloadDir,
   });
 
   DirectoryPath get tempDir => documentDir / "temp";
@@ -45,13 +49,24 @@ final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
     documentDir = DirectoryPath(await getApplicationDocumentsDirectory());
   }
   final supportDir = DirectoryPath(await getApplicationSupportDirectory());
+  final downloadDir = DirectoryPath(await getDownloadsDirectory());
   final info = PathInfo(
     documentDir: documentDir / appName,
     supportDir: supportDir,
+    executableDir: FilePath.resolvedExecutable.parent,
+    downloadDir: downloadDir,
   );
   return info;
 });
 
 final pathInfoProvider = Provider<PathInfo>((ref) {
   return ref.watch(pathInfoLoader).value!;
+});
+
+final isInstallerModeLoader = FutureProvider<bool>((ref) async {
+  final info = await ref.watch(pathInfoLoader.future);
+  return info.executableDir
+      .listSync(recursive: false, followLinks: false)
+      .where((e) => Const.uninstallerPattern.hasMatch(e.path))
+      .isNotEmpty;
 });
