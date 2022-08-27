@@ -385,6 +385,42 @@
                             "button": "長押しで削除"
                         }
                     }
+                },
+                "comment": {
+                    "cell": {
+                        "description": "コメントを入力"
+                    },
+                    "dialog": {
+                        "title": "コメント",
+                        "ok_button": {
+                            "label": "OK",
+                            "tooltip": "この設定でテーブルに反映"
+                        },
+                        "close_button": {
+                            "tooltip": "反映せずにキャンセル"
+                        }
+                    },
+                    "pattern": {
+                        "label": "検索",
+                        "description": "正規表現にマッチするウマ娘がテーブルに表示されます。",
+                        "regexp": {
+                            "label": "正規表現"
+                        }
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    },
+                    "storage": {
+                        "label": "データ削除",
+                        "description": "このコメントデータを完全に削除します。一度削除すると復元はできません。",
+                        "delete": {
+                            "button": "長押しで削除"
+                        }
+                    }
                 }
             },
             "columns": {
@@ -511,6 +547,9 @@
                 },
                 "rating": {
                     "title": "レーティング"
+                },
+                "comment": {
+                    "title": "コメント"
                 }
             },
             "context_menu": {

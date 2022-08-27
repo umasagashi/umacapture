@@ -28,6 +28,8 @@ class PathInfo {
 
   DirectoryPath get charaDetailRatingDir => storageDir / "chara_detail" / "metadata" / "rating";
 
+  DirectoryPath get charaDetailCommentDir => storageDir / "chara_detail" / "metadata" / "comment";
+
   @override
   String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';
 }
