@@ -9,11 +9,11 @@ import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -277,13 +277,16 @@ class AggregateFactorSetPredicate {
   }
 }
 
-class FactorCellData implements Exportable {
+class FactorCellData implements CellData {
   final String label;
 
   @override
   final String csv;
 
   FactorCellData(this.label, {String? csv}) : csv = (csv ?? label);
+
+  @override
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
 @jsonSerializable
@@ -394,7 +397,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      readOnly: true,
+      enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         final data = context.cell.getUserData<FactorCellData>()!;
         return Text(data.label);
@@ -474,7 +477,7 @@ class _SelectionSelector extends ConsumerWidget {
     if (availableOnly) {
       final spec = _clonedSpecProvider.watch(ref, specId);
       final records = ref.watch(charaDetailRecordStorageProvider);
-      final values = spec.parse(RefBase(ref), records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
+      final values = spec.parse(ref.base, records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
       factorInfoList = ref.watch(factorInfoProvider).where((e) => values.contains(e.sid)).toList();
     } else {
       factorInfoList = ref.watch(factorInfoProvider);

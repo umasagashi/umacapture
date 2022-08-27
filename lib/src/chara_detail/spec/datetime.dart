@@ -7,10 +7,10 @@ import 'package:table_calendar/table_calendar.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -43,13 +43,16 @@ class IsInRangeDateTimePredicate {
   }
 }
 
-class DateTimeCellData implements Exportable {
+class DateTimeCellData implements CellData {
   final String value;
 
   DateTimeCellData(this.value);
 
   @override
   String get csv => value.toString();
+
+  @override
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
 @jsonSerializable
@@ -113,7 +116,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      readOnly: true,
+      enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         return Text(context.cell.value, textAlign: TextAlign.center);
       },
@@ -163,7 +166,7 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     final records = ref.read(charaDetailRecordStorageProvider);
-    range = spec.parse(RefBase(ref), records).range();
+    range = spec.parse(ref.base, records).range();
     _focusedDay = range.max;
   }
 

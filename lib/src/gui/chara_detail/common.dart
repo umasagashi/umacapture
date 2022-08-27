@@ -82,11 +82,15 @@ class FormGroup extends ConsumerWidget {
 class DenseTextField extends ConsumerWidget {
   final TextEditingController controller;
   final StringCallback onChanged;
+  final bool allowEmpty;
+  final String? hintText;
 
   DenseTextField({
     Key? key,
     required String initialText,
     required this.onChanged,
+    this.allowEmpty = false,
+    this.hintText,
   })  : controller = TextEditingController(text: initialText),
         super(key: key);
 
@@ -100,9 +104,10 @@ class DenseTextField extends ConsumerWidget {
           isCollapsed: true,
           contentPadding: const EdgeInsets.all(8).copyWith(right: 16),
           errorStyle: const TextStyle(fontSize: 0),
+          hintText: hintText,
         ),
         autovalidateMode: AutovalidateMode.always,
-        validator: (value) => (value == null || value.isEmpty) ? "title cannot be empty" : null,
+        validator: (value) => (!allowEmpty && (value == null || value.isEmpty)) ? "cannot be empty" : null,
         onChanged: (value) => onChanged(value),
       ),
     );

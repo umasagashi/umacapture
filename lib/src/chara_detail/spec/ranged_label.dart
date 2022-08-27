@@ -6,12 +6,12 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -19,13 +19,16 @@ import '/src/gui/chara_detail/common.dart';
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
 
-class RangedLabelCellData implements Exportable {
+class RangedLabelCellData implements CellData {
   final String label;
 
   RangedLabelCellData(this.label);
 
   @override
   String get csv => label;
+
+  @override
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
 @jsonSerializable
@@ -96,7 +99,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      readOnly: true,
+      enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         final data = context.cell.getUserData<RangedLabelCellData>()!;
         return Text(
@@ -143,7 +146,7 @@ class _RangedLabelSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = spec.parse(RefBase(ref), records).range().toDouble();
+    final range = spec.parse(ref.base, records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_label.range.label".tr()),
       description: Text("$tr_ranged_label.range.description".tr()),

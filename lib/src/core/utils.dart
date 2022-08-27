@@ -236,10 +236,18 @@ class Math {
   static T max<T extends num>(T a, T b) => math.max(a, b);
 }
 
+extension WidgetRefExtension on WidgetRef {
+  RefBase get base => RefBase._(this);
+}
+
+extension RefExtension on Ref {
+  RefBase get base => RefBase._(this);
+}
+
 class RefBase {
   final dynamic _ref;
 
-  RefBase(ref) : _ref = ref;
+  RefBase._(ref) : _ref = ref;
 
   T read<T>(ProviderBase<T> provider) => _ref.read(provider);
 

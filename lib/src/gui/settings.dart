@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '/const.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
@@ -276,7 +277,7 @@ class _LicensePageDialog extends ConsumerWidget {
     Key? key,
   }) : super(key: key);
 
-  static void show(WidgetRef ref) {
+  static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const _LicensePageDialog());
   }
 
@@ -317,7 +318,7 @@ class LicenseGroup extends ConsumerWidget {
           title: Text("$tr_settings.license.subtitle".tr()),
           subtitle: Text("$tr_settings.license.description".tr()),
           onTap: () {
-            _LicensePageDialog.show(ref);
+            _LicensePageDialog.show(ref.base);
           },
         ),
       ],
