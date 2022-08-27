@@ -9,6 +9,8 @@ typedef PathEntityCallback = Callback<PathEntity>;
 
 typedef Value2Callback<T1, T2> = void Function(T1, T2);
 
+typedef Predicate<T> = bool Function(T);
+
 extension CallbackExtension<T> on Callback<T> {
   VoidCallback bind(T value) {
     return () => this(value);

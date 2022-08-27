@@ -34,6 +34,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_charaRankBorderLoader.future),
       ref.watch(_charaCardInfoLoader.future),
       ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
+      ref.watch(_charaDetailRecordCommentStorageDataLoader.future),
     ]).then((_) {
       return Future.wait([
         ref.watch(_currentColumnSpecsLoader.future),
@@ -140,19 +141,19 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
       .toList();
 });
 
-class _SaveAsString {
+class _RatingDataWriter {
   final FilePath path;
   final RatingData data;
 
-  _SaveAsString(this.path, this.data);
+  _RatingDataWriter(this.path, this.data);
 
-  static Future<void> _run(_SaveAsString arg) {
+  static Future<void> _run(_RatingDataWriter arg) {
     initializeJsonReflectable();
     return arg.path.writeAsString(JsonMapper.serialize(arg.data));
   }
 
   Future<void> run() {
-    return compute(_SaveAsString._run, this);
+    return compute(_RatingDataWriter._run, this);
   }
 }
 
@@ -211,7 +212,7 @@ class CharaDetailRecordRatingController extends StateNotifier<RatingData> {
   }
 
   void save() {
-    _SaveAsString(path, state).run();
+    _RatingDataWriter(path, state).run();
   }
 }
 
@@ -237,6 +238,9 @@ class RatingStorageData {
 
 Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async {
   initializeJsonReflectable();
+  if (!directoryPath.existsSync()) {
+    return [];
+  }
   return directoryPath
       .listSync()
       .map((e) => RatingStorageData(
@@ -262,6 +266,160 @@ final charaDetailRecordRatingProvider =
     return CharaDetailRecordRatingController(path, RatingData.empty);
   } else {
     return CharaDetailRecordRatingController(path, JsonMapper.deserialize<RatingData>(path.readAsStringSync())!);
+  }
+});
+
+class _CommentDataWriter {
+  final FilePath path;
+  final CommentData data;
+
+  _CommentDataWriter(this.path, this.data);
+
+  static Future<void> _run(_CommentDataWriter arg) {
+    initializeJsonReflectable();
+    return arg.path.writeAsString(JsonMapper.serialize(arg.data));
+  }
+
+  Future<void> run() {
+    return compute(_CommentDataWriter._run, this);
+  }
+}
+
+@jsonSerializable
+class CommentData {
+  final String title;
+  final Map<String, String> data;
+
+  CommentData({
+    required this.title,
+    required this.data,
+  });
+
+  @jsonConstructor
+  CommentData.fromJson(
+    @JsonProperty(name: 'title') String title,
+    @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
+    // ignore: prefer_initializing_formals
+  )   : title = title,
+        data = Map<String, String>.from(data);
+
+  CommentData copyWith({
+    String? title,
+    Map<String, String>? data,
+  }) {
+    return CommentData(
+      title: title ?? this.title,
+      data: data ?? this.data,
+    );
+  }
+
+  static CommentData get empty {
+    return CommentData(
+      title: "pages.chara_detail.columns.comment.title".tr(),
+      data: {},
+    );
+  }
+}
+
+class CharaDetailRecordCommentController extends StateNotifier<CommentData> {
+  final FilePath path;
+
+  CharaDetailRecordCommentController(this.path, super.state);
+
+  String get title => state.title;
+
+  // void _updateWithoutNotify({
+  //   required String recordId,
+  //   required String comment,
+  // }) {
+  //   state.data[recordId] = comment;
+  // }
+
+  void _update({
+    required String recordId,
+    required String comment,
+  }) {
+    state.data[recordId] = comment;
+    state = state.copyWith();
+  }
+
+  void _remove({required String recordId}) {
+    state.data.remove(recordId);
+    state = state.copyWith();
+  }
+
+  void updateTitle({required String title}) {
+    state = state.copyWith(title: title);
+    _save();
+  }
+
+  void _save() {
+    _CommentDataWriter(path, state).run();
+  }
+
+  void update({
+    required String recordId,
+    required String? comment,
+  }) {
+    if (comment?.isEmpty ?? true) {
+      _remove(recordId: recordId);
+    } else {
+      _update(recordId: recordId, comment: comment!);
+    }
+    _save();
+  }
+}
+
+class CommentStorageData {
+  final String key;
+  final String title;
+
+  CommentStorageData({
+    required this.key,
+    required this.title,
+  });
+
+  CommentStorageData copyWith({
+    String? key,
+    String? title,
+  }) {
+    return CommentStorageData(
+      key: key ?? this.key,
+      title: title ?? this.title,
+    );
+  }
+}
+
+Future<List<CommentStorageData>> _loadComments(DirectoryPath directoryPath) async {
+  initializeJsonReflectable();
+  if (!directoryPath.existsSync()) {
+    return [];
+  }
+  return directoryPath
+      .listSync()
+      .map((e) => CommentStorageData(
+            key: e.stem,
+            title: JsonMapper.deserialize<CommentData>(e.asFilePath.readAsStringSync())!.title,
+          ))
+      .toList();
+}
+
+final _charaDetailRecordCommentStorageDataLoader = FutureProvider<List<CommentStorageData>>((ref) {
+  final path = ref.watch(pathInfoProvider).charaDetailCommentDir;
+  return compute(_loadComments, path);
+});
+
+final charaDetailRecordCommentStorageDataProvider = StateProvider<List<CommentStorageData>>((ref) {
+  return ref.watch(_charaDetailRecordCommentStorageDataLoader).value!;
+});
+
+final charaDetailRecordCommentProvider =
+    StateNotifierProvider.family<CharaDetailRecordCommentController, CommentData, String>((ref, key) {
+  final path = ref.watch(pathInfoProvider).charaDetailCommentDir.filePath("$key.json");
+  if (!path.existsSync()) {
+    return CharaDetailRecordCommentController(path, CommentData.empty);
+  } else {
+    return CharaDetailRecordCommentController(path, JsonMapper.deserialize<CommentData>(path.readAsStringSync())!);
   }
 });
 
@@ -316,7 +474,7 @@ final currentGridProvider = Provider<Grid>((ref) {
   final specList = ref.watch(currentColumnSpecsProvider);
 
   try {
-    return _buildGrid(RefBase(ref), recordList, specList);
+    return _buildGrid(ref.base, recordList, specList);
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);

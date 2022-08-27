@@ -291,11 +291,11 @@ class Disabled extends StatelessWidget {
 }
 
 class CardDialog extends ConsumerWidget {
-  static void show(WidgetRef ref, WidgetBuilder builder) {
+  static void show(RefBase ref, WidgetBuilder builder) {
     ref.read(dialogBuilderProvider.notifier).show(builder);
   }
 
-  static void dismiss(WidgetRef ref) {
+  static void dismiss(RefBase ref) {
     ref.read(dialogBuilderProvider.notifier).dismiss();
   }
 
@@ -339,7 +339,7 @@ class CardDialog extends ConsumerWidget {
                       icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
                       splashRadius: 24,
                       onPressed: () {
-                        CardDialog.dismiss(ref);
+                        CardDialog.dismiss(ref.base);
                       },
                     ),
                   ),

@@ -7,6 +7,7 @@ import 'package:recase/recase.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/common.dart';
 
@@ -16,7 +17,7 @@ const tr_chara_detail = "pages.chara_detail";
 class ColumnBuilderDialog extends ConsumerWidget {
   const ColumnBuilderDialog({Key? key}) : super(key: key);
 
-  static void show(WidgetRef ref) {
+  static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const ColumnBuilderDialog());
   }
 
@@ -33,7 +34,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             specs.add(builder.build());
           }
         }
-        CardDialog.dismiss(ref);
+        CardDialog.dismiss(ref.base);
       },
     );
   }
@@ -44,8 +45,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
       onLongPress: () {
         final spec = builder.build();
         ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
-        CardDialog.dismiss(ref);
-        ColumnSpecDialog.show(ref, spec);
+        CardDialog.dismiss(ref.base);
+        ColumnSpecDialog.show(ref.base, spec);
       },
       child: ActionChip(
         backgroundColor:
@@ -53,7 +54,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         label: Text(builder.title),
         onPressed: () {
           ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build());
-          CardDialog.dismiss(ref);
+          CardDialog.dismiss(ref.base);
         },
       ),
     );

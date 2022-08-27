@@ -7,11 +7,11 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -49,7 +49,7 @@ class IsInRangeRatingPredicate {
   }
 }
 
-class RatingCellData implements Exportable {
+class RatingCellData implements CellData {
   final double? value;
   final numberFormatter = NumberFormat("#0.0");
 
@@ -57,6 +57,9 @@ class RatingCellData implements Exportable {
 
   @override
   String get csv => numberFormatter.format(value);
+
+  @override
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
 @jsonSerializable
@@ -64,7 +67,6 @@ class RatingCellData implements Exportable {
 class RatingColumnSpec extends ColumnSpec<double?> {
   final Parser parser;
   final IsInRangeRatingPredicate predicate;
-
   final String storageKey;
 
   @override
@@ -134,13 +136,14 @@ class RatingColumnSpec extends ColumnSpec<double?> {
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      readOnly: true,
+      enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
         return _RecordRatingWidget(
           storageKey: storageKey,
           recordId: record.id,
           rating: ratings.data[record.id],
+          ratingTitle: ratings.title,
         );
       },
     )..setUserData(this);
@@ -170,20 +173,29 @@ class RatingColumnSpec extends ColumnSpec<double?> {
 class _RecordRatingDialog extends ConsumerStatefulWidget {
   final String recordId;
   final double initialRating;
+  final String ratingTitle;
   final ValueChanged<double> onRatingUpdate;
 
   const _RecordRatingDialog({
     Key? key,
     required this.recordId,
     required this.initialRating,
+    required this.ratingTitle,
     required this.onRatingUpdate,
   }) : super(key: key);
 
-  static void show(WidgetRef ref, String recordId, double initialRating, ValueChanged<double> onRatingUpdate) {
+  static void show(
+    RefBase ref, {
+    required String recordId,
+    required double initialRating,
+    required String ratingTitle,
+    required ValueChanged<double> onRatingUpdate,
+  }) {
     CardDialog.show(ref, (_) {
       return _RecordRatingDialog(
         recordId: recordId,
         initialRating: initialRating,
+        ratingTitle: ratingTitle,
         onRatingUpdate: onRatingUpdate,
       );
     });
@@ -262,7 +274,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                 label: Text("$tr_rating.dialog.ok_button.label".tr()),
                 onPressed: () {
                   widget.onRatingUpdate(rating);
-                  CardDialog.dismiss(ref);
+                  CardDialog.dismiss(ref.base);
                 },
               ),
             ),
@@ -277,11 +289,13 @@ class _RecordRatingWidget extends ConsumerStatefulWidget {
   final String storageKey;
   final String recordId;
   final double? rating;
+  final String ratingTitle;
 
   const _RecordRatingWidget({
     required this.storageKey,
     required this.recordId,
     required this.rating,
+    required this.ratingTitle,
   });
 
   @override
@@ -298,11 +312,17 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
   }
 
   void _showDialog() {
-    _RecordRatingDialog.show(ref, widget.recordId, widget.rating!, (rating) {
-      final controller = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
-      controller.update(widget.recordId, rating);
-      controller.save();
-    });
+    _RecordRatingDialog.show(
+      ref.base,
+      recordId: widget.recordId,
+      initialRating: widget.rating!,
+      ratingTitle: widget.ratingTitle,
+      onRatingUpdate: (rating) {
+        final controller = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
+        controller.update(widget.recordId, rating);
+        controller.save();
+      },
+    );
   }
 
   @override
@@ -343,7 +363,7 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
           IgnorePointer(
             ignoring: true,
             child: Opacity(
-              opacity: 0.8,
+              opacity: 0.4,
               child: Padding(
                 padding: const EdgeInsets.only(top: 24),
                 child: Text(
@@ -494,7 +514,7 @@ class _StorageController extends ConsumerWidget {
             }
 
             ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
-            CardDialog.dismiss(ref);
+            CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_rating.storage.delete.button".tr()),
         )

@@ -6,10 +6,10 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -42,13 +42,16 @@ class IsInRangeIntegerPredicate {
   }
 }
 
-class RangedIntegerCellData implements Exportable {
+class RangedIntegerCellData implements CellData {
   final int value;
 
   RangedIntegerCellData(this.value);
 
   @override
   String get csv => value.toString();
+
+  @override
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
 @jsonSerializable
@@ -117,7 +120,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      readOnly: true,
+      enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
         return Text(numberFormatter.format(data.value), textAlign: TextAlign.center);
@@ -160,7 +163,7 @@ class _RangedIntegerSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = spec.parse(RefBase(ref), records).range().toDouble();
+    final range = spec.parse(ref.base, records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_integer.range.label".tr()),
       description: Text("$tr_ranged_integer.range.description".tr()),

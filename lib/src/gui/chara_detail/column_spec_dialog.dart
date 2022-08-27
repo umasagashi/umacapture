@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/callback.dart';
+import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -42,7 +43,7 @@ class ColumnSpecDialog extends ConsumerWidget {
     required this.child,
   }) : super(key: key);
 
-  static void show(WidgetRef ref, ColumnSpec spec) {
+  static void show(RefBase ref, ColumnSpec spec) {
     CardDialog.show(ref, (_) {
       final notifier = PlainChangeNotifier();
       return ColumnSpecDialog(
@@ -72,7 +73,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
               onPressed: () {
                 ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
-                CardDialog.dismiss(ref);
+                CardDialog.dismiss(ref.base);
               },
             ),
           ),
@@ -85,7 +86,7 @@ class ColumnSpecDialog extends ConsumerWidget {
                 onDecided.notifyListeners();
                 final spec = ref.read(specCloneProvider(specId));
                 ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
-                CardDialog.dismiss(ref);
+                CardDialog.dismiss(ref.base);
               },
             ),
           ),

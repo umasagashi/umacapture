@@ -60,10 +60,10 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
                 label: spec.label(),
-                tooltip: spec.tooltip(RefBase(ref)),
+                tooltip: spec.tooltip(ref.base),
                 backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
                 onPressed: () {
-                  ColumnSpecDialog.show(ref, spec);
+                  ColumnSpecDialog.show(ref.base, spec);
                 },
               ),
             ),
@@ -111,7 +111,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
                   side: BorderSide.none,
                   labelPadding: EdgeInsets.zero,
                   onPressed: () {
-                    ColumnBuilderDialog.show(ref);
+                    ColumnBuilderDialog.show(ref.base);
                   },
                 ),
                 const Opacity(

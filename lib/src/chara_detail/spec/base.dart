@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -6,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pluto_grid/pluto_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/exporter.dart';
+import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
@@ -264,7 +268,64 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
   }
 }
 
-extension PlutoCellWithUserData on PlutoCell {
+extension PlutoGridStateManagerExtension on PlutoGridStateManager {
+  void autoFitColumnPrecise(BuildContext context, PlutoColumn column) {
+    final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
+    final maxWidth = values.toSet().map((value) {
+      TextSpan textSpan = TextSpan(
+        style: DefaultTextStyle.of(context).style,
+        text: value,
+      );
+      TextPainter textPainter = TextPainter(
+        text: textSpan,
+        textDirection: ui.TextDirection.ltr,
+      );
+      textPainter.layout();
+      return textPainter.width;
+    }).max;
+
+    EdgeInsets cellPadding = column.cellPadding ?? configuration!.style.defaultCellPadding;
+
+    resizeColumn(
+      column,
+      maxWidth - column.width + (cellPadding.left + cellPadding.right) + 8,
+    );
+  }
+
+  void autoFitColumns() {
+    final context = gridKey!.currentContext!;
+    for (final col in columns) {
+      final enabled = col.enableDropToResize;
+      col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
+      autoFitColumnPrecise(context, col);
+      if (maxWidth != null && col.width > maxWidth!) {
+        resizeColumn(col, -col.width / 2);
+      }
+      col.enableDropToResize = enabled;
+    }
+  }
+
+  PlutoColumn? getColumn(String field) {
+    return columns.firstWhereOrNull((e) => e.field == field);
+  }
+
+  void sortColumn(PlutoColumn col, PlutoColumnSort order) {
+    if (order == PlutoColumnSort.ascending) {
+      sortAscending(col);
+    } else {
+      sortDescending(col);
+    }
+  }
+
+  void sortColumnByField(String columnField, PlutoColumnSort sortOrder) {
+    final col = getColumn(columnField);
+    if (col != null) {
+      sortColumn(col, sortOrder);
+    }
+  }
+}
+
+extension PlutoCellExtension on PlutoCell {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -286,4 +347,8 @@ extension PlutoColumnWithUserData on PlutoColumn {
   T? getUserData<T>() => _userData[this] as T?;
 
   void setUserData<T>(T value) => _userData[this] = value;
+}
+
+abstract class CellData implements Exportable {
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected;
 }

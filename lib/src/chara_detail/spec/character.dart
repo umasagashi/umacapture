@@ -7,10 +7,10 @@ import 'package:pluto_grid/pluto_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -34,13 +34,16 @@ class CharacterCardPredicate {
   }
 }
 
-class CharacterCardCellData implements Exportable {
+class CharacterCardCellData implements CellData {
   final String name;
 
   CharacterCardCellData(this.name);
 
   @override
   String get csv => name;
+
+  @override
+  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
 @jsonSerializable
@@ -105,7 +108,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      readOnly: true,
+      enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
         return Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
