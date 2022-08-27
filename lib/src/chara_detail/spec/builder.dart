@@ -5,6 +5,7 @@ import 'package:quiver/iterables.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
+import '/src/chara_detail/spec/comment.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -23,6 +24,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   final strategies = enumerate(labels["race_strategy.name"]!).toList();
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
+  final commentStorages = ref.watch(charaDetailRecordCommentStorageDataProvider);
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -295,6 +297,33 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         parser: TraineeIdParser(),
         type: ColumnBuilderType.add,
       ),
-    ]
+    ],
+    if (commentStorages.isEmpty)
+      CommentColumnBuilder(
+        ref: ref,
+        title: "$tr_columns.comment.title".tr(),
+        category: ColumnCategory.metadata,
+        parser: TraineeIdParser(),
+        type: ColumnBuilderType.normal,
+      ),
+    if (commentStorages.isNotEmpty) ...[
+      for (final storage in commentStorages) ...[
+        CommentColumnBuilder(
+          ref: ref,
+          title: storage.title,
+          category: ColumnCategory.metadata,
+          parser: TraineeIdParser(),
+          storageKey: storage.key,
+          type: ColumnBuilderType.normal,
+        ),
+      ],
+      CommentColumnBuilder(
+        ref: ref,
+        title: "$tr_columns.comment.title".tr(),
+        category: ColumnCategory.metadata,
+        parser: TraineeIdParser(),
+        type: ColumnBuilderType.add,
+      ),
+    ],
   ];
 });
