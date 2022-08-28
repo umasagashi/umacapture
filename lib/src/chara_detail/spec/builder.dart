@@ -5,10 +5,10 @@ import 'package:quiver/iterables.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
-import '/src/chara_detail/spec/comment.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
@@ -25,7 +25,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   final skillInfo = ref.watch(skillInfoProvider);
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
-  final commentStorages = ref.watch(charaDetailRecordCommentStorageDataProvider);
+  final memoStorages = ref.watch(charaDetailRecordMemoStorageDataProvider);
   return [
     CharacterCardColumnBuilder(
       title: "$tr_columns.character.title".tr(),
@@ -311,16 +311,16 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         type: ColumnBuilderType.add,
       ),
     ],
-    if (commentStorages.isEmpty)
-      CommentColumnBuilder(
-        title: "$tr_columns.comment.title".tr(),
+    if (memoStorages.isEmpty)
+      MemoColumnBuilder(
+        title: "$tr_columns.memo.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),
         type: ColumnBuilderType.normal,
       ),
-    if (commentStorages.isNotEmpty) ...[
-      for (final storage in commentStorages) ...[
-        CommentColumnBuilder(
+    if (memoStorages.isNotEmpty) ...[
+      for (final storage in memoStorages) ...[
+        MemoColumnBuilder(
           title: storage.title,
           category: ColumnCategory.metadata,
           parser: TraineeIdParser(),
@@ -328,8 +328,8 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
           type: ColumnBuilderType.normal,
         ),
       ],
-      CommentColumnBuilder(
-        title: "$tr_columns.comment.title".tr(),
+      MemoColumnBuilder(
+        title: "$tr_columns.memo.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),
         type: ColumnBuilderType.add,

@@ -18,7 +18,7 @@ import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
-const tr_comment = "pages.chara_detail.column_predicate.comment";
+const tr_memo = "pages.chara_detail.column_predicate.memo";
 
 @jsonSerializable
 class RegExpPredicate {
@@ -41,7 +41,7 @@ class RegExpPredicate {
   }
 }
 
-class CommentCellData implements CellData {
+class MemoCellData implements CellData {
   final String? value;
 
   @override
@@ -50,12 +50,12 @@ class CommentCellData implements CellData {
   @override
   String get csv => value ?? "";
 
-  CommentCellData(this.value, this.onSelected);
+  MemoCellData(this.value, this.onSelected);
 }
 
 @jsonSerializable
-@Json(discriminatorValue: "CommentColumnSpec")
-class CommentColumnSpec extends ColumnSpec<String?> {
+@Json(discriminatorValue: "MemoColumnSpec")
+class MemoColumnSpec extends ColumnSpec<String?> {
   final Parser parser;
   final RegExpPredicate predicate;
   final String storageKey;
@@ -69,7 +69,7 @@ class CommentColumnSpec extends ColumnSpec<String?> {
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
-  CommentColumnSpec({
+  MemoColumnSpec({
     required this.id,
     required this.title,
     required this.parser,
@@ -77,14 +77,14 @@ class CommentColumnSpec extends ColumnSpec<String?> {
     required this.storageKey,
   });
 
-  CommentColumnSpec copyWith({
+  MemoColumnSpec copyWith({
     String? id,
     String? title,
     Parser? parser,
     RegExpPredicate? predicate,
     String? storageKey,
   }) {
-    return CommentColumnSpec(
+    return MemoColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
@@ -95,8 +95,8 @@ class CommentColumnSpec extends ColumnSpec<String?> {
 
   @override
   List<String?> parse(RefBase ref, List<CharaDetailRecord> records) {
-    final comments = ref.watch(charaDetailRecordCommentProvider(storageKey));
-    return List<String?>.from(records.map((e) => comments.data[parser.parse(e)]));
+    final memos = ref.watch(charaDetailRecordMemoProvider(storageKey));
+    return List<String?>.from(records.map((e) => memos.data[parser.parse(e)]));
   }
 
   @override
@@ -108,16 +108,16 @@ class CommentColumnSpec extends ColumnSpec<String?> {
   PlutoCell plutoCell(RefBase ref, String? value) {
     return PlutoCell(
       value: value ?? "_" * 20,
-    )..setUserData(CommentCellData(
+    )..setUserData(MemoCellData(
         value,
         (PlutoGridOnSelectedEvent event) {
           final record = event.row!.getUserData<CharaDetailRecord>()!;
-          final comments = ref.read(charaDetailRecordCommentProvider(storageKey));
-          _RecordCommentDialog.show(
+          final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
+          _RecordMemoDialog.show(
             ref,
             recordId: record.id,
             storageKey: storageKey,
-            initialComment: comments.data[record.id] ?? "",
+            initialMemo: memos.data[record.id] ?? "",
           );
           return true;
         },
@@ -134,9 +134,9 @@ class CommentColumnSpec extends ColumnSpec<String?> {
       enableDropToResize: false,
       enableColumnDrag: false,
       renderer: (PlutoColumnRendererContext context) {
-        final data = context.cell.getUserData<CommentCellData>()!;
+        final data = context.cell.getUserData<MemoCellData>()!;
         if (data.value == null) {
-          return Opacity(opacity: 0.4, child: Text("$tr_comment.cell.description".tr()));
+          return Opacity(opacity: 0.4, child: Text("$tr_memo.cell.description".tr()));
         } else {
           return Text(data.value!);
         }
@@ -157,7 +157,7 @@ class CommentColumnSpec extends ColumnSpec<String?> {
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return CommentColumnSelector(
+    return MemoColumnSelector(
       specId: id,
       onDecided: onDecided,
       storageKey: storageKey,
@@ -165,45 +165,45 @@ class CommentColumnSpec extends ColumnSpec<String?> {
   }
 }
 
-class _RecordCommentDialog extends ConsumerStatefulWidget {
+class _RecordMemoDialog extends ConsumerStatefulWidget {
   final String recordId;
   final String storageKey;
-  final String initialComment;
+  final String initialMemo;
 
-  const _RecordCommentDialog({
+  const _RecordMemoDialog({
     Key? key,
     required this.recordId,
     required this.storageKey,
-    required this.initialComment,
+    required this.initialMemo,
   }) : super(key: key);
 
   static void show(
     RefBase ref, {
     required String recordId,
     required String storageKey,
-    required String initialComment,
+    required String initialMemo,
   }) {
     CardDialog.show(ref, (_) {
-      return _RecordCommentDialog(
+      return _RecordMemoDialog(
         recordId: recordId,
         storageKey: storageKey,
-        initialComment: initialComment,
+        initialMemo: initialMemo,
       );
     });
   }
 
   @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _RecordCommentDialogState();
+  ConsumerState<ConsumerStatefulWidget> createState() => _RecordMemoDialogState();
 }
 
-class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
+class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
   late final TextEditingController controller;
   late final FocusNode focusNode;
 
   @override
   void initState() {
     super.initState();
-    controller = TextEditingController(text: widget.initialComment);
+    controller = TextEditingController(text: widget.initialMemo);
     focusNode = FocusNode();
     focusNode.requestFocus();
   }
@@ -214,15 +214,15 @@ class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
     final recordStorage = ref.watch(charaDetailRecordStorageProvider.notifier);
     final record = recordStorage.getBy(id: widget.recordId)!;
     final iconPath = recordStorage.traineeIconPathOf(record);
-    final commentStorage = ref.read(charaDetailRecordCommentProvider(widget.storageKey).notifier);
+    final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
     return ConstrainedBox(
       constraints: const BoxConstraints(
         maxWidth: 800,
         maxHeight: 400,
       ),
       child: CardDialog(
-        dialogTitle: commentStorage.title,
-        closeButtonTooltip: "$tr_comment.dialog.close_button.tooltip".tr(),
+        dialogTitle: memoStorage.title,
+        closeButtonTooltip: "$tr_memo.dialog.close_button.tooltip".tr(),
         usePageView: false,
         content: Expanded(
           child: Column(
@@ -237,8 +237,7 @@ class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
                   focusNode: focusNode,
                   controller: controller,
                   onSubmitted: (value) {
-                    commentStorage.update(recordId: record.id, comment: controller.text);
-                    // commentStorage.save();
+                    memoStorage.update(recordId: record.id, memo: controller.text);
                     CardDialog.dismiss(ref.base);
                   },
                 ),
@@ -250,13 +249,12 @@ class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             Tooltip(
-              message: "$tr_comment.dialog.ok_button.tooltip".tr(),
+              message: "$tr_memo.dialog.ok_button.tooltip".tr(),
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.check_circle),
-                label: Text("$tr_comment.dialog.ok_button.label".tr()),
+                label: Text("$tr_memo.dialog.ok_button.label".tr()),
                 onPressed: () {
-                  commentStorage.update(recordId: record.id, comment: controller.text);
-                  // commentStorage.save();
+                  memoStorage.update(recordId: record.id, memo: controller.text);
                   CardDialog.dismiss(ref.base);
                 },
               ),
@@ -268,7 +266,7 @@ class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
   }
 }
 
-final _clonedSpecProvider = SpecProviderAccessor<CommentColumnSpec>();
+final _clonedSpecProvider = SpecProviderAccessor<MemoColumnSpec>();
 
 class _PatternSelector extends ConsumerStatefulWidget {
   final String specId;
@@ -302,11 +300,11 @@ class _PatternSelectorState extends ConsumerState<_PatternSelector> {
   Widget build(BuildContext context) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
     return FormGroup(
-      title: Text("$tr_comment.pattern.label".tr()),
-      description: Text("$tr_comment.pattern.description".tr()),
+      title: Text("$tr_memo.pattern.label".tr()),
+      description: Text("$tr_memo.pattern.description".tr()),
       children: [
         FormLine(
-          title: Text("$tr_comment.pattern.regexp.label".tr()),
+          title: Text("$tr_memo.pattern.regexp.label".tr()),
           children: [
             DenseTextField(
               initialText: predicate.pattern?.pattern ?? "",
@@ -350,11 +348,11 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
         return spec.copyWith(title: title);
       });
 
-      final commentController = ref.read(charaDetailRecordCommentProvider(widget.storageKey).notifier);
-      commentController.updateTitle(title: title);
+      final memoController = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
+      memoController.updateTitle(title: title);
 
-      final commentStorageController = ref.read(charaDetailRecordCommentStorageDataProvider.notifier);
-      commentStorageController.update((state) {
+      final memoStorageController = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
+      memoStorageController.update((state) {
         final index = state.indexWhere((e) => e.key == (widget.storageKey));
         state[index] = state[index].copyWith(title: title);
         return [...state];
@@ -365,11 +363,11 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_comment.notation.label".tr()),
-      description: Text("$tr_comment.notation.description".tr()),
+      title: Text("$tr_memo.notation.label".tr()),
+      description: Text("$tr_memo.notation.description".tr()),
       children: [
         FormLine(
-          title: Text("$tr_comment.notation.title.label".tr()),
+          title: Text("$tr_memo.notation.title.label".tr()),
           children: [
             DenseTextField(
               initialText: title,
@@ -396,19 +394,19 @@ class _StorageController extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return FormGroup(
-      title: Text("$tr_comment.storage.label".tr()),
-      description: Text("$tr_comment.storage.description".tr()),
+      title: Text("$tr_memo.storage.label".tr()),
+      description: Text("$tr_memo.storage.description".tr()),
       children: [
         TextButton(
           onPressed: () {},
           onLongPress: () {
-            final commentStorageController = ref.read(charaDetailRecordCommentStorageDataProvider.notifier);
-            commentStorageController.update((state) {
+            final memoStorageController = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
+            memoStorageController.update((state) {
               state.removeWhere((e) => e.key == storageKey);
               return [...state];
             });
 
-            final storageFile = ref.watch(pathInfoProvider).charaDetailCommentDir.filePath("$storageKey.json");
+            final storageFile = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$storageKey.json");
             if (storageFile.existsSync()) {
               storageFile.deleteSync();
             }
@@ -416,19 +414,19 @@ class _StorageController extends ConsumerWidget {
             ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);
           },
-          child: Text("$tr_comment.storage.delete.button".tr()),
+          child: Text("$tr_memo.storage.delete.button".tr()),
         )
       ],
     );
   }
 }
 
-class CommentColumnSelector extends ConsumerWidget {
+class MemoColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
   final String storageKey;
 
-  const CommentColumnSelector({
+  const MemoColumnSelector({
     Key? key,
     required this.specId,
     required this.onDecided,
@@ -449,7 +447,7 @@ class CommentColumnSelector extends ConsumerWidget {
   }
 }
 
-class CommentColumnBuilder extends ColumnBuilder {
+class MemoColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String? storageKey;
 
@@ -462,7 +460,7 @@ class CommentColumnBuilder extends ColumnBuilder {
   @override
   final ColumnBuilderType type;
 
-  CommentColumnBuilder({
+  MemoColumnBuilder({
     required this.title,
     required this.category,
     required this.parser,
@@ -471,14 +469,14 @@ class CommentColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  CommentColumnSpec build(RefBase ref) {
+  MemoColumnSpec build(RefBase ref) {
     String? actualKey = storageKey;
     if (actualKey == null) {
       actualKey = const Uuid().v4();
-      final controller = ref.read(charaDetailRecordCommentStorageDataProvider.notifier);
-      controller.update((e) => [...e, CommentStorageData(key: actualKey!, title: title)]);
+      final controller = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
+      controller.update((e) => [...e, MemoStorageData(key: actualKey!, title: title)]);
     }
-    return CommentColumnSpec(
+    return MemoColumnSpec(
       id: const Uuid().v4(),
       title: title,
       parser: parser,
