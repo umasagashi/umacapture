@@ -508,7 +508,15 @@
                     }
                 },
                 "skill": {
-                    "title": "スキル"
+                    "title": "スキル",
+                    "shortcuts": {
+                        "status_up": {
+                            "title": "緑スキル"
+                        },
+                        "consolidation": {
+                            "title": "地固め"
+                        }
+                    }
                 },
                 "factor": {
                     "title": "因子",

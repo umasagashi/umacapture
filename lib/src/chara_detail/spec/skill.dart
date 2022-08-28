@@ -114,11 +114,23 @@ class SkillCellData<T> implements CellData {
 }
 
 @jsonSerializable
+enum SkillDialogElements {
+  selection,
+  selectionTags,
+  mode,
+  notationMax,
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "SkillColumnSpec")
 class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final Parser parser;
   final String labelKey = LabelKeys.skill;
   final AggregateSkillPredicate predicate;
+
+  final bool showAllWhenQueryIsEmpty;
+  final bool showAvailableOnly;
+  final Set<SkillDialogElements> hiddenElements;
 
   @override
   final String id;
@@ -134,6 +146,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     required this.title,
     required this.parser,
     required this.predicate,
+    this.showAllWhenQueryIsEmpty = true,
+    this.showAvailableOnly = true,
+    this.hiddenElements = const {},
   });
 
   SkillColumnSpec copyWith({
@@ -141,12 +156,18 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     String? title,
     Parser? parser,
     AggregateSkillPredicate? predicate,
+    bool? showAllWhenQueryIsEmpty,
+    bool? showAvailableOnly,
+    Set<SkillDialogElements>? hiddenElements,
   }) {
     return SkillColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
+      showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
+      showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
+      hiddenElements: hiddenElements ?? this.hiddenElements,
     );
   }
 
@@ -212,8 +233,10 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     }
 
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    final skills = predicate.query.map((e) => labels[e]);
-    return "${skills.join(sep)}$modeText";
+    final skills = predicate.query.map((e) => labels[e]).toList();
+    const limit = 30;
+    final ellipsis = skills.length > limit ? "$sep- ${skills.length - limit} more" : "";
+    return "${skills.partial(0, limit).join(sep)}$ellipsis$modeText";
   }
 
   @override
@@ -291,10 +314,11 @@ class _SelectionSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hiddenElements = _clonedSpecProvider.watch(ref, specId).hiddenElements;
     return FormGroup(
       title: Text("$tr_skill.selection.label".tr()),
       children: [
-        tagsWidget(),
+        if (!hiddenElements.contains(SkillDialogElements.selectionTags)) tagsWidget(),
         selectorWidget(context, ref),
       ],
     );
@@ -441,11 +465,12 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
   @override
   Widget build(BuildContext context) {
+    final hiddenElements = _clonedSpecProvider.watch(ref, widget.specId).hiddenElements;
     return FormGroup(
       title: Text("$tr_skill.notation.label".tr()),
       description: Text("$tr_skill.notation.description".tr()),
       children: [
-        notationMaxWidget(ref),
+        if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationMaxWidget(ref),
         notationTitleWidget(ref),
       ],
     );
@@ -464,12 +489,17 @@ class SkillColumnSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final hiddenElements = _clonedSpecProvider.watch(ref, specId).hiddenElements;
     return Column(
       children: [
-        _SelectionSelector(specId: specId),
-        const SizedBox(height: 32),
-        _ModeSelector(specId: specId),
-        const SizedBox(height: 32),
+        if (!hiddenElements.contains(SkillDialogElements.selection)) ...[
+          _SelectionSelector(specId: specId),
+          const SizedBox(height: 32),
+        ],
+        if (!hiddenElements.contains(SkillDialogElements.mode)) ...[
+          _ModeSelector(specId: specId),
+          const SizedBox(height: 32),
+        ],
         _NotationSelector(specId: specId, onDecided: onDecided),
       ],
     );
@@ -498,6 +528,61 @@ class SkillColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       predicate: AggregateSkillPredicate.any(),
+    );
+  }
+}
+
+class FilteredSkillColumnBuilder extends ColumnBuilder {
+  final Parser parser;
+  final Set<String> initialTags;
+  final Set<int> initialIds;
+
+  @override
+  final String title;
+
+  @override
+  final ColumnCategory category;
+
+  @override
+  final ColumnBuilderType type;
+
+  FilteredSkillColumnBuilder({
+    required this.title,
+    required this.category,
+    required this.parser,
+    bool isFilterColumn = true,
+    this.initialTags = const {},
+    required this.initialIds,
+  }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+
+  @override
+  ColumnSpec<List<Skill>> build(RefBase ref) {
+    return SkillColumnSpec(
+      id: const Uuid().v4(),
+      title: title,
+      parser: parser,
+      predicate: AggregateSkillPredicate(
+        query: initialIds,
+        logic: SkillSetLogicMode.anyOf,
+        min: 1,
+        notation: SkillNotation(
+          max: 3,
+        ),
+        tags: initialTags,
+      ),
+      hiddenElements: {
+        if (initialTags.isEmpty) ...{
+          SkillDialogElements.selection,
+          SkillDialogElements.mode,
+          SkillDialogElements.selectionTags,
+          SkillDialogElements.notationMax,
+        },
+        if (initialTags.isNotEmpty) ...{
+          SkillDialogElements.selectionTags,
+        },
+      },
+      showAllWhenQueryIsEmpty: false,
+      showAvailableOnly: false,
     );
   }
 }
