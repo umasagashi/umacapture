@@ -127,7 +127,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   final String title;
 
   @override
-  int get tabIdx => 0;
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   SkillColumnSpec({
     required this.id,

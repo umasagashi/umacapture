@@ -21,6 +21,8 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_rating = "pages.chara_detail.column_predicate.rating";
 
+final ratingFormatter = NumberFormat("0.0");
+
 @jsonSerializable
 class IsInRangeRatingPredicate {
   final double? min;
@@ -51,12 +53,11 @@ class IsInRangeRatingPredicate {
 
 class RatingCellData implements CellData {
   final double? value;
-  final numberFormatter = NumberFormat("#0.0");
 
   RatingCellData(this.value);
 
   @override
-  String get csv => numberFormatter.format(value);
+  String get csv => value == null ? "" : ratingFormatter.format(value);
 
   @override
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
@@ -76,13 +77,10 @@ class RatingColumnSpec extends ColumnSpec<double?> {
   final String title;
 
   @override
-  int get tabIdx => 0;
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   @JsonProperty(ignore: true)
-  final Range<double> range = Range<double>(min: 0.0, max: 5.0);
-
-  @JsonProperty(ignore: true)
-  final numberFormatter = NumberFormat("00.0");
+  final range = Range<double>(min: 0.0, max: 5.0);
 
   RatingColumnSpec({
     required this.id,
@@ -122,7 +120,7 @@ class RatingColumnSpec extends ColumnSpec<double?> {
   @override
   PlutoCell plutoCell(RefBase ref, double? value) {
     return PlutoCell(
-      value: "M" * 7 + numberFormatter.format(value ?? 6.0),
+      value: "M" * 7 + ratingFormatter.format(value ?? 6.0),
     )..setUserData(RatingCellData(value));
   }
 
@@ -220,7 +218,6 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
     final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
     final record = storage.getBy(id: widget.recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
-    final formatter = NumberFormat("#,###");
     return ConstrainedBox(
       constraints: const BoxConstraints(
         maxWidth: 400,
@@ -235,7 +232,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Image.file(iconPath.toFile()),
-              Text(formatter.format(record.evaluationValue), style: theme.textTheme.titleMedium),
+              Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
               RatingBar.builder(
                 initialRating: widget.initialRating,
@@ -391,7 +388,6 @@ class _RatingSelector extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
-    final formatter = NumberFormat("#0.0");
     return FormGroup(
       title: Text("$tr_rating.range.label".tr()),
       description: Text("$tr_rating.range.description".tr()),
@@ -404,7 +400,7 @@ class _RatingSelector extends ConsumerWidget {
             step: 0.5,
             start: (spec.predicate.min ?? spec.range.min).toDouble(),
             end: (spec.predicate.max ?? spec.range.max).toDouble(),
-            formatter: (value) => formatter.format(value),
+            formatter: (value) => ratingFormatter.format(value),
             onChanged: (start, end) {
               _clonedSpecProvider.update(ref, specId, (spec) {
                 return spec.copyWith(

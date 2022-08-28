@@ -149,6 +149,26 @@ class CharaCardInfo {
 }
 
 @jsonSerializable
+enum ColumnSpecCellAction {
+  openSkillPreview,
+  openFactorPreview,
+  openCampaignPreview,
+}
+
+extension ColumnSpecCellActionExtension on ColumnSpecCellAction {
+  int? get tabIdx {
+    switch (this) {
+      case ColumnSpecCellAction.openSkillPreview:
+        return 0;
+      case ColumnSpecCellAction.openFactorPreview:
+        return 1;
+      case ColumnSpecCellAction.openCampaignPreview:
+        return 2;
+    }
+  }
+}
+
+@jsonSerializable
 @Json(discriminatorProperty: 'type')
 abstract class ColumnSpec<T> {
   String get type => runtimeType.toString();
@@ -157,7 +177,7 @@ abstract class ColumnSpec<T> {
 
   String get title;
 
-  int get tabIdx;
+  ColumnSpecCellAction get cellAction;
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
@@ -270,6 +290,9 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
 
 extension PlutoGridStateManagerExtension on PlutoGridStateManager {
   void autoFitColumnPrecise(BuildContext context, PlutoColumn column) {
+    if (refRows.isEmpty) {
+      return;
+    }
     final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
     final maxWidth = values.toSet().map((value) {
       TextSpan textSpan = TextSpan(
@@ -293,6 +316,9 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
   }
 
   void autoFitColumns() {
+    if (refRows.isEmpty) {
+      return;
+    }
     final context = gridKey!.currentContext!;
     for (final col in columns) {
       final enabled = col.enableDropToResize;

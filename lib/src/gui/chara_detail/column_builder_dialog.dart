@@ -127,8 +127,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final builders = ref.watch(columnBuilderProvider);
-    final buildersMap = groupBy<ColumnBuilder, ColumnCategory>(builders, (b) => b.category);
+    final buildersMap = ref.watch(columnBuilderProvider).groupListsBy((b) => b.category);
     return CardDialog(
       dialogTitle: "$tr_chara_detail.column_spec.dialog.title".tr(),
       closeButtonTooltip: "$tr_chara_detail.column_spec.dialog.close_button.tooltip".tr(),

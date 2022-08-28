@@ -59,7 +59,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   final String title;
 
   @override
-  int get tabIdx => 0;
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   CharacterCardColumnSpec({
     required this.id,

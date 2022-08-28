@@ -45,7 +45,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   final String title;
 
   @override
-  final int tabIdx;
+  final ColumnSpecCellAction cellAction;
 
   RangedLabelColumnSpec({
     required this.id,
@@ -53,8 +53,8 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
     required this.parser,
     required this.labelKey,
     required this.predicate,
-    int? tabIdx,
-  }) : tabIdx = tabIdx ?? 0;
+    ColumnSpecCellAction? cellAction,
+  }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   RangedLabelColumnSpec copyWith({
     String? id,
@@ -251,7 +251,7 @@ class RangedLabelColumnSelector extends ConsumerWidget {
 class RangedLabelColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String labelKey;
-  final int? tabIdx;
+  final ColumnSpecCellAction? cellAction;
   final int? min;
 
   @override
@@ -268,7 +268,7 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
     required this.category,
     required this.labelKey,
     required this.parser,
-    this.tabIdx,
+    this.cellAction,
     this.min,
   }) : type = min != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
@@ -279,7 +279,7 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       labelKey: labelKey,
-      tabIdx: tabIdx,
+      cellAction: cellAction,
       predicate: IsInRangeIntegerPredicate(
         min: min,
       ),

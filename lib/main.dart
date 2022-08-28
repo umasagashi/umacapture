@@ -20,6 +20,7 @@ void setupWindowManager() async {
   windowManager.waitUntilReadyToShow(
     const WindowOptions(
       titleBarStyle: TitleBarStyle.hidden,
+      minimumSize: Size(600, 400),
     ),
     () async {
       final box = WindowStateBox();

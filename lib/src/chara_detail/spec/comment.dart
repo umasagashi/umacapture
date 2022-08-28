@@ -67,7 +67,7 @@ class CommentColumnSpec extends ColumnSpec<String?> {
   final String title;
 
   @override
-  int get tabIdx => 0;
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   CommentColumnSpec({
     required this.id,
@@ -214,7 +214,6 @@ class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
     final recordStorage = ref.watch(charaDetailRecordStorageProvider.notifier);
     final record = recordStorage.getBy(id: widget.recordId)!;
     final iconPath = recordStorage.traineeIconPathOf(record);
-    final formatter = NumberFormat("#,###");
     final commentStorage = ref.read(charaDetailRecordCommentProvider(widget.storageKey).notifier);
     return ConstrainedBox(
       constraints: const BoxConstraints(
@@ -230,7 +229,7 @@ class _RecordCommentDialogState extends ConsumerState<_RecordCommentDialog> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Image.file(iconPath.toFile()),
-              Text(formatter.format(record.evaluationValue), style: theme.textTheme.titleMedium),
+              Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),

@@ -126,15 +126,15 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
             },
             onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
               final record = event.row!.getUserData<CharaDetailRecord>()!;
-              final spec = event.cell?.column.getUserData();
-              showPopup(context, ref, event.offset!, record, spec?.tabIdx ?? 0);
+              final spec = event.cell?.column.getUserData<ColumnSpec>();
+              showPopup(context, ref, event.offset!, record, spec!.cellAction.tabIdx ?? 0);
             },
             onSelected: (PlutoGridOnSelectedEvent event) {
               final data = event.cell?.getUserData<CellData>();
               if (!(data?.onSelected?.call(event) ?? false)) {
                 final record = event.row!.getUserData<CharaDetailRecord>()!;
-                final spec = event.cell?.column.getUserData();
-                CharaDetailPreviewDialog.show(ref.base, record, spec?.tabIdx ?? 0);
+                final spec = event.cell?.column.getUserData<ColumnSpec>();
+                CharaDetailPreviewDialog.show(ref.base, record, spec!.cellAction.tabIdx ?? 0);
               }
             },
             onSorted: (PlutoGridOnSortedEvent event) {
