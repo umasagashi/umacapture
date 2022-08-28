@@ -838,7 +838,7 @@ class FactorColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  ColumnSpec<FactorSet> build() {
+  ColumnSpec<FactorSet> build(RefBase ref) {
     return FactorColumnSpec(
       id: const Uuid().v4(),
       title: title,
@@ -876,7 +876,7 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
   }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
-  ColumnSpec<FactorSet> build() {
+  ColumnSpec<FactorSet> build(RefBase ref) {
     return FactorColumnSpec(
       id: const Uuid().v4(),
       title: title,

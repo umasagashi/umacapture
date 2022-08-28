@@ -273,7 +273,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       ),
     if (ratingStorages.isEmpty)
       RatingColumnBuilder(
-        ref: ref,
         title: "$tr_columns.rating.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),
@@ -282,7 +281,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     if (ratingStorages.isNotEmpty) ...[
       for (final storage in ratingStorages) ...[
         RatingColumnBuilder(
-          ref: ref,
           title: storage.title,
           category: ColumnCategory.metadata,
           parser: TraineeIdParser(),
@@ -291,7 +289,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         ),
       ],
       RatingColumnBuilder(
-        ref: ref,
         title: "$tr_columns.rating.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),
@@ -300,7 +297,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ],
     if (commentStorages.isEmpty)
       CommentColumnBuilder(
-        ref: ref,
         title: "$tr_columns.comment.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),
@@ -309,7 +305,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     if (commentStorages.isNotEmpty) ...[
       for (final storage in commentStorages) ...[
         CommentColumnBuilder(
-          ref: ref,
           title: storage.title,
           category: ColumnCategory.metadata,
           parser: TraineeIdParser(),
@@ -318,7 +313,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         ),
       ],
       CommentColumnBuilder(
-        ref: ref,
         title: "$tr_columns.comment.title".tr(),
         category: ColumnCategory.metadata,
         parser: TraineeIdParser(),

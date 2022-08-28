@@ -68,7 +68,7 @@ class CharaRankColumnBuilder extends ColumnBuilder {
   }) : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
-  CharaRankColumnSpec build() {
+  CharaRankColumnSpec build(RefBase ref) {
     return CharaRankColumnSpec(
       id: const Uuid().v4(),
       title: title,
