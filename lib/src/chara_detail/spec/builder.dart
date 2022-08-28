@@ -22,6 +22,7 @@ const tr_columns = "pages.chara_detail.columns";
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   final labels = ref.watch(labelMapProvider);
   final strategies = enumerate(labels["race_strategy.name"]!).toList();
+  final skillInfo = ref.watch(skillInfoProvider);
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
   final commentStorages = ref.watch(charaDetailRecordCommentStorageDataProvider);
@@ -165,6 +166,21 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.skill,
       parser: SkillParser(),
     ),
+    FilteredSkillColumnBuilder(
+      title: "$tr_columns.skill.shortcuts.status_up.title".tr(),
+      category: ColumnCategory.skill,
+      parser: SkillParser(),
+      isFilterColumn: true,
+      initialTags: {"skill_status_up"},
+      initialIds: skillInfo.where((e) => e.tags.contains("skill_status_up")).map((e) => e.sid).toSet(),
+    ),
+    FilteredSkillColumnBuilder(
+      title: "$tr_columns.skill.shortcuts.consolidation.title".tr(),
+      category: ColumnCategory.skill,
+      parser: SkillParser(),
+      isFilterColumn: true,
+      initialIds: {179},
+    ),
     FactorColumnBuilder(
       title: "$tr_columns.factor.title".tr(),
       category: ColumnCategory.factor,
@@ -237,14 +253,14 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.fans.title".tr(),
       category: ColumnCategory.campaign,
       parser: FansParser(),
-      tabIdx: 2,
+      cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.campaign_scenario.title".tr(),
       category: ColumnCategory.campaign,
       labelKey: LabelKeys.campaignScenario,
       parser: CampaignScenarioParser(),
-      tabIdx: 2,
+      cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
     DateTimeColumnBuilder(
       title: "$tr_columns.trained_date.title".tr(),
@@ -255,7 +271,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.race_winning_count.title".tr(),
       category: ColumnCategory.race,
       parser: RaceWinningCountParser(),
-      tabIdx: 2,
+      cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.race_strategy.title".tr(),
