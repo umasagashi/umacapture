@@ -2,10 +2,13 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:quiver/iterables.dart';
+import 'package:quiver/time.dart' as qtm;
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:tuple/tuple.dart';
 
@@ -36,6 +39,43 @@ class ProviderLogger extends ProviderObserver {
       "value: ${p.length < limit ? p : "${p.substring(0, limit)}..."}"
       " -> ${n.length < limit ? n : "${n.substring(0, limit)}..."}",
     );
+  }
+}
+
+class NumberFormatter {
+  static final number = NumberFormat("#,###", "en_US");
+  static final numberCompactIso = NumberFormat.compact(locale: "en_US");
+  static final numberCompactLocal = NumberFormat.compact();
+}
+
+extension NumExtension on num {
+  String toNumberString() => NumberFormatter.number.format(this);
+
+  String toCompactNumberString() => NumberFormatter.numberCompactIso.format(this);
+
+  String toLocalCompactNumberString() {
+    final raw = NumberFormatter.numberCompactLocal.format(this);
+    final unit = raw.last; // Assuming unit is a single character.
+    if (unit.isNumber) {
+      return raw;
+    } else {
+      return "${raw.truncated(1)} $unit";
+    }
+  }
+}
+
+extension IntExtension on int {
+  Iterable<int> range() sync* {
+    for (int i = 0; i < this; i++) {
+      yield i;
+    }
+  }
+
+  int get digits => toString().length;
+
+  int roundTopmost([int division = 1]) {
+    final r = math.pow(10, digits - 1) / division;
+    return ((this / r).round() * r).toInt();
   }
 }
 
@@ -171,7 +211,7 @@ extension List2DExtension<T> on List<List<T>> {
     }
     final d0 = length;
     final d1 = this[0].length;
-    return intRange(d1).map((i1) => intRange(d0).map((i0) => this[i0][i1]).toList()).toList();
+    return d1.range().map((i1) => d0.range().map((i0) => this[i0][i1]).toList()).toList();
   }
 }
 
@@ -180,21 +220,59 @@ extension DateTimeExtension on DateTime {
     return compareTo(other) != 1;
   }
 
+  Duration operator -(DateTime other) {
+    return difference(other);
+  }
+
+  bool isInRange(DateTime start, DateTime end) {
+    return start <= this && this <= end;
+  }
+
   String toDateString() => toString().substring(0, 10);
 
+  String toMonthString() => toString().substring(0, 7);
+
   DateTime asLocal() => DateTime(year, month, day, hour, minute, second, microsecond);
+
+  DateTime lastMonth() {
+    if (month == 1) {
+      return DateTime(year - 1, 12);
+    } else {
+      return DateTime(year, month - 1);
+    }
+  }
+
+  DateTime nextMonth() {
+    if (month == 12) {
+      return DateTime(year + 1, 1);
+    } else {
+      return DateTime(year, month + 1);
+    }
+  }
+
+  bool isSameMonth(DateTime other) => year == other.year && month == other.month;
+
+  int get inDays => (this - DateTime(0, 1, 1)).inDays;
+
+  int get daysInMonth => qtm.daysInMonth(year, month);
+
+  static DateTime earlier(DateTime a, DateTime b) => b.isAfter(a) ? a : b;
+
+  static DateTime later(DateTime a, DateTime b) => b.isBefore(a) ? a : b;
 }
 
 extension StringExtension on String {
   String joinLines([String sep = ""]) {
     return replaceAll("\n", sep);
   }
-}
 
-Iterable<int> intRange(int stop) sync* {
-  for (final e in range(stop)) {
-    yield e as int;
-  }
+  String truncated(int n) => substring(0, length - n);
+
+  String get last => this[length - 1];
+
+  String get first => this[0];
+
+  bool get isNumber => num.tryParse(this) != null;
 }
 
 Iterable<Tuple2<T1, T2>> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {
@@ -279,5 +357,15 @@ bool isSentryAvailable() {
 FutureOr<void> captureException(exception, stackTrace) {
   if (isSentryAvailable()) {
     Sentry.captureException(exception, stackTrace: stackTrace);
+  }
+}
+
+extension AsyncValueExtension<T> on AsyncValue<T> {
+  Widget guarded(Widget Function(T) data) {
+    return when(
+      loading: () => const CircularProgressIndicator(),
+      error: (e, _) => Text("ERROR: $e"),
+      data: data,
+    );
   }
 }

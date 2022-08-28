@@ -321,6 +321,9 @@ class CharaDetailRecord extends JsonEquatable {
   @JsonProperty(ignore: true)
   FilePath get traineeIconPath => DirectoryPath(id).filePath("trainee.jpg");
 
+  @JsonProperty(ignore: true)
+  DateTime get trainedDateAsDateTime => DateTime.parse(trainedDate.replaceAll("/", "-"));
+
   static CharaDetailRecord? deserialize(String content) {
     return JsonMapper.deserialize<CharaDetailRecord>(content, const DeserializationOptions(caseStyle: CaseStyle.snake));
   }

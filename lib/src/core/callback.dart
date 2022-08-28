@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/path_entity.dart';
 
@@ -10,6 +11,9 @@ typedef PathEntityCallback = Callback<PathEntity>;
 typedef Value2Callback<T1, T2> = void Function(T1, T2);
 
 typedef Predicate<T> = bool Function(T);
+
+typedef ConsumerWidgetBuilder = Widget Function(BuildContext context, WidgetRef ref);
+typedef InlineWidgetBuilder = Widget Function();
 
 extension CallbackExtension<T> on Callback<T> {
   VoidCallback bind(T value) {
