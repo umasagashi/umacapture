@@ -59,7 +59,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
   final String title;
 
   @override
-  final int tabIdx;
+  final ColumnSpecCellAction cellAction;
 
   SimpleLabelColumnSpec({
     required this.id,
@@ -67,8 +67,8 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
     required this.parser,
     required this.labelKey,
     required this.predicate,
-    int? tabIdx,
-  }) : tabIdx = tabIdx ?? 0;
+    ColumnSpecCellAction? cellAction,
+  }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   SimpleLabelColumnSpec copyWith({
     String? id,
@@ -280,7 +280,7 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String labelKey;
   final Set<int>? rejects;
-  final int? tabIdx;
+  final ColumnSpecCellAction? cellAction;
 
   @override
   final String title;
@@ -297,7 +297,7 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
     required this.labelKey,
     required this.parser,
     this.rejects,
-    this.tabIdx,
+    this.cellAction,
   }) : type = rejects != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
@@ -308,7 +308,7 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
       parser: parser,
       labelKey: labelKey,
       predicate: rejects == null ? SimpleLabelPredicate.any() : SimpleLabelPredicate(rejects: rejects!),
-      tabIdx: tabIdx,
+      cellAction: cellAction,
     );
   }
 }

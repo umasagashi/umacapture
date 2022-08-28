@@ -67,15 +67,15 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   final String title;
 
   @override
-  final int tabIdx;
+  final ColumnSpecCellAction cellAction;
 
   RangedIntegerColumnSpec({
     required this.id,
     required this.title,
     required this.parser,
     required this.predicate,
-    int? tabIdx,
-  }) : tabIdx = tabIdx ?? 0;
+    ColumnSpecCellAction? cellAction,
+  }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   RangedIntegerColumnSpec copyWith({
     String? id,
@@ -90,7 +90,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
-      tabIdx: tabIdx,
+      cellAction: cellAction,
     );
   }
 
@@ -111,7 +111,6 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
 
   @override
   PlutoColumn plutoColumn(RefBase ref) {
-    final numberFormatter = NumberFormat("#,###");
     return PlutoColumn(
       title: title,
       field: id,
@@ -123,7 +122,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
       enableEditingMode: false,
       renderer: (PlutoColumnRendererContext context) {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
-        return Text(numberFormatter.format(data.value), textAlign: TextAlign.center);
+        return Text(data.value.toNumberString(), textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }
@@ -152,9 +151,8 @@ final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
 
 class _RangedIntegerSelector extends ConsumerWidget {
   final String specId;
-  final formatter = NumberFormat("#,###");
 
-  _RangedIntegerSelector({
+  const _RangedIntegerSelector({
     Key? key,
     required this.specId,
   }) : super(key: key);
@@ -176,7 +174,7 @@ class _RangedIntegerSelector extends ConsumerWidget {
             step: 1,
             start: (spec.predicate.min ?? range.min).toDouble(),
             end: (spec.predicate.max ?? range.max).toDouble(),
-            formatter: (value) => formatter.format(value),
+            formatter: (value) => value.toNumberString(),
             onChanged: (double start, double end) {
               _clonedSpecProvider.update(ref, specId, (spec) {
                 return spec.copyWith(
@@ -267,7 +265,7 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
 
 class RangedIntegerColumnBuilder extends ColumnBuilder {
   final Parser parser;
-  final int? tabIdx;
+  final ColumnSpecCellAction? cellAction;
 
   @override
   final String title;
@@ -279,7 +277,7 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
     required this.title,
     required this.category,
     required this.parser,
-    this.tabIdx,
+    this.cellAction,
   });
 
   @override
@@ -288,7 +286,7 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       parser: parser,
-      tabIdx: tabIdx,
+      cellAction: cellAction,
       predicate: IsInRangeIntegerPredicate(),
     );
   }

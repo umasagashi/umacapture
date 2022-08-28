@@ -68,7 +68,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   final String title;
 
   @override
-  int get tabIdx => 2;
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openCampaignPreview;
 
   DateTimeColumnSpec({
     required this.id,

@@ -23,12 +23,6 @@ import '/src/gui/common.dart';
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
 @jsonSerializable
-enum FactorDialogElements {
-  tags,
-  logic,
-}
-
-@jsonSerializable
 enum FactorSetLogicMode {
   anyOf,
   allOf,
@@ -290,6 +284,12 @@ class FactorCellData implements CellData {
 }
 
 @jsonSerializable
+enum FactorDialogElements {
+  selectionTags,
+  modeLogic,
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "FactorColumnSpec")
 class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final Parser parser;
@@ -297,7 +297,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final AggregateFactorSetPredicate predicate;
 
   final bool showAllWhenQueryIsEmpty;
-  final bool showAvailableFactorOnly;
+  final bool showAvailableOnly;
   final Set<FactorDialogElements> hiddenElements;
 
   @override
@@ -307,7 +307,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   final String title;
 
   @override
-  int get tabIdx => 1;
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   FactorColumnSpec({
     required this.id,
@@ -315,7 +315,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     required this.parser,
     required this.predicate,
     this.showAllWhenQueryIsEmpty = true,
-    this.showAvailableFactorOnly = true,
+    this.showAvailableOnly = true,
     this.hiddenElements = const {},
   });
 
@@ -325,7 +325,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     Parser? parser,
     AggregateFactorSetPredicate? predicate,
     bool? showAllWhenQueryIsEmpty,
-    bool? showAvailableFactorOnly,
+    bool? showAvailableOnly,
     Set<FactorDialogElements>? hiddenElements,
   }) {
     return FactorColumnSpec(
@@ -334,7 +334,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
-      showAvailableFactorOnly: showAvailableFactorOnly ?? this.showAvailableFactorOnly,
+      showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
     );
   }
@@ -434,8 +434,10 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
-    final factors = predicate.query.map((e) => labels[e]);
-    return "${factors.join(sep)}$modeText";
+    final factors = predicate.query.map((e) => labels[e]).toList();
+    const limit = 30;
+    final ellipsis = factors.length > limit ? "$sep- ${factors.length - limit} more" : "";
+    return "${factors.partial(0, limit).join(sep)}$ellipsis$modeText";
   }
 
   @override
@@ -446,7 +448,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     return FactorColumnSelector(
       specId: id,
       onDecided: onDecided,
-      availableOnly: showAvailableFactorOnly,
+      availableOnly: showAvailableOnly,
     );
   }
 }
@@ -549,7 +551,7 @@ class _SelectionSelector extends ConsumerWidget {
     return FormGroup(
       title: Text("$tr_factor.selection.label".tr()),
       children: [
-        if (!spec.hiddenElements.contains(FactorDialogElements.tags)) tagsWidget(),
+        if (!spec.hiddenElements.contains(FactorDialogElements.selectionTags)) tagsWidget(),
         selectorWidget(context, ref),
       ],
     );
@@ -689,7 +691,7 @@ class _ModeSelector extends ConsumerWidget {
       title: Text("$tr_factor.mode.label".tr()),
       description: descriptionWidget(context, ref),
       children: [
-        if (!spec.hiddenElements.contains(FactorDialogElements.logic)) logicChoiceWidget(context, ref),
+        if (!spec.hiddenElements.contains(FactorDialogElements.modeLogic)) logicChoiceWidget(context, ref),
         subjectChoiceWidget(context, ref),
         elementChoiceWidget(context, ref),
         elementStarWidget(context, ref),
@@ -898,11 +900,11 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
         skillTags: initialSkillTags,
       ),
       hiddenElements: {
-        FactorDialogElements.tags,
-        FactorDialogElements.logic,
+        FactorDialogElements.selectionTags,
+        FactorDialogElements.modeLogic,
       },
       showAllWhenQueryIsEmpty: false,
-      showAvailableFactorOnly: false,
+      showAvailableOnly: false,
     );
   }
 }
