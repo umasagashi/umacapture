@@ -552,7 +552,6 @@ class RatingColumnSelector extends ConsumerWidget {
 class RatingColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String? storageKey;
-  final Ref ref;
 
   @override
   final String title;
@@ -564,7 +563,6 @@ class RatingColumnBuilder extends ColumnBuilder {
   final ColumnBuilderType type;
 
   RatingColumnBuilder({
-    required this.ref,
     required this.title,
     required this.category,
     required this.parser,
@@ -573,7 +571,7 @@ class RatingColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  RatingColumnSpec build() {
+  RatingColumnSpec build(RefBase ref) {
     String? actualKey = storageKey;
     if (actualKey == null) {
       actualKey = const Uuid().v4();

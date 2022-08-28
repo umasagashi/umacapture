@@ -273,7 +273,7 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
   }) : type = min != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
-  RangedLabelColumnSpec build() {
+  RangedLabelColumnSpec build(RefBase ref) {
     return RangedLabelColumnSpec(
       id: const Uuid().v4(),
       title: title,

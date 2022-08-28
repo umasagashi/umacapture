@@ -453,7 +453,6 @@ class CommentColumnSelector extends ConsumerWidget {
 class CommentColumnBuilder extends ColumnBuilder {
   final Parser parser;
   final String? storageKey;
-  final Ref ref;
 
   @override
   final String title;
@@ -465,7 +464,6 @@ class CommentColumnBuilder extends ColumnBuilder {
   final ColumnBuilderType type;
 
   CommentColumnBuilder({
-    required this.ref,
     required this.title,
     required this.category,
     required this.parser,
@@ -474,7 +472,7 @@ class CommentColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  CommentColumnSpec build() {
+  CommentColumnSpec build(RefBase ref) {
     String? actualKey = storageKey;
     if (actualKey == null) {
       actualKey = const Uuid().v4();

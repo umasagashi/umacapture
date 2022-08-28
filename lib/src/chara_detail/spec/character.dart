@@ -328,7 +328,7 @@ class CharacterCardColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  CharacterCardColumnSpec build() {
+  CharacterCardColumnSpec build(RefBase ref) {
     return CharacterCardColumnSpec(
       id: const Uuid().v4(),
       title: title,

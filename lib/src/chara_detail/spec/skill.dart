@@ -492,7 +492,7 @@ class SkillColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  ColumnSpec<List<Skill>> build() {
+  ColumnSpec<List<Skill>> build(RefBase ref) {
     return SkillColumnSpec(
       id: const Uuid().v4(),
       title: title,

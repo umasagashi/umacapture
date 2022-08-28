@@ -283,7 +283,7 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  RangedIntegerColumnSpec build() {
+  RangedIntegerColumnSpec build(RefBase ref) {
     return RangedIntegerColumnSpec(
       id: const Uuid().v4(),
       title: title,

@@ -61,7 +61,7 @@ abstract class ColumnBuilder {
 
   ColumnBuilderType get type => ColumnBuilderType.normal;
 
-  ColumnSpec build();
+  ColumnSpec build(RefBase ref);
 }
 
 @jsonSerializable

@@ -31,7 +31,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         final specs = ref.read(currentColumnSpecsProvider.notifier);
         for (final builder in targets) {
           if (builder.type == ColumnBuilderType.normal) {
-            specs.add(builder.build());
+            specs.add(builder.build(ref.base));
           }
         }
         CardDialog.dismiss(ref.base);
@@ -43,7 +43,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
     final theme = Theme.of(context);
     return GestureDetector(
       onLongPress: () {
-        final spec = builder.build();
+        final spec = builder.build(ref.base);
         ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
         CardDialog.dismiss(ref.base);
         ColumnSpecDialog.show(ref.base, spec);
@@ -53,7 +53,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor!.withOpacity(0.2),
         label: Text(builder.title),
         onPressed: () {
-          ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build());
+          ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build(ref.base));
           CardDialog.dismiss(ref.base);
         },
       ),

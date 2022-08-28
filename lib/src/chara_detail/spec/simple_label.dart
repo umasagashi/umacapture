@@ -301,7 +301,7 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
   }) : type = rejects != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
-  SimpleLabelColumnSpec build() {
+  SimpleLabelColumnSpec build(RefBase ref) {
     return SimpleLabelColumnSpec(
       id: const Uuid().v4(),
       title: title,

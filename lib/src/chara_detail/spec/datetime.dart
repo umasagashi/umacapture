@@ -320,7 +320,7 @@ class DateTimeColumnBuilder extends ColumnBuilder {
   });
 
   @override
-  DateTimeColumnSpec build() {
+  DateTimeColumnSpec build(RefBase ref) {
     return DateTimeColumnSpec(
       id: const Uuid().v4(),
       title: title,
