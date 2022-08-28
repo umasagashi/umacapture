@@ -107,6 +107,8 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     }
   }
 
+  int get length => state.length;
+
   void _updateRecordInfo(CharaDetailRecord record) {
     if (record.evaluationValue > (charaCardMap[record.trainee.card]?.evaluationValue ?? -1)) {
       charaCardMap[record.trainee.card] = record;

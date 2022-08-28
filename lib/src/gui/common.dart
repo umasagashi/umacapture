@@ -260,13 +260,13 @@ class _SpinBoxState extends State<SpinBox> {
 
 class Disabled extends StatelessWidget {
   final bool disabled;
-  final String tooltip;
+  final String? tooltip;
   final Widget child;
 
   const Disabled({
     super.key,
     required this.disabled,
-    required this.tooltip,
+    this.tooltip,
     required this.child,
   });
 
@@ -282,7 +282,7 @@ class Disabled extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (disabled) {
+    if (disabled && tooltip != null) {
       return Tooltip(message: tooltip, child: wrappedChild());
     } else {
       return wrappedChild();

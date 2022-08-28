@@ -23,6 +23,9 @@
             },
             "news": {
                 "title": "お知らせ"
+            },
+            "statistic": {
+                "title": "統計"
             }
         },
         "capture": {
@@ -627,6 +630,19 @@
                 "subtitle": "現在のバージョン",
                 "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
                 "unknown_version": "不明"
+            }
+        },
+        "statistics": {
+            "record_count": {
+                "title": "殿堂入り登録数",
+                "bottom": "全期間"
+            },
+            "evaluation_value": {
+                "title": "最大評価点",
+                "bottom": "全期間"
+            },
+            "monthly_fans": {
+                "title": "月間ファン獲得数"
             }
         }
     },

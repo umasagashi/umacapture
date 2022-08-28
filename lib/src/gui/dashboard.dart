@@ -3,6 +3,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:version/version.dart';
@@ -13,6 +14,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/statistics.dart';
 
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
@@ -108,8 +110,8 @@ class AppUpdaterGroup extends ConsumerWidget {
   }
 }
 
-class NewsGroup extends ConsumerWidget {
-  const NewsGroup({Key? key}) : super(key: key);
+class _NewsGroup extends ConsumerWidget {
+  const _NewsGroup({Key? key}) : super(key: key);
 
   Widget text(String data) {
     return Padding(
@@ -129,22 +131,38 @@ class NewsGroup extends ConsumerWidget {
     );
   }
 
-  Widget body(WidgetRef ref) {
-    final loader = ref.watch(_newsMarkdownLoader);
-    return loader.when(
-      loading: () => text("loading..."),
-      error: (error, _) => text("ERROR: $error"),
-      data: (data) => markdown(data),
-    );
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final loader = ref.watch(_newsMarkdownLoader);
     return ListCard(
       title: "$tr_dashboard.news.title".tr(),
       padding: EdgeInsets.zero,
       children: [
-        body(ref),
+        loader.guarded((data) => markdown(data)),
+      ],
+    );
+  }
+}
+
+class _StatisticGroup extends ConsumerWidget {
+  const _StatisticGroup({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_dashboard.statistic.title".tr(),
+      padding: const EdgeInsets.all(16),
+      children: [
+        StaggeredGrid.extent(
+          maxCrossAxisExtent: 300,
+          mainAxisSpacing: 16,
+          crossAxisSpacing: 16,
+          children: [
+            NumberOfRecordStatisticWidget.asTile(),
+            MaxEvaluationValueStatisticWidget.asTile(),
+            MonthlyFansStatisticWidget.asTile(),
+          ],
+        ),
       ],
     );
   }
@@ -159,7 +177,8 @@ class DashboardPage extends ConsumerWidget {
     return ListTilePageRootWidget(
       children: [
         if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest),
-        const NewsGroup(),
+        const _NewsGroup(),
+        const _StatisticGroup(),
       ],
     );
   }

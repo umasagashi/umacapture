@@ -29,7 +29,7 @@ class IsInRangeDateTimePredicate {
   });
 
   bool apply(DateTime value) {
-    return (min ?? value) <= value && value <= (max ?? value);
+    return value.isInRange(min ?? value, max ?? value);
   }
 
   IsInRangeDateTimePredicate copyWith({
