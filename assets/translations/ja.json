@@ -392,12 +392,12 @@
                         }
                     }
                 },
-                "comment": {
+                "memo": {
                     "cell": {
-                        "description": "コメントを入力"
+                        "description": "メモを入力"
                     },
                     "dialog": {
-                        "title": "コメント",
+                        "title": "メモ",
                         "ok_button": {
                             "label": "OK",
                             "tooltip": "この設定でテーブルに反映"
@@ -408,7 +408,7 @@
                     },
                     "pattern": {
                         "label": "検索",
-                        "description": "正規表現にマッチするウマ娘がテーブルに表示されます。",
+                        "description": "メモが正規表現にマッチするウマ娘がテーブルに表示されます。",
                         "regexp": {
                             "label": "正規表現"
                         }
@@ -422,7 +422,7 @@
                     },
                     "storage": {
                         "label": "データ削除",
-                        "description": "このコメントデータを完全に削除します。一度削除すると復元はできません。",
+                        "description": "このメモデータを完全に削除します。一度削除すると復元はできません。",
                         "delete": {
                             "button": "長押しで削除"
                         }
@@ -562,8 +562,8 @@
                 "rating": {
                     "title": "レーティング"
                 },
-                "comment": {
-                    "title": "コメント"
+                "memo": {
+                    "title": "メモ"
                 }
             },
             "context_menu": {

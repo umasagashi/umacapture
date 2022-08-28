@@ -34,7 +34,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_charaRankBorderLoader.future),
       ref.watch(_charaCardInfoLoader.future),
       ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
-      ref.watch(_charaDetailRecordCommentStorageDataLoader.future),
+      ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
     ]).then((_) {
       return Future.wait([
         ref.watch(_currentColumnSpecsLoader.future),
@@ -269,77 +269,70 @@ final charaDetailRecordRatingProvider =
   }
 });
 
-class _CommentDataWriter {
+class _MemoDataWriter {
   final FilePath path;
-  final CommentData data;
+  final MemoData data;
 
-  _CommentDataWriter(this.path, this.data);
+  _MemoDataWriter(this.path, this.data);
 
-  static Future<void> _run(_CommentDataWriter arg) {
+  static Future<void> _run(_MemoDataWriter arg) {
     initializeJsonReflectable();
     return arg.path.writeAsString(JsonMapper.serialize(arg.data));
   }
 
   Future<void> run() {
-    return compute(_CommentDataWriter._run, this);
+    return compute(_MemoDataWriter._run, this);
   }
 }
 
 @jsonSerializable
-class CommentData {
+class MemoData {
   final String title;
   final Map<String, String> data;
 
-  CommentData({
+  MemoData({
     required this.title,
     required this.data,
   });
 
   @jsonConstructor
-  CommentData.fromJson(
+  MemoData.fromJson(
     @JsonProperty(name: 'title') String title,
     @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
     // ignore: prefer_initializing_formals
   )   : title = title,
         data = Map<String, String>.from(data);
 
-  CommentData copyWith({
+  MemoData copyWith({
     String? title,
     Map<String, String>? data,
   }) {
-    return CommentData(
+    return MemoData(
       title: title ?? this.title,
       data: data ?? this.data,
     );
   }
 
-  static CommentData get empty {
-    return CommentData(
-      title: "pages.chara_detail.columns.comment.title".tr(),
+  static MemoData get empty {
+    return MemoData(
+      title: "pages.chara_detail.columns.memo.title".tr(),
       data: {},
     );
   }
 }
 
-class CharaDetailRecordCommentController extends StateNotifier<CommentData> {
+class CharaDetailRecordMemoController extends StateNotifier<MemoData> {
   final FilePath path;
 
-  CharaDetailRecordCommentController(this.path, super.state);
+  CharaDetailRecordMemoController(this.path, super.state);
 
   String get title => state.title;
 
-  // void _updateWithoutNotify({
-  //   required String recordId,
-  //   required String comment,
-  // }) {
-  //   state.data[recordId] = comment;
-  // }
-
   void _update({
     required String recordId,
-    required String comment,
+    required String memo,
   }) {
-    state.data[recordId] = comment;
+    state.data[recordId] = memo;
     state = state.copyWith();
   }
 
@@ -354,72 +347,72 @@ class CharaDetailRecordCommentController extends StateNotifier<CommentData> {
   }
 
   void _save() {
-    _CommentDataWriter(path, state).run();
+    _MemoDataWriter(path, state).run();
   }
 
   void update({
     required String recordId,
-    required String? comment,
+    required String? memo,
   }) {
-    if (comment?.isEmpty ?? true) {
+    if (memo?.isEmpty ?? true) {
       _remove(recordId: recordId);
     } else {
-      _update(recordId: recordId, comment: comment!);
+      _update(recordId: recordId, memo: memo!);
     }
     _save();
   }
 }
 
-class CommentStorageData {
+class MemoStorageData {
   final String key;
   final String title;
 
-  CommentStorageData({
+  MemoStorageData({
     required this.key,
     required this.title,
   });
 
-  CommentStorageData copyWith({
+  MemoStorageData copyWith({
     String? key,
     String? title,
   }) {
-    return CommentStorageData(
+    return MemoStorageData(
       key: key ?? this.key,
       title: title ?? this.title,
     );
   }
 }
 
-Future<List<CommentStorageData>> _loadComments(DirectoryPath directoryPath) async {
+Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   initializeJsonReflectable();
   if (!directoryPath.existsSync()) {
     return [];
   }
   return directoryPath
       .listSync()
-      .map((e) => CommentStorageData(
+      .map((e) => MemoStorageData(
             key: e.stem,
-            title: JsonMapper.deserialize<CommentData>(e.asFilePath.readAsStringSync())!.title,
+            title: JsonMapper.deserialize<MemoData>(e.asFilePath.readAsStringSync())!.title,
           ))
       .toList();
 }
 
-final _charaDetailRecordCommentStorageDataLoader = FutureProvider<List<CommentStorageData>>((ref) {
-  final path = ref.watch(pathInfoProvider).charaDetailCommentDir;
-  return compute(_loadComments, path);
+final _charaDetailRecordMemoStorageDataLoader = FutureProvider<List<MemoStorageData>>((ref) {
+  final path = ref.watch(pathInfoProvider).charaDetailMemoDir;
+  return compute(_loadMemos, path);
 });
 
-final charaDetailRecordCommentStorageDataProvider = StateProvider<List<CommentStorageData>>((ref) {
-  return ref.watch(_charaDetailRecordCommentStorageDataLoader).value!;
+final charaDetailRecordMemoStorageDataProvider = StateProvider<List<MemoStorageData>>((ref) {
+  return ref.watch(_charaDetailRecordMemoStorageDataLoader).value!;
 });
 
-final charaDetailRecordCommentProvider =
-    StateNotifierProvider.family<CharaDetailRecordCommentController, CommentData, String>((ref, key) {
-  final path = ref.watch(pathInfoProvider).charaDetailCommentDir.filePath("$key.json");
+final charaDetailRecordMemoProvider =
+    StateNotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>((ref, key) {
+  final path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
   if (!path.existsSync()) {
-    return CharaDetailRecordCommentController(path, CommentData.empty);
+    return CharaDetailRecordMemoController(path, MemoData.empty);
   } else {
-    return CharaDetailRecordCommentController(path, JsonMapper.deserialize<CommentData>(path.readAsStringSync())!);
+    return CharaDetailRecordMemoController(path, JsonMapper.deserialize<MemoData>(path.readAsStringSync())!);
   }
 });
 
