@@ -28,11 +28,15 @@ class PathInfo {
 
   DirectoryPath get modulesDir => supportDir / "modules";
 
-  DirectoryPath get charaDetailActiveDir => storageDir / "chara_detail" / "active";
+  DirectoryPath get charaDetailDir => storageDir / "chara_detail";
 
-  DirectoryPath get charaDetailRatingDir => storageDir / "chara_detail" / "metadata" / "rating";
+  DirectoryPath get charaDetailActiveDir => charaDetailDir / "active";
 
-  DirectoryPath get charaDetailMemoDir => storageDir / "chara_detail" / "metadata" / "memo";
+  DirectoryPath get charaDetailMetadataDir => charaDetailDir / "metadata";
+
+  DirectoryPath get charaDetailRatingDir => charaDetailMetadataDir / "rating";
+
+  DirectoryPath get charaDetailMemoDir => charaDetailMetadataDir / "memo";
 
   @override
   String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';

@@ -77,7 +77,11 @@
                 "disabled_tooltip": "エクスポート中です。",
                 "csv": {
                     "label": "CSV",
-                    "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート"
+                    "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート (Shift-JIS)"
+                },
+                "csv_utf": {
+                    "label": "CSV (UTF-8)",
+                    "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート (UTF-8-BOM)"
                 },
                 "json": {
                     "label": "JSON",

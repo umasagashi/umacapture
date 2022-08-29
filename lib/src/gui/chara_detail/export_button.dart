@@ -23,13 +23,32 @@ final recordExportEventProvider = StreamProvider<PathEntity>((ref) {
 class CharaDetailExportButton extends ConsumerWidget {
   const CharaDetailExportButton({Key? key}) : super(key: key);
 
+  Widget menu({
+    required double height,
+    required String tooltip,
+    required String label,
+    required TextStyle? style,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        height: height,
+        child: Center(
+          child: Text(
+            label,
+            style: style,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final style = theme.textTheme.labelLarge;
     const menuHeight = 40.0;
     const buttonSize = 30.0;
-    const encoding = CharCodec.shiftJis;
     final exporting = ref.watch(exportingStateProvider);
     return SizedBox(
       height: buttonSize,
@@ -56,13 +75,31 @@ class CharaDetailExportButton extends ConsumerWidget {
                   PopupMenuItem(
                     height: menuHeight,
                     onTap: () {
-                      CsvExporter(title, "records.csv", ref, encoding).export(onSuccess: (path) {
+                      CsvExporter(title, "records.csv", ref, CharCodec.shiftJis).export(onSuccess: (path) {
                         _recordExportEventController.sink.add(path);
                       });
                     },
-                    child: Tooltip(
-                      message: "$tr_chara_detail.export.csv.tooltip".tr(),
-                      child: Text("$tr_chara_detail.export.csv.label".tr(), style: style),
+                    padding: EdgeInsets.zero,
+                    child: menu(
+                      height: menuHeight,
+                      tooltip: "$tr_chara_detail.export.csv.tooltip".tr(),
+                      label: "$tr_chara_detail.export.csv.label".tr(),
+                      style: style,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    height: menuHeight,
+                    onTap: () {
+                      CsvExporter(title, "records.csv", ref, CharCodec.utf8Bom).export(onSuccess: (path) {
+                        _recordExportEventController.sink.add(path);
+                      });
+                    },
+                    padding: EdgeInsets.zero,
+                    child: menu(
+                      height: menuHeight,
+                      tooltip: "$tr_chara_detail.export.csv_utf.tooltip".tr(),
+                      label: "$tr_chara_detail.export.csv_utf.label".tr(),
+                      style: style,
                     ),
                   ),
                   PopupMenuItem(
@@ -72,9 +109,12 @@ class CharaDetailExportButton extends ConsumerWidget {
                         _recordExportEventController.sink.add(path);
                       });
                     },
-                    child: Tooltip(
-                      message: "$tr_chara_detail.export.json.tooltip".tr(),
-                      child: Text("$tr_chara_detail.export.json.label".tr(), style: style),
+                    padding: EdgeInsets.zero,
+                    child: menu(
+                      height: menuHeight,
+                      tooltip: "$tr_chara_detail.export.json.tooltip".tr(),
+                      label: "$tr_chara_detail.export.json.label".tr(),
+                      style: style,
                     ),
                   ),
                   PopupMenuItem(
@@ -84,9 +124,12 @@ class CharaDetailExportButton extends ConsumerWidget {
                         _recordExportEventController.sink.add(path);
                       });
                     },
-                    child: Tooltip(
-                      message: "$tr_chara_detail.export.zip.tooltip".tr(),
-                      child: Text("$tr_chara_detail.export.zip.label".tr(), style: style),
+                    padding: EdgeInsets.zero,
+                    child: menu(
+                      height: menuHeight,
+                      tooltip: "$tr_chara_detail.export.zip.tooltip".tr(),
+                      label: "$tr_chara_detail.export.zip.label".tr(),
+                      style: style,
                     ),
                   ),
                 ];

@@ -133,7 +133,7 @@ class ZipExporter extends Exporter {
   static void _run(_ZipExporterArgs args) {
     final encoder = ZipFileEncoder();
     encoder.create(args.path.path);
-    encoder.addDirectory(args.pathInfo.charaDetailActiveDir.toDirectory());
+    encoder.addDirectory(args.pathInfo.charaDetailDir.toDirectory(), followLinks: false);
     encoder.addFile((args.pathInfo.modulesDir.filePath("labels.json")).toFile());
     encoder.close();
   }
