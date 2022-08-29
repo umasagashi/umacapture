@@ -211,7 +211,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recordStorage = ref.watch(charaDetailRecordStorageProvider.notifier);
+    final recordStorage = ref.read(charaDetailRecordStorageProvider.notifier);
     final record = recordStorage.getBy(id: widget.recordId)!;
     final iconPath = recordStorage.traineeIconPathOf(record);
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);

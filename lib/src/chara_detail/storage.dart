@@ -109,6 +109,8 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
 
   int get length => state.length;
 
+  bool get isEmpty => state.isEmpty;
+
   void _updateRecordInfo(CharaDetailRecord record) {
     if (record.evaluationValue > (charaCardMap[record.trainee.card]?.evaluationValue ?? -1)) {
       charaCardMap[record.trainee.card] = record;
@@ -126,7 +128,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
       (rootDirectory / record.id).deleteSync(recursive: true);
       _duplicatedCharaEventController.sink.add(record.id);
       ref
-          .watch(charaDetailCaptureStateProvider.notifier)
+          .read(charaDetailCaptureStateProvider.notifier)
           .update((state) => state.fail(message: "duplicated_character"));
       return;
     }

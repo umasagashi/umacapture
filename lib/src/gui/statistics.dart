@@ -95,9 +95,9 @@ class NumberOfRecordStatisticWidget extends ConsumerWidget {
       bottom: Text("$tr_statistics.record_count.bottom".tr()),
       builder: () {
         final theme = Theme.of(context);
-        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+        final records = ref.watch(charaDetailRecordStorageProvider);
         return Text(
-          "${storage.length}",
+          "${records.length}",
           style: theme.textTheme.headlineLarge,
         );
       },
@@ -123,8 +123,12 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
       title: Text("$tr_statistics.evaluation_value.title".tr()),
       bottom: Text("$tr_statistics.evaluation_value.bottom".tr()),
       builder: () {
-        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
-        final best = storage.records.reduce((a, b) => a.evaluationValue > b.evaluationValue ? a : b);
+        final records = ref.watch(charaDetailRecordStorageProvider);
+        if (records.isEmpty) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
+        final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+        final best = records.reduce((a, b) => a.evaluationValue > b.evaluationValue ? a : b);
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -144,15 +148,15 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
 }
 
 class MonthlyFansChartData {
-  final CharaDetailRecordStorage storage;
+  final List<CharaDetailRecord> records;
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
-  MonthlyFansChartData(this.storage);
+  MonthlyFansChartData(this.records);
 
   List<FlSpot> parse({required DateTime start, required DateTime end}) {
-    final records = storage.records.where((record) => record.trainedDateAsDateTime.isInRange(start, end));
+    final targets = records.where((record) => record.trainedDateAsDateTime.isInRange(start, end));
 
-    final fansPerDay = records.groupFoldBy<int, int>(
+    final fansPerDay = targets.groupFoldBy<int, int>(
       (record) => record.trainedDateAsDateTime.inDays,
       (previous, record) => (previous ?? 0) + record.fans,
     );
@@ -334,10 +338,10 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
         ],
       ),
       builder: () {
-        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+        final records = ref.watch(charaDetailRecordStorageProvider);
         return Padding(
           padding: const EdgeInsets.only(top: 16, right: 16, bottom: 8),
-          child: MonthlyFansChartData(storage).build(theme, targetMonth),
+          child: MonthlyFansChartData(records).build(theme, targetMonth),
         );
       },
     );
@@ -345,7 +349,7 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
 }
 
 class CountSRankChartData {
-  final CharaDetailRecordStorage storage;
+  final List<CharaDetailRecord> records;
 
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
@@ -356,12 +360,12 @@ class CountSRankChartData {
     "$tr_statistics.count_s_rank.aptitude.long_range".tr(),
   ];
 
-  CountSRankChartData(this.storage);
+  CountSRankChartData(this.records);
 
   List<int> parse() {
     const targetRank = 7;
     List<int> counts = [0, 0, 0, 0];
-    for (final record in storage.records.where((e) => e.metadata.stage == RecordStage.active)) {
+    for (final record in records.where((e) => e.metadata.stage == RecordStage.active)) {
       for (final i in enumerate(record.aptitudes.distance.flatten)) {
         if (i.value >= targetRank) {
           counts[i.index]++;
@@ -458,10 +462,10 @@ class CountSRankStatisticWidget extends ConsumerWidget {
       title: Text("$tr_statistics.count_s_rank.title".tr()),
       bottom: Text("$tr_statistics.count_s_rank.bottom".tr()),
       builder: () {
-        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+        final records = ref.watch(charaDetailRecordStorageProvider);
         return Padding(
           padding: const EdgeInsets.only(top: 36, bottom: 4),
-          child: CountSRankChartData(storage).build(theme),
+          child: CountSRankChartData(records).build(theme),
         );
       },
     );
@@ -469,7 +473,7 @@ class CountSRankStatisticWidget extends ConsumerWidget {
 }
 
 class CountStrategyChartData {
-  final CharaDetailRecordStorage storage;
+  final List<CharaDetailRecord> records;
   final List<String> labels;
   late final List<int> counts;
   late final List<int> indices;
@@ -483,14 +487,14 @@ class CountStrategyChartData {
     const Color(0xff13d38e),
   ];
 
-  CountStrategyChartData(this.storage, this.labels) {
+  CountStrategyChartData(this.records, this.labels) {
     counts = parse();
     indices = enumerate(counts).sortedBy<num>((e) => -e.value).map((e) => e.index).toList();
   }
 
   List<int> parse() {
     List<int> d = [0, 0, 0, 0];
-    for (final record in storage.records.where((e) => e.metadata.stage == RecordStage.active)) {
+    for (final record in records.where((e) => e.metadata.stage == RecordStage.active)) {
       d[record.metadata.strategy]++;
     }
     return d;
@@ -540,9 +544,12 @@ class CountStrategyStatisticWidget extends ConsumerWidget {
       title: Text("$tr_statistics.count_strategy.title".tr()),
       bottom: Text("$tr_statistics.count_strategy.bottom".tr()),
       builder: () {
-        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+        final records = ref.watch(charaDetailRecordStorageProvider);
+        if (records.isEmpty) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
         final labels = ref.watch(labelMapProvider)[LabelKeys.raceStrategy]!;
-        final chart = CountStrategyChartData(storage, labels);
+        final chart = CountStrategyChartData(records, labels);
         return Padding(
           padding: const EdgeInsets.all(8),
           child: Row(

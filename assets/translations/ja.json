@@ -657,7 +657,7 @@
                 "title": "月間ファン獲得数"
             },
             "count_s_rank": {
-                "title": "距離適性S",
+                "title": "適性S獲得数",
                 "bottom": "全体",
                 "aptitude": {
                     "short_range": "短距離",

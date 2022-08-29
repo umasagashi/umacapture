@@ -215,7 +215,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
     final record = storage.getBy(id: widget.recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
