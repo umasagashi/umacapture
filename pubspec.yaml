@@ -5,7 +5,7 @@ description: Application for the game Umamusume players.
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
-version: 0.0.0-alpha.3
+version: 0.0.0-beta
 
 environment:
   sdk: ">=2.17.6"
@@ -17,15 +17,15 @@ dependencies:
   another_xlider: ^1.1.2
   archive: ^3.3.1
   audioplayers: ^1.0.1
-  auto_route: ^4.2.1
+  auto_route: ^5.0.1
   badges: ^2.0.3
   charset: ^1.1.0
   collection: ^1.16.0
   csv: ^5.0.1
-  dart_json_mapper: ^2.2.4+2
+  dart_json_mapper: ^2.2.5+3
   dio: ^4.0.6
   easy_localization: ^3.0.1
-  equatable: ^2.0.4
+  equatable: ^2.0.5
   extended_image: ^6.2.1
   feedback: ^2.5.0
   feedback_sentry: ^2.3.0
@@ -33,7 +33,7 @@ dependencies:
   fl_chart: ^0.55.1
   flex_color_scheme: ^5.1.0
   flutter_markdown: ^0.6.10+5
-  flutter_native_splash: ^2.2.7
+  flutter_native_splash: ^2.2.8
   flutter_rating_bar: ^4.0.1
   flutter_riverpod: ^1.0.4
   flutter_staggered_grid_view: ^0.6.2
@@ -67,7 +67,7 @@ dev_dependencies:
   #  flutter_test:
   #    sdk: flutter
 
-  auto_route_generator: ^4.2.0
+  auto_route_generator: ^5.0.1
   build_runner: ^2.2.0
   flutter_lints: ^2.0.1
   flutter_oss_licenses: ^2.0.1

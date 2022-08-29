@@ -7,14 +7,14 @@ packages:
       name: _fe_analyzer_shared
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "38.0.0"
+    version: "42.0.0"
   analyzer:
     dependency: transitive
     description:
       name: analyzer
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "3.4.1"
+    version: "4.3.0"
   another_xlider:
     dependency: "direct main"
     description:
@@ -98,14 +98,14 @@ packages:
       name: auto_route
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "4.2.1"
+    version: "5.0.1"
   auto_route_generator:
     dependency: "direct dev"
     description:
       name: auto_route_generator
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "4.2.0"
+    version: "5.0.2"
   badges:
     dependency: "direct main"
     description:
@@ -273,7 +273,7 @@ packages:
       name: dart_json_mapper
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "2.2.4+2"
+    version: "2.2.5+3"
   dart_pubspec_licenses:
     dependency: transitive
     description:
@@ -416,7 +416,7 @@ packages:
       name: flutter_native_splash
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "2.2.7"
+    version: "2.2.8"
   flutter_oss_licenses:
     dependency: "direct dev"
     description:
@@ -729,7 +729,7 @@ packages:
       name: path_provider_android
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "2.0.19"
+    version: "2.0.20"
   path_provider_ios:
     dependency: transitive
     description:
@@ -848,7 +848,7 @@ packages:
       name: reflectable
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "3.0.8"
+    version: "3.0.9"
   riverpod:
     dependency: transitive
     description:
@@ -1057,13 +1057,6 @@ packages:
       url: "https://pub.dartlang.org"
     source: hosted
     version: "1.3.1"
-  universal_html:
-    dependency: transitive
-    description:
-      name: universal_html
-      url: "https://pub.dartlang.org"
-    source: hosted
-    version: "2.0.8"
   universal_io:
     dependency: transitive
     description:
@@ -1182,7 +1175,7 @@ packages:
       name: xdg_directories
       url: "https://pub.dartlang.org"
     source: hosted
-    version: "0.2.0+1"
+    version: "0.2.0+2"
   xml:
     dependency: transitive
     description:
