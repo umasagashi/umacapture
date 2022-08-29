@@ -26,7 +26,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
     ref.watch(moduleVersionLoader.future),
   ]).then((_) {
     return Future.wait([
-      ref.watch(_labelMapLoader.future),
+      ref.watch(labelMapLoader.future),
       ref.watch(_skillInfoLoader.future),
       ref.watch(_skillTagLoader.future),
       ref.watch(_factorInfoLoader.future),
@@ -49,7 +49,7 @@ Future<T> _loadFromJson<T>(FilePath path) async {
   return path.toFile().readAsString().then((e) => JsonMapper.deserialize<T>(e, options)!);
 }
 
-final _labelMapLoader = FutureProvider<LabelMap>((ref) async {
+final labelMapLoader = FutureProvider<LabelMap>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<Map<String, dynamic>>, path.modulesDir.filePath("labels.json"))
@@ -57,7 +57,7 @@ final _labelMapLoader = FutureProvider<LabelMap>((ref) async {
 });
 
 final labelMapProvider = Provider<LabelMap>((ref) {
-  return ref.watch(_labelMapLoader).value!;
+  return ref.watch(labelMapLoader).value!;
 });
 
 final _skillInfoLoader = FutureProvider<List<SkillInfo>>((ref) async {
