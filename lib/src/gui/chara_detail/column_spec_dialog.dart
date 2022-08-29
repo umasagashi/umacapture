@@ -13,7 +13,7 @@ import '/src/gui/common.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 final specCloneProvider = StateProvider.autoDispose.family<ColumnSpec, String>((ref, specId) {
-  final source = ref.watch(currentColumnSpecsProvider.notifier).getById(specId)!;
+  final source = ref.read(currentColumnSpecsProvider.notifier).getById(specId)!;
   return JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(source))!;
 });
 
