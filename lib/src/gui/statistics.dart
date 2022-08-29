@@ -8,13 +8,28 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:quiver/iterables.dart';
 import 'package:quiver/time.dart';
 
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
+import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
 const tr_statistics = "pages.statistics";
+
+final statisticsInitialLoader = FutureProvider((ref) async {
+  return Future.wait([
+    ref.watch(moduleVersionLoader.future),
+  ]).then((_) {
+    return Future.wait([
+      ref.watch(labelMapLoader.future),
+      ref.watch(charaDetailRecordStorageLoader.future),
+    ]);
+  });
+});
 
 class _StatisticTile extends ConsumerWidget {
   final Widget title;
@@ -49,7 +64,7 @@ class _StatisticTile extends ConsumerWidget {
             child: Container(
               alignment: Alignment.center,
               color: theme.colorScheme.primaryContainer.withOpacity(0.2),
-              child: builder(),
+              child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),
           Padding(
@@ -75,17 +90,17 @@ class NumberOfRecordStatisticWidget extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final loader = ref.watch(charaDetailRecordStorageLoader);
     return _StatisticTile(
       title: Text("$tr_statistics.record_count.title".tr()),
       bottom: Text("$tr_statistics.record_count.bottom".tr()),
-      builder: () => loader.guarded((storage) {
+      builder: () {
+        final theme = Theme.of(context);
+        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
         return Text(
           "${storage.length}",
           style: theme.textTheme.headlineLarge,
         );
-      }),
+      },
     );
   }
 }
@@ -104,11 +119,11 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final loader = ref.watch(charaDetailRecordStorageLoader);
     return _StatisticTile(
       title: Text("$tr_statistics.evaluation_value.title".tr()),
       bottom: Text("$tr_statistics.evaluation_value.bottom".tr()),
-      builder: () => loader.guarded((storage) {
+      builder: () {
+        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
         final best = storage.records.reduce((a, b) => a.evaluationValue > b.evaluationValue ? a : b);
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -123,7 +138,7 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
             ),
           ],
         );
-      }),
+      },
     );
   }
 }
@@ -192,7 +207,7 @@ class MonthlyFansChartData {
       lineTouchData: LineTouchData(
         enabled: false,
         touchTooltipData: LineTouchTooltipData(
-          tooltipBgColor: theme.colorScheme.primaryContainer.blend(theme.colorScheme.surface, 50),
+          tooltipBgColor: theme.colorScheme.surface.blend(Colors.cyan, 50),
           tooltipRoundedRadius: 8,
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           fitInsideHorizontally: true,
@@ -201,7 +216,7 @@ class MonthlyFansChartData {
             return lineBarsSpot.map((lineBarSpot) {
               return LineTooltipItem(
                 lineBarSpot.y.toInt().toLocalCompactNumberString(),
-                theme.textTheme.bodyMedium!.copyWith(color: theme.colorScheme.onPrimaryContainer),
+                theme.textTheme.bodyMedium!.copyWith(color: theme.colorScheme.onSurface),
               );
             }).toList();
           },
@@ -247,8 +262,7 @@ class MonthlyFansChartData {
 
     return LineChart(
       lineChartData,
-      swapAnimationDuration: const Duration(milliseconds: 50),
-      swapAnimationCurve: Curves.linear,
+      swapAnimationDuration: Duration.zero,
     );
   }
 }
@@ -283,7 +297,6 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final loader = ref.watch(charaDetailRecordStorageLoader);
     return _StatisticTile(
       title: Text("$tr_statistics.monthly_fans.title".tr()),
       bottom: Row(
@@ -320,12 +333,252 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
           ),
         ],
       ),
-      builder: () => loader.guarded((storage) {
+      builder: () {
+        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
         return Padding(
           padding: const EdgeInsets.only(top: 16, right: 16, bottom: 8),
           child: MonthlyFansChartData(storage).build(theme, targetMonth),
         );
-      }),
+      },
+    );
+  }
+}
+
+class CountSRankChartData {
+  final CharaDetailRecordStorage storage;
+
+  final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
+
+  final List<String> labels = [
+    "$tr_statistics.count_s_rank.aptitude.short_range".tr(),
+    "$tr_statistics.count_s_rank.aptitude.mile_range".tr(),
+    "$tr_statistics.count_s_rank.aptitude.middle_range".tr(),
+    "$tr_statistics.count_s_rank.aptitude.long_range".tr(),
+  ];
+
+  CountSRankChartData(this.storage);
+
+  List<int> parse() {
+    const targetRank = 7;
+    List<int> counts = [0, 0, 0, 0];
+    for (final record in storage.records.where((e) => e.metadata.stage == RecordStage.active)) {
+      for (final i in enumerate(record.aptitudes.distance.flatten)) {
+        if (i.value >= targetRank) {
+          counts[i.index]++;
+        }
+      }
+    }
+    return counts;
+  }
+
+  BarChart build(ThemeData theme) {
+    final counts = parse();
+    final maxValue = counts.max.toDouble();
+
+    final barTouchData = BarTouchData(
+      enabled: false,
+      touchTooltipData: BarTouchTooltipData(
+        tooltipBgColor: Colors.transparent,
+        tooltipPadding: EdgeInsets.zero,
+        tooltipMargin: 0,
+        getTooltipItem: (BarChartGroupData group, int groupIndex, BarChartRodData rod, int rodIndex) {
+          return BarTooltipItem(
+            rod.toY.round().toString(),
+            theme.textTheme.titleMedium!,
+          );
+        },
+      ),
+    );
+
+    final titlesData = FlTitlesData(
+      show: true,
+      leftTitles: noTitle,
+      rightTitles: noTitle,
+      topTitles: noTitle,
+      bottomTitles: AxisTitles(
+        sideTitles: SideTitles(
+          showTitles: true,
+          reservedSize: 30,
+          getTitlesWidget: (double value, TitleMeta meta) {
+            return SideTitleWidget(
+              axisSide: meta.axisSide,
+              space: 4,
+              child: Text(labels[value.toInt()]),
+            );
+          },
+        ),
+      ),
+    );
+
+    final barChartData = BarChartData(
+      barTouchData: barTouchData,
+      titlesData: titlesData,
+      borderData: FlBorderData(show: false),
+      barGroups: [
+        for (final i in enumerate(counts))
+          BarChartGroupData(
+            x: i.index,
+            barRods: [
+              BarChartRodData(
+                toY: i.value.toDouble(),
+                width: 16,
+                borderRadius: const BorderRadius.all(Radius.circular(2)),
+              )
+            ],
+            showingTooltipIndicators: [0],
+          ),
+      ],
+      gridData: FlGridData(show: false),
+      alignment: BarChartAlignment.spaceAround,
+      maxY: maxValue,
+    );
+
+    return BarChart(
+      barChartData,
+      swapAnimationDuration: Duration.zero,
+    );
+  }
+}
+
+class CountSRankStatisticWidget extends ConsumerWidget {
+  const CountSRankStatisticWidget({Key? key}) : super(key: key);
+
+  static StaggeredGridTile asTile() {
+    return const StaggeredGridTile.count(
+      crossAxisCellCount: 1,
+      mainAxisCellCount: 1,
+      child: CountSRankStatisticWidget(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return _StatisticTile(
+      title: Text("$tr_statistics.count_s_rank.title".tr()),
+      bottom: Text("$tr_statistics.count_s_rank.bottom".tr()),
+      builder: () {
+        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+        return Padding(
+          padding: const EdgeInsets.only(top: 36, bottom: 4),
+          child: CountSRankChartData(storage).build(theme),
+        );
+      },
+    );
+  }
+}
+
+class CountStrategyChartData {
+  final CharaDetailRecordStorage storage;
+  final List<String> labels;
+  late final List<int> counts;
+  late final List<int> indices;
+
+  final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
+
+  final colors = [
+    const Color(0xff0293ee),
+    const Color(0xfff8b250),
+    const Color(0xff845bef),
+    const Color(0xff13d38e),
+  ];
+
+  CountStrategyChartData(this.storage, this.labels) {
+    counts = parse();
+    indices = enumerate(counts).sortedBy<num>((e) => -e.value).map((e) => e.index).toList();
+  }
+
+  List<int> parse() {
+    List<int> d = [0, 0, 0, 0];
+    for (final record in storage.records.where((e) => e.metadata.stage == RecordStage.active)) {
+      d[record.metadata.strategy]++;
+    }
+    return d;
+  }
+
+  PieChart build(ThemeData theme, double space) {
+    final total = counts.sum;
+    final pieChartData = PieChartData(
+      startDegreeOffset: -90,
+      sectionsSpace: 2,
+      centerSpaceRadius: 0,
+      sections: [
+        for (final i in indices)
+          PieChartSectionData(
+            color: colors[i],
+            value: counts[i].toDouble(),
+            title: "${(100 * counts[i] / total).round().toNumberString()} %",
+            radius: space / 2,
+            titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            titlePositionPercentageOffset: 0.65,
+          )
+      ],
+    );
+
+    return PieChart(
+      pieChartData,
+      swapAnimationDuration: Duration.zero,
+    );
+  }
+}
+
+class CountStrategyStatisticWidget extends ConsumerWidget {
+  const CountStrategyStatisticWidget({Key? key}) : super(key: key);
+
+  static StaggeredGridTile asTile() {
+    return const StaggeredGridTile.count(
+      crossAxisCellCount: 1,
+      mainAxisCellCount: 1,
+      child: CountStrategyStatisticWidget(),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return _StatisticTile(
+      title: Text("$tr_statistics.count_strategy.title".tr()),
+      bottom: Text("$tr_statistics.count_strategy.bottom".tr()),
+      builder: () {
+        final storage = ref.watch(charaDetailRecordStorageProvider.notifier);
+        final labels = ref.watch(labelMapProvider)[LabelKeys.raceStrategy]!;
+        final chart = CountStrategyChartData(storage, labels);
+        return Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            children: [
+              Expanded(
+                child: LayoutBuilder(
+                  builder: (BuildContext context, BoxConstraints constraints) {
+                    return chart.build(theme, Math.min(constraints.maxHeight, constraints.maxWidth));
+                  },
+                ),
+              ),
+              const SizedBox(width: 4),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  for (final i in chart.indices)
+                    Row(
+                      children: [
+                        Container(
+                          width: 12,
+                          height: 12,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: chart.colors[i],
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(labels[i])
+                      ],
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

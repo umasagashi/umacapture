@@ -643,14 +643,28 @@
         "statistics": {
             "record_count": {
                 "title": "殿堂入り登録数",
-                "bottom": "全期間"
+                "bottom": "全体"
             },
             "evaluation_value": {
                 "title": "最大評価点",
-                "bottom": "全期間"
+                "bottom": "全体"
             },
             "monthly_fans": {
                 "title": "月間ファン獲得数"
+            },
+            "count_s_rank": {
+                "title": "距離適性S",
+                "bottom": "全体",
+                "aptitude": {
+                    "short_range": "短距離",
+                    "mile_range": "マイル",
+                    "middle_range": "中距離",
+                    "long_range": "長距離"
+                }
+            },
+            "count_strategy": {
+                "title": "作戦採用率",
+                "bottom": "全体"
             }
         }
     },

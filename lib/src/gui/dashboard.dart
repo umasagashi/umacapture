@@ -161,6 +161,8 @@ class _StatisticGroup extends ConsumerWidget {
             NumberOfRecordStatisticWidget.asTile(),
             MaxEvaluationValueStatisticWidget.asTile(),
             MonthlyFansStatisticWidget.asTile(),
+            CountSRankStatisticWidget.asTile(),
+            CountStrategyStatisticWidget.asTile(),
           ],
         ),
       ],

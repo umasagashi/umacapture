@@ -52,6 +52,8 @@ class DistanceAptitude extends JsonEquatable {
 
   const DistanceAptitude(this.shortRange, this.mileRange, this.middleRange, this.longRange);
 
+  List<int> get flatten => [shortRange, mileRange, middleRange, longRange];
+
   @override
   List<Object?> properties() => [shortRange, mileRange, middleRange, longRange];
 }
@@ -226,6 +228,11 @@ class RecordId extends JsonEquatable {
 }
 
 @jsonSerializable
+enum RecordStage {
+  active,
+}
+
+@jsonSerializable
 @Json(ignoreNullMembers: true)
 class Metadata extends JsonEquatable {
   final String formatVersion;
@@ -234,7 +241,7 @@ class Metadata extends JsonEquatable {
   final String trainerId;
   final String capturedDate;
   final String recognizerVersion;
-  final String stage;
+  final RecordStage stage;
   final int strategy;
   final int? relationBonus;
 
