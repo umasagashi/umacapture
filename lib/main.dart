@@ -1,3 +1,4 @@
+import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -48,20 +49,13 @@ void setupWindowManager() async {
 }
 
 void setupLicense() {
-  LicenseRegistry.addLicense(() async* {
-    // TODO: This should be separated by OS.
-    yield LicenseEntryWithLineBreaks(
-      ["google_fonts"],
-      await rootBundle.loadString("assets/license/google_fonts/OFL.txt"),
-    );
-    yield LicenseEntryWithLineBreaks(
-      ["opencv"],
-      await rootBundle.loadString("assets/license/opencv/LICENSE.txt"),
-    );
-    yield LicenseEntryWithLineBreaks(
-      ["onnxruntime"],
-      await rootBundle.loadString("assets/license/onnxruntime/LICENSE"),
-    );
+  rootBundle.loadString("assets/additional_license_info.json").then((infoString) {
+    final info = JsonMapper.deserialize<Map<String, dynamic>>(infoString)!.map((k, v) => MapEntry(k, v.toString()));
+    LicenseRegistry.addLicense(() async* {
+      for (final entry in info.entries) {
+        yield LicenseEntryWithLineBreaks([entry.key], await rootBundle.loadString(entry.value));
+      }
+    });
   });
 }
 

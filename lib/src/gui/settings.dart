@@ -285,8 +285,8 @@ class _LicensePageDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return CardDialog(
-      dialogTitle: "$tr_settings.license.dialog.title".tr(),
-      closeButtonTooltip: "$tr_settings.license.dialog.close_button".tr(),
+      dialogTitle: "$tr_settings.about.license.dialog.title".tr(),
+      closeButtonTooltip: "$tr_settings.about.license.dialog.close_button".tr(),
       usePageView: false,
       content: Expanded(
         child: Localizations(
@@ -295,7 +295,7 @@ class _LicensePageDialog extends ConsumerWidget {
             DefaultWidgetsLocalizations.delegate,
             DefaultMaterialLocalizations.delegate,
           ],
-          locale: const Locale('en', 'US'),
+          locale: const Locale('en'),
           child: license.LicensePage(
             applicationVersion: ref.read(localAppVersionLoader).value.toString(),
           ),
@@ -305,30 +305,8 @@ class _LicensePageDialog extends ConsumerWidget {
   }
 }
 
-class LicenseGroup extends ConsumerWidget {
-  const LicenseGroup({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return ListCard(
-      title: "$tr_settings.license.title".tr(),
-      padding: EdgeInsets.zero,
-      children: [
-        ListTile(
-          isThreeLine: true,
-          title: Text("$tr_settings.license.subtitle".tr()),
-          subtitle: Text("$tr_settings.license.description".tr()),
-          onTap: () {
-            _LicensePageDialog.show(ref.base);
-          },
-        ),
-      ],
-    );
-  }
-}
-
-class VersionCheckGroup extends ConsumerWidget {
-  const VersionCheckGroup({Key? key}) : super(key: key);
+class AboutGroup extends ConsumerWidget {
+  const AboutGroup({Key? key}) : super(key: key);
 
   String moduleVersion(WidgetRef ref) {
     return ref.watch(moduleVersionLoader).when(
@@ -347,7 +325,7 @@ class VersionCheckGroup extends ConsumerWidget {
   }
 
   String versionString(WidgetRef ref) {
-    return "$tr_settings.version_check.description".tr(namedArgs: {
+    return "$tr_settings.about.version.description".tr(namedArgs: {
       "app_version": appVersion(ref),
       "module_version": moduleVersion(ref),
     });
@@ -356,16 +334,20 @@ class VersionCheckGroup extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListCard(
-      title: "$tr_settings.version_check.title".tr(),
+      title: "$tr_settings.about.title".tr(),
       padding: EdgeInsets.zero,
       children: [
         ListTile(
+          title: Text("$tr_settings.about.license.title".tr()),
+          subtitle: Text("$tr_settings.about.license.description".tr()),
+          onTap: () {
+            _LicensePageDialog.show(ref.base);
+          },
+        ),
+        ListTile(
           isThreeLine: true,
-          title: Text("$tr_settings.version_check.subtitle".tr()),
-          subtitle: Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: Text(versionString(ref)),
-          ),
+          title: Text("$tr_settings.about.version.title".tr()),
+          subtitle: Text(versionString(ref)),
           trailing: const Align(
             widthFactor: 1,
             child: Padding(
@@ -390,8 +372,7 @@ class SettingsPage extends ConsumerWidget {
         StyleSettingsGroup(),
         CaptureSettingsGroup(),
         PrivacySettingsGroup(),
-        LicenseGroup(),
-        VersionCheckGroup(),
+        AboutGroup(),
       ],
     );
   }

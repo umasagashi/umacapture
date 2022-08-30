@@ -36,6 +36,35 @@ class DistributionInfoBuilder implements Builder {
     return license;
   }
 
+  String _getLicenseFile(String directory) {
+    final licensePattern = RegExp("LICENSE.*", caseSensitive: false);
+    return Directory(directory)
+        .listSync(recursive: false, followLinks: false)
+        .firstWhere((e) => licensePattern.hasMatch(path.basename(e.path)))
+        .path;
+  }
+
+  FutureOr<String> _buildAdditionalLicenseInfo() async {
+    final packages = {
+      // TODO: This should be separated by OS.
+      "opencv": _getLicenseFile("windows/opencv"),
+      "onnxruntime": _getLicenseFile("windows/onnxruntime"),
+      for (final dir in Directory("native/vendor").listSync(recursive: false, followLinks: false))
+        path.basename(dir.path): _getLicenseFile(dir.path),
+    };
+
+    const outputDir = "assets/license";
+    for (final entry in packages.entries) {
+      File(entry.value).copy("$outputDir/${entry.key}.txt");
+    }
+
+    final info = {
+      "google_fonts": "assets/license/google_fonts.txt",
+      ...packages.map((key, _) => MapEntry(key, "$outputDir/$key.txt")),
+    };
+    return jsonEncoder.convert(info);
+  }
+
   FutureOr<String> _buildVersionInfo(String inputPath) async {
     final pubspec = loadYaml(File(inputPath).readAsStringSync());
     final String version = pubspec['version'];
@@ -61,6 +90,8 @@ class DistributionInfoBuilder implements Builder {
         buildStep.writeAsString(output, _buildVersionInfo(buildStep.inputId.path));
       } else if (output.pathSegments.last == "license_info.json") {
         buildStep.writeAsString(output, _buildLicenseInfo(buildStep.inputId.path));
+      } else if (output.pathSegments.last == "additional_license_info.json") {
+        buildStep.writeAsString(output, _buildAdditionalLicenseInfo());
       } else {
         throw ArgumentError.value(output.toString());
       }
@@ -73,6 +104,7 @@ class DistributionInfoBuilder implements Builder {
       "pubspec.yaml": [
         "assets/version_info.json",
         "assets/license_info.json",
+        "assets/additional_license_info.json",
       ],
     };
   }

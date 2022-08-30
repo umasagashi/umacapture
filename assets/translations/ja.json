@@ -14,7 +14,7 @@
             "title": "ダッシュボード",
             "app_updater": {
                 "title": "アプリ更新",
-                "subtitle": "更新が利用可能です。クリックしてダウンロードします。",
+                "subtitle": "更新が利用可能です。クリックして更新をダウンロードします。",
                 "downloading": {
                     "template": "ダウンロード中。完了すると{file}が開きます。",
                     "exe": "インストーラー",
@@ -629,20 +629,21 @@
                     "sample_link": "サンプルデータ"
                 }
             },
-            "license": {
-                "title": "ライセンス情報",
-                "subtitle": "サードパーティーライセンス",
-                "description": "クリックするとライセンスを表示します。",
-                "dialog": {
+            "about": {
+                "title": "アプリ情報",
+                "license": {
                     "title": "ライセンス",
-                    "close_button": "閉じる"
+                    "description": "クリックしてソフトウェアライセンスを表示します。",
+                    "dialog": {
+                        "title": "ライセンス",
+                        "close_button": "閉じる"
+                    }
+                },
+                "version": {
+                    "title": "バージョン",
+                    "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
+                    "unknown_version": "不明"
                 }
-            },
-            "version_check": {
-                "title": "バージョン情報",
-                "subtitle": "現在のバージョン",
-                "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
-                "unknown_version": "不明"
             }
         },
         "statistics": {
