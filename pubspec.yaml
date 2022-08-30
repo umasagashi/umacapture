@@ -80,17 +80,9 @@ flutter:
 
   assets:
     - assets/
-
     - assets/translations/
-
+    - assets/license/
     - assets/sound/
-
     - assets/image/
-
     - assets/config/
     - assets/config/chara_detail/
-
-    - assets/license/
-    - assets/license/google_fonts/
-    - assets/license/onnxruntime/
-    - assets/license/opencv/
