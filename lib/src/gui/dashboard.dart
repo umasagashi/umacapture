@@ -1,12 +1,12 @@
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:percent_indicator/percent_indicator.dart';
+import 'package:version/version.dart';
 
 import '/const.dart';
 import '/src/core/path_entity.dart';
@@ -34,7 +34,7 @@ final _newsMarkdownLoader = FutureProvider<String>((ref) async {
 });
 
 class AppUpdaterGroup extends ConsumerWidget {
-  final String version;
+  final Version version;
 
   const AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
 
@@ -44,7 +44,7 @@ class AppUpdaterGroup extends ConsumerWidget {
       final pathInfo = ref.watch(pathInfoProvider);
       final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
       final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
-      logger.d("$downloadUrl, ${downloadPath.path}");
+      logger.d(downloadUrl);
       Dio().download(
         downloadUrl,
         downloadPath.path,
@@ -93,15 +93,14 @@ class AppUpdaterGroup extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final downloadProgress = ref.watch(_downloadProgressProvider);
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
       padding: EdgeInsets.zero,
+      baseColor: Colors.amber,
       children: [
         ListTile(
           title: Text("$tr_dashboard.app_updater.subtitle".tr()),
-          tileColor: theme.colorScheme.surface.blend(Colors.yellow, 15),
           onTap: downloadProgress != null ? null : () => downloadAndOpen(ref),
         ),
         AnimatedSwitcher(
@@ -155,7 +154,10 @@ class _StatisticGroup extends ConsumerWidget {
     return ListCard(
       title: "$tr_dashboard.statistic.title".tr(),
       padding: const EdgeInsets.all(16),
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text("$tr_dashboard.statistic.description".tr()),
+        const SizedBox(height: 12),
         StaggeredGrid.extent(
           maxCrossAxisExtent: 300,
           mainAxisSpacing: 16,
@@ -173,15 +175,24 @@ class _StatisticGroup extends ConsumerWidget {
   }
 }
 
+final _versionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
+  late final AppVersionCheckResult result;
+  await Future.wait([
+    ref.watch(appVersionCheckLoader.future).then((e) => result = e),
+    ref.watch(isInstallerModeLoader.future),
+  ]);
+  return result;
+});
+
 class DashboardPage extends ConsumerWidget {
   const DashboardPage({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AppVersionCheckResult? result = ref.watch(appVersionCheckLoader).asData?.value;
+    final result = ref.watch(_versionCheckLoader).asData?.value;
     return ListTilePageRootWidget(
       children: [
-        if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest.toString()),
+        if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest),
         const _NewsGroup(),
         const _StatisticGroup(),
       ],

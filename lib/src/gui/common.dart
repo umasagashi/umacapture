@@ -14,6 +14,7 @@ class ListCard extends StatelessWidget {
   final Widget? trailing;
   final EdgeInsetsGeometry? padding;
   final CrossAxisAlignment crossAxisAlignment;
+  final Color? baseColor;
 
   const ListCard({
     Key? key,
@@ -22,7 +23,20 @@ class ListCard extends StatelessWidget {
     this.trailing,
     this.padding,
     this.crossAxisAlignment = CrossAxisAlignment.center,
+    this.baseColor,
   }) : super(key: key);
+
+  Widget child() {
+    return Padding(
+      padding: padding ?? const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: crossAxisAlignment,
+        children: [
+          ...children,
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -33,19 +47,22 @@ class ListCard extends StatelessWidget {
         children: [
           if (title != null)
             ListTile(
-              tileColor: theme.scaffoldBackgroundColor.blend(theme.cardColor, 50),
+              tileColor: baseColor != null
+                  ? theme.cardColor.blend(baseColor!, 50)
+                  : theme.scaffoldBackgroundColor.blend(theme.cardColor, 50),
               title: Text(title!, style: theme.textTheme.headline5),
               trailing: trailing,
             ),
-          Padding(
-            padding: padding ?? const EdgeInsets.all(8),
-            child: Column(
-              crossAxisAlignment: crossAxisAlignment,
-              children: [
-                ...children,
-              ],
+          if (baseColor != null)
+            Theme(
+              data: theme.copyWith(
+                listTileTheme: theme.listTileTheme.copyWith(
+                  tileColor: (theme.listTileTheme.tileColor ?? theme.colorScheme.surface).blend(baseColor!, 15),
+                ),
+              ),
+              child: child(),
             ),
-          ),
+          if (baseColor == null) child(),
         ],
       ),
     );
