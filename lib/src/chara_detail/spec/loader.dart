@@ -71,6 +71,12 @@ final skillInfoProvider = Provider<List<SkillInfo>>((ref) {
   return ref.watch(_skillInfoLoader).value!;
 });
 
+final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
+  final records = ref.watch(charaDetailRecordStorageProvider);
+  final ids = records.map((r) => r.skills.map((s) => s.id)).flattened.toSet();
+  return ref.watch(skillInfoProvider).where((e) => ids.contains(e.sid)).toList();
+});
+
 final _skillTagLoader = FutureProvider<List<Tag>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
@@ -92,6 +98,12 @@ final _factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
 
 final factorInfoProvider = Provider<List<FactorInfo>>((ref) {
   return ref.watch(_factorInfoLoader).value!;
+});
+
+final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
+  final records = ref.watch(charaDetailRecordStorageProvider);
+  final ids = records.map((r) => r.factors.flattened.map((f) => f.id)).flattened.toSet();
+  return ref.watch(factorInfoProvider).where((e) => ids.contains(e.sid)).toList();
 });
 
 final _factorTagLoader = FutureProvider<List<Tag>>((ref) async {

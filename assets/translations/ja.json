@@ -14,7 +14,7 @@
             "title": "ダッシュボード",
             "app_updater": {
                 "title": "アプリ更新",
-                "subtitle": "アプリの更新が利用可能です。ここをクリックして更新をダウンロードします。",
+                "subtitle": "更新が利用可能です。クリックしてダウンロードします。",
                 "downloading": {
                     "template": "ダウンロード中。完了すると{file}が開きます。",
                     "exe": "インストーラー",
@@ -25,7 +25,8 @@
                 "title": "お知らせ"
             },
             "statistic": {
-                "title": "統計"
+                "title": "統計",
+                "description": "※キャプチャ済みのウマ娘のみが集計対象です。"
             }
         },
         "capture": {
@@ -624,8 +625,8 @@
                 "title": "プライバシー設定",
                 "allow_post_user_data": {
                     "title": "利用環境情報の送信許可",
-                    "description": "エラーログやフィードバックなど、お使いの環境情報を送信する機能を有効にします。これをオフにしてもバージョンチェックなどの受信機能は無効化されません。変更は次回アプリ起動時から有効です。",
-                    "sample_link": "データのサンプル"
+                    "description": "エラーログやフィードバックなど、お使いの環境情報を送信する機能を有効にします。これをオフにしてもバージョンチェックなどの受信機能はオフになりません。変更は次回アプリ起動時から反映されます。",
+                    "sample_link": "サンプルデータ"
                 }
             },
             "license": {
@@ -650,14 +651,14 @@
                 "bottom": "全体"
             },
             "evaluation_value": {
-                "title": "最大評価点",
+                "title": "最高評価点",
                 "bottom": "全体"
             },
             "monthly_fans": {
                 "title": "月間ファン獲得数"
             },
             "count_s_rank": {
-                "title": "適性S獲得数",
+                "title": "適性S保有数",
                 "bottom": "全体",
                 "aptitude": {
                     "short_range": "短距離",
@@ -679,10 +680,10 @@
             "no_version_available": "認識モジュールの取得に失敗しました。キャプチャ機能は利用できません。",
             "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",
             "no_update_required": "認識モジュールは最新版です。",
-            "updated": "認識モジュールを最新版に更新しました。"
+            "updated": "認識モジュールを更新しました。"
         },
         "app_version_check": {
-            "new_version_available": "umacapture の更新が利用可能です。",
+            "new_version_available": "アプリの更新が利用可能です。",
             "latest_version_not_available": "アプリバージョンの取得に失敗しました。"
         }
     },

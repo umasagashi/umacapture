@@ -12,8 +12,8 @@ typedef Value2Callback<T1, T2> = void Function(T1, T2);
 
 typedef Predicate<T> = bool Function(T);
 
-typedef ConsumerWidgetBuilder = Widget Function(BuildContext context, WidgetRef ref);
-typedef InlineWidgetBuilder = Widget Function();
+typedef ConsumerWidgetBuilder<T> = T Function(BuildContext context, WidgetRef ref);
+typedef InlineBuilder<T> = T Function();
 
 extension CallbackExtension<T> on Callback<T> {
   VoidCallback bind(T value) {

@@ -34,7 +34,7 @@ final statisticsInitialLoader = FutureProvider((ref) async {
 class _StatisticTile extends ConsumerWidget {
   final Widget title;
   final Widget bottom;
-  final InlineWidgetBuilder builder;
+  final InlineBuilder<Widget> builder;
 
   const _StatisticTile({
     Key? key,
@@ -172,7 +172,7 @@ class MonthlyFansChartData {
   int calcMaxValue(List<FlSpot> spots, int maxX) {
     final actual = spots.map((e) => e.y).max;
     final predicted = actual * maxX / spots.length;
-    return (predicted * 1.22).toInt().roundTopmost(4);
+    return (predicted * 1.2).toInt().roundTopmost(4);
   }
 
   LineChart build(ThemeData theme, DateTime month) {
@@ -215,7 +215,6 @@ class MonthlyFansChartData {
           tooltipRoundedRadius: 8,
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           fitInsideHorizontally: true,
-          fitInsideVertically: true,
           getTooltipItems: (List<LineBarSpot> lineBarsSpot) {
             return lineBarsSpot.map((lineBarSpot) {
               return LineTooltipItem(

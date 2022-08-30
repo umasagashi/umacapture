@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:version/version.dart';
 
 class Const {
   static String get moduleUrlRoot => "https://umasagashi.com/data/umacapture";
@@ -13,9 +14,9 @@ class Const {
 
   static String get appVersionInfoUrl => "$appUrlRoot/version_info.json";
 
-  static String appExeUrl({required String version}) => "$appUrlRoot/umacapture-v$version-windows.exe";
+  static String appExeUrl({required Version version}) => "$appUrlRoot/umacapture-v${version.toString()}-windows.exe";
 
-  static String appZipUrl({required String version}) => "$appUrlRoot/umacapture-v$version-windows.zip";
+  static String appZipUrl({required Version version}) => "$appUrlRoot/umacapture-v${version.toString()}-windows.zip";
 
   static RegExp get uninstallerPattern => RegExp(r"unins[0-9]+\.exe");
 

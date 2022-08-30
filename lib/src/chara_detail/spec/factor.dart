@@ -12,7 +12,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
-import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -448,7 +447,6 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     return FactorColumnSelector(
       specId: id,
       onDecided: onDecided,
-      availableOnly: showAvailableOnly,
     );
   }
 }
@@ -467,29 +465,20 @@ final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<String>
 
 class _SelectionSelector extends ConsumerWidget {
   final String specId;
-  final bool availableOnly;
 
   const _SelectionSelector({
     required this.specId,
-    required this.availableOnly,
   });
 
   List<FactorInfo> _watchCandidateFactors(WidgetRef ref, String specId) {
-    late final List<FactorInfo> factorInfoList;
-    if (availableOnly) {
-      final spec = _clonedSpecProvider.watch(ref, specId);
-      final records = ref.watch(charaDetailRecordStorageProvider);
-      final values = spec.parse(ref.base, records).map((e) => e.flattened).flattened.map((e) => e.id).toSet();
-      factorInfoList = ref.watch(factorInfoProvider).where((e) => values.contains(e.sid)).toList();
-    } else {
-      factorInfoList = ref.watch(factorInfoProvider);
-    }
+    final spec = _clonedSpecProvider.watch(ref, specId);
+    final info = ref.watch(spec.showAvailableOnly ? availableFactorInfoProvider : factorInfoProvider);
     final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).toSet();
     final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).toSet();
     if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty) {
-      return factorInfoList;
+      return info;
     } else {
-      return factorInfoList.where((factor) {
+      return info.where((factor) {
         final factorContains = factor.tags.containsAll(selectedFactorTags);
         final skillContains = factor.skillInfo?.tags.containsAll(selectedSkillTags) ?? selectedSkillTags.isEmpty;
         return factorContains && skillContains;
@@ -801,20 +790,18 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 class FactorColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
-  final bool availableOnly;
 
   const FactorColumnSelector({
     Key? key,
     required this.specId,
     required this.onDecided,
-    required this.availableOnly,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
-        _SelectionSelector(specId: specId, availableOnly: availableOnly),
+        _SelectionSelector(specId: specId),
         const SizedBox(height: 32),
         _ModeSelector(specId: specId),
         const SizedBox(height: 32),

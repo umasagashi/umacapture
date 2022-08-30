@@ -1,4 +1,3 @@
-import 'package:collection/collection.dart';
 import 'package:csv/csv.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -12,7 +11,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
-import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -267,9 +265,7 @@ class _SelectionSelector extends ConsumerWidget {
 
   List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
     final spec = _clonedSpecProvider.watch(ref, specId);
-    final records = ref.watch(charaDetailRecordStorageProvider);
-    final values = spec.parse(ref.base, records).flattened.map((e) => e.id).toSet();
-    final info = ref.watch(skillInfoProvider).where((e) => values.contains(e.sid)).toList();
+    final info = ref.watch(spec.showAvailableOnly ? availableSkillInfoProvider : skillInfoProvider);
     final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
     if (selected.isEmpty) {
       return info;
