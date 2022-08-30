@@ -14,6 +14,7 @@ import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
+import '/src/gui/license_alt.dart' as license;
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
 
@@ -295,7 +296,7 @@ class _LicensePageDialog extends ConsumerWidget {
             DefaultMaterialLocalizations.delegate,
           ],
           locale: const Locale('en', 'US'),
-          child: LicensePage(
+          child: license.LicensePage(
             applicationVersion: ref.read(localAppVersionLoader).value.toString(),
           ),
         ),
