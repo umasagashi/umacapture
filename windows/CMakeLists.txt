@@ -36,8 +36,10 @@ function(APPLY_STANDARD_SETTINGS TARGET)
     target_compile_options(${TARGET} PRIVATE
             /W4
             /WX
+            /wd4018
             /wd4068
             /wd4100
+            /wd4267
             /wd4459
             /wd4819
             /wd5054
@@ -103,3 +105,8 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
         CONFIGURATIONS Profile;Release
         COMPONENT Runtime)
+
+# clip
+set(CLIP_EXAMPLES OFF CACHE BOOL "Compile clip examples")
+set(CLIP_TESTS OFF CACHE BOOL "Compile clip tests")
+add_subdirectory(clip)

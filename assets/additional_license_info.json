@@ -2,6 +2,7 @@
     "google_fonts": "assets/license/google_fonts.txt",
     "opencv": "assets/license/opencv.txt",
     "onnxruntime": "assets/license/onnxruntime.txt",
+    "clip": "assets/license/clip.txt",
     "CLI11": "assets/license/CLI11.txt",
     "eventpp": "assets/license/eventpp.txt",
     "minimal_uuid4": "assets/license/minimal_uuid4.txt",

@@ -47,6 +47,7 @@ target_link_libraries(
         flutter_wrapper_app
         "${OpenCV_LIBS}"
         "${ONNX_DIR}/lib/onnxruntime.lib"
+        clip
 )
 
 target_include_directories(
