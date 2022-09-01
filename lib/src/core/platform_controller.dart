@@ -27,6 +27,14 @@ final capturingStateProvider = Provider<bool>((ref) {
       });
 });
 
+final capturingFrameSizeProvider = StateProvider<Size?>((ref) {
+  return null;
+});
+
+final capturingFrameRateProvider = StateProvider<double?>((ref) {
+  return null;
+});
+
 StreamController<String> _errorEventController = StreamController();
 final errorEventProvider = StreamProvider<String>((ref) {
   if (_errorEventController.hasListener) {
@@ -256,6 +264,8 @@ class PlatformController {
       case 'onCaptureStopped':
         _captureTriggeredEventController.sink.add(false);
         captureState.update((state) => state.reset());
+        _ref.read(capturingFrameSizeProvider.notifier).state = null;
+        _ref.read(capturingFrameRateProvider.notifier).state = null;
         break;
       case 'onScrollReady':
         _scrollReadyEventController.sink.add(data['index']);
@@ -275,9 +285,17 @@ class PlatformController {
           _charaDetailRecordCapturedEventController.sink.add(data['id']);
           captureState.update((state) => state.success(id: data['id']));
         }
+        _ref.read(capturingFrameRateProvider.notifier).state = null;
         break;
       case 'onCharaDetailUpdated':
         _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
+        break;
+      case 'onFrameRateReported':
+        _ref.read(capturingFrameRateProvider.notifier).update((_) => data['fps'].toDouble());
+        break;
+      case 'onFrameSizeReported':
+        final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
+        _ref.read(capturingFrameSizeProvider.notifier).update((_) => size);
         break;
       default:
         throw UnimplementedError(dataType);

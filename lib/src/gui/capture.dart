@@ -306,8 +306,89 @@ class _CharaDetailStateWidget extends ConsumerWidget {
           duration: animationDuration,
           child: (state.link != null && state.error == null) ? _buildLink(context, ref) : Container(),
         ),
-        const Divider(),
+        if (state.isCapturing || state.error != null || state.link != null) const Divider(),
         additionalInfoWidget(ref),
+      ],
+    );
+  }
+}
+
+enum _Requirement { good, unsure, insufficient }
+
+class _CapturingPlatformInfoWidget extends ConsumerWidget {
+  final colorMap = {
+    _Requirement.good: Colors.green.shade500,
+    _Requirement.unsure: Colors.orange.shade500,
+    _Requirement.insufficient: Colors.red.shade500,
+  };
+  final iconMap = {
+    _Requirement.good: Icons.check,
+    _Requirement.unsure: Icons.warning_amber,
+    _Requirement.insufficient: Icons.block,
+  };
+
+  Widget chip({
+    required ThemeData theme,
+    required String label,
+    required _Requirement requirement,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: colorMap[requirement],
+        borderRadius: BorderRadius.circular(16),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          Icon(iconMap[requirement], color: Colors.white, size: 14),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: theme.textTheme.labelSmall?.copyWith(color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget sizeWidget(BuildContext context, WidgetRef ref) {
+    final size = ref.watch(capturingFrameSizeProvider);
+    final theme = Theme.of(context);
+    if (size == null) {
+      return const Text("-");
+    }
+    return chip(
+      theme: theme,
+      label: "${size.width.toInt()} x ${size.height.toInt()}",
+      requirement:
+          size.width >= 540 ? _Requirement.good : (size.width >= 512 ? _Requirement.unsure : _Requirement.insufficient),
+    );
+  }
+
+  Widget fpsWidget(BuildContext context, WidgetRef ref) {
+    final fps = ref.watch(capturingFrameRateProvider);
+    final theme = Theme.of(context);
+    if (fps == null) {
+      return const Text("-");
+    }
+    return chip(
+      theme: theme,
+      label: fps.round().toString(),
+      requirement: fps >= 35 ? _Requirement.good : (fps >= 20 ? _Requirement.unsure : _Requirement.insufficient),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text("${"$tr_capture.capture_control.requirement.window_size".tr()} : "),
+        sizeWidget(context, ref),
+        const SizedBox(width: 16),
+        Text("${"$tr_capture.capture_control.requirement.frame_rate".tr()} : "),
+        fpsWidget(context, ref),
       ],
     );
   }
@@ -336,6 +417,9 @@ class CaptureControlGroup extends ConsumerWidget {
             ),
           ),
         ),
+        const Divider(),
+        _CapturingPlatformInfoWidget(),
+        const Divider(),
         _CharaDetailStateWidget(),
       ],
     );

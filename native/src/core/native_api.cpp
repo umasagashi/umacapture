@@ -90,11 +90,24 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
     on_stitch_ready = stitch_ready_connection;
 
+    lap_time_wrapper = event_util::makeDirectConnection<Frame, chara_detail::SceneInfo>();
+    chara_detail_updated_connection->listen([this](const auto &frame, const auto &info) {
+        lap_time_wrapper->send(frame, info);
+        const auto &now = std::chrono::steady_clock::now();
+        lap_time_buffer.push_back(now);
+        if ((now - lap_time_buffer.front()) > report_interval) {
+            notifyFrameRateReported(
+                static_cast<double>(chrono_util::ms(report_interval) * lap_time_buffer.size())
+                / static_cast<double>(chrono_util::ms(lap_time_buffer.back() - lap_time_buffer.front())));
+            lap_time_buffer.clear();
+        }
+    });
+
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
-        chara_detail_updated_connection,
+        lap_time_wrapper,
         chara_detail_closed_connection,
         closed_before_completed_connection,
         scroll_ready_connection,
@@ -164,8 +177,13 @@ bool NativeApi::isRunning() const {
     return event_runners && event_runners->isRunning();
 }
 
-void NativeApi::updateFrame(const cv::Mat &image, uint64 timestamp) {
+void NativeApi::updateFrame(const cv::Mat &image, const cv::Size &original_size, uint64 timestamp) {
     on_frame_captured->send({image, timestamp});
+    const auto &now = std::chrono::steady_clock::now();
+    if (now - last_size_reported > report_interval) {
+        notifyFrameSizeReported(original_size);
+        last_size_reported = now;
+    }
 }
 
 void NativeApi::updateRecord(const std::string &id) {
@@ -178,7 +196,7 @@ void NativeApi::updateRecord(const std::string &id) {
     NativeApi::instance();
     startEventLoop({});
     joinEventLoop();
-    updateFrame({}, 0);
+    updateFrame({}, {}, 0);
     setNotifyCallback({});
     setDetachCallback({});
     setMkdirCallback({});

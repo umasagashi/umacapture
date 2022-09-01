@@ -42,6 +42,10 @@
                     "closed_before_completed": "[エラー] キャプチャ完了前に詳細画面をロストしました。",
                     "duplicated_character": "[エラー] このウマ娘はすでにキャプチャ済みです。"
                 },
+                "requirement": {
+                    "window_size": "画面サイズ",
+                    "frame_rate": "フレームレート"
+                },
                 "progress": {
                     "skill": "スキル",
                     "factor": "因子",

@@ -41,9 +41,11 @@ public:
     void joinEventLoop();
     [[nodiscard]] bool isRunning() const;
 
-    void updateFrame(const cv::Mat &image, uint64 timestamp);
+    void updateFrame(const cv::Mat &image, const cv::Size &original_size, uint64 timestamp);
 
     void stitch(const std::string &id) { on_stitch_ready->send(id); }
+
+    void recognize(const std::string &id) { on_recognize_ready->send(id); }
 
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
 
@@ -70,6 +72,14 @@ public:
     void updateRecord(const std::string &id);
     void notifyCharaDetailUpdated(const std::string &id) {
         notify(json_util::Json{{"type", "onCharaDetailUpdated"}, {"id", id}}.dump());
+    }
+
+    void notifyFrameRateReported(double fps) {
+        notify(json_util::Json{{"type", "onFrameRateReported"}, {"fps", fps}}.dump());
+    }
+
+    void notifyFrameSizeReported(const cv::Size &size) {
+        notify(json_util::Json{{"type", "onFrameSizeReported"}, {"size", Size<int>{size}}}.dump());
     }
 
     void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }
@@ -117,6 +127,11 @@ private:
     std::unique_ptr<chara_detail::CharaDetailSceneScraper> chara_detail_scene_scraper;
     std::unique_ptr<chara_detail::CharaDetailSceneStitcher> chara_detail_scene_stitcher;
     std::unique_ptr<chara_detail::CharaDetailRecognizer> chara_detail_recognizer;
+
+    const std::chrono::milliseconds report_interval = std::chrono::milliseconds(1000);
+    event_util::Connection<Frame, chara_detail::SceneInfo> lap_time_wrapper;
+    std::chrono::steady_clock::time_point last_size_reported;
+    std::list<std::chrono::steady_clock::time_point> lap_time_buffer;
 
 public:
     [[maybe_unused]] void _dummyForSuppressingUnusedWarning();
