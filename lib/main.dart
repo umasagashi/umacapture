@@ -45,7 +45,7 @@ void easyLocalizationPrinter(Object object, {String? name, StackTrace? stackTrac
   }
 }
 
-void setupLocalization() async {
+Future<void> setupLocalization() async {
   EasyLocalization.logger = EasyLogger(
     name: "Easy Localization",
     printer: easyLocalizationPrinter,
@@ -76,6 +76,7 @@ void setupWindowManager() async {
     const WindowOptions(
       titleBarStyle: TitleBarStyle.hidden,
       minimumSize: Size(600, 400),
+      center: true,
     ),
     () async {
       final box = WindowStateBox();
@@ -127,7 +128,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeJsonReflectable();
   await StorageBox.ensureOpened(reset: false);
-  setupLocalization();
+  await setupLocalization();
   setupLicense();
   if (CurrentPlatform.hasWindowFrame()) {
     setupWindowManager();
