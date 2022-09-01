@@ -103,12 +103,18 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         }
     });
 
+    lap_discard_wrapper = event_util::makeDirectConnection<>();
+    chara_detail_closed_connection->listen([this]() {
+        lap_discard_wrapper->send();
+        lap_time_buffer.clear();
+    });
+
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         lap_time_wrapper,
-        chara_detail_closed_connection,
+        lap_discard_wrapper,
         closed_before_completed_connection,
         scroll_ready_connection,
         scroll_updated_connection,

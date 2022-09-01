@@ -374,7 +374,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
     return chip(
       theme: theme,
       label: fps.round().toString(),
-      requirement: fps >= 35 ? _Requirement.good : (fps >= 20 ? _Requirement.unsure : _Requirement.insufficient),
+      requirement: fps > 30 ? _Requirement.good : (fps > 15 ? _Requirement.unsure : _Requirement.insufficient),
     );
   }
 

@@ -130,6 +130,7 @@ private:
 
     const std::chrono::milliseconds report_interval = std::chrono::milliseconds(1000);
     event_util::Connection<Frame, chara_detail::SceneInfo> lap_time_wrapper;
+    event_util::Connection<> lap_discard_wrapper;
     std::chrono::steady_clock::time_point last_size_reported;
     std::list<std::chrono::steady_clock::time_point> lap_time_buffer;
 
