@@ -15,6 +15,11 @@ inline uint64_t timestamp() {
     return std::chrono::duration_cast<time_unit>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
 
+template<typename T, typename S>
+auto ms(std::chrono::duration<T, S> duration) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
+}
+
 inline std::string utc() {
     const time_t unix_ts = std::time(nullptr);
     std::tm datetime{};
