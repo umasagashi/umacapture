@@ -367,7 +367,7 @@ class _ModeSelector extends ConsumerWidget {
           tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
           child: SpinBox(
             height: 30,
-            min: 1,
+            min: 0,
             max: predicate.query.length,
             value: predicate.min,
             onChanged: (value) {

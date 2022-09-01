@@ -630,7 +630,7 @@ class _ModeSelector extends ConsumerWidget {
       children: [
         SpinBox(
           height: 30,
-          min: 1,
+          min: 0,
           max: predicate.starMaxLimit,
           value: predicate.element.star,
           onChanged: (value) {
@@ -655,7 +655,7 @@ class _ModeSelector extends ConsumerWidget {
           tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
           child: SpinBox(
             height: 30,
-            min: 1,
+            min: 0,
             max: predicate.countMaxLimit,
             value: predicate.element.count,
             onChanged: (value) {
