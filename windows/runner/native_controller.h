@@ -7,6 +7,7 @@
 #include <runner/win32_window.h>
 
 #include "core/native_api.h"
+#include "runner/clipboard.h"
 #include "runner/platform_channel.h"
 #include "runner/window_recorder.h"
 #include "runner/windows_config.h"
@@ -40,6 +41,9 @@ public:
         channel->addMethodCallHandler("stopCapture", [this]() { joinEventLoop(); });
 
         channel->addMethodCallHandler("updateRecord", [this](const auto &id) { updateRecord(id); });
+
+        channel->addMethodCallHandler(
+            "copyToClipboardFromFile", [this](const auto &path) { copyToClipboardFromFile(path); });
 
         app::NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
 

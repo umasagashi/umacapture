@@ -120,6 +120,25 @@ void stitchFromImages(const std::string &id) {
     }
 }
 
+void recognizeFromImages(const std::string &id) {
+    const auto recorder_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
+
+    auto &api = app::NativeApi::instance();
+    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
+
+    const auto config = createConfig(true);
+    api.startEventLoop(config.dump());
+
+    recorder_runner->start();
+
+    api.recognize(id);
+
+    while (api.isRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+}
+
 }  // namespace uma::cli
 
 int main(int argc, char **argv) {
@@ -149,6 +168,9 @@ int main(int argc, char **argv) {
         auto stitch_command = command.add_subcommand("stitch", "run capture mode from scraped images");
         std::string id;
         stitch_command->add_option("--id", id)->required();
+
+        auto recognize_command = command.add_subcommand("recognize", "run recognizer mode from stitched images");
+        recognize_command->add_option("--id", id)->required();
 
         CLI11_PARSE(command, argc, argv)
 
@@ -184,6 +206,10 @@ int main(int argc, char **argv) {
 
         if (stitch_command->parsed()) {
             uma::cli::stitchFromImages(id);
+        }
+
+        if (recognize_command->parsed()) {
+            uma::cli::recognizeFromImages(id);
         }
     } catch (std::exception &e) {
         std::cerr << e.what() << std::endl;

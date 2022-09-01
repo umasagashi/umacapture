@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -14,6 +15,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
+import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_capture = "pages.capture";
@@ -24,14 +26,6 @@ final duplicatedCharaEventProvider = StreamProvider<String>((ref) {
     _duplicatedCharaEventController = StreamController();
   }
   return _duplicatedCharaEventController.stream;
-});
-
-StreamController<String> _clipboardPasteEventController = StreamController();
-final clipboardPasteEventProvider = StreamProvider<String>((ref) {
-  if (_clipboardPasteEventController.hasListener) {
-    _clipboardPasteEventController = StreamController();
-  }
-  return _clipboardPasteEventController.stream;
 });
 
 final charaCardIconMapProvider = StateProvider<Map<int, FilePath>>((ref) {
@@ -127,9 +121,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSync(recursive: true);
       _duplicatedCharaEventController.sink.add(record.id);
-      ref
-          .read(charaDetailCaptureStateProvider.notifier)
-          .update((state) => state.fail(message: "duplicated_character"));
+      ref.read(charaDetailCaptureStateProvider.notifier).update((state) => state.fail(message: "duplicated_character"));
       return;
     }
     _updateRecordInfo(record);
@@ -175,10 +167,33 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     return rootDirectory.filePath(record.traineeIconPath);
   }
 
-  void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
+  void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image, {bool memory = false}) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
-    Pasteboard.writeFiles([imagePath.path]).then((_) => _clipboardPasteEventController.sink.add(imagePath.path));
+    if (!imagePath.existsSync()) {
+      Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.file_not_found".tr()));
+      return;
+    }
+
+    late final Future<bool> result;
+    if (memory) {
+      final controller = ref.read(platformControllerProvider);
+      if (controller == null) {
+        Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.unavailable".tr()));
+        return;
+      }
+      result = controller.copyToClipboardFromFile(imagePath).then((e) => true);
+    } else {
+      result = Pasteboard.writeFiles([imagePath.path]);
+    }
+
+    result.then((result) {
+      if (result) {
+        Toaster.show(ToastData(ToastType.success, description: "$tr_toast.clipboard.success".tr()));
+      } else {
+        Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.failed_result_code".tr()));
+      }
+    });
   }
 
   List<CharaDetailRecord> get records => state;

@@ -73,7 +73,6 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
 
     _listenForToastData(plainToastEventProvider);
     _listenForToastData(versionCheckEventProvider);
-    _listenForToast(clipboardPasteEventProvider, "$tr_toast.clipboard_paste".tr());
     _listenForToast<PathEntity>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {
       path.parent.launch();
     });

@@ -33,6 +33,10 @@ class PlatformChannel {
     return channel.invokeMethod('updateRecord', id);
   }
 
+  Future<void> copyToClipboardFromFile(FilePath path) {
+    return channel.invokeMethod('copyToClipboardFromFile', path.path);
+  }
+
   Future<dynamic> callbackFromPlatform(MethodCall call) {
     switch (call.method) {
       case 'notify':

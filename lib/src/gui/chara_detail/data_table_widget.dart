@@ -62,12 +62,22 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         PopupMenuItem(
           height: height,
           onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.skillPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
+          child: Text("$tr_chara_detail.context_menu.copy_skill_file".tr(), style: style),
+        ),
+        PopupMenuItem(
+          height: height,
+          onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.skillPlain, memory: true),
+          child: Text("$tr_chara_detail.context_menu.copy_skill_memory".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
           onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.factorPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
+          child: Text("$tr_chara_detail.context_menu.copy_factor_file".tr(), style: style),
+        ),
+        PopupMenuItem(
+          height: height,
+          onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.factorPlain, memory: true),
+          child: Text("$tr_chara_detail.context_menu.copy_factor_memory".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
@@ -95,55 +105,55 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                 // Since PlutoGrid have internal states, it won't rebuilt without changing the key each time.
                 key: ValueKey(const Uuid().v4()),
                 columns: grid.columns,
-            rows: grid.rows,
-            mode: PlutoGridMode.select,
-            configuration: PlutoGridConfiguration(
-              enterKeyAction: PlutoGridEnterKeyAction.toggleEditing,
-              scrollbar: const PlutoGridScrollbarConfig(
-                isAlwaysShown: true,
-                scrollbarRadius: Radius.circular(8),
-                scrollbarRadiusWhileDragging: Radius.circular(8),
-                scrollbarThickness: 12,
+                rows: grid.rows,
+                mode: PlutoGridMode.select,
+                configuration: PlutoGridConfiguration(
+                  enterKeyAction: PlutoGridEnterKeyAction.toggleEditing,
+                  scrollbar: const PlutoGridScrollbarConfig(
+                    isAlwaysShown: true,
+                    scrollbarRadius: Radius.circular(8),
+                    scrollbarRadiusWhileDragging: Radius.circular(8),
+                    scrollbarThickness: 12,
                 scrollbarThicknessWhileDragging: 12,
               ),
               style: PlutoGridStyleConfig(
                 enableCellBorderVertical: false,
                 gridBackgroundColor: theme.colorScheme.surface,
                 rowColor: theme.colorScheme.surface,
-                evenRowColor: theme.colorScheme.surfaceVariant,
-                activatedColor: theme.focusColor,
-                gridBorderColor: theme.colorScheme.outline.withOpacity(0.5),
-                borderColor: theme.focusColor,
-                activatedBorderColor: theme.focusColor,
-                inactivatedBorderColor: theme.focusColor,
-                columnTextStyle: theme.textTheme.titleSmall!,
-                cellTextStyle: theme.textTheme.bodyMedium!,
-              ),
-            ),
-            onLoaded: (PlutoGridOnLoadedEvent event) {
-              event.stateManager.autoFitColumns();
-              if (sortColumn != null) {
-                event.stateManager.sortColumnByField(sortColumn!, sortOrder);
-              }
-            },
-            onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
-              final record = event.row!.getUserData<CharaDetailRecord>()!;
-              final spec = event.cell?.column.getUserData<ColumnSpec>();
-              showPopup(context, ref, event.offset!, record, spec!.cellAction.tabIdx ?? 0);
-            },
-            onSelected: (PlutoGridOnSelectedEvent event) {
-              final data = event.cell?.getUserData<CellData>();
-              if (!(data?.onSelected?.call(event) ?? false)) {
-                final record = event.row!.getUserData<CharaDetailRecord>()!;
-                final spec = event.cell?.column.getUserData<ColumnSpec>();
-                CharaDetailPreviewDialog.show(ref.base, record, spec!.cellAction.tabIdx ?? 0);
-              }
-            },
-            onSorted: (PlutoGridOnSortedEvent event) {
-              if (event.column.sort == PlutoColumnSort.none) {
-                sortColumn = null;
-                sortOrder = PlutoColumnSort.none;
-              } else {
+                    evenRowColor: theme.colorScheme.surfaceVariant,
+                    activatedColor: theme.focusColor,
+                    gridBorderColor: theme.colorScheme.outline.withOpacity(0.5),
+                    borderColor: theme.focusColor,
+                    activatedBorderColor: theme.focusColor,
+                    inactivatedBorderColor: theme.focusColor,
+                    columnTextStyle: theme.textTheme.titleSmall!,
+                    cellTextStyle: theme.textTheme.bodyMedium!,
+                  ),
+                ),
+                onLoaded: (PlutoGridOnLoadedEvent event) {
+                  event.stateManager.autoFitColumns();
+                  if (sortColumn != null) {
+                    event.stateManager.sortColumnByField(sortColumn!, sortOrder);
+                  }
+                },
+                onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
+                  final record = event.row!.getUserData<CharaDetailRecord>()!;
+                  final spec = event.cell?.column.getUserData<ColumnSpec>();
+                  showPopup(context, ref, event.offset!, record, spec!.cellAction.tabIdx ?? 0);
+                },
+                onSelected: (PlutoGridOnSelectedEvent event) {
+                  final data = event.cell?.getUserData<CellData>();
+                  if (!(data?.onSelected?.call(event) ?? false)) {
+                    final record = event.row!.getUserData<CharaDetailRecord>()!;
+                    final spec = event.cell?.column.getUserData<ColumnSpec>();
+                    CharaDetailPreviewDialog.show(ref.base, record, spec!.cellAction.tabIdx ?? 0);
+                  }
+                },
+                onSorted: (PlutoGridOnSortedEvent event) {
+                  if (event.column.sort == PlutoColumnSort.none) {
+                    sortColumn = null;
+                    sortOrder = PlutoColumnSort.none;
+                  } else {
                     sortColumn = event.column.field;
                     sortOrder = event.column.sort;
                   }

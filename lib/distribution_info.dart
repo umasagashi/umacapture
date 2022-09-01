@@ -49,6 +49,7 @@ class DistributionInfoBuilder implements Builder {
       // TODO: This should be separated by OS.
       "opencv": _getLicenseFile("windows/opencv"),
       "onnxruntime": _getLicenseFile("windows/onnxruntime"),
+      "clip": _getLicenseFile("windows/clip"),
       for (final dir in Directory("native/vendor").listSync(recursive: false, followLinks: false))
         path.basename(dir.path): _getLicenseFile(dir.path),
     };
