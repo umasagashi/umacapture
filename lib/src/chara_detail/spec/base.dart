@@ -325,7 +325,7 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
       autoFitColumnPrecise(context, col);
       if (maxWidth != null && col.width > maxWidth!) {
-        resizeColumn(col, -col.width / 2);
+        resizeColumn(col, -(col.width / 2 - 24));
       }
       col.enableDropToResize = enabled;
     }

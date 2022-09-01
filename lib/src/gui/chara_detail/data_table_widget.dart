@@ -89,10 +89,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       child: Stack(
         alignment: Alignment.center,
         children: [
-          PlutoGrid(
-            // Since PlutoGrid have internal states, it won't rebuilt without changing the key each time.
-            key: ValueKey(const Uuid().v4()),
-            columns: grid.columns,
+          LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              return PlutoGrid(
+                // Since PlutoGrid have internal states, it won't rebuilt without changing the key each time.
+                key: ValueKey(const Uuid().v4()),
+                columns: grid.columns,
             rows: grid.rows,
             mode: PlutoGridMode.select,
             configuration: PlutoGridConfiguration(
@@ -142,9 +144,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                 sortColumn = null;
                 sortOrder = PlutoColumnSort.none;
               } else {
-                sortColumn = event.column.field;
-                sortOrder = event.column.sort;
-              }
+                    sortColumn = event.column.field;
+                    sortOrder = event.column.sort;
+                  }
+                },
+              );
             },
           ),
           if (grid.rows.isEmpty) Text("$tr_chara_detail.no_row_message".tr()),
