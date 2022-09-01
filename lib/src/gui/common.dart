@@ -421,6 +421,8 @@ class _CustomFeedbackLocalizations implements FeedbackLocalizations {
 }
 
 class _CustomFeedbackLocalizationsDelegate extends GlobalFeedbackLocalizationsDelegate {
+  static const locale = Locale('en');
+
   @override
   Future<FeedbackLocalizations> load(Locale locale) {
     return SynchronousFuture(const _CustomFeedbackLocalizations());
@@ -440,6 +442,7 @@ class FeedbackLayer extends StatelessWidget {
     final theme = Theme.of(context);
     return BetterFeedback(
       localizationsDelegates: [_CustomFeedbackLocalizationsDelegate()],
+      localeOverride: _CustomFeedbackLocalizationsDelegate.locale,
       theme: FeedbackThemeData(
         background: Colors.transparent,
         feedbackSheetColor: theme.colorScheme.surface,
