@@ -98,9 +98,9 @@ class AggregateSkillPredicate {
   }
 }
 
-class SkillCellData<T> implements CellData {
+class SkillCellData implements CellData {
   final List<String> skills;
-  final T label;
+  final String label;
 
   SkillCellData(this.skills, this.label);
 
@@ -187,7 +187,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
     if (predicate.notation.max == 0) {
       return PlutoCell(
         value: foundSkills.length.toString().padLeft(3, "0"),
-      )..setUserData(SkillCellData(skillNames, foundSkills.length));
+      )..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
     }
     final desc = skillNames.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
