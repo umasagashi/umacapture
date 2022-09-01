@@ -228,6 +228,10 @@ extension DateTimeExtension on DateTime {
     return start <= this && this <= end;
   }
 
+  bool hasExpired(Duration duration) {
+    return add(duration) <= DateTime.now();
+  }
+
   String toDateString() => toString().substring(0, 10);
 
   String toMonthString() => toString().substring(0, 7);

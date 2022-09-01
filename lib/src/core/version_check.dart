@@ -114,7 +114,7 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
     await compute(_extractArchive, Tuple2(downloadPath, pathInfo.supportDir));
     downloadPath.toFile().delete();
   } catch (exception, stackTrace) {
-    logger.e(exception);
+    logger.e("Failed to download modules.", exception, stackTrace);
     if (local == null) {
       _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
     } else {
@@ -157,35 +157,46 @@ void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
 enum VersionCheckEntryKey {
   lastAppVersionChecked,
   latestAppVersion,
+  localAppVersion,
 }
 
 extension StringExtension on String {
   Version toVersion() => Version.parse(this);
 }
 
-FutureOr<Version?> _checkLatestAppVersion() async {
+FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
   final box = StorageBox(StorageBoxKey.versionCheck);
   final lastAppVersionCheckedEntry = box.entry<DateTime>(VersionCheckEntryKey.lastAppVersionChecked.name);
   final latestAppVersionEntry = box.entry<String>(VersionCheckEntryKey.latestAppVersion.name);
+  final localAppVersionEntry = box.entry<String>(VersionCheckEntryKey.localAppVersion.name);
 
-  final durationSinceLastChecked =
-      lastAppVersionCheckedEntry.pull()?.difference(DateTime.now()).abs() ?? const Duration(days: 30);
+  final hasExpired = lastAppVersionCheckedEntry.pull()?.hasExpired(const Duration(hours: 20)) ?? true;
+  final knownLocalAppVersion = localAppVersionEntry.pull()?.toVersion();
   final knownLatestAppVersion = latestAppVersionEntry.pull()?.toVersion();
-  logger.d("last=$durationSinceLastChecked, latest=$knownLatestAppVersion");
+  logger.d(
+    "last=${lastAppVersionCheckedEntry.pull()}"
+    ", current-local=$currentLocalVersion"
+    ", known-local=$knownLocalAppVersion"
+    ", known-latest=$knownLatestAppVersion"
+    ", hasExpired=$hasExpired",
+  );
 
-  if (durationSinceLastChecked <= const Duration(hours: 20) && knownLatestAppVersion != null) {
+  if (!hasExpired && knownLatestAppVersion != null && knownLocalAppVersion == currentLocalVersion) {
     return knownLatestAppVersion;
   } else {
     lastAppVersionCheckedEntry.push(DateTime.now());
+    localAppVersionEntry.push(currentLocalVersion.toString());
     latestAppVersionEntry.delete();
     try {
       final latest = await Dio()
           .get(Const.appVersionInfoUrl)
           .then((response) => Version.parse(jsonDecode(response.toString())['version']));
       latestAppVersionEntry.push(latest.toString());
+      logger.d("latest=$latest");
       return latest;
-    } catch (e) {
-      logger.w(e);
+    } catch (exception, stackTrace) {
+      logger.e("Failed to get latest app version.", exception, stackTrace);
+      captureException(exception, stackTrace);
       return null;
     }
   }
@@ -201,7 +212,7 @@ final localAppVersionLoader = FutureProvider<Version>((ref) async {
 
 final appVersionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
   final local = await ref.watch(localAppVersionLoader.future);
-  final latest = await _checkLatestAppVersion();
+  final latest = await _checkLatestAppVersion(local);
   logger.i("App version: local=$local, latest=$latest");
 
   if (latest == null) {
