@@ -285,7 +285,6 @@ class PlatformController {
           _charaDetailRecordCapturedEventController.sink.add(data['id']);
           captureState.update((state) => state.success(id: data['id']));
         }
-        _ref.read(capturingFrameRateProvider.notifier).state = null;
         break;
       case 'onCharaDetailUpdated':
         _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
