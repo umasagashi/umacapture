@@ -52,8 +52,9 @@ struct WindowRecorder {
     std::optional<WindowProfile> window_profile;
     std::optional<Size<int>> minimum_size;
     std::optional<int> recording_fps;
+    std::optional<bool> force_resize;
 
-    EXTENDED_JSON_TYPE_NDC(WindowRecorder, window_profile, minimum_size, recording_fps);
+    EXTENDED_JSON_TYPE_NDC(WindowRecorder, window_profile, minimum_size, recording_fps, force_resize);
 };
 
 }  // namespace windows_config
@@ -61,16 +62,27 @@ struct WindowRecorder {
 namespace windows_impl {
 
 inline Size<int> getCircumscribedSize(const Size<int> &source, const Size<int> &fitTo) {
-    const auto sd = source.cast<double>();
-    const auto fd = fitTo.cast<double>();
+    const auto &sd = source.cast<double>();
+    const auto &fd = fitTo.cast<double>();
     return (sd * std::max(fd.width() / sd.width(), fd.height() / sd.height())).round();
+}
+
+inline Size<int> getRatioFixedSize(const Size<int> &source, const Size<int> &fitTo) {
+    const auto &sd = source.cast<double>();
+    const auto &fd = fitTo.cast<double>();
+    return {
+        source.width(),
+        std::lround(sd.width() * fd.height() / fd.width()),
+    };
 }
 
 class WindowCapturer {
 public:
-    WindowCapturer(const windows_config::WindowProfile &window_profile, const Size<int> &minimum_size)
+    WindowCapturer(
+        const windows_config::WindowProfile &window_profile, const Size<int> &minimum_size, bool force_resize)
         : window_profile(window_profile)
-        , minimum_size(minimum_size) {}
+        , minimum_size(minimum_size)
+        , force_resize(force_resize) {}
 
     [[nodiscard]] cv::Mat capture() {
         const cv::Rect &rect = findWindow();
@@ -82,14 +94,18 @@ public:
             plain_mat = cv::Mat(rect.size(), CV_8UC4);
         }
 
-        const Size<int> &scaled_size =
+        const Size<int> &circumscribe_size =
             window_profile.fixed_aspect_ratio ? minimum_size : getCircumscribedSize(rect.size(), minimum_size);
+        const Size<int> &scaled_size =
+            force_resize ? circumscribe_size : getRatioFixedSize(rect.size(), circumscribe_size);
         if (scaled_size != scaled_mat.size()) {
             scaled_mat = cv::Mat(scaled_size.toCVSize(), CV_8UC4);
         }
 
         return capture(GetDesktopWindow(), rect);
     }
+
+    [[nodiscard]] cv::Size lastSize() const { return plain_mat.size(); }
 
 private:
     [[nodiscard]] cv::Rect findWindow() const {
@@ -163,6 +179,7 @@ private:
 
     const windows_config::WindowProfile window_profile;
     const Size<int> minimum_size;
+    const bool force_resize;
 
     cv::Mat plain_mat;
     cv::Mat scaled_mat;
@@ -192,13 +209,16 @@ private:
 class RecordingThread : public thread_util::ThreadBase {
 public:
     RecordingThread(
-        const event_util::Sender<cv::Mat, uint64_t> &sender,
+        const event_util::Sender<cv::Mat, cv::Size, uint64_t> &sender,
         const windows_config::WindowProfile &window_profile,
         const Size<int> &minimum_size,
-        int fps)
+        int fps,
+        bool force_resize)
         : sender(sender)
-        , capturer(std::make_unique<WindowCapturer>(window_profile, minimum_size))
+        , capturer(std::make_unique<WindowCapturer>(window_profile, minimum_size, force_resize))
         , minimum_size(minimum_size)
+        , window_profile(window_profile)
+        , force_resize(force_resize)
         , time_keeper(fps) {}
 
     void setFps(int fps) {
@@ -206,16 +226,14 @@ public:
         time_keeper.setFps(fps);
     }
 
-    void setWindowProfile(const windows_config::WindowProfile &window_profile) {
-        // Don't want to put a guard on the thread, so instead, kill and respawn the thread.
-        const auto was_running = isRunning();
-        if (was_running) {
-            join();
-        }
-        this->capturer = std::make_unique<WindowCapturer>(window_profile, minimum_size);
-        if (was_running) {
-            start();
-        }
+    void setForceResize(bool enable) {
+        force_resize = enable;
+        rebuildCapturer();
+    }
+
+    void setWindowProfile(const windows_config::WindowProfile &profile) {
+        window_profile = window_profile;
+        rebuildCapturer();
     }
 
 protected:
@@ -227,7 +245,7 @@ protected:
             time_keeper.waitLap();
             const auto &frame = capturer->capture();
             if (!frame.empty()) {
-                sender->send(frame, chrono_util::timestamp());
+                sender->send(frame, capturer->lastSize(), chrono_util::timestamp());
             }
         }
 
@@ -235,9 +253,24 @@ protected:
     }
 
 private:
-    const event_util::Sender<cv::Mat, uint64_t> sender;
+    void rebuildCapturer() {
+        // Don't want to put a guard on the thread, so instead, kill and respawn the thread.
+        const auto was_running = isRunning();
+        if (was_running) {
+            join();
+        }
+        this->capturer = std::make_unique<WindowCapturer>(window_profile, minimum_size, force_resize);
+        if (was_running) {
+            start();
+        }
+    }
+
+    const event_util::Sender<cv::Mat, cv::Size, uint64_t> sender;
     std::unique_ptr<WindowCapturer> capturer;
     const Size<int> minimum_size;
+
+    windows_config::WindowProfile window_profile;
+    bool force_resize;
     TimeKeeper time_keeper;
 };
 
@@ -245,7 +278,7 @@ private:
 
 class WindowRecorder {
 public:
-    explicit WindowRecorder(const event_util::Sender<cv::Mat, uint64_t> &sender)
+    explicit WindowRecorder(const event_util::Sender<cv::Mat, cv::Size, uint64_t> &sender)
         : frame_captured(sender) {}
 
     ~WindowRecorder() {
@@ -259,17 +292,22 @@ public:
             assert(config.recording_fps.has_value());
             assert(config.minimum_size.has_value());
             assert(config.window_profile.has_value());
+            assert(config.force_resize.has_value());
             recording_thread = std::make_unique<windows_impl::RecordingThread>(
                 frame_captured,
                 config.window_profile.value(),
                 config.minimum_size.value(),
-                config.recording_fps.value());
+                config.recording_fps.value(),
+                config.force_resize.value());
         } else {
             if (config.recording_fps.has_value()) {
                 recording_thread->setFps(config.recording_fps.value());
             }
             if (config.window_profile.has_value()) {
                 recording_thread->setWindowProfile(config.window_profile.value());
+            }
+            if (config.force_resize.has_value()) {
+                recording_thread->setForceResize(config.force_resize.value());
             }
         }
     }
@@ -290,7 +328,7 @@ public:
 
 private:
     std::unique_ptr<windows_impl::RecordingThread> recording_thread;
-    event_util::Sender<cv::Mat, uint64_t> frame_captured;
+    event_util::Sender<cv::Mat, cv::Size, uint64_t> frame_captured;
 };
 
 }  // namespace uma::windows

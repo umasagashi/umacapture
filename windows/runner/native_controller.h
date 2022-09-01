@@ -21,7 +21,7 @@ public:
         : channel(platform_channel) {
         const auto recorder_runner_impl =
             event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
-        const auto connection = recorder_runner_impl->makeConnection<cv::Mat, uint64>();
+        const auto connection = recorder_runner_impl->makeConnection<cv::Mat, cv::Size, uint64>();
 
         recorder_runner = recorder_runner_impl;
         window_recorder = std::make_unique<WindowRecorder>(connection);
@@ -29,11 +29,16 @@ public:
         channel->addMethodCallHandler("setConfig", [this](const auto &config_string) {
             vlog_debug(config_string.length());
             native_config = config_string;
-            const auto config_json = json_util::Json::parse(native_config);
+            const auto config_json = json_util::Json::parse(config_string);
             const auto windows_config = config_json["platform"]["windows"].get<windows_config::WindowsConfig>();
-            if (windows_config.window_recorder.has_value()) {
-                window_recorder->setConfig(windows_config.window_recorder.value());
-            }
+            setPlatformConfig(windows_config);
+        });
+
+        channel->addMethodCallHandler("setPlatformConfig", [this](const auto &config_string) {
+            vlog_debug(config_string);
+            const auto config_json = json_util::Json::parse(config_string);
+            const auto windows_config = config_json.get<windows_config::WindowsConfig>();
+            setPlatformConfig(windows_config);
         });
 
         channel->addMethodCallHandler("startCapture", [this]() { startEventLoop(); });
@@ -47,8 +52,9 @@ public:
 
         app::NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
 
-        connection->listen(
-            [](const auto &frame, const auto &ts) { app::NativeApi::instance().updateFrame(frame, ts); });
+        connection->listen([](const auto &frame, const auto &size, const auto &ts) {
+            app::NativeApi::instance().updateFrame(frame, size, ts);
+        });
     }
 
     ~NativeController() {
@@ -86,6 +92,12 @@ private:
         log_debug("");
         app::NativeApi::instance().startEventLoop(native_config);
         app::NativeApi::instance().updateRecord(id);
+    }
+
+    void setPlatformConfig(const windows_config::WindowsConfig &config) {
+        if (config.window_recorder.has_value()) {
+            window_recorder->setConfig(config.window_recorder.value());
+        }
     }
 
     std::shared_ptr<PlatformChannel> channel;

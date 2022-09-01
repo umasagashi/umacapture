@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '/const.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/platform_controller.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
@@ -188,6 +189,7 @@ class CaptureSettingsGroup extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isCapturing = ref.watch(capturingStateProvider);
     return ListCard(
       title: "$tr_settings.capture.title".tr(),
       padding: EdgeInsets.zero,
@@ -202,6 +204,15 @@ class CaptureSettingsGroup extends ConsumerWidget {
           description: "$tr_settings.capture.auto_copy.description".tr(),
           name: (e) => "$tr_settings.capture.auto_copy.choice.${(e?.name ?? "disabled").snakeCase}".tr(),
           provider: autoCopyClipboardStateProvider,
+        ),
+        Disabled(
+          disabled: isCapturing,
+          tooltip: "$tr_settings.capture.force_resize.disabled_tooltip".tr(),
+          child: SwitchWidget(
+            title: Text("$tr_settings.capture.force_resize.title".tr()),
+            description: Text("$tr_settings.capture.force_resize.description".tr()),
+            provider: forceResizeModeStateProvider,
+          ),
         ),
       ],
     );

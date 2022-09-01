@@ -1,16 +1,20 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/storage.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/platform_channel.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
+import '/src/preference/notifier.dart';
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
 final capturingStateProvider = Provider<bool>((ref) {
@@ -152,6 +156,14 @@ final trainerIdProvider = Provider<String>((ref) {
   return id;
 });
 
+final forceResizeModeStateProvider = BooleanNotifierProvider((ref) {
+  final box = ref.watch(storageBoxProvider);
+  return BooleanNotifier(
+    entry: StorageEntry(box: box, key: SettingsEntryKey.forceResizeMode.name),
+    defaultValue: false,
+  );
+});
+
 typedef JsonMap = Map<String, dynamic>;
 
 final platformConfigLoader = FutureProvider<JsonMap>((ref) async {
@@ -191,7 +203,14 @@ final platformControllerLoader = FutureProvider<PlatformController?>((ref) async
     return null;
   }
   return ref.watch(platformConfigLoader.future).then((config) {
+    final forceResizeMode = ref.read(forceResizeModeStateProvider);
+    config["platform"]["windows"]["window_recorder"]["force_resize"] = forceResizeMode;
+
     final controller = PlatformController(ref, config);
+    ref.listen<bool>(forceResizeModeStateProvider, (_, enable) {
+      controller.setForceResizeMode(enable);
+    });
+
     if (ref.read(autoStartCaptureStateProvider)) {
       controller.startCapture();
     }
@@ -265,11 +284,20 @@ class PlatformController {
     }
   }
 
-  void startCapture() => _platformChannel.startCapture();
+  Future<void> startCapture() => _platformChannel.startCapture();
 
-  void stopCapture() => _platformChannel.stopCapture();
+  Future<void> stopCapture() => _platformChannel.stopCapture();
 
-  void updateRecord(String id) => _platformChannel.updateRecord(id);
+  Future<void> updateRecord(String id) => _platformChannel.updateRecord(id);
 
-  String get storageDir => nativeConfig["storage_dir"];
+  Future<void> copyToClipboardFromFile(FilePath path) => _platformChannel.copyToClipboardFromFile(path);
+
+  Future<void> setForceResizeMode(bool enable) {
+    final config = {
+      "window_recorder": {
+        "force_resize": enable,
+      }
+    };
+    return _platformChannel.setPlatformConfig(jsonEncode(config));
+  }
 }
