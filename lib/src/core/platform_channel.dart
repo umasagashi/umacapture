@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
 import '/src/core/callback.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 
 typedef PlatformCallback = StringCallback;
@@ -19,6 +20,10 @@ class PlatformChannel {
 
   Future<void> setConfig(String config) {
     return channel.invokeMethod('setConfig', config);
+  }
+
+  Future<void> setPlatformConfig(String config) {
+    return channel.invokeMethod('setPlatformConfig', config);
   }
 
   Future<void> startCapture() {
