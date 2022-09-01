@@ -366,7 +366,6 @@ class _ModeSelector extends ConsumerWidget {
           disabled: predicate.logic != SkillSetLogicMode.sumOf,
           tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
           child: SpinBox(
-            width: 100,
             height: 30,
             min: 1,
             max: predicate.query.length,
@@ -428,7 +427,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_skill.notation.max.label".tr()),
       children: [
         SpinBox(
-          width: 120,
           height: 30,
           min: 0,
           max: 100,

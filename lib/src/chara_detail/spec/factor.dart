@@ -629,7 +629,6 @@ class _ModeSelector extends ConsumerWidget {
       title: Text("$tr_factor.mode.element.value.star".tr()),
       children: [
         SpinBox(
-          width: 100,
           height: 30,
           min: 1,
           max: predicate.starMaxLimit,
@@ -655,7 +654,6 @@ class _ModeSelector extends ConsumerWidget {
           disabled: predicate.element.mode == FactorSearchElementMode.starOnly,
           tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
           child: SpinBox(
-            width: 100,
             height: 30,
             min: 1,
             max: predicate.countMaxLimit,
@@ -740,7 +738,6 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_factor.notation.max.label".tr()),
       children: [
         SpinBox(
-          width: 120,
           height: 30,
           min: 0,
           max: 100,

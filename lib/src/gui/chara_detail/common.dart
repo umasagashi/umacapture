@@ -33,7 +33,10 @@ class FormLine extends ConsumerWidget {
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            title,
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: title,
+            ),
             ...children,
           ],
         ),

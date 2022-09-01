@@ -207,8 +207,9 @@ class SpinBox extends StatefulWidget {
   final int max;
   final int value;
   final ValueChanged<int> onChanged;
-  final double? width;
+  final double width;
   final double? height;
+  final bool use10;
 
   const SpinBox({
     Key? key,
@@ -216,9 +217,11 @@ class SpinBox extends StatefulWidget {
     required this.max,
     required this.value,
     required this.onChanged,
-    this.width,
+    this.width = 48,
     this.height,
-  }) : super(key: key);
+    bool? use10,
+  })  : use10 = use10 ?? max > 10,
+        super(key: key);
 
   @override
   State<StatefulWidget> createState() => _SpinBoxState();
@@ -233,42 +236,48 @@ class _SpinBoxState extends State<SpinBox> {
     _value = widget.value;
   }
 
+  Widget button(ThemeData theme, String text, int offset) {
+    return TextButton(
+      style: OutlinedButton.styleFrom(
+        backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+      ),
+      onPressed: () {
+        setState(() {
+          _value = Math.clamp(widget.min, _value + offset, widget.max);
+          widget.onChanged(_value);
+        });
+      },
+      child: Text(text, style: const TextStyle(fontSize: 12)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final iconSize = widget.height?.multiply(0.8);
-    final splashRadius = widget.height?.multiply(0.6);
+    final theme = Theme.of(context);
     return SizedBox(
-      width: widget.width,
       height: widget.height,
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          IconButton(
-            icon: const Icon(Icons.remove_circle_outline),
-            iconSize: iconSize,
-            splashRadius: splashRadius,
-            padding: EdgeInsets.zero,
-            onPressed: () {
-              setState(() {
-                _value = Math.max(widget.min, _value - 1);
-                widget.onChanged(_value);
-              });
-            },
+          if (widget.use10) ...[
+            button(theme, "-10", -10),
+            const SizedBox(width: 4),
+          ],
+          button(theme, "-1", -1),
+          Container(
+            constraints: BoxConstraints(minWidth: widget.width),
+            alignment: Alignment.center,
+            child: Text(_value.toString(), style: const TextStyle(fontSize: 16)),
           ),
-          Text(_value.toString(), style: const TextStyle(fontSize: 16)),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline),
-            iconSize: iconSize,
-            splashRadius: splashRadius,
-            padding: EdgeInsets.zero,
-            onPressed: () {
-              setState(() {
-                _value = Math.min(widget.max, _value + 1);
-                widget.onChanged(_value);
-              });
-            },
-          ),
+          button(theme, "+1", 1),
+          if (widget.use10) ...[
+            const SizedBox(width: 4),
+            button(theme, "+10", 10),
+          ],
         ],
       ),
     );

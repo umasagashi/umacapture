@@ -316,6 +316,8 @@ class Math {
   static T min<T extends num>(T a, T b) => math.min(a, b);
 
   static T max<T extends num>(T a, T b) => math.max(a, b);
+
+  static T clamp<T extends num>(T lower, T src, T upper) => Math.max(Math.min(src, upper), lower);
 }
 
 extension WidgetRefExtension on WidgetRef {
