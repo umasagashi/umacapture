@@ -577,9 +577,9 @@
             },
             "context_menu": {
                 "preview": "プレビュー",
-                "copy_skill_file": "スキル画面をコピー (ファイル)",
+                "copy_skill_file": "スキル画面をコピー",
                 "copy_skill_memory": "スキル画面をコピー (メモリ)",
-                "copy_factor_file": "因子画面をコピー（ファイル）",
+                "copy_factor_file": "因子画面をコピー",
                 "copy_factor_memory": "因子画面をコピー（メモリ）",
                 "open_in_explorer": "フォルダを開く"
             },
@@ -628,7 +628,7 @@
                 },
                 "force_resize": {
                     "title": "強制リサイズ",
-                    "description": "キャプチャした画面をリサイズします。大画面でプレイしている場合、処理が高速になります。",
+                    "description": "キャプチャした画面をリサイズします。オンにすると動作が安定しますが、保存される画像が固定サイズになります。",
                     "disabled_tooltip": "キャプチャ中は変更できません"
                 }
             },
