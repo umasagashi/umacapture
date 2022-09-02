@@ -1,5 +1,6 @@
 {
     "google_fonts": "assets/license/google_fonts.txt",
+    "ZapSplat": "assets/license/ZapSplat.txt",
     "opencv": "assets/license/opencv.txt",
     "onnxruntime": "assets/license/onnxruntime.txt",
     "clip": "assets/license/clip.txt",

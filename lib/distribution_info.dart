@@ -61,6 +61,7 @@ class DistributionInfoBuilder implements Builder {
 
     final info = {
       "google_fonts": "assets/license/google_fonts.txt",
+      "ZapSplat": "assets/license/ZapSplat.txt",
       ...packages.map((key, _) => MapEntry(key, "$outputDir/$key.txt")),
     };
     return jsonEncoder.convert(info);
