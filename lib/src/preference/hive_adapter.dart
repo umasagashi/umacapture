@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
 import '/src/chara_detail/storage.dart';
+import '/src/core/clipboard_alt.dart';
 
 class JsonAdapter<T> extends TypeAdapter<T?> {
   static const _serializationOptions = SerializationOptions(
@@ -39,4 +40,5 @@ void registerHiveAdapters() {
   Hive.registerAdapter(JsonAdapter<Offset>(index++));
   Hive.registerAdapter(JsonAdapter<ThemeMode>(index++));
   Hive.registerAdapter(JsonAdapter<CharaDetailRecordImageMode>(index++));
+  Hive.registerAdapter(JsonAdapter<ClipboardPasteImageMode>(index++));
 }

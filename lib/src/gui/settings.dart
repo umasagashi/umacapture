@@ -9,6 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '/const.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/clipboard_alt.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
@@ -202,7 +203,7 @@ class CaptureSettingsGroup extends ConsumerWidget {
         DropdownButtonWidget<CharaDetailRecordImageMode?>(
           title: "$tr_settings.capture.auto_copy.title".tr(),
           description: "$tr_settings.capture.auto_copy.description".tr(),
-          name: (e) => "$tr_settings.capture.auto_copy.choice.${(e?.name ?? "disabled").snakeCase}".tr(),
+          name: (e) => "$tr_settings.capture.auto_copy.choice.${e!.name.snakeCase}".tr(),
           provider: autoCopyClipboardStateProvider,
         ),
         Disabled(
@@ -213,6 +214,26 @@ class CaptureSettingsGroup extends ConsumerWidget {
             description: Text("$tr_settings.capture.force_resize.description".tr()),
             provider: forceResizeModeStateProvider,
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class SystemGroup extends ConsumerWidget {
+  const SystemGroup({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_settings.system.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [
+        DropdownButtonWidget<ClipboardPasteImageMode?>(
+          title: "$tr_settings.system.clipboard_paste_image_mode.title".tr(),
+          description: "$tr_settings.system.clipboard_paste_image_mode.description".tr(),
+          name: (e) => "$tr_settings.system.clipboard_paste_image_mode.choice.${e!.name.snakeCase}".tr(),
+          provider: clipboardPasteImageModeProvider,
         ),
       ],
     );
@@ -382,6 +403,7 @@ class SettingsPage extends ConsumerWidget {
       children: [
         StyleSettingsGroup(),
         CaptureSettingsGroup(),
+        SystemGroup(),
         PrivacySettingsGroup(),
         AboutGroup(),
       ],

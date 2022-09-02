@@ -8,6 +8,7 @@ enum SettingsEntryKey {
   sidebarExtended,
   autoStartCapture,
   autoCopyClipboard,
+  clipboardPasteImageMode,
   soundEffect,
   allowPostUserData,
   forceResizeMode,

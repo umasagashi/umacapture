@@ -577,10 +577,8 @@
             },
             "context_menu": {
                 "preview": "プレビュー",
-                "copy_skill_file": "スキル画面をコピー",
-                "copy_skill_memory": "スキル画面をコピー (メモリ)",
-                "copy_factor_file": "因子画面をコピー",
-                "copy_factor_memory": "因子画面をコピー（メモリ）",
+                "copy_skill": "スキル画面をコピー",
+                "copy_factor": "因子画面をコピー",
                 "open_in_explorer": "フォルダを開く"
             },
             "preview": {
@@ -630,6 +628,17 @@
                     "title": "強制リサイズ",
                     "description": "キャプチャした画面をリサイズします。オンにすると動作が安定しますが、保存される画像が固定サイズになります。",
                     "disabled_tooltip": "キャプチャ中は変更できません"
+                }
+            },
+            "system": {
+                "title": "システム設定",
+                "clipboard_paste_image_mode": {
+                    "title": "クリップボード設定",
+                    "description": "クリップボードに画像をコピーする機能の動作モードを選択します。",
+                    "choice": {
+                        "memory": "メモリ",
+                        "file": "ファイル"
+                    }
                 }
             },
             "privacy": {

@@ -2,12 +2,11 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pasteboard/pasteboard.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/core/clipboard_alt.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
@@ -15,7 +14,6 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
-import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_capture = "pages.capture";
@@ -167,33 +165,10 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     return rootDirectory.filePath(record.traineeIconPath);
   }
 
-  void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image, {bool memory = false}) {
+  void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
-    if (!imagePath.existsSync()) {
-      Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.file_not_found".tr()));
-      return;
-    }
-
-    late final Future<bool> result;
-    if (memory) {
-      final controller = ref.read(platformControllerProvider);
-      if (controller == null) {
-        Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.unavailable".tr()));
-        return;
-      }
-      result = controller.copyToClipboardFromFile(imagePath).then((e) => true);
-    } else {
-      result = Pasteboard.writeFiles([imagePath.path]);
-    }
-
-    result.then((result) {
-      if (result) {
-        Toaster.show(ToastData(ToastType.success, description: "$tr_toast.clipboard.success".tr()));
-      } else {
-        Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.failed_result_code".tr()));
-      }
-    });
+    ClipboardAlt.pasteImage(ref.base, imagePath);
   }
 
   List<CharaDetailRecord> get records => state;

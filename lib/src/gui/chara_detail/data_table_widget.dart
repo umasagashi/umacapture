@@ -62,22 +62,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         PopupMenuItem(
           height: height,
           onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.skillPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_skill_file".tr(), style: style),
-        ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.skillPlain, memory: true),
-          child: Text("$tr_chara_detail.context_menu.copy_skill_memory".tr(), style: style),
+          child: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
           onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.factorPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_factor_file".tr(), style: style),
-        ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.factorPlain, memory: true),
-          child: Text("$tr_chara_detail.context_menu.copy_factor_memory".tr(), style: style),
+          child: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
