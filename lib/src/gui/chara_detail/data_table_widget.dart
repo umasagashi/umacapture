@@ -104,12 +104,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     scrollbarRadius: Radius.circular(8),
                     scrollbarRadiusWhileDragging: Radius.circular(8),
                     scrollbarThickness: 12,
-                scrollbarThicknessWhileDragging: 12,
-              ),
-              style: PlutoGridStyleConfig(
-                enableCellBorderVertical: false,
-                gridBackgroundColor: theme.colorScheme.surface,
-                rowColor: theme.colorScheme.surface,
+                    scrollbarThicknessWhileDragging: 12,
+                  ),
+                  style: PlutoGridStyleConfig(
+                    enableCellBorderVertical: false,
+                    gridBackgroundColor: theme.colorScheme.surface,
+                    rowColor: theme.colorScheme.surface,
                     evenRowColor: theme.colorScheme.surfaceVariant,
                     activatedColor: theme.focusColor,
                     gridBorderColor: theme.colorScheme.outline.withOpacity(0.5),
@@ -132,11 +132,16 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   showPopup(context, ref, event.offset!, record, spec!.cellAction.tabIdx ?? 0);
                 },
                 onSelected: (PlutoGridOnSelectedEvent event) {
-                  final data = event.cell?.getUserData<CellData>();
-                  if (!(data?.onSelected?.call(event) ?? false)) {
-                    final record = event.row!.getUserData<CharaDetailRecord>()!;
-                    final spec = event.cell?.column.getUserData<ColumnSpec>();
-                    CharaDetailPreviewDialog.show(ref.base, record, spec!.cellAction.tabIdx ?? 0);
+                  try {
+                    final data = event.cell?.getUserData<CellData>();
+                    if (!(data?.onSelected?.call(event) ?? false)) {
+                      final record = event.row!.getUserData<CharaDetailRecord>()!;
+                      final spec = event.cell!.column.getUserData<ColumnSpec>()!;
+                      CharaDetailPreviewDialog.show(ref.base, record, spec.cellAction.tabIdx ?? 0);
+                    }
+                  } catch (error, stackTrace) {
+                    logger.e("Failed to handle cell selected. row=${event.row}, cell=${event.cell}", error, stackTrace);
+                    captureException(error, stackTrace);
                   }
                 },
                 onSorted: (PlutoGridOnSortedEvent event) {

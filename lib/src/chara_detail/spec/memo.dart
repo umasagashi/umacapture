@@ -353,9 +353,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
       final memoStorageController = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
       memoStorageController.update((state) {
-        final index = state.indexWhere((e) => e.key == (widget.storageKey));
-        state[index] = state[index].copyWith(title: title);
-        return [...state];
+        try {
+          final index = state.indexWhere((e) => e.key == (widget.storageKey));
+          state[index] = state[index].copyWith(title: title);
+          return [...state];
+        } catch (error, stackTrace) {
+          logger.e(
+            "Failed to change title. state=${state.map((e) => e.key).join(", ")}, widget=${widget.storageKey}",
+            error,
+            stackTrace,
+          );
+          captureException(error, stackTrace);
+          return state;
+        }
       });
     });
   }
