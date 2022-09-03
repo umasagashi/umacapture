@@ -210,7 +210,7 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
       }
     }
     if (failed) {
-      Toaster.show(ToastData(ToastType.warning, description: "pages.chara_detail.error.loading_spec".tr()));
+      Toaster.show(ToastData.warning(description: "pages.chara_detail.error.loading_spec".tr()));
     }
     state = [...state];
   }

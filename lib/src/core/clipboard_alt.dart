@@ -29,7 +29,7 @@ final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider((ref) {
 class ClipboardAlt {
   static void pasteImage(RefBase ref, FilePath imagePath) {
     if (!imagePath.existsSync()) {
-      Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.file_not_found".tr()));
+      Toaster.show(ToastData.error(description: "$tr_toast.clipboard.file_not_found".tr()));
       return;
     }
 
@@ -38,7 +38,7 @@ class ClipboardAlt {
     if (mode == ClipboardPasteImageMode.memory) {
       final controller = ref.read(platformControllerProvider);
       if (controller == null) {
-        Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.unavailable".tr()));
+        Toaster.show(ToastData.error(description: "$tr_toast.clipboard.unavailable".tr()));
         return;
       }
       result = controller.copyToClipboardFromFile(imagePath).then((e) => true); // TODO: Should use actual result.
@@ -48,9 +48,9 @@ class ClipboardAlt {
 
     result.then((result) {
       if (result) {
-        Toaster.show(ToastData(ToastType.success, description: "$tr_toast.clipboard.success".tr()));
+        Toaster.show(ToastData.success(description: "$tr_toast.clipboard.success".tr()));
       } else {
-        Toaster.show(ToastData(ToastType.error, description: "$tr_toast.clipboard.failed_result_code".tr()));
+        Toaster.show(ToastData.error(description: "$tr_toast.clipboard.failed_result_code".tr()));
       }
     });
   }

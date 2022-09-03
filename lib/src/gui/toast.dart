@@ -29,13 +29,23 @@ class ToastData {
   final VoidCallback? onTap;
   final PageRouteInfo? navigateOnTab;
 
-  ToastData(this.type, {this.description, this.label, this.duration, this.onTap, this.navigateOnTab}) {
-    assert(description != null || label != null);
-  }
+  ToastData({required this.type, this.description, this.label, this.duration, this.onTap, this.navigateOnTab});
+
+  ToastData.success({this.description, this.label, this.duration, this.onTap, this.navigateOnTab})
+      : type = ToastType.success;
+
+  ToastData.info({this.description, this.label, this.duration, this.onTap, this.navigateOnTab}) : type = ToastType.info;
+
+  ToastData.warning({this.description, this.label, this.duration, this.onTap, this.navigateOnTab})
+      : type = ToastType.warning;
+
+  ToastData.error({this.description, this.label, this.duration, this.onTap, this.navigateOnTab})
+      : type = ToastType.error;
 }
 
 class Toaster {
   static show(ToastData data) {
+    assert(data.description != null || data.label != null);
     _plainToastEventController.sink.add(data);
   }
 
@@ -44,7 +54,7 @@ class Toaster {
     ToastType.success: const Duration(seconds: 5),
     ToastType.info: const Duration(seconds: 5),
     ToastType.warning: const Duration(seconds: 10),
-    ToastType.error: const Duration(seconds: 10),
+    ToastType.error: const Duration(seconds: 15),
   };
   final Map<ToastType, IconData> iconMap = {
     ToastType.success: Icons.check_circle,

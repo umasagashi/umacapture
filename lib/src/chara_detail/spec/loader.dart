@@ -488,7 +488,7 @@ final currentGridProvider = Provider<Grid>((ref) {
       const Duration(milliseconds: 1),
       () => ref.read(currentColumnSpecsProvider.notifier).clear(), // TODO: Remove only failed specs.
     );
-    Toaster.show(ToastData(ToastType.error, description: "pages.chara_detail.error.building_grid".tr()));
+    Toaster.show(ToastData.error(description: "pages.chara_detail.error.building_grid".tr()));
     return Grid.empty;
   }
 });

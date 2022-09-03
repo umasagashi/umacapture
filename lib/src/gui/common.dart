@@ -403,7 +403,7 @@ OnFeedbackCallback _sendToSentryAndNotify() {
   final send = sendToSentry();
   return (UserFeedback feedback) async {
     send(feedback);
-    Toaster.show(ToastData(ToastType.success, description: "app.feedback.toast".tr()));
+    Toaster.show(ToastData.success(description: "app.feedback.toast".tr()));
   };
 }
 
