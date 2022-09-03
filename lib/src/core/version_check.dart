@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:archive/archive_io.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
@@ -22,14 +23,6 @@ import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_toast = "toast";
-
-StreamController<ToastData> _versionCheckEventController = StreamController();
-final versionCheckEventProvider = StreamProvider<ToastData>((ref) {
-  if (_versionCheckEventController.hasListener) {
-    _versionCheckEventController = StreamController();
-  }
-  return _versionCheckEventController.stream;
-});
 
 @jsonSerializable
 class ModuleVersionInfo {
@@ -73,12 +66,11 @@ enum ModuleVersionCheckResultCode {
   updated,
   latestVersionNotAvailable,
   noVersionAvailable,
+  accessDenied,
 }
 
 void _sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
-  _versionCheckEventController.sink.add(
-    ToastData(type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()),
-  );
+  Toaster.show(ToastData(type: type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()));
 }
 
 Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
@@ -115,12 +107,16 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
     downloadPath.toFile().delete();
   } catch (exception, stackTrace) {
     logger.e("Failed to download modules.", exception, stackTrace);
-    if (local == null) {
-      _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+    if (exception is FileSystemException && exception.osError?.errorCode == 5) {
+      _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
     } else {
-      _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
+      if (local == null) {
+        _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+      } else {
+        _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
+      }
+      captureException(exception, stackTrace);
     }
-    captureException(exception, stackTrace);
     return local?.version;
   }
 
@@ -146,12 +142,11 @@ enum AppVersionCheckResultCode {
   noUpdateRequired,
   newVersionAvailable,
   latestVersionNotAvailable,
+  accessDenied,
 }
 
 void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
-  _versionCheckEventController.sink.add(
-    ToastData(type, description: "$tr_toast.app_version_check.${code.name.snakeCase}".tr()),
-  );
+  Toaster.show(ToastData(type: type, description: "$tr_toast.app_version_check.${code.name.snakeCase}".tr()));
 }
 
 enum VersionCheckEntryKey {
@@ -183,22 +178,26 @@ FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
 
   if (!hasExpired && knownLatestAppVersion != null && knownLocalAppVersion == currentLocalVersion) {
     return knownLatestAppVersion;
-  } else {
+  }
+
+  try {
     lastAppVersionCheckedEntry.push(DateTime.now());
     localAppVersionEntry.push(currentLocalVersion.toString());
     latestAppVersionEntry.delete();
-    try {
-      final latest = await Dio()
-          .get(Const.appVersionInfoUrl)
-          .then((response) => Version.parse(jsonDecode(response.toString())['version']));
-      latestAppVersionEntry.push(latest.toString());
-      logger.d("latest=$latest");
-      return latest;
-    } catch (exception, stackTrace) {
-      logger.e("Failed to get latest app version.", exception, stackTrace);
+    final latest = await Dio()
+        .get(Const.appVersionInfoUrl)
+        .then((response) => Version.parse(jsonDecode(response.toString())['version']));
+    latestAppVersionEntry.push(latest.toString());
+    logger.d("latest=$latest");
+    return latest;
+  } catch (exception, stackTrace) {
+    logger.e("Failed to get latest app version.", exception, stackTrace);
+    if (exception is FileSystemException && exception.osError?.errorCode == 5) {
+      _sendAppVersionCheckToast(ToastType.error, AppVersionCheckResultCode.accessDenied);
+    } else {
       captureException(exception, stackTrace);
-      return null;
     }
+    return null;
   }
 }
 

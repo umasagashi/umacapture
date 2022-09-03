@@ -709,11 +709,13 @@
             "no_version_available": "認識モジュールの取得に失敗しました。キャプチャ機能は利用できません。",
             "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",
             "no_update_required": "認識モジュールは最新版です。",
-            "updated": "認識モジュールを更新しました。"
+            "updated": "認識モジュールを更新しました。",
+            "access_denied": "ファイルの書き込み権限がないため、アプリは正常に動作しません。お使いの環境の設定を確認してください。"
         },
         "app_version_check": {
             "new_version_available": "アプリの更新が利用可能です。",
-            "latest_version_not_available": "アプリバージョンの取得に失敗しました。"
+            "latest_version_not_available": "アプリバージョンの取得に失敗しました。",
+            "access_denied": "ファイルの書き込み権限がないため、アプリは正常に動作しません。お使いの環境の設定を確認してください。"
         }
     },
     "common": {

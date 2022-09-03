@@ -7,7 +7,6 @@ import '/src/core/callback.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sound_player.dart';
-import '/src/core/version_check.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/toast.dart';
 
@@ -31,9 +30,7 @@ class NotificationLayer extends ConsumerStatefulWidget {
 }
 
 class _NotificationLayerState extends ConsumerState<NotificationLayer> {
-  final Toaster _toaster = Toaster();
-
-  void _showToast(BuildContext context, ToastData data) => _toaster.showToast(context, data);
+  final Toaster _toaster = Toaster(); // Do not use Toaster.show in this class.
 
   void _playSound(SoundType type) => ref.read(soundEffectProvider(type).future).then((se) => se.play());
 
@@ -46,21 +43,14 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
   void _listenForToast<T>(StreamProvider<T> provider, String message, [Callback<T>? onTap]) {
     ref.listen<AsyncValue<T>>(provider, (_, current) {
       current.whenData((T data) {
-        _showToast(
-          context,
-          ToastData(
-            ToastType.success,
-            description: message,
-            onTap: onTap?.bind(data),
-          ),
-        );
+        _toaster.showToast(context, ToastData.success(description: message, onTap: onTap?.bind(data)));
       });
     });
   }
 
   void _listenForToastData<T>(StreamProvider<ToastData> provider) {
     ref.listen<AsyncValue<ToastData>>(provider, (_, current) {
-      current.whenData((ToastData data) => _showToast(context, data));
+      current.whenData((ToastData data) => _toaster.showToast(context, data));
     });
   }
 
@@ -72,7 +62,6 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
     _listenForPlaySound(duplicatedCharaEventProvider, SoundType.error);
 
     _listenForToastData(plainToastEventProvider);
-    _listenForToastData(versionCheckEventProvider);
     _listenForToast<PathEntity>(recordExportEventProvider, "$tr_toast.record_export".tr(), (path) {
       path.parent.launch();
     });
