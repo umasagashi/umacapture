@@ -110,3 +110,7 @@ install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
 set(CLIP_EXAMPLES OFF CACHE BOOL "Compile clip examples")
 set(CLIP_TESTS OFF CACHE BOOL "Compile clip tests")
 add_subdirectory(clip)
+target_compile_options(clip PRIVATE
+        /wd4018
+        /wd4267
+        )
