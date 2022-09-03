@@ -3,9 +3,9 @@
 # umacapture
 
 umacapture is a software that extracts in-game information from the game [ウマ娘](https://umamusume.jp/) using only image recognition.
-This software is designed not to interfere with the game client or server and does not violate any terms of use.
+This software is designed not to interfere with the game client or server and is not intended to violate the terms of use.
 
-NOTE: Currently, this software is only available for the game client in Japan.
+NOTE: Currently, only supports the game client for the Japanese market.
 
 
 ## Docs
