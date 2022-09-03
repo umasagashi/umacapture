@@ -139,7 +139,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   void addFromFile(String id) {
-    CharaDetailRecord.load(rootDirectory / id).then((e) => addIfNotNull(e));
+    addIfNotNull(CharaDetailRecord.load(rootDirectory / id));
   }
 
   CharaDetailRecord? getBy({required String id}) {
@@ -198,16 +198,18 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 }
 
-Future<CharaDetailRecord?> _loadCharaDetailRecord(DirectoryPath directory) {
+CharaDetailRecord? _loadCharaDetailRecord(DirectoryPath directory) {
   initializeJsonReflectable();
   return CharaDetailRecord.load(directory);
 }
 
-Future<List<CharaDetailRecord>> _loadAllCharaDetailRecord(DirectoryPath directory) {
+List<CharaDetailRecord> _loadAllCharaDetailRecord(DirectoryPath directory) {
   initializeJsonReflectable();
-  final records =
-      directory.listSync(recursive: false, followLinks: false).map((e) => CharaDetailRecord.load(e.asDirectoryPath));
-  return Future.wait(records).then((e) => e.whereNotNull().toList());
+  return directory
+      .listSync(recursive: false, followLinks: false)
+      .map((e) => CharaDetailRecord.load(e.asDirectoryPath))
+      .whereNotNull()
+      .toList();
 }
 
 final charaDetailRecordStorageLoader = FutureProvider<CharaDetailRecordStorage>((ref) async {
