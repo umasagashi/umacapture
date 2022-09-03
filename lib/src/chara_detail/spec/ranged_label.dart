@@ -151,27 +151,29 @@ class _RangedLabelSelector extends ConsumerWidget {
       title: Text("$tr_ranged_label.range.label".tr()),
       description: Text("$tr_ranged_label.range.description".tr()),
       children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
-          child: CustomRangeSlider(
-            min: range.min,
-            max: range.max,
-            step: 1,
-            start: (spec.predicate.min ?? range.min).toDouble(),
-            end: (spec.predicate.max ?? range.max).toDouble(),
-            formatter: (value) => labels[value.toInt()],
-            onChanged: (double start, double end) {
-              _clonedSpecProvider.update(ref, specId, (spec) {
-                return spec.copyWith(
-                  predicate: IsInRangeIntegerPredicate(
-                    min: start == range.min ? null : start.toInt(),
-                    max: end == range.max ? null : end.toInt(),
-                  ),
-                );
-              });
-            },
+        if (range.min == range.max) NoteCard(description: Text("$tr_ranged_label.range.empty_range_message".tr())),
+        if (range.min != range.max)
+          Padding(
+            padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
+            child: CustomRangeSlider(
+              min: range.min,
+              max: range.max,
+              step: 1,
+              start: (spec.predicate.min ?? range.min).toDouble(),
+              end: (spec.predicate.max ?? range.max).toDouble(),
+              formatter: (value) => labels[value.toInt()],
+              onChanged: (double start, double end) {
+                _clonedSpecProvider.update(ref, specId, (spec) {
+                  return spec.copyWith(
+                    predicate: IsInRangeIntegerPredicate(
+                      min: start == range.min ? null : start.toInt(),
+                      max: end == range.max ? null : end.toInt(),
+                    ),
+                  );
+                });
+              },
+            ),
           ),
-        ),
       ],
     );
   }

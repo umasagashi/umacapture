@@ -378,7 +378,7 @@ class CustomRangeSlider extends ConsumerStatefulWidget {
   final String Function(double) formatter;
   final Value2Callback<double, double> onChanged;
 
-  const CustomRangeSlider({
+  CustomRangeSlider({
     Key? key,
     required this.min,
     required this.max,
@@ -387,7 +387,11 @@ class CustomRangeSlider extends ConsumerStatefulWidget {
     required this.end,
     required this.formatter,
     required this.onChanged,
-  }) : super(key: key);
+  }) : super(key: key) {
+    if (min == max) {
+      logger.e("This condition is illegal and should be prevented.");
+    }
+  }
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _CustomRangeSliderState();
@@ -416,6 +420,7 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
 
   @override
   Widget build(BuildContext context) {
+    assert(widget.min != widget.max);
     final theme = Theme.of(context);
     return FlutterSlider(
       rangeSlider: true,

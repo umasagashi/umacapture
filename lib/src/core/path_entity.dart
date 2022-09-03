@@ -73,6 +73,8 @@ class PathEntity {
 
   String get stem => basenameWithoutExtension(segments.last);
 
+  String get name => segments.last;
+
   @override
   @Deprecated("toString is disabled to prevent implicit conversion. Use path getter instead.")
   String toString() {
