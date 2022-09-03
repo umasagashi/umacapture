@@ -339,6 +339,7 @@ class CharaDetailRecord extends JsonEquatable {
       return JsonMapper.deserialize<CharaDetailRecord>(content, deserializationOptions);
     } catch (error, stackTrace) {
       logger.e("Failed to load record.json.", error, stackTrace);
+      logger.i(directory.listSync().map((e) => e.name).join(", "));
       captureException(error, stackTrace);
     }
     directory.deleteSyncSafe();

@@ -163,7 +163,8 @@
                 "ranged_label": {
                     "range": {
                         "label": "範囲",
-                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。"
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
                     },
                     "notation": {
                         "label": "表示",
@@ -176,7 +177,8 @@
                 "ranged_integer": {
                     "range": {
                         "label": "範囲",
-                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。"
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
                     },
                     "notation": {
                         "label": "表示",
@@ -384,7 +386,8 @@
                     },
                     "range": {
                         "label": "範囲",
-                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。"
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
                     },
                     "notation": {
                         "label": "表示",
