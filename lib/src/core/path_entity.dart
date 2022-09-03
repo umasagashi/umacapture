@@ -135,6 +135,11 @@ class DirectoryPath extends PathEntity {
   }
 
   Future<void> create({bool recursive = false}) => toDirectory().create(recursive: recursive);
+
+  void deleteSyncSafe() {
+    listSync(recursive: false, followLinks: false).forEach((e) => e.deleteSync(recursive: false));
+    deleteSync(recursive: false);
+  }
 }
 
 extension DirectoryExtension on Directory {

@@ -5,6 +5,8 @@ import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 
+const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
+
 @jsonSerializable
 class Character extends JsonEquatable {
   final int icon;
@@ -331,12 +333,16 @@ class CharaDetailRecord extends JsonEquatable {
   @JsonProperty(ignore: true)
   DateTime get trainedDateAsDateTime => DateTime.parse(trainedDate.replaceAll("/", "-"));
 
-  static CharaDetailRecord? deserialize(String content) {
-    return JsonMapper.deserialize<CharaDetailRecord>(content, const DeserializationOptions(caseStyle: CaseStyle.snake));
-  }
-
-  static Future<CharaDetailRecord?> load(DirectoryPath directory) async {
-    return directory.filePath("record.json").readAsString().then((body) => deserialize(body));
+  static CharaDetailRecord? load(DirectoryPath directory) {
+    try {
+      final content = directory.filePath("record.json").readAsStringSync();
+      return JsonMapper.deserialize<CharaDetailRecord>(content, deserializationOptions);
+    } catch (error, stackTrace) {
+      logger.e("Failed to load record.json.", error, stackTrace);
+      captureException(error, stackTrace);
+    }
+    directory.deleteSyncSafe();
+    return null;
   }
 
   bool isSameChara(CharaDetailRecord other) {
