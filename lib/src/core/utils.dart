@@ -366,6 +366,12 @@ FutureOr<void> captureException(exception, stackTrace) {
   }
 }
 
+FutureOr<void> captureError(String message) {
+  if (isSentryAvailable()) {
+    Sentry.captureMessage(message, level: SentryLevel.error);
+  }
+}
+
 extension AsyncValueExtension<T> on AsyncValue<T> {
   Widget guarded(Widget Function(T) data) {
     return when(
@@ -373,5 +379,16 @@ extension AsyncValueExtension<T> on AsyncValue<T> {
       error: (e, _) => Text("ERROR: $e"),
       data: data,
     );
+  }
+}
+
+extension BuildContextExtension on BuildContext {
+  List<Element> getAncestorElements(int depth) {
+    final List<Element> elements = [];
+    visitAncestorElements((e) {
+      elements.add(e);
+      return elements.length < depth;
+    });
+    return elements;
   }
 }

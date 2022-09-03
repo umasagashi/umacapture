@@ -422,50 +422,58 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
   Widget build(BuildContext context) {
     assert(widget.min != widget.max);
     final theme = Theme.of(context);
-    return FlutterSlider(
-      rangeSlider: true,
-      jump: true,
-      min: widget.min,
-      max: widget.max,
-      step: FlutterSliderStep(step: widget.step),
-      handler: FlutterSliderHandler(
-        child: Tooltip(
-          message: "$tr_common.range.tooltip.min".tr(),
-          child: Icon(
-            Icons.arrow_right,
-            color: theme.colorScheme.onPrimary,
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        if (start > end || widget.min > widget.max || start < widget.min || widget.max < end) {
+          logger.e("Invalid slider range. start=$start, end=$end, min=${widget.min}, max=${widget.max}");
+          logger.i("${context.getAncestorElements(7)}");
+        }
+        return FlutterSlider(
+          rangeSlider: true,
+          jump: true,
+          min: widget.min,
+          max: widget.max,
+          step: FlutterSliderStep(step: widget.step),
+          handler: FlutterSliderHandler(
+            child: Tooltip(
+              message: "$tr_common.range.tooltip.min".tr(),
+              child: Icon(
+                Icons.arrow_right,
+                color: theme.colorScheme.onPrimary,
+              ),
+            ),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
           ),
-        ),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary,
-          shape: BoxShape.circle,
-        ),
-      ),
-      rightHandler: FlutterSliderHandler(
-        child: Tooltip(
-          message: "$tr_common.range.tooltip.max".tr(),
-          child: Icon(
-            Icons.arrow_left,
-            color: theme.colorScheme.onPrimary,
+          rightHandler: FlutterSliderHandler(
+            child: Tooltip(
+              message: "$tr_common.range.tooltip.max".tr(),
+              child: Icon(
+                Icons.arrow_left,
+                color: theme.colorScheme.onPrimary,
+              ),
+            ),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
           ),
-        ),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.primary,
-          shape: BoxShape.circle,
-        ),
-      ),
-      tooltip: FlutterSliderTooltip(
-        alwaysShowTooltip: true,
-        disableAnimation: true,
-        custom: (value) => Chip(label: popup(value)),
-      ),
-      values: [start, end],
-      onDragging: (handlerIndex, start, end) {
-        widget.onChanged(start, end);
-        setState(() {
-          this.start = start;
-          this.end = end;
-        });
+          tooltip: FlutterSliderTooltip(
+            alwaysShowTooltip: true,
+            disableAnimation: true,
+            custom: (value) => Chip(label: popup(value)),
+          ),
+          values: [start, end],
+          onDragging: (handlerIndex, start, end) {
+            widget.onChanged(start, end);
+            setState(() {
+              this.start = start;
+              this.end = end;
+            });
+          },
+        );
       },
     );
   }
