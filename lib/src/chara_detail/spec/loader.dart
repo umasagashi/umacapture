@@ -13,6 +13,7 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/toast.dart';

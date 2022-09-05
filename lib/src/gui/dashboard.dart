@@ -11,6 +11,7 @@ import 'package:version/version.dart';
 import '/const.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';

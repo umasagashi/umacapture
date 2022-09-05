@@ -5,8 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
-import '/src/gui/toast.dart';
 
 class ListCard extends StatelessWidget {
   final String? title;
@@ -398,17 +398,8 @@ class CardDialog extends ConsumerWidget {
   }
 }
 
-OnFeedbackCallback _sendToSentryAndNotify() {
-  // ignore: invalid_use_of_visible_for_testing_member
-  final send = sendToSentry();
-  return (UserFeedback feedback) async {
-    send(feedback);
-    Toaster.show(ToastData.success(description: "app.feedback.toast".tr()));
-  };
-}
-
 void showFeedbackDialog(BuildContext context) {
-  BetterFeedback.of(context).show(_sendToSentryAndNotify());
+  BetterFeedback.of(context).show(captureFeedback());
 }
 
 class _CustomFeedbackLocalizations implements FeedbackLocalizations {

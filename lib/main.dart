@@ -1,63 +1,20 @@
+import 'dart:async';
+
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
-
-// ignore: depend_on_referenced_packages
-import 'package:easy_logger/easy_logger.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:logger/logger.dart';
-import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/const.dart';
-import '/src/preference/privacy_setting.dart';
+import '/src/core/localization_util.dart';
+import '/src/core/sentry_util.dart';
 import 'src/core/json_adapter.dart';
-import 'src/core/utils.dart';
-import 'src/core/version_check.dart';
 import 'src/gui/app_widget.dart';
 import 'src/preference/storage_box.dart';
 import 'src/preference/window_state.dart';
-
-extension LevelMessagesExtension on LevelMessages {
-  Level get asLoggerLevel {
-    switch (this) {
-      case LevelMessages.debug:
-        return Level.debug;
-      case LevelMessages.info:
-        return Level.info;
-      case LevelMessages.warning:
-        return Level.warning;
-      case LevelMessages.error:
-        return Level.error;
-    }
-  }
-}
-
-void easyLocalizationPrinter(Object object, {String? name, StackTrace? stackTrace, LevelMessages? level}) {
-  final loggerLevel = level?.asLoggerLevel ?? EasyLocalization.logger.defaultLevel.asLoggerLevel;
-  final message = "$name: ${object.toString()}";
-  if (stackTrace == null) {
-    logger.log(loggerLevel, message);
-  } else {
-    logger.log(loggerLevel, message, "EasyLocalizationError", stackTrace);
-  }
-}
-
-Future<void> setupLocalization() async {
-  EasyLocalization.logger = EasyLogger(
-    name: "Easy Localization",
-    printer: easyLocalizationPrinter,
-    enableLevels: [
-      // LevelMessages.debug,
-      LevelMessages.info,
-      LevelMessages.error,
-      LevelMessages.warning,
-    ],
-  );
-  await EasyLocalization.ensureInitialized();
-}
 
 void setupLicense() {
   rootBundle.loadString("assets/additional_license_info.json").then((infoString) {
@@ -124,7 +81,7 @@ void run() {
   );
 }
 
-void main() async {
+FutureOr<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeJsonReflectable();
   await StorageBox.ensureOpened(reset: false);
@@ -133,23 +90,5 @@ void main() async {
   if (CurrentPlatform.hasWindowFrame()) {
     setupWindowManager();
   }
-
-  if (kDebugMode || allowPostUserData() == PostUserData.deny) {
-    logger.i("Error logging is disabled.");
-    run();
-  } else {
-    logger.i("Error logging is enabled.");
-    final appVersion = await loadLocalAppVersion();
-    await SentryFlutter.init(
-      (SentryFlutterOptions options) {
-        if (kDebugMode) {
-          options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
-        } else {
-          options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
-        }
-        options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
-      },
-      appRunner: run,
-    );
-  }
+  runWithSentry(run);
 }

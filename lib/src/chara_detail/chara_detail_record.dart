@@ -3,6 +3,7 @@ import 'package:dart_json_mapper/dart_json_mapper.dart';
 
 import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 
 const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
@@ -337,10 +338,10 @@ class CharaDetailRecord extends JsonEquatable {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
       return JsonMapper.deserialize<CharaDetailRecord>(content, deserializationOptions);
-    } catch (error, stackTrace) {
-      logger.e("Failed to load record.json.", error, stackTrace);
+    } catch (exception, stackTrace) {
+      logger.e("Failed to load record.json.", exception, stackTrace);
       logger.i(directory.listSync().map((e) => e.name).join(", "));
-      captureException(error, stackTrace);
+      captureException(exception, stackTrace);
     }
     directory.deleteSyncSafe();
     return null;

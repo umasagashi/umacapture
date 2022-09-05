@@ -12,6 +12,7 @@ import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/providers.dart';
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -357,13 +358,13 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           final index = state.indexWhere((e) => e.key == (widget.storageKey));
           state[index] = state[index].copyWith(title: title);
           return [...state];
-        } catch (error, stackTrace) {
+        } catch (exception, stackTrace) {
           logger.e(
             "Failed to change title. state=${state.map((e) => e.key).join(", ")}, widget=${widget.storageKey}",
-            error,
+            exception,
             stackTrace,
           );
-          captureException(error, stackTrace);
+          captureException(exception, stackTrace);
           return state;
         }
       });

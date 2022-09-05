@@ -1,10 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
-import 'package:path/path.dart';
+import 'package:path/path.dart' as p;
 
 class PathEntity {
-  static Context context = Context();
+  static p.Context context = p.Context();
 
   final List<String> segments;
 
@@ -71,9 +72,25 @@ class PathEntity {
 
   String get path => context.joinAll(segments);
 
-  String get stem => basenameWithoutExtension(segments.last);
+  String get stem => p.basenameWithoutExtension(segments.last);
 
   String get name => segments.last;
+
+  String get extension => p.extension(segments.last);
+
+  String get contentType {
+    switch (extension) {
+      case ".png":
+        return "image/png";
+      case ".jpg":
+      case ".jpeg":
+        return "image/jpeg";
+      case ".json":
+        return "application/json";
+      default:
+        throw UnsupportedError("$extension is not supported.");
+    }
+  }
 
   @override
   @Deprecated("toString is disabled to prevent implicit conversion. Use path getter instead.")
@@ -98,6 +115,10 @@ class FilePath extends PathEntity {
   Future<String> readAsString() => toFile().readAsString();
 
   String readAsStringSync() => toFile().readAsStringSync();
+
+  Future<Uint8List> readAsBytes() => toFile().readAsBytes();
+
+  Uint8List readAsBytesSync() => toFile().readAsBytesSync();
 
   Future<File> writeAsBytes(List<int> bytes) => toFile().writeAsBytes(bytes);
 

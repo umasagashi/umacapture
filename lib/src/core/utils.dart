@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dart_json_mapper/dart_json_mapper.dart';
@@ -9,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:quiver/iterables.dart';
 import 'package:quiver/time.dart' as qtm;
-import 'package:sentry_flutter/sentry_flutter.dart';
 import 'package:tuple/tuple.dart';
 
 final logger = Logger(
@@ -354,22 +352,6 @@ class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
 
   @override
   ProviderBase<StateController<T>> get notifier => provider.notifier;
-}
-
-bool isSentryAvailable() {
-  return HubAdapter().isEnabled;
-}
-
-FutureOr<void> captureException(exception, stackTrace) {
-  if (isSentryAvailable()) {
-    Sentry.captureException(exception, stackTrace: stackTrace);
-  }
-}
-
-FutureOr<void> captureError(String message) {
-  if (isSentryAvailable()) {
-    Sentry.captureMessage(message, level: SentryLevel.error);
-  }
 }
 
 extension AsyncValueExtension<T> on AsyncValue<T> {

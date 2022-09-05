@@ -12,6 +12,8 @@ enum SettingsEntryKey {
   soundEffect,
   allowPostUserData,
   forceResizeMode,
+  sentryReportLastMonth,
+  sentryReportTotalCount,
 }
 
 final storageBoxProvider = Provider<StorageBox>((ref) {

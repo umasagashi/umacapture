@@ -10,9 +10,11 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
+import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -74,6 +76,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           onTap: () => storage.recordPathOf(record).launch(),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
+        if (isSentryAvailable())
+          PopupMenuItem(
+            height: height,
+            onTap: () => ReportRecordDialog.show(ref.base, storage.recordPathOf(record)),
+            child: Text("$tr_chara_detail.context_menu.send_record".tr(), style: style),
+          ),
       ],
     );
   }
