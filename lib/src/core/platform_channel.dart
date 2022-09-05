@@ -42,6 +42,10 @@ class PlatformChannel {
     return channel.invokeMethod('copyToClipboardFromFile', path.path);
   }
 
+  Future<void> takeScreenshot(FilePath path) {
+    return channel.invokeMethod('takeScreenshot', path.path);
+  }
+
   Future<dynamic> callbackFromPlatform(MethodCall call) {
     switch (call.method) {
       case 'notify':

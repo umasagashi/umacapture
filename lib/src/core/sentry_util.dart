@@ -5,11 +5,14 @@ import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback/feedback.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '/const.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/toast.dart';
@@ -57,6 +60,26 @@ void incrementSentryReportCount() {
   count.push((count.pull() ?? 0) + 1);
 }
 
+class ScreenshotResult {
+  final FilePath path;
+  final String result;
+
+  ScreenshotResult(this.path, this.result);
+
+  bool get hasError => result.isNotEmpty;
+}
+
+final latestScreenshotProvider = StateProvider<ScreenshotResult?>((ref) {
+  return null;
+});
+
+void takeScreenshot(RefBase ref) {
+  ref.read(latestScreenshotProvider.notifier).update((_) => null);
+  final path = ref.read(pathInfoProvider).tempDir.filePath("screenshot.png");
+  path.deleteSync(emptyOk: true);
+  ref.read(platformControllerProvider)!.takeScreenshot(path);
+}
+
 bool isSentryAvailable() {
   return HubAdapter().isEnabled;
 }
@@ -100,7 +123,25 @@ FutureOr<void> captureCharaDetailRecord(String message, DirectoryPath directory)
         getCharaDetailRecordFiles(directory).forEach((path) => scope.addFile(path));
       },
     ).then((_) {
-      Toaster.show(ToastData.success(description: "toast.send_record".tr()));
+      incrementSentryReportCount();
+      Toaster.show(ToastData.success(description: "toast.report_record".tr()));
+    });
+  }
+}
+
+FutureOr<void> captureScreen(String message, FilePath path) {
+  if (isSentryAvailable()) {
+    Sentry.captureMessage(
+      message,
+      level: SentryLevel.info,
+      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Screen"),
+      withScope: (Scope scope) {
+        scope.addFile(path);
+      },
+    ).then((_) {
+      path.deleteSync(emptyOk: true);
+      incrementSentryReportCount();
+      Toaster.show(ToastData.success(description: "toast.report_screen".tr()));
     });
   }
 }

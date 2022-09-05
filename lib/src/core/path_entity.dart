@@ -44,7 +44,12 @@ class PathEntity {
     return DirectoryPath(segments.sublist(0, segments.length - 1));
   }
 
-  void deleteSync({bool recursive = false}) => toEntity().deleteSync(recursive: recursive);
+  void deleteSync({bool recursive = false, bool emptyOk = false}) {
+    if (emptyOk && !existsSync()) {
+      return;
+    }
+    toEntity().deleteSync(recursive: recursive);
+  }
 
   bool existsSync() => toEntity().existsSync();
 

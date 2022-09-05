@@ -80,7 +80,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           PopupMenuItem(
             height: height,
             onTap: () => ReportRecordDialog.show(ref.base, storage.recordPathOf(record)),
-            child: Text("$tr_chara_detail.context_menu.send_record".tr(), style: style),
+            child: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
           ),
       ],
     );

@@ -9,6 +9,9 @@ import 'package:percent_indicator/circular_percent_indicator.dart';
 import '/src/app/route.gr.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/sentry_util.dart';
+import '/src/core/utils.dart';
+import '/src/gui/chara_detail/report_screen_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
 import '/src/preference/notifier.dart';
@@ -330,65 +333,97 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
   Widget chip({
     required ThemeData theme,
     required String label,
+    required String tooltip,
     required _Requirement requirement,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: colorMap[requirement],
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          Icon(iconMap[requirement], color: Colors.white, size: 14),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: theme.textTheme.labelSmall?.copyWith(color: Colors.white),
-          ),
-        ],
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        decoration: BoxDecoration(
+          color: colorMap[requirement],
+          borderRadius: BorderRadius.circular(16),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            Icon(iconMap[requirement], color: Colors.white, size: 14),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(color: Colors.white),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget sizeWidget(BuildContext context, WidgetRef ref) {
-    final size = ref.watch(capturingFrameSizeProvider);
+  Widget sizeWidget(BuildContext context, WidgetRef ref, Size? size) {
     final theme = Theme.of(context);
     if (size == null) {
       return const Text("-");
     }
+    final requirement =
+        size.width >= 540 ? _Requirement.good : (size.width >= 512 ? _Requirement.unsure : _Requirement.insufficient);
     return chip(
       theme: theme,
       label: "${size.width.toInt()} x ${size.height.toInt()}",
-      requirement:
-          size.width >= 540 ? _Requirement.good : (size.width >= 512 ? _Requirement.unsure : _Requirement.insufficient),
+      tooltip: "$tr_capture.capture_control.requirement.window_size.tooltip.${requirement.name}".tr(),
+      requirement: requirement,
     );
   }
 
-  Widget fpsWidget(BuildContext context, WidgetRef ref) {
-    final fps = ref.watch(capturingFrameRateProvider);
+  Widget fpsWidget(BuildContext context, WidgetRef ref, double? fps) {
     final theme = Theme.of(context);
     if (fps == null) {
       return const Text("-");
     }
+    final requirement = fps > 30 ? _Requirement.good : (fps > 15 ? _Requirement.unsure : _Requirement.insufficient);
     return chip(
       theme: theme,
       label: fps.round().toString(),
-      requirement: fps > 30 ? _Requirement.good : (fps > 15 ? _Requirement.unsure : _Requirement.insufficient),
+      tooltip: "$tr_capture.capture_control.requirement.frame_rate.tooltip.${requirement.name}".tr(),
+      requirement: requirement,
     );
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
+    final size = ref.watch(capturingFrameSizeProvider);
+    final fps = ref.watch(capturingFrameRateProvider);
+    final isCapturing = ref.watch(capturingStateProvider);
+    return Column(
       children: [
-        Text("${"$tr_capture.capture_control.requirement.window_size".tr()} : "),
-        sizeWidget(context, ref),
-        const SizedBox(width: 16),
-        Text("${"$tr_capture.capture_control.requirement.frame_rate".tr()} : "),
-        fpsWidget(context, ref),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text("${"$tr_capture.capture_control.requirement.window_size.label".tr()} : "),
+            sizeWidget(context, ref, size),
+            const SizedBox(width: 16),
+            Text("${"$tr_capture.capture_control.requirement.frame_rate.label".tr()} : "),
+            fpsWidget(context, ref, fps),
+            const SizedBox(width: 16),
+            Disabled(
+              disabled:isCapturing,
+              tooltip: "キャプチャ中は利用できません",
+              child: Tooltip(
+                message: "$tr_capture.capture_control.report_screen.tooltip".tr(),
+                child: TextButton(
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.all(6),
+                  ),
+                  onPressed: () {
+                    takeScreenshot(ref.base);
+                    ReportScreenDialog.show(ref.base);
+                  },
+                  child: Text("$tr_capture.capture_control.report_screen.label".tr()),
+                ),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }

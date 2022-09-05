@@ -10,6 +10,7 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_channel.dart';
 import '/src/core/providers.dart';
+import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
@@ -292,6 +293,12 @@ class PlatformController {
       case 'onFrameRateReported':
         _ref.read(capturingFrameRateProvider.notifier).update((_) => data['fps'].toDouble());
         break;
+      case 'onScreenshotTaken':
+        logger.i("path=${data['path']}, result='${data['result']}'");
+        _ref
+            .read(latestScreenshotProvider.notifier)
+            .update((_) => ScreenshotResult(FilePath(data['path']), data['result']));
+        break;
       case 'onFrameSizeReported':
         final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
         _ref.read(capturingFrameSizeProvider.notifier).update((_) => size);
@@ -308,6 +315,8 @@ class PlatformController {
   Future<void> updateRecord(String id) => _platformChannel.updateRecord(id);
 
   Future<void> copyToClipboardFromFile(FilePath path) => _platformChannel.copyToClipboardFromFile(path);
+
+  Future<void> takeScreenshot(FilePath path) => _platformChannel.takeScreenshot(path);
 
   Future<void> setForceResizeMode(bool enable) {
     final config = {

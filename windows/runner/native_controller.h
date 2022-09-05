@@ -47,6 +47,12 @@ public:
 
         channel->addMethodCallHandler("updateRecord", [this](const auto &id) { updateRecord(id); });
 
+        channel->addMethodCallHandler("takeScreenshot", [this](const auto &path) {
+            const std::filesystem::path fspath = std::filesystem::u8path(path);
+            const auto &result = window_recorder->takeScreenshot(fspath);
+            app::NativeApi::instance().notifyScreenshotTaken(path, result);
+        });
+
         channel->addMethodCallHandler(
             "copyToClipboardFromFile", [this](const auto &path) { copyToClipboardFromFile(path); });
 
