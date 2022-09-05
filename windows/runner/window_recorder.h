@@ -84,6 +84,25 @@ public:
         , minimum_size(minimum_size)
         , force_resize(force_resize) {}
 
+    [[nodiscard]] cv::Rect findWindow() const {
+        HWND window = FindWindowA(window_profile.windowClassOrNull(), window_profile.windowTitleOrNull());
+        if (!window) {
+            return {};
+        }
+
+        RECT rect;
+        if (!GetClientRect(window, &rect)) {
+            return {};
+        }
+
+        POINT top_left{0, 0};
+        if (!ClientToScreen(window, &top_left)) {
+            return {};
+        }
+
+        return {cv::Point(top_left.x, top_left.y), cv::Size(rect.right, rect.bottom)};
+    }
+
     [[nodiscard]] cv::Mat capture() {
         const cv::Rect &rect = findWindow();
         if (rect.empty()) {
@@ -108,25 +127,6 @@ public:
     [[nodiscard]] cv::Size lastSize() const { return plain_mat.size(); }
 
 private:
-    [[nodiscard]] cv::Rect findWindow() const {
-        HWND window = FindWindowA(window_profile.windowClassOrNull(), window_profile.windowTitleOrNull());
-        if (!window) {
-            return {};
-        }
-
-        RECT rect;
-        if (!GetClientRect(window, &rect)) {
-            return {};
-        }
-
-        POINT top_left{0, 0};
-        if (!ClientToScreen(window, &top_left)) {
-            return {};
-        }
-
-        return {cv::Point(top_left.x, top_left.y), cv::Size(rect.right, rect.bottom)};
-    }
-
     cv::Mat capture(HWND window, const cv::Rect &rect) const {
         /**
          * Most of the code for this method was taken from the official doc below.
@@ -236,6 +236,22 @@ public:
         rebuildCapturer();
     }
 
+    std::string takeScreenshot(const std::filesystem::path &path) {
+        if (capturer == nullptr) {
+            return "Failed to take screenshot. Capturer not initialized.";
+        }
+        const auto &image = capturer->capture();
+        if (image.empty()) {
+            if (capturer->findWindow().empty()) {
+                return "Failed to take screenshot. Window not found.";
+            } else {
+                return "Failed to take screenshot. Window found, but failed to capture.";
+            }
+        }
+        cv::imwrite(path.string(), image);
+        return {};
+    }
+
 protected:
     void run() override {
         log_debug("started");
@@ -324,6 +340,13 @@ public:
         if (recording_thread) {
             recording_thread->join();
         }
+    }
+
+    std::string takeScreenshot(const std::filesystem::path &path) {
+        if (recording_thread == nullptr) {
+            return "Failed to take screenshot. recorder not initialized.";
+        }
+        return recording_thread->takeScreenshot(path);
     }
 
 private:

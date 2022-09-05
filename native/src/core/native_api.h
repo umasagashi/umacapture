@@ -43,6 +43,10 @@ public:
 
     void updateFrame(const cv::Mat &image, const cv::Size &original_size, uint64 timestamp);
 
+    void notifyScreenshotTaken(const std::string &path, const std::string &resultCode) {
+        notify(json_util::Json{{"type", "onScreenshotTaken"}, {"path", path}, {"result", resultCode}}.dump());
+    }
+
     void stitch(const std::string &id) { on_stitch_ready->send(id); }
 
     void recognize(const std::string &id) { on_recognize_ready->send(id); }

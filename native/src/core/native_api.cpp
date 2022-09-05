@@ -211,6 +211,7 @@ void NativeApi::updateRecord(const std::string &id) {
     notifyCaptureStarted();
     notifyCaptureStopped();
     updateRecord({});
+    notifyScreenshotTaken({}, {});
     std::cout << (frame_distributor == nullptr);
     std::cout << (chara_detail_scene_scraper == nullptr);
     std::cout << (chara_detail_scene_stitcher == nullptr);
