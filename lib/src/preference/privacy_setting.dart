@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '/src/core/utils.dart';
+import '/src/core/sentry_util.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
