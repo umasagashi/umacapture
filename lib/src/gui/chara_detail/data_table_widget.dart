@@ -13,6 +13,7 @@ import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
+import '/src/gui/chara_detail/delete_record_dialog.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/common.dart';
@@ -75,6 +76,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           height: height,
           onTap: () => storage.recordPathOf(record).launch(),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          height: height,
+          onTap: () => DeleteRecordDialog.show(ref.base, recordId: record.id),
+          child: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: style),
         ),
         if (isSentryAvailable())
           PopupMenuItem(
