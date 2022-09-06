@@ -189,6 +189,15 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     replaceBy(record!, id: id);
   }
 
+  void delete(String id) {
+    final record = getBy(id: id);
+    assert(record != null);
+    final directory = recordPathOf(record!);
+    directory.deleteSyncSafe();
+    state.remove(record);
+    forceRebuild();
+  }
+
   void forceRebuild() {
     charaCardMap.clear();
     for (var e in state) {

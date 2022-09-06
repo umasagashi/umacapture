@@ -120,20 +120,23 @@ class DenseTextField extends ConsumerWidget {
 class NoteCard extends ConsumerWidget {
   final Widget description;
   final List<Widget> children;
+  final Color? color;
 
   const NoteCard({
     Key? key,
     required this.description,
     this.children = const [],
+    this.color,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final baseColor = color ?? theme.colorScheme.primaryContainer;
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.primaryContainer.withOpacity(0.2),
-        border: Border.all(color: theme.colorScheme.primaryContainer),
+        color: baseColor.withOpacity(0.2),
+        border: Border.all(color: baseColor),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Padding(
