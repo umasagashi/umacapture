@@ -84,6 +84,37 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     );
   }
 
+  Widget addButton(ThemeData theme) {
+    return ActionChip(
+      avatar: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+      label: const Text(""),
+      tooltip: "$tr_chara_detail.add_column_button.tooltip".tr(),
+      backgroundColor: theme.colorScheme.primary,
+      shape: const CircleBorder().copyWith(side: theme.chipTheme.shape?.side),
+      side: BorderSide.none,
+      labelPadding: EdgeInsets.zero,
+      onPressed: () {
+        ColumnBuilderDialog.show(ref.base);
+      },
+    );
+  }
+
+  Widget addButtonWithLabel(ThemeData theme) {
+    return ActionChip(
+      avatar: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+      label: Text(
+        "$tr_chara_detail.add_column_button.label".tr(),
+        style: theme.textTheme.labelLarge!.copyWith(color: theme.colorScheme.onPrimary),
+      ),
+      tooltip: "$tr_chara_detail.add_column_button.tooltip".tr(),
+      backgroundColor: theme.colorScheme.primary,
+      side: BorderSide.none,
+      onPressed: () {
+        ColumnBuilderDialog.show(ref.base);
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -103,17 +134,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               children: [
                 for (final col in zip2(specs, filteredCounts))
                   buildSpecChip(context, col.item1, col.item2 == recordCount ? null : col.item2),
-                ActionChip(
-                  label: Icon(Icons.add, color: theme.colorScheme.onPrimary),
-                  tooltip: "$tr_chara_detail.add_column_button_tooltip".tr(),
-                  backgroundColor: theme.colorScheme.primary,
-                  shape: const CircleBorder().copyWith(side: theme.chipTheme.shape?.side),
-                  side: BorderSide.none,
-                  labelPadding: EdgeInsets.zero,
-                  onPressed: () {
-                    ColumnBuilderDialog.show(ref.base);
-                  },
-                ),
+                specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
                 const Opacity(
                   // Spacing widget for export button.
                   opacity: 0,
