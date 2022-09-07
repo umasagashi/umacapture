@@ -246,7 +246,7 @@ Future<void> _runWithSentry(AppRunner runner) async {
 }
 
 Future<void> runWithSentry(AppRunner runner) async {
-  if (allowPostUserData() == PostUserData.deny) {
+  if (kDebugMode || allowPostUserData() == PostUserData.deny) {
     logger.i("Error logging is disabled.");
     runner();
   } else {

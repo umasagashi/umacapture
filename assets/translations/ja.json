@@ -87,7 +87,10 @@
             "no_column_message": "表示する列がありません。上のボタンから列を追加してください。",
             "no_row_message": "該当するウマ娘は見つかりませんでした。",
             "loading_error": "ロード中にエラーが発生しました。\n注意：エラーメッセージにはユーザー名が含まれます。",
-            "add_column_button_tooltip": "表示列を新規追加",
+            "add_column_button": {
+                "label": "新規追加",
+                "tooltip": "表示列を新規追加"
+            },
             "regenerating_message": "認識結果を更新しています",
             "error": {
                 "building_grid": "テーブルの生成に失敗したため、テーブルをリセットしました。",
