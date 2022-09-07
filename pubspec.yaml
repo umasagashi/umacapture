@@ -26,7 +26,6 @@ dependencies:
   dio: ^4.0.6
   easy_localization: ^3.0.1
   equatable: ^2.0.5
-  extended_image: ^6.2.1
   feedback: ^2.5.0
   feedback_sentry: ^2.3.0
   file_picker: ^5.0.1

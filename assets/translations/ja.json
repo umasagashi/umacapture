@@ -604,10 +604,26 @@
                 "report_record": "誤認識を報告する"
             },
             "preview": {
+                "rental": "レンタル",
                 "dialog": {
                     "title": "プレビュー",
                     "close_button": {
+                        "label": "閉じる",
                         "tooltip": "閉じる"
+                    },
+                    "report_button": {
+                        "label": "誤認識を報告する",
+                        "tooltip": "このデータを誤認識として報告します"
+                    },
+                    "visualize_prediction": {
+                        "true": {
+                            "label": "認識結果を非表示",
+                            "tooltip": "認識結果を非表示にします"
+                        },
+                        "false": {
+                            "label": "認識結果を表示",
+                            "tooltip": "認識結果を画像にオーバーレイ表示します"
+                        }
                     }
                 }
             },
