@@ -139,8 +139,8 @@ class ReportScreenDialog extends ConsumerWidget {
               icon: const Icon(Icons.cancel),
               label: Text("$tr_report_screen.dialog.cancel_button.label".tr()),
               onPressed: () {
-                CardDialog.dismiss(ref.base);
                 data?.path.deleteSync(emptyOk: true);
+                CardDialog.dismiss(ref.base);
               },
             ),
           ),
@@ -155,7 +155,6 @@ class ReportScreenDialog extends ConsumerWidget {
                 onPressed: () {
                   captureScreen(controller.text, data!.path);
                   CardDialog.dismiss(ref.base);
-                  data.path.deleteSync(emptyOk: true);
                 },
               ),
             ),
