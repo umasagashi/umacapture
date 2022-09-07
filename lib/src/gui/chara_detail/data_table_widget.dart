@@ -59,7 +59,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       items: [
         PopupMenuItem(
           height: height,
-          onTap: () => CharaDetailPreviewDialog.show(ref.base, record, initialPage),
+          onTap: () => CharaDetailPreviewDialog.show(ref.base, storage.recordPathOf(record)),
           child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
         PopupMenuItem(
@@ -151,8 +151,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     final data = event.cell?.getUserData<CellData>();
                     if (!(data?.onSelected?.call(event) ?? false)) {
                       final record = event.row!.getUserData<CharaDetailRecord>()!;
-                      final spec = event.cell!.column.getUserData<ColumnSpec>()!;
-                      CharaDetailPreviewDialog.show(ref.base, record, spec.cellAction.tabIdx ?? 0);
+                      final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+                      CharaDetailPreviewDialog.show(ref.base, storage.recordPathOf(record));
                     }
                   } catch (error, stackTrace) {
                     logger.e("Failed to handle cell selected. row=${event.row}, cell=${event.cell}", error, stackTrace);
