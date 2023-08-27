@@ -389,6 +389,21 @@ class AboutGroup extends ConsumerWidget {
           ),
           onTap: () => Pasteboard.writeText(versionString(ref)),
         ),
+        Disabled(
+          disabled: !ref.watch(charaDetailRecordRegenerationControllerProvider).isEmpty,
+          child: ListTile(
+            title: Text("$tr_settings.about.regenerate.title".tr()),
+            subtitle: Text("$tr_settings.about.regenerate.description".tr()),
+            trailing: const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Icon(Icons.refresh),
+            ),
+            onTap: () {
+              final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+              storage.checkRecordVersion(includeCurrentVersion: true);
+            },
+          ),
+        ),
       ],
     );
   }

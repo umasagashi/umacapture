@@ -370,9 +370,10 @@ class CharaDetailRecord extends JsonEquatable {
     ].everyIn();
   }
 
-  bool isObsoleted(DateTime moduleVersion) {
+  bool isObsoleted(DateTime moduleVersion, bool includeCurrentVersion) {
     final recordVersion = DateTime.parse(metadata.recognizerVersion);
     final capturedDate = DateTime.parse(metadata.capturedDate);
-    return recordVersion != moduleVersion && capturedDate.isAfter(moduleVersion);
+    final obsoleted = recordVersion != moduleVersion && capturedDate.isAfter(moduleVersion);
+    return obsoleted || (includeCurrentVersion && recordVersion == moduleVersion);
   }
 }
