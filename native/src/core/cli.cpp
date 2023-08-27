@@ -58,12 +58,13 @@ json_util::Json createConfig(bool video_mode) {
 void captureFromScreen() {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
-    const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
+    const auto connection = recorder_runner->makeConnection<cv::Mat, cv::Size, uint64>();
     const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
-    connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
+    connection->listen(
+        [&api](const auto &frame, const auto &size, uint64 timestamp) { api.updateFrame(frame, size, timestamp); });
 
     const auto config = createConfig(false);
     api.startEventLoop(config.dump());
@@ -82,11 +83,12 @@ void captureFromScreen() {
 void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
-    const auto connection = recorder_runner->makeConnection<cv::Mat, uint64>();
+    const auto connection = recorder_runner->makeConnection<cv::Mat, cv::Size, uint64>();
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
-    connection->listen([&api](const auto &frame, uint64 timestamp) { api.updateFrame(frame, timestamp); });
+    connection->listen(
+        [&api](const auto &frame, const auto &size, uint64 timestamp) { api.updateFrame(frame, size, timestamp); });
 
     const auto config = createConfig(true);
     api.startEventLoop(config.dump());
