@@ -83,6 +83,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           onTap: () => storage.recordPathOf(record).launch(),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
+        PopupMenuItem(
+          height: height,
+          onTap: () => ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]),
+          child: Text("$tr_chara_detail.context_menu.regenerate_record".tr(), style: style),
+        ),
         const PopupMenuDivider(),
         PopupMenuItem(
           height: height,

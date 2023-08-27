@@ -173,12 +173,12 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
 
   List<CharaDetailRecord> get records => state;
 
-  Future<void> checkRecordVersion() async {
+  Future<void> checkRecordVersion({bool includeCurrentVersion = false}) async {
     final moduleVersion = await ref.read(moduleVersionLoader.future);
     if (moduleVersion == null) {
       return Future.value();
     }
-    final obsoletedRecords = state.where((r) => r.isObsoleted(moduleVersion)).toList();
+    final obsoletedRecords = state.where((r) => r.isObsoleted(moduleVersion, includeCurrentVersion)).toList();
     if (obsoletedRecords.isNotEmpty) {
       ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start(obsoletedRecords);
     }

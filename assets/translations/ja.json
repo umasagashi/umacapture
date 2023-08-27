@@ -606,6 +606,7 @@
                 "copy_skill": "スキル画面をコピー",
                 "copy_factor": "因子画面をコピー",
                 "open_in_explorer": "フォルダを開く",
+                "regenerate_record": "再認識する",
                 "delete_record": "データを削除する",
                 "report_record": "誤認識を報告する"
             },
@@ -782,6 +783,10 @@
                     "title": "バージョン",
                     "description": "アプリ: {app_version}\n認識モジュール: {module_version}",
                     "unknown_version": "不明"
+                },
+                "regenerate": {
+                    "title": "キャプチャ済みウマ娘の再認識",
+                    "description": "クリックして現在の認識モジュールバージョン以降の認識をやり直します。"
                 }
             }
         },
