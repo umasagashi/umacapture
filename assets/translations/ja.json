@@ -613,6 +613,12 @@
                 "rental": "レンタル",
                 "dialog": {
                     "title": "プレビュー",
+                    "up_button": {
+                        "tooltip": "表の1つ上のウマ娘を表示します"
+                    },
+                    "down_button": {
+                        "tooltip": "表の1つ下のウマ娘を表示します"
+                    },
                     "close_button": {
                         "label": "閉じる",
                         "tooltip": "閉じる"
@@ -630,7 +636,8 @@
                             "label": "認識結果を表示",
                             "tooltip": "認識結果を画像にオーバーレイ表示します"
                         }
-                    }
+                    },
+                    "loading_error": "ロード中にエラーが発生しました。"
                 }
             },
             "report_record": {

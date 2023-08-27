@@ -349,6 +349,10 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       sortColumn(col, sortOrder);
     }
   }
+
+  Iterable<CharaDetailRecord> getSortedRecords() {
+    return refRows.map((e) => e.getUserData<CharaDetailRecord>()).whereNotNull();
+  }
 }
 
 extension PlutoCellExtension on PlutoCell {
