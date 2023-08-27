@@ -1163,6 +1163,7 @@
         }
       },
       "vertical_gap": 0.044399999999999995,
+      "vertical_gap_limit": 0.0407,
       "fans_value": {
         "module_path": "fans_value/prediction.onnx",
         "rect": {
@@ -1176,7 +1177,7 @@
           },
           "bottom_right": {
             "x": 0.5278,
-            "y": 0.027700000000000058,
+            "y": 0.0278,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1197,7 +1198,28 @@
           },
           "bottom_right": {
             "x": 0.7648,
-            "y": 0.027800000000000047,
+            "y": 0.0278,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          }
+        }
+      },
+      "foreign_aptitude": {
+        "module_path": "foreign_aptitude/prediction.onnx",
+        "rect": {
+          "top_left": {
+            "x": 0.2926,
+            "y": 0.0,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          },
+          "bottom_right": {
+            "x": 0.4093,
+            "y": 0.0278,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1218,7 +1240,7 @@
           },
           "bottom_right": {
             "x": 0.5537,
-            "y": 0.027800000000000047,
+            "y": 0.0278,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"

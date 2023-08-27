@@ -289,6 +289,7 @@ class CharaDetailRecord extends JsonEquatable {
   final Family family;
   final int fans;
   final Scenario scenario;
+  final int? foreignAptitude;
   final String trainedDate;
   final List<Race> races;
 
@@ -304,6 +305,7 @@ class CharaDetailRecord extends JsonEquatable {
     this.family,
     this.fans,
     this.scenario,
+    this.foreignAptitude,
     this.trainedDate,
     this.races,
   );
@@ -321,6 +323,7 @@ class CharaDetailRecord extends JsonEquatable {
         family,
         fans,
         scenario,
+        foreignAptitude,
         trainedDate,
         races,
       ];
@@ -361,6 +364,7 @@ class CharaDetailRecord extends JsonEquatable {
       family == other.family,
       fans == other.fans,
       scenario == other.scenario,
+      foreignAptitude == other.foreignAptitude,
       trainedDate == other.trainedDate,
       equality.equals(races, other.races),
     ].everyIn();

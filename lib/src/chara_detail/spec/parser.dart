@@ -151,6 +151,13 @@ class FansParser extends Parser<int> {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: "ForeignAptitudeParser")
+class ForeignAptitudeParser extends Parser<int> {
+  @override
+  int parse(CharaDetailRecord record) => record.foreignAptitude ?? 0;
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "TrainedDateParser")
 class TrainedDateParser extends Parser<DateTime> {
   @override

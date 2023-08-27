@@ -255,6 +255,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: FansParser(),
       cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
+    RangedIntegerColumnBuilder(
+      title: "$tr_columns.foreign_aptitude.title".tr(),
+      category: ColumnCategory.campaign,
+      parser: ForeignAptitudeParser(),
+      cellAction: ColumnSpecCellAction.openCampaignPreview,
+    ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.campaign_scenario.title".tr(),
       category: ColumnCategory.campaign,

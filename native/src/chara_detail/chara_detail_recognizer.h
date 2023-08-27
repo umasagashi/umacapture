@@ -513,6 +513,7 @@ public:
         , common_config(common_config)
         , fans_value_model(module_root_dir / config.fans_value.module_path, "fans_value")
         , scenario_model(module_root_dir / config.scenario.module_path, "scenario")
+        , foreign_aptitude_model(module_root_dir / config.foreign_aptitude.module_path, "foreign_aptitude")
         , trained_date_model(module_root_dir / config.trained_date.module_path, "trained_date") {}
 
     void recognize(
@@ -537,20 +538,48 @@ public:
             predict(scenario_model, frame, anchor.absolute(config.scenario.rect) + Point<double>{0, scan_top}, history),
         };
 
-        // evaluation value
-        scan_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
+        // There might be two lines of space below the scenario,
+        // so first get the position below the scenario and then get the rest.
+        const auto below_scenario_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
+        const auto &rest =
+            findAll(frame, {scan_left, below_scenario_top}, config.vertical_gap, config.vertical_gap_limit);
 
-        // trained date
-        scan_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
+        if (rest.size() >= 2) {
+            record.foreign_aptitude = predict(
+                foreign_aptitude_model,
+                frame,
+                anchor.absolute(config.foreign_aptitude.rect) + Point<double>{0, below_scenario_top},
+                history);
+        }
+
         record.trained_date = predict(
-            trained_date_model, frame, anchor.absolute(config.trained_date.rect) + Point<double>{0, scan_top}, history);
+            trained_date_model,
+            frame,
+            anchor.absolute(config.trained_date.rect) + Point<double>{0, rest.back()},
+            history);
 
-        scan_top += config.vertical_delta;
+        scan_top = rest.back() + config.vertical_delta;
     }
 
 private:
-    [[nodiscard]] std::optional<double> findNext(const Frame &frame, const Point<double> &scan_top_left) const {
-        return searchVertical(frame, common_config.bg_color, scan_top_left, 1.0);
+    [[nodiscard]] std::vector<double>
+    findAll(const Frame &frame, const Point<double> &scan_top_left, double gap, double gap_limit) const {
+        std::vector<double> found_tops;
+        double current_top = scan_top_left.y();
+        for (;;) {
+            const auto &found = findNext(frame, {scan_top_left.x(), current_top + gap}, gap_limit);
+            if (!found.has_value()) {
+                break;
+            }
+            current_top = found.value();
+            found_tops.push_back(current_top);
+        }
+        return found_tops;
+    }
+
+    [[nodiscard]] std::optional<double>
+    findNext(const Frame &frame, const Point<double> &scan_top_left, double max_length = 1.0) const {
+        return searchVertical(frame, common_config.bg_color, scan_top_left, max_length);
     }
 
     const recognizer_config::CampaignRecordConfig config;
@@ -558,6 +587,7 @@ private:
 
     recognizer::Model<IndexPrediction> fans_value_model;
     recognizer::Model<IndexPrediction> scenario_model;
+    recognizer::Model<IndexPrediction> foreign_aptitude_model;
     recognizer::Model<DateTimePrediction> trained_date_model;
 };
 
@@ -737,7 +767,7 @@ public:
                 timestamp,
                 version_info.recognizer_version,
                 "active",
-                record.races.front().strategy,
+                (!record.races.empty() ? record.races.front().strategy : 0),
             };
         }
 
