@@ -9,7 +9,7 @@ namespace uma::video {
 
 class VideoLoader {
 public:
-    explicit VideoLoader(const event_util::Sender<cv::Mat, uint64> &on_frame_captured)
+    explicit VideoLoader(const event_util::Sender<cv::Mat, cv::Size, uint64> &on_frame_captured)
         : on_frame_captured(on_frame_captured) {
         std::filesystem::create_directories("./temp");
     }
@@ -42,7 +42,7 @@ public:
             //            save(i, ts, mat);
 
             last_ts = std::max(last_ts, ts);
-            on_frame_captured->send(mat, std::llround(ts + head_ts));
+            on_frame_captured->send(mat, mat.size(), std::llround(ts + head_ts));
         }
         return last_ts;
     }
@@ -55,7 +55,7 @@ private:
         cv::imwrite(stream.str(), mat);
     }
 
-    const event_util::Sender<cv::Mat, uint64> on_frame_captured{};
+    const event_util::Sender<cv::Mat, cv::Size, uint64> on_frame_captured{};
 };
 
 }  // namespace uma::video
