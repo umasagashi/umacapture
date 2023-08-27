@@ -42,6 +42,7 @@ class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
 class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTableWidget> {
   String? sortColumn;
   PlutoColumnSort sortOrder = PlutoColumnSort.none;
+  late PlutoGridStateManager stateManager;
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
@@ -59,7 +60,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       items: [
         PopupMenuItem(
           height: height,
-          onTap: () => CharaDetailPreviewDialog.show(ref.base, storage.recordPathOf(record)),
+          onTap: () {
+            final records = stateManager.getSortedRecords().toList();
+            final index = records.indexOf(record);
+            final directories = records.map((e) => storage.recordPathOf(e)).toList();
+            return CharaDetailPreviewDialog.show(ref.base, directories, index);
+          },
           child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
         PopupMenuItem(
@@ -136,6 +142,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   ),
                 ),
                 onLoaded: (PlutoGridOnLoadedEvent event) {
+                  stateManager = event.stateManager;
                   event.stateManager.autoFitColumns();
                   if (sortColumn != null) {
                     event.stateManager.sortColumnByField(sortColumn!, sortOrder);
@@ -150,9 +157,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   try {
                     final data = event.cell?.getUserData<CellData>();
                     if (!(data?.onSelected?.call(event) ?? false)) {
-                      final record = event.row!.getUserData<CharaDetailRecord>()!;
                       final storage = ref.read(charaDetailRecordStorageProvider.notifier);
-                      CharaDetailPreviewDialog.show(ref.base, storage.recordPathOf(record));
+                      final records = stateManager.getSortedRecords().map((e) => storage.recordPathOf(e)).toList();
+                      CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
                     }
                   } catch (error, stackTrace) {
                     logger.e("Failed to handle cell selected. row=${event.row}, cell=${event.cell}", error, stackTrace);

@@ -62,7 +62,7 @@ class PredictionData {
 
   PredictionData(this.model, this.rect, this.prediction);
 
-  String toFormatString(LabelMap labelMap) {
+  String getLabelString(LabelMap labelMap) {
     if (prediction.label is String) {
       return prediction.label;
     }
@@ -88,6 +88,16 @@ class PredictionData {
       throw UnsupportedError(toString());
     }
     throw UnsupportedError(toString());
+  }
+
+  String toFormatString(LabelMap labelMap) {
+    return "${getLabelString(labelMap)} (${prediction.confidence.toStringAsFixed(2)})";
+  }
+
+  Color getColor() {
+    const lowerThreshold = 0.8;
+    final v = (1.0 - (prediction.confidence - lowerThreshold) / (1.0 - lowerThreshold)).clamp(0.0, 1.0);
+    return HSVColor.fromAHSV(1.0, 0.0, 1.0, v).toColor();
   }
 }
 
@@ -136,50 +146,62 @@ class ImageSizeContainer {
   }
 }
 
-class _ImageViewer extends ConsumerStatefulWidget {
+class ImageViewer extends ConsumerWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
-  final Size viewportSize;
   final bool overlay;
+  final TransformationController transformationController;
+  final double maxScale;
+  final PredictionContainer? prediction;
 
-  const _ImageViewer({
+  const ImageViewer({
     Key? key,
     required this.recordDir,
     required this.imageSize,
-    required this.viewportSize,
     required this.overlay,
+    required this.transformationController,
+    required this.maxScale,
+    required this.prediction,
   }) : super(key: key);
 
-  @override
-  ConsumerState<ConsumerStatefulWidget> createState() => _ViewerState();
-}
-
-class _ViewerState extends ConsumerState<_ImageViewer> {
-  late TransformationController transformationController;
-  late final double maxScale;
-
-  // TODO: This should be async.
-  late final PredictionContainer? prediction = PredictionContainer.load(widget.recordDir);
-
-  @override
-  void initState() {
-    super.initState();
+  static ImageViewer? load({
+    required DirectoryPath recordDir,
+    required Size viewportSize,
+    required bool overlay,
+  }) {
+    final imageSize = ImageSizeContainer.load(recordDir);
+    if (imageSize == null) {
+      return null;
+    }
     final imageWidth = [
-      widget.imageSize.skill.intersection.width,
-      widget.imageSize.factor.intersection.width,
-      widget.imageSize.campaign.intersection.width,
+      imageSize.skill.intersection.width,
+      imageSize.factor.intersection.width,
+      imageSize.campaign.intersection.width,
     ].sum;
-    final scale = widget.viewportSize.width / imageWidth;
-    maxScale = Math.max(scale, 3);
-    transformationController = TransformationController(Matrix4.identity()..scale(Math.max(0.5, scale)));
+    final scale = viewportSize.width / imageWidth;
+    // TODO: This should be async.
+    final prediction = PredictionContainer.load(recordDir);
+    return ImageViewer(
+      recordDir: recordDir,
+      imageSize: imageSize,
+      overlay: overlay,
+      transformationController: TransformationController(Matrix4.identity()..scale(scale)),
+      maxScale: scale * 3,
+      prediction: prediction,
+    );
   }
 
-  Widget predictionTabOverlay(FilePath imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
+  Widget predictionTabOverlay(
+    WidgetRef ref,
+    FilePath imagePath,
+    ImageSizeInfo sizeInfo,
+    List<PredictionData>? predictions,
+  ) {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(
       color: Colors.black,
       backgroundColor: Colors.white.withOpacity(0.5),
-      fontSize: 12,
+      fontSize: 9,
     );
     return Stack(
       children: [
@@ -201,7 +223,6 @@ class _ViewerState extends ConsumerState<_ImageViewer> {
                   width: data.rect.width.toDouble() + 1,
                   height: data.rect.height.toDouble() + 1,
                   decoration: BoxDecoration(
-                    // color: Colors.grey,
                     borderRadius: BorderRadius.zero,
                     border: Border.all(color: Colors.black.withOpacity(0.5)),
                   ),
@@ -210,7 +231,9 @@ class _ViewerState extends ConsumerState<_ImageViewer> {
                   width: data.rect.width.toDouble() + (sizeInfo.intersection.width * 0.04),
                   child: Text(
                     data.toFormatString(labelMap),
-                    style: textStyle,
+                    style: textStyle.copyWith(
+                      color: data.getColor(),
+                    ),
                   ),
                 ),
               ],
@@ -222,7 +245,7 @@ class _ViewerState extends ConsumerState<_ImageViewer> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return InteractiveViewer(
       minScale: 0.25,
       maxScale: maxScale,
@@ -244,19 +267,22 @@ class _ViewerState extends ConsumerState<_ImageViewer> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             predictionTabOverlay(
-              widget.recordDir.filePath("skill.png"),
-              widget.imageSize.skill,
-              !widget.overlay ? null : [...(prediction?.statusHeader ?? []), ...(prediction?.skillTab ?? [])],
+              ref,
+              recordDir.filePath("skill.png"),
+              imageSize.skill,
+              !overlay ? null : [...(prediction?.statusHeader ?? []), ...(prediction?.skillTab ?? [])],
             ),
             predictionTabOverlay(
-              widget.recordDir.filePath("factor.png"),
-              widget.imageSize.factor,
-              !widget.overlay ? null : prediction?.factorTab,
+              ref,
+              recordDir.filePath("factor.png"),
+              imageSize.factor,
+              !overlay ? null : prediction?.factorTab,
             ),
             predictionTabOverlay(
-              widget.recordDir.filePath("campaign.png"),
-              widget.imageSize.campaign,
-              !widget.overlay ? null : prediction?.campaignTab,
+              ref,
+              recordDir.filePath("campaign.png"),
+              imageSize.campaign,
+              !overlay ? null : prediction?.campaignTab,
             ),
           ],
         ),
@@ -266,18 +292,17 @@ class _ViewerState extends ConsumerState<_ImageViewer> {
 }
 
 class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
-  final DirectoryPath recordDir;
-  final ImageSizeContainer imageSize;
+  final List<DirectoryPath> recordDirs;
+  final int initialIdx;
 
   const CharaDetailPreviewDialog({
     Key? key,
-    required this.recordDir,
-    required this.imageSize,
+    required this.recordDirs,
+    required this.initialIdx,
   }) : super(key: key);
 
-  static void show(RefBase ref, DirectoryPath recordDir) {
-    final imageSize = ImageSizeContainer.load(recordDir);
-    CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDir: recordDir, imageSize: imageSize!));
+  static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx) {
+    CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx));
   }
 
   @override
@@ -285,16 +310,12 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
 }
 
 class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDialog> {
-  late bool overlay;
-
-  @override
-  void initState() {
-    super.initState();
-    overlay = false;
-  }
+  bool overlay = false;
+  late int currentIdx = widget.initialIdx;
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return CardDialog(
       dialogTitle: "$tr_preview.dialog.title".tr(),
       closeButtonTooltip: "$tr_preview.dialog.close_button.tooltip".tr(),
@@ -308,58 +329,94 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
             padding: const EdgeInsets.all(2),
             child: LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
-                return _ImageViewer(
-                  recordDir: widget.recordDir,
-                  imageSize: widget.imageSize,
-                  viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
-                  overlay: overlay,
-                );
+                return ImageViewer.load(
+                      recordDir: widget.recordDirs[currentIdx],
+                      viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
+                      overlay: overlay,
+                    ) ??
+                    ErrorMessageWidget(message: "$tr_preview.dialog.loading_error".tr());
               },
             ),
           ),
         ),
       ),
-      bottom: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Tooltip(
-            message: "$tr_preview.dialog.visualize_prediction.$overlay.tooltip".tr(),
-            child: OutlinedButton.icon(
-              icon: Icon(overlay ? Icons.subtitles_off_outlined : Icons.subtitles_outlined),
-              label: Text("$tr_preview.dialog.visualize_prediction.$overlay.label".tr()),
-              onPressed: () {
-                setState(() {
-                  overlay = !overlay;
-                });
-              },
-            ),
-          ),
-          if (isSentryAvailable() && overlay) ...[
-            const SizedBox(width: 8),
+      bottom: IntrinsicHeight(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
             Tooltip(
-              message: "$tr_preview.dialog.report_button.tooltip".tr(),
+              message: "$tr_preview.dialog.visualize_prediction.$overlay.tooltip".tr(),
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.report_outlined),
-                label: Text("$tr_preview.dialog.report_button.label".tr()),
+                icon: Icon(overlay ? Icons.subtitles_off_outlined : Icons.subtitles_outlined),
+                label: Text("$tr_preview.dialog.visualize_prediction.$overlay.label".tr()),
+                onPressed: () {
+                  setState(() {
+                    overlay = !overlay;
+                  });
+                },
+              ),
+            ),
+            if (isSentryAvailable() && overlay) ...[
+              const SizedBox(width: 8),
+              Tooltip(
+                message: "$tr_preview.dialog.report_button.tooltip".tr(),
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.report_outlined),
+                  label: Text("$tr_preview.dialog.report_button.label".tr()),
+                  onPressed: () {
+                    CardDialog.dismiss(ref.base);
+                    ReportRecordDialog.show(ref.base, widget.recordDirs[currentIdx]);
+                  },
+                ),
+              ),
+            ],
+            const Spacer(),
+            Disabled(
+              disabled: currentIdx == 0,
+              child: Tooltip(
+                message: "$tr_preview.dialog.up_button.tooltip".tr(),
+                child: OutlinedButton(
+                  child: const Icon(Icons.arrow_upward),
+                  onPressed: () {
+                    setState(() {
+                      currentIdx = Math.clamp(0, currentIdx - 1, widget.recordDirs.length - 1);
+                    });
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Disabled(
+              disabled: currentIdx == widget.recordDirs.length - 1,
+              child: Tooltip(
+                message: "$tr_preview.dialog.down_button.tooltip".tr(),
+                child: OutlinedButton(
+                  child: const Icon(Icons.arrow_downward),
+                  onPressed: () {
+                    setState(() {
+                      currentIdx = Math.clamp(0, currentIdx + 1, widget.recordDirs.length - 1);
+                    });
+                  },
+                ),
+              ),
+            ),
+            const VerticalDivider(
+              width: 20,
+              indent: 8,
+              endIndent: 8,
+            ),
+            Tooltip(
+              message: "$tr_preview.dialog.close_button.tooltip".tr(),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.close),
+                label: Text("$tr_preview.dialog.close_button.label".tr()),
                 onPressed: () {
                   CardDialog.dismiss(ref.base);
-                  ReportRecordDialog.show(ref.base, widget.recordDir);
                 },
               ),
             ),
           ],
-          const Spacer(),
-          Tooltip(
-            message: "$tr_preview.dialog.close_button.tooltip".tr(),
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.check_circle),
-              label: Text("$tr_preview.dialog.close_button.label".tr()),
-              onPressed: () {
-                CardDialog.dismiss(ref.base);
-              },
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
