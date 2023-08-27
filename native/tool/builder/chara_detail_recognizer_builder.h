@@ -229,17 +229,22 @@ private:
         return {
             Point<double>{0.2537, 0.0000, {IS, SS}},
             1.0037 - 0.9593,
+            0.0407,
             {
                 getModulePath("fans_value"),
-                Rect<double>{{0.2926, 1.0167 - 1.0167, {IS, SS}}, {0.5278, 1.0444 - 1.0167, {IS, SS}}},
+                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.5278, 0.0278, {IS, SS}}},
             },
             {
                 getModulePath("scenario"),
-                Rect<double>{{0.2926, 1.1296 - 1.1296, {IS, SS}}, {0.7648, 1.1574 - 1.1296, {IS, SS}}},
+                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.7648, 0.0278, {IS, SS}}},
+            },
+            {
+                getModulePath("foreign_aptitude"),
+                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.4093, 0.0278, {IS, SS}}},
             },
             {
                 getModulePath("trained_date"),
-                Rect<double>{{0.2926, 1.2778 - 1.2778, {IS, SS}}, {0.5537, 1.3056 - 1.2778, {IS, SS}}},
+                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.5537, 0.0278, {IS, SS}}},
             },
             1.3370 - 1.2778,
         };

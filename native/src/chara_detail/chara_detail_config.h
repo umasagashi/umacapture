@@ -262,13 +262,23 @@ struct FamilyTreeConfig {
 struct CampaignRecordConfig {
     Point<double> scan_point;
     double vertical_gap;
+    double vertical_gap_limit;
     BasicModuleConfig fans_value;
     BasicModuleConfig scenario;
+    BasicModuleConfig foreign_aptitude;
     BasicModuleConfig trained_date;
     double vertical_delta;
 
     EXTENDED_JSON_TYPE_NDC(
-        CampaignRecordConfig, scan_point, vertical_gap, fans_value, scenario, trained_date, vertical_delta);
+        CampaignRecordConfig,
+        scan_point,
+        vertical_gap,
+        vertical_gap_limit,
+        fans_value,
+        scenario,
+        foreign_aptitude,
+        trained_date,
+        vertical_delta);
 };
 
 struct RaceConfig {
