@@ -243,6 +243,10 @@ private:
                 Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.4093, 0.0278, {IS, SS}}},
             },
             {
+                getModulePath("uaf_wins"),
+                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.4407, 0.0278, {IS, SS}}},
+            },
+            {
                 getModulePath("trained_date"),
                 Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.5537, 0.0278, {IS, SS}}},
             },

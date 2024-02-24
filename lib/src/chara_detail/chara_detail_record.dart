@@ -290,6 +290,7 @@ class CharaDetailRecord extends JsonEquatable {
   final int fans;
   final Scenario scenario;
   final int? foreignAptitude;
+  final int? uafWins;
   final String trainedDate;
   final List<Race> races;
 
@@ -306,6 +307,7 @@ class CharaDetailRecord extends JsonEquatable {
     this.fans,
     this.scenario,
     this.foreignAptitude,
+    this.uafWins,
     this.trainedDate,
     this.races,
   );
@@ -324,6 +326,7 @@ class CharaDetailRecord extends JsonEquatable {
         fans,
         scenario,
         foreignAptitude,
+        uafWins,
         trainedDate,
         races,
       ];

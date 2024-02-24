@@ -1227,6 +1227,27 @@
           }
         }
       },
+      "uaf_wins": {
+        "module_path": "uaf_wins/prediction.onnx",
+        "rect": {
+          "top_left": {
+            "x": 0.2926,
+            "y": 0.0,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          },
+          "bottom_right": {
+            "x": 0.4407,
+            "y": 0.0278,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          }
+        }
+      },
       "trained_date": {
         "module_path": "trained_date/prediction.onnx",
         "rect": {
