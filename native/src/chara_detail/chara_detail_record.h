@@ -238,6 +238,7 @@ struct CharaDetailRecord {
     int fans;
     Scenario scenario;
     std::optional<int> foreign_aptitude;
+    std::optional<int> uaf_wins;
     std::string trained_date;
     std::vector<Race> races;
 
@@ -255,6 +256,7 @@ struct CharaDetailRecord {
         fans,
         scenario,
         foreign_aptitude,
+        uaf_wins,
         trained_date,
         races);
 };

@@ -514,6 +514,7 @@ public:
         , fans_value_model(module_root_dir / config.fans_value.module_path, "fans_value")
         , scenario_model(module_root_dir / config.scenario.module_path, "scenario")
         , foreign_aptitude_model(module_root_dir / config.foreign_aptitude.module_path, "foreign_aptitude")
+        , uaf_wins_model(module_root_dir / config.uaf_wins.module_path, "uaf_wins")
         , trained_date_model(module_root_dir / config.trained_date.module_path, "trained_date") {}
 
     void recognize(
@@ -544,12 +545,22 @@ public:
         const auto &rest =
             findAll(frame, {scan_left, below_scenario_top}, config.vertical_gap, config.vertical_gap_limit);
 
+        log_debug("rest: {}, scenario: {}", rest.size(), record.scenario.id);
         if (rest.size() >= 2) {
-            record.foreign_aptitude = predict(
-                foreign_aptitude_model,
-                frame,
-                anchor.absolute(config.foreign_aptitude.rect) + Point<double>{0, below_scenario_top},
-                history);
+            // TODO: Do not want to hardcode the ID, but it is on hold because it is not possible to decide what kind of generalization is needed at this point.
+            if (record.scenario.id == 5) {
+                record.foreign_aptitude = predict(
+                    foreign_aptitude_model,
+                    frame,
+                    anchor.absolute(config.foreign_aptitude.rect) + Point<double>{0, below_scenario_top},
+                    history);
+            } else {
+                record.uaf_wins = predict(
+                    uaf_wins_model,
+                    frame,
+                    anchor.absolute(config.uaf_wins.rect) + Point<double>{0, below_scenario_top},
+                    history);
+            }
         }
 
         record.trained_date = predict(
@@ -588,6 +599,7 @@ private:
     recognizer::Model<IndexPrediction> fans_value_model;
     recognizer::Model<IndexPrediction> scenario_model;
     recognizer::Model<IndexPrediction> foreign_aptitude_model;
+    recognizer::Model<IndexPrediction> uaf_wins_model;
     recognizer::Model<DateTimePrediction> trained_date_model;
 };
 

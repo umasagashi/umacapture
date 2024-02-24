@@ -192,8 +192,6 @@ public:
 
 class SingleThreadMultiEventRunnerImpl : public EventRunnerInterface {
 public:
-    ~SingleThreadMultiEventRunnerImpl() override { assert_(runner == nullptr); }
-
     SingleThreadMultiEventRunnerImpl(
         QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name)
         : queue_limit_mode(queue_limit_mode)

@@ -266,6 +266,7 @@ struct CampaignRecordConfig {
     BasicModuleConfig fans_value;
     BasicModuleConfig scenario;
     BasicModuleConfig foreign_aptitude;
+    BasicModuleConfig uaf_wins;
     BasicModuleConfig trained_date;
     double vertical_delta;
 
@@ -277,6 +278,7 @@ struct CampaignRecordConfig {
         fans_value,
         scenario,
         foreign_aptitude,
+        uaf_wins,
         trained_date,
         vertical_delta);
 };

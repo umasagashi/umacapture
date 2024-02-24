@@ -31,10 +31,10 @@ class ModuleVersionInfo {
   final String region;
   final String recognizerVersion;
 
-  @JsonProperty(ignore: true)
-  DateTime get version => DateTime.parse(recognizerVersion);
+  @JsonProperty(defaultValue: "0.0.0")
+  final String applicationVersion;
 
-  ModuleVersionInfo(this.formatVersion, this.region, this.recognizerVersion);
+  ModuleVersionInfo(this.formatVersion, this.region, this.recognizerVersion, this.applicationVersion);
 
   static Future<ModuleVersionInfo?> load(FilePath file) async {
     if (!file.existsSync()) {
@@ -82,8 +82,13 @@ Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
 }
 
 final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
-  final pathInfo = await ref.watch(pathInfoLoader.future);
+  final appVersion = await ref.watch(appVersionCheckLoader.future);
+  if (appVersion.isUpdatable) {
+    logger.i("Skipping module version check because app is updatable.");
+    return null;
+  }
 
+  final pathInfo = await ref.watch(pathInfoLoader.future);
   final local = await compute(ModuleVersionInfo.load, pathInfo.modulesDir.filePath("version_info.json"));
   final latest = await compute(ModuleVersionInfo.download, Uri.parse(Const.moduleVersionInfoUrl));
   logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
@@ -94,11 +99,16 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   }
   if (latest == null) {
     _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
-    return local!.version;
+    return local!.recognizerVersion.toDateTime();
   }
   // Rollback is allowed.
-  if (local?.version == latest.version) {
-    return latest.version;
+  if (local?.recognizerVersion == latest.recognizerVersion) {
+    return latest.recognizerVersion.toDateTime();
+  }
+
+  if (latest.applicationVersion.toVersion() > appVersion.local) {
+    logger.i("Updating the module is disallowed because it does not meet the required app version.");
+    return null;
   }
 
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
@@ -118,11 +128,11 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
       }
       captureException(exception, stackTrace);
     }
-    return local?.version;
+    return local?.recognizerVersion.toDateTime();
   }
 
   _sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.updated);
-  return latest.version;
+  return latest.recognizerVersion.toDateTime();
 });
 
 class AppVersionCheckResult {
@@ -158,6 +168,7 @@ enum VersionCheckEntryKey {
 
 extension StringExtension on String {
   Version toVersion() => Version.parse(this);
+  DateTime toDateTime() => DateTime.parse(this);
 }
 
 FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
