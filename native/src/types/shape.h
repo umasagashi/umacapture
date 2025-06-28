@@ -9,6 +9,62 @@
 
 namespace uma {
 
+template<typename T>
+class Point;
+
+template<typename T>
+class Size {
+public:
+    constexpr Size(T width, T height) noexcept
+        : width_(width)
+        , height_(height) {}
+
+    Size(const cv::Size_<T> &size) noexcept  // NOLINT(google-explicit-constructor)
+        : width_(size.width)
+        , height_(size.height) {}
+
+    [[nodiscard]] inline T width() const { return width_; }
+    [[nodiscard]] inline T height() const { return height_; }
+
+    [[maybe_unused]] [[nodiscard]] inline cv::Size_<T> toCVSize() const { return {width_, height_}; }
+    [[nodiscard]] inline Point<T> toPoint() const { return {width_, height_}; }
+
+    template<typename S>
+    [[nodiscard]] inline Size<S> cast() const {
+        return {static_cast<S>(width_), static_cast<S>(height_)};
+    }
+
+    [[nodiscard]] inline Size<int> round() const { return {std::lround(width_), std::lround(height_)}; }
+
+    inline Size<T> &operator=(const Size<T> &other) = default;
+
+    inline bool operator==(const Size<T> &other) const {
+        return (width_ == other.width_) && (height_ == other.height_);
+    }
+
+    inline bool operator==(const cv::Size_<T> &other) const {
+        return (width_ == other.width) && (height_ == other.height);
+    }
+
+    inline bool operator!=(const Size<T> &other) const { return !(*this == other); }
+
+    inline bool operator!=(const cv::Size_<T> &other) const { return !(*this == other); }
+
+    inline Size<T> operator-(const Size<T> &other) const { return {width_ - other.width_, height_ - other.height_}; }
+    inline Size<T> operator+(const Size<T> &other) const { return {width_ + other.width_, height_ + other.height_}; }
+    inline Size<T> operator/(const Size<T> &other) const { return {width_ / other.width_, height_ / other.height_}; }
+
+    inline Size<T> operator/(const T &other) const { return {width_ / other, height_ / other}; }
+    inline Size<T> operator*(const T &other) const { return {width_ * other, height_ * other}; }
+
+    EXTENDED_JSON_TYPE_NDC(Size<T>, width_, height_);
+
+private:
+    T width_;
+    T height_;
+};
+EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Size)
+
 enum LayoutAnchor {
     ScreenStart,
     ScreenLogicalEnd,
@@ -95,6 +151,14 @@ public:
         return {x_ - other.x_, y_ - other.y_, anchor_};
     }
 
+    inline Point<T> operator+(const Size<T> &offset) const {
+        return {x_ + offset.width(), y_ + offset.height(), anchor_};
+    }
+
+    inline Point<T> operator-(const Size<T> &offset) const {
+        return {x_ - offset.width(), y_ - offset.height(), anchor_};
+    }
+
     inline Point<T> operator*(const T &other) const { return {x_ * other, y_ * other, anchor_}; }
 
     inline Point<T> operator/(const T &other) const { return {x_ / other, y_ / other, anchor_}; }
@@ -112,53 +176,6 @@ private:
     Anchor anchor_;
 };
 EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Point)
-
-template<typename T>
-class Size {
-public:
-    constexpr Size(T width, T height) noexcept
-        : width_(width)
-        , height_(height) {}
-
-    Size(const cv::Size_<T> &size) noexcept  // NOLINT(google-explicit-constructor)
-        : width_(size.width)
-        , height_(size.height) {}
-
-    [[nodiscard]] inline T width() const { return width_; }
-    [[nodiscard]] inline T height() const { return height_; }
-
-    [[maybe_unused]] [[nodiscard]] inline cv::Size_<T> toCVSize() const { return {width_, height_}; }
-    [[nodiscard]] inline Point<T> toPoint() const { return {width_, height_}; }
-
-    template<typename S>
-    [[nodiscard]] inline Size<S> cast() const {
-        return {static_cast<S>(width_), static_cast<S>(height_)};
-    }
-
-    [[nodiscard]] inline Size<int> round() const { return {std::lround(width_), std::lround(height_)}; }
-
-    inline Size<T> &operator=(const Size<T> &other) = default;
-
-    inline bool operator==(const Size<T> &other) const {
-        return (width_ == other.width_) && (height_ == other.height_);
-    }
-
-    inline bool operator!=(const Size<T> &other) const { return !(*this == other); }
-
-    inline Size<T> operator-(const Size<T> &other) const { return {width_ - other.width_, height_ - other.height_}; }
-    inline Size<T> operator+(const Size<T> &other) const { return {width_ + other.width_, height_ + other.height_}; }
-    inline Size<T> operator/(const Size<T> &other) const { return {width_ / other.width_, height_ / other.height_}; }
-
-    inline Size<T> operator/(const T &other) const { return {width_ / other, height_ / other}; }
-    inline Size<T> operator*(const T &other) const { return {width_ * other, height_ * other}; }
-
-    EXTENDED_JSON_TYPE_NDC(Size<T>, width_, height_);
-
-private:
-    T width_;
-    T height_;
-};
-EXTENDED_JSON_TYPE_TEMPLATE_PRINTABLE(Size)
 
 template<typename T>
 class Line1D {
@@ -218,10 +235,12 @@ public:
 
     inline Line<T> operator-(const Line<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
 
+    inline Line<T> operator+(const Size<T> &offset) const { return {p1_ + offset, p2_ + offset}; }
+
     inline Line<T> operator*(const T &other) const { return {p1_ * other, p2_ * other}; }
     inline Line<T> operator/(const T &other) const { return {p1_ / other, p2_ / other}; }
 
-    EXTENDED_JSON_TYPE_NDC(Line<T>, p1_, p2_);
+    EXTENDED_JSON_TYPE_NDC(Line<T>, p1_, p2_)
 
 private:
     Point<T> p1_;
@@ -236,11 +255,24 @@ public:
         : top_left_(top_left)
         , bottom_right_(bottom_right) {}
 
+    Rect(const Point<T> &top_left, const Size<T> &size) noexcept
+        : top_left_(top_left)
+        , bottom_right_(top_left + size) {}
+
+    explicit Rect(const cv::Rect &rect) noexcept
+        : top_left_(rect.x, rect.y)
+        , bottom_right_(rect.x + rect.width, rect.y + rect.height) {}
+
     Rect() noexcept = default;
 
     [[nodiscard]] inline bool empty() const { return width() == 0 || height() == 0; }
 
     inline Rect &operator=(const Rect &other) = default;
+
+    template<typename S>
+    [[nodiscard]] inline Rect<S> cast() const {
+        return {top_left_.template cast<S>(), bottom_right_.template cast<S>()};
+    }
 
     [[nodiscard]] inline const Point<T> &topLeft() const { return top_left_; }
     [[nodiscard]] inline const Point<T> &bottomRight() const { return bottom_right_; }
@@ -267,14 +299,18 @@ public:
         };
     }
 
+    inline Rect<T> operator/(const T &other) const { return {top_left_ / other, bottom_right_ / other}; }
+
+    inline Rect<T> operator+(const Size<T> &offset) const { return {top_left_ + offset, bottom_right_ + offset}; }
+
     [[nodiscard]] inline Rect<T> margined(T margin_left, T margin_top, T margin_right, T margin_bottom) const {
         return {
             {left() - margin_left, top() - margin_top},
-            {right() + margin_right, bottom() + margin_bottom},
+            Point<T>{right() + margin_right, bottom() + margin_bottom},
         };
     }
 
-    EXTENDED_JSON_TYPE_NDC(Rect, top_left_, bottom_right_);
+    EXTENDED_JSON_TYPE_NDC(Rect, top_left_, bottom_right_)
 
 private:
     Point<T> top_left_;

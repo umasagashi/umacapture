@@ -183,8 +183,8 @@ bool NativeApi::isRunning() const {
     return event_runners && event_runners->isRunning();
 }
 
-void NativeApi::updateFrame(const cv::Mat &image, const cv::Size &original_size, uint64 timestamp) {
-    on_frame_captured->send({image, timestamp});
+void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) {
+    on_frame_captured->send(frame);
     const auto &now = std::chrono::steady_clock::now();
     if (now - last_size_reported > report_interval) {
         notifyFrameSizeReported(original_size);
@@ -202,7 +202,7 @@ void NativeApi::updateRecord(const std::string &id) {
     NativeApi::instance();
     startEventLoop({});
     joinEventLoop();
-    updateFrame({}, {}, 0);
+    updateFrame({}, {0, 0});
     setNotifyCallback({});
     setDetachCallback({});
     setMkdirCallback({});

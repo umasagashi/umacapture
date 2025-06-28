@@ -1,8 +1,8 @@
 {
   "common": {
-    "base_image_rect": {
+    "base_image_stationary_rect": {
       "top_left": {
-        "x": 0.0222,
+        "x": 0.1,
         "y": 0.0556,
         "anchor": {
           "h": "IntersectStart",
@@ -10,11 +10,29 @@
         }
       },
       "bottom_right": {
-        "x": 0.9759,
+        "x": 0.9,
         "y": 0.8074,
         "anchor": {
           "h": "IntersectStart",
           "v": "IntersectStart"
+        }
+      }
+    },
+    "base_image_rect": {
+      "top_left": {
+        "x": 0.0,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.0,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectPixelEnd",
+          "v": "IntersectPixelEnd"
         }
       }
     },

@@ -73,7 +73,9 @@ private:
             0.9519 - 0.9148,
             {
                 getModulePath("skill_level"),
-                Rect<double>{{0.4537 - left_rect.left(), top_offset}, {0.4815 - left_rect.left(), bottom_offset}},
+                Rect<double>{
+                    Point<double>{0.4537 - left_rect.left(), top_offset},
+                    Point<double>{0.4815 - left_rect.left(), bottom_offset}},
             },
         };
     }

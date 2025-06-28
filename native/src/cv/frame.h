@@ -45,8 +45,7 @@ struct BGR {
     inline bool operator<=(const BGR &other) const { return (r <= other.r) && (g <= other.g) && (b <= other.b); }
 
 private:
-    BGR(uchar b, uchar g, uchar r)
-    noexcept
+    BGR(uchar b, uchar g, uchar r) noexcept
         : b(b)
         , g(g)
         , r(r) {}
@@ -124,6 +123,10 @@ public:
         return point.cast<double>() / unit_size;
     }
 
+    [[nodiscard]] inline Rect<double> mapFromFrame(const Rect<int> &rect) const {
+        return rect.cast<double>() / unit_size;
+    }
+
     [[nodiscard]] inline double scaleFromPixels(int v) const { return static_cast<double>(v) / unit_size; }
 
     [[nodiscard]] inline int scaleToPixels(double v) const { return std::lround(v * unit_size); }
@@ -195,7 +198,7 @@ public:
         assert_(this->image.type() == CV_8UC3);
     }
 
-    Frame(const cv::Mat &image, uint64 timestamp)
+    Frame(const cv::Mat &image, const uint64 timestamp)
         : image(image)
         , timestamp_(timestamp)
         , anchor_(FrameAnchor::intersect(image.size())) {

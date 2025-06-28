@@ -63,7 +63,7 @@
       }
     },
     "bottom_right": {
-      "x": -0.0241,
+      "x": -0.0236,
       "y": 0.0,
       "anchor": {
         "h": "IntersectLogicalEnd",
@@ -100,7 +100,7 @@
     },
     "bottom_right": {
       "x": 0.9667,
-      "y": -0.2352,
+      "y": -0.23,
       "anchor": {
         "h": "IntersectStart",
         "v": "IntersectLogicalEnd"

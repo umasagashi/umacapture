@@ -58,13 +58,13 @@ json_util::Json createConfig(bool video_mode) {
 void captureFromScreen() {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
-    const auto connection = recorder_runner->makeConnection<cv::Mat, cv::Size, uint64>();
+    const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
     const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
     connection->listen(
-        [&api](const auto &frame, const auto &size, uint64 timestamp) { api.updateFrame(frame, size, timestamp); });
+        [&api](const auto &frame, const auto &original_size) { api.updateFrame(frame,original_size); });
 
     const auto config = createConfig(false);
     api.startEventLoop(config.dump());
@@ -83,19 +83,23 @@ void captureFromScreen() {
 void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
-    const auto connection = recorder_runner->makeConnection<cv::Mat, cv::Size, uint64>();
+    const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
     connection->listen(
-        [&api](const auto &frame, const auto &size, uint64 timestamp) { api.updateFrame(frame, size, timestamp); });
+        [&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
 
     const auto config = createConfig(true);
     api.startEventLoop(config.dump());
 
+    const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
+    const auto profile = windows_config.window_recorder->window_profiles.value()[0];
+    // assert_(profile.window_title.value() == "UmamusumePrettyDerby_Jpn");
+
     recorder_runner->start();
 
-    auto video = video::VideoLoader(connection);
+    auto video = video::VideoLoader(connection, profile.crop_rect.value());
     video.runBatch(video_path_list);
 
     while (api.isRunning()) {

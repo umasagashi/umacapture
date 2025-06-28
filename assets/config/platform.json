@@ -1,16 +1,58 @@
 {
     "windows": {
         "window_recorder": {
+            "recording_fps": 40,
+            "force_resize": false,
             "minimum_size": {
                 "height": 960,
                 "width": 540
             },
-            "recording_fps": 40,
-            "window_profile": {
-                "window_class": "UnityWndClass",
-                "window_title": "umamusume",
-                "fixed_aspect_ratio": true
-            }
+            "window_profiles": [
+                {
+                    "window_class": "UnityWndClass",
+                    "window_title": "umamusume",
+                    "crop_rect": {
+                        "top_left": {
+                            "x": 0.0,
+                            "y": 0.0,
+                            "anchor": {
+                                "h": "ScreenStart",
+                                "v": "ScreenStart"
+                            }
+                        },
+                        "bottom_right": {
+                            "x": 0.0,
+                            "y": 0.0,
+                            "anchor": {
+                                "h": "ScreenPixelEnd",
+                                "v": "ScreenPixelEnd"
+                            }
+                        }
+                    }
+                },
+                {
+                    "window_class": "UnityWndClass",
+                    "window_title": "UmamusumePrettyDerby_Jpn",
+                    "crop_rect": {
+                        "top_left": {
+                            "x": -0.669,
+                            "y": 0.0,
+                            "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                            }
+                        },
+                        "bottom_right": {
+                            "x": 0.329,
+                            "y": 0.0,
+                            "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectPixelEnd"
+                            }
+                        }
+                    }
+                }
+            ]
         }
     }
 }
