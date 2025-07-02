@@ -97,7 +97,18 @@ public:
             return {};
         }
 
-        return applyResize(image, window_info.capture_rect.size());
+        // TODO: This should not be the minimum size, but rather the ideal size for image recognition.
+        const Size<int> &target_size =
+            m_force_resize ? m_minimum_size : getRatioFixedSize(window_info.capture_rect.size(), m_minimum_size);
+
+        // Allow a small margin of error, since resizing even when the difference is minor can make the image blur.
+        if (target_size.difference_max(image.size()) > 3) {
+            cv::Mat resized;
+            cv::resize(image, resized, target_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
+            image = resized;
+        }
+
+        return {image, chrono_util::timestamp()};
     }
 
     [[nodiscard]] Frame takeScreenshot() {
@@ -232,11 +243,8 @@ private:
             expected_height = static_cast<int>(std::round(expected_width / expected_ratio));
         }
 
-        // Check if the difference is within tolerance (3 pixels)
-        const int width_diff = std::abs(client_rect.width() - expected_width);
-        const int height_diff = std::abs(client_rect.height() - expected_height);
-
-        if (width_diff <= 3 && height_diff <= 3) {
+        // Allow a small margin of error, since resizing even when the difference is minor can make the image blur.
+        if (client_rect.size().difference_max({expected_width, expected_height}) <= 3) {
             // Within tolerance, treat as no letterbox
             return client_rect;
         }
@@ -509,19 +517,6 @@ private:
 
         frame.Close();
         return result;
-    }
-
-    Frame applyResize(cv::Mat &image, const Size<int> &original_size) const {
-        const Size<int> &target_size =
-            m_force_resize ? m_minimum_size : getRatioFixedSize(original_size, m_minimum_size);
-
-        if (image.size() != target_size.toCVSize()) {
-            cv::Mat resized;
-            cv::resize(image, resized, target_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
-            image = resized;
-        }
-
-        return {image, chrono_util::timestamp()};
     }
 
     // Configuration

@@ -28,8 +28,8 @@
                             "x": 0.0,
                             "y": 0.0,
                             "anchor": {
-                                "h": "ScreenPixelEnd",
-                                "v": "ScreenPixelEnd"
+                                "h": "ScreenLogicalEnd",
+                                "v": "ScreenLogicalEnd"
                             }
                         }
                     }
@@ -51,11 +51,11 @@
                             }
                         },
                         "bottom_right": {
-                            "x": 0.329,
+                            "x": 0.331,
                             "y": 0.0,
                             "anchor": {
                                 "h": "IntersectStart",
-                                "v": "IntersectPixelEnd"
+                                "v": "IntersectLogicalEnd"
                             }
                         }
                     }

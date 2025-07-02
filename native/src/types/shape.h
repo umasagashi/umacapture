@@ -36,6 +36,10 @@ public:
 
     [[nodiscard]] inline Size<int> round() const { return {std::lround(width_), std::lround(height_)}; }
 
+    [[nodiscard]] inline T difference_max(const Size<T> &other) const {
+        return std::max(std::abs(width_ - other.width_), std::abs(height_ - other.height_));
+    }
+
     inline Size<T> &operator=(const Size<T> &other) = default;
 
     inline bool operator==(const Size<T> &other) const {
