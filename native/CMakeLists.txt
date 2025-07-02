@@ -30,12 +30,16 @@ add_executable(
 target_compile_options(
         ${PROJECT_NAME} PRIVATE
         /wd4068
+        /wd4819
+        /wd4996
         /bigobj
 )
 
 target_compile_definitions(
         ${PROJECT_NAME} PRIVATE
         USE_CUSTOM_ASSERT
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
 )
 
 find_package(OpenCV REQUIRED)
@@ -55,6 +59,8 @@ target_link_libraries(
         ${PROJECT_NAME} PRIVATE
         "${OpenCV_LIBS}"
         "${ONNX_DIR}/lib/onnxruntime.lib"
+        windowsapp.lib
+        dwmapi.lib
 )
 
 add_custom_command(

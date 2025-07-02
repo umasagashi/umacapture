@@ -163,6 +163,12 @@ public:
 
     inline Point<T> operator/(const T &other) const { return {x_ / other, y_ / other, anchor_}; }
 
+    inline bool operator==(const Point<T> &other) const {
+        return x_ == other.x_ && y_ == other.y_ && anchor_ == other.anchor_;
+    }
+
+    inline bool operator!=(const Point<T> &other) const { return !(*this == other); }
+
     [[nodiscard]] double distance(const Point<T> &other) const {
         assert_(anchor_ == other.anchor_);
         return std::sqrt(std::pow(x_ - other.x_, 2) + std::pow(y_ - other.y_, 2));
@@ -302,6 +308,12 @@ public:
     inline Rect<T> operator/(const T &other) const { return {top_left_ / other, bottom_right_ / other}; }
 
     inline Rect<T> operator+(const Size<T> &offset) const { return {top_left_ + offset, bottom_right_ + offset}; }
+
+    inline bool operator==(const Rect<T> &other) const {
+        return top_left_ == other.top_left_ && bottom_right_ == other.bottom_right_;
+    }
+
+    inline bool operator!=(const Rect<T> &other) const { return !(*this == other); }
 
     [[nodiscard]] inline Rect<T> margined(T margin_left, T margin_top, T margin_right, T margin_bottom) const {
         return {

@@ -11,6 +11,10 @@
                 {
                     "window_class": "UnityWndClass",
                     "window_title": "umamusume",
+                    "window_aspect_ratio": {
+                        "height": 16,
+                        "width": 9
+                    },
                     "crop_rect": {
                         "top_left": {
                             "x": 0.0,
@@ -33,6 +37,10 @@
                 {
                     "window_class": "UnityWndClass",
                     "window_title": "UmamusumePrettyDerby_Jpn",
+                    "window_aspect_ratio": {
+                        "height": 9,
+                        "width": 16
+                    },
                     "crop_rect": {
                         "top_left": {
                             "x": -0.669,
