@@ -122,7 +122,7 @@
     },
     "initial_scroll_threshold": 0.01,
     "minimum_scroll_threshold": 0.05,
-    "stationary_time_threshold": 100,
+    "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
     "stationary_color_threshold": 100
   },
