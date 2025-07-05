@@ -23,6 +23,8 @@ public:
         : width_(size.width)
         , height_(size.height) {}
 
+    Size() noexcept = default;
+
     [[nodiscard]] inline T width() const { return width_; }
     [[nodiscard]] inline T height() const { return height_; }
 

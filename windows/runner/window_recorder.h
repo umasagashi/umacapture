@@ -104,8 +104,6 @@ protected:
                 sender->send(frame, capturer->lastWindowSize());
             }
         }
-
-        // Clean up capture resources when stopping
         capturer->cleanup();
 
         log_debug("finished");

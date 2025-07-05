@@ -52,11 +52,12 @@ namespace windows_impl {
 // Window information structure
 struct WindowInfo {
     HWND hwnd{nullptr};
-    Rect<int> window_rect;  // Actual window bounds (excluding shadows)
-    Rect<int> client_rect;  // Client area in screen coordinates
-    Rect<int> content_rect;  // Content area without letterbox (in screen coordinates)
-    Rect<int> capture_rect;  // Final capture region in window coordinates
-    bool is_client_area_only{false};
+    Rect<int> window_rect;  // Window bounds, including frames.
+    Rect<int> client_rect;  // Client area, including letterbox (in full-screen mode).
+    Rect<int> content_rect;  // Client area, excluding letterbox (in full-screen mode).
+    Rect<int> capture_rect;  // Final area of interest.
+
+    [[nodiscard]] inline bool isValid() const { return hwnd != nullptr; }
 };
 
 inline Size<int> getRatioFixedSize(const Size<int> &source, const Size<int> &fitTo) {
@@ -74,9 +75,9 @@ public:
         const std::vector<windows_config::WindowProfile> &window_profiles,
         const Size<int> &minimum_size,
         const bool force_resize)
-        : m_window_profiles(window_profiles)
-        , m_minimum_size(minimum_size)
-        , m_force_resize(force_resize) {
+        : window_profiles(window_profiles)
+        , minimum_size(minimum_size)
+        , force_resize(force_resize) {
         initializeGraphicsCapture();
     }
 
@@ -92,14 +93,14 @@ public:
             return {};
         }
 
-        cv::Mat image = captureRegion(window_info);
+        auto image = captureRegion(window_info.capture_rect);
         if (image.empty()) {
             return {};
         }
 
         // TODO: This should not be the minimum size, but rather the ideal size for image recognition.
         const Size<int> &target_size =
-            m_force_resize ? m_minimum_size : getRatioFixedSize(window_info.capture_rect.size(), m_minimum_size);
+            force_resize ? minimum_size : getRatioFixedSize(window_info.capture_rect.size(), minimum_size);
 
         // Allow a small margin of error, since resizing even when the difference is minor can make the image blur.
         if (target_size.difference_max(image.size()) > 3) {
@@ -112,353 +113,278 @@ public:
     }
 
     [[nodiscard]] Frame takeScreenshot() {
-        auto window_info = findTargetWindow();
+        const auto window_info = findTargetWindow();
         if (!window_info.hwnd) {
             return {};
         }
 
-        // For screenshot, capture content area (without letterbox)
-        window_info.is_client_area_only = true;
-        window_info.capture_rect = Rect<int>{
-            window_info.content_rect.topLeft() - window_info.window_rect.topLeft(), window_info.content_rect.size()};
-
         if (!ensureCaptureSession(window_info.hwnd)) {
             return {};
         }
+
+        const auto capture_rect = Rect<int>{
+            window_info.content_rect.topLeft() - window_info.window_rect.topLeft(),
+            window_info.content_rect.size(),
+        };
 
         // Try to capture with retries (max 3 seconds)
         const auto start_time = std::chrono::steady_clock::now();
         constexpr auto max_duration = std::chrono::seconds(3);
         constexpr auto retry_interval = std::chrono::milliseconds(100);
 
-        Frame result;
         while (true) {
-            if (const cv::Mat image = captureRegion(window_info); !image.empty()) {
-                result = {image, chrono_util::timestamp()};
-                break;
+            const auto image = captureRegion(capture_rect);
+            if (!image.empty()) {
+                // Successfully captured.
+                cleanup();
+                return {image, chrono_util::timestamp()};
             }
 
-            // Check if timeout
-            if (const auto elapsed = std::chrono::steady_clock::now() - start_time; elapsed >= max_duration) {
-                break;
+            if ((std::chrono::steady_clock::now() - start_time) >= max_duration) {
+                // Failed to capture.
+                cleanup();
+                return {};
             }
-
-            // Wait before retry
             std::this_thread::sleep_for(retry_interval);
         }
-
-        // Clean up resources after screenshot
-        cleanup();
-
-        return result;
     }
 
     void cleanup() {
-        if (m_session) {
+        if (session) {
             try {
-                m_session.Close();
+                session.Close();
             } catch (...) {
             }
-            m_session = nullptr;
+            session = nullptr;
         }
 
-        if (m_framePool) {
+        if (frame_pool) {
             try {
-                m_framePool.Close();
+                frame_pool.Close();
             } catch (...) {
             }
-            m_framePool = nullptr;
+            frame_pool = nullptr;
         }
 
-        m_item = nullptr;
-        m_current_window = nullptr;
-        m_current_process_id = 0;
+        current_window = nullptr;
     }
 
-    [[nodiscard]] Size<int> lastWindowSize() const { return m_last_window_info.content_rect.size(); }
+    [[nodiscard]] Size<int> lastWindowSize() const { return last_window_size; }
 
 private:
     void initializeGraphicsCapture() {
-        // Initialize WinRT
-        try {
-            winrt::init_apartment(winrt::apartment_type::multi_threaded);
-        } catch (...) {
-        }
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
 
-        // Create Direct3D11 device
-        D3D_FEATURE_LEVEL featureLevels[] = {
+        D3D_FEATURE_LEVEL feature_levels[] = {
             D3D_FEATURE_LEVEL_11_1,
             D3D_FEATURE_LEVEL_11_0,
             D3D_FEATURE_LEVEL_10_1,
             D3D_FEATURE_LEVEL_10_0,
         };
-
-        HRESULT hr = D3D11CreateDevice(
+        auto hr = D3D11CreateDevice(
             nullptr,
             D3D_DRIVER_TYPE_HARDWARE,
             nullptr,
             D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            featureLevels,
-            ARRAYSIZE(featureLevels),
+            feature_levels,
+            ARRAYSIZE(feature_levels),
             D3D11_SDK_VERSION,
-            m_device.put(),
+            d3d_device.put(),
             nullptr,
-            m_context.put());
-
+            d3d_device_context.put());
         if (FAILED(hr)) {
             throw std::runtime_error("Failed to create D3D11 device");
         }
 
-        // Create WinRT device
-        const auto dxgiDevice = m_device.as<IDXGIDevice>();
+        const auto dxgi_device = d3d_device.as<IDXGIDevice>();
         winrt::com_ptr<::IInspectable> inspectable;
-        hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), inspectable.put());
-
+        hr = CreateDirect3D11DeviceFromDXGIDevice(dxgi_device.get(), inspectable.put());
         if (FAILED(hr)) {
             throw std::runtime_error("Failed to create Direct3D11 device");
         }
 
-        m_winrtDevice = inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
+        winrt_device = inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
     }
 
-    // Helper function to detect and remove letterbox
     Rect<int> removeLetterbox(const Rect<int> &client_rect, const Size<int> &expected_aspect) const {
-        if (expected_aspect.width() <= 0 || expected_aspect.height() <= 0) {
-            return client_rect;
-        }
-
         const double expected_ratio = static_cast<double>(expected_aspect.width()) / expected_aspect.height();
         const double client_ratio = static_cast<double>(client_rect.width()) / client_rect.height();
 
-        // Calculate expected dimensions based on aspect ratio
         int expected_width, expected_height;
-
         if (client_ratio > expected_ratio) {
-            // Letterbox on left/right
+            // Letterbox on left/right.
             expected_height = client_rect.height();
             expected_width = static_cast<int>(std::round(expected_height * expected_ratio));
         } else {
-            // Letterbox on top/bottom
+            // Letterbox on top/bottom.
             expected_width = client_rect.width();
             expected_height = static_cast<int>(std::round(expected_width / expected_ratio));
         }
 
         // Allow a small margin of error, since resizing even when the difference is minor can make the image blur.
         if (client_rect.size().difference_max({expected_width, expected_height}) <= 3) {
-            // Within tolerance, treat as no letterbox
+            // Within tolerance, treat as no letterbox.
             return client_rect;
         }
 
-        // Calculate centered content area
+        // Calculate centered content area.
         const int content_width = std::min(client_rect.width(), expected_width);
         const int content_height = std::min(client_rect.height(), expected_height);
-
-        // Center the content area
         const int offset_x = (client_rect.width() - content_width) / 2;
         const int offset_y = (client_rect.height() - content_height) / 2;
-
         return {
             client_rect.topLeft() + Size<int>{offset_x, offset_y},
             Size<int>{content_width, content_height},
         };
     }
 
-    WindowInfo findTargetWindow() {
-        for (const auto &profile : m_window_profiles) {
-            HWND hwnd = FindWindowA(profile.windowClassOrNull(), profile.windowTitleOrNull());
-            if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd)) {
-                continue;
-            }
-
-            WindowInfo info;
-            info.hwnd = hwnd;
-
-            // Get accurate window bounds using DWM
-            RECT dwm_rect;
-            const HRESULT hr = DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &dwm_rect, sizeof(RECT));
-            if (FAILED(hr)) {
-                // Fallback to GetWindowRect
-                RECT window_rect;
-                if (!GetWindowRect(hwnd, &window_rect)) {
-                    continue;
-                }
-                dwm_rect = window_rect;
-            }
-
-            info.window_rect =
-                Rect<int>{Point<int>{dwm_rect.left, dwm_rect.top}, Point<int>{dwm_rect.right, dwm_rect.bottom}};
-
-            // Get client area
-            RECT client_rect;
-            if (!GetClientRect(hwnd, &client_rect)) {
-                continue;
-            }
-
-            POINT client_origin{0, 0};
-            if (!ClientToScreen(hwnd, &client_origin)) {
-                continue;
-            }
-
-            info.client_rect = {
-                Point<int>{client_origin.x, client_origin.y},
-                Size<int>{client_rect.right, client_rect.bottom},
-            };
-
-            // Remove letterbox if aspect ratio is specified
-            if (profile.window_aspect_ratio.has_value()) {
-                info.content_rect = removeLetterbox(info.client_rect, profile.window_aspect_ratio.value());
-            } else {
-                info.content_rect = info.client_rect;
-            }
-
-            // Convert from screen coordinates to window coordinates
-            const Point<int> window_origin = info.window_rect.topLeft();
-            if (profile.crop_rect.has_value()) {
-                // Use content area (without letterbox) as the base for crop calculation
-                const auto anchor = FrameAnchor::intersect(info.content_rect.size());
-                const auto crop_rect = anchor.mapToFrame(profile.crop_rect.value());
-
-                // Convert crop rect to window coordinates
-                const Point<int> crop_origin =
-                    info.content_rect.topLeft() + Size<int>{crop_rect.left(), crop_rect.top()};
-                info.capture_rect = Rect<int>{crop_origin - window_origin, crop_rect.size()};
-            } else {
-                // Capture content area by default
-                info.capture_rect = Rect<int>{info.content_rect.topLeft() - window_origin, info.content_rect.size()};
-            }
-
-            m_last_window_info = info;
-            return info;
+    WindowInfo findTargetWindow(const windows_config::WindowProfile &profile) {
+        HWND hwnd = FindWindowA(profile.windowClassOrNull(), profile.windowTitleOrNull());
+        if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd)) {
+            return {};
         }
 
+        WindowInfo info;
+        info.hwnd = hwnd;
+
+        // Get accurate window bounds using DWM
+        RECT dwm_rect;
+        auto hr = DwmGetWindowAttribute(hwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &dwm_rect, sizeof(RECT));
+        if (FAILED(hr)) {
+            // Fallback to GetWindowRect
+            RECT window_rect;
+            if (!GetWindowRect(hwnd, &window_rect)) {
+                return {};
+            }
+            dwm_rect = window_rect;
+        }
+
+        info.window_rect = {
+            Point<int>{dwm_rect.left, dwm_rect.top},
+            Point<int>{dwm_rect.right, dwm_rect.bottom},
+        };
+
+        RECT client_rect;
+        if (!GetClientRect(hwnd, &client_rect)) {
+            return {};
+        }
+
+        POINT client_origin{0, 0};
+        if (!ClientToScreen(hwnd, &client_origin)) {
+            return {};
+        }
+
+        info.client_rect = {
+            Point<int>{client_origin.x, client_origin.y},
+            Size<int>{client_rect.right, client_rect.bottom},
+        };
+
+        if (!profile.window_aspect_ratio.has_value()) {
+            info.content_rect = info.client_rect;
+        } else {
+            info.content_rect = removeLetterbox(info.client_rect, profile.window_aspect_ratio.value());
+        }
+
+        const Point<int> window_origin = info.window_rect.topLeft();
+        if (!profile.crop_rect.has_value()) {
+            info.capture_rect = Rect<int>{info.content_rect.topLeft() - window_origin, info.content_rect.size()};
+        } else {
+            const auto anchor = FrameAnchor::intersect(info.content_rect.size());
+            const auto crop_rect = anchor.mapToFrame(profile.crop_rect.value());
+            const Point<int> crop_origin = info.content_rect.topLeft() + Size<int>{crop_rect.left(), crop_rect.top()};
+            info.capture_rect = Rect<int>{crop_origin - window_origin, crop_rect.size()};
+        }
+
+        last_window_size = info.content_rect.size();
+        return info;
+    }
+
+    WindowInfo findTargetWindow() {
+        for (const auto &profile : window_profiles) {
+            const auto info = findTargetWindow(profile);
+            if (info.isValid()) {
+                return info;
+            }
+        }
         return {};
     }
 
     bool ensureCaptureSession(const HWND hwnd) {
-        if (!isCurrentWindowValid() || hwnd != m_current_window) {
+        if (hwnd != current_window) {
             cleanup();
             return initializeCapture(hwnd);
         }
         return true;
     }
 
-    bool isCurrentWindowValid() const {
-        if (!m_current_window)
-            return false;
-
-        DWORD process_id = 0;
-        GetWindowThreadProcessId(m_current_window, &process_id);
-        return IsWindow(m_current_window) && process_id == m_current_process_id;
-    }
-
     bool initializeCapture(const HWND hwnd) {
-        if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd)) {
-            return false;
-        }
-
-        GetWindowThreadProcessId(hwnd, &m_current_process_id);
-        m_current_window = hwnd;
-
-        // Create GraphicsCaptureItem
-        const auto factory = winrt::get_activation_factory<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>();
-        const auto interop = factory.as<IGraphicsCaptureItemInterop>();
-
         try {
-            const HRESULT hr = interop->CreateForWindow(
-                hwnd, winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(), winrt::put_abi(m_item));
+            winrt::Windows::Graphics::Capture::GraphicsCaptureItem capture_item{nullptr};
 
-            if (FAILED(hr) || !m_item) {
-                return false;
-            }
-        } catch (...) {
-            return false;
-        }
-
-        // Validate and get size
-        winrt::Windows::Graphics::SizeInt32 size;
-        try {
-            size = m_item.Size();
-            if (size.Width <= 0 || size.Height <= 0) {
-                m_item = nullptr;
-                return false;
-            }
-        } catch (...) {
-            m_item = nullptr;
-            return false;
-        }
-
-        // Create frame pool
-        try {
-            m_framePool = winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
-                m_winrtDevice, winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized, 1, size);
-
-            if (!m_framePool) {
-                m_item = nullptr;
-                return false;
-            }
-        } catch (...) {
-            m_item = nullptr;
-            return false;
-        }
-
-        // Create capture session
-        try {
-            m_session = m_framePool.CreateCaptureSession(m_item);
-            if (!m_session) {
-                cleanup();
-                return false;
+            const auto factory =
+                winrt::get_activation_factory<winrt::Windows::Graphics::Capture::GraphicsCaptureItem>();
+            const auto interop = factory.as<IGraphicsCaptureItemInterop>();
+            const auto hr = interop->CreateForWindow(
+                hwnd,
+                winrt::guid_of<ABI::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
+                winrt::put_abi(capture_item));
+            if (FAILED(hr) || !capture_item) {
+                throw std::runtime_error("Failed to create GraphicsCaptureItem.");
             }
 
-            m_session.IsCursorCaptureEnabled(false);
-            m_session.StartCapture();
+            frame_pool = winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool::CreateFreeThreaded(
+                winrt_device,
+                winrt::Windows::Graphics::DirectX::DirectXPixelFormat::B8G8R8A8UIntNormalized,
+                1,
+                capture_item.Size());
+            if (!frame_pool) {
+                throw std::runtime_error("Failed to create Direct3D11CaptureFramePool.");
+            }
+
+            session = frame_pool.CreateCaptureSession(capture_item);
+            if (!session) {
+                throw std::runtime_error("Failed to create CaptureSession.");
+            }
+
+            session.IsCursorCaptureEnabled(false);
+            session.StartCapture();
+            current_window = hwnd;
+            return true;
         } catch (...) {
+            // TODO: Error details should be reported to the app.
             cleanup();
             return false;
         }
-
-        return true;
     }
 
-    cv::Mat captureRegion(const WindowInfo &window_info) const {
-        if (!m_session || !m_framePool)
-            return {};
-
-        // Get frame
-        winrt::Windows::Graphics::Capture::Direct3D11CaptureFrame frame{nullptr};
-        try {
-            frame = m_framePool.TryGetNextFrame();
-        } catch (...) {
+    cv::Mat captureRegion(const Rect<int> &rect) {
+        if (!session || !frame_pool) {
             return {};
         }
 
+        const auto frame = frame_pool.TryGetNextFrame();
         if (!frame)
             return {};
 
-        cv::Mat result;
         try {
-            // Get Direct3D surface
             const auto surface = frame.Surface();
             if (!surface) {
-                frame.Close();
-                return {};
+                throw std::runtime_error("Failed to get surface.");
             }
 
             const auto access = surface.as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
             winrt::com_ptr<ID3D11Texture2D> source_texture;
-            HRESULT hr = access->GetInterface(IID_PPV_ARGS(&source_texture));
+            auto hr = access->GetInterface(IID_PPV_ARGS(&source_texture));
             if (FAILED(hr) || !source_texture) {
-                frame.Close();
-                return {};
+                throw std::runtime_error("Failed to get source texture.");
             }
 
-            // Get source texture description
             D3D11_TEXTURE2D_DESC source_desc;
             source_texture->GetDesc(&source_desc);
 
-            // Create staging texture for the cropped region
             D3D11_TEXTURE2D_DESC staging_desc = {};
-            staging_desc.Width = window_info.capture_rect.width();
-            staging_desc.Height = window_info.capture_rect.height();
+            staging_desc.Width = rect.width();
+            staging_desc.Height = rect.height();
             staging_desc.MipLevels = 1;
             staging_desc.ArraySize = 1;
             staging_desc.Format = source_desc.Format;
@@ -470,72 +396,53 @@ private:
             staging_desc.MiscFlags = 0;
 
             winrt::com_ptr<ID3D11Texture2D> staging_texture;
-            hr = m_device->CreateTexture2D(&staging_desc, nullptr, staging_texture.put());
+            hr = d3d_device->CreateTexture2D(&staging_desc, nullptr, staging_texture.put());
             if (FAILED(hr) || !staging_texture) {
-                frame.Close();
-                return {};
+                throw std::runtime_error("Failed to create dest texture.");
             }
 
-            // Copy only the required region using CopySubresourceRegion
+            // Copy only the required region.
             D3D11_BOX source_box;
-            source_box.left = std::max(0, window_info.capture_rect.left());
-            source_box.top = std::max(0, window_info.capture_rect.top());
-            source_box.right = std::min(static_cast<int>(source_desc.Width), window_info.capture_rect.right());
-            source_box.bottom = std::min(static_cast<int>(source_desc.Height), window_info.capture_rect.bottom());
+            source_box.left = rect.left();
+            source_box.top = rect.top();
+            source_box.right = rect.right();
+            source_box.bottom = rect.bottom();
             source_box.front = 0;
             source_box.back = 1;
+            d3d_device_context->CopySubresourceRegion(staging_texture.get(), 0, 0, 0, 0, source_texture.get(), 0, &source_box);
 
-            // Ensure valid box dimensions
-            if (source_box.right > source_box.left && source_box.bottom > source_box.top) {
-                m_context->CopySubresourceRegion(
-                    staging_texture.get(),
-                    0,  // Destination subresource
-                    0,  // Destination X
-                    0,  // Destination Y
-                    0,  // Destination Z
-                    source_texture.get(),
-                    0,  // Source subresource
-                    &source_box);
-            } else {
-                frame.Close();
-                return {};
+            // Convert to cv::Mat.
+            D3D11_MAPPED_SUBRESOURCE resource;
+            hr = d3d_device_context->Map(staging_texture.get(), 0, D3D11_MAP_READ, 0, &resource);
+            if (FAILED(hr)) {
+                throw std::runtime_error("Failed to map resource.");
             }
+            cv::Mat captured_image;
+            const cv::Mat bgra_image(
+                staging_desc.Height, staging_desc.Width, CV_8UC4, resource.pData, resource.RowPitch);
+            cv::cvtColor(bgra_image, captured_image, cv::COLOR_BGRA2BGR);
+            d3d_device_context->Unmap(staging_texture.get(), 0);
 
-            // Map and convert to cv::Mat
-            D3D11_MAPPED_SUBRESOURCE mapped;
-            hr = m_context->Map(staging_texture.get(), 0, D3D11_MAP_READ, 0, &mapped);
-            if (SUCCEEDED(hr)) {
-                const cv::Mat bgra_image(
-                    staging_desc.Height, staging_desc.Width, CV_8UC4, mapped.pData, mapped.RowPitch);
-                cv::cvtColor(bgra_image, result, cv::COLOR_BGRA2BGR);
-
-                m_context->Unmap(staging_texture.get(), 0);
-            }
+            frame.Close();
+            return captured_image;
         } catch (...) {
-            // Handle any exceptions
+            frame.Close();
+            return {};
         }
-
-        frame.Close();
-        return result;
     }
 
-    // Configuration
-    const std::vector<windows_config::WindowProfile> m_window_profiles;
-    const Size<int> m_minimum_size;
-    const bool m_force_resize;
-    WindowInfo m_last_window_info;
+    const std::vector<windows_config::WindowProfile> window_profiles;
+    const Size<int> minimum_size;
+    const bool force_resize;
 
-    // Windows Graphics Capture resources
-    winrt::com_ptr<ID3D11Device> m_device;
-    winrt::com_ptr<ID3D11DeviceContext> m_context;
-    winrt::Windows::Graphics::Capture::GraphicsCaptureItem m_item{nullptr};
-    winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool m_framePool{nullptr};
-    winrt::Windows::Graphics::Capture::GraphicsCaptureSession m_session{nullptr};
-    winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice m_winrtDevice{nullptr};
+    Size<int> last_window_size;
+    HWND current_window{nullptr};
 
-    // Window tracking
-    HWND m_current_window{nullptr};
-    DWORD m_current_process_id{0};
+    winrt::com_ptr<ID3D11Device> d3d_device;
+    winrt::com_ptr<ID3D11DeviceContext> d3d_device_context;
+    winrt::Windows::Graphics::Capture::Direct3D11CaptureFramePool frame_pool{nullptr};
+    winrt::Windows::Graphics::Capture::GraphicsCaptureSession session{nullptr};
+    winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice winrt_device{nullptr};
 };
 
 }  // namespace windows_impl
