@@ -256,21 +256,33 @@ final _selectedTagsProvider = StateProvider.autoDispose.family<Set<String>, Stri
   return Set.from(spec.predicate.tags);
 });
 
-class _SelectionSelector extends ConsumerWidget {
+class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
 
   const _SelectionSelector({
     required this.specId,
   });
 
-  List<SkillInfo> _watchCandidateSkills(WidgetRef ref, String specId) {
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
+}
+
+class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
+  String textQuery = "";
+
+  List<SkillInfo> _watchCandidateSkills(String specId) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final info = ref.watch(spec.showAvailableOnly ? availableSkillInfoProvider : skillInfoProvider);
     final selected = ref.watch(_selectedTagsProvider(specId)).toSet();
-    if (selected.isEmpty) {
+    final normalizedQuery = textQuery.toLowerCase().trim();
+    if (selected.isEmpty && normalizedQuery.isEmpty) {
       return info;
     } else {
-      return info.where((e) => e.tags.containsAll(selected)).toList();
+      return info.where((skill) {
+        final tagContains = skill.tags.containsAll(selected);
+        final queryContains = skill.names.any((name) => name.toLowerCase().contains(normalizedQuery));
+        return tagContains && queryContains;
+      }).toList();
     }
   }
 
@@ -282,40 +294,41 @@ class _SelectionSelector extends ConsumerWidget {
         children: [
           TagSelector(
             candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedTagsProvider(specId)),
+            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedTagsProvider(widget.specId)),
           ),
         ],
       ),
     );
   }
 
-  Widget selectorWidget(BuildContext context, WidgetRef ref) {
-    final selected = _clonedSpecProvider.watch(ref, specId).predicate.query.toSet();
-    final candidates = _watchCandidateSkills(ref, specId);
+  Widget selectorWidget(BuildContext context) {
+    final selected = _clonedSpecProvider.watch(ref, widget.specId).predicate.query.toSet();
+    final candidates = _watchCandidateSkills(widget.specId);
     return SelectorWidget<SkillInfo>(
       description: Text("$tr_skill.selection.description".tr()),
       candidates: candidates,
       selected: selected,
-      onSelected: (sid, selected) {
-        _clonedSpecProvider.update(ref, specId, (spec) {
+      onSelected: (newSelected) {
+        _clonedSpecProvider.update(ref, widget.specId, (spec) {
           return spec.copyWith(
             predicate: spec.predicate.copyWith(
-              query: Set.from(spec.predicate.query)..toggle(sid, shouldExists: !selected),
+              query: newSelected,
             ),
           );
         });
       },
+      onTextQueryChanged: (query) => setState(() => textQuery = query),
     );
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final hiddenElements = _clonedSpecProvider.watch(ref, specId).hiddenElements;
+  Widget build(BuildContext context) {
+    final hiddenElements = _clonedSpecProvider.watch(ref, widget.specId).hiddenElements;
     return FormGroup(
       title: Text("$tr_skill.selection.label".tr()),
       children: [
         if (!hiddenElements.contains(SkillDialogElements.selectionTags)) tagsWidget(),
-        selectorWidget(context, ref),
+        selectorWidget(context),
       ],
     );
   }

@@ -315,7 +315,6 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return CardDialog(
       dialogTitle: "$tr_preview.dialog.title".tr(),
       closeButtonTooltip: "$tr_preview.dialog.close_button.tooltip".tr(),
