@@ -73,7 +73,7 @@ enum ModuleVersionCheckResultCode {
 void _sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
   // This function can be called before EasyLocalization is initialized.
   // For this reason, a delay is required for now.
-  Future.delayed(Duration.zero, () {
+  Future.delayed(const Duration(milliseconds: 300), () {
     Toaster.show(ToastData(type: type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()));
   });
 }
@@ -162,7 +162,7 @@ enum AppVersionCheckResultCode {
 void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
   // This function can be called before EasyLocalization is initialized.
   // For this reason, a delay is required for now.
-  Future.delayed(Duration.zero, () {
+  Future.delayed(const Duration(milliseconds: 300), () {
     Toaster.show(ToastData(type: type, description: "$tr_toast.app_version_check.${code.name.snakeCase}".tr()));
   });
 }
