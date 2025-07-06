@@ -21,7 +21,7 @@ public:
         : channel(platform_channel) {
         const auto recorder_runner_impl =
             event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
-        const auto connection = recorder_runner_impl->makeConnection<cv::Mat, cv::Size, uint64>();
+        const auto connection = recorder_runner_impl->makeConnection<Frame, Size<int>>();
 
         recorder_runner = recorder_runner_impl;
         window_recorder = std::make_unique<WindowRecorder>(connection);
@@ -58,9 +58,8 @@ public:
 
         app::NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
 
-        connection->listen([](const auto &frame, const auto &size, const auto &ts) {
-            app::NativeApi::instance().updateFrame(frame, size, ts);
-        });
+        connection->listen(
+            [](const auto &frame, const auto &size) { app::NativeApi::instance().updateFrame(frame, size); });
     }
 
     ~NativeController() {

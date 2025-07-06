@@ -71,7 +71,11 @@ enum ModuleVersionCheckResultCode {
 }
 
 void _sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
-  Toaster.show(ToastData(type: type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()));
+  // This function can be called before EasyLocalization is initialized.
+  // For this reason, a delay is required for now.
+  Future.delayed(Duration.zero, () {
+    Toaster.show(ToastData(type: type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()));
+  });
 }
 
 Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
@@ -84,8 +88,7 @@ Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
 final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   final appVersion = await ref.watch(appVersionCheckLoader.future);
   if (appVersion.isUpdatable) {
-    logger.i("Skipping module version check because app is updatable.");
-    return null;
+    logger.w("The module version check is not guaranteed to work properly when the app is updatable.");
   }
 
   final pathInfo = await ref.watch(pathInfoLoader.future);
@@ -157,7 +160,11 @@ enum AppVersionCheckResultCode {
 }
 
 void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
-  Toaster.show(ToastData(type: type, description: "$tr_toast.app_version_check.${code.name.snakeCase}".tr()));
+  // This function can be called before EasyLocalization is initialized.
+  // For this reason, a delay is required for now.
+  Future.delayed(Duration.zero, () {
+    Toaster.show(ToastData(type: type, description: "$tr_toast.app_version_check.${code.name.snakeCase}".tr()));
+  });
 }
 
 enum VersionCheckEntryKey {
@@ -168,6 +175,7 @@ enum VersionCheckEntryKey {
 
 extension StringExtension on String {
   Version toVersion() => Version.parse(this);
+
   DateTime toDateTime() => DateTime.parse(this);
 }
 

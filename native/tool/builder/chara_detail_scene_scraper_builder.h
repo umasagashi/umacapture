@@ -22,7 +22,8 @@ public:
 private:
     [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig common() const {
         return {
-            Rect<double>{{0.0222, 0.0556, IS}, {0.9759, 0.8074, IS}},
+            Rect<double>{{0.1, 0.0556, IS}, {0.9, 0.8074, IS}},
+            Rect<double>{{0.0, 0.0, IS}, {0.0, 0.0, ILE}},
             Rect<double>{{0.0222, 0.7296, IS}, {0.9759, 0.8074, IS}},
             Rect<double>{{0.0000, 0.8278, IS}, {0.0000, -0.2426, {IPE, ILE}}},
             Rect<double>{{0.0222, 0.0000, IS}, {-0.0222, 0.0000, {ILE, IPE}}},
@@ -30,7 +31,7 @@ private:
             Line<double>{{0.9676, 0.0092, IS}, {0.9676, -0.0092, {IS, ILE}}},
             0.01,
             0.05,
-            100,
+            200,
             18,
             100,
         };

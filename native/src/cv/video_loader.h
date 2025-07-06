@@ -9,8 +9,9 @@ namespace uma::video {
 
 class VideoLoader {
 public:
-    explicit VideoLoader(const event_util::Sender<cv::Mat, cv::Size, uint64> &on_frame_captured)
-        : on_frame_captured(on_frame_captured) {
+    explicit VideoLoader(const event_util::Sender<Frame, Size<int>> &on_frame_captured, const Rect<double> &crop_rect)
+        : on_frame_captured(on_frame_captured)
+        , crop_rect(crop_rect) {
         std::filesystem::create_directories("./temp");
     }
 
@@ -27,6 +28,7 @@ public:
         if (!cap.open(path.generic_string())) {
             throw std::runtime_error((std::ostringstream() << "Failed to open: " << path.generic_string()).str());
         }
+        vlog_debug("VideoCapture successfully opened.");
 
         int64 last_ts = 0;
         for (int i = 0;; i++) {
@@ -39,23 +41,25 @@ public:
                 break;
             }
 
-            //            save(i, ts, mat);
-
             last_ts = std::max(last_ts, ts);
-            on_frame_captured->send(mat, mat.size(), std::llround(ts + head_ts));
+            const auto captured_frame = Frame{mat, static_cast<uint64>(std::llround(ts + head_ts))};
+            const auto cropped_frame = captured_frame.view(crop_rect).clone();
+            // save(i, cropped_frame);
+            on_frame_captured->send(cropped_frame, captured_frame.size());
         }
         return last_ts;
     }
 
 private:
-    void save(int index, uint64 ts, const cv::Mat &mat) const {
+    void save(const int index, const Frame &frame) const {
         std::ostringstream stream;
-        stream << "./temp/source_frames/" << std::setw(5) << std::setfill('0') << index << "_" << ts << ".png";
+        stream << "./temp/source_frames/" << std::setw(5) << std::setfill('0') << index << "_" << frame.timestamp() << ".png";
         app::NativeApi::instance().mkdir("./temp/source_frames");
-        cv::imwrite(stream.str(), mat);
+        frame.save(stream.str());
     }
 
-    const event_util::Sender<cv::Mat, cv::Size, uint64> on_frame_captured{};
+    const event_util::Sender<Frame, Size<int>> on_frame_captured{};
+    const Rect<double> crop_rect;
 };
 
 }  // namespace uma::video

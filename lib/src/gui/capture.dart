@@ -363,8 +363,14 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
     if (size == null) {
       return const Text("-");
     }
-    final requirement =
-        size.width >= 540 ? _Requirement.good : (size.width >= 512 ? _Requirement.unsure : _Requirement.insufficient);
+    // TODO: These reference values should be defined by the model.
+    const goodSize = Size(540, 960);
+    const unsureSize = Size(512 * 0.95, 960 * 0.95);
+    final requirement = (size.width >= goodSize.width && size.height >= goodSize.height)
+        ? _Requirement.good
+        : ((size.width >= unsureSize.width && size.height >= unsureSize.height)
+            ? _Requirement.unsure
+            : _Requirement.insufficient);
     return chip(
       theme: theme,
       label: "${size.width.toInt()} x ${size.height.toInt()}",
@@ -405,7 +411,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
             fpsWidget(context, ref, fps),
             const SizedBox(width: 16),
             Disabled(
-              disabled:isCapturing,
+              disabled: isCapturing,
               tooltip: "キャプチャ中は利用できません",
               child: Tooltip(
                 message: "$tr_capture.capture_control.report_screen.tooltip".tr(),

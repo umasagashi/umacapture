@@ -463,27 +463,35 @@ final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<String>
   return Set.from(spec.predicate.factorTags);
 });
 
-class _SelectionSelector extends ConsumerWidget {
+class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
 
   const _SelectionSelector({
     required this.specId,
   });
 
-  List<FactorInfo> _watchCandidateFactors(WidgetRef ref, String specId) {
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
+}
+
+class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
+  String textQuery = "";
+
+  List<FactorInfo> _watchCandidateFactors(String specId) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final info = ref.watch(spec.showAvailableOnly ? availableFactorInfoProvider : factorInfoProvider);
     final selectedFactorTags = ref.watch(_selectedFactorTagsProvider(specId)).toSet();
     final selectedSkillTags = ref.watch(_selectedSkillTagsProvider(specId)).toSet();
-    if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty) {
+    final normalizedQuery = textQuery.toLowerCase().trim();
+    if (selectedFactorTags.isEmpty && selectedSkillTags.isEmpty && normalizedQuery.isEmpty) {
       return info;
-    } else {
-      return info.where((factor) {
-        final factorContains = factor.tags.containsAll(selectedFactorTags);
-        final skillContains = factor.skillInfo?.tags.containsAll(selectedSkillTags) ?? selectedSkillTags.isEmpty;
-        return factorContains && skillContains;
-      }).toList();
     }
+    return info.where((factor) {
+      final factorContains = factor.tags.containsAll(selectedFactorTags);
+      final skillContains = factor.skillInfo?.tags.containsAll(selectedSkillTags) ?? selectedSkillTags.isEmpty;
+      final queryContains = factor.names.any((name) => name.toLowerCase().contains(normalizedQuery));
+      return factorContains && skillContains && queryContains;
+    }).toList();
   }
 
   Widget tagsWidget() {
@@ -494,7 +502,7 @@ class _SelectionSelector extends ConsumerWidget {
         children: [
           TagSelector(
             candidateTagsProvider: factorTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedFactorTagsProvider(specId)),
+            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedFactorTagsProvider(widget.specId)),
           ),
           Row(
             children: [
@@ -508,40 +516,41 @@ class _SelectionSelector extends ConsumerWidget {
           ),
           TagSelector(
             candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedSkillTagsProvider(specId)),
+            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedSkillTagsProvider(widget.specId)),
           ),
         ],
       ),
     );
   }
 
-  Widget selectorWidget(BuildContext context, WidgetRef ref) {
-    final selected = _clonedSpecProvider.watch(ref, specId).predicate.query.toSet();
-    final candidates = _watchCandidateFactors(ref, specId);
+  Widget selectorWidget(BuildContext context) {
+    final selected = _clonedSpecProvider.watch(ref, widget.specId).predicate.query.toSet();
+    final candidates = _watchCandidateFactors(widget.specId);
     return SelectorWidget<FactorInfo>(
       description: Text("$tr_factor.selection.description".tr()),
       candidates: candidates,
       selected: selected,
-      onSelected: (sid, selected) {
-        _clonedSpecProvider.update(ref, specId, (spec) {
+      onSelected: (newSelected) {
+        _clonedSpecProvider.update(ref, widget.specId, (spec) {
           return spec.copyWith(
             predicate: spec.predicate.copyWith(
-              query: Set.from(spec.predicate.query)..toggle(sid, shouldExists: !selected),
+              query: newSelected,
             ),
           );
         });
       },
+      onTextQueryChanged: (query) => setState(() => textQuery = query),
     );
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final spec = _clonedSpecProvider.watch(ref, specId);
+  Widget build(BuildContext context) {
+    final spec = _clonedSpecProvider.watch(ref, widget.specId);
     return FormGroup(
       title: Text("$tr_factor.selection.label".tr()),
       children: [
         if (!spec.hiddenElements.contains(FactorDialogElements.selectionTags)) tagsWidget(),
-        selectorWidget(context, ref),
+        selectorWidget(context),
       ],
     );
   }

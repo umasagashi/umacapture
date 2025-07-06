@@ -167,7 +167,21 @@
                     "selector": {
                         "not_found_message": "該当なし",
                         "skill_prefix": "スキル：",
-                        "expand_button": "全部を表示"
+                        "expand_button": "全部を表示",
+                        "control": {
+                            "select_all": {
+                                "label": "全選択",
+                                "tooltip": "下記をすべて選択します"
+                            },
+                            "deselect_all": {
+                                "label": "全解除",
+                                "tooltip": "下記をすべて選択解除します"
+                            },
+                            "text_search": {
+                                "label": "テキスト検索",
+                                "tooltip": "指定したテキストが名前に含まれるものだけを表示します"
+                            }
+                        }
                     },
                     "range": {
                         "tooltip": {

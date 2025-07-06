@@ -42,6 +42,7 @@ function(APPLY_STANDARD_SETTINGS TARGET)
             /wd4267
             /wd4459
             /wd4819
+            /wd4996
             /wd5054
             /bigobj
             )

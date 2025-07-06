@@ -205,7 +205,7 @@ public:
     }
 
 private:
-    [[nodiscard]] void detectKeyPoints(FrameDescriptor &descriptor) const {
+    void detectKeyPoints(FrameDescriptor &descriptor) const {
         if (!descriptor.key_points.empty()) {
             return;
         }
@@ -283,8 +283,7 @@ public:
             if (++current_scan != scan_parameters.end()) {
                 continue;
             }
-            const Rect<double> rect = {scaled_top_left, {1., scaled_y}};
-            if (!rect.empty()) {
+            if (const Rect<double> rect = {scaled_top_left, Point<double>{1., scaled_y}}; !rect.empty()) {
                 saveIncremental(frame.view(rect));
             }
             return;
@@ -623,10 +622,12 @@ class BaseFrameCatcher {
 public:
     BaseFrameCatcher(
         const StationaryFrameCatcher &base_frame_catcher,
+        const Rect<double> &base_image_rect,
         const Line<double> &snackbar_scan_line,
         const Range<Color> &snackbar_bg_color_range,
         const uint64 snackbar_time_threshold)
         : base_frame_catcher(base_frame_catcher)
+        , base_image_rect(base_image_rect)
         , snackbar_scan_line(snackbar_scan_line)
         , snackbar_bg_color_range(snackbar_bg_color_range)
         , snackbar_time_threshold(snackbar_time_threshold) {}
@@ -637,6 +638,7 @@ public:
         }
 
         base_frame_catcher.update(frame);
+        log_trace("base image: {}", base_frame_catcher.ready());
 
         if (isSnackbarVisible(frame)) {
             last_snackbar_visible = frame.timestamp();
@@ -647,13 +649,16 @@ public:
 
     [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && !last_snackbar_visible; }
 
-    [[nodiscard]] inline Frame frame() const { return base_frame_catcher.fullSizeFrame(); }
+    [[nodiscard]] inline Frame frame() const {
+        return base_frame_catcher.fullSizeFrame().view(base_image_rect);
+    }
 
 private:
     [[nodiscard]] bool isSnackbarVisible(const Frame &frame) const {
         return frame.isIn(snackbar_bg_color_range, snackbar_scan_line);
     }
 
+    const Rect<double> base_image_rect;
     const Line<double> snackbar_scan_line;
     const Range<Color> snackbar_bg_color_range;
     const uint64 snackbar_time_threshold;
@@ -730,11 +735,13 @@ public:
                 config.common.stationary_time_threshold,
                 config.common.minimum_color_threshold,
                 config.common.stationary_color_threshold,
-                config.common.base_image_rect,
+                config.common.base_image_stationary_rect,
             },
+            config.common.base_image_rect,
             config.snackbar_scan_line,
             config.snackbar_color_range,
-            config.snackbar_time_threshold);
+            config.snackbar_time_threshold
+            );
 
         state = scraper_impl::Updatable;
     }

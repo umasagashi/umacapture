@@ -41,7 +41,7 @@ public:
     void joinEventLoop();
     [[nodiscard]] bool isRunning() const;
 
-    void updateFrame(const cv::Mat &image, const cv::Size &original_size, uint64 timestamp);
+    void updateFrame(const Frame &frame, const Size<int> &original_size);
 
     void notifyScreenshotTaken(const std::string &path, const std::string &resultCode) {
         notify(json_util::Json{{"type", "onScreenshotTaken"}, {"path", path}, {"result", resultCode}}.dump());
@@ -82,8 +82,8 @@ public:
         notify(json_util::Json{{"type", "onFrameRateReported"}, {"fps", fps}}.dump());
     }
 
-    void notifyFrameSizeReported(const cv::Size &size) {
-        notify(json_util::Json{{"type", "onFrameSizeReported"}, {"size", Size<int>{size}}}.dump());
+    void notifyFrameSizeReported(const Size<int> &size) {
+        notify(json_util::Json{{"type", "onFrameSizeReported"}, {"size", size}}.dump());
     }
 
     void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }

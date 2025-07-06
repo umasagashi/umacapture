@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:another_xlider/another_xlider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -82,23 +84,50 @@ class FormGroup extends ConsumerWidget {
   }
 }
 
-class DenseTextField extends ConsumerWidget {
-  final TextEditingController controller;
+class DenseTextField extends ConsumerStatefulWidget {
+  final String? initialText;
+  final TextEditingController? controller;
   final StringCallback onChanged;
+  final Duration? debounce;
   final bool allowEmpty;
   final String? hintText;
 
-  DenseTextField({
+  const DenseTextField({
     Key? key,
-    required String initialText,
+    this.initialText,
+    this.controller,
     required this.onChanged,
+    this.debounce,
     this.allowEmpty = false,
     this.hintText,
-  })  : controller = TextEditingController(text: initialText),
+  })  : assert((initialText == null) != (controller == null)),
         super(key: key);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConsumerStatefulWidget> createState() => DenseTextFieldState();
+}
+
+class DenseTextFieldState extends ConsumerState<DenseTextField> {
+  late final TextEditingController controller;
+  Timer? debouncedOnChangedTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = widget.controller ?? TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    if (widget.controller == null) {
+      controller.dispose();
+    }
+    debouncedOnChangedTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return IntrinsicWidth(
       child: TextFormField(
         controller: controller,
@@ -107,11 +136,18 @@ class DenseTextField extends ConsumerWidget {
           isCollapsed: true,
           contentPadding: const EdgeInsets.all(8).copyWith(right: 16),
           errorStyle: const TextStyle(fontSize: 0),
-          hintText: hintText,
+          hintText: widget.hintText,
         ),
         autovalidateMode: AutovalidateMode.always,
-        validator: (value) => (!allowEmpty && (value == null || value.isEmpty)) ? "cannot be empty" : null,
-        onChanged: (value) => onChanged(value),
+        validator: (value) => (!widget.allowEmpty && (value == null || value.isEmpty)) ? "cannot be empty" : null,
+        onChanged: (value) {
+          if (widget.debounce != null) {
+            debouncedOnChangedTimer?.cancel();
+            debouncedOnChangedTimer = Timer(widget.debounce!, () => widget.onChanged(value));
+          } else {
+            widget.onChanged(value);
+          }
+        },
       ),
     );
   }
@@ -305,7 +341,8 @@ class SelectorWidget<T> extends ConsumerStatefulWidget {
   final Widget description;
   final List<T> candidates;
   final Set<int> selected;
-  final Value2Callback<int, bool> onSelected;
+  final Callback<Set<int>> onSelected;
+  final Callback<String> onTextQueryChanged;
 
   const SelectorWidget({
     Key? key,
@@ -313,6 +350,7 @@ class SelectorWidget<T> extends ConsumerStatefulWidget {
     required this.candidates,
     required this.selected,
     required this.onSelected,
+    required this.onTextQueryChanged,
   }) : super(key: key);
 
   @override
@@ -321,11 +359,68 @@ class SelectorWidget<T> extends ConsumerStatefulWidget {
 
 class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
   late bool collapsed;
+  late final TextEditingController controller;
 
   @override
   void initState() {
     super.initState();
     collapsed = true;
+    controller = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  Widget controlWidget(BuildContext context) {
+    final theme = Theme.of(context);
+    const EdgeInsetsGeometry padding = EdgeInsets.all(8);
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ActionChip(
+            padding: padding,
+            avatar: const Icon(Icons.select_all, size: 20),
+            label: Text("$tr_common.selector.control.select_all.label".tr()),
+            tooltip: "$tr_common.selector.control.select_all.tooltip".tr(),
+            side: BorderSide.none,
+            backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            onPressed: () {
+              widget.onSelected({...widget.selected}..addAll(widget.candidates.map((e) => e.sid)));
+            },
+          ),
+          ActionChip(
+            padding: padding,
+            avatar: const Icon(Icons.deselect, size: 20),
+            label: Text("$tr_common.selector.control.deselect_all.label".tr()),
+            tooltip: "$tr_common.selector.control.deselect_all.tooltip".tr(),
+            side: BorderSide.none,
+            backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            onPressed: () {
+              widget.onSelected({...widget.selected}..removeAll(widget.candidates.map((e) => e.sid)));
+            },
+          ),
+          Tooltip(
+            message: "$tr_common.selector.control.text_search.tooltip".tr(),
+            child: DenseTextField(
+              controller: controller,
+              debounce: const Duration(milliseconds: 200),
+              hintText: "$tr_common.selector.control.text_search.label".tr(),
+              allowEmpty: true,
+              onChanged: (text) => widget.onTextQueryChanged(text),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -338,6 +433,10 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
         Padding(
           padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
           child: widget.description,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
+          child: controlWidget(context),
         ),
         Padding(
           padding: const EdgeInsets.all(8),
@@ -354,7 +453,15 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
                     label: Text(info.label),
                     tooltip: info.tooltip,
                     selected: widget.selected.contains(info.sid),
-                    onSelected: (selected) => widget.onSelected(info.sid, selected),
+                    onSelected: (selected) {
+                      final current = {...widget.selected};
+                      if (selected) {
+                        current.add(info.sid);
+                      } else {
+                        current.remove(info.sid);
+                      }
+                      widget.onSelected(current);
+                    },
                   ),
                 if (needCollapse) Text("${widget.candidates.length - reduced.length} more"),
               ],

@@ -43,6 +43,7 @@ inline const auto path_config = PathUtil();  // NOLINT(cert-err58-cpp)
 namespace scraper_config {
 
 struct SceneScraperConfig {
+    Rect<double> base_image_stationary_rect;
     Rect<double> base_image_rect;
     Rect<double> tab_button_rect;
     Rect<double> scroll_area_rect;
@@ -57,6 +58,7 @@ struct SceneScraperConfig {
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
+        base_image_stationary_rect,
         base_image_rect,
         tab_button_rect,
         scroll_area_rect,
