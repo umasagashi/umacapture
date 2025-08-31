@@ -122,14 +122,23 @@ private:
 };
 
 template<typename PredictionType>
-inline auto predict(
+inline auto predictWithConfidence(
     const recognizer::Model<PredictionType> &model,
     const Frame &frame,
     const Rect<double> &position,
     PredictionHistory &history) {
     const auto &predicted = model.predict(frame.view(position));
     history.add(model.name(), frame.anchor().mapToFrame(position), predicted.toJson());
-    return predicted.result();
+    return std::make_pair(predicted.result(), predicted.confidence());
+}
+
+template<typename PredictionType>
+inline auto predict(
+    const recognizer::Model<PredictionType> &model,
+    const Frame &frame,
+    const Rect<double> &position,
+    PredictionHistory &history) {
+    return predictWithConfidence(model, frame, position, history).first;
 }
 
 template<typename PredictionType, size_t n>
@@ -441,8 +450,8 @@ public:
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , character_model(module_root_dir / config.module_path, "character")
-        , character_rank_model(module_root_dir / config.chara_rank.module_path, "character_rank") {}
+        , character_model(module_root_dir / config.module.chara, "character")
+        , character_rank_model(module_root_dir / config.module.rank, "character_rank") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -451,22 +460,42 @@ public:
             common_config.bg_color,
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
-
+        const auto bottom = searchVertical(
+            frame,
+            config.frame_color,
+            {frame.anchor().absolute(config.scan_point).x(), top.value() + config.vertical_gap, ScreenStart},
+            1.0);
         const auto top_offset = Point<double>{0, top.value()};
+        const auto frame_height = bottom.value() - top.value();
+        if (frame_height > config.legacy_frame_height) {
+            record.family = recognizeTree(frame, top_offset, config.legacy_icons, history);
+        } else {
+            record.family = recognizeTree(frame, top_offset, config.icons, history);
+        }
 
-        record.family.parent1 = recognizeParent(frame, top_offset, config.parent1, config.chara_rank.parent1, history);
-        record.family.parent2 = recognizeParent(frame, top_offset, config.parent2, config.chara_rank.parent2, history);
-
-        scan_top = top.value() + config.vertical_delta;
+        scan_top = bottom.value() + config.vertical_delta;
     }
 
 private:
+    [[nodiscard]] record::Family recognizeTree(
+        const Frame &frame,
+        const Point<double> &top_offset,
+        const recognizer_config::FamilyTreeIconConfig &icon_config,
+        PredictionHistory &history) const {
+        return {
+            recognizeParent(frame, top_offset, icon_config.parent1, history),
+            recognizeParent(frame, top_offset, icon_config.parent2, history),
+        };
+    }
+
     [[nodiscard]] record::Parent recognizeParent(
         const Frame &frame,
         const Point<double> &top_offset,
-        const std::array<Rect<double>, 3> &icon_rects,
-        const std::array<Rect<double>, 3> &rank_rects,
+        const std::array<recognizer_config::IconSetConfig, 3> &icon_config,
         PredictionHistory &history) const {
+        const std::array<Rect<double>, 3> icon_rects = {
+            icon_config[0].chara, icon_config[1].chara, icon_config[2].chara};
+        const std::array<Rect<double>, 3> rank_rects = {icon_config[0].rank, icon_config[1].rank, icon_config[2].rank};
         const auto &anchor = frame.anchor();
 
         const auto &mapped_icon_rects = stds::transformed_inplace<std::array<Rect<double>, 3>>(
@@ -511,6 +540,7 @@ public:
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
+        , campaign_field_model(module_root_dir / config.campaign_field.module_path, "campaign_field")
         , fans_value_model(module_root_dir / config.fans_value.module_path, "fans_value")
         , scenario_model(module_root_dir / config.scenario.module_path, "scenario")
         , foreign_aptitude_model(module_root_dir / config.foreign_aptitude.module_path, "foreign_aptitude")
@@ -521,65 +551,74 @@ public:
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
         const double scan_left = anchor.absolute(config.scan_point).x();
+        const double bg_scan_left = anchor.absolute(config.bg_scan_point).x();
 
-        // winning
-        scan_top = findNext(frame, {scan_left, scan_top}).value();
+        // Find the bottom of the area to be scanned.
+        const double area_bottom = findNext(frame, {bg_scan_left, scan_top}).value();
 
-        // fans
-        scan_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
-        record.fans = predict(
-            fans_value_model, frame, anchor.absolute(config.fans_value.rect) + Point<double>{0, scan_top}, history);
+        const auto &field_tops =
+            findAll(frame, {scan_left, scan_top}, config.vertical_gap, area_bottom - config.vertical_gap);
 
-        // winning record
-        scan_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
+        std::map<int, float> predicted_field_confidences;
+        for (const auto &field_top : field_tops) {
+            const auto [field_class, confidence] = predictFieldClass(frame, anchor, {0.0, field_top}, history);
+            if (field_class == 0) {
+                continue;  // Unknown (not yet supported) class.
+            }
+            float &best_confidence = predicted_field_confidences[field_class];
+            if (best_confidence > 0) {
+                // This should not happen, but fields added for the new scenario may be incorrectly recognized as existing ones.
+                log_warning("Field {} found multiple times.", field_class);
+            }
+            if (best_confidence >= confidence) {
+                // If the previous prediction has higher confidence, use that one.
+                // If the new prediction has higher confidence, allow it to overwrite the previous one.
+                // This does not guarantee that incorrect fields will always be overwritten.
+                continue;
+            }
+            best_confidence = confidence;
 
-        // scenario
-        scan_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
-        record.scenario = {
-            predict(scenario_model, frame, anchor.absolute(config.scenario.rect) + Point<double>{0, scan_top}, history),
-        };
-
-        // There might be two lines of space below the scenario,
-        // so first get the position below the scenario and then get the rest.
-        const auto below_scenario_top = findNext(frame, {scan_left, scan_top + config.vertical_gap}).value();
-        const auto &rest =
-            findAll(frame, {scan_left, below_scenario_top}, config.vertical_gap, config.vertical_gap_limit);
-
-        log_debug("rest: {}, scenario: {}", rest.size(), record.scenario.id);
-        if (rest.size() >= 2) {
-            // TODO: Do not want to hardcode the ID, but it is on hold because it is not possible to decide what kind of generalization is needed at this point.
-            if (record.scenario.id == 5) {
-                record.foreign_aptitude = predict(
-                    foreign_aptitude_model,
-                    frame,
-                    anchor.absolute(config.foreign_aptitude.rect) + Point<double>{0, below_scenario_top},
-                    history);
-            } else {
-                record.uaf_wins = predict(
-                    uaf_wins_model,
-                    frame,
-                    anchor.absolute(config.uaf_wins.rect) + Point<double>{0, below_scenario_top},
-                    history);
+            switch (field_class) {
+                case 3: record.fans = predictFans(frame, anchor, {0.0, field_top}, history); break;
+                case 5: record.scenario = predictScenario(frame, anchor, {0.0, field_top}, history); break;
+                case 7: record.trained_date = predictTrainedDate(frame, anchor, {0.0, field_top}, history); break;
+                default:  // Do nothing for the rest of the classes.
+                    break;
             }
         }
 
-        record.trained_date = predict(
-            trained_date_model,
-            frame,
-            anchor.absolute(config.trained_date.rect) + Point<double>{0, rest.back()},
-            history);
-
-        scan_top = rest.back() + config.vertical_delta;
+        scan_top = field_tops.back() + config.vertical_delta;
     }
 
 private:
+    [[nodiscard]] std::pair<int, float> predictFieldClass(
+        const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
+        return predictWithConfidence(
+            campaign_field_model, frame, anchor.absolute(config.campaign_field.rect) + pos, history);
+    }
+
+    [[nodiscard]] int predictFans(
+        const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
+        return predict(fans_value_model, frame, anchor.absolute(config.fans_value.rect) + pos, history);
+    }
+
+    [[nodiscard]] record::Scenario predictScenario(
+        const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
+        return {predict(scenario_model, frame, anchor.absolute(config.scenario.rect) + pos, history)};
+    }
+
+    [[nodiscard]] std::string predictTrainedDate(
+        const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
+        return predict(trained_date_model, frame, anchor.absolute(config.trained_date.rect) + pos, history);
+    }
+
     [[nodiscard]] std::vector<double>
-    findAll(const Frame &frame, const Point<double> &scan_top_left, double gap, double gap_limit) const {
+    findAll(const Frame &frame, const Point<double> &scan_top_left, double initial_gap, double bottom_limit) const {
         std::vector<double> found_tops;
         double current_top = scan_top_left.y();
         for (;;) {
-            const auto &found = findNext(frame, {scan_top_left.x(), current_top + gap}, gap_limit);
-            if (!found.has_value()) {
+            const auto &found = findNext(frame, {scan_top_left.x(), current_top + initial_gap});
+            if (!found.has_value() || found.value() > bottom_limit) {
                 break;
             }
             current_top = found.value();
@@ -589,13 +628,14 @@ private:
     }
 
     [[nodiscard]] std::optional<double>
-    findNext(const Frame &frame, const Point<double> &scan_top_left, double max_length = 1.0) const {
+    findNext(const Frame &frame, const Point<double> &scan_top_left, const double max_length = 1.0) const {
         return searchVertical(frame, common_config.bg_color, scan_top_left, max_length);
     }
 
     const recognizer_config::CampaignRecordConfig config;
     const recognizer_config::CampaignTabCommonConfig common_config;
 
+    recognizer::Model<IndexPrediction> campaign_field_model;
     recognizer::Model<IndexPrediction> fans_value_model;
     recognizer::Model<IndexPrediction> scenario_model;
     recognizer::Model<IndexPrediction> foreign_aptitude_model;

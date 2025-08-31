@@ -242,29 +242,55 @@ struct SupportCardConfig {
     EXTENDED_JSON_TYPE_NDC(SupportCardConfig, module_path, scan_point, rects, level, rank, vertical_delta);
 };
 
-struct CharaRankConfig {
-    std::string module_path;
-    std::array<Rect<double>, 3> parent1;
-    std::array<Rect<double>, 3> parent2;
+struct IconSetConfig {
+    Rect<double> chara;
+    Rect<double> rank;
 
-    EXTENDED_JSON_TYPE_NDC(CharaRankConfig, module_path, parent1, parent2);
+    EXTENDED_JSON_TYPE_NDC(IconSetConfig, chara, rank);
+};
+
+struct FamilyTreeIconConfig {
+    std::array<IconSetConfig, 3> parent1;
+    std::array<IconSetConfig, 3> parent2;
+
+    EXTENDED_JSON_TYPE_NDC(FamilyTreeIconConfig, parent1, parent2);
+};
+
+struct FamilyTreeModuleConfig {
+    std::string chara;
+    std::string rank;
+
+    EXTENDED_JSON_TYPE_NDC(FamilyTreeModuleConfig, chara, rank);
 };
 
 struct FamilyTreeConfig {
-    std::string module_path;
+    FamilyTreeModuleConfig module;
     Point<double> scan_point;
-    std::array<Rect<double>, 3> parent1;
-    std::array<Rect<double>, 3> parent2;
-    CharaRankConfig chara_rank;
+    double vertical_gap;
+    Range<Color> frame_color;
+    double legacy_frame_height;
+    FamilyTreeIconConfig legacy_icons;
+    FamilyTreeIconConfig icons;
     double vertical_delta;
 
-    EXTENDED_JSON_TYPE_NDC(FamilyTreeConfig, module_path, scan_point, parent1, parent2, chara_rank, vertical_delta);
+    EXTENDED_JSON_TYPE_NDC(
+        FamilyTreeConfig,
+        module,
+        scan_point,
+        vertical_gap,
+        frame_color,
+        legacy_frame_height,
+        legacy_icons,
+        icons,
+        vertical_delta);
 };
 
 struct CampaignRecordConfig {
     Point<double> scan_point;
+    Point<double> bg_scan_point;
     double vertical_gap;
     double vertical_gap_limit;
+    BasicModuleConfig campaign_field;
     BasicModuleConfig fans_value;
     BasicModuleConfig scenario;
     BasicModuleConfig foreign_aptitude;
@@ -275,8 +301,10 @@ struct CampaignRecordConfig {
     EXTENDED_JSON_TYPE_NDC(
         CampaignRecordConfig,
         scan_point,
+        bg_scan_point,
         vertical_gap,
         vertical_gap_limit,
+        campaign_field,
         fans_value,
         scenario,
         foreign_aptitude,

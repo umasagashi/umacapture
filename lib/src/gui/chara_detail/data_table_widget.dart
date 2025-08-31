@@ -12,11 +12,14 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
+import '/src/core/version_check.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
 import '/src/gui/chara_detail/delete_record_dialog.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
+import '/src/gui/chara_detail/regenerate_record_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/common.dart';
+import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
@@ -85,7 +88,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]),
+          onTap: () async {
+            final moduleVersion = await ref.read(moduleVersionLoader.future);
+            if (moduleVersion == null) {
+              sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+              return;
+            }
+            if (!record.isSupported(moduleVersion)) {
+              RegenerateRecordDialog.show(ref.base, recordId: record.id);
+              return;
+            }
+            ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]);
+          },
           child: Text("$tr_chara_detail.context_menu.regenerate_record".tr(), style: style),
         ),
         const PopupMenuDivider(),

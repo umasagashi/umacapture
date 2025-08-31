@@ -25,37 +25,65 @@ import '/src/preference/storage_box.dart';
 // ignore: constant_identifier_names
 const tr_toast = "toast";
 
+class ModuleVersion {
+  final DateTime recognizerVersion;
+  final DateTime minimumVersion;
+
+  ModuleVersion({
+    required this.recognizerVersion,
+    required this.minimumVersion,
+  });
+}
+
 @jsonSerializable
-class ModuleVersionInfo {
+class ModuleVersionRawData {
   final String formatVersion;
   final String region;
   final String recognizerVersion;
 
+  @JsonProperty(defaultValue: "2021-02-24T00:00:00+0900")
+  final String minimumVersion;
+
   @JsonProperty(defaultValue: "0.0.0")
   final String applicationVersion;
 
-  ModuleVersionInfo(this.formatVersion, this.region, this.recognizerVersion, this.applicationVersion);
+  ModuleVersionRawData(
+    this.formatVersion,
+    this.region,
+    this.recognizerVersion,
+    this.minimumVersion,
+    this.applicationVersion,
+  );
 
-  static Future<ModuleVersionInfo?> load(FilePath file) async {
+  ModuleVersion toModuleVersion() {
+    return ModuleVersion(
+      recognizerVersion: recognizerVersion.toDateTime(),
+      minimumVersion: minimumVersion.toDateTime(),
+    );
+  }
+
+  static Future<ModuleVersionRawData?> load(FilePath file) async {
     if (!file.existsSync()) {
       return Future.value(null);
     }
     initializeJsonReflectable();
     const options = DeserializationOptions(caseStyle: CaseStyle.snake);
     try {
-      return await file.readAsString().then((content) => JsonMapper.deserialize<ModuleVersionInfo>(content, options));
+      return await file
+          .readAsString()
+          .then((content) => JsonMapper.deserialize<ModuleVersionRawData>(content, options));
     } catch (e) {
       return null;
     }
   }
 
-  static Future<ModuleVersionInfo?> download(Uri url) async {
+  static Future<ModuleVersionRawData?> download(Uri url) async {
     initializeJsonReflectable();
     const options = DeserializationOptions(caseStyle: CaseStyle.snake);
     try {
       return await Dio()
           .get(url.toString())
-          .then((response) => JsonMapper.deserialize<ModuleVersionInfo>(response.toString(), options));
+          .then((response) => JsonMapper.deserialize<ModuleVersionRawData>(response.toString(), options));
     } catch (e) {
       return null;
     }
@@ -70,7 +98,7 @@ enum ModuleVersionCheckResultCode {
   accessDenied,
 }
 
-void _sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
+void sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
   // This function can be called before EasyLocalization is initialized.
   // For this reason, a delay is required for now.
   Future.delayed(const Duration(milliseconds: 300), () {
@@ -85,28 +113,33 @@ Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
   return stream.close();
 }
 
-final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
+final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   final appVersion = await ref.watch(appVersionCheckLoader.future);
   if (appVersion.isUpdatable) {
     logger.w("The module version check is not guaranteed to work properly when the app is updatable.");
   }
 
   final pathInfo = await ref.watch(pathInfoLoader.future);
-  final local = await compute(ModuleVersionInfo.load, pathInfo.modulesDir.filePath("version_info.json"));
-  final latest = await compute(ModuleVersionInfo.download, Uri.parse(Const.moduleVersionInfoUrl));
+  final local = await compute(ModuleVersionRawData.load, pathInfo.modulesDir.filePath("version_info.json"));
+  final latest = await compute(ModuleVersionRawData.download, Uri.parse(Const.moduleVersionInfoUrl));
   logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
+  if (kDebugMode) {
+    logger.w("Updating modules is disabled in debug mode.");
+    return local!.toModuleVersion();
+  }
+
   if (local == null && latest == null) {
-    _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+    sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
     return null;
   }
   if (latest == null) {
-    _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
-    return local!.recognizerVersion.toDateTime();
+    sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
+    return local!.toModuleVersion();
   }
-  // Rollback is allowed.
+  // No need to update. (Rollback is allowed)
   if (local?.recognizerVersion == latest.recognizerVersion) {
-    return latest.recognizerVersion.toDateTime();
+    return local!.toModuleVersion();
   }
 
   if (latest.applicationVersion.toVersion() > appVersion.local) {
@@ -122,20 +155,20 @@ final moduleVersionLoader = FutureProvider<DateTime?>((ref) async {
   } catch (exception, stackTrace) {
     logger.e("Failed to download modules.", exception, stackTrace);
     if (exception is FileSystemException && exception.osError?.errorCode == 5) {
-      _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
+      sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
     } else {
       if (local == null) {
-        _sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+        sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
       } else {
-        _sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
+        sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
       }
       captureException(exception, stackTrace);
     }
-    return local?.recognizerVersion.toDateTime();
+    return local?.toModuleVersion();
   }
 
-  _sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.updated);
-  return latest.recognizerVersion.toDateTime();
+  sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.updated);
+  return latest.toModuleVersion();
 });
 
 class AppVersionCheckResult {

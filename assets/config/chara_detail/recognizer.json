@@ -915,243 +915,501 @@
       "vertical_delta": 0.19819999999999993
     },
     "family_tree": {
-      "module_path": "character/prediction.onnx",
+      "module": {
+        "chara": "character/prediction.onnx",
+        "rank": "character_rank/prediction.onnx"
+      },
       "scan_point": {
-        "x": 0.3148,
+        "x": 0.4815,
         "y": 0.0,
         "anchor": {
           "h": "IntersectStart",
           "v": "ScreenStart"
         }
       },
-      "parent1": [
-        {
-          "top_left": {
-            "x": 0.0852,
-            "y": 0.1036999999999999,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.2537,
-            "y": 0.2722,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
+      "vertical_gap": 0.1852,
+      "frame_color": {
+        "min": {
+          "r": 245,
+          "g": 245,
+          "b": 245
         },
-        {
-          "top_left": {
-            "x": 0.3389,
-            "y": 0.03699999999999992,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.4537,
-            "y": 0.15179999999999993,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        },
-        {
-          "top_left": {
-            "x": 0.3389,
-            "y": 0.1943999999999999,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.4537,
-            "y": 0.3091999999999999,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
+        "max": {
+          "r": 255,
+          "g": 255,
+          "b": 255
         }
-      ],
-      "parent2": [
-        {
-          "top_left": {
-            "x": 0.5426,
-            "y": 0.1036999999999999,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.7111,
-            "y": 0.2722,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        },
-        {
-          "top_left": {
-            "x": 0.7963,
-            "y": 0.03699999999999992,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.9111,
-            "y": 0.15179999999999993,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        },
-        {
-          "top_left": {
-            "x": 0.7963,
-            "y": 0.1943999999999999,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.9111,
-            "y": 0.3091999999999999,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        }
-      ],
-      "chara_rank": {
-        "module_path": "character_rank/prediction.onnx",
+      },
+      "legacy_frame_height": 0.2778,
+      "legacy_icons": {
         "parent1": [
           {
-            "top_left": {
-              "x": 0.1889,
-              "y": 0.08699999999999997,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "chara": {
+              "top_left": {
+                "x": 0.0852,
+                "y": 0.1036999999999999,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.2537,
+                "y": 0.2722,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             },
-            "bottom_right": {
-              "x": 0.2574,
-              "y": 0.15549999999999997,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "rank": {
+              "top_left": {
+                "x": 0.1889,
+                "y": 0.08699999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.2574,
+                "y": 0.15549999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             }
           },
           {
-            "top_left": {
-              "x": 0.4111,
-              "y": 0.02400000000000002,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "chara": {
+              "top_left": {
+                "x": 0.3389,
+                "y": 0.03699999999999992,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.4537,
+                "y": 0.15179999999999993,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             },
-            "bottom_right": {
-              "x": 0.4556,
-              "y": 0.0685,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "rank": {
+              "top_left": {
+                "x": 0.4111,
+                "y": 0.02400000000000002,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.4556,
+                "y": 0.0685,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             }
           },
           {
-            "top_left": {
-              "x": 0.4111,
-              "y": 0.1814,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "chara": {
+              "top_left": {
+                "x": 0.3389,
+                "y": 0.1943999999999999,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.4537,
+                "y": 0.3091999999999999,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             },
-            "bottom_right": {
-              "x": 0.4556,
-              "y": 0.2259,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "rank": {
+              "top_left": {
+                "x": 0.4111,
+                "y": 0.1814,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.4556,
+                "y": 0.2259,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             }
           }
         ],
         "parent2": [
           {
-            "top_left": {
-              "x": 0.6481,
-              "y": 0.08699999999999997,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "chara": {
+              "top_left": {
+                "x": 0.5426,
+                "y": 0.1036999999999999,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.7111,
+                "y": 0.2722,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             },
-            "bottom_right": {
-              "x": 0.7167,
-              "y": 0.15549999999999997,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "rank": {
+              "top_left": {
+                "x": 0.6481,
+                "y": 0.08699999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.7167,
+                "y": 0.15549999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             }
           },
           {
-            "top_left": {
-              "x": 0.8685,
-              "y": 0.02400000000000002,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "chara": {
+              "top_left": {
+                "x": 0.7963,
+                "y": 0.03699999999999992,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.9111,
+                "y": 0.15179999999999993,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             },
-            "bottom_right": {
-              "x": 0.913,
-              "y": 0.0685,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "rank": {
+              "top_left": {
+                "x": 0.8685,
+                "y": 0.02400000000000002,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.913,
+                "y": 0.0685,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             }
           },
           {
-            "top_left": {
-              "x": 0.8685,
-              "y": 0.1814,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "chara": {
+              "top_left": {
+                "x": 0.7963,
+                "y": 0.1943999999999999,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.9111,
+                "y": 0.3091999999999999,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             },
-            "bottom_right": {
-              "x": 0.913,
-              "y": 0.2259,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
+            "rank": {
+              "top_left": {
+                "x": 0.8685,
+                "y": 0.1814,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.913,
+                "y": 0.2259,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
               }
             }
           }
         ]
       },
-      "vertical_delta": 0.3536999999999999
+      "icons": {
+        "parent1": [
+          {
+            "chara": {
+              "top_left": {
+                "x": 0.0699,
+                "y": 0.0685,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.2074,
+                "y": 0.20419999999999994,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            },
+            "rank": {
+              "top_left": {
+                "x": 0.1551,
+                "y": 0.055600000000000094,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.2097,
+                "y": 0.10790000000000011,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            }
+          },
+          {
+            "chara": {
+              "top_left": {
+                "x": 0.2329,
+                "y": 0.09960000000000013,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.3389,
+                "y": 0.2028000000000001,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            },
+            "rank": {
+              "top_left": {
+                "x": 0.2977,
+                "y": 0.08699999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.3393,
+                "y": 0.12729999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            }
+          },
+          {
+            "chara": {
+              "top_left": {
+                "x": 0.3644,
+                "y": 0.09960000000000013,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.469,
+                "y": 0.2028000000000001,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            },
+            "rank": {
+              "top_left": {
+                "x": 0.4296,
+                "y": 0.08699999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.4722,
+                "y": 0.12729999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            }
+          }
+        ],
+        "parent2": [
+          {
+            "chara": {
+              "top_left": {
+                "x": 0.5292,
+                "y": 0.0685,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.6653,
+                "y": 0.20419999999999994,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            },
+            "rank": {
+              "top_left": {
+                "x": 0.613,
+                "y": 0.055600000000000094,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.6667,
+                "y": 0.10790000000000011,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            }
+          },
+          {
+            "chara": {
+              "top_left": {
+                "x": 0.6903,
+                "y": 0.09960000000000013,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.7949,
+                "y": 0.2028000000000001,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            },
+            "rank": {
+              "top_left": {
+                "x": 0.757,
+                "y": 0.08699999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.7981,
+                "y": 0.12729999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            }
+          },
+          {
+            "chara": {
+              "top_left": {
+                "x": 0.8218,
+                "y": 0.09960000000000013,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.9278,
+                "y": 0.2028000000000001,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            },
+            "rank": {
+              "top_left": {
+                "x": 0.887,
+                "y": 0.08699999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              },
+              "bottom_right": {
+                "x": 0.9301,
+                "y": 0.12729999999999997,
+                "anchor": {
+                  "h": "IntersectStart",
+                  "v": "ScreenStart"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "vertical_delta": 0.02
     },
     "campaign_record": {
       "scan_point": {
@@ -1162,8 +1420,37 @@
           "v": "ScreenStart"
         }
       },
+      "bg_scan_point": {
+        "x": 0.2833,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "ScreenStart"
+        }
+      },
       "vertical_gap": 0.044399999999999995,
       "vertical_gap_limit": 0.0407,
+      "campaign_field": {
+        "module_path": "campaign_field/prediction.onnx",
+        "rect": {
+          "top_left": {
+            "x": 0.0741,
+            "y": 0.003,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          },
+          "bottom_right": {
+            "x": 0.2519,
+            "y": 0.030799999999999998,
+            "anchor": {
+              "h": "IntersectStart",
+              "v": "ScreenStart"
+            }
+          }
+        }
+      },
       "fans_value": {
         "module_path": "fans_value/prediction.onnx",
         "rect": {

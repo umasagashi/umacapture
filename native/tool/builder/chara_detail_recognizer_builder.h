@@ -176,7 +176,7 @@ private:
         };
     }
 
-    [[nodiscard]] FamilyTreeConfig familyTree() const {
+    [[nodiscard]] FamilyTreeIconConfig legacyFamilyTreeIcon() const {
         const double scan_top = 1.1130;
 
         const double parent_top = 1.2167 - scan_top;
@@ -198,40 +198,112 @@ private:
         const double grand_lower_rank_bottom = 1.3389 - scan_top;
 
         return {
-            getModulePath("character"),
-            Point<double>{0.3148, 0.0000, {IS, SS}},
             {
-                Rect<double>{{0.0852, parent_top, {IS, SS}}, {0.2537, parent_bottom, {IS, SS}}},
-                Rect<double>{{0.3389, grand_upper_top, {IS, SS}}, {0.4537, grand_upper_bottom, {IS, SS}}},
-                Rect<double>{{0.3389, grand_lower_top, {IS, SS}}, {0.4537, grand_lower_bottom, {IS, SS}}},
-            },
-            {
-                Rect<double>{{0.5426, parent_top, {IS, SS}}, {0.7111, parent_bottom, {IS, SS}}},
-                Rect<double>{{0.7963, grand_upper_top, {IS, SS}}, {0.9111, grand_upper_bottom, {IS, SS}}},
-                Rect<double>{{0.7963, grand_lower_top, {IS, SS}}, {0.9111, grand_lower_bottom, {IS, SS}}},
-            },
-            {
-                getModulePath("character_rank"),
-                {
+                IconSetConfig{
+                    Rect<double>{{0.0852, parent_top, {IS, SS}}, {0.2537, parent_bottom, {IS, SS}}},
                     Rect<double>{{0.1889, parent_rank_top, {IS, SS}}, {0.2574, parent_rank_bottom, {IS, SS}}},
+                },
+                IconSetConfig{
+                    Rect<double>{{0.3389, grand_upper_top, {IS, SS}}, {0.4537, grand_upper_bottom, {IS, SS}}},
                     Rect<double>{{0.4111, grand_upper_rank_top, {IS, SS}}, {0.4556, grand_upper_rank_bottom, {IS, SS}}},
+                },
+                IconSetConfig{
+                    Rect<double>{{0.3389, grand_lower_top, {IS, SS}}, {0.4537, grand_lower_bottom, {IS, SS}}},
                     Rect<double>{{0.4111, grand_lower_rank_top, {IS, SS}}, {0.4556, grand_lower_rank_bottom, {IS, SS}}},
                 },
-                {
+            },
+            {
+                IconSetConfig{
+                    Rect<double>{{0.5426, parent_top, {IS, SS}}, {0.7111, parent_bottom, {IS, SS}}},
                     Rect<double>{{0.6481, parent_rank_top, {IS, SS}}, {0.7167, parent_rank_bottom, {IS, SS}}},
+
+                },
+                IconSetConfig{
+                    Rect<double>{{0.7963, grand_upper_top, {IS, SS}}, {0.9111, grand_upper_bottom, {IS, SS}}},
                     Rect<double>{{0.8685, grand_upper_rank_top, {IS, SS}}, {0.9130, grand_upper_rank_bottom, {IS, SS}}},
+                },
+                IconSetConfig{
+                    Rect<double>{{0.7963, grand_lower_top, {IS, SS}}, {0.9111, grand_lower_bottom, {IS, SS}}},
                     Rect<double>{{0.8685, grand_lower_rank_top, {IS, SS}}, {0.9130, grand_lower_rank_bottom, {IS, SS}}},
                 },
             },
-            1.4667 - 1.1130,
+        };
+    }
+
+    [[nodiscard]] FamilyTreeIconConfig familyTreeIcon() const {
+        const double scan_top = 1.1111;
+
+        const double parent_top = 1.1796 - scan_top;
+        const double parent_bottom = 1.3153 - scan_top;
+
+        const double grand_top = 1.2107 - scan_top;
+        const double grand_bottom = 1.3139 - scan_top;
+
+        const double parent_rank_top = 1.1667 - scan_top;
+        const double parent_rank_bottom = 1.2190 - scan_top;
+
+        const double grand_rank_top = 1.1981 - scan_top;
+        const double grand_rank_bottom = 1.2384 - scan_top;
+
+        return {
+            {
+                IconSetConfig{
+                    Rect<double>{{0.0699, parent_top, {IS, SS}}, {0.2074, parent_bottom, {IS, SS}}},
+                    Rect<double>{{0.1551, parent_rank_top, {IS, SS}}, {0.2097, parent_rank_bottom, {IS, SS}}},
+                },
+                IconSetConfig{
+                    Rect<double>{{0.2329, grand_top, {IS, SS}}, {0.3389, grand_bottom, {IS, SS}}},
+                    Rect<double>{{0.2977, grand_rank_top, {IS, SS}}, {0.3393, grand_rank_bottom, {IS, SS}}},
+                },
+                IconSetConfig{
+                    Rect<double>{{0.3644, grand_top, {IS, SS}}, {0.4690, grand_bottom, {IS, SS}}},
+                    Rect<double>{{0.4296, grand_rank_top, {IS, SS}}, {0.4722, grand_rank_bottom, {IS, SS}}},
+                },
+            },
+            {
+                IconSetConfig{
+                    Rect<double>{{0.5292, parent_top, {IS, SS}}, {0.6653, parent_bottom, {IS, SS}}},
+                    Rect<double>{{0.6130, parent_rank_top, {IS, SS}}, {0.6667, parent_rank_bottom, {IS, SS}}},
+
+                },
+                IconSetConfig{
+                    Rect<double>{{0.6903, grand_top, {IS, SS}}, {0.7949, grand_bottom, {IS, SS}}},
+                    Rect<double>{{0.7570, grand_rank_top, {IS, SS}}, {0.7981, grand_rank_bottom, {IS, SS}}},
+                },
+                IconSetConfig{
+                    Rect<double>{{0.8218, grand_top, {IS, SS}}, {0.9278, grand_bottom, {IS, SS}}},
+                    Rect<double>{{0.8870, grand_rank_top, {IS, SS}}, {0.9301, grand_rank_bottom, {IS, SS}}},
+                },
+            },
+        };
+    }
+
+    [[nodiscard]] FamilyTreeConfig familyTree() const {
+        return {
+            {
+                getModulePath("character"),
+                getModulePath("character_rank"),
+            },
+            Point<double>{0.4815, 0.0000, {IS, SS}},
+            0.1852,
+            {{245, 245, 245}, {255, 255, 255}},
+            0.2778,
+            legacyFamilyTreeIcon(),
+            familyTreeIcon(),
+            0.02,
         };
     }
 
     [[nodiscard]] CampaignRecordConfig campaignRecord() const {
         return {
             Point<double>{0.2537, 0.0000, {IS, SS}},
+            Point<double>{0.2833, 0.0000, {IS, SS}},
             1.0037 - 0.9593,
             0.0407,
+            {
+                getModulePath("campaign_field"),
+                Rect<double>{{0.0741, 0.003, {IS, SS}}, {0.2519, 0.003 + 0.0278, {IS, SS}}},
+            },
             {
                 getModulePath("fans_value"),
                 Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.5278, 0.0278, {IS, SS}}},
