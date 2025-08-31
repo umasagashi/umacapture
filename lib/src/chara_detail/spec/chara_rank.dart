@@ -24,7 +24,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec {
   List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
     final charaRankBorder = ref.watch(charaRankBorderProvider);
     return List<int>.from(
-        records.map(parser.parse).map((evaluation) => charaRankBorder.indexWhere((border) => border >= evaluation)));
+        records.map(parser.parse).map((evaluation) => charaRankBorder.indexWhere((border) => border > evaluation)));
   }
 
   @override
