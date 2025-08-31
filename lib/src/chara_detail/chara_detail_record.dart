@@ -5,6 +5,7 @@ import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
+import '/src/core/version_check.dart';
 
 const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
 
@@ -373,10 +374,16 @@ class CharaDetailRecord extends JsonEquatable {
     ].everyIn();
   }
 
-  bool isObsoleted(DateTime moduleVersion, bool includeCurrentVersion) {
+  bool isObsoleted(ModuleVersion moduleVersion, bool includeCurrentVersion) {
     final recordVersion = DateTime.parse(metadata.recognizerVersion);
     final capturedDate = DateTime.parse(metadata.capturedDate);
-    final obsoleted = recordVersion != moduleVersion && capturedDate.isAfter(moduleVersion);
-    return obsoleted || (includeCurrentVersion && recordVersion == moduleVersion);
+    final obsoleted =
+        recordVersion != moduleVersion.recognizerVersion && capturedDate.isAfter(moduleVersion.recognizerVersion);
+    return obsoleted || (includeCurrentVersion && recordVersion == moduleVersion.recognizerVersion);
+  }
+
+  bool isSupported(ModuleVersion moduleVersion) {
+    final capturedDate = DateTime.parse(metadata.capturedDate);
+    return capturedDate.isAfter(moduleVersion.minimumVersion);
   }
 }

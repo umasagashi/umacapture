@@ -1,5 +1,4 @@
 import 'package:easy_localization/easy_localization.dart';
-
 // ignore: depend_on_referenced_packages
 import 'package:easy_logger/easy_logger.dart';
 import 'package:logger/logger.dart';

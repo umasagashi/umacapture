@@ -1,0 +1,94 @@
+import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '/src/chara_detail/storage.dart';
+import '/src/core/utils.dart';
+import '/src/gui/chara_detail/common.dart';
+import '/src/gui/common.dart';
+
+// ignore: constant_identifier_names
+const tr_regenerate_record = "pages.chara_detail.regenerate_record";
+
+class RegenerateRecordDialog extends ConsumerWidget {
+  final String recordId;
+
+  const RegenerateRecordDialog({
+    Key? key,
+    required this.recordId,
+  }) : super(key: key);
+
+  static void show(RefBase ref, {required String recordId}) {
+    CardDialog.show(ref, (_) {
+      return RegenerateRecordDialog(recordId: recordId);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final record = storage.getBy(id: recordId)!;
+    final iconPath = storage.traineeIconPathOf(record);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(
+        maxWidth: 500,
+        maxHeight: 400,
+      ),
+      child: CardDialog(
+        dialogTitle: "$tr_regenerate_record.dialog.title".tr(),
+        closeButtonTooltip: "$tr_regenerate_record.dialog.close_button.tooltip".tr(),
+        usePageView: false,
+        content: Expanded(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Image.file(iconPath.toFile()),
+              Text(
+                DateTime.parse(record.metadata.capturedDate).toLocal().toString(),
+                style: theme.textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              NoteCard(
+                description: Text("$tr_regenerate_record.dialog.description".tr()),
+                color: theme.colorScheme.error,
+              ),
+            ],
+          ),
+        ),
+        bottom: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Tooltip(
+              message: "$tr_regenerate_record.dialog.cancel_button.tooltip".tr(),
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.cancel),
+                label: Text("$tr_regenerate_record.dialog.cancel_button.label".tr()),
+                onPressed: () {
+                  CardDialog.dismiss(ref.base);
+                },
+              ),
+            ),
+            const SizedBox(width: 8),
+            Tooltip(
+              message: "$tr_regenerate_record.dialog.ok_button.tooltip".tr(),
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  primary: theme.colorScheme.error,
+                  onPrimary: theme.colorScheme.onError,
+                ),
+                icon: const Icon(Icons.refresh),
+                label: Text("$tr_regenerate_record.dialog.ok_button.label".tr()),
+                onPressed: () {},
+                onLongPress: () {
+                  ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]);
+                  CardDialog.dismiss(ref.base);
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -344,7 +344,9 @@ class AboutGroup extends ConsumerWidget {
     return ref.watch(moduleVersionLoader).when(
           loading: () => "checking...",
           error: (e, __) => "ERROR: $e",
-          data: (data) => data?.toLocal().toString() ?? "$tr_settings.version_check.unknown_version".tr(),
+          data: (data) {
+            return data?.recognizerVersion.toLocal().toString() ?? "$tr_settings.version_check.unknown_version".tr();
+          },
         );
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:collection/collection.dart';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -14,9 +15,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
-
-// ignore: constant_identifier_names
-const tr_capture = "pages.capture";
+import '/src/gui/toast.dart';
 
 StreamController<String> _duplicatedCharaEventController = StreamController();
 final duplicatedCharaEventProvider = StreamProvider<String>((ref) {
@@ -40,6 +39,7 @@ class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
     for (final record in records) {
       platformController!.updateRecord(record.id);
     }
+    logger.d("Start regenerating ${records.length} chara detail records.");
     state = Progress(total: records.length);
   }
 
@@ -48,8 +48,13 @@ class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
     state = state.increment();
     if (state.isCompleted) {
       Future.delayed(const Duration(milliseconds: 200), () {
-        state = Progress.none;
         ref.read(charaDetailRecordStorageProvider.notifier).forceRebuild();
+        Toaster.show(ToastData(
+            type: ToastType.success,
+            description: "pages.capture.regenerate.success".tr(namedArgs: {
+              "count": state.total.toString(),
+            })));
+        state = Progress.none;
       });
     }
     return Future.value();
@@ -178,10 +183,13 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     if (moduleVersion == null) {
       return Future.value();
     }
-    final obsoletedRecords = state.where((r) => r.isObsoleted(moduleVersion, includeCurrentVersion)).toList();
-    if (obsoletedRecords.isNotEmpty) {
-      ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start(obsoletedRecords);
+    final obsoletedRecords = state.where((r) {
+      return r.isObsoleted(moduleVersion, includeCurrentVersion) && r.isSupported(moduleVersion);
+    }).toList();
+    if (obsoletedRecords.isEmpty) {
+      return Future.value();
     }
+    ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start(obsoletedRecords);
   }
 
   Future<void> reload(String id) async {
