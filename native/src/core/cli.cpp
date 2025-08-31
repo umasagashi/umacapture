@@ -99,7 +99,7 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
 
     recorder_runner->start();
 
-    auto video = video::VideoLoader(connection, profile.crop_rect.value());
+    auto video = video::VideoLoader(connection, profile.crop_rect);
     video.runBatch(video_path_list);
 
     while (api.isRunning()) {
