@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -160,7 +161,10 @@ final trainerIdProvider = Provider<String>((ref) {
     entry.push(id);
     logger.i("Trainer ID generated: $id");
   } else {
-    logger.i("Trainer ID loaded: $id");
+    // Logs are included in bug reports, so we should not casually print the trainer ID.
+    if (kDebugMode) {
+      logger.i("Trainer ID loaded: $id");
+    }
   }
   return id;
 });

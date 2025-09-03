@@ -45,7 +45,7 @@ class RegenerateRecordDialog extends ConsumerWidget {
             children: [
               Image.file(iconPath.toFile()),
               Text(
-                DateTime.parse(record.metadata.capturedDate).toLocal().toString(),
+                record.metadata.capturedDate.toDateTime().toLocal().toString(),
                 style: theme.textTheme.titleMedium,
               ),
               const SizedBox(height: 8),

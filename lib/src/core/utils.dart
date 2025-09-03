@@ -275,6 +275,19 @@ extension StringExtension on String {
   String get first => this[0];
 
   bool get isNumber => num.tryParse(this) != null;
+
+  DateTime toDateTime() {
+    try {
+      return DateTime.parse(this);
+    } catch (error, stackTrace) {
+      logger.e("Failed to parse DateTime: value=$this", error, stackTrace);
+      // Since it gets sent every time the table is displayed, temporarily disabled.
+      // captureException(error, stackTrace);
+
+      // The date has no particular meaning, but having the first digit different improves readability.
+      return DateTime(1999, 12, 31);
+    }
+  }
 }
 
 Iterable<Tuple2<T1, T2>> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {

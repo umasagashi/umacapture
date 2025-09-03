@@ -339,7 +339,7 @@ class CharaDetailRecord extends JsonEquatable {
   FilePath get traineeIconPath => DirectoryPath(id).filePath("trainee.jpg");
 
   @JsonProperty(ignore: true)
-  DateTime get trainedDateAsDateTime => DateTime.parse(trainedDate.replaceAll("/", "-"));
+  DateTime get trainedDateAsDateTime => trainedDate.replaceAll("/", "-").toDateTime();
 
   static CharaDetailRecord? load(DirectoryPath directory) {
     try {
@@ -375,15 +375,15 @@ class CharaDetailRecord extends JsonEquatable {
   }
 
   bool isObsoleted(ModuleVersion moduleVersion, bool includeCurrentVersion) {
-    final recordVersion = DateTime.parse(metadata.recognizerVersion);
-    final capturedDate = DateTime.parse(metadata.capturedDate);
+    final recordVersion = metadata.recognizerVersion.toDateTime();
+    final capturedDate = metadata.capturedDate.toDateTime();
     final obsoleted =
         recordVersion != moduleVersion.recognizerVersion && capturedDate.isAfter(moduleVersion.recognizerVersion);
     return obsoleted || (includeCurrentVersion && recordVersion == moduleVersion.recognizerVersion);
   }
 
   bool isSupported(ModuleVersion moduleVersion) {
-    final capturedDate = DateTime.parse(metadata.capturedDate);
+    final capturedDate = metadata.capturedDate.toDateTime();
     return capturedDate.isAfter(moduleVersion.minimumVersion);
   }
 }
