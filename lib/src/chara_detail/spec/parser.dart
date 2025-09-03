@@ -1,6 +1,7 @@
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/core/utils.dart';
 
 @jsonSerializable
 @Json(discriminatorProperty: 'type')
@@ -162,7 +163,7 @@ class ForeignAptitudeParser extends Parser<int> {
 class TrainedDateParser extends Parser<DateTime> {
   @override
   DateTime parse(CharaDetailRecord record) {
-    return DateTime.parse(record.trainedDate.replaceAll("/", "-"));
+    return record.trainedDate.replaceAll("/", "-").toDateTime();
   }
 }
 

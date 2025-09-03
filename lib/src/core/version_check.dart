@@ -207,9 +207,15 @@ enum VersionCheckEntryKey {
 }
 
 extension StringExtension on String {
-  Version toVersion() => Version.parse(this);
-
-  DateTime toDateTime() => DateTime.parse(this);
+  Version toVersion() {
+    try {
+      return Version.parse(this);
+    } catch (error, stackTrace) {
+      logger.e("Failed to parse Version: value=$this", error, stackTrace);
+      captureException(error, stackTrace);
+      return Version(0, 0, 0);
+    }
+  }
 }
 
 FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
