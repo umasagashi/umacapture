@@ -342,5 +342,10 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         type: ColumnBuilderType.add,
       ),
     ],
+    DateTimeColumnBuilder(
+      title: "$tr_columns.captured_date.title".tr(),
+      category: ColumnCategory.metadata,
+      parser: CapturedDateParser(),
+    ),
   ];
 });

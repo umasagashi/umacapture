@@ -616,6 +616,9 @@
                 },
                 "memo": {
                     "title": "メモ"
+                },
+                "captured_date": {
+                    "title": "キャプチャ日"
                 }
             },
             "context_menu": {

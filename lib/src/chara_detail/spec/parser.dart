@@ -168,6 +168,15 @@ class TrainedDateParser extends Parser<DateTime> {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: "CapturedDateParser")
+class CapturedDateParser extends Parser<DateTime> {
+  @override
+  DateTime parse(CharaDetailRecord record) {
+    return record.metadata.capturedDate.toDateTime().toLocal();
+  }
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "RaceWinningCountParser")
 class RaceWinningCountParser extends Parser<int> {
   @override
