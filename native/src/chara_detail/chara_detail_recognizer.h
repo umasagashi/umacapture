@@ -795,7 +795,10 @@ public:
 
         auto started = std::chrono::steady_clock::now();
 
-        const auto timestamp = chrono_util::utc();
+        // TODO: These should share the exact same time.
+        const auto utc_now = chrono_util::utc();
+        const auto timestamp = chrono_util::timestamp();
+
         record::CharaDetailRecord record;
 
         status_header_recognizer.recognize(skill_frame, record, status_header_history);
@@ -810,13 +813,18 @@ public:
             const auto old_record = json_util::read(record_dir / "record.json").get<record::CharaDetailRecord>();
             record.metadata = old_record.metadata;
             record.metadata.recognizer_version = version_info.recognizer_version;
+
+            std::filesystem::copy_file(
+                record_dir / "record.json",
+                record_dir / ("record_" + std::to_string(timestamp) + ".json"),
+                std::filesystem::copy_options::overwrite_existing);
         } else {
             record.metadata = {
                 version_info.format_version,
                 version_info.region,
                 {id},
                 trainer_id,
-                timestamp,
+                utc_now,
                 version_info.recognizer_version,
                 "active",
                 (!record.races.empty() ? record.races.front().strategy : 0),
