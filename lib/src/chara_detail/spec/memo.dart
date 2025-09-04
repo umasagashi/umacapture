@@ -419,7 +419,7 @@ class _StorageController extends ConsumerWidget {
 
             final storageFile = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$storageKey.json");
             if (storageFile.existsSync()) {
-              storageFile.deleteSync();
+              storageFile.deleteSyncWithCheck();
             }
 
             ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);

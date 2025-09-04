@@ -2,8 +2,12 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+
+import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 
 const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
 
@@ -51,7 +55,30 @@ class PathEntity {
     if (emptyOk && !existsSync()) {
       return;
     }
-    toEntity().deleteSync(recursive: recursive);
+
+    // Retry up to 3 times to avoid file lock issues.
+    int attempts = 0;
+    while (true) {
+      try {
+        toEntity().deleteSync(recursive: recursive);
+        return; // Exit the loop on success.
+      } catch (e) {
+        if (++attempts >= 3) {
+          rethrow; // Exit the loop on failure.
+        }
+        sleep(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
+  void deleteSyncWithCheck({bool recursive = false, bool emptyOk = false}) {
+    try {
+      deleteSync(recursive: recursive, emptyOk: emptyOk);
+    } catch (error, stackTrace) {
+      logger.e("Failed to delete record.", error, stackTrace);
+      Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
+      parent.launch();
+    }
   }
 
   bool existsSync() => toEntity().existsSync();
@@ -169,9 +196,15 @@ class DirectoryPath extends PathEntity {
 
   Future<void> create({bool recursive = false}) => toDirectory().create(recursive: recursive);
 
-  void deleteSyncSafe() {
-    listSync(recursive: false, followLinks: false).forEach((e) => e.deleteSync(recursive: false));
-    deleteSync(recursive: false);
+  void deleteSyncSafeWithCheck() {
+    try {
+      listSync(recursive: false, followLinks: false).forEach((e) => e.deleteSync(recursive: false));
+      deleteSync(recursive: false);
+    } catch (error, stackTrace) {
+      logger.e("Failed to delete record.", error, stackTrace);
+      Toaster.show(ToastData.error(description: "app.file_deletion_error".tr()));
+      launch();
+    }
   }
 }
 

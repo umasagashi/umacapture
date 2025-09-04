@@ -6,7 +6,8 @@
             "navigate": "アプリ操作",
             "draw": "ペイント",
             "submit": "フィードバックを送信"
-        }
+        },
+        "file_deletion_error": "ファイルの削除が許可されていません。エクスプローラーで削除してください。"
     },
     "pages": {
         "dashboard": {

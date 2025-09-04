@@ -350,7 +350,7 @@ class CharaDetailRecord extends JsonEquatable {
       logger.i(directory.listSync().map((e) => e.name).join(", "));
       captureException(exception, stackTrace);
     }
-    directory.deleteSyncSafe();
+    directory.deleteSyncSafeWithCheck();
     return null;
   }
 
