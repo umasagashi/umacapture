@@ -161,7 +161,7 @@ class _RangedIntegerSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = spec.parse(ref.base, records).range().toDouble();
+    final range = records.isEmpty ? Range<double>(min: 0, max: 0) : spec.parse(ref.base, records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_integer.range.label".tr()),
       description: Text("$tr_ranged_integer.range.description".tr()),

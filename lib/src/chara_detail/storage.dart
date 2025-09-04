@@ -122,7 +122,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   void add(CharaDetailRecord record) {
     final duplicated = state.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
-      (rootDirectory / record.id).deleteSync(recursive: true);
+      (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
       _duplicatedCharaEventController.sink.add(record.id);
       ref.read(charaDetailCaptureStateProvider.notifier).update((state) => state.fail(message: "duplicated_character"));
       return;
@@ -201,7 +201,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     final record = getBy(id: id);
     assert(record != null);
     final directory = recordPathOf(record!);
-    directory.deleteSyncSafe();
+    directory.deleteSyncSafeWithCheck();
     state.remove(record);
     forceRebuild();
   }
