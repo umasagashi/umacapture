@@ -188,6 +188,9 @@ class Range<T extends dynamic> {
 
 extension DynamicTypeListExtension<T extends dynamic> on List<T> {
   Range<T> range() {
+    if (isEmpty) {
+      throw Exception("Cannot determine range of an empty list.");
+    }
     T min = first;
     T max = first;
     for (final T value in this) {
