@@ -29,11 +29,9 @@ namespace uma::windows {
 
 namespace windows_config {
 
-struct WindowProfile {
+struct WindowTarget {
     std::optional<std::string> window_class;
     std::optional<std::string> window_title;
-    std::optional<Size<int>> window_aspect_ratio;
-    std::optional<Rect<double>> crop_rect;
 
     [[nodiscard]] const char *windowClassOrNull() const {
         return (window_class && !window_class->empty()) ? window_class->c_str() : nullptr;
@@ -42,7 +40,15 @@ struct WindowProfile {
         return (window_title && !window_title->empty()) ? window_title->c_str() : nullptr;
     }
 
-    EXTENDED_JSON_TYPE_NDC(WindowProfile, window_class, window_title, window_aspect_ratio, crop_rect);
+    EXTENDED_JSON_TYPE_NDC(WindowTarget, window_class, window_title);
+};
+
+struct CropProfile {
+    std::optional<Range<double>> window_aspect_ratio;
+    std::optional<Size<int>> client_aspect_ratio;
+    std::optional<Rect<double>> crop_rect;
+
+    EXTENDED_JSON_TYPE_NDC(CropProfile, window_aspect_ratio, client_aspect_ratio, crop_rect);
 };
 
 }  // namespace windows_config
@@ -72,10 +78,12 @@ inline Size<int> getRatioFixedSize(const Size<int> &source, const Size<int> &fit
 class WindowCapturer {
 public:
     WindowCapturer(
-        const std::vector<windows_config::WindowProfile> &window_profiles,
+        const std::vector<windows_config::WindowTarget> &window_targets,
+        const std::vector<windows_config::CropProfile> &crop_profiles,
         const Size<int> &minimum_size,
         const bool force_resize)
-        : window_profiles(window_profiles)
+        : window_targets(window_targets)
+        , crop_profiles(crop_profiles)
         , minimum_size(minimum_size)
         , force_resize(force_resize) {
         initializeGraphicsCapture();
@@ -238,8 +246,8 @@ private:
         };
     }
 
-    WindowInfo findTargetWindow(const windows_config::WindowProfile &profile) {
-        HWND hwnd = FindWindowA(profile.windowClassOrNull(), profile.windowTitleOrNull());
+    WindowInfo findWindow(const windows_config::WindowTarget &target) {
+        HWND hwnd = FindWindowA(target.windowClassOrNull(), target.windowTitleOrNull());
         if (!hwnd || !IsWindow(hwnd) || IsIconic(hwnd)) {
             return {};
         }
@@ -279,34 +287,61 @@ private:
             Size<int>{client_rect.right, client_rect.bottom},
         };
 
-        if (!profile.window_aspect_ratio.has_value()) {
-            info.content_rect = info.client_rect;
-        } else {
-            info.content_rect = removeLetterbox(info.client_rect, profile.window_aspect_ratio.value());
+        return info;
+    }
+
+    const std::optional<windows_config::CropProfile> &findMatchingCropProfile(const Rect<int> &client_rect) const {
+        const double ratio = static_cast<double>(client_rect.width()) / client_rect.height();
+        // const windows_config::CropProfile *fallback = nullptr;
+        for (const auto &profile : crop_profiles) {
+            if (profile.window_aspect_ratio->contains(ratio)) {
+                return profile;
+            }
+        }
+        return {};
+    }
+
+    WindowInfo findTargetWindow() {
+        // Phase 1: Find window from targets.
+        WindowInfo info;
+        for (const auto &target : window_targets) {
+            info = findWindow(target);
+            if (info.isValid()) {
+                break;
+            }
+        }
+        if (!info.isValid()) {
+            return {};
         }
 
-        const Point<int> window_origin = info.window_rect.topLeft();
-        if (!profile.crop_rect.has_value()) {
-            info.capture_rect = Rect<int>{info.content_rect.topLeft() - window_origin, info.content_rect.size()};
+        // Phase 2: Select crop profile based on window aspect ratio.
+        const auto &profile = findMatchingCropProfile(info.client_rect);
+        if (!profile.has_value()) {
+            // No matching profile means no cropping is needed.
+            info.content_rect = info.client_rect;
+            info.capture_rect = {info.content_rect.topLeft() - info.window_rect.topLeft(), info.content_rect.size()};
         } else {
-            const auto anchor = FrameAnchor::intersect(info.content_rect.size());
-            const auto crop_rect = anchor.mapToFrame(profile.crop_rect.value());
-            const Point<int> crop_origin = info.content_rect.topLeft() + Size<int>{crop_rect.left(), crop_rect.top()};
-            info.capture_rect = Rect<int>{crop_origin - window_origin, crop_rect.size()};
+            // Apply letterbox removal if client_aspect_ratio is specified.
+            if (!profile->client_aspect_ratio.has_value()) {
+                info.content_rect = info.client_rect;
+            } else {
+                info.content_rect = removeLetterbox(info.client_rect, profile->client_aspect_ratio.value());
+            }
+
+            // Apply crop_rect if specified.
+            const auto window_origin = info.window_rect.topLeft();
+            if (!profile->crop_rect.has_value()) {
+                info.capture_rect = {info.content_rect.topLeft() - window_origin, info.content_rect.size()};
+            } else {
+                const auto anchor = FrameAnchor::intersect(info.content_rect.size());
+                const auto crop_rect = anchor.mapToFrame(profile->crop_rect.value());
+                const auto crop_origin = info.content_rect.topLeft() + Size<int>{crop_rect.left(), crop_rect.top()};
+                info.capture_rect = {crop_origin - window_origin, crop_rect.size()};
+            }
         }
 
         last_window_size = info.content_rect.size();
         return info;
-    }
-
-    WindowInfo findTargetWindow() {
-        for (const auto &profile : window_profiles) {
-            const auto info = findTargetWindow(profile);
-            if (info.isValid()) {
-                return info;
-            }
-        }
-        return {};
     }
 
     bool ensureCaptureSession(const HWND hwnd) {
@@ -409,7 +444,8 @@ private:
             source_box.bottom = rect.bottom();
             source_box.front = 0;
             source_box.back = 1;
-            d3d_device_context->CopySubresourceRegion(staging_texture.get(), 0, 0, 0, 0, source_texture.get(), 0, &source_box);
+            d3d_device_context->CopySubresourceRegion(
+                staging_texture.get(), 0, 0, 0, 0, source_texture.get(), 0, &source_box);
 
             // Convert to cv::Mat.
             D3D11_MAPPED_SUBRESOURCE resource;
@@ -431,7 +467,8 @@ private:
         }
     }
 
-    const std::vector<windows_config::WindowProfile> window_profiles;
+    const std::vector<windows_config::WindowTarget> window_targets;
+    const std::vector<windows_config::CropProfile> crop_profiles;
     const Size<int> minimum_size;
     const bool force_resize;
 
