@@ -286,30 +286,44 @@ public:
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, CropInfo &crop_info, PredictionHistory &history) const {
-        double current_y = frame.anchor().absolute(config.area).top() + config.vertical_margin;
+        const auto anchor = frame.anchor();
 
+        // Find the green banner at the top of the Factors tab to calibrate the initial Y position,
+        const auto top_banner_y = searchVertical(
+            frame,
+            config.bg_color,
+            {
+                anchor.absolute(config.left_rect).left(),
+                anchor.absolute(config.area).top(),
+            },
+            config.vertical_banner_upper_gap);
+        if (!top_banner_y) {
+            log_warning("Failed to find top banner of factor tab.");
+            return;
+        }
+
+        // Move to the space between the banner and the first factor.
+        const double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+
+        double current_y = scan_top;
         const auto self = recognizeOne(frame, current_y, history);
         const auto parent1 = recognizeOne(frame, current_y, history);
         const auto parent2 = recognizeOne(frame, current_y, history);
 
         record.factors = {self, parent1, parent2};
 
-        record.trainee = recognizeTrainee(frame, crop_info, history);
+        record.trainee = recognizeTrainee(frame, scan_top, crop_info, history);
     }
 
 private:
     [[nodiscard]] record::Character
-    recognizeTrainee(const Frame &frame, CropInfo &crop_info, PredictionHistory &history) const {
+    recognizeTrainee(const Frame &frame, const double scan_top, CropInfo &crop_info, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
-        const auto &scan_top = findNext(
-            frame,
-            {
-                anchor.absolute(config.left_rect).left(),
-                anchor.absolute(config.area).top() + config.vertical_margin,
-            });
+        const auto &reference_top =
+            findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top)).value();
 
-        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + Point<double>{0, scan_top.value()};
-        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + Point<double>{0, scan_top.value()};
+        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + Point<double>{0, reference_top};
+        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + Point<double>{0, reference_top};
         crop_info.trainee_icon = chara_rect;
 
         const auto icon = predict(character_model, frame, chara_rect, history);
@@ -399,7 +413,7 @@ public:
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
         const auto card_top = searchVertical(
             frame,
-            common_config.bg_color,
+            common_config.loose_bg_color,  // May start from slightly above the scroll area.
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
 
@@ -457,7 +471,7 @@ public:
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
         const auto top = searchVertical(
             frame,
-            common_config.bg_color,
+            common_config.strict_bg_color,
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
         const auto bottom = searchVertical(
@@ -629,7 +643,7 @@ private:
 
     [[nodiscard]] std::optional<double>
     findNext(const Frame &frame, const Point<double> &scan_top_left, const double max_length = 1.0) const {
-        return searchVertical(frame, common_config.bg_color, scan_top_left, max_length);
+        return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
     }
 
     const recognizer_config::CampaignRecordConfig config;
@@ -680,7 +694,7 @@ public:
 private:
     [[nodiscard]] std::optional<double>
     findNext(const Frame &frame, const Point<double> &scan_top_left, double max_length) const {
-        return searchVertical(frame, common_config.bg_color, scan_top_left, max_length);
+        return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
     }
 
     [[nodiscard]] record::Race

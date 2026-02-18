@@ -65,7 +65,7 @@ private:
         return {
             getModulePath("skill"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
             left_rect,
             right_rect,
             0.9352 - 0.8444,
@@ -89,12 +89,14 @@ private:
         return {
             getModulePath("factor"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
             left_rect,
             right_rect,
             0.9852 - 0.9111,
             0.9019 - 0.8278,
-            0.9981 - 0.9852,
+            0.0555,
+            0.0481,
+            0.0222,
             1.3704 - 1.3111,
             {
                 getModulePath("factor_rank"),
@@ -118,8 +120,9 @@ private:
     [[nodiscard]] CampaignTabConfig campaignTab() const {
         return {
             {
-                Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
+                Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
                 Range<Color>{{218, 218, 218}, {248, 248, 248}},
+                Range<Color>{{218, 218, 218}, {255, 255, 255}},
             },
             supportCards(),
             familyTree(),

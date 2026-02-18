@@ -38,7 +38,7 @@
   "scroll_area_rect": {
     "top_left": {
       "x": 0.0,
-      "y": 0.8278,
+      "y": 0.8093,
       "anchor": {
         "h": "IntersectStart",
         "v": "IntersectStart"
@@ -74,7 +74,7 @@
   "scroll_area_upper_fill_rect": {
     "top_left": {
       "x": 0.0315,
-      "y": 0.8204,
+      "y": 0.8019000000000001,
       "anchor": {
         "h": "IntersectStart",
         "v": "IntersectStart"
@@ -82,7 +82,7 @@
     },
     "bottom_right": {
       "x": 0.9667,
-      "y": 0.8278,
+      "y": 0.8093,
       "anchor": {
         "h": "IntersectStart",
         "v": "IntersectStart"
@@ -110,7 +110,7 @@
   "tab_button_rect": {
     "top_left": {
       "x": 0.0222,
-      "y": 0.7296,
+      "y": 0.7259,
       "anchor": {
         "h": "IntersectStart",
         "v": "IntersectStart"
@@ -118,7 +118,7 @@
     },
     "bottom_right": {
       "x": 0.9759,
-      "y": 0.8074,
+      "y": 0.8037,
       "anchor": {
         "h": "IntersectStart",
         "v": "IntersectStart"
