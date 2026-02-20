@@ -155,19 +155,24 @@ inline auto predict(
 }
 
 [[nodiscard]] std::optional<double> inline searchVertical(
-    const Frame &frame, const Range<Color> &bg_color, const Point<double> &scan_top_left, double max_length) {
+    const Frame &frame,
+    const Range<Color> &bg_color,
+    const Point<double> &scan_start_left,
+    const double max_length,
+    const bool reversed = false) {
     const auto &frame_anchor = frame.anchor();
-
-    const auto scan_top_pixels = frame_anchor.mapToFrame(scan_top_left).y();
+    const auto scan_start_pixels = frame_anchor.mapToFrame(scan_start_left).y();
     const auto scan_length_pixels = frame_anchor.scaleToPixels(max_length);
-    const auto scan_bottom_pixels = std::min(frame.height(), scan_top_pixels + scan_length_pixels);
 
-    for (int y = scan_top_pixels; y < scan_bottom_pixels; y++) {
+    const int direction = reversed ? -1 : 1;
+    const auto scan_end_pixels = std::clamp(scan_start_pixels + direction * scan_length_pixels, 0, frame.height());
+
+    for (int y = scan_start_pixels; reversed ? (y >= scan_end_pixels) : (y < scan_end_pixels); y += direction) {
         const auto scaled_y = frame_anchor.scaleFromPixels(y);
         const auto scan_point = Point<double>{
-            scan_top_left.x(),
+            scan_start_left.x(),
             scaled_y,
-            {scan_top_left.anchor().h(), ScreenStart},
+            {scan_start_left.anchor().h(), ScreenStart},
         };
         if (!frame.isIn(bg_color, scan_point)) {
             return scaled_y;
@@ -680,12 +685,15 @@ public:
 
         std::vector<record::Race> races;
         for (;;) {
-            const auto scan_result = findNext(frame, {scan_left, scan_top}, area_bottom - scan_top);
-            if (!scan_result) {
+            const auto block_top = findNext(frame, {scan_left, scan_top}, area_bottom - scan_top);
+            if (!block_top) {
                 break;
             }
-            races.push_back(recognizeRace(frame, {0.0, scan_result.value()}, history));
-            scan_top = scan_result.value() + config.vertical_delta;
+            const auto block_bottom = findLast(frame, {scan_left, block_top.value() + config.vertical_delta}, 1.0);
+            assert_(block_bottom.has_value());
+
+            races.push_back(recognizeRace(frame, block_top.value(), block_bottom.value(), history));
+            scan_top = block_top.value() + config.vertical_delta;
         }
 
         record.races = races;
@@ -693,33 +701,41 @@ public:
 
 private:
     [[nodiscard]] std::optional<double>
-    findNext(const Frame &frame, const Point<double> &scan_top_left, double max_length) const {
+    findNext(const Frame &frame, const Point<double> &scan_top_left, const double max_length) const {
         return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
     }
 
-    [[nodiscard]] record::Race
-    recognizeRace(const Frame &frame, const Point<double> &scan_offset, PredictionHistory &history) const {
-        assert_(scan_offset.anchor() == ScreenStart);
+    [[nodiscard]] std::optional<double>
+    findLast(const Frame &frame, const Point<double> &scan_bottom_left, const double max_length) const {
+        return searchVertical(frame, common_config.strict_bg_color, scan_bottom_left, max_length, true);
+    }
+
+    [[nodiscard]] record::Race recognizeRace(
+        const Frame &frame, const double block_top_y, const double block_bottom_y, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
+        const auto block_top_offset = Point<double>{0, block_top_y};
+        const auto block_bottom_offset = Point<double>{0, block_bottom_y};
 
         record::Race race{};
 
-        race.title = predict(title_model, frame, anchor.absolute(config.title.rect) + scan_offset, history);
+        // Offset from the top of the block.
+        race.title = predict(title_model, frame, anchor.absolute(config.title.rect) + block_top_offset, history);
+        race.weather = predict(weather_model, frame, anchor.absolute(config.weather.rect) + block_top_offset, history);
 
-        race.weather = predict(weather_model, frame, anchor.absolute(config.weather.rect) + scan_offset, history);
-
-        race.strategy = predict(strategy_model, frame, anchor.absolute(config.strategy.rect) + scan_offset, history);
-
-        race.turn = predict(turn_model, frame, anchor.absolute(config.turn.rect) + scan_offset, history);
-
-        race.position = predict(position_model, frame, anchor.absolute(config.position.rect) + scan_offset, history)
-                      + 1;  // 1-based
-
-        const auto &place = predict(place_model, frame, anchor.absolute(config.place.rect) + scan_offset, history);
+        const auto &place = predict(place_model, frame, anchor.absolute(config.place.rect) + block_top_offset, history);
         race.place = place.place;
         race.ground = place.ground;
         race.distance = place.distance;
         race.variation = place.variation;
+
+        race.position =
+            predict(position_model, frame, anchor.absolute(config.position.rect) + block_top_offset, history)
+            + 1;  // 1-based
+
+        // Offset from the bottom of the block.
+        race.strategy =
+            predict(strategy_model, frame, anchor.absolute(config.strategy.rect) + block_bottom_offset, history);
+        race.turn = predict(turn_model, frame, anchor.absolute(config.turn.rect) + block_bottom_offset, history);
 
         return race;
     }

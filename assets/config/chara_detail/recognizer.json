@@ -1581,13 +1581,13 @@
           "v": "ScreenStart"
         }
       },
-      "vertical_delta": 0.17410000000000014,
+      "vertical_delta": 0.1748,
       "title": {
         "module_path": "race_title/prediction.onnx",
         "rect": {
           "top_left": {
             "x": 0.1574,
-            "y": 0.009300000000000086,
+            "y": 0.011099999999999888,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1595,7 +1595,7 @@
           },
           "bottom_right": {
             "x": 0.7481,
-            "y": 0.038900000000000046,
+            "y": 0.038899999999999935,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1608,7 +1608,7 @@
         "rect": {
           "top_left": {
             "x": 0.0685,
-            "y": 0.07220000000000004,
+            "y": 0.07030000000000003,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1616,7 +1616,7 @@
           },
           "bottom_right": {
             "x": 0.5852,
-            "y": 0.10000000000000009,
+            "y": 0.10180000000000011,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1628,16 +1628,16 @@
         "module_path": "race_turn/prediction.onnx",
         "rect": {
           "top_left": {
-            "x": 0.4463,
-            "y": 0.11299999999999999,
+            "x": 0.4426,
+            "y": -0.048100000000000254,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
             }
           },
           "bottom_right": {
-            "x": 0.7815,
-            "y": 0.14080000000000004,
+            "x": 0.7778,
+            "y": -0.016599999999999948,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1649,16 +1649,16 @@
         "module_path": "race_position/prediction.onnx",
         "rect": {
           "top_left": {
-            "x": 0.7944,
-            "y": 0.007400000000000073,
+            "x": 0.7963,
+            "y": 0.014799999999999924,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
             }
           },
           "bottom_right": {
-            "x": 0.9259,
-            "y": 0.13890000000000002,
+            "x": 0.9333,
+            "y": 0.15179999999999993,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1670,16 +1670,16 @@
         "module_path": "race_strategy/prediction.onnx",
         "rect": {
           "top_left": {
-            "x": 0.1833,
-            "y": 0.11299999999999999,
+            "x": 0.187,
+            "y": -0.048100000000000254,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
             }
           },
           "bottom_right": {
-            "x": 0.2407,
-            "y": 0.14080000000000004,
+            "x": 0.2481,
+            "y": -0.016599999999999948,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -1691,16 +1691,16 @@
         "module_path": "race_weather/prediction.onnx",
         "rect": {
           "top_left": {
-            "x": 0.5907,
-            "y": 0.07410000000000005,
+            "x": 0.5937,
+            "y": 0.07030000000000003,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
             }
           },
           "bottom_right": {
-            "x": 0.6926,
-            "y": 0.1019000000000001,
+            "x": 0.6956,
+            "y": 0.10180000000000011,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"

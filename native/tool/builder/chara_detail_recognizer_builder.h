@@ -332,33 +332,34 @@ private:
     }
 
     [[nodiscard]] RaceConfig races() const {
-        const double scan_top = 0.9259;
+        const double scan_top = 1.9130;
+        const double scan_bottom = 2.0796;
         return {
             Point<double>{0.2074, 0.0000, {IS, SS}},
-            1.1000 - 0.9259,
+            0.1748,
             {
                 getModulePath("race_title"),
-                Rect<double>{{0.1574, 0.9352 - scan_top, {IS, SS}}, {0.7481, 0.9648 - scan_top, {IS, SS}}},
+                Rect<double>{{0.1574, 1.9241 - scan_top, {IS, SS}}, {0.7481, 1.9519 - scan_top, {IS, SS}}},
             },
             {
                 getModulePath("race_place"),
-                Rect<double>{{0.0685, 0.9981 - scan_top, {IS, SS}}, {0.5852, 1.0259 - scan_top, {IS, SS}}},
+                Rect<double>{{0.0685, 1.9833 - scan_top, {IS, SS}}, {0.5852, 2.0148 - scan_top, {IS, SS}}},
             },
             {
                 getModulePath("race_turn"),
-                Rect<double>{{0.4463, 1.0389 - scan_top, {IS, SS}}, {0.7815, 1.0667 - scan_top, {IS, SS}}},
+                Rect<double>{{0.4426, 2.0315 - scan_bottom, {IS, SS}}, {0.7778, 2.0630 - scan_bottom, {IS, SS}}},
             },
             {
                 getModulePath("race_position"),
-                Rect<double>{{0.7944, 0.9333 - scan_top, {IS, SS}}, {0.9259, 1.0648 - scan_top, {IS, SS}}},
+                Rect<double>{{0.7963, 1.9278 - scan_top, {IS, SS}}, {0.9333, 2.0648 - scan_top, {IS, SS}}},
             },
             {
                 getModulePath("race_strategy"),
-                Rect<double>{{0.1833, 1.0389 - scan_top, {IS, SS}}, {0.2407, 1.0667 - scan_top, {IS, SS}}},
+                Rect<double>{{0.1870, 2.0315 - scan_bottom, {IS, SS}}, {0.2481, 2.0630 - scan_bottom, {IS, SS}}},
             },
             {
                 getModulePath("race_weather"),
-                Rect<double>{{0.5907, 1.0000 - scan_top, {IS, SS}}, {0.6926, 1.0278 - scan_top, {IS, SS}}},
+                Rect<double>{{0.5937, 1.9833 - scan_top, {IS, SS}}, {0.6956, 2.0148 - scan_top, {IS, SS}}},
             },
         };
     }
