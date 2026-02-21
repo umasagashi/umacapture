@@ -34,7 +34,7 @@
             }
           },
           "bottom_right": {
-            "x": 0.1944,
+            "x": 0.2111,
             "y": 0.5111,
             "anchor": {
               "h": "IntersectStart",
@@ -52,7 +52,7 @@
             }
           },
           "bottom_right": {
-            "x": 0.3796,
+            "x": 0.39630000000000004,
             "y": 0.5111,
             "anchor": {
               "h": "IntersectStart",
@@ -70,7 +70,7 @@
             }
           },
           "bottom_right": {
-            "x": 0.5648,
+            "x": 0.5815,
             "y": 0.5111,
             "anchor": {
               "h": "IntersectStart",
@@ -88,7 +88,7 @@
             }
           },
           "bottom_right": {
-            "x": 0.75,
+            "x": 0.7667,
             "y": 0.5111,
             "anchor": {
               "h": "IntersectStart",
@@ -106,7 +106,7 @@
             }
           },
           "bottom_right": {
-            "x": 0.9352,
+            "x": 0.9518,
             "y": 0.5111,
             "anchor": {
               "h": "IntersectStart",
@@ -466,8 +466,8 @@
     "vertical_delta": 0.07409999999999994,
     "vertical_margin": 0.07410000000000005,
     "vertical_banner_upper_gap": 0.0555,
-    "vertical_banner_bottom_delta": 0.0481,
-    "vertical_factor_gap": 0.0222,
+    "vertical_banner_bottom_delta": 0.0537,
+    "vertical_factor_gap": 0.0129,
     "vertical_chara_gap": 0.05930000000000013,
     "factor_rank": {
       "module_path": "factor_rank/prediction.onnx",

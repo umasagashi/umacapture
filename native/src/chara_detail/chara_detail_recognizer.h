@@ -324,15 +324,18 @@ private:
     [[nodiscard]] record::Character
     recognizeTrainee(const Frame &frame, const double scan_top, CropInfo &crop_info, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
-        const auto &reference_top =
-            findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top)).value();
-
-        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + Point<double>{0, reference_top};
-        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + Point<double>{0, reference_top};
-        crop_info.trainee_icon = chara_rect;
-
+        const auto reference_top = findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
+        if (!reference_top.has_value()) {
+            log_warning("Failed to find reference point for trainee icon.");
+            return {};
+        }
+        const auto reference_offset = Point<double>{0, reference_top.value()};
+        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + reference_offset;
+        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + reference_offset;
         const auto icon = predict(character_model, frame, chara_rect, history);
         const auto rank = predict(character_rank_model, frame, rank_rect, history);
+
+        crop_info.trainee_icon = chara_rect;
 
         record::Character character{};
         character.icon = icon.icon;
@@ -411,8 +414,7 @@ public:
         : config(config)
         , common_config(common_config)
         , support_card_model(module_root_dir / config.module_path, "support_card")
-        , support_card_rank_model(module_root_dir / config.rank.module_path, "support_card_rank")
-        , support_card_level_model(module_root_dir / config.level.module_path, "support_card_level") {}
+        , support_card_rank_model(module_root_dir / config.rank.module_path, "support_card_rank") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -431,19 +433,19 @@ public:
         const auto rank_rects = stds::transformed_inplace<std::array<Rect<double>, 6>>(
             config.rank.rects, [&](const auto &r) { return anchor.absolute(r) + top_offset; });
 
-        const auto level_rects = stds::transformed_inplace<std::array<Rect<double>, 6>>(
-            config.level.rects, [&](const auto &r) { return anchor.absolute(r) + top_offset; });
-
         const auto id = predict(support_card_model, frame, id_rects, history);
         const auto rank = predict(support_card_rank_model, frame, rank_rects, history);
-        const auto level = predict(support_card_level_model, frame, level_rects, history);
 
         std::array<record::SupportCard, 6> support_cards{};
         for (int i = 0; i < support_cards.size(); i++) {
+            // Card levels no longer exist in the game.
+            // Until the record field is deleted, fill it with a dummy value.
+            constexpr auto level = 0;
+
             support_cards[i] = {
                 id[i],
                 rank[i] + 1,  // 1-based
-                level[i],
+                level,
             };
         }
 
@@ -458,7 +460,6 @@ private:
 
     recognizer::Model<IndexPrediction> support_card_model;
     recognizer::Model<IndexPrediction> support_card_rank_model;
-    recognizer::Model<IndexPrediction> support_card_level_model;
 };
 
 class FamilyTreeRecognizer {

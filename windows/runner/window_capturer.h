@@ -290,9 +290,8 @@ private:
         return info;
     }
 
-    const std::optional<windows_config::CropProfile> &findMatchingCropProfile(const Rect<int> &client_rect) const {
+    std::optional<windows_config::CropProfile> findMatchingCropProfile(const Rect<int> &client_rect) const {
         const double ratio = static_cast<double>(client_rect.width()) / client_rect.height();
-        // const windows_config::CropProfile *fallback = nullptr;
         for (const auto &profile : crop_profiles) {
             if (profile.window_aspect_ratio->contains(ratio)) {
                 return profile;

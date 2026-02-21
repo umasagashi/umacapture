@@ -22,6 +22,9 @@ private:
     [[nodiscard]] std::string getModulePath(const std::string &key) const { return key + "/prediction.onnx"; }
 
     [[nodiscard]] StatusHeaderConfig statusHeader() const {
+        constexpr auto status_top = 0.4833;
+        constexpr auto status_bottom = 0.5111;
+        constexpr auto status_width = 0.1037;
         return {
             {
                 getModulePath("evaluation_value"),
@@ -30,11 +33,11 @@ private:
             {
                 getModulePath("status_value"),
                 {
-                    Rect<double>{{0.1074, 0.4833, IS}, {0.1944, 0.5111, IS}},
-                    Rect<double>{{0.2926, 0.4833, IS}, {0.3796, 0.5111, IS}},
-                    Rect<double>{{0.4778, 0.4833, IS}, {0.5648, 0.5111, IS}},
-                    Rect<double>{{0.6630, 0.4833, IS}, {0.7500, 0.5111, IS}},
-                    Rect<double>{{0.8481, 0.4833, IS}, {0.9352, 0.5111, IS}},
+                    Rect<double>{{0.1074, status_top, IS}, {0.1074 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.2926, status_top, IS}, {0.2926 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.4778, status_top, IS}, {0.4778 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.6630, status_top, IS}, {0.6630 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.8481, status_top, IS}, {0.8481 + status_width, status_bottom, IS}},
                 },
             },
             {
@@ -95,8 +98,8 @@ private:
             0.9852 - 0.9111,
             0.9019 - 0.8278,
             0.0555,
-            0.0481,
-            0.0222,
+            0.0481 + 0.0056,
+            0.0129,
             1.3704 - 1.3111,
             {
                 getModulePath("factor_rank"),
