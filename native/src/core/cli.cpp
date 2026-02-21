@@ -63,8 +63,7 @@ void captureFromScreen() {
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
-    connection->listen(
-        [&api](const auto &frame, const auto &original_size) { api.updateFrame(frame,original_size); });
+    connection->listen([&api](const auto &frame, const auto &original_size) { api.updateFrame(frame, original_size); });
 
     const auto config = createConfig(false);
     api.startEventLoop(config.dump());
@@ -87,19 +86,20 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
-    connection->listen(
-        [&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
+    connection->listen([&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
 
     const auto config = createConfig(true);
     api.startEventLoop(config.dump());
 
     const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
-    const auto profile = windows_config.window_recorder->window_profiles.value()[0];
-    // assert_(profile.window_title.value() == "UmamusumePrettyDerby_Jpn");
+
+    const auto crop_rect =
+        windows_config.window_recorder->crop_profiles.value()[0].crop_rect;  // For horizontal screen.
+    // const std::optional<Rect<double>> crop_rect = {};  // For vertical screen.
 
     recorder_runner->start();
 
-    auto video = video::VideoLoader(connection, profile.crop_rect);
+    auto video = video::VideoLoader(connection, crop_rect);
     video.runBatch(video_path_list);
 
     while (api.isRunning()) {
