@@ -21,9 +21,10 @@ struct WindowRecorder {
     std::optional<int> recording_fps;
     std::optional<bool> force_resize;
     std::optional<Size<int>> minimum_size;
-    std::optional<std::vector<WindowProfile>> window_profiles;
+    std::optional<std::vector<WindowTarget>> window_targets;
+    std::optional<std::vector<CropProfile>> crop_profiles;
 
-    EXTENDED_JSON_TYPE_NDC(WindowRecorder, recording_fps, force_resize, minimum_size, window_profiles);
+    EXTENDED_JSON_TYPE_NDC(WindowRecorder, recording_fps, force_resize, minimum_size, window_targets, crop_profiles);
 };
 
 }  // namespace windows_config
@@ -55,14 +56,16 @@ class RecordingThread : public thread_util::ThreadBase {
 public:
     RecordingThread(
         const event_util::Sender<Frame, Size<int>> &sender,
-        const std::vector<windows_config::WindowProfile> &window_profiles,
+        const std::vector<windows_config::WindowTarget> &window_targets,
+        const std::vector<windows_config::CropProfile> &crop_profiles,
         const Size<int> &minimum_size,
         const int fps,
         const bool force_resize)
         : sender(sender)
-        , capturer(std::make_unique<WindowCapturer>(window_profiles, minimum_size, force_resize))
+        , capturer(std::make_unique<WindowCapturer>(window_targets, crop_profiles, minimum_size, force_resize))
         , minimum_size(minimum_size)
-        , window_profiles(window_profiles)
+        , window_targets(window_targets)
+        , crop_profiles(crop_profiles)
         , force_resize(force_resize)
         , time_keeper(fps) {}
 
@@ -73,8 +76,13 @@ public:
         rebuildCapturer();
     }
 
-    void setWindowProfiles(const std::vector<windows_config::WindowProfile> &profiles) {
-        window_profiles = profiles;
+    void setWindowTargets(const std::vector<windows_config::WindowTarget> &targets) {
+        window_targets = targets;
+        rebuildCapturer();
+    }
+
+    void setCropProfiles(const std::vector<windows_config::CropProfile> &profiles) {
+        crop_profiles = profiles;
         rebuildCapturer();
     }
 
@@ -115,7 +123,7 @@ private:
         if (was_running) {
             join();
         }
-        capturer = std::make_unique<WindowCapturer>(window_profiles, minimum_size, force_resize);
+        capturer = std::make_unique<WindowCapturer>(window_targets, crop_profiles, minimum_size, force_resize);
         if (was_running) {
             start();
         }
@@ -125,7 +133,8 @@ private:
     std::unique_ptr<WindowCapturer> capturer;
     const Size<int> minimum_size;
 
-    std::vector<windows_config::WindowProfile> window_profiles;
+    std::vector<windows_config::WindowTarget> window_targets;
+    std::vector<windows_config::CropProfile> crop_profiles;
     bool force_resize;
     TimeKeeper time_keeper;
 };
@@ -147,11 +156,12 @@ public:
         if (!recording_thread) {
             assert(config.recording_fps.has_value());
             assert(config.minimum_size.has_value());
-            assert(config.window_profiles.has_value());
+            assert(config.window_targets.has_value());
             assert(config.force_resize.has_value());
             recording_thread = std::make_unique<windows_impl::RecordingThread>(
                 frame_captured,
-                config.window_profiles.value(),
+                config.window_targets.value(),
+                config.crop_profiles.value_or(std::vector<windows_config::CropProfile>{}),
                 config.minimum_size.value(),
                 config.recording_fps.value(),
                 config.force_resize.value());
@@ -159,8 +169,11 @@ public:
             if (config.recording_fps.has_value()) {
                 recording_thread->setFps(config.recording_fps.value());
             }
-            if (config.window_profiles.has_value()) {
-                recording_thread->setWindowProfiles(config.window_profiles.value());
+            if (config.window_targets.has_value()) {
+                recording_thread->setWindowTargets(config.window_targets.value());
+            }
+            if (config.crop_profiles.has_value()) {
+                recording_thread->setCropProfiles(config.crop_profiles.value());
             }
             if (config.force_resize.has_value()) {
                 recording_thread->setForceResize(config.force_resize.value());

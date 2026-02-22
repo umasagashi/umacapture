@@ -47,12 +47,16 @@ class ModuleVersionRawData {
   @JsonProperty(defaultValue: "0.0.0")
   final String applicationVersion;
 
+  @JsonProperty(defaultValue: false)
+  final bool pinVersion;
+
   ModuleVersionRawData(
     this.formatVersion,
     this.region,
     this.recognizerVersion,
     this.minimumVersion,
     this.applicationVersion,
+    this.pinVersion,
   );
 
   ModuleVersion toModuleVersion() {
@@ -126,6 +130,11 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
 
   if (kDebugMode) {
     logger.w("Updating modules is disabled in debug mode.");
+    return local!.toModuleVersion();
+  }
+
+  if (local?.pinVersion == true) {
+    logger.w("Updating modules is disabled by pin_version flag in local version_info.json.");
     return local!.toModuleVersion();
   }
 

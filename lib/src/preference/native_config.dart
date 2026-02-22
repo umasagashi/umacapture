@@ -3,26 +3,48 @@ import 'dart:ui';
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 
 @jsonSerializable
-class WindowProfile {
+class WindowTarget {
   final String? windowClass;
   final String? windowTitle;
-  final bool? fixedAspectRatio;
 
-  const WindowProfile({
+  const WindowTarget({
     this.windowClass,
     this.windowTitle,
-    this.fixedAspectRatio,
+  });
+}
+
+@jsonSerializable
+class AspectRatioRange {
+  final double? min;
+  final double? max;
+
+  const AspectRatioRange({
+    this.min,
+    this.max,
+  });
+}
+
+@jsonSerializable
+class CropProfile {
+  final AspectRatioRange? windowAspectRatio;
+  final Size? clientAspectRatio;
+
+  const CropProfile({
+    this.windowAspectRatio,
+    this.clientAspectRatio,
   });
 }
 
 @jsonSerializable
 class RecorderConfig {
-  final WindowProfile? windowProfile;
+  final List<WindowTarget>? windowTargets;
+  final List<CropProfile>? cropProfiles;
   final int? recordingFps;
   final Size? minimumSize;
 
   const RecorderConfig({
-    this.windowProfile,
+    this.windowTargets,
+    this.cropProfiles,
     this.recordingFps,
     this.minimumSize,
   });

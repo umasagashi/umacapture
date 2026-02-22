@@ -7,15 +7,23 @@
                 "height": 960,
                 "width": 540
             },
-            "window_profiles": [
+            "window_targets": [
                 {
                     "window_class": "UnityWndClass",
                     "window_title": "umamusume"
                 },
                 {
                     "window_class": "UnityWndClass",
-                    "window_title": "UmamusumePrettyDerby_Jpn",
+                    "window_title": "UmamusumePrettyDerby_Jpn"
+                }
+            ],
+            "crop_profiles": [
+                {
                     "window_aspect_ratio": {
+                        "min": 1.66,
+                        "max": 1.88
+                    },
+                    "client_aspect_ratio": {
                         "height": 9,
                         "width": 16
                     },

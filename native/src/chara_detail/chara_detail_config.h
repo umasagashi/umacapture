@@ -196,6 +196,8 @@ struct FactorTabConfig {
     Rect<double> right_rect;
     double vertical_delta;
     double vertical_margin;
+    double vertical_banner_upper_gap;
+    double vertical_banner_bottom_delta;
     double vertical_factor_gap;
     double vertical_chara_gap;
     BasicModuleConfig factor_rank;
@@ -211,6 +213,8 @@ struct FactorTabConfig {
         right_rect,
         vertical_delta,
         vertical_margin,
+        vertical_banner_upper_gap,
+        vertical_banner_bottom_delta,
         vertical_factor_gap,
         vertical_chara_gap,
         factor_rank,
@@ -328,9 +332,10 @@ struct RaceConfig {
 
 struct CampaignTabCommonConfig {
     Rect<double> area;
-    Range<Color> bg_color;
+    Range<Color> strict_bg_color;
+    Range<Color> loose_bg_color;
 
-    EXTENDED_JSON_TYPE_NDC(CampaignTabCommonConfig, area, bg_color);
+    EXTENDED_JSON_TYPE_NDC(CampaignTabCommonConfig, area, strict_bg_color, loose_bg_color);
 };
 
 struct CampaignTabConfig {

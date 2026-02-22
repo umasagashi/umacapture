@@ -155,19 +155,24 @@ inline auto predict(
 }
 
 [[nodiscard]] std::optional<double> inline searchVertical(
-    const Frame &frame, const Range<Color> &bg_color, const Point<double> &scan_top_left, double max_length) {
+    const Frame &frame,
+    const Range<Color> &bg_color,
+    const Point<double> &scan_start_left,
+    const double max_length,
+    const bool reversed = false) {
     const auto &frame_anchor = frame.anchor();
-
-    const auto scan_top_pixels = frame_anchor.mapToFrame(scan_top_left).y();
+    const auto scan_start_pixels = frame_anchor.mapToFrame(scan_start_left).y();
     const auto scan_length_pixels = frame_anchor.scaleToPixels(max_length);
-    const auto scan_bottom_pixels = std::min(frame.height(), scan_top_pixels + scan_length_pixels);
 
-    for (int y = scan_top_pixels; y < scan_bottom_pixels; y++) {
+    const int direction = reversed ? -1 : 1;
+    const auto scan_end_pixels = std::clamp(scan_start_pixels + direction * scan_length_pixels, 0, frame.height());
+
+    for (int y = scan_start_pixels; reversed ? (y >= scan_end_pixels) : (y < scan_end_pixels); y += direction) {
         const auto scaled_y = frame_anchor.scaleFromPixels(y);
         const auto scan_point = Point<double>{
-            scan_top_left.x(),
+            scan_start_left.x(),
             scaled_y,
-            {scan_top_left.anchor().h(), ScreenStart},
+            {scan_start_left.anchor().h(), ScreenStart},
         };
         if (!frame.isIn(bg_color, scan_point)) {
             return scaled_y;
@@ -286,34 +291,51 @@ public:
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, CropInfo &crop_info, PredictionHistory &history) const {
-        double current_y = frame.anchor().absolute(config.area).top() + config.vertical_margin;
+        const auto anchor = frame.anchor();
 
+        // Find the green banner at the top of the Factors tab to calibrate the initial Y position,
+        const auto top_banner_y = searchVertical(
+            frame,
+            config.bg_color,
+            {
+                anchor.absolute(config.left_rect).left(),
+                anchor.absolute(config.area).top(),
+            },
+            config.vertical_banner_upper_gap);
+        if (!top_banner_y) {
+            log_warning("Failed to find top banner of factor tab.");
+            return;
+        }
+
+        // Move to the space between the banner and the first factor.
+        const double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+
+        double current_y = scan_top;
         const auto self = recognizeOne(frame, current_y, history);
         const auto parent1 = recognizeOne(frame, current_y, history);
         const auto parent2 = recognizeOne(frame, current_y, history);
 
         record.factors = {self, parent1, parent2};
 
-        record.trainee = recognizeTrainee(frame, crop_info, history);
+        record.trainee = recognizeTrainee(frame, scan_top, crop_info, history);
     }
 
 private:
     [[nodiscard]] record::Character
-    recognizeTrainee(const Frame &frame, CropInfo &crop_info, PredictionHistory &history) const {
+    recognizeTrainee(const Frame &frame, const double scan_top, CropInfo &crop_info, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
-        const auto &scan_top = findNext(
-            frame,
-            {
-                anchor.absolute(config.left_rect).left(),
-                anchor.absolute(config.area).top() + config.vertical_margin,
-            });
-
-        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + Point<double>{0, scan_top.value()};
-        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + Point<double>{0, scan_top.value()};
-        crop_info.trainee_icon = chara_rect;
-
+        const auto reference_top = findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
+        if (!reference_top.has_value()) {
+            log_warning("Failed to find reference point for trainee icon.");
+            return {};
+        }
+        const auto reference_offset = Point<double>{0, reference_top.value()};
+        const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + reference_offset;
+        const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + reference_offset;
         const auto icon = predict(character_model, frame, chara_rect, history);
         const auto rank = predict(character_rank_model, frame, rank_rect, history);
+
+        crop_info.trainee_icon = chara_rect;
 
         record::Character character{};
         character.icon = icon.icon;
@@ -392,14 +414,13 @@ public:
         : config(config)
         , common_config(common_config)
         , support_card_model(module_root_dir / config.module_path, "support_card")
-        , support_card_rank_model(module_root_dir / config.rank.module_path, "support_card_rank")
-        , support_card_level_model(module_root_dir / config.level.module_path, "support_card_level") {}
+        , support_card_rank_model(module_root_dir / config.rank.module_path, "support_card_rank") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
         const auto card_top = searchVertical(
             frame,
-            common_config.bg_color,
+            common_config.loose_bg_color,  // May start from slightly above the scroll area.
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
 
@@ -412,19 +433,19 @@ public:
         const auto rank_rects = stds::transformed_inplace<std::array<Rect<double>, 6>>(
             config.rank.rects, [&](const auto &r) { return anchor.absolute(r) + top_offset; });
 
-        const auto level_rects = stds::transformed_inplace<std::array<Rect<double>, 6>>(
-            config.level.rects, [&](const auto &r) { return anchor.absolute(r) + top_offset; });
-
         const auto id = predict(support_card_model, frame, id_rects, history);
         const auto rank = predict(support_card_rank_model, frame, rank_rects, history);
-        const auto level = predict(support_card_level_model, frame, level_rects, history);
 
         std::array<record::SupportCard, 6> support_cards{};
         for (int i = 0; i < support_cards.size(); i++) {
+            // Card levels no longer exist in the game.
+            // Until the record field is deleted, fill it with a dummy value.
+            constexpr auto level = 0;
+
             support_cards[i] = {
                 id[i],
                 rank[i] + 1,  // 1-based
-                level[i],
+                level,
             };
         }
 
@@ -439,7 +460,6 @@ private:
 
     recognizer::Model<IndexPrediction> support_card_model;
     recognizer::Model<IndexPrediction> support_card_rank_model;
-    recognizer::Model<IndexPrediction> support_card_level_model;
 };
 
 class FamilyTreeRecognizer {
@@ -457,7 +477,7 @@ public:
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
         const auto top = searchVertical(
             frame,
-            common_config.bg_color,
+            common_config.strict_bg_color,
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
         const auto bottom = searchVertical(
@@ -629,7 +649,7 @@ private:
 
     [[nodiscard]] std::optional<double>
     findNext(const Frame &frame, const Point<double> &scan_top_left, const double max_length = 1.0) const {
-        return searchVertical(frame, common_config.bg_color, scan_top_left, max_length);
+        return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
     }
 
     const recognizer_config::CampaignRecordConfig config;
@@ -666,12 +686,15 @@ public:
 
         std::vector<record::Race> races;
         for (;;) {
-            const auto scan_result = findNext(frame, {scan_left, scan_top}, area_bottom - scan_top);
-            if (!scan_result) {
+            const auto block_top = findNext(frame, {scan_left, scan_top}, area_bottom - scan_top);
+            if (!block_top) {
                 break;
             }
-            races.push_back(recognizeRace(frame, {0.0, scan_result.value()}, history));
-            scan_top = scan_result.value() + config.vertical_delta;
+            const auto block_bottom = findLast(frame, {scan_left, block_top.value() + config.vertical_delta}, 1.0);
+            assert_(block_bottom.has_value());
+
+            races.push_back(recognizeRace(frame, block_top.value(), block_bottom.value(), history));
+            scan_top = block_top.value() + config.vertical_delta;
         }
 
         record.races = races;
@@ -679,33 +702,41 @@ public:
 
 private:
     [[nodiscard]] std::optional<double>
-    findNext(const Frame &frame, const Point<double> &scan_top_left, double max_length) const {
-        return searchVertical(frame, common_config.bg_color, scan_top_left, max_length);
+    findNext(const Frame &frame, const Point<double> &scan_top_left, const double max_length) const {
+        return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
     }
 
-    [[nodiscard]] record::Race
-    recognizeRace(const Frame &frame, const Point<double> &scan_offset, PredictionHistory &history) const {
-        assert_(scan_offset.anchor() == ScreenStart);
+    [[nodiscard]] std::optional<double>
+    findLast(const Frame &frame, const Point<double> &scan_bottom_left, const double max_length) const {
+        return searchVertical(frame, common_config.strict_bg_color, scan_bottom_left, max_length, true);
+    }
+
+    [[nodiscard]] record::Race recognizeRace(
+        const Frame &frame, const double block_top_y, const double block_bottom_y, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
+        const auto block_top_offset = Point<double>{0, block_top_y};
+        const auto block_bottom_offset = Point<double>{0, block_bottom_y};
 
         record::Race race{};
 
-        race.title = predict(title_model, frame, anchor.absolute(config.title.rect) + scan_offset, history);
+        // Offset from the top of the block.
+        race.title = predict(title_model, frame, anchor.absolute(config.title.rect) + block_top_offset, history);
+        race.weather = predict(weather_model, frame, anchor.absolute(config.weather.rect) + block_top_offset, history);
 
-        race.weather = predict(weather_model, frame, anchor.absolute(config.weather.rect) + scan_offset, history);
-
-        race.strategy = predict(strategy_model, frame, anchor.absolute(config.strategy.rect) + scan_offset, history);
-
-        race.turn = predict(turn_model, frame, anchor.absolute(config.turn.rect) + scan_offset, history);
-
-        race.position = predict(position_model, frame, anchor.absolute(config.position.rect) + scan_offset, history)
-                      + 1;  // 1-based
-
-        const auto &place = predict(place_model, frame, anchor.absolute(config.place.rect) + scan_offset, history);
+        const auto &place = predict(place_model, frame, anchor.absolute(config.place.rect) + block_top_offset, history);
         race.place = place.place;
         race.ground = place.ground;
         race.distance = place.distance;
         race.variation = place.variation;
+
+        race.position =
+            predict(position_model, frame, anchor.absolute(config.position.rect) + block_top_offset, history)
+            + 1;  // 1-based
+
+        // Offset from the bottom of the block.
+        race.strategy =
+            predict(strategy_model, frame, anchor.absolute(config.strategy.rect) + block_bottom_offset, history);
+        race.turn = predict(turn_model, frame, anchor.absolute(config.turn.rect) + block_bottom_offset, history);
 
         return race;
     }

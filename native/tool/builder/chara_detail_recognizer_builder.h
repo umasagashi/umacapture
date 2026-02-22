@@ -22,6 +22,9 @@ private:
     [[nodiscard]] std::string getModulePath(const std::string &key) const { return key + "/prediction.onnx"; }
 
     [[nodiscard]] StatusHeaderConfig statusHeader() const {
+        constexpr auto status_top = 0.4833;
+        constexpr auto status_bottom = 0.5111;
+        constexpr auto status_width = 0.1037;
         return {
             {
                 getModulePath("evaluation_value"),
@@ -30,11 +33,11 @@ private:
             {
                 getModulePath("status_value"),
                 {
-                    Rect<double>{{0.1074, 0.4833, IS}, {0.1944, 0.5111, IS}},
-                    Rect<double>{{0.2926, 0.4833, IS}, {0.3796, 0.5111, IS}},
-                    Rect<double>{{0.4778, 0.4833, IS}, {0.5648, 0.5111, IS}},
-                    Rect<double>{{0.6630, 0.4833, IS}, {0.7500, 0.5111, IS}},
-                    Rect<double>{{0.8481, 0.4833, IS}, {0.9352, 0.5111, IS}},
+                    Rect<double>{{0.1074, status_top, IS}, {0.1074 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.2926, status_top, IS}, {0.2926 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.4778, status_top, IS}, {0.4778 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.6630, status_top, IS}, {0.6630 + status_width, status_bottom, IS}},
+                    Rect<double>{{0.8481, status_top, IS}, {0.8481 + status_width, status_bottom, IS}},
                 },
             },
             {
@@ -65,7 +68,7 @@ private:
         return {
             getModulePath("skill"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
             left_rect,
             right_rect,
             0.9352 - 0.8444,
@@ -89,12 +92,14 @@ private:
         return {
             getModulePath("factor"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
             left_rect,
             right_rect,
             0.9852 - 0.9111,
             0.9019 - 0.8278,
-            0.9981 - 0.9852,
+            0.0555,
+            0.0481 + 0.0056,
+            0.0129,
             1.3704 - 1.3111,
             {
                 getModulePath("factor_rank"),
@@ -118,8 +123,9 @@ private:
     [[nodiscard]] CampaignTabConfig campaignTab() const {
         return {
             {
-                Rect<double>{{0.0000, 0.8278, IS}, {0.0, -0.2426, {IPE, ILE}}},
+                Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
                 Range<Color>{{218, 218, 218}, {248, 248, 248}},
+                Range<Color>{{218, 218, 218}, {255, 255, 255}},
             },
             supportCards(),
             familyTree(),
@@ -329,33 +335,34 @@ private:
     }
 
     [[nodiscard]] RaceConfig races() const {
-        const double scan_top = 0.9259;
+        const double scan_top = 1.9130;
+        const double scan_bottom = 2.0796;
         return {
             Point<double>{0.2074, 0.0000, {IS, SS}},
-            1.1000 - 0.9259,
+            0.1748,
             {
                 getModulePath("race_title"),
-                Rect<double>{{0.1574, 0.9352 - scan_top, {IS, SS}}, {0.7481, 0.9648 - scan_top, {IS, SS}}},
+                Rect<double>{{0.1574, 1.9241 - scan_top, {IS, SS}}, {0.7481, 1.9519 - scan_top, {IS, SS}}},
             },
             {
                 getModulePath("race_place"),
-                Rect<double>{{0.0685, 0.9981 - scan_top, {IS, SS}}, {0.5852, 1.0259 - scan_top, {IS, SS}}},
+                Rect<double>{{0.0685, 1.9833 - scan_top, {IS, SS}}, {0.5852, 2.0148 - scan_top, {IS, SS}}},
             },
             {
                 getModulePath("race_turn"),
-                Rect<double>{{0.4463, 1.0389 - scan_top, {IS, SS}}, {0.7815, 1.0667 - scan_top, {IS, SS}}},
+                Rect<double>{{0.4426, 2.0315 - scan_bottom, {IS, SS}}, {0.7778, 2.0630 - scan_bottom, {IS, SS}}},
             },
             {
                 getModulePath("race_position"),
-                Rect<double>{{0.7944, 0.9333 - scan_top, {IS, SS}}, {0.9259, 1.0648 - scan_top, {IS, SS}}},
+                Rect<double>{{0.7963, 1.9278 - scan_top, {IS, SS}}, {0.9333, 2.0648 - scan_top, {IS, SS}}},
             },
             {
                 getModulePath("race_strategy"),
-                Rect<double>{{0.1833, 1.0389 - scan_top, {IS, SS}}, {0.2407, 1.0667 - scan_top, {IS, SS}}},
+                Rect<double>{{0.1870, 2.0315 - scan_bottom, {IS, SS}}, {0.2481, 2.0630 - scan_bottom, {IS, SS}}},
             },
             {
                 getModulePath("race_weather"),
-                Rect<double>{{0.5907, 1.0000 - scan_top, {IS, SS}}, {0.6926, 1.0278 - scan_top, {IS, SS}}},
+                Rect<double>{{0.5937, 1.9833 - scan_top, {IS, SS}}, {0.6956, 2.0148 - scan_top, {IS, SS}}},
             },
         };
     }

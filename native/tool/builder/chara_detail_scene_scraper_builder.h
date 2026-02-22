@@ -24,8 +24,8 @@ private:
         return {
             Rect<double>{{0.1, 0.0556, IS}, {0.9, 0.8074, IS}},
             Rect<double>{{0.0, 0.0, IS}, {0.0, 0.0, ILE}},
-            Rect<double>{{0.0222, 0.7296, IS}, {0.9759, 0.8074, IS}},
-            Rect<double>{{0.0000, 0.8278, IS}, {0.0000, -0.2426, {IPE, ILE}}},
+            Rect<double>{{0.0222, 0.7259, IS}, {0.9759, 0.8037, IS}},
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
             Rect<double>{{0.0222, 0.0000, IS}, {-0.0222, 0.0000, {ILE, IPE}}},
             Range<Color>{Color{123, 121, 140} + 30, {255, 255, 255}},
             Line<double>{{0.9676, 0.0092, IS}, {0.9676, -0.0092, {IS, ILE}}},
