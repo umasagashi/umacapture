@@ -578,6 +578,18 @@
           "g": 255,
           "b": 255
         }
+      },
+      "block_bg_color": {
+        "min": {
+          "r": 248,
+          "g": 248,
+          "b": 248
+        },
+        "max": {
+          "r": 255,
+          "g": 255,
+          "b": 255
+        }
       }
     },
     "support_card": {
@@ -1573,137 +1585,276 @@
       "vertical_delta": 0.05919999999999992
     },
     "race": {
-      "scan_point": {
-        "x": 0.2074,
-        "y": 0.0,
+      "approx_scan_point": {
+        "x": 0.0556,
+        "y": 0.15,
         "anchor": {
           "h": "IntersectStart",
           "v": "ScreenStart"
         }
       },
-      "vertical_delta": 0.1748,
-      "title": {
-        "module_path": "race_title/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.1574,
-            "y": 0.011099999999999888,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
+      "exact_scan_point": {
+        "x": 0.1678,
+        "y": 0.015,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "ScreenStart"
+        }
+      },
+      "vertical_delta": 0.013,
+      "block_height_threshold": 0.1944,
+      "block_1line_config": {
+        "title": {
+          "module_path": "race_title/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.1611,
+              "y": 0.0111,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.7519,
+              "y": 0.0389,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
             }
-          },
-          "bottom_right": {
-            "x": 0.7481,
-            "y": 0.038899999999999935,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
+          }
+        },
+        "place": {
+          "module_path": "race_place_1line/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.0667,
+              "y": 0.0722,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.5833,
+              "y": 0.1,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            }
+          }
+        },
+        "turn": {
+          "module_path": "race_turn/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.4389,
+              "y": -0.0463,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.7741,
+              "y": -0.0185,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            }
+          }
+        },
+        "position": {
+          "module_path": "race_position/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.7926,
+              "y": -0.0704,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.9333,
+              "y": 0.0704,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            }
+          }
+        },
+        "strategy": {
+          "module_path": "race_strategy/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.1852,
+              "y": -0.0463,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.2426,
+              "y": -0.0185,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            }
+          }
+        },
+        "weather": {
+          "module_path": "race_weather/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.5963,
+              "y": 0.0741,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.6981,
+              "y": 0.1019,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
             }
           }
         }
       },
-      "place": {
-        "module_path": "race_place/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.0685,
-            "y": 0.07030000000000003,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.5852,
-            "y": 0.10180000000000011,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        }
-      },
-      "turn": {
-        "module_path": "race_turn/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.4426,
-            "y": -0.048100000000000254,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.7778,
-            "y": -0.016599999999999948,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
+      "block_2line_config": {
+        "title": {
+          "module_path": "race_title/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.1611,
+              "y": 0.0148,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.7519,
+              "y": 0.0426,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
             }
           }
-        }
-      },
-      "position": {
-        "module_path": "race_position/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.7963,
-            "y": 0.014799999999999924,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.9333,
-            "y": 0.15179999999999993,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        }
-      },
-      "strategy": {
-        "module_path": "race_strategy/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.187,
-            "y": -0.048100000000000254,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.2481,
-            "y": -0.016599999999999948,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
+        },
+        "place": {
+          "module_path": "race_place_2line/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.0685,
+              "y": 0.0722,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.5852,
+              "y": 0.1481,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
             }
           }
-        }
-      },
-      "weather": {
-        "module_path": "race_weather/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.5937,
-            "y": 0.07030000000000003,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
+        },
+        "turn": {
+          "module_path": "race_turn/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.4407,
+              "y": -0.0519,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.7759,
+              "y": -0.0241,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
             }
-          },
-          "bottom_right": {
-            "x": 0.6956,
-            "y": 0.10180000000000011,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
+          }
+        },
+        "position": {
+          "module_path": "race_position/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.7944,
+              "y": -0.0778,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.9352,
+              "y": 0.063,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            }
+          }
+        },
+        "strategy": {
+          "module_path": "race_strategy/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.1889,
+              "y": -0.0519,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.2463,
+              "y": -0.0241,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            }
+          }
+        },
+        "weather": {
+          "module_path": "race_weather/prediction.onnx",
+          "rect": {
+            "top_left": {
+              "x": 0.5963,
+              "y": 0.113,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
+            },
+            "bottom_right": {
+              "x": 0.6981,
+              "y": 0.1407,
+              "anchor": {
+                "h": "IntersectStart",
+                "v": "ScreenStart"
+              }
             }
           }
         }

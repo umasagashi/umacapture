@@ -671,72 +671,127 @@ public:
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , title_model(module_root_dir / config.title.module_path, "race_title")
-        , place_model(module_root_dir / config.place.module_path, "race_place")
-        , weather_model(module_root_dir / config.weather.module_path, "race_weather")
-        , strategy_model(module_root_dir / config.strategy.module_path, "race_strategy")
-        , turn_model(module_root_dir / config.turn.module_path, "race_turn")
-        , position_model(module_root_dir / config.position.module_path, "race_position") {}
+        , models_1line(module_root_dir, config.block_1line_config, "_1line")
+        , models_2line(module_root_dir, config.block_2line_config, "_2line") {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
-        const double scan_left = anchor.absolute(config.scan_point).x();
+        const auto approx_scan_offset = anchor.absolute(config.approx_scan_point);
+        const auto exact_scan_offset = anchor.absolute(config.exact_scan_point);
         const double area_bottom = anchor.absolute(common_config.area).bottom();
 
         std::vector<record::Race> races;
         for (;;) {
-            const auto block_top = findNext(frame, {scan_left, scan_top}, area_bottom - scan_top);
+            // First, determine the exact top coordinate of the block.
+            const auto block_top = findNextBlock(frame, exact_scan_offset + Point<double>{0.0, scan_top}, area_bottom);
             if (!block_top) {
                 break;
             }
-            const auto block_bottom = findLast(frame, {scan_left, block_top.value() + config.vertical_delta}, 1.0);
-            assert_(block_bottom.has_value());
 
-            races.push_back(recognizeRace(frame, block_top.value(), block_bottom.value(), history));
-            scan_top = block_top.value() + config.vertical_delta;
+            // Next, determine the approximate bottom coordinate of the block.
+            // Search points that avoid interference from elements within the block are only available along the edges.
+            // However, the edges are rounded, which can result in inaccurate results.
+            const auto approx_bottom =
+                findNextGap(frame, approx_scan_offset + Point<double>{0.0, block_top.value()}, area_bottom);
+            assert_(approx_bottom.has_value());
+
+            // Then, determine the exact bottom coordinate of the block.
+            // By starting the search from the approx bottom, elements within the block will no longer interfere.
+            const auto block_bottom = findLast(frame, exact_scan_offset + Point<double>{0.0, approx_bottom.value()});
+
+            // Finally, we can recognize the block.
+            const auto block_rect =
+                Rect<double>{Point<double>{0.0, block_top.value()}, Point<double>{0.0, block_bottom.value()}};
+            const bool is_2line = (block_bottom.value() - block_top.value()) > config.block_height_threshold;
+            races.push_back(recognizeRace(
+                frame,
+                block_rect,
+                is_2line ? models_2line : models_1line,
+                is_2line ? config.block_2line_config : config.block_1line_config,
+                history));
+
+            // Proceed to the next block.
+            scan_top = block_bottom.value() + config.vertical_delta;
         }
 
         record.races = races;
     }
 
 private:
+    struct RaceBlockModelSet {
+        RaceBlockModelSet(
+            const std::filesystem::path &module_root_dir,
+            const recognizer_config::RaceBlockConfig &block_config,
+            const std::string &suffix)
+            : title(module_root_dir / block_config.title.module_path, "race_title")
+            , place(module_root_dir / block_config.place.module_path, "race_place" + suffix)
+            , weather(module_root_dir / block_config.weather.module_path, "race_weather")
+            , strategy(module_root_dir / block_config.strategy.module_path, "race_strategy")
+            , turn(module_root_dir / block_config.turn.module_path, "race_turn")
+            , position(module_root_dir / block_config.position.module_path, "race_position") {}
+
+        recognizer::Model<IndexPrediction> title;
+        recognizer::Model<RacePlacePrediction> place;
+        recognizer::Model<IndexPrediction> weather;
+        recognizer::Model<IndexPrediction> strategy;
+        recognizer::Model<IndexPrediction> turn;
+        recognizer::Model<IndexPrediction> position;
+    };
+
     [[nodiscard]] std::optional<double>
-    findNext(const Frame &frame, const Point<double> &scan_top_left, const double max_length) const {
-        return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
+    findNextBlock(const Frame &frame, const Point<double> &scan_top_left, const double bottom) const {
+        return searchVertical(frame, common_config.strict_bg_color, scan_top_left, bottom - scan_top_left.y());
     }
 
     [[nodiscard]] std::optional<double>
-    findLast(const Frame &frame, const Point<double> &scan_bottom_left, const double max_length) const {
-        return searchVertical(frame, common_config.strict_bg_color, scan_bottom_left, max_length, true);
+    findNextGap(const Frame &frame, const Point<double> &scan_top_left, const double bottom) const {
+        return searchVertical(frame, common_config.block_bg_color, scan_top_left, bottom - scan_top_left.y());
+    }
+
+    [[nodiscard]] std::optional<double> findLast(const Frame &frame, const Point<double> &scan_bottom_left) const {
+        return searchVertical(frame, common_config.strict_bg_color, scan_bottom_left, scan_bottom_left.y(), true);
     }
 
     [[nodiscard]] record::Race recognizeRace(
-        const Frame &frame, const double block_top_y, const double block_bottom_y, PredictionHistory &history) const {
+        const Frame &frame,
+        const Rect<double> &block_rect,
+        const RaceBlockModelSet &block_models,
+        const recognizer_config::RaceBlockConfig &block_config,
+        PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
-        const auto block_top_offset = Point<double>{0, block_top_y};
-        const auto block_bottom_offset = Point<double>{0, block_bottom_y};
+        const auto block_top_offset = Point<double>{0, block_rect.top()};
+        const auto block_bottom_offset = Point<double>{0, block_rect.bottom()};
+        const auto block_center_offset = (block_top_offset + block_bottom_offset) / 2.0;
 
         record::Race race{};
 
         // Offset from the top of the block.
-        race.title = predict(title_model, frame, anchor.absolute(config.title.rect) + block_top_offset, history);
-        race.weather = predict(weather_model, frame, anchor.absolute(config.weather.rect) + block_top_offset, history);
+        race.title =
+            predict(block_models.title, frame, anchor.absolute(block_config.title.rect) + block_top_offset, history);
+        race.weather = predict(
+            block_models.weather, frame, anchor.absolute(block_config.weather.rect) + block_top_offset, history);
 
-        const auto &place = predict(place_model, frame, anchor.absolute(config.place.rect) + block_top_offset, history);
+        const auto &place =
+            predict(block_models.place, frame, anchor.absolute(block_config.place.rect) + block_top_offset, history);
         race.place = place.place;
         race.ground = place.ground;
         race.distance = place.distance;
         race.variation = place.variation;
 
-        race.position =
-            predict(position_model, frame, anchor.absolute(config.position.rect) + block_top_offset, history)
-            + 1;  // 1-based
-
         // Offset from the bottom of the block.
-        race.strategy =
-            predict(strategy_model, frame, anchor.absolute(config.strategy.rect) + block_bottom_offset, history);
-        race.turn = predict(turn_model, frame, anchor.absolute(config.turn.rect) + block_bottom_offset, history);
+        race.strategy = predict(
+            block_models.strategy, frame, anchor.absolute(block_config.strategy.rect) + block_bottom_offset, history);
+        race.turn =
+            predict(block_models.turn, frame, anchor.absolute(block_config.turn.rect) + block_bottom_offset, history);
+
+        // Offset from the vertical-center of the block.
+        race.position = predict(
+                            block_models.position,
+                            frame,
+                            anchor.absolute(block_config.position.rect) + block_center_offset,
+                            history)
+                      + 1;  // 1-based
 
         return race;
     }
@@ -744,12 +799,8 @@ private:
     const recognizer_config::RaceConfig config;
     const recognizer_config::CampaignTabCommonConfig common_config;
 
-    recognizer::Model<IndexPrediction> title_model;
-    recognizer::Model<RacePlacePrediction> place_model;
-    recognizer::Model<IndexPrediction> weather_model;
-    recognizer::Model<IndexPrediction> strategy_model;
-    recognizer::Model<IndexPrediction> turn_model;
-    recognizer::Model<IndexPrediction> position_model;
+    RaceBlockModelSet models_1line;
+    RaceBlockModelSet models_2line;
 };
 
 class CampaignTabRecognizer {

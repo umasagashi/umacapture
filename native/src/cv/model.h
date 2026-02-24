@@ -6,6 +6,8 @@
 
 #include <opencv2/opencv.hpp>
 
+#include "util/logger_util.h"
+
 namespace uma::recognizer {
 
 namespace recognizer_impl {
@@ -59,6 +61,7 @@ public:
     [[maybe_unused]] Model(const std::filesystem::path &path, const std::string &name)
         : model_name(name)
         , input_size(-1, -1) {
+        log_debug("Load model from {}", std::filesystem::absolute(path).string());
         std::filesystem::path::string_type path_str = path;
         prediction = std::make_unique<Ort::Experimental::Session>(env, path_str, session_options);
         const auto input_shape = prediction->GetInputShapes()[0];
