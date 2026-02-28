@@ -61,24 +61,18 @@ private:
     }
 
     [[nodiscard]] SkillTabConfig skillTab() const {
-        const double top_offset = 0.8685 - 0.8444;
-        const double bottom_offset = 0.8963 - 0.8444;
-        const auto left_rect = Rect<double>{{0.1019, top_offset, {IS, SS}}, {0.4296, bottom_offset, {IS, SS}}};
-        const auto right_rect = Rect<double>{{0.5667, top_offset, {IS, SS}}, {0.8944, bottom_offset, {IS, SS}}};
         return {
             getModulePath("skill"),
-            Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
-            left_rect,
-            right_rect,
+            {{235, 235, 235}, {255, 255, 255}},
+            {{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            {{0.1037, 0.0259, {IS, SS}}, {0.4722, 0.0537, {IS, SS}}},
+            {{0.5685, 0.0259, {IS, SS}}, {0.9370, 0.0537, {IS, SS}}},
             0.9352 - 0.8444,
             0.0,
             0.9519 - 0.9148,
             {
                 getModulePath("skill_level"),
-                Rect<double>{
-                    Point<double>{0.4537 - left_rect.left(), top_offset},
-                    Point<double>{0.4815 - left_rect.left(), bottom_offset}},
+                {Point<double>{0.4537, 0.0259, {IS, SS}}, Point<double>{0.4815, 0.0537, {IS, SS}}},
             },
         };
     }

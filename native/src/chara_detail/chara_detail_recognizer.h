@@ -225,14 +225,31 @@ public:
             if (!left_column_y) {
                 break;
             }
-            skills.push_back(predictSkill(frame, left_rect, left_column_y.value(), skills.empty(), history));
+            {
+                const Point<double> current_column_offset = {0.0, left_column_y.value()};
+                const int skill_id = predict(skill_model, frame, left_rect + current_column_offset, history);
+                if (!skills.empty()) {
+                    skills.push_back({skill_id});
+                } else {
+                    const int skill_level = predict(
+                        skill_level_model,
+                        frame,
+                        anchor.absolute(config.skill_level.rect) + current_column_offset,
+                        history);
+                    skills.push_back({skill_id, skill_level + 1});  // 1-based.
+                }
+            }
 
             // Find next row of RIGHT column.
             const auto right_column_y = findNext(frame, right_rect.topLeft().withY(current_y));
             if (!right_column_y) {
                 break;
             }
-            skills.push_back(predictSkill(frame, right_rect, right_column_y.value(), false, history));
+            {
+                const Point<double> current_column_offset = {0.0, right_column_y.value()};
+                const int skill_id = predict(skill_model, frame, right_rect + current_column_offset, history);
+                skills.push_back({skill_id});
+            }
 
             current_y = left_column_y.value() + config.vertical_delta;
         }
@@ -242,31 +259,6 @@ public:
 private:
     [[nodiscard]] std::optional<double> findNext(const Frame &frame, const Point<double> &scan_top_left) const {
         return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_gap);
-    }
-
-    [[nodiscard]] record::Skill predictSkill(
-        const Frame &frame,
-        const Rect<double> &rect,
-        double top,
-        bool predict_level,
-        PredictionHistory &history) const {
-        assert_(config.skill_level.rect.topLeft().anchor() == ScreenStart);
-        assert_(config.skill_level.rect.bottomRight().anchor() == ScreenStart);
-        assert_(rect.topLeft().anchor() == ScreenStart);
-        assert_(rect.bottomRight().anchor() == ScreenStart);
-
-        const auto skill_id = predict(skill_model, frame, rect + Point<double>{0, top}, history);
-        if (!predict_level) {
-            return {skill_id};
-        }
-
-        const auto skill_level =
-            predict(skill_level_model, frame, config.skill_level.rect + Point<double>{rect.left(), top}, history);
-
-        return {
-            skill_id,
-            skill_level + 1,  // 1-based
-        };
     }
 
     const recognizer_config::SkillTabConfig config;

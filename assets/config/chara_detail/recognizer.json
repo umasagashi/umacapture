@@ -336,16 +336,16 @@
     },
     "left_rect": {
       "top_left": {
-        "x": 0.1019,
-        "y": 0.02410000000000001,
+        "x": 0.1037,
+        "y": 0.0259,
         "anchor": {
           "h": "IntersectStart",
           "v": "ScreenStart"
         }
       },
       "bottom_right": {
-        "x": 0.4296,
-        "y": 0.051899999999999946,
+        "x": 0.4722,
+        "y": 0.0537,
         "anchor": {
           "h": "IntersectStart",
           "v": "ScreenStart"
@@ -354,16 +354,16 @@
     },
     "right_rect": {
       "top_left": {
-        "x": 0.5667,
-        "y": 0.02410000000000001,
+        "x": 0.5685,
+        "y": 0.0259,
         "anchor": {
           "h": "IntersectStart",
           "v": "ScreenStart"
         }
       },
       "bottom_right": {
-        "x": 0.8944,
-        "y": 0.051899999999999946,
+        "x": 0.937,
+        "y": 0.0537,
         "anchor": {
           "h": "IntersectStart",
           "v": "ScreenStart"
@@ -377,18 +377,18 @@
       "module_path": "skill_level/prediction.onnx",
       "rect": {
         "top_left": {
-          "x": 0.3518,
-          "y": 0.02410000000000001,
+          "x": 0.4537,
+          "y": 0.0259,
           "anchor": {
-            "h": "ScreenStart",
+            "h": "IntersectStart",
             "v": "ScreenStart"
           }
         },
         "bottom_right": {
-          "x": 0.3796,
-          "y": 0.051899999999999946,
+          "x": 0.4815,
+          "y": 0.0537,
           "anchor": {
-            "h": "ScreenStart",
+            "h": "IntersectStart",
             "v": "ScreenStart"
           }
         }
