@@ -317,9 +317,7 @@ struct CampaignRecordConfig {
         vertical_delta);
 };
 
-struct RaceConfig {
-    Point<double> scan_point;
-    double vertical_delta;
+struct RaceBlockConfig {
     BasicModuleConfig title;
     BasicModuleConfig place;
     BasicModuleConfig turn;
@@ -327,15 +325,34 @@ struct RaceConfig {
     BasicModuleConfig strategy;
     BasicModuleConfig weather;
 
-    EXTENDED_JSON_TYPE_NDC(RaceConfig, scan_point, vertical_delta, title, place, turn, position, strategy, weather);
+    EXTENDED_JSON_TYPE_NDC(RaceBlockConfig, title, place, turn, position, strategy, weather);
+};
+
+struct RaceConfig {
+    Point<double> approx_scan_point;
+    Point<double> exact_scan_point;
+    double vertical_delta;
+    double block_height_threshold;
+    RaceBlockConfig block_1line_config;
+    RaceBlockConfig block_2line_config;
+
+    EXTENDED_JSON_TYPE_NDC(
+        RaceConfig,
+        approx_scan_point,
+        exact_scan_point,
+        vertical_delta,
+        block_height_threshold,
+        block_1line_config,
+        block_2line_config);
 };
 
 struct CampaignTabCommonConfig {
     Rect<double> area;
     Range<Color> strict_bg_color;
     Range<Color> loose_bg_color;
+    Range<Color> block_bg_color;
 
-    EXTENDED_JSON_TYPE_NDC(CampaignTabCommonConfig, area, strict_bg_color, loose_bg_color);
+    EXTENDED_JSON_TYPE_NDC(CampaignTabCommonConfig, area, strict_bg_color, loose_bg_color, block_bg_color);
 };
 
 struct CampaignTabConfig {

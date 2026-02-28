@@ -61,24 +61,18 @@ private:
     }
 
     [[nodiscard]] SkillTabConfig skillTab() const {
-        const double top_offset = 0.8685 - 0.8444;
-        const double bottom_offset = 0.8963 - 0.8444;
-        const auto left_rect = Rect<double>{{0.1019, top_offset, {IS, SS}}, {0.4296, bottom_offset, {IS, SS}}};
-        const auto right_rect = Rect<double>{{0.5667, top_offset, {IS, SS}}, {0.8944, bottom_offset, {IS, SS}}};
         return {
             getModulePath("skill"),
-            Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
-            left_rect,
-            right_rect,
+            {{235, 235, 235}, {255, 255, 255}},
+            {{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            {{0.1037, 0.0259, {IS, SS}}, {0.4722, 0.0537, {IS, SS}}},
+            {{0.5685, 0.0259, {IS, SS}}, {0.9370, 0.0537, {IS, SS}}},
             0.9352 - 0.8444,
             0.0,
             0.9519 - 0.9148,
             {
                 getModulePath("skill_level"),
-                Rect<double>{
-                    Point<double>{0.4537 - left_rect.left(), top_offset},
-                    Point<double>{0.4815 - left_rect.left(), bottom_offset}},
+                {Point<double>{0.4537, 0.0259, {IS, SS}}, Point<double>{0.4815, 0.0537, {IS, SS}}},
             },
         };
     }
@@ -126,11 +120,12 @@ private:
                 Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
                 Range<Color>{{218, 218, 218}, {248, 248, 248}},
                 Range<Color>{{218, 218, 218}, {255, 255, 255}},
+                Range<Color>{{248, 248, 248}, {255, 255, 255}},
             },
             supportCards(),
             familyTree(),
             campaignRecord(),
-            races(),
+            race(),
         };
     }
 
@@ -334,36 +329,73 @@ private:
         };
     }
 
-    [[nodiscard]] RaceConfig races() const {
-        const double scan_top = 1.9130;
-        const double scan_bottom = 2.0796;
+    [[nodiscard]] RaceBlockConfig race1LineBlock() const {
         return {
-            Point<double>{0.2074, 0.0000, {IS, SS}},
-            0.1748,
             {
                 getModulePath("race_title"),
-                Rect<double>{{0.1574, 1.9241 - scan_top, {IS, SS}}, {0.7481, 1.9519 - scan_top, {IS, SS}}},
+                {{0.1611, 0.0111, {IS, SS}}, {0.7519, 0.0389, {IS, SS}}},
             },
             {
-                getModulePath("race_place"),
-                Rect<double>{{0.0685, 1.9833 - scan_top, {IS, SS}}, {0.5852, 2.0148 - scan_top, {IS, SS}}},
+                getModulePath("race_place_1line"),
+                {{0.0667, 0.0722, {IS, SS}}, {0.5833, 0.1000, {IS, SS}}},
             },
             {
                 getModulePath("race_turn"),
-                Rect<double>{{0.4426, 2.0315 - scan_bottom, {IS, SS}}, {0.7778, 2.0630 - scan_bottom, {IS, SS}}},
+                {{0.4389, -0.0463, {IS, SS}}, {0.7741, -0.0185, {IS, SS}}},
             },
             {
                 getModulePath("race_position"),
-                Rect<double>{{0.7963, 1.9278 - scan_top, {IS, SS}}, {0.9333, 2.0648 - scan_top, {IS, SS}}},
+                {{0.7926, -0.0704, {IS, SS}}, {0.9333, 0.0704, {IS, SS}}},
+
             },
             {
                 getModulePath("race_strategy"),
-                Rect<double>{{0.1870, 2.0315 - scan_bottom, {IS, SS}}, {0.2481, 2.0630 - scan_bottom, {IS, SS}}},
+                {{0.1852, -0.0463, {IS, SS}}, {0.2426, -0.0185, {IS, SS}}},
             },
             {
                 getModulePath("race_weather"),
-                Rect<double>{{0.5937, 1.9833 - scan_top, {IS, SS}}, {0.6956, 2.0148 - scan_top, {IS, SS}}},
+                {{0.5963, 0.0741, {IS, SS}}, {0.6981, 0.1019, {IS, SS}}},
             },
+        };
+    }
+
+    [[nodiscard]] RaceBlockConfig race2LineBlock() const {
+        return {
+            {
+                getModulePath("race_title"),
+                {{0.1611, 0.0148, {IS, SS}}, {0.7519, 0.0426, {IS, SS}}},
+            },
+            {
+                getModulePath("race_place_2line"),
+                {{0.0685, 0.0722, {IS, SS}}, {0.5852, 0.1481, {IS, SS}}},
+            },
+            {
+                getModulePath("race_turn"),
+                {{0.4407, -0.0519, {IS, SS}}, {0.7759, -0.0241, {IS, SS}}},
+            },
+            {
+                getModulePath("race_position"),
+                {{0.7944, -0.0778, {IS, SS}}, {0.9352, 0.0630, {IS, SS}}},
+            },
+            {
+                getModulePath("race_strategy"),
+                {{0.1889, -0.0519, {IS, SS}}, {0.2463, -0.0241, {IS, SS}}},
+            },
+            {
+                getModulePath("race_weather"),
+                {{0.5963, 0.1130, {IS, SS}}, {0.6981, 0.1407, {IS, SS}}},
+            },
+        };
+    }
+
+    [[nodiscard]] RaceConfig race() const {
+        return {
+            {0.0556, 0.1500, {IS, SS}},
+            {0.1678, 0.0150, {IS, SS}},
+            0.0130,
+            0.1944,
+            race1LineBlock(),
+            race2LineBlock(),
         };
     }
 };
