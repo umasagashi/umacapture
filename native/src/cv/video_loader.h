@@ -54,7 +54,7 @@ public:
     }
 
 private:
-    Frame crop(const Frame &frame) const {
+    [[nodiscard]] Frame crop(const Frame &frame) const {
         if (crop_rect.has_value()) {
             return frame.view(crop_rect.value()).clone();
         } else {
