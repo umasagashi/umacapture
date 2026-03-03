@@ -11,8 +11,12 @@ namespace uma::chrono_util {
 
 using time_unit = std::chrono::milliseconds;
 
-inline uint64_t timestamp() {
-    return std::chrono::duration_cast<time_unit>(std::chrono::system_clock::now().time_since_epoch()).count();
+inline std::chrono::system_clock::time_point local_now() {
+    return std::chrono::system_clock::now();
+}
+
+inline uint64_t to_timestamp(std::chrono::system_clock::time_point tp) {
+    return std::chrono::duration_cast<time_unit>(tp.time_since_epoch()).count();
 }
 
 template<typename T, typename S>
@@ -20,8 +24,8 @@ auto ms(std::chrono::duration<T, S> duration) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 }
 
-inline std::string utc() {
-    const time_t unix_ts = std::time(nullptr);
+inline std::string to_datetime_string(std::chrono::system_clock::time_point tp) {
+    const time_t unix_ts = std::chrono::system_clock::to_time_t(tp);
     std::tm datetime{};
 
 #if defined(__ANDROID__)

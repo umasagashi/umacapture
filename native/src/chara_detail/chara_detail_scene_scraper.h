@@ -764,7 +764,7 @@ public:
             checkForCompleted();
         }
 
-        log_trace("delay={}", chrono_util::timestamp() - frame.timestamp());
+        log_trace("delay={}", chrono_util::to_timestamp(chrono_util::local_now()) - frame.timestamp());
     }
 
     void release() {

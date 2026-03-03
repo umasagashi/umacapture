@@ -37,8 +37,8 @@ public:
     [[nodiscard]] bool met(const bool &parent, state::TimestampState &state) const override {
         if (parent) {
             if (state.timestamp == 0) {
-                state.timestamp = chrono_util::timestamp();
-            } else if (chrono_util::timestamp() - state.timestamp > threshold) {
+                state.timestamp = chrono_util::to_timestamp(chrono_util::local_now());
+            } else if (chrono_util::to_timestamp(chrono_util::local_now()) - state.timestamp > threshold) {
                 return true;
             }
         } else {

@@ -869,9 +869,9 @@ public:
 
         auto started = std::chrono::steady_clock::now();
 
-        // TODO: These should share the exact same time.
-        const auto utc_now = chrono_util::utc();
-        const auto timestamp = chrono_util::timestamp();
+        const auto now = chrono_util::local_now();
+        const auto utc_now = chrono_util::to_datetime_string(now);
+        const auto timestamp = chrono_util::to_timestamp(now);
 
         record::CharaDetailRecord record;
 
