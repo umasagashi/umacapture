@@ -46,6 +46,8 @@ class LabelKeys {
   static String get raceStrategy => "race_strategy.name";
 
   static String get campaignScenario => "scenario.name";
+
+  static String get recordType => "record_type.name";
 }
 
 enum ColumnBuilderType {

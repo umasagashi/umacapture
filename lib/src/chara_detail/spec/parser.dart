@@ -184,6 +184,16 @@ class RaceWinningCountParser extends Parser<int> {
 }
 
 @jsonSerializable
+@Json(discriminatorValue: "RecordTypeParser")
+class RecordTypeParser extends Parser<int> {
+  @override
+  int parse(CharaDetailRecord record) {
+    final recordType = record.metadata.recordType ?? RecordType.standard;
+    return RecordType.values.indexOf(recordType);
+  }
+}
+
+@jsonSerializable
 @Json(discriminatorValue: "CampaignScenarioParser")
 class CampaignScenarioParser extends Parser<int> {
   @override
