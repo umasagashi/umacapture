@@ -516,8 +516,8 @@
         "module_path": "character_rank/prediction.onnx",
         "rect": {
           "top_left": {
-            "x": 0.1333,
-            "y": -0.014800000000000035,
+            "x": 0.1296,
+            "y": -0.0185,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"
@@ -525,7 +525,7 @@
           },
           "bottom_right": {
             "x": 0.1833,
-            "y": 0.03520000000000001,
+            "y": 0.0352,
             "anchor": {
               "h": "IntersectStart",
               "v": "ScreenStart"

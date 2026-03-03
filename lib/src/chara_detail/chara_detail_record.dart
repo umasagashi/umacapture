@@ -363,23 +363,17 @@ class CharaDetailRecord extends JsonEquatable {
     return null;
   }
 
+  /// Determines if another record represents the same character based on key attributes.
+  /// This method partially compares only the attributes necessary for distinguishing records.
   bool isSameChara(CharaDetailRecord other) {
     const DeepCollectionEquality equality = DeepCollectionEquality();
     return [
-      // No metadata comparison.
       trainee == other.trainee,
       evaluationValue == other.evaluationValue,
       status == other.status,
       aptitudes == other.aptitudes,
       equality.equals(skills, other.skills),
       factors == other.factors,
-      equality.equals(supportCards, other.supportCards),
-      family == other.family,
-      fans == other.fans,
-      scenario == other.scenario,
-      foreignAptitude == other.foreignAptitude,
-      trainedDate == other.trainedDate,
-      equality.equals(races, other.races),
     ].everyIn();
   }
 
