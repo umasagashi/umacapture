@@ -141,16 +141,18 @@ public:
         , horizontal_threshold(config.horizontal_threshold)
         , minimum_key_points(config.minimum_key_points)
         , vertical_threshold(config.vertical_threshold)
-        , detector(cv::AKAZE::create(
-              cv::AKAZE::DESCRIPTOR_MLDB_UPRIGHT,
-              0,
-              config.descriptor_channels,
-              config.descriptor_threshold,
-              config.octaves,
-              config.octave_layers,
-              cv::KAZE::DIFF_PM_G2))
-        , matcher(cv::makePtr<cv::FlannBasedMatcher>(
-              cv::makePtr<cv::flann::LshIndexParams>(config.table_number, config.key_size, config.probe_level))) {}
+        , detector(
+              cv::AKAZE::create(
+                  cv::AKAZE::DESCRIPTOR_MLDB_UPRIGHT,
+                  0,
+                  config.descriptor_channels,
+                  config.descriptor_threshold,
+                  config.octaves,
+                  config.octave_layers,
+                  cv::KAZE::DIFF_PM_G2))
+        , matcher(
+              cv::makePtr<cv::FlannBasedMatcher>(
+                  cv::makePtr<cv::flann::LshIndexParams>(config.table_number, config.key_size, config.probe_level))) {}
 
     ImageOffsetEstimator()
         : ImageOffsetEstimator(ImageOffsetEstimatorConfig()) {}
@@ -329,11 +331,13 @@ public:
         const std::vector<scraper_config::ScanParameter> &skill_scans,
         const std::vector<scraper_config::ScanParameter> &factor_scans,
         const std::vector<scraper_config::ScanParameter> &campaign_scans,
+        const record::RecordType &record_type,
         const std::filesystem::path &image_dir)
-        : skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config.skill.stem()))
+        : base_path(image_dir / path_config.base.filename())
+        , record_type(record_type)
+        , skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config.skill.stem()))
         , factor_box_(std::make_shared<PageScrapingBox>(factor_scans, image_dir / path_config.factor.stem()))
-        , campaign_box_(std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config.campaign.stem()))
-        , base_path(image_dir / path_config.base.filename()) {}
+        , campaign_box_(std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config.campaign.stem())) {}
 
     [[nodiscard]] std::shared_ptr<PageScrapingBox> skill_box() const { return skill_box_; }
     [[nodiscard]] std::shared_ptr<PageScrapingBox> factor_box() const { return factor_box_; }
@@ -345,12 +349,20 @@ public:
         base_ready = true;
     }
 
-    [[nodiscard]] inline bool ready() const {
-        return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
+    [[nodiscard]] bool ready() const {
+        switch (record_type) {
+            case record::RecordType::InheritanceOnly: {
+                return base_ready && factor_box_->ready() && campaign_box_->ready();
+            }
+            default: {
+                return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
+            }
+        }
     }
 
 private:
     const std::filesystem::path base_path;
+    const record::RecordType record_type;
 
     std::shared_ptr<PageScrapingBox> skill_box_;
     std::shared_ptr<PageScrapingBox> factor_box_;
@@ -649,9 +661,7 @@ public:
 
     [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && !last_snackbar_visible; }
 
-    [[nodiscard]] inline Frame frame() const {
-        return base_frame_catcher.fullSizeFrame().view(base_image_rect);
-    }
+    [[nodiscard]] inline Frame frame() const { return base_frame_catcher.fullSizeFrame().view(base_image_rect); }
 
 private:
     [[nodiscard]] bool isSnackbarVisible(const Frame &frame) const {
@@ -672,14 +682,14 @@ private:
 class CharaDetailSceneScraper {
 public:
     CharaDetailSceneScraper(
-        const event_util::Listener<> &on_opened,
-        const event_util::Listener<Frame, SceneInfo> &on_updated,
+        const event_util::Listener<SceneInfo> &on_opened,
+        const event_util::Listener<Frame, SceneState> &on_updated,
         const event_util::Listener<> &on_closed,
-        const event_util::Sender<std::string> &on_closed_before_completed,
+        const event_util::Sender<RecordInfo> &on_closed_before_completed,
         const event_util::Sender<int> &on_scroll_ready,
         const event_util::Sender<int, double> &on_scroll_updated,
         const event_util::Sender<int> &on_page_ready,
-        const event_util::Sender<std::string> &on_completed,
+        const event_util::Sender<RecordInfo> &on_completed,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir)
         : on_updated(on_updated)
@@ -692,25 +702,32 @@ public:
         , on_completed(on_completed)
         , config(config)
         , scraping_root_dir(scraping_dir) {
-        this->on_opened->listen([this]() { build(); });
-        this->on_updated->listen([this](const auto &frame, const auto &info) { update(frame, info); });
+        this->on_opened->listen([this](const auto &info) { build(info); });
+        this->on_updated->listen([this](const auto &frame, const auto &state) { update(frame, state); });
         this->on_closed->listen([this]() {
             log_debug("on_closed");
             if (!ready()) {
-                this->on_closed_before_completed->send(std::string{current_uuid});
+                this->on_closed_before_completed->send(RecordInfo(current_record_info));
             }
             release();
         });
     }
 
-    void build() {
-        log_debug("");
-        assert_(state == scraper_impl::Null);
+    void build(const SceneInfo &info) {
+        vlog_trace(info.record_type);
+        assert_(scraping_state == scraper_impl::Null);
 
-        current_uuid = uuid_generator.uuid4().str();
+        current_record_info = {
+            uuid_generator.uuid4().str(),
+            info.record_type,
+        };
 
         scraping_box = std::make_shared<scraper_impl::SceneScrapingBox>(
-            config.skill_scans, config.factor_scans, config.campaign_scans, scraping_root_dir / current_uuid);
+            config.skill_scans,
+            config.factor_scans,
+            config.campaign_scans,
+            info.record_type,
+            scraping_root_dir / current_record_info.record_id);
 
         skill_scraper = std::make_unique<scraper_impl::SceneScraper>(
             config.common,
@@ -740,22 +757,21 @@ public:
             config.common.base_image_rect,
             config.snackbar_scan_line,
             config.snackbar_color_range,
-            config.snackbar_time_threshold
-            );
+            config.snackbar_time_threshold);
 
-        state = scraper_impl::Updatable;
+        scraping_state = scraper_impl::Updatable;
     }
 
-    void update(const Frame &frame, const SceneInfo &scene_info) {
-        vlog_trace("");
+    void update(const Frame &frame, const SceneState &scene_state) {
+        vlog_trace(state.tab_page);
 
         if (ready()) {  // After ready, do nothing until scene is closed.
             return;
         }
 
-        const auto tab_scraper = tabScraper(scene_info.tab_page);
+        const auto tab_scraper = tabScraper(scene_state.tab_page);
         if (updateUntilReady(tab_scraper, frame)) {
-            on_page_ready->send(scene_info.tab_page);
+            on_page_ready->send(scene_state.tab_page);
             checkForCompleted();
         }
 
@@ -773,12 +789,12 @@ public:
         campaign_scraper = nullptr;
         base_frame_catcher = nullptr;
         scraping_box = nullptr;
-        state = scraper_impl::Null;
+        scraping_state = scraper_impl::Null;
     }
 
 private:
     [[nodiscard]] scraper_impl::SceneScraper *tabScraper(TabPage tab_page) const {
-        assert_(state == scraper_impl::Updatable);
+        assert_(scraping_state == scraper_impl::Updatable);
         switch (tab_page) {
             case TabPage::SkillPage: return skill_scraper.get();
             case TabPage::FactorPage: return factor_scraper.get();
@@ -787,38 +803,38 @@ private:
         }
     }
 
-    [[nodiscard]] bool ready() const { return state == scraper_impl::Ready; }
+    [[nodiscard]] bool ready() const { return scraping_state == scraper_impl::Ready; }
 
     void checkForCompleted() {
-        assert_(state == scraper_impl::Updatable);
+        assert_(scraping_state == scraper_impl::Updatable);
         if (scraping_box->ready()) {
-            on_completed->send(current_uuid);
-            state = scraper_impl::Ready;
+            on_completed->send(RecordInfo(current_record_info));
+            scraping_state = scraper_impl::Ready;
         }
     }
 
-    const event_util::Listener<> on_opened;
-    const event_util::Listener<Frame, SceneInfo> on_updated;
+    const event_util::Listener<SceneInfo> on_opened;
+    const event_util::Listener<Frame, SceneState> on_updated;
     const event_util::Listener<> on_closed;
 
-    const event_util::Sender<std::string> on_closed_before_completed;
+    const event_util::Sender<RecordInfo> on_closed_before_completed;
     const event_util::Sender<int> on_scroll_ready;  // When user can start scrolling.
     const event_util::Sender<int, double> on_scroll_updated;  // When user scrolling.
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
-    const event_util::Sender<std::string> on_completed;  // When all three pages are ready.
+    const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
 
     minimal_uuid4::Generator uuid_generator;
 
-    std::string current_uuid;
+    RecordInfo current_record_info = {};
     std::unique_ptr<scraper_impl::SceneScraper> skill_scraper;
     std::unique_ptr<scraper_impl::SceneScraper> factor_scraper;
     std::unique_ptr<scraper_impl::SceneScraper> campaign_scraper;
     std::unique_ptr<scraper_impl::BaseFrameCatcher> base_frame_catcher;
     std::shared_ptr<scraper_impl::SceneScrapingBox> scraping_box;
-    scraper_impl::ReadyState state = scraper_impl::Null;
+    scraper_impl::ReadyState scraping_state = scraper_impl::Null;
 };
 
 }  // namespace uma::chara_detail

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "chara_detail/chara_detail_record.h"
 #include "condition/basic_condition.h"
 #include "condition/condition.h"
 #include "condition/rule.h"
@@ -20,42 +21,48 @@ enum TabPage {
 };
 
 struct SceneInfo {
-    TabPage tab_page;
+    record::RecordType record_type;
+};
 
-    SceneInfo(int tab_page)  // NOLINT(google-explicit-constructor)
-        : tab_page(static_cast<TabPage>(tab_page)) {}
+struct SceneState {
+    TabPage tab_page;
 };
 
 class CharaDetailSceneContext : public distributor::SceneContext {
 public:
     CharaDetailSceneContext(
         const std::shared_ptr<condition::Condition<Frame>> &child,
-        const event_util::Sender<> &on_scene_begin,
-        const event_util::Sender<Frame, SceneInfo> &on_scene_updated,
+        const event_util::Sender<SceneInfo> &on_scene_begin,
+        const event_util::Sender<Frame, SceneState> &on_scene_updated,
         const event_util::Sender<> &on_scene_end,
         const chrono_util::time_unit &scene_end_timeout)
         : child(child)
-        , tab_condition(dynamic_cast<const TabCondition *>(child->findByTag("tab_condition")))
+        , tab_page_condition(dynamic_cast<const TabCondition *>(child->findByTag("tab_page")))
+        , record_type_condition(dynamic_cast<const TabCondition *>(child->findByTag("record_type")))
         , on_scene_begin(on_scene_begin)
         , on_scene_updated(on_scene_updated)
         , on_scene_end(on_scene_end)
         , scene_end_timeout(scene_end_timeout) {
-        if (tab_condition == nullptr) {
-            throw std::runtime_error("tab_condition not found");
+        if (tab_page_condition == nullptr) {
+            throw std::runtime_error("tab_page condition not found");
+        }
+        if (record_type_condition == nullptr) {
+            throw std::runtime_error("record_type condition not found");
         }
     }
 
     void update(const Frame &input) override {
         child->update(input);
-        const auto tab_index = getActiveTabIndex();
-        met_ = child->met() && tab_index.has_value();
+        const auto tab_page = getActiveTabIndex();
+        const auto record_type = getRecordType();
+        met_ = child->met() && tab_page.has_value() && record_type.has_value();
 
         if (met_) {
             const auto canceled = cancelSceneEndTimer();
             if (!previous_condition && !canceled) {  // When end is canceled, no need to call begin either.
-                on_scene_begin->send();
+                on_scene_begin->send({record_type.value()});
             }
-            on_scene_updated->send(input, {tab_index.value()});
+            on_scene_updated->send(input, { tab_page.value()});
         } else if (previous_condition) {
             if (scene_end_timeout == chrono_util::time_unit::zero()) {
                 on_scene_end->send();
@@ -85,20 +92,29 @@ private:
         scene_end_timer = std::make_unique<thread_util::Timer>(scene_end_timeout, [this]() { on_scene_end->send(); });
     }
 
-    [[nodiscard]] std::optional<int> getActiveTabIndex() const {
-        const auto tab_states = tab_condition->metDetail();
-        const auto active = stds::find(tab_states, true);
-        if (active == tab_states.end()) {
+    template<typename T>
+    [[nodiscard]] std::optional<T> getActiveIndexAs(const TabCondition *cond) const {
+        const auto states = cond->metDetail();
+        const auto active = stds::find(states, true);
+        if (active == states.end()) {
             return std::nullopt;
-        } else {
-            return static_cast<int>(std::distance(tab_states.begin(), active));
         }
+        return static_cast<T>(std::distance(states.begin(), active));
+    }
+
+    [[nodiscard]] std::optional<TabPage> getActiveTabIndex() const {
+        return getActiveIndexAs<TabPage>(tab_page_condition);
+    }
+
+    [[nodiscard]] std::optional<record::RecordType> getRecordType() const {
+        return getActiveIndexAs<record::RecordType>(record_type_condition);
     }
 
     const std::shared_ptr<condition::Condition<Frame>> child;
-    const condition::ParallelCondition<Frame, rule::LogicalOr> *tab_condition;
-    const event_util::Sender<> on_scene_begin;
-    const event_util::Sender<Frame, SceneInfo> on_scene_updated;
+    const condition::ParallelCondition<Frame, rule::LogicalOr> *tab_page_condition;
+    const condition::ParallelCondition<Frame, rule::LogicalOr> *record_type_condition;
+    const event_util::Sender<SceneInfo> on_scene_begin;
+    const event_util::Sender<Frame, SceneState> on_scene_updated;
     const event_util::Sender<> on_scene_end;
 
     std::unique_ptr<thread_util::Timer> scene_end_timer;

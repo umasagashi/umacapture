@@ -14,6 +14,7 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
+#include "chara_detail/record_info.h"
 #include "cv/frame.h"
 #include "cv/frame_distributor.h"
 #include "util/event_util.h"
@@ -47,9 +48,10 @@ public:
         notify(json_util::Json{{"type", "onScreenshotTaken"}, {"path", path}, {"result", resultCode}}.dump());
     }
 
-    void stitch(const std::string &id) { on_stitch_ready->send(id); }
+    void stitch(const chara_detail::RecordInfo &info) const { on_stitch_ready->send(info); }
 
-    void recognize(const std::string &id) { on_recognize_ready->send(id); }
+    void recognize(const chara_detail::RecordInfo &info) const { on_recognize_ready->send(info); }
+    void recognize(const std::string &record_id) const { on_recognize_ready->send({record_id, std::nullopt}); }
 
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
 
@@ -69,13 +71,13 @@ public:
     void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
 
     void notifyCharaDetailStarted() { notify(json_util::Json{{"type", "onCharaDetailStarted"}}.dump()); }
-    void notifyCharaDetailFinished(const std::string &id, bool success) {
-        notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", id}, {"success", success}}.dump());
+    void notifyCharaDetailFinished(const chara_detail::RecordInfo &info, bool success) {
+        notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", info.record_id}, {"success", success}}.dump());
     }
 
-    void updateRecord(const std::string &id);
-    void notifyCharaDetailUpdated(const std::string &id) {
-        notify(json_util::Json{{"type", "onCharaDetailUpdated"}, {"id", id}}.dump());
+    void updateRecord(const chara_detail::RecordInfo &info) const;
+    void notifyCharaDetailUpdated(const chara_detail::RecordInfo &info) {
+        notify(json_util::Json{{"type", "onCharaDetailUpdated"}, {"id", info.record_id}}.dump());
     }
 
     void notifyFrameRateReported(double fps) {
@@ -119,10 +121,10 @@ private:
     std::function<PathCallback> rmdir_callback = [](const auto &path) { std::filesystem::remove_all(path); };
 
     // debug interface
-    event_util::Sender<std::string> on_stitch_ready;
-    event_util::Sender<std::string> on_recognize_ready;
+    event_util::Sender<chara_detail::RecordInfo> on_stitch_ready;
+    event_util::Sender<chara_detail::RecordInfo> on_recognize_ready;
 
-    event_util::Sender<std::string> on_update_ready;
+    event_util::Sender<chara_detail::RecordInfo> on_update_ready;
 
     event_util::Sender<Frame> on_frame_captured;
     event_util::EventRunnerController event_runners;
@@ -133,7 +135,7 @@ private:
     std::unique_ptr<chara_detail::CharaDetailRecognizer> chara_detail_recognizer;
 
     const std::chrono::milliseconds report_interval = std::chrono::milliseconds(1000);
-    event_util::Connection<Frame, chara_detail::SceneInfo> lap_time_wrapper;
+    event_util::Connection<Frame, chara_detail::SceneState> lap_time_wrapper;
     event_util::Connection<> lap_discard_wrapper;
     std::chrono::steady_clock::time_point last_size_reported;
     std::list<std::chrono::steady_clock::time_point> lap_time_buffer;

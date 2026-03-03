@@ -2,6 +2,7 @@
 #include "chara_detail/chara_detail_scene_context.h"
 #include "chara_detail/chara_detail_scene_scraper.h"
 #include "chara_detail/chara_detail_scene_stitcher.h"
+#include "chara_detail/record_info.h"
 #include "util/logger_util.h"
 #include "util/misc.h"
 
@@ -46,11 +47,11 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto scraper_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "scraper");
     event_runners->add(scraper_runner);
 
-    const auto chara_detail_updated_connection = scraper_runner->makeConnection<Frame, chara_detail::SceneInfo>();
-    const auto chara_detail_opened_connection = scraper_runner->makeConnection<>();
+    const auto chara_detail_updated_connection = scraper_runner->makeConnection<Frame, chara_detail::SceneState>();
+    const auto chara_detail_opened_connection = scraper_runner->makeConnection<chara_detail::SceneInfo>();
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>();
 
-    chara_detail_opened_connection->listen([this]() { notifyCharaDetailStarted(); });
+    chara_detail_opened_connection->listen([this](const auto &) { notifyCharaDetailStarted(); });
 
     {
         const auto scene_context = std::make_shared<chara_detail::CharaDetailSceneContext>(
@@ -72,9 +73,9 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::NoLimit, detach_callback, "stitcher");
     event_runners->add(stitcher_runner);
 
-    const auto closed_before_completed_connection = event_util::makeDirectConnection<std::string>();
-    closed_before_completed_connection->listen([this](const std::string &id) {
-        notifyCharaDetailFinished(id, false);
+    const auto closed_before_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    closed_before_completed_connection->listen([this](const auto &info) {
+        notifyCharaDetailFinished(info, false);
         notifyError("closed_before_completed");
     });
 
@@ -87,10 +88,10 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
-    const auto stitch_ready_connection = stitcher_runner->makeConnection<std::string>();
+    const auto stitch_ready_connection = stitcher_runner->makeConnection<chara_detail::RecordInfo>();
     on_stitch_ready = stitch_ready_connection;
 
-    lap_time_wrapper = event_util::makeDirectConnection<Frame, chara_detail::SceneInfo>();
+    lap_time_wrapper = event_util::makeDirectConnection<Frame, chara_detail::SceneState>();
     chara_detail_updated_connection->listen([this](const auto &frame, const auto &info) {
         lap_time_wrapper->send(frame, info);
         const auto &now = std::chrono::steady_clock::now();
@@ -127,10 +128,10 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::NoLimit, detach_callback, "recognizer");
     event_runners->add(recognizer_runner);
 
-    const auto recognize_ready_connection = recognizer_runner->makeConnection<std::string>();
+    const auto recognize_ready_connection = recognizer_runner->makeConnection<chara_detail::RecordInfo>();
     on_recognize_ready = recognize_ready_connection;
 
-    const auto update_ready_connection = recognizer_runner->makeConnection<std::string>();
+    const auto update_ready_connection = recognizer_runner->makeConnection<chara_detail::RecordInfo>();
     on_update_ready = update_ready_connection;
 
     const auto stitcher_dir =
@@ -144,11 +145,12 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         config_json["chara_detail"]["scene_stitcher"]
             .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>());
 
-    const auto recognize_completed_connection = event_util::makeDirectConnection<std::string>();
-    recognize_completed_connection->listen([this](const auto &id) { notifyCharaDetailFinished(id, true); });
+    const auto recognize_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    recognize_completed_connection->listen(
+        [this](const auto &info) { notifyCharaDetailFinished(info, true); });
 
-    const auto update_completed_connection = event_util::makeDirectConnection<std::string>();
-    update_completed_connection->listen([this](const auto &id) { notifyCharaDetailUpdated(id); });
+    const auto update_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    update_completed_connection->listen([this](const auto &info) { notifyCharaDetailUpdated(info); });
 
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
@@ -192,9 +194,9 @@ void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) 
     }
 }
 
-void NativeApi::updateRecord(const std::string &id) {
+void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
     assert_(isRunning());
-    on_update_ready->send(id);
+    on_update_ready->send(info);
 }
 
 [[maybe_unused]] void NativeApi::_dummyForSuppressingUnusedWarning() {

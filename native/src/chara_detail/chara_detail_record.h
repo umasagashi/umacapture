@@ -4,17 +4,26 @@
 #include <string>
 #include <vector>
 
+#include "util/json_util.h"
 #include "util/stds.h"
 
 namespace uma::chara_detail::record {
+
+enum RecordType {
+    Standard = 0,
+    InheritanceOnly = 1,
+    Friend = 2,
+};
+EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, Friend)
 
 struct Character {
     int icon;
     int character;
     int card;
     int rank;
+    std::optional<RecordType> record_type;
 
-    EXTENDED_JSON_TYPE_NDC(Character, icon, character, card, rank);
+    EXTENDED_JSON_TYPE_NDC(Character, icon, character, card, rank, record_type);
 };
 
 struct CharacterStatus {
@@ -26,7 +35,8 @@ struct CharacterStatus {
 
     CharacterStatus() = default;
 
-    [[maybe_unused]] CharacterStatus(int speed, int stamina, int power, int guts, int intelligence)
+    [[maybe_unused]] CharacterStatus(
+        const int speed, const int stamina, const int power, const int guts, const int intelligence)
         : speed(speed)
         , stamina(stamina)
         , power(power)
@@ -49,7 +59,7 @@ struct GroundAptitude {
 
     GroundAptitude() = default;
 
-    [[maybe_unused]] GroundAptitude(int turf, int dirt)
+    [[maybe_unused]] GroundAptitude(const int turf, const int dirt)
         : turf(turf)
         , dirt(dirt) {}
 
@@ -68,7 +78,8 @@ struct DistanceAptitude {
 
     DistanceAptitude() = default;
 
-    [[maybe_unused]] DistanceAptitude(int short_range, int mile_range, int middle_range, int long_range)
+    [[maybe_unused]] DistanceAptitude(
+        const int short_range, const int mile_range, const int middle_range, const int long_range)
         : short_range(short_range)
         , mile_range(mile_range)
         , middle_range(middle_range)
@@ -91,7 +102,7 @@ struct StyleAptitude {
 
     StyleAptitude() = default;
 
-    [[maybe_unused]] StyleAptitude(int lead_pace, int with_pace, int off_pace, int late_charge)
+    [[maybe_unused]] StyleAptitude(const int lead_pace, const int with_pace, const int off_pace, const int late_charge)
         : lead_pace(lead_pace)
         , with_pace(with_pace)
         , off_pace(off_pace)
@@ -113,7 +124,8 @@ struct AptitudeSet {
 
     AptitudeSet() = default;
 
-    [[maybe_unused]] AptitudeSet(GroundAptitude ground, DistanceAptitude distance, StyleAptitude style)
+    [[maybe_unused]] AptitudeSet(
+        const GroundAptitude ground, const DistanceAptitude distance, const StyleAptitude style)
         : ground(ground)
         , distance(distance)
         , style(style) {}
@@ -210,6 +222,7 @@ struct Metadata {
     std::string stage;
     int strategy;
     std::optional<int> relation_bonus;
+    std::optional<RecordType> record_type;
 
     EXTENDED_JSON_TYPE_NDC(
         Metadata,
@@ -221,7 +234,8 @@ struct Metadata {
         recognizer_version,
         stage,
         strategy,
-        relation_bonus);
+        relation_bonus,
+        record_type);
 };
 
 struct CharaDetailRecord {
