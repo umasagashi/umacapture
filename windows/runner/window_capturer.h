@@ -117,7 +117,7 @@ public:
             image = resized;
         }
 
-        return {image, chrono_util::timestamp()};
+        return {image, chrono_util::to_timestamp(chrono_util::local_now())};
     }
 
     [[nodiscard]] Frame takeScreenshot() {
@@ -145,7 +145,7 @@ public:
             if (!image.empty()) {
                 // Successfully captured.
                 cleanup();
-                return {image, chrono_util::timestamp()};
+                return {image, chrono_util::to_timestamp(chrono_util::local_now())};
             }
 
             if ((std::chrono::steady_clock::now() - start_time) >= max_duration) {

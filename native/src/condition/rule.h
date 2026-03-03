@@ -14,6 +14,12 @@ struct TimestampState {
 
 }  // namespace uma::state
 
+namespace uma::input {
+
+struct None {};
+
+}  // namespace uma::input
+
 namespace uma::rule {
 #pragma clang diagnostic push
 #pragma ide diagnostic ignored "readability-convert-member-functions-to-static"
@@ -37,8 +43,8 @@ public:
     [[nodiscard]] bool met(const bool &parent, state::TimestampState &state) const override {
         if (parent) {
             if (state.timestamp == 0) {
-                state.timestamp = chrono_util::timestamp();
-            } else if (chrono_util::timestamp() - state.timestamp > threshold) {
+                state.timestamp = chrono_util::to_timestamp(chrono_util::local_now());
+            } else if (chrono_util::to_timestamp(chrono_util::local_now()) - state.timestamp > threshold) {
                 return true;
             }
         } else {
@@ -73,6 +79,39 @@ public:
     }
 
     EXTENDED_JSON_TYPE_NO_ARGS_DC(LogicalOr);
+};
+
+class LogicalNot : public Rule<bool, state::Empty> {
+public:
+    LogicalNot() = default;
+
+    [[nodiscard]] bool met(const bool &operand, state::Empty &) const override {
+        return !operand;
+    }
+
+    EXTENDED_JSON_TYPE_NO_ARGS_DC(LogicalNot);
+};
+
+class AlwaysTrue : public Rule<input::None, state::Empty> {
+public:
+    AlwaysTrue() = default;
+
+    [[nodiscard]] bool met(const input::None &, state::Empty &) const override {
+        return true;
+    }
+
+    EXTENDED_JSON_TYPE_NO_ARGS_DC(AlwaysTrue);
+};
+
+class AlwaysFalse : public Rule<input::None, state::Empty> {
+public:
+    AlwaysFalse() = default;
+
+    [[nodiscard]] bool met(const input::None &, state::Empty &) const override {
+        return false;
+    }
+
+    EXTENDED_JSON_TYPE_NO_ARGS_DC(AlwaysFalse);
 };
 
 #pragma clang diagnostic pop

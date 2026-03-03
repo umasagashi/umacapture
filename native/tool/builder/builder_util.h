@@ -37,43 +37,44 @@ inline Line<double> lineToY(const Point<double> &point, double y) {
     return {point, {point.x(), y, point.anchor()}};
 }
 
-ConditionBase allOf(const std::vector<ConditionBase> &children) {
+inline ConditionBase allOf(const std::vector<ConditionBase> &children) {
     return std::make_shared<condition::ParallelCondition<Frame, rule::LogicalAnd>>(rule::LogicalAnd(), children);
 }
 
-ConditionBase anyOf(const std::vector<ConditionBase> &children, const std::optional<std::string> &name = std::nullopt) {
+inline ConditionBase
+anyOf(const std::vector<ConditionBase> &children, const std::optional<std::string> &name = std::nullopt) {
     return std::make_shared<condition::ParallelCondition<Frame, rule::LogicalOr>>(rule::LogicalOr(), children, name);
 }
 
-ConditionBase stable(int threshold, const ConditionBase &child) {
+inline ConditionBase stable(int threshold, const ConditionBase &child) {
     return std::make_shared<condition::NestedCondition<Frame, rule::Stable>>(rule::Stable(threshold), child);
 }
 
-ConditionBase pointColor(const Point<double> &point, const Range<Color> &color_range) {
+inline ConditionBase pointColor(const Point<double> &point, const Range<Color> &color_range) {
     return std::make_shared<condition::PlainCondition<Frame, rule::PointColor>>(rule::PointColor(point, color_range));
 }
 
-ConditionBase
+inline ConditionBase
 lineLength(const Line<double> &line, const Range<double> &length_range, const Range<Color> &color_deviation) {
     return std::make_shared<condition::PlainCondition<Frame, rule::LineLength>>(
         rule::LineLength({line, color_deviation}, length_range));
 }
 
-ConditionBase lineLength(const Line<double> &line, const Range<double> &length_range) {
+inline ConditionBase lineLength(const Line<double> &line, const Range<double> &length_range) {
     return lineLength(line, length_range, flat_deviation);
 }
 
-ConditionBase
+inline ConditionBase
 stableLineLength(const Line<double> &line, const Range<double> &length_range, const Range<Color> &color_deviation) {
     return std::make_shared<condition::PlainCondition<Frame, rule::StableLineLength>>(
         rule::StableLineLength({line, color_deviation}, length_range));
 }
 
-ConditionBase stableLineLength(const Line<double> &line, const Range<double> &length_range) {
+inline ConditionBase stableLineLength(const Line<double> &line, const Range<double> &length_range) {
     return stableLineLength(line, length_range, flat_deviation);
 }
 
-ConditionBase lineCheck(
+inline ConditionBase lineCheck(
     const Line<double> &line,
     const Range<Color> &p1_color,
     const Range<double> &length,
@@ -84,11 +85,11 @@ ConditionBase lineCheck(
     });
 }
 
-ConditionBase lineCheck(const Line<double> &line, const Range<Color> &p1_color, const Range<double> &length) {
+inline ConditionBase lineCheck(const Line<double> &line, const Range<Color> &p1_color, const Range<double> &length) {
     return lineCheck(line, p1_color, length, flat_deviation);
 }
 
-ConditionBase stableLineCheck(
+inline ConditionBase stableLineCheck(
     int threshold,
     const Line<double> &line,
     const Range<Color> &p1_color,
@@ -102,9 +103,21 @@ ConditionBase stableLineCheck(
         }));
 }
 
-ConditionBase
+inline ConditionBase
 stableLineCheck(int threshold, const Line<double> &line, const Range<Color> &p1_color, const Range<double> &length) {
     return stableLineCheck(threshold, line, p1_color, length, flat_deviation);
+}
+
+inline ConditionBase logicalNot(const ConditionBase &child) {
+    return std::make_shared<condition::NestedCondition<Frame, rule::LogicalNot>>(rule::LogicalNot(), child);
+}
+
+inline ConditionBase alwaysTrue() {
+    return std::make_shared<condition::NullaryCondition<Frame, rule::AlwaysTrue>>(rule::AlwaysTrue());
+}
+
+inline ConditionBase alwaysFalse() {
+    return std::make_shared<condition::NullaryCondition<Frame, rule::AlwaysFalse>>(rule::AlwaysFalse());
 }
 
 }  // namespace uma::tool

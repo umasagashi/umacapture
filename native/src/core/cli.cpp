@@ -119,14 +119,14 @@ void stitchFromImages(const std::string &id) {
 
     recorder_runner->start();
 
-    api.stitch(id);
+    api.stitch({id, chara_detail::record::RecordType::Standard});
 
     while (api.isRunning()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
-void recognizeFromImages(const std::string &id) {
+void recognizeFromImages(const std::vector<std::string> &id_list) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
@@ -138,7 +138,9 @@ void recognizeFromImages(const std::string &id) {
 
     recorder_runner->start();
 
-    api.recognize(id);
+    for (const auto &id : id_list) {
+        api.recognize(id);
+    }
 
     while (api.isRunning()) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -172,11 +174,12 @@ int main(int argc, char **argv) {
         video_command->add_option("--video_path_list", video_path_list)->required();
 
         auto stitch_command = command.add_subcommand("stitch", "run capture mode from scraped images");
-        std::string id;
-        stitch_command->add_option("--id", id)->required();
+        std::string stitch_id;
+        stitch_command->add_option("--id", stitch_id)->required();
 
         auto recognize_command = command.add_subcommand("recognize", "run recognizer mode from stitched images");
-        recognize_command->add_option("--id", id)->required();
+        std::vector<std::string> recognize_id_list;
+        recognize_command->add_option("--id", recognize_id_list)->required();
 
         CLI11_PARSE(command, argc, argv)
 
@@ -211,11 +214,11 @@ int main(int argc, char **argv) {
         }
 
         if (stitch_command->parsed()) {
-            uma::cli::stitchFromImages(id);
+            uma::cli::stitchFromImages(stitch_id);
         }
 
         if (recognize_command->parsed()) {
-            uma::cli::recognizeFromImages(id);
+            uma::cli::recognizeFromImages(recognize_id_list);
         }
     } catch (std::exception &e) {
         std::cerr << e.what() << std::endl;

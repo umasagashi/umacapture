@@ -281,6 +281,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
     SimpleLabelColumnBuilder(
+      title: "$tr_columns.record_type.title".tr(),
+      category: ColumnCategory.metadata,
+      labelKey: LabelKeys.recordType,
+      parser: RecordTypeParser(),
+    ),
+    SimpleLabelColumnBuilder(
       title: "$tr_columns.race_strategy.title".tr(),
       category: ColumnCategory.metadata,
       labelKey: LabelKeys.raceStrategy,

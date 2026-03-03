@@ -184,7 +184,7 @@ JNIEXPORT void JNICALL Java_com_umasagashi_umacapture_ScreenCaptureService_updat
     auto mat = cv::Mat(scaled_size, CV_8UC3);
     cv::cvtColor(buffer_mat, mat, cv::COLOR_RGBA2BGR);
     uma::app::NativeApi::instance().updateFrame(mat,
-                                                uma::chrono_util::timestamp());  // TODO: take timestamp in android.
+                                                uma::chrono_util::to_timestamp(uma::chrono_util::local_now()));  // TODO: take timestamp in android.
 }
 
 JNIEXPORT void JNICALL

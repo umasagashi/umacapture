@@ -96,7 +96,7 @@ private:
     void updateRecord(const std::string &id) {
         log_debug("");
         app::NativeApi::instance().startEventLoop(native_config);
-        app::NativeApi::instance().updateRecord(id);
+        app::NativeApi::instance().updateRecord({id});
     }
 
     void setPlatformConfig(const windows_config::WindowsConfig &config) {

@@ -42,20 +42,20 @@ public:
     CharaDetailSceneStitcher(
         const std::filesystem::path &scraping_dir,
         const std::filesystem::path &stitching_dir,
-        const event_util::Listener<std::string> &on_stitch_ready,
-        const event_util::Sender<std::string> &on_stitch_completed,
+        const event_util::Listener<RecordInfo> &on_stitch_ready,
+        const event_util::Sender<RecordInfo> &on_stitch_completed,
         const stitcher_config::CharaDetailSceneStitcherConfig &config)
-        : scraping_root_dir(scraping_dir)
+        : config(config)
+        , scraping_root_dir(scraping_dir)
         , stitching_root_dir(stitching_dir)
         , on_stitch_ready(on_stitch_ready)
-        , on_stitch_completed(on_stitch_completed)
-        , config(config) {
-        on_stitch_ready->listen([this](const auto &id) { stitch(id); });
+        , on_stitch_completed(on_stitch_completed) {
+        on_stitch_ready->listen([this](const auto &info) { stitch(info); });
     }
 
-    void stitch(const std::string &id) {
-        const auto input_dir = scraping_root_dir / id;
-        const auto output_dir = stitching_root_dir / id;
+    void stitch(const RecordInfo &info) const {
+        const auto input_dir = scraping_root_dir / info.record_id;
+        const auto output_dir = stitching_root_dir / info.record_id;
 
         vlog_debug(input_dir.string(), output_dir.string());
 
@@ -66,7 +66,7 @@ public:
         stitchTab(base_image, input_dir / path_config.campaign.stem(), output_dir, path_config.campaign);
 
         app::NativeApi::instance().rmdir(input_dir);
-        on_stitch_completed->send(id);
+        on_stitch_completed->send(info);
     }
 
 private:
@@ -74,9 +74,16 @@ private:
         const Frame &base_image,
         const std::filesystem::path &input_dir,
         const std::filesystem::path &output_dir,
-        const PathEntry &path_entry) {
+        const PathEntry &path_entry) const {
+        const auto scroll_area_window_size = base_image.anchor().mapToFrame(config.scroll_area_rect).size();
+
+        // For record types other than Standard, unnecessary tabs may be left empty.
+        auto scroll_area = Frame::fixed(
+            std::filesystem::is_empty(input_dir) ? createDummyImage(scroll_area_window_size)
+                                                 : scroll_area_stitcher.stitch(input_dir));
+
         // Stitch scroll area.
-        auto scroll_area = Frame::fixed(scroll_area_stitcher.stitch(input_dir));
+        // auto scroll_area = Frame::fixed(scroll_area_stitcher.stitch(input_dir));
         const auto background_color = scroll_area.colorAt({0.5, 0.0, {ScreenStart, ScreenPixelEnd}});
         // const auto background_color = Color{255, 0, 0};
 
@@ -84,8 +91,7 @@ private:
         scroll_area.fill(config.scroll_bar_fill_rect, background_color);
 
         // Create canvas.
-        const auto amount_of_stretch =
-            scroll_area.size() - base_image.anchor().mapToFrame(config.scroll_area_rect).size();
+        const auto amount_of_stretch = scroll_area.size() - scroll_area_window_size;
         auto canvas =
             Frame::stretched(cv::Mat{(base_image.size() + amount_of_stretch).toCVSize(), CV_8UC3}, base_image.size());
 
@@ -123,9 +129,10 @@ private:
         }
 
         // Paste tab.
-        canvas.paste(
-            config.tab_button_rect,
-            Frame::fixed(cv::imread((input_dir / path_config.tab_button.filename()).string(), -1)));
+        // TODO: When the tab button image does not exist, it should be fetched from another record.
+        if (const auto tab_path = input_dir / path_config.tab_button.filename(); std::filesystem::exists(tab_path)) {
+            canvas.paste(config.tab_button_rect, Frame::fixed(cv::imread(tab_path.string(), -1)));
+        }
 
         // Fill stains in base_image.
         // base_image was captured while scrolling, so fragments of the scrolling area will appear at the bottom or top edge.
@@ -137,13 +144,18 @@ private:
         canvas.dump(output_dir / path_entry.filename());
     }
 
+    [[nodiscard]] static cv::Mat createDummyImage(const Size<int> &size) {
+        // TODO: The color should be picked from other tabs.
+        return {size.toCVSize(), CV_8UC3, cv::Scalar(243, 243, 243)};
+    }
+
     const stitcher_config::CharaDetailSceneStitcherConfig config;
     const std::filesystem::path scraping_root_dir;
     const std::filesystem::path stitching_root_dir;
     const stitcher_impl::ScrollAreaStitcher scroll_area_stitcher;
 
-    const event_util::Listener<std::string> on_stitch_ready;
-    const event_util::Sender<std::string> on_stitch_completed;
+    const event_util::Listener<RecordInfo> on_stitch_ready;
+    const event_util::Sender<RecordInfo> on_stitch_completed;
 };
 
 }  // namespace uma::chara_detail

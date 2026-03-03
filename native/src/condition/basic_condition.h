@@ -62,7 +62,7 @@ private:
     const std::optional<std::string> condition_name;
     const RuleType rule;
 
-    StateType state;
+    StateType state{};
     bool met_ = false;
 };
 
@@ -120,7 +120,7 @@ private:
     const RuleType rule;
     const std::shared_ptr<Condition<InputType>> child;
 
-    StateType state;
+    StateType state{};
     bool met_ = false;
 };
 
@@ -189,7 +189,56 @@ private:
     const RuleType rule;
     const std::vector<std::shared_ptr<Condition<InputType>>> children;
 
-    StateType state;
+    StateType state{};
+    bool met_ = false;
+};
+
+template<typename InputType, typename RuleType, typename StateType = typename RuleType::state_type>
+class NullaryCondition : public Condition<InputType> {
+public:
+    using rule_type = RuleType;
+    using state_type = StateType;
+
+    NullaryCondition(const RuleType &rule, const std::optional<std::string> &name)
+        : rule(rule)
+        , condition_name(name) {}
+
+    explicit NullaryCondition(const RuleType &rule)
+        : rule(rule) {}
+
+    void update(const InputType &) override {
+        typename RuleType::input_type none{};
+        met_ = rule.met(none, state);
+    }
+
+    [[nodiscard]] bool met() const override { return met_; }
+
+    [[nodiscard]] const Condition<InputType> *findByTag(const std::string &tag) const override {
+        return (tag == condition_name) ? this : nullptr;
+    }
+
+    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+
+    static Condition<InputType> *fromJson(const json_util::Json &json) {
+        return new NullaryCondition<InputType, RuleType, StateType>{
+            json_util::extended_from_json(json, "rule", json_util::AsType<decltype(rule)>()),
+            json_util::extended_from_json(json, "name", json_util::AsType<decltype(condition_name)>()),
+        };
+    }
+
+    [[nodiscard]] json_util::Json toJson() const {
+        json_util::Json json;
+        json_util::extended_to_json(json, "name", condition_name);
+        json_util::extended_to_json(json, "type", typeName());
+        json_util::extended_to_json(json, "rule", rule);
+        return json;
+    }
+
+private:
+    const std::optional<std::string> condition_name;
+    const RuleType rule;
+
+    StateType state{};
     bool met_ = false;
 };
 

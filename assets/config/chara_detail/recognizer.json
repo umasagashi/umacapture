@@ -1224,16 +1224,16 @@
             },
             "rank": {
               "top_left": {
-                "x": 0.1551,
-                "y": 0.055600000000000094,
+                "x": 0.1556,
+                "y": 0.0519,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
                 }
               },
               "bottom_right": {
-                "x": 0.2097,
-                "y": 0.10790000000000011,
+                "x": 0.2093,
+                "y": 0.1056,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1262,16 +1262,16 @@
             },
             "rank": {
               "top_left": {
-                "x": 0.2977,
-                "y": 0.08699999999999997,
+                "x": 0.2981,
+                "y": 0.0852,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
                 }
               },
               "bottom_right": {
-                "x": 0.3393,
-                "y": 0.12729999999999997,
+                "x": 0.3407,
+                "y": 0.1278,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1301,7 +1301,7 @@
             "rank": {
               "top_left": {
                 "x": 0.4296,
-                "y": 0.08699999999999997,
+                "y": 0.0852,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1309,7 +1309,7 @@
               },
               "bottom_right": {
                 "x": 0.4722,
-                "y": 0.12729999999999997,
+                "y": 0.1278,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1340,16 +1340,16 @@
             },
             "rank": {
               "top_left": {
-                "x": 0.613,
-                "y": 0.055600000000000094,
+                "x": 0.6148,
+                "y": 0.0519,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
                 }
               },
               "bottom_right": {
-                "x": 0.6667,
-                "y": 0.10790000000000011,
+                "x": 0.6685,
+                "y": 0.1056,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1378,8 +1378,8 @@
             },
             "rank": {
               "top_left": {
-                "x": 0.757,
-                "y": 0.08699999999999997,
+                "x": 0.7556,
+                "y": 0.0852,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1387,7 +1387,7 @@
               },
               "bottom_right": {
                 "x": 0.7981,
-                "y": 0.12729999999999997,
+                "y": 0.1278,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
@@ -1417,15 +1417,15 @@
             "rank": {
               "top_left": {
                 "x": 0.887,
-                "y": 0.08699999999999997,
+                "y": 0.0852,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"
                 }
               },
               "bottom_right": {
-                "x": 0.9301,
-                "y": 0.12729999999999997,
+                "x": 0.9296,
+                "y": 0.1278,
                 "anchor": {
                   "h": "IntersectStart",
                   "v": "ScreenStart"

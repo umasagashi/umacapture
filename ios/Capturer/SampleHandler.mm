@@ -102,7 +102,7 @@ int counter_for_debug = 0;
             if (counter_for_debug++ % 10 != 0) {  // TODO: Check the queue size. This is reqired to prevent OOM in debug build.
                 break;
             }
-            const auto ts = uma::chrono_util::timestamp();
+            const auto ts = uma::chrono_util::to_timestamp(uma::chrono_util::local_now());
             cv::Mat mat = [imageConverter convertToMat:sampleBuffer];
             uma::app::NativeApi::instance().updateFrame(mat, ts);
             break;

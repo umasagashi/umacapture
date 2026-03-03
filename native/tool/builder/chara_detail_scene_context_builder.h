@@ -19,6 +19,7 @@ public:
             closeButton(),
             tabBarButtons(),
             tabBarBorders(),
+            recordTypes(),
         });
     }
 
@@ -57,7 +58,7 @@ private:
                     rightTabButton(selected_color),
                 }),
             },
-            "tab_condition");
+            "tab_page");
     }
 
     [[nodiscard]] ConditionBase tabButton(
@@ -100,6 +101,28 @@ private:
             lineLength(cross_line, half_length),
             lineLength(cross_line.reversed(), half_length),
         });
+    }
+
+    [[nodiscard]] ConditionBase standardRecordType() const { return logicalNot(inheritanceOnlyRecordType()); }
+
+    [[nodiscard]] ConditionBase inheritanceOnlyRecordType() const {
+        return anyOf({
+            lineCheck(lineToX({0.0500, 0.4981, IS}, 0.0963), colorRange({255, 255, 255}, 5), full_length),
+            lineCheck(lineToX({0.8000, 0.4981, IS}, 0.8444), colorRange({255, 255, 255}, 5), full_length),
+        });
+    }
+
+    [[nodiscard]] ConditionBase friendRecordType() const { return alwaysFalse(); }
+
+    [[nodiscard]] ConditionBase recordTypes() const {
+        // The following only determines which type fits, assuming all other conditions are met.
+        return anyOf(
+            {
+                standardRecordType(),
+                inheritanceOnlyRecordType(),
+                friendRecordType(),
+            },
+            "record_type");
     }
 };
 

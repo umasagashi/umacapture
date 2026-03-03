@@ -609,6 +609,9 @@
                 "race_winning_count": {
                     "title": "勝利数"
                 },
+                "record_type": {
+                    "title": "育成種別"
+                },
                 "race_strategy": {
                     "title": "作戦"
                 },

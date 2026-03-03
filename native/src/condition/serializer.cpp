@@ -16,6 +16,9 @@ const auto CONDITION_BUILDERS /* NOLINT(cert-err58-cpp)*/ = {
     Builder<ConditionBase>::create<NestedCondition<Frame, rule::Stable>>(),
     Builder<ConditionBase>::create<ParallelCondition<Frame, rule::LogicalAnd>>(),
     Builder<ConditionBase>::create<ParallelCondition<Frame, rule::LogicalOr>>(),
+    Builder<ConditionBase>::create<NestedCondition<Frame, rule::LogicalNot>>(),
+    Builder<ConditionBase>::create<NullaryCondition<Frame, rule::AlwaysTrue>>(),
+    Builder<ConditionBase>::create<NullaryCondition<Frame, rule::AlwaysFalse>>(),
 };
 
 }

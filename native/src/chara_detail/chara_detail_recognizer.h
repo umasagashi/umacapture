@@ -5,6 +5,8 @@
 
 #include "chara_detail/chara_detail_config.h"
 #include "chara_detail/chara_detail_record.h"
+#include "chara_detail/chara_detail_scene_context.h"
+#include "chara_detail/record_info.h"
 #include "cv/frame.h"
 #include "cv/model.h"
 #include "util/event_util.h"
@@ -35,8 +37,9 @@ struct Chara {
     int chara;
     int card;
     bool rental;
+    int record_type;
 
-    EXTENDED_JSON_TYPE_NDC(Chara, icon, chara, card, rental);
+    EXTENDED_JSON_TYPE_NDC(Chara, icon, chara, card, rental, record_type);
 };
 
 struct CharaPrediction : public recognizer::Prediction {
@@ -48,12 +51,15 @@ struct CharaPrediction : public recognizer::Prediction {
 
     [[nodiscard]] bool rental() const { return at<int64_t>(6); }
 
+    [[nodiscard]] bool recordType() const { return at<int64_t>(6); }
+
     [[nodiscard]] Chara result() const {
         return {
             icon(),
             chara(),
             card(),
             rental(),
+            recordType(),
         };
     }
 
@@ -190,9 +196,15 @@ public:
         , status_value_model(module_root_dir / config.status.module_path, "status_value")
         , aptitude_model(module_root_dir / config.aptitude.module_path, "aptitude") {}
 
-    void recognize(const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
-        record.evaluation_value = predict(evaluation_value_model, frame, config.evaluation.rect, history);
-        record.status = predict(status_value_model, frame, config.status.rects, history);
+    void recognize(
+        const Frame &frame,
+        const RecordInfo &record_info,
+        record::CharaDetailRecord &record,
+        PredictionHistory &history) const {
+        if (record_info.record_type.value() != record::InheritanceOnly) {
+            record.evaluation_value = predict(evaluation_value_model, frame, config.evaluation.rect, history);
+            record.status = predict(status_value_model, frame, config.status.rects, history);
+        }
         record.aptitudes = predict(aptitude_model, frame, config.aptitude.rects, history);
     }
 
@@ -212,7 +224,15 @@ public:
         , skill_model(module_root_dir / config.module_path, "skill")
         , skill_level_model(module_root_dir / config.skill_level.module_path, "skill_level") {}
 
-    void recognize(const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
+    void recognize(
+        const Frame &frame,
+        const RecordInfo &record_info,
+        record::CharaDetailRecord &record,
+        PredictionHistory &history) const {
+        if (record_info.record_type == record::RecordType::InheritanceOnly) {
+            record.skills = {};
+            return;
+        }
         const auto anchor = frame.anchor();
         const auto left_rect = anchor.absolute(config.left_rect);
         const auto right_rect = anchor.absolute(config.right_rect);
@@ -282,7 +302,11 @@ public:
         , character_rank_model(module_root_dir / config.trainee_icon.rank.module_path, "character_rank") {}
 
     void recognize(
-        const Frame &frame, record::CharaDetailRecord &record, CropInfo &crop_info, PredictionHistory &history) const {
+        const Frame &frame,
+        const RecordInfo &record_info,
+        record::CharaDetailRecord &record,
+        CropInfo &crop_info,
+        PredictionHistory &history) const {
         const auto anchor = frame.anchor();
 
         // Find the green banner at the top of the Factors tab to calibrate the initial Y position,
@@ -309,12 +333,16 @@ public:
 
         record.factors = {self, parent1, parent2};
 
-        record.trainee = recognizeTrainee(frame, scan_top, crop_info, history);
+        record.trainee = recognizeTrainee(frame, record_info, scan_top, crop_info, history);
     }
 
 private:
-    [[nodiscard]] record::Character
-    recognizeTrainee(const Frame &frame, const double scan_top, CropInfo &crop_info, PredictionHistory &history) const {
+    [[nodiscard]] record::Character recognizeTrainee(
+        const Frame &frame,
+        const RecordInfo &record_info,
+        const double scan_top,
+        CropInfo &crop_info,
+        PredictionHistory &history) const {
         const auto &anchor = frame.anchor();
         const auto reference_top = findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
         if (!reference_top.has_value()) {
@@ -325,7 +353,10 @@ private:
         const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + reference_offset;
         const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + reference_offset;
         const auto icon = predict(character_model, frame, chara_rect, history);
-        const auto rank = predict(character_rank_model, frame, rank_rect, history);
+
+        const auto rank = record_info.record_type.value() != record::InheritanceOnly
+                            ? predict(character_rank_model, frame, rank_rect, history)
+                            : 0;
 
         crop_info.trainee_icon = chara_rect;
 
@@ -518,7 +549,7 @@ private:
         const auto &icon = predict(character_model, frame, mapped_icon_rects, history);
         const auto &rank = predict(character_rank_model, frame, mapped_rank_rects, history);
 
-        record::Parent parent;
+        record::Parent parent{};
         parent.self = makeCharacter(icon[0], rank[0]);
         parent.parent1 = makeCharacter(icon[1], rank[1]);
         parent.parent2 = makeCharacter(icon[2], rank[2]);
@@ -534,6 +565,7 @@ private:
         character.character = chara.chara;
         character.card = chara.card;
         character.rank = rank;
+        character.record_type = static_cast<record::RecordType>(chara.record_type);
         return character;
     }
 
@@ -663,8 +695,8 @@ public:
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , models_1line(module_root_dir, config.block_1line_config, "_1line")
-        , models_2line(module_root_dir, config.block_2line_config, "_2line") {}
+        , models_1line(module_root_dir, config.block_1line_config)
+        , models_2line(module_root_dir, config.block_2line_config) {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -713,11 +745,10 @@ public:
 private:
     struct RaceBlockModelSet {
         RaceBlockModelSet(
-            const std::filesystem::path &module_root_dir,
-            const recognizer_config::RaceBlockConfig &block_config,
-            const std::string &suffix)
+            const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config)
             : title(module_root_dir / block_config.title.module_path, "race_title")
-            , place(module_root_dir / block_config.place.module_path, "race_place" + suffix)
+            // race_place has 1line and 2line variations, but since there's no need to distinguish the output, name can be the same.
+            , place(module_root_dir / block_config.place.module_path, "race_place")
             , weather(module_root_dir / block_config.weather.module_path, "race_weather")
             , strategy(module_root_dir / block_config.strategy.module_path, "race_strategy")
             , turn(module_root_dir / block_config.turn.module_path, "race_turn")
@@ -830,31 +861,39 @@ public:
         const std::string &trainer_id,
         const std::filesystem::path &record_root_dir,
         const std::filesystem::path &module_root_dir,
-        const event_util::Listener<std::string> &on_recognize_ready,
-        const event_util::Sender<std::string> &on_recognize_completed,
-        const event_util::Listener<std::string> &on_update_requested,
-        const event_util::Sender<std::string> &on_update_completed,
+        const event_util::Listener<RecordInfo> &on_recognize_ready,
+        const event_util::Sender<RecordInfo> &on_recognize_completed,
+        const event_util::Listener<RecordInfo> &on_update_requested,
+        const event_util::Sender<RecordInfo> &on_update_completed,
         const recognizer_config::CharaDetailRecognizerConfig &config)
         : trainer_id(trainer_id)
         , record_root_dir(record_root_dir)
         , module_root_dir(module_root_dir)
-        , on_recognize_ready(on_recognize_ready)
-        , on_recognize_completed(on_recognize_completed)
-        , on_update_requested(on_update_requested)
-        , on_update_completed(on_update_completed)
         , config(config)
         , status_header_recognizer(module_root_dir, config.status_header)
         , skill_tab_recognizer(module_root_dir, config.skill_tab)
         , factor_tab_recognizer(module_root_dir, config.factor_tab)
-        , campaign_tab_recognizer(module_root_dir, config.campaign_tab) {
-        this->on_recognize_ready->listen([this](const auto &id) { this->recognize(id, false); });
-        this->on_update_requested->listen([this](const auto &id) { this->recognize(id, true); });
+        , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
+        , on_recognize_ready(on_recognize_ready)
+        , on_recognize_completed(on_recognize_completed)
+        , on_update_requested(on_update_requested)
+        , on_update_completed(on_update_completed) {
+        this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
+        this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
     }
 
-    void recognize(const std::string &id, bool isUpdateMode) {
-        vlog_debug(id, isUpdateMode);
+    void recognize(const RecordInfo &raw_info, bool isUpdateMode) const {
+        vlog_debug(raw_info.record_id, raw_info.record_type.has_value(), isUpdateMode);
 
-        const auto &record_dir = record_root_dir / id;
+        const auto record_dir = record_root_dir / raw_info.record_id;
+        const auto record_path = record_dir / "record.json";
+        auto record_info = raw_info;
+
+        if (!record_info.record_type.has_value()) {
+            assert_(std::filesystem::exists(record_path));
+            const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
+            record_info.record_type = old_record.metadata.record_type.value_or(record::RecordType::Standard);
+        }
 
         const auto &skill_frame = Frame::open(record_dir / "skill.png");
         const auto &factor_frame = Frame::open(record_dir / "factor.png");
@@ -865,43 +904,45 @@ public:
         recognizer_impl::PredictionHistory factor_tab_history;
         recognizer_impl::PredictionHistory campaign_tab_history;
 
-        recognizer_impl::CropInfo crop_info;
+        recognizer_impl::CropInfo crop_info{};
 
         auto started = std::chrono::steady_clock::now();
 
-        // TODO: These should share the exact same time.
-        const auto utc_now = chrono_util::utc();
-        const auto timestamp = chrono_util::timestamp();
+        const auto now = chrono_util::local_now();
+        const auto utc_now = chrono_util::to_datetime_string(now);
+        const auto timestamp = chrono_util::to_timestamp(now);
 
-        record::CharaDetailRecord record;
+        record::CharaDetailRecord record{};
 
-        status_header_recognizer.recognize(skill_frame, record, status_header_history);
-        skill_tab_recognizer.recognize(skill_frame, record, skill_tab_history);
-        factor_tab_recognizer.recognize(factor_frame, record, crop_info, factor_tab_history);
+        status_header_recognizer.recognize(skill_frame, record_info, record, status_header_history);
+        skill_tab_recognizer.recognize(skill_frame, record_info, record, skill_tab_history);
+        factor_tab_recognizer.recognize(factor_frame, record_info, record, crop_info, factor_tab_history);
         campaign_tab_recognizer.recognize(campaign_frame, record, campaign_tab_history);
 
         const auto version_info =
             json_util::read(module_root_dir / "version_info.json").get<recognizer_impl::VersionInfo>();
 
         if (isUpdateMode) {
-            const auto old_record = json_util::read(record_dir / "record.json").get<record::CharaDetailRecord>();
+            const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
             record.metadata = old_record.metadata;
             record.metadata.recognizer_version = version_info.recognizer_version;
 
             std::filesystem::copy_file(
-                record_dir / "record.json",
+                record_path,
                 record_dir / ("record_" + std::to_string(timestamp) + ".json"),
                 std::filesystem::copy_options::overwrite_existing);
         } else {
             record.metadata = {
                 version_info.format_version,
                 version_info.region,
-                {id},
+                {record_info.record_id},
                 trainer_id,
                 utc_now,
                 version_info.recognizer_version,
                 "active",
                 (!record.races.empty() ? record.races.front().strategy : 0),
+                std::nullopt,
+                record_info.record_type,
             };
         }
 
@@ -909,7 +950,7 @@ public:
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
         vlog_debug(elapsed);
 
-        json_util::write(record_dir / "record.json", record, 4);
+        json_util::write(record_path, record, 4);
 
         json_util::write(
             record_dir / "prediction.json",
@@ -925,9 +966,9 @@ public:
             .save(record_dir / "trainee.jpg");
 
         if (isUpdateMode) {
-            on_update_completed->send(id);
+            on_update_completed->send(record_info);
         } else {
-            on_recognize_completed->send(id);
+            on_recognize_completed->send(record_info);
         }
     }
 
@@ -942,11 +983,11 @@ private:
     const recognizer_impl::FactorTabRecognizer factor_tab_recognizer;
     const recognizer_impl::CampaignTabRecognizer campaign_tab_recognizer;
 
-    const event_util::Listener<std::string> on_recognize_ready;
-    const event_util::Sender<std::string> on_recognize_completed;
+    const event_util::Listener<RecordInfo> on_recognize_ready;
+    const event_util::Sender<RecordInfo> on_recognize_completed;
 
-    const event_util::Listener<std::string> on_update_requested;
-    const event_util::Sender<std::string> on_update_completed;
+    const event_util::Listener<RecordInfo> on_update_requested;
+    const event_util::Sender<RecordInfo> on_update_completed;
 };
 
 }  // namespace uma::chara_detail

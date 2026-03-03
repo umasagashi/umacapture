@@ -237,6 +237,13 @@ enum RecordStage {
 }
 
 @jsonSerializable
+enum RecordType {
+  standard,
+  inheritanceOnly,
+  friend,
+}
+
+@jsonSerializable
 @Json(ignoreNullMembers: true)
 class Metadata extends JsonEquatable {
   final String formatVersion;
@@ -248,6 +255,7 @@ class Metadata extends JsonEquatable {
   final RecordStage stage;
   final int strategy;
   final int? relationBonus;
+  final RecordType? recordType;
 
   const Metadata(
     this.formatVersion,
@@ -259,6 +267,7 @@ class Metadata extends JsonEquatable {
     this.stage,
     this.strategy,
     this.relationBonus,
+    this.recordType,
   );
 
   @override
