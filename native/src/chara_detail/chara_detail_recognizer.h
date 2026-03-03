@@ -695,8 +695,8 @@ public:
         const recognizer_config::CampaignTabCommonConfig &common_config)
         : config(config)
         , common_config(common_config)
-        , models_1line(module_root_dir, config.block_1line_config, "_1line")
-        , models_2line(module_root_dir, config.block_2line_config, "_2line") {}
+        , models_1line(module_root_dir, config.block_1line_config)
+        , models_2line(module_root_dir, config.block_2line_config) {}
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -745,11 +745,10 @@ public:
 private:
     struct RaceBlockModelSet {
         RaceBlockModelSet(
-            const std::filesystem::path &module_root_dir,
-            const recognizer_config::RaceBlockConfig &block_config,
-            const std::string &suffix)
+            const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config)
             : title(module_root_dir / block_config.title.module_path, "race_title")
-            , place(module_root_dir / block_config.place.module_path, "race_place" + suffix)
+            // race_place has 1line and 2line variations, but since there's no need to distinguish the output, name can be the same.
+            , place(module_root_dir / block_config.place.module_path, "race_place")
             , weather(module_root_dir / block_config.weather.module_path, "race_weather")
             , strategy(module_root_dir / block_config.strategy.module_path, "race_strategy")
             , turn(module_root_dir / block_config.turn.module_path, "race_turn")
