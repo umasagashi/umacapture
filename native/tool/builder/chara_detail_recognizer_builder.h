@@ -240,40 +240,34 @@ private:
         const double grand_top = 1.2107 - scan_top;
         const double grand_bottom = 1.3139 - scan_top;
 
-        const double parent_rank_top = 1.1667 - scan_top;
-        const double parent_rank_bottom = 1.2190 - scan_top;
-
-        const double grand_rank_top = 1.1981 - scan_top;
-        const double grand_rank_bottom = 1.2384 - scan_top;
-
         return {
             {
                 IconSetConfig{
                     Rect<double>{{0.0699, parent_top, {IS, SS}}, {0.2074, parent_bottom, {IS, SS}}},
-                    Rect<double>{{0.1551, parent_rank_top, {IS, SS}}, {0.2097, parent_rank_bottom, {IS, SS}}},
+                    Rect<double>{{0.1556, 0.0519, {IS, SS}}, {0.2093, 0.1056, {IS, SS}}},
                 },
                 IconSetConfig{
                     Rect<double>{{0.2329, grand_top, {IS, SS}}, {0.3389, grand_bottom, {IS, SS}}},
-                    Rect<double>{{0.2977, grand_rank_top, {IS, SS}}, {0.3393, grand_rank_bottom, {IS, SS}}},
+                    Rect<double>{{0.2981, 0.0852, {IS, SS}}, {0.3407, 0.1278, {IS, SS}}},
                 },
                 IconSetConfig{
                     Rect<double>{{0.3644, grand_top, {IS, SS}}, {0.4690, grand_bottom, {IS, SS}}},
-                    Rect<double>{{0.4296, grand_rank_top, {IS, SS}}, {0.4722, grand_rank_bottom, {IS, SS}}},
+                    Rect<double>{{0.4296, 0.0852, {IS, SS}}, {0.4722, 0.1278, {IS, SS}}},
                 },
             },
             {
                 IconSetConfig{
                     Rect<double>{{0.5292, parent_top, {IS, SS}}, {0.6653, parent_bottom, {IS, SS}}},
-                    Rect<double>{{0.6130, parent_rank_top, {IS, SS}}, {0.6667, parent_rank_bottom, {IS, SS}}},
+                    Rect<double>{{0.6148, 0.0519, {IS, SS}}, {0.6685, 0.1056, {IS, SS}}},
 
                 },
                 IconSetConfig{
                     Rect<double>{{0.6903, grand_top, {IS, SS}}, {0.7949, grand_bottom, {IS, SS}}},
-                    Rect<double>{{0.7570, grand_rank_top, {IS, SS}}, {0.7981, grand_rank_bottom, {IS, SS}}},
+                    Rect<double>{{0.7556, 0.0852, {IS, SS}}, {0.7981, 0.1278, {IS, SS}}},
                 },
                 IconSetConfig{
                     Rect<double>{{0.8218, grand_top, {IS, SS}}, {0.9278, grand_bottom, {IS, SS}}},
-                    Rect<double>{{0.8870, grand_rank_top, {IS, SS}}, {0.9301, grand_rank_bottom, {IS, SS}}},
+                    Rect<double>{{0.8870, 0.0852, {IS, SS}}, {0.9296, 0.1278, {IS, SS}}},
                 },
             },
         };
