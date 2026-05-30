@@ -1,4 +1,3 @@
-import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -26,7 +25,7 @@ final _downloadProgressProvider = StateProvider<Progress?>((ref) {
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
-    return Dio().get(Const.newsUrl).then((response) => response.toString());
+    return createDiagnosticDio(operation: "load_news").get(Const.newsUrl).then((response) => response.toString());
   } catch (error, stackTrace) {
     logger.e("Failed to load news.", error, stackTrace);
     captureException(error, stackTrace);
@@ -46,7 +45,7 @@ class AppUpdaterGroup extends ConsumerWidget {
       final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
       final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
       logger.d(downloadUrl);
-      Dio().download(
+      createDiagnosticDio(operation: "download_app_update").download(
         downloadUrl,
         downloadPath.path,
         onReceiveProgress: (int count, int total) {
