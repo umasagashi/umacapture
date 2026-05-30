@@ -2,43 +2,15 @@ import 'dart:math' as math;
 
 import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:logger/logger.dart';
 import 'package:quiver/iterables.dart';
 import 'package:quiver/time.dart' as qtm;
 import 'package:tuple/tuple.dart';
 
-final logger = Logger(
-  level: (kDebugMode) ? Level.verbose : Level.info,
-  filter: ProductionFilter(),
-  printer: PrettyPrinter(
-    printEmojis: false,
-    printTime: true,
-    lineLength: 80,
-    colors: false,
-  ),
-);
+import '/src/core/app_logger.dart';
 
-class ProviderLogger extends ProviderObserver {
-  @override
-  void didUpdateProvider(
-    ProviderBase provider,
-    Object? previousValue,
-    Object? newValue,
-    ProviderContainer container,
-  ) {
-    final String p = previousValue.toString();
-    final String n = newValue.toString();
-    const limit = 300;
-    logger.v(
-      "provider: ${provider.name ?? provider.runtimeType}, "
-      "value: ${p.length < limit ? p : "${p.substring(0, limit)}..."}"
-      " -> ${n.length < limit ? n : "${n.substring(0, limit)}..."}",
-    );
-  }
-}
+export '/src/core/app_logger.dart' show logger, AppLogger, ProviderLogger;
 
 class NumberFormatter {
   static final number = NumberFormat("#,###", "en_US");
