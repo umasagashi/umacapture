@@ -1,0 +1,28 @@
+{
+  // FVM でピンした Flutter 3.0.5 を使う（.fvm/flutter_sdk シンボリックリンク）
+  "dart.flutterSdkPath": ".fvm/flutter_sdk",
+
+  // FVM 管理下のディレクトリを解析・検索から除外
+  "files.exclude": {
+    "**/.fvm/versions": true
+  },
+  "files.watcherExclude": {
+    "**/.fvm/versions": true
+  },
+  "search.exclude": {
+    "**/.fvm/versions": true
+  },
+
+  // Dart コードスタイル（IntelliJ の RIGHT_MARGIN=120 / .editorconfig と一致）
+  "dart.lineLength": 120,
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.rulers": [120],
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "Dart-Code.dart-code",
+    "editor.codeActionsOnSave": {
+      "source.fixAll": true,
+      "source.organizeImports": true
+    }
+  }
+}
