@@ -4,19 +4,22 @@
     {
       "label": "flutter: pub get",
       "type": "shell",
-      "command": "fvm flutter pub get",
+      "command": "${workspaceFolder}/.fvm/flutter_sdk/bin/flutter",
+      "args": ["pub", "get"],
       "problemMatcher": []
     },
     {
       "label": "build_runner: build (once)",
       "type": "shell",
-      "command": "fvm flutter pub run build_runner build --delete-conflicting-outputs",
+      "command": "${workspaceFolder}/.fvm/flutter_sdk/bin/flutter",
+      "args": ["pub", "run", "build_runner", "build", "--delete-conflicting-outputs"],
       "problemMatcher": []
     },
     {
       "label": "build_runner: watch",
       "type": "shell",
-      "command": "fvm flutter pub run build_runner watch --delete-conflicting-outputs",
+      "command": "${workspaceFolder}/.fvm/flutter_sdk/bin/flutter",
+      "args": ["pub", "run", "build_runner", "watch", "--delete-conflicting-outputs"],
       "isBackground": true,
       "problemMatcher": []
     }
