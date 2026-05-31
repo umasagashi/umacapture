@@ -57,3 +57,6 @@ lib/*.g.dart
 .fvm/
 
 /git-filter-repo
+
+# Sentry native runtime artifacts
+.sentry-native/
