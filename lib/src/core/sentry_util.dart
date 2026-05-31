@@ -8,6 +8,8 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback/feedback.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '/const.dart';
@@ -452,8 +454,16 @@ class CustomHint {
 
 Future<void> _runWithSentry(AppRunner runner) async {
   final appVersion = await loadLocalAppVersion();
+  // The sentry-native (crashpad) database defaults to `.sentry-native` in the current
+  // working directory. For a Program Files install without admin rights that directory
+  // is not writable, so native crash capture would silently fail. Pin it to a
+  // user-writable, persistent location under the app support directory (the same base
+  // PathInfo uses), as recommended by the Sentry docs for production deployments.
+  final supportDir = await getApplicationSupportDirectory();
+  final nativeDatabasePath = p.join(supportDir.path, "sentry-native");
   await SentryFlutter.init(
     (SentryFlutterOptions options) {
+      options.nativeDatabasePath = nativeDatabasePath;
       if (kDebugMode) {
         options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
       } else {
