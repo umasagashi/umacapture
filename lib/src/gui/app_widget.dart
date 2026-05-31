@@ -222,17 +222,15 @@ class AppWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FeedbackLayer(
-      child: AutoTabsRouter(
-        routes: Pages.routes,
-        builder: (context, child) {
-          if (!kIsWeb && kIsDesktop) {
-            return _WindowFrame(child: root(child));
-          } else {
-            return root(child);
-          }
-        },
-      ),
+    return AutoTabsRouter(
+      routes: Pages.routes,
+      builder: (context, child) {
+        if (!kIsWeb && kIsDesktop) {
+          return _WindowFrame(child: root(child));
+        } else {
+          return root(child);
+        }
+      },
     );
   }
 }
@@ -303,32 +301,45 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     // Baseline theme: stick to standard FlexColorScheme / Material-3 usage.
     // Color-specific tuning (surface blends, app-bar opacity, etc.) is handled
     // incrementally in a follow-up task rather than reproducing the legacy look.
-    final theme = FlexThemeData.light(
-      scheme: FlexScheme.blue,
-      subThemesData: const FlexSubThemesData(),
-      visualDensity: FlexColorScheme.comfortablePlatformDensity,
-      useMaterial3: true,
-      fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
+    final lightTheme = modifyTheme(
+      ref,
+      FlexThemeData.light(
+        scheme: FlexScheme.blue,
+        subThemesData: const FlexSubThemesData(),
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
+      ),
     );
 
-    final darkTheme = FlexThemeData.dark(
-      scheme: FlexScheme.blue,
-      subThemesData: const FlexSubThemesData(),
-      visualDensity: FlexColorScheme.comfortablePlatformDensity,
-      useMaterial3: true,
-      fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
+    final darkTheme = modifyTheme(
+      ref,
+      FlexThemeData.dark(
+        scheme: FlexScheme.blue,
+        subThemesData: const FlexSubThemesData(),
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
+      ),
     );
 
     final themeMode = ref.watch(themeSettingProvider);
-    return MaterialApp.router(
-      title: 'umacapture',
-      theme: modifyTheme(ref, theme),
-      darkTheme: modifyTheme(ref, darkTheme),
+    // BetterFeedback wraps MaterialApp (see FeedbackLayer docs): inside MaterialApp
+    // it would override the app ColorScheme for all content.
+    return FeedbackLayer(
+      lightTheme: lightTheme,
+      darkTheme: darkTheme,
       themeMode: themeMode,
-      localizationsDelegates: context.localizationDelegates,
-      supportedLocales: context.supportedLocales,
-      locale: context.locale,
-      routerConfig: widget.router.config(),
+      child: MaterialApp.router(
+        title: 'umacapture',
+        theme: lightTheme,
+        darkTheme: darkTheme,
+        themeMode: themeMode,
+        localizationsDelegates: context.localizationDelegates,
+        supportedLocales: context.supportedLocales,
+        locale: context.locale,
+        routerConfig: widget.router.config(),
+      ),
     );
   }
 }

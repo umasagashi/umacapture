@@ -413,26 +413,48 @@ class _CustomFeedbackLocalizationsDelegate extends GlobalFeedbackLocalizationsDe
   }
 }
 
+/// Wraps [BetterFeedback] around the app.
+///
+/// [BetterFeedback] must sit ABOVE [MaterialApp], not inside it: the feedback
+/// package re-themes its whole child subtree with a [ThemeData] derived from
+/// [FeedbackThemeData]. Placed inside MaterialApp it overrides the app's
+/// ColorScheme for all content (everything falls back to the default M3 purple).
+/// Wrapping MaterialApp lets the app re-establish its own theme below, while the
+/// feedback overlay keeps using the feedback theme.
+///
+/// The app themes are passed in (rather than read via `Theme.of`) because at this
+/// position there is no MaterialApp ancestor to read them from.
 class FeedbackLayer extends StatelessWidget {
   final Widget child;
+  final ThemeData lightTheme;
+  final ThemeData darkTheme;
+  final ThemeMode themeMode;
 
   const FeedbackLayer({
     super.key,
     required this.child,
+    required this.lightTheme,
+    required this.darkTheme,
+    required this.themeMode,
   });
+
+  FeedbackThemeData _feedbackTheme(ThemeData theme) {
+    return FeedbackThemeData(
+      background: Colors.transparent,
+      feedbackSheetColor: theme.colorScheme.surface,
+      sheetIsDraggable: false, // Not draggable anyway.
+      bottomSheetDescriptionStyle: theme.textTheme.bodyMedium!,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return BetterFeedback(
       localizationsDelegates: [_CustomFeedbackLocalizationsDelegate()],
       localeOverride: _CustomFeedbackLocalizationsDelegate.locale,
-      theme: FeedbackThemeData(
-        background: Colors.transparent,
-        feedbackSheetColor: theme.colorScheme.surface,
-        sheetIsDraggable: false, // Not draggable anyway.
-        bottomSheetDescriptionStyle: theme.textTheme.bodyMedium!,
-      ),
+      themeMode: themeMode,
+      theme: _feedbackTheme(lightTheme),
+      darkTheme: _feedbackTheme(darkTheme),
       child: child,
     );
   }
