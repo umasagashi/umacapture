@@ -60,3 +60,6 @@ lib/*.g.dart
 
 # Sentry native runtime artifacts
 .sentry-native/
+
+# Local working notes (kept out of version control)
+.notes/
