@@ -159,9 +159,8 @@ class _SimpleLabelSelector extends ConsumerWidget {
   final String specId;
 
   const _SimpleLabelSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -184,7 +183,7 @@ class _SimpleLabelSelector extends ConsumerWidget {
                 for (final index in indices)
                   FilterChip(
                     label: Text(labels[index].joinLines(" ")),
-                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceVariant,
+                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceContainerHighest,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
                     onSelected: (selected) {
@@ -260,10 +259,10 @@ class SimpleLabelColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const SimpleLabelColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

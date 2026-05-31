@@ -816,10 +816,10 @@ class FactorColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const FactorColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

@@ -154,9 +154,8 @@ class _RangedIntegerSelector extends ConsumerWidget {
   final String specId;
 
   const _RangedIntegerSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -249,10 +248,10 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const RangedIntegerColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

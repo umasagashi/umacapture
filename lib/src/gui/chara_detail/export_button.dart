@@ -21,7 +21,7 @@ final recordExportEventProvider = StreamProvider<PathEntity>((ref) {
 });
 
 class CharaDetailExportButton extends ConsumerWidget {
-  const CharaDetailExportButton({Key? key}) : super(key: key);
+  const CharaDetailExportButton({super.key});
 
   Widget menu({
     required double height,
@@ -66,7 +66,7 @@ class CharaDetailExportButton extends ConsumerWidget {
               splashRadius: 24,
               position: PopupMenuPosition.under,
               shape: RoundedRectangleBorder(
-                side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
+                side: BorderSide(color: theme.colorScheme.outline.withValues(alpha: 0.5)),
                 borderRadius: BorderRadius.circular(8),
               ),
               itemBuilder: (BuildContext context) {

@@ -138,9 +138,8 @@ class _RangedLabelSelector extends ConsumerWidget {
   final String specId;
 
   const _RangedLabelSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -234,10 +233,10 @@ class RangedLabelColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const RangedLabelColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

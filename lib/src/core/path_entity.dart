@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -14,7 +13,7 @@ class PathEntity {
 
   final List<String> segments;
 
-  static List<String> parseSegments(src) {
+  static List<String> parseSegments(dynamic src) {
     if (src is String) {
       return context.split(src);
     } else if (src is Directory || src is File) {
@@ -34,16 +33,16 @@ class PathEntity {
     return src.startsWith("/") || src.startsWith("\\");
   }
 
-  static bool isFilePathCompatible(src) {
+  static bool isFilePathCompatible(dynamic src) {
     return (src is String || src is PathEntity || src is FileSystemEntity) &&
         (src is! DirectoryPath && src is! Directory);
   }
 
-  static bool isDirectoryPathCompatible(src) {
+  static bool isDirectoryPathCompatible(dynamic src) {
     return (src is String || src is PathEntity || src is FileSystemEntity) && (src is! FilePath && src is! File);
   }
 
-  PathEntity(src) : segments = parseSegments(src);
+  PathEntity(dynamic src) : segments = parseSegments(src);
 
   DirectoryPath get parent {
     return DirectoryPath(segments.sublist(0, segments.length - 1));
@@ -167,17 +166,17 @@ class FilePath extends PathEntity {
 class DirectoryPath extends PathEntity {
   DirectoryPath(super.src);
 
-  FilePath filePath(other) {
+  FilePath filePath(dynamic other) {
     assert(PathEntity.isFilePathCompatible(other));
     return FilePath([...segments, ...PathEntity.parseSegments(other)]);
   }
 
-  DirectoryPath _directoryPath(other) {
+  DirectoryPath _directoryPath(dynamic other) {
     assert(PathEntity.isDirectoryPathCompatible(other));
     return DirectoryPath([...segments, ...PathEntity.parseSegments(other)]);
   }
 
-  DirectoryPath operator /(other) => _directoryPath(other);
+  DirectoryPath operator /(dynamic other) => _directoryPath(other);
 
   @override
   bool get isFileSync => false;

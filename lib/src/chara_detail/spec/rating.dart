@@ -175,12 +175,11 @@ class _RecordRatingDialog extends ConsumerStatefulWidget {
   final ValueChanged<double> onRatingUpdate;
 
   const _RecordRatingDialog({
-    Key? key,
     required this.recordId,
     required this.initialRating,
     required this.ratingTitle,
     required this.onRatingUpdate,
-  }) : super(key: key);
+  });
 
   static void show(
     RefBase ref, {
@@ -381,9 +380,8 @@ class _RatingSelector extends ConsumerWidget {
   final String specId;
 
   const _RatingSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -527,11 +525,11 @@ class RatingColumnSelector extends ConsumerWidget {
   final String storageKey;
 
   const RatingColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
     required this.storageKey,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

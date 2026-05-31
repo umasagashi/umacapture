@@ -321,7 +321,7 @@ extension RefExtension on Ref {
 class RefBase {
   final dynamic _ref;
 
-  RefBase._(ref) : _ref = ref;
+  RefBase._(dynamic ref) : _ref = ref;
 
   T read<T>(ProviderListenable<T> provider) => _ref.read(provider);
 

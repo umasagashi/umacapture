@@ -170,7 +170,7 @@ class _CharaCardChip extends ConsumerWidget {
               padding: const EdgeInsets.only(left: 36),
               child: Text(card.cardInfo.names.first),
             ),
-            backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
+            backgroundColor: selected ? null : theme.colorScheme.surfaceContainerHighest,
             showCheckmark: false,
             selected: selected,
             onSelected: (selected) {
@@ -207,9 +207,8 @@ class _CharacterCardSelector extends ConsumerWidget {
   final String specId;
 
   const _CharacterCardSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -296,10 +295,10 @@ class CharacterCardColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const CharacterCardColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

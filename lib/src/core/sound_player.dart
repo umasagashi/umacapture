@@ -70,7 +70,7 @@ class SoundEffect {
 
   SoundEffect._(AudioPlayer player) : _player = player;
 
-  static load(SoundSetting setting) async {
+  static Future<SoundEffect> load(SoundSetting setting) async {
     final player = AudioPlayer();
     await player.setReleaseMode(ReleaseMode.stop);
     // TODO: This does not work on android.

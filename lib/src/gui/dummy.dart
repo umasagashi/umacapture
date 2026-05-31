@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 class GuidePage extends DummyPage {
-  const GuidePage({Key? key}) : super(key: key, title: 'Guide');
+  const GuidePage({super.key}) : super(title: 'Guide');
 }
 
 class DummyPage extends ConsumerStatefulWidget {
-  const DummyPage({Key? key, required this.title}) : super(key: key);
+  const DummyPage({super.key, required this.title});
 
   final String title;
 

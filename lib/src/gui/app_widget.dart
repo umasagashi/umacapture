@@ -85,7 +85,7 @@ class _Sidebar extends ConsumerWidget {
           left: 0,
           right: 0,
           child: TextButton(
-            style: ButtonStyle(shape: MaterialStateProperty.all(const RoundedRectangleBorder())),
+            style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
             child: Icon(isExtended ? Icons.chevron_left : Icons.chevron_right),
             onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
           ),
@@ -96,7 +96,7 @@ class _Sidebar extends ConsumerWidget {
 }
 
 class _Drawer extends StatelessWidget {
-  const _Drawer({Key? key}) : super(key: key);
+  const _Drawer();
 
   @override
   Widget build(BuildContext context) {
@@ -123,9 +123,8 @@ class _ResponsiveScaffold extends StatelessWidget {
   final Widget child;
 
   const _ResponsiveScaffold({
-    Key? key,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -163,9 +162,8 @@ class _WindowFrame extends ConsumerStatefulWidget {
   final Widget child;
   final WindowStateBox _windowStateBox;
 
-  _WindowFrame({Key? key, required this.child})
-      : _windowStateBox = WindowStateBox(),
-        super(key: key);
+  _WindowFrame({required this.child})
+      : _windowStateBox = WindowStateBox();
 
   @override
   ConsumerState<_WindowFrame> createState() => _WindowFrameState();
@@ -214,7 +212,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
 
 @RoutePage(name: 'AppWidgetRoute')
 class AppWidget extends StatelessWidget {
-  const AppWidget({Key? key}) : super(key: key);
+  const AppWidget({super.key});
 
   Widget root(Widget child) {
     return DialogLayer(
@@ -242,7 +240,7 @@ class AppWidget extends StatelessWidget {
 class ApplicationWidget extends ConsumerStatefulWidget {
   final router = AppRouter();
 
-  ApplicationWidget({Key? key}) : super(key: key);
+  ApplicationWidget({super.key});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => ApplicationWidgetState();
@@ -250,9 +248,13 @@ class ApplicationWidget extends ConsumerStatefulWidget {
 
 class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {
-    return base?.copyWith(
-        fontWeight: FontWeight
-            .values[Math.min((base.fontWeight?.index ?? FontWeight.normal.index) + offset, FontWeight.w900.index)]);
+    // FontWeight.index was deprecated in favor of the numeric `value` (100-900).
+    // Reproduce the old index (value ~/ 100 - 1, clamped to 0..8) and step by `offset`,
+    // capping at w900 (index 8), then pick from the still-supported `values` list.
+    const maxIndex = 8; // FontWeight.w900 is the last of the 9 standard weights.
+    final baseValue = base?.fontWeight?.value ?? FontWeight.normal.value;
+    final baseIndex = (baseValue ~/ 100 - 1).clamp(0, maxIndex);
+    return base?.copyWith(fontWeight: FontWeight.values[Math.min(baseIndex + offset, maxIndex)]);
   }
 
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
@@ -303,7 +305,7 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     ref.read(charaDetailInitialDataLoader);
 
     // Rebuild this widget when requested.
-    ref.listen(_applicationWidgetRebuildEventProvider, (_, __) => setState(() {}));
+    ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));
 
     final theme = FlexThemeData.light(
       scheme: FlexScheme.blue,

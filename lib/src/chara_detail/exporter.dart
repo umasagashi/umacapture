@@ -93,7 +93,7 @@ class CsvExporter extends Exporter {
     final grid = ref.watch(currentGridProvider);
     final table = [
       grid.columns.map((e) => e.title).toList(),
-      ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()!.csv).toList()).toList(),
+      ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()!.csv).toList()),
     ];
     final content = const CsvEncoder().convert(table);
     return path.writeAsBytes(encode(content));

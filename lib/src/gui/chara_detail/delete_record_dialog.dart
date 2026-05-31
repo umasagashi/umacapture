@@ -14,9 +14,9 @@ class DeleteRecordDialog extends ConsumerWidget {
   final String recordId;
 
   const DeleteRecordDialog({
-    Key? key,
+    super.key,
     required this.recordId,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, {required String recordId}) {
     CardDialog.show(ref, (_) {

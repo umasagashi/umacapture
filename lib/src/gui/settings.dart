@@ -31,12 +31,12 @@ class ToggleButtonWidget<T> extends ConsumerWidget {
   final ExclusiveItemsNotifierProvider<T> provider;
 
   const ToggleButtonWidget({
-    Key? key,
+    super.key,
     required this.title,
     required this.description,
     required this.icon,
     required this.provider,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -66,12 +66,12 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
   final ExclusiveItemsNotifierProvider<T> provider;
 
   const DropdownButtonWidget({
-    Key? key,
+    super.key,
     required this.title,
     required this.description,
     required this.name,
     required this.provider,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -99,7 +99,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
           margin: const EdgeInsets.symmetric(vertical: 8),
           width: 100,
           decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onBackground)),
+            border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
           ),
           child: Text(name(current)),
         ),
@@ -115,11 +115,11 @@ class SwitchWidget extends ConsumerWidget {
   final BooleanNotifierProvider provider;
 
   const SwitchWidget({
-    Key? key,
+    super.key,
     required this.title,
     required this.description,
     required this.provider,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -167,7 +167,7 @@ class _BrightnessWidget extends ConsumerWidget {
 }
 
 class StyleSettingsGroup extends ConsumerWidget {
-  const StyleSettingsGroup({Key? key}) : super(key: key);
+  const StyleSettingsGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -187,7 +187,7 @@ class StyleSettingsGroup extends ConsumerWidget {
 }
 
 class CaptureSettingsGroup extends ConsumerWidget {
-  const CaptureSettingsGroup({Key? key}) : super(key: key);
+  const CaptureSettingsGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -222,7 +222,7 @@ class CaptureSettingsGroup extends ConsumerWidget {
 }
 
 class SystemGroup extends ConsumerWidget {
-  const SystemGroup({Key? key}) : super(key: key);
+  const SystemGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -242,7 +242,7 @@ class SystemGroup extends ConsumerWidget {
 }
 
 class PrivacySettingsGroup extends ConsumerWidget {
-  const PrivacySettingsGroup({Key? key}) : super(key: key);
+  const PrivacySettingsGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -258,7 +258,7 @@ class PrivacySettingsGroup extends ConsumerWidget {
           description: RichText(
             text: TextSpan(
               style: theme.textTheme.bodyMedium!.copyWith(
-                color: theme.textTheme.bodyMedium!.color!.withOpacity(0.8),
+                color: theme.textTheme.bodyMedium!.color!.withValues(alpha: 0.8),
               ),
               children: [
                 TextSpan(text: "$tr_settings.privacy.allow_post_user_data.description".tr()),
@@ -307,9 +307,7 @@ class _LicenseMaterialLocalizations extends DefaultMaterialLocalizations {
 }
 
 class _LicensePageDialog extends ConsumerWidget {
-  const _LicensePageDialog({
-    Key? key,
-  }) : super(key: key);
+  const _LicensePageDialog();
 
   static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const _LicensePageDialog());
@@ -339,12 +337,12 @@ class _LicensePageDialog extends ConsumerWidget {
 }
 
 class AboutGroup extends ConsumerWidget {
-  const AboutGroup({Key? key}) : super(key: key);
+  const AboutGroup({super.key});
 
   String moduleVersion(WidgetRef ref) {
     return ref.watch(moduleVersionLoader).when(
           loading: () => "checking...",
-          error: (e, __) => "ERROR: $e",
+          error: (e, _) => "ERROR: $e",
           data: (data) {
             return data?.recognizerVersion.toLocal().toString() ?? "$tr_settings.version_check.unknown_version".tr();
           },
@@ -354,7 +352,7 @@ class AboutGroup extends ConsumerWidget {
   String appVersion(WidgetRef ref) {
     return ref.watch(appVersionCheckLoader).when(
           loading: () => "checking...",
-          error: (e, __) => "ERROR: $e",
+          error: (e, _) => "ERROR: $e",
           data: (data) => data.local.toString(),
         );
   }
@@ -414,7 +412,7 @@ class AboutGroup extends ConsumerWidget {
 
 @RoutePage()
 class SettingsPage extends ConsumerWidget {
-  const SettingsPage({Key? key}) : super(key: key);
+  const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

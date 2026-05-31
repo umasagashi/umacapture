@@ -254,7 +254,7 @@ List<CharaDetailRecord> _loadAllCharaDetailRecord(DirectoryPath directory) {
   return directory
       .listSync(recursive: false, followLinks: false)
       .map((e) => CharaDetailRecord.load(e.asDirectoryPath))
-      .whereNotNull()
+      .nonNulls
       .toList();
 }
 

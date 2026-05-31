@@ -92,15 +92,15 @@ bool isSentryAvailable() {
   return HubAdapter().isEnabled;
 }
 
-FutureOr<void> captureException(exception, stackTrace) {
+FutureOr<void> captureException(dynamic exception, dynamic stackTrace) {
   if (isSentryAvailable()) {
     Sentry.captureException(exception, stackTrace: stackTrace);
   }
 }
 
 FutureOr<void> captureExceptionWithScope(
-  exception,
-  stackTrace, {
+  dynamic exception,
+  dynamic stackTrace, {
   Map<String, String>? tags,
   Map<String, dynamic>? contexts,
 }) {
@@ -252,7 +252,7 @@ Dio createDiagnosticDio({String? operation}) {
           "Bad certificate rejected.",
           level: SentryLevel.error,
           tags: {
-            if (operation != null) "network.operation": operation,
+            "network.operation": ?operation,
             "network.host": host,
             "network.bad_certificate": "true",
           },
@@ -464,11 +464,14 @@ Future<void> _runWithSentry(AppRunner runner) async {
       options.beforeSend = (SentryEvent event, Hint hint) async {
         final customHint = CustomHint.from(hint);
         if (customHint.useUniqueFingerprint) {
-          event = event.copyWith(fingerprint: [event.eventId.toString()]);
+          // SentryEvent.copyWith is deprecated; assign fields directly.
+          event.fingerprint = [event.eventId.toString()];
         }
         if (customHint.titlePrefix != null) {
-          final formatted = "[${customHint.titlePrefix}] ${event.message?.formatted}";
-          event = event.copyWith(message: event.message?.copyWith(formatted: formatted));
+          final message = event.message;
+          if (message != null) {
+            message.formatted = "[${customHint.titlePrefix}] ${message.formatted}";
+          }
         }
         return event;
       };

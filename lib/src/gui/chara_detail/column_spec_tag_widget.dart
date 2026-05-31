@@ -16,7 +16,7 @@ import '/src/gui/chara_detail/export_button.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 class ColumnSpecTagWidget extends ConsumerStatefulWidget {
-  const ColumnSpecTagWidget({Key? key}) : super(key: key);
+  const ColumnSpecTagWidget({super.key});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _ColumnSpecTagWidgetState();
@@ -73,15 +73,15 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           ),
         );
       },
-      onWillAccept: (data) {
+      onWillAcceptWithDetails: (data) {
         setState(() => hoveredSpec = spec);
         return true;
       },
       onLeave: (data) {
         setState(() => hoveredSpec = null);
       },
-      onAccept: (dropped) {
-        ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(dropped, spec);
+      onAcceptWithDetails: (dropped) {
+        ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(dropped.data, spec);
         setState(() => hoveredSpec = null);
       },
     );

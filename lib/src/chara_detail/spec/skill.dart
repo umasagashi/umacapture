@@ -500,10 +500,10 @@ class SkillColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const SkillColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

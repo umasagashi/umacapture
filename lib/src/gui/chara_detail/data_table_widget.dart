@@ -36,7 +36,7 @@ final charaDetailInitialDataLoader = FutureProvider((ref) async {
 });
 
 class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
-  const _CharaDetailDataTableWidget({Key? key}) : super(key: key);
+  const _CharaDetailDataTableWidget();
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _CharaDetailDataTableWidgetState();
@@ -57,7 +57,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       context: context,
       position: RelativeRect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom),
       shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.outline.withValues(alpha: 0.5)),
         borderRadius: BorderRadius.circular(8),
       ),
       items: [
@@ -148,9 +148,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     enableCellBorderVertical: false,
                     gridBackgroundColor: theme.colorScheme.surface,
                     rowColor: theme.colorScheme.surface,
-                    evenRowColor: theme.colorScheme.surfaceVariant,
+                    evenRowColor: theme.colorScheme.surfaceContainerHighest,
                     activatedColor: theme.focusColor,
-                    gridBorderColor: theme.colorScheme.outline.withOpacity(0.5),
+                    gridBorderColor: theme.colorScheme.outline.withValues(alpha: 0.5),
                     borderColor: theme.focusColor,
                     activatedBorderColor: theme.focusColor,
                     inactivatedBorderColor: theme.focusColor,
@@ -203,7 +203,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 }
 
 class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
-  const _CharaDetailDataTablePreCheckLayer({Key? key}) : super(key: key);
+  const _CharaDetailDataTablePreCheckLayer();
 
   Widget regenerationProgressWidget(BuildContext context, Progress regenerationProgress) {
     final theme = Theme.of(context);
@@ -249,7 +249,7 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
 }
 
 class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
-  const CharaDetailDataTableLoaderLayer({Key? key}) : super(key: key);
+  const CharaDetailDataTableLoaderLayer({super.key});
 
   Widget loading() {
     return Center(
@@ -265,7 +265,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     );
   }
 
-  Widget error(errorMessage, stackTrace, theme) {
+  Widget error(Object? errorMessage, Object? stackTrace, ThemeData theme) {
     return Center(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,

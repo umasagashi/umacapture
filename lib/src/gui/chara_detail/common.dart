@@ -20,10 +20,10 @@ class FormLine extends ConsumerWidget {
   final List<Widget> children;
 
   const FormLine({
-    Key? key,
+    super.key,
     required this.title,
     required this.children,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -54,11 +54,11 @@ class FormGroup extends ConsumerWidget {
   final List<Widget> children;
 
   const FormGroup({
-    Key? key,
+    super.key,
     required this.title,
     this.description,
     required this.children,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -94,15 +94,14 @@ class DenseTextField extends ConsumerStatefulWidget {
   final String? hintText;
 
   const DenseTextField({
-    Key? key,
+    super.key,
     this.initialText,
     this.controller,
     required this.onChanged,
     this.debounce,
     this.allowEmpty = false,
     this.hintText,
-  })  : assert((initialText == null) != (controller == null)),
-        super(key: key);
+  })  : assert((initialText == null) != (controller == null));
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => DenseTextFieldState();
@@ -160,11 +159,11 @@ class NoteCard extends ConsumerWidget {
   final Color? color;
 
   const NoteCard({
-    Key? key,
+    super.key,
     required this.description,
     this.children = const [],
     this.color,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -172,7 +171,7 @@ class NoteCard extends ConsumerWidget {
     final baseColor = color ?? theme.colorScheme.primaryContainer;
     return Container(
       decoration: BoxDecoration(
-        color: baseColor.withOpacity(0.2),
+        color: baseColor.withValues(alpha: 0.2),
         border: Border.all(color: baseColor),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -201,10 +200,10 @@ class TagSelector extends ConsumerWidget {
   final NotifierProvider<TagSelectionNotifier, Set<String>> selectedTagsProvider;
 
   const TagSelector({
-    Key? key,
+    super.key,
     required this.candidateTagsProvider,
     required this.selectedTagsProvider,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -220,7 +219,7 @@ class TagSelector extends ConsumerWidget {
           for (final tag in candidateTags)
             FilterChip(
               label: Text(tag.name),
-              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceVariant,
+              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceContainerHighest,
               showCheckmark: false,
               selected: selectedTags.contains(tag.id),
               onSelected: (selected) {
@@ -244,7 +243,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   final Callback<T> onSelected;
 
   const ChoiceFormLine({
-    Key? key,
+    super.key,
     required this.title,
     required this.prefix,
     this.tooltip = true,
@@ -252,7 +251,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
     required this.selected,
     this.disabled,
     required this.onSelected,
-  }) : super(key: key);
+  });
 
   Widget chip(BuildContext context, WidgetRef ref, T value) {
     final theme = Theme.of(context);
@@ -264,7 +263,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
       child: ChoiceChip(
         label: Text("$prefix.${value.name.snakeCase}.label".tr()),
         tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
-        backgroundColor: isSelected ? null : theme.colorScheme.surfaceVariant,
+        backgroundColor: isSelected ? null : theme.colorScheme.surfaceContainerHighest,
         selected: isSelected,
         onSelected: (_) => onSelected(value),
       ),
@@ -289,19 +288,18 @@ class _SelectorChip extends ConsumerWidget {
   final ValueChanged<bool> onSelected;
 
   const _SelectorChip({
-    Key? key,
     required this.label,
     required this.tooltip,
     required this.selected,
     required this.onSelected,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     return FilterChip(
       label: label,
-      backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
+      backgroundColor: selected ? null : theme.colorScheme.surfaceContainerHighest,
       showCheckmark: false,
       tooltip: tooltip,
       selected: selected,
@@ -313,7 +311,7 @@ class _SelectorChip extends ConsumerWidget {
 class _SelectorExpandButton extends ConsumerWidget {
   final VoidCallback onPressed;
 
-  const _SelectorExpandButton({Key? key, required this.onPressed}) : super(key: key);
+  const _SelectorExpandButton({required this.onPressed});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -327,7 +325,7 @@ class _SelectorExpandButton extends ConsumerWidget {
           avatar: const Icon(Icons.expand_more),
           label: Text("$tr_common.selector.expand_button".tr()),
           side: BorderSide.none,
-          backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+          backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           onPressed: onPressed,
         ),
@@ -344,13 +342,13 @@ class SelectorWidget<T> extends ConsumerStatefulWidget {
   final Callback<String> onTextQueryChanged;
 
   const SelectorWidget({
-    Key? key,
+    super.key,
     required this.description,
     required this.candidates,
     required this.selected,
     required this.onSelected,
     required this.onTextQueryChanged,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _SelectorWidgetState();
@@ -389,7 +387,7 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
             label: Text("$tr_common.selector.control.select_all.label".tr()),
             tooltip: "$tr_common.selector.control.select_all.tooltip".tr(),
             side: BorderSide.none,
-            backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+            backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             onPressed: () {
               widget.onSelected({...widget.selected}..addAll(widget.candidates.map((e) => e.sid)));
@@ -401,7 +399,7 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
             label: Text("$tr_common.selector.control.deselect_all.label".tr()),
             tooltip: "$tr_common.selector.control.deselect_all.tooltip".tr(),
             side: BorderSide.none,
-            backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.2),
+            backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             onPressed: () {
               widget.onSelected({...widget.selected}..removeAll(widget.candidates.map((e) => e.sid)));
@@ -488,7 +486,7 @@ class CustomRangeSlider extends ConsumerStatefulWidget {
   final Value2Callback<double, double> onChanged;
 
   CustomRangeSlider({
-    Key? key,
+    super.key,
     required this.min,
     required this.max,
     required this.step,
@@ -496,7 +494,7 @@ class CustomRangeSlider extends ConsumerStatefulWidget {
     required this.end,
     required this.formatter,
     required this.onChanged,
-  }) : super(key: key) {
+  }) {
     if (min == max) {
       logger.e("This condition is illegal and should be prevented.");
     }

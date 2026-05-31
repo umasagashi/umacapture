@@ -50,11 +50,11 @@ class ColumnSpecDialog extends ConsumerWidget {
   final Widget child;
 
   const ColumnSpecDialog({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
     required this.child,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, ColumnSpec spec) {
     CardDialog.show(ref, (_) {

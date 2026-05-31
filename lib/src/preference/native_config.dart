@@ -72,8 +72,8 @@ class NativeConfig with NativeConfigMappable {
   });
 
   NativeConfig copyWith({
-    windows,
-    directory,
+    WindowsConfig? windows,
+    String? directory,
   }) {
     return NativeConfig(
       windows: windows ?? this.windows,

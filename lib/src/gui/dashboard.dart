@@ -42,7 +42,7 @@ final _newsMarkdownLoader = FutureProvider<String>((ref) async {
 class AppUpdaterGroup extends ConsumerWidget {
   final Version version;
 
-  const AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
+  const AppUpdaterGroup({super.key, required this.version});
 
   void downloadAndOpen(WidgetRef ref) {
     ref.read(_downloadProgressProvider.notifier).set(Progress(count: 0, total: 100));
@@ -119,7 +119,7 @@ class AppUpdaterGroup extends ConsumerWidget {
 }
 
 class _NewsGroup extends ConsumerWidget {
-  const _NewsGroup({Key? key}) : super(key: key);
+  const _NewsGroup();
 
   Widget text(String data) {
     return Padding(
@@ -153,7 +153,7 @@ class _NewsGroup extends ConsumerWidget {
 }
 
 class _StatisticGroup extends ConsumerWidget {
-  const _StatisticGroup({Key? key}) : super(key: key);
+  const _StatisticGroup();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -192,7 +192,7 @@ final _versionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
 
 @RoutePage()
 class DashboardPage extends ConsumerWidget {
-  const DashboardPage({Key? key}) : super(key: key);
+  const DashboardPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

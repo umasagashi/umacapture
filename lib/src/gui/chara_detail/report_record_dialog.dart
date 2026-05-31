@@ -17,10 +17,9 @@ class ReportRecordDialog extends ConsumerWidget {
   final List<FilePath> files;
 
   ReportRecordDialog({
-    Key? key,
+    super.key,
     required this.directory,
-  })  : files = getCharaDetailRecordFiles(directory),
-        super(key: key);
+  })  : files = getCharaDetailRecordFiles(directory);
 
   static void show(RefBase ref, DirectoryPath directory) {
     CardDialog.show(ref, (_) => ReportRecordDialog(directory: directory));

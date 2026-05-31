@@ -139,9 +139,9 @@ class ImageSizeContainer {
 
   static ImageSizeContainer? load(DirectoryPath recordDir) {
     return ImageSizeContainer(
-      skill: recordDir.filePath("skill.json").deserializeSync<ImageSizeInfo>()!,
-      factor: recordDir.filePath("factor.json").deserializeSync<ImageSizeInfo>()!,
-      campaign: recordDir.filePath("campaign.json").deserializeSync<ImageSizeInfo>()!,
+      skill: recordDir.filePath("skill.json").deserializeSync<ImageSizeInfo>(),
+      factor: recordDir.filePath("factor.json").deserializeSync<ImageSizeInfo>(),
+      campaign: recordDir.filePath("campaign.json").deserializeSync<ImageSizeInfo>(),
     );
   }
 }
@@ -155,14 +155,14 @@ class ImageViewer extends ConsumerWidget {
   final PredictionContainer? prediction;
 
   const ImageViewer({
-    Key? key,
+    super.key,
     required this.recordDir,
     required this.imageSize,
     required this.overlay,
     required this.transformationController,
     required this.maxScale,
     required this.prediction,
-  }) : super(key: key);
+  });
 
   static ImageViewer? load({
     required DirectoryPath recordDir,
@@ -185,7 +185,7 @@ class ImageViewer extends ConsumerWidget {
       recordDir: recordDir,
       imageSize: imageSize,
       overlay: overlay,
-      transformationController: TransformationController(Matrix4.identity()..scale(scale)),
+      transformationController: TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0)),
       maxScale: scale * 3,
       prediction: prediction,
     );
@@ -200,7 +200,7 @@ class ImageViewer extends ConsumerWidget {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(
       color: Colors.black,
-      backgroundColor: Colors.white.withOpacity(0.5),
+      backgroundColor: Colors.white.withValues(alpha: 0.5),
       fontSize: 9,
     );
     return Stack(
@@ -224,7 +224,7 @@ class ImageViewer extends ConsumerWidget {
                   height: data.rect.height.toDouble() + 1,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.zero,
-                    border: Border.all(color: Colors.black.withOpacity(0.5)),
+                    border: Border.all(color: Colors.black.withValues(alpha: 0.5)),
                   ),
                 ),
                 SizedBox(
@@ -296,10 +296,10 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
   final int initialIdx;
 
   const CharaDetailPreviewDialog({
-    Key? key,
+    super.key,
     required this.recordDirs,
     required this.initialIdx,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx) {
     CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx));

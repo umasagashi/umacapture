@@ -173,11 +173,10 @@ class _RecordMemoDialog extends ConsumerStatefulWidget {
   final String initialMemo;
 
   const _RecordMemoDialog({
-    Key? key,
     required this.recordId,
     required this.storageKey,
     required this.initialMemo,
-  }) : super(key: key);
+  });
 
   static void show(
     RefBase ref, {
@@ -275,10 +274,9 @@ class _PatternSelector extends ConsumerStatefulWidget {
   final ChangeNotifier onDecided;
 
   const _PatternSelector({
-    Key? key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _PatternSelectorState();
@@ -439,11 +437,11 @@ class MemoColumnSelector extends ConsumerWidget {
   final String storageKey;
 
   const MemoColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
     required this.storageKey,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

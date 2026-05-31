@@ -150,9 +150,8 @@ class _DateTimeSelector extends ConsumerStatefulWidget {
   final String specId;
 
   const _DateTimeSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _DateTimeSelectorState();
@@ -200,7 +199,7 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
               child: Container(
                 width: 300,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withOpacity(0.1),
+                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.1),
                   border: Border.all(color: theme.colorScheme.primaryContainer),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -288,10 +287,10 @@ class DateTimeColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const DateTimeColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

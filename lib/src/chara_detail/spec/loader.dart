@@ -17,7 +17,6 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/toast.dart';
-import '/src/preference/storage_box.dart';
 
 part 'loader.mapper.dart';
 

@@ -14,7 +14,7 @@ import '/src/gui/toast.dart';
 const tr_toast = "toast";
 
 class NotificationLayer extends ConsumerStatefulWidget {
-  const NotificationLayer({Key? key}) : super(key: key);
+  const NotificationLayer({super.key});
 
   static Widget asSibling({required Widget child}) {
     return Column(

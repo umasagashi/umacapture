@@ -12,7 +12,7 @@ import '/src/gui/toast.dart';
 const tr_report_screen = "pages.chara_detail.report_screen";
 
 class ReportScreenDialog extends ConsumerWidget {
-  const ReportScreenDialog({Key? key}) : super(key: key);
+  const ReportScreenDialog({super.key});
 
   static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const ReportScreenDialog());

@@ -37,11 +37,10 @@ class _StatisticTile extends ConsumerWidget {
   final InlineBuilder<Widget> builder;
 
   const _StatisticTile({
-    Key? key,
     required this.title,
     required this.bottom,
     required this.builder,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -49,7 +48,7 @@ class _StatisticTile extends ConsumerWidget {
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
-          color: theme.colorScheme.primaryContainer.withOpacity(0.5),
+          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
           width: 2,
         ),
         borderRadius: BorderRadius.circular(4),
@@ -63,7 +62,7 @@ class _StatisticTile extends ConsumerWidget {
           Expanded(
             child: Container(
               alignment: Alignment.center,
-              color: theme.colorScheme.primaryContainer.withOpacity(0.2),
+              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
               child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),
@@ -78,7 +77,7 @@ class _StatisticTile extends ConsumerWidget {
 }
 
 class NumberOfRecordStatisticWidget extends ConsumerWidget {
-  const NumberOfRecordStatisticWidget({Key? key}) : super(key: key);
+  const NumberOfRecordStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(
@@ -106,7 +105,7 @@ class NumberOfRecordStatisticWidget extends ConsumerWidget {
 }
 
 class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
-  const MaxEvaluationValueStatisticWidget({Key? key}) : super(key: key);
+  const MaxEvaluationValueStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(
@@ -272,7 +271,7 @@ class MonthlyFansStatisticWidget extends ConsumerStatefulWidget {
   final DateTime start = DateTime(2021, 2);
   final DateTime end = DateTime.now();
 
-  MonthlyFansStatisticWidget({Key? key}) : super(key: key);
+  MonthlyFansStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return StaggeredGridTile.count(
@@ -442,7 +441,7 @@ class CountSRankChartData {
 }
 
 class CountSRankStatisticWidget extends ConsumerWidget {
-  const CountSRankStatisticWidget({Key? key}) : super(key: key);
+  const CountSRankStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(
@@ -524,7 +523,7 @@ class CountStrategyChartData {
 }
 
 class CountStrategyStatisticWidget extends ConsumerWidget {
-  const CountStrategyStatisticWidget({Key? key}) : super(key: key);
+  const CountStrategyStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(

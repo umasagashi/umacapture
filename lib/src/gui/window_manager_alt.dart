@@ -12,11 +12,11 @@ class WindowCaptionButtonAlt extends StatefulWidget {
   final VoidCallback onPressed;
 
   const WindowCaptionButtonAlt({
-    Key? key,
+    super.key,
     required this.icon,
     this.tooltip = "",
     required this.onPressed,
-  }) : super(key: key);
+  });
 
   @override
   State<WindowCaptionButtonAlt> createState() => _WindowCaptionButtonState();
@@ -39,7 +39,7 @@ class _WindowCaptionButtonState extends State<WindowCaptionButtonAlt> {
           child: Container(
             constraints: const BoxConstraints(minWidth: 46, minHeight: kWindowCaptionHeight),
             decoration: BoxDecoration(
-              color: hovering ? theme.colorScheme.onSurface.withOpacity(0.06) : Colors.transparent,
+              color: hovering ? theme.colorScheme.onSurface.withValues(alpha: 0.06) : Colors.transparent,
             ),
             child: Center(
               child: widget.icon,
@@ -52,7 +52,7 @@ class _WindowCaptionButtonState extends State<WindowCaptionButtonAlt> {
 }
 
 class WindowCaptionAlt extends ConsumerStatefulWidget implements PreferredSizeWidget {
-  const WindowCaptionAlt({Key? key}) : super(key: key);
+  const WindowCaptionAlt({super.key});
 
   @override
   ConsumerState<WindowCaptionAlt> createState() => _WindowCaptionAltState();

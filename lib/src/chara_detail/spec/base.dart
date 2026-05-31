@@ -354,7 +354,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   }
 
   Iterable<CharaDetailRecord> getSortedRecords() {
-    return refRows.map((e) => e.getUserData<CharaDetailRecord>()).whereNotNull();
+    return refRows.map((e) => e.getUserData<CharaDetailRecord>()).nonNulls;
   }
 }
 

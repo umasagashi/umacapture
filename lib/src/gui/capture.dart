@@ -44,14 +44,14 @@ class StackedIndicator extends StatelessWidget {
   final Widget child;
 
   const StackedIndicator({
-    Key? key,
+    super.key,
     this.size = 20,
     this.strokeWidth = 2,
     this.alignment = AlignmentDirectional.center,
     this.reverseColor = false,
     required this.child,
     required this.loading,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -82,14 +82,13 @@ class _TwoStateButton extends ConsumerStatefulWidget {
   final Provider<bool> provider;
 
   const _TwoStateButton({
-    Key? key,
     required this.trueWidget,
     required this.falseWidget,
     required this.onTruePressed,
     required this.onFalsePressed,
     this.elevateWhen = true,
     required this.provider,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _TwoStateButtonState();
@@ -141,11 +140,10 @@ class _ScrollStateWidget extends ConsumerWidget {
   final bool disable;
 
   const _ScrollStateWidget({
-    Key? key,
     required this.header,
     required this.progress,
     required this.disable,
-  }) : super(key: key);
+  });
 
   Color _progressColor() {
     if (disable) {
@@ -433,7 +431,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
 }
 
 class CaptureControlGroup extends ConsumerWidget {
-  const CaptureControlGroup({Key? key}) : super(key: key);
+  const CaptureControlGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -481,7 +479,7 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
     );
   }
 
-  Widget error(errorMessage, stackTrace, theme) {
+  Widget error(Object? errorMessage, Object? stackTrace, ThemeData theme) {
     return SingleTileWidget(
       child: Center(
         child: Column(
@@ -525,7 +523,7 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
 
 @RoutePage()
 class CapturePage extends ConsumerWidget {
-  const CapturePage({Key? key}) : super(key: key);
+  const CapturePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

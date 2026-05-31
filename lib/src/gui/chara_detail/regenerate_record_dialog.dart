@@ -14,9 +14,9 @@ class RegenerateRecordDialog extends ConsumerWidget {
   final String recordId;
 
   const RegenerateRecordDialog({
-    Key? key,
+    super.key,
     required this.recordId,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, {required String recordId}) {
     CardDialog.show(ref, (_) {

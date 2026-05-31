@@ -17,14 +17,14 @@ class ListCard extends StatelessWidget {
   final Color? baseColor;
 
   const ListCard({
-    Key? key,
+    super.key,
     this.title,
     required this.children,
     this.trailing,
     this.padding,
     this.crossAxisAlignment = CrossAxisAlignment.center,
     this.baseColor,
-  }) : super(key: key);
+  });
 
   Widget child() {
     return Padding(
@@ -75,11 +75,11 @@ class ListTilePageRootWidget extends ConsumerStatefulWidget {
   final double? gap;
 
   const ListTilePageRootWidget({
-    Key? key,
+    super.key,
     required this.children,
     this.margin = const EdgeInsets.all(8),
     this.gap = 8,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _ListTilePageRootWidgetState();
@@ -110,11 +110,11 @@ class SingleTilePageRootWidget extends ConsumerStatefulWidget {
   final EdgeInsetsGeometry? padding;
 
   const SingleTilePageRootWidget({
-    Key? key,
+    super.key,
     required this.child,
     this.margin = const EdgeInsets.all(8),
     this.padding = const EdgeInsets.all(8),
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _SingleTilePageRootWidgetState();
@@ -146,11 +146,11 @@ class SingleTileWidget extends ConsumerWidget {
   final EdgeInsetsGeometry? padding;
 
   const SingleTileWidget({
-    Key? key,
+    super.key,
     required this.child,
     this.margin = const EdgeInsets.all(8),
     this.padding = const EdgeInsets.all(8),
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -169,7 +169,7 @@ class SingleTileWidget extends ConsumerWidget {
 class ErrorMessageWidget extends StatelessWidget {
   final String message;
 
-  const ErrorMessageWidget({Key? key, required this.message}) : super(key: key);
+  const ErrorMessageWidget({super.key, required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -212,7 +212,7 @@ class SpinBox extends StatefulWidget {
   final bool use10;
 
   const SpinBox({
-    Key? key,
+    super.key,
     required this.min,
     required this.max,
     required this.value,
@@ -220,8 +220,7 @@ class SpinBox extends StatefulWidget {
     this.width = 48,
     this.height,
     bool? use10,
-  })  : use10 = use10 ?? max > 10,
-        super(key: key);
+  })  : use10 = use10 ?? max > 10;
 
   @override
   State<StatefulWidget> createState() => _SpinBoxState();
@@ -239,7 +238,7 @@ class _SpinBoxState extends State<SpinBox> {
   Widget button(ThemeData theme, String text, int offset) {
     return TextButton(
       style: OutlinedButton.styleFrom(
-        backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+        backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
       ),
@@ -332,13 +331,13 @@ class CardDialog extends ConsumerWidget {
   final bool usePageView;
 
   const CardDialog({
-    Key? key,
+    super.key,
     required this.dialogTitle,
     this.closeButtonTooltip,
     required this.content,
     this.bottom,
     this.usePageView = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -433,9 +432,9 @@ class FeedbackLayer extends StatelessWidget {
   final Widget child;
 
   const FeedbackLayer({
-    Key? key,
+    super.key,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -473,9 +472,9 @@ class DialogLayer extends ConsumerStatefulWidget {
   final Widget child;
 
   const DialogLayer({
-    Key? key,
+    super.key,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _DialogLayerState();
@@ -497,7 +496,7 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
               ref.read(dialogBuilderProvider.notifier).dismiss();
             },
             child: Container(
-              color: theme.shadowColor.withOpacity(0.5),
+              color: theme.shadowColor.withValues(alpha: 0.5),
             ),
           ),
           Padding(

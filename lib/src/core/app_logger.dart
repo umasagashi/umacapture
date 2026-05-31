@@ -4,11 +4,11 @@ import 'package:logger/logger.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 final _consoleLogger = Logger(
-  level: kDebugMode ? Level.verbose : Level.info,
+  level: kDebugMode ? Level.trace : Level.info,
   filter: ProductionFilter(),
   printer: PrettyPrinter(
     printEmojis: false,
-    printTime: true,
+    dateTimeFormat: DateTimeFormat.onlyTimeAndSinceStart,
     lineLength: 80,
     colors: false,
   ),
@@ -16,7 +16,7 @@ final _consoleLogger = Logger(
 
 SentryLevel _toSentryLevel(Level level) {
   switch (level) {
-    case Level.verbose:
+    case Level.trace:
     case Level.debug:
       return SentryLevel.debug;
     case Level.info:
@@ -25,7 +25,7 @@ SentryLevel _toSentryLevel(Level level) {
       return SentryLevel.warning;
     case Level.error:
       return SentryLevel.error;
-    case Level.wtf:
+    case Level.fatal:
       return SentryLevel.fatal;
     default:
       return SentryLevel.info;
@@ -36,7 +36,7 @@ class AppLogger {
   static const _maxBreadcrumbMessageLength = 1000;
 
   void v(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.verbose, message, error, stackTrace);
+      log(Level.trace, message, error, stackTrace);
 
   void d(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
       log(Level.debug, message, error, stackTrace);
@@ -51,11 +51,11 @@ class AppLogger {
       log(Level.error, message, error, stackTrace);
 
   void wtf(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.wtf, message, error, stackTrace);
+      log(Level.fatal, message, error, stackTrace);
 
   void log(Level level, dynamic message, [dynamic error, StackTrace? stackTrace]) {
     _consoleLogger.log(level, message, error: error, stackTrace: stackTrace);
-    if (level != Level.verbose) {
+    if (level != Level.trace) {
       _addBreadcrumb(level, message, error);
     }
   }

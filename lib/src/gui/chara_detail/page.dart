@@ -7,7 +7,7 @@ import '/src/gui/common.dart';
 
 @RoutePage()
 class CharaDetailPage extends ConsumerWidget {
-  const CharaDetailPage({Key? key}) : super(key: key);
+  const CharaDetailPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

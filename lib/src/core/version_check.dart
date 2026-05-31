@@ -108,7 +108,7 @@ Map<String, dynamic> _networkExceptionContext({
   required Object exception,
   String? url,
 }) {
-  final dioError = exception is DioError ? exception : null;
+  final dioError = exception is DioException ? exception : null;
   final requestUri = dioError?.requestOptions.uri;
   final fallbackUri = url == null ? null : Uri.tryParse(url);
   final uri = requestUri ?? fallbackUri;
@@ -141,7 +141,7 @@ Future<void> _logNetworkException({
   logger.e("Network request failed. context=$context", exception, stackTrace);
 
   Map<String, dynamic>? probe;
-  final probeUri = (exception is DioError ? exception.requestOptions.uri : null) ??
+  final probeUri = (exception is DioException ? exception.requestOptions.uri : null) ??
       (url == null ? null : Uri.tryParse(url));
   if (probeUri != null) {
     try {
@@ -169,7 +169,7 @@ Future<void> _logNetworkException({
     },
     contexts: {
       "network_failure": context,
-      if (probe != null) "tls_probe": probe,
+      "tls_probe": ?probe,
     },
   );
 }
