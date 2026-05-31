@@ -1,5 +1,5 @@
 {
-  // FVM でピンした Flutter 3.0.5 を使う（.fvm/flutter_sdk シンボリックリンク）
+  // FVM でピンした Flutter 3.38.7 を使う（.fvm/flutter_sdk シンボリックリンク）
   "dart.flutterSdkPath": ".fvm/flutter_sdk",
 
   // FVM 管理下のディレクトリを解析・検索から除外
@@ -21,8 +21,8 @@
     "editor.tabSize": 2,
     "editor.defaultFormatter": "Dart-Code.dart-code",
     "editor.codeActionsOnSave": {
-      "source.fixAll": true,
-      "source.organizeImports": true
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
     }
   }
 }

@@ -7,71 +7,74 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 
 version: 0.0.10
 
-# Flutter 3.0.5 (Dart SDK 2.17.6). Use `fvm use` to install.
+# Flutter 3.38.7 (Dart SDK 3.10.7). Use `fvm use` to install.
 environment:
-  sdk: "2.17.6"
+  sdk: ">=3.10.0 <4.0.0"
 
 dependencies:
   flutter:
     sdk: flutter
 
-  another_xlider: ^1.1.2
-  archive: ^3.3.1
-  audioplayers: ^1.0.1
-  auto_route: ^5.0.1
-  badges: ^2.0.3
-  charset: ^1.1.0
+  another_xlider: ^3.0.2
+  archive: ^4.0.9
+  audioplayers: ^6.7.0
+  auto_route: ^11.0.0
+  badges: ^3.2.0
+  charset: ^2.0.1
   collection: ^1.16.0
-  csv: ^5.0.1
-  dart_json_mapper: ^2.2.5+3
-  dio: ^4.0.6
+  csv: ^8.0.0
+  dart_mappable: ^4.8.0
+  dio: ^5.9.2
   easy_localization: ^3.0.1
   equatable: ^2.0.5
-  feedback: ^2.5.0
-  feedback_sentry: ^2.3.0
-  file_picker: ^5.0.1
-  fl_chart: ^0.55.1
-  flex_color_scheme: ^5.1.0
-  flutter_markdown: ^0.6.10+5
+  feedback: ^3.2.0
+  feedback_sentry: ^3.2.0
+  # TODO(deps): swap to a stable file_picker 12 once released. 12.0.0-beta.5 uses win32 ^6 and is
+  # the only version consistent with the latest set (win32 6) such as package_info_plus 10 / window_manager 0.5.
+  # The stable 11 line uses win32 ^5.9 and conflicts with that latest set.
+  file_picker: ^12.0.0-beta.5
+  fl_chart: ^1.2.0
+  flex_color_scheme: ^8.4.0
+  flutter_markdown: ^0.7.7+1
   flutter_native_splash: ^2.2.8
   flutter_rating_bar: ^4.0.1
-  flutter_riverpod: ^1.0.4
-  flutter_staggered_grid_view: ^0.6.2
-  google_fonts: ^3.0.1
+  flutter_riverpod: ^2.6.1
+  flutter_staggered_grid_view: ^0.7.0
+  google_fonts: ^8.1.0
   hive: ^2.2.3
   hive_flutter: ^1.1.0
-  image: ^3.2.0
-  intl: ^0.17.0
-  logger: ^1.1.0
-  markdown: ^5.0.0
-  package_info_plus: ^1.4.3+1
-  pasteboard: ^0.2.0
+  image: ^4.8.0
+  intl: ^0.20.2
+  logger: ^2.7.0
+  markdown: ^7.3.1
+  package_info_plus: ^10.1.0
+  pasteboard: ^0.5.0
   path: ^1.8.1
   path_provider: ^2.0.11
   percent_indicator: ^4.2.2
-  pluto_grid: ^5.0.4
+  pluto_grid: ^8.1.0
   quiver: ^3.1.0
   recase: ^4.0.0
-  sentry_flutter: ^6.9.1
-  state_notifier: ^0.7.2+1
+  sentry_flutter: ^9.21.0
+  state_notifier: ^1.0.0
   table_calendar: ^3.0.6
   tuple: ^2.0.0
   url_launcher: ^6.1.5
-  uuid: ^3.0.6
+  uuid: ^4.5.3
   version: ^3.0.2
-  window_manager: ^0.2.7
+  window_manager: ^0.5.1
   yaml: ^3.1.1
 
 
 dev_dependencies:
-  #  flutter_test:
-  #    sdk: flutter
+  flutter_test:
+    sdk: flutter
 
-  auto_route_generator: ^5.0.1
+  auto_route_generator: ^10.4.0
   build_runner: ^2.2.0
-  flutter_lints: ^2.0.1
-  flutter_oss_licenses: ^2.0.1
-  hive_generator: ^1.1.3
+  dart_mappable_builder: ^4.8.0
+  flutter_lints: ^6.0.0
+  flutter_oss_licenses: ^3.2.0
   msix: ^3.6.3
 
 
