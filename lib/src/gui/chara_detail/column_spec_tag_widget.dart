@@ -46,7 +46,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             showBadge: count != null,
             position: badges.BadgePosition.topEnd(top: -8, end: -8),
             badgeStyle: badges.BadgeStyle(
-              badgeColor: theme.chipTheme.selectedColor!,
+              // flex_color_scheme leaves ChipThemeData.selectedColor null under
+              // Material 3, so fall back like app_widget does for the same value.
+              badgeColor: theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer,
               shape: badges.BadgeShape.square,
               borderRadius: BorderRadius.circular(8),
               padding: const EdgeInsets.symmetric(horizontal: 4),
