@@ -298,13 +298,16 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     // Rebuild this widget when requested.
     ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));
 
-    // Baseline theme: stick to standard FlexColorScheme / Material-3 usage.
-    // Color-specific tuning (surface blends, app-bar opacity, etc.) is handled
-    // incrementally in a follow-up task rather than reproducing the legacy look.
+    // Standard FlexColorScheme / Material-3 baseline, plus a light surface blend
+    // (surfaceMode + blendLevel) to restore the previous brand-tinted surfaces.
+    // Other legacy tuning (app-bar opacity/style, on-level blends) stays dropped
+    // and is reapplied incrementally if needed.
     final lightTheme = modifyTheme(
       ref,
       FlexThemeData.light(
         scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 20,
         subThemesData: const FlexSubThemesData(),
         visualDensity: FlexColorScheme.comfortablePlatformDensity,
         useMaterial3: true,
@@ -316,6 +319,8 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
       ref,
       FlexThemeData.dark(
         scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 15,
         subThemesData: const FlexSubThemesData(),
         visualDensity: FlexColorScheme.comfortablePlatformDensity,
         useMaterial3: true,

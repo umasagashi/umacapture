@@ -44,6 +44,11 @@ class ListCard extends StatelessWidget {
         children: [
           if (title != null)
             ListTile(
+              // Header band: blend halfway between the brand-tinted scaffold
+              // background and the (near-white) card surface, giving a subtle
+              // blue band. Surface-container roles carry little blend under the
+              // highScaffoldLowSurface mode, so we derive the tint from scaffold.
+              tileColor: Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5),
               title: Text(title!, style: theme.textTheme.headlineSmall),
               trailing: trailing,
             ),
