@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,6 +16,8 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'ranged_label.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
 
@@ -31,9 +33,8 @@ class RangedLabelCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RangedLabelColumnSpec")
-class RangedLabelColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'RangedLabelColumnSpec')
+class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMappable {
   final Parser parser;
   final String labelKey;
   IsInRangeIntegerPredicate predicate;

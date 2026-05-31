@@ -1,9 +1,11 @@
 import 'dart:ui';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 
-@jsonSerializable
-class WindowTarget {
+part 'native_config.mapper.dart';
+
+@MappableClass()
+class WindowTarget with WindowTargetMappable {
   final String? windowClass;
   final String? windowTitle;
 
@@ -13,8 +15,8 @@ class WindowTarget {
   });
 }
 
-@jsonSerializable
-class AspectRatioRange {
+@MappableClass()
+class AspectRatioRange with AspectRatioRangeMappable {
   final double? min;
   final double? max;
 
@@ -24,8 +26,8 @@ class AspectRatioRange {
   });
 }
 
-@jsonSerializable
-class CropProfile {
+@MappableClass()
+class CropProfile with CropProfileMappable {
   final AspectRatioRange? windowAspectRatio;
   final Size? clientAspectRatio;
 
@@ -35,8 +37,8 @@ class CropProfile {
   });
 }
 
-@jsonSerializable
-class RecorderConfig {
+@MappableClass()
+class RecorderConfig with RecorderConfigMappable {
   final List<WindowTarget>? windowTargets;
   final List<CropProfile>? cropProfiles;
   final int? recordingFps;
@@ -50,8 +52,8 @@ class RecorderConfig {
   });
 }
 
-@jsonSerializable
-class WindowsConfig {
+@MappableClass()
+class WindowsConfig with WindowsConfigMappable {
   final RecorderConfig? windowRecorder;
 
   const WindowsConfig({
@@ -59,8 +61,8 @@ class WindowsConfig {
   });
 }
 
-@jsonSerializable
-class NativeConfig {
+@MappableClass()
+class NativeConfig with NativeConfigMappable {
   final WindowsConfig? windows;
   final String? directory;
 

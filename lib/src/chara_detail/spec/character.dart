@@ -1,5 +1,5 @@
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,11 +16,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'character.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_character = "pages.chara_detail.column_predicate.character";
 
-@jsonSerializable
-class CharacterCardPredicate {
+@MappableClass()
+class CharacterCardPredicate with CharacterCardPredicateMappable {
   final Set<int> rejects;
 
   CharacterCardPredicate({
@@ -46,9 +48,8 @@ class CharacterCardCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "CharacterCardColumnSpec")
-class CharacterCardColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'CharacterCardColumnSpec')
+class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSpecMappable {
   final Parser parser;
   final CharacterCardPredicate predicate;
 

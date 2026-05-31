@@ -1,6 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -11,14 +11,14 @@ import 'package:window_manager/window_manager.dart';
 import '/const.dart';
 import '/src/core/localization_util.dart';
 import '/src/core/sentry_util.dart';
-import 'src/core/json_adapter.dart';
+import 'src/core/mapper_init.dart';
 import 'src/gui/app_widget.dart';
 import 'src/preference/storage_box.dart';
 import 'src/preference/window_state.dart';
 
 void setupLicense() {
   rootBundle.loadString("assets/additional_license_info.json").then((infoString) {
-    final info = JsonMapper.deserialize<Map<String, dynamic>>(infoString)!.map((k, v) => MapEntry(k, v.toString()));
+    final info = (jsonDecode(infoString) as Map<String, dynamic>).map((k, v) => MapEntry(k, v.toString()));
     LicenseRegistry.addLicense(() async* {
       for (final entry in info.entries) {
         yield LicenseEntryWithLineBreaks([entry.key], await rootBundle.loadString(entry.value));
@@ -83,7 +83,7 @@ void run() {
 
 FutureOr<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  initializeJsonReflectable();
+  initializeMappers();
   await StorageBox.ensureOpened(reset: false);
   await setupLocalization();
   setupLicense();

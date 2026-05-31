@@ -211,8 +211,8 @@ class MonthlyFansChartData {
       lineTouchData: LineTouchData(
         enabled: false,
         touchTooltipData: LineTouchTooltipData(
-          tooltipBgColor: theme.colorScheme.surface.blend(Colors.cyan, 50),
-          tooltipRoundedRadius: 8,
+          getTooltipColor: (touchedSpot) => theme.colorScheme.surface.blend(Colors.cyan, 50),
+          tooltipBorderRadius: BorderRadius.circular(8),
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           fitInsideHorizontally: true,
           getTooltipItems: (List<LineBarSpot> lineBarsSpot) {
@@ -233,13 +233,12 @@ class MonthlyFansChartData {
       titlesData: FlTitlesData(
         rightTitles: noTitle,
         leftTitles: AxisTitles(
-          drawBehindEverything: true,
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 70,
             interval: horizontalInterval,
             getTitlesWidget: (value, meta) => SideTitleWidget(
-              axisSide: meta.axisSide,
+              meta: meta,
               space: 8,
               child: Text(value.toLocalCompactNumberString()),
             ),
@@ -247,13 +246,12 @@ class MonthlyFansChartData {
         ),
         topTitles: noTitle,
         bottomTitles: AxisTitles(
-          drawBehindEverything: true,
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 30,
             interval: 7,
             getTitlesWidget: (value, meta) => SideTitleWidget(
-              axisSide: meta.axisSide,
+              meta: meta,
               space: 8.0,
               child: Text(value.toLocalCompactNumberString()),
             ),
@@ -265,7 +263,7 @@ class MonthlyFansChartData {
 
     return LineChart(
       lineChartData,
-      swapAnimationDuration: Duration.zero,
+      duration: Duration.zero,
     );
   }
 }
@@ -381,7 +379,7 @@ class CountSRankChartData {
     final barTouchData = BarTouchData(
       enabled: false,
       touchTooltipData: BarTouchTooltipData(
-        tooltipBgColor: Colors.transparent,
+        getTooltipColor: (group) => Colors.transparent,
         tooltipPadding: EdgeInsets.zero,
         tooltipMargin: 0,
         getTooltipItem: (BarChartGroupData group, int groupIndex, BarChartRodData rod, int rodIndex) {
@@ -404,7 +402,7 @@ class CountSRankChartData {
           reservedSize: 30,
           getTitlesWidget: (double value, TitleMeta meta) {
             return SideTitleWidget(
-              axisSide: meta.axisSide,
+              meta: meta,
               space: 4,
               child: Text(labels[value.toInt()]),
             );
@@ -438,7 +436,7 @@ class CountSRankChartData {
 
     return BarChart(
       barChartData,
-      swapAnimationDuration: Duration.zero,
+      duration: Duration.zero,
     );
   }
 }
@@ -520,7 +518,7 @@ class CountStrategyChartData {
 
     return PieChart(
       pieChartData,
-      swapAnimationDuration: Duration.zero,
+      duration: Duration.zero,
     );
   }
 }

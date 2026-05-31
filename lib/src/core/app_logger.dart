@@ -54,7 +54,7 @@ class AppLogger {
       log(Level.wtf, message, error, stackTrace);
 
   void log(Level level, dynamic message, [dynamic error, StackTrace? stackTrace]) {
-    _consoleLogger.log(level, message, error, stackTrace);
+    _consoleLogger.log(level, message, error: error, stackTrace: stackTrace);
     if (level != Level.verbose) {
       _addBreadcrumb(level, message, error);
     }

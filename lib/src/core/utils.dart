@@ -1,6 +1,6 @@
 import 'dart:math' as math;
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +11,8 @@ import 'package:tuple/tuple.dart';
 import '/src/core/app_logger.dart';
 
 export '/src/core/app_logger.dart' show logger, AppLogger, ProviderLogger;
+
+part 'utils.mapper.dart';
 
 class NumberFormatter {
   static final number = NumberFormat("#,###", "en_US");
@@ -140,8 +142,8 @@ extension ListExtension<T> on List<T> {
   }
 }
 
-@jsonSerializable
-class Range<T extends dynamic> {
+@MappableClass()
+class Range<T extends dynamic> with RangeMappable<T> {
   final T min;
   final T max;
 
@@ -319,15 +321,15 @@ class RefBase {
 
   RefBase._(ref) : _ref = ref;
 
-  T read<T>(ProviderBase<T> provider) => _ref.read(provider);
+  T read<T>(ProviderListenable<T> provider) => _ref.read(provider);
 
-  T watch<T>(ProviderBase<T> provider) => _ref.watch(provider);
+  T watch<T>(ProviderListenable<T> provider) => _ref.watch(provider);
 }
 
 abstract class StateProviderLike<T> {
   ProviderListenable<T> get listenable;
 
-  ProviderBase<StateController<T>> get notifier;
+  ProviderListenable<StateController<T>> get notifier;
 }
 
 class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
@@ -339,7 +341,7 @@ class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
   ProviderListenable<T> get listenable => provider;
 
   @override
-  ProviderBase<StateController<T>> get notifier => provider.notifier;
+  ProviderListenable<StateController<T>> get notifier => provider.notifier;
 }
 
 extension AsyncValueExtension<T> on AsyncValue<T> {

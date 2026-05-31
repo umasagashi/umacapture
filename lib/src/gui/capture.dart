@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
-import '/src/app/route.gr.dart';
+import '/src/app/route.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
@@ -526,6 +526,7 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
   }
 }
 
+@RoutePage()
 class CapturePage extends ConsumerWidget {
   const CapturePage({Key? key}) : super(key: key);
 

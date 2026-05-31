@@ -6,19 +6,22 @@ import '/src/gui/chara_detail/page.dart';
 import '/src/gui/dashboard.dart';
 import '/src/gui/settings.dart';
 
-@MaterialAutoRouter(
-  replaceInRouteName: 'Page,Route',
-  routes: <AutoRoute>[
-    AutoRoute(
-      path: '/',
-      page: AppWidget,
-      children: <AutoRoute>[
-        AutoRoute(page: DashboardPage, initial: true),
-        AutoRoute(page: CapturePage),
-        AutoRoute(page: CharaDetailPage),
-        AutoRoute(page: SettingsPage),
-      ],
-    )
-  ],
-)
-class $AppRouter {}
+part 'route.gr.dart';
+
+@AutoRouterConfig(replaceInRouteName: 'Page,Route')
+class AppRouter extends RootStackRouter {
+  @override
+  List<AutoRoute> get routes => [
+        AutoRoute(
+          path: '/',
+          page: AppWidgetRoute.page,
+          initial: true,
+          children: [
+            AutoRoute(page: DashboardRoute.page, initial: true),
+            AutoRoute(page: CaptureRoute.page),
+            AutoRoute(page: CharaDetailRoute.page),
+            AutoRoute(page: SettingsRoute.page),
+          ],
+        ),
+      ];
+}

@@ -1,4 +1,4 @@
-import 'package:badges/badges.dart';
+import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
@@ -42,14 +42,15 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             opacity: 0.6,
             child: Chip(label: spec.label()),
           ),
-          child: Badge(
+          child: badges.Badge(
             showBadge: count != null,
-            badgeColor: theme.chipTheme.selectedColor!,
-            position: BadgePosition.topEnd(top: -8, end: -8),
-            shape: BadgeShape.square,
-            borderRadius: BorderRadius.circular(8),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            alignment: Alignment.center,
+            position: badges.BadgePosition.topEnd(top: -8, end: -8),
+            badgeStyle: badges.BadgeStyle(
+              badgeColor: theme.chipTheme.selectedColor!,
+              shape: badges.BadgeShape.square,
+              borderRadius: BorderRadius.circular(8),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
             ignorePointer: true,
             badgeContent: Text(
               "$count",

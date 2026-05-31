@@ -10,7 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/src/app/pages.dart';
-import '/src/app/route.gr.dart';
+import '/src/app/route.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/utils.dart';
@@ -216,6 +216,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
   }
 }
 
+@RoutePage(name: 'AppWidgetRoute')
 class AppWidget extends StatelessWidget {
   const AppWidget({Key? key}) : super(key: key);
 
@@ -230,7 +231,7 @@ class AppWidget extends StatelessWidget {
     return FeedbackLayer(
       child: AutoTabsRouter(
         routes: Pages.routes,
-        builder: (context, child, animation) {
+        builder: (context, child) {
           if (!kIsWeb && kIsDesktop) {
             return _WindowFrame(child: root(child));
           } else {
@@ -351,8 +352,7 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
       localizationsDelegates: context.localizationDelegates,
       supportedLocales: context.supportedLocales,
       locale: context.locale,
-      routerDelegate: widget.router.delegate(),
-      routeInformationParser: widget.router.defaultRouteParser(),
+      routerConfig: widget.router.config(),
     );
   }
 }

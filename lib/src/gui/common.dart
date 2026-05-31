@@ -50,7 +50,7 @@ class ListCard extends StatelessWidget {
               tileColor: baseColor != null
                   ? theme.cardColor.blend(baseColor!, 50)
                   : theme.scaffoldBackgroundColor.blend(theme.cardColor, 50),
-              title: Text(title!, style: theme.textTheme.headline5),
+              title: Text(title!, style: theme.textTheme.headlineSmall),
               trailing: trailing,
             ),
           if (baseColor != null)

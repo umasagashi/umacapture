@@ -1,73 +1,70 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 
-import '/main.mapper.g.dart';
+/// Custom dart_mappable mappers.
+/// Used to serialize dart:ui / material types (Size / Offset / ThemeMode).
+/// Replaces the old dart_json_mapper MappingConverter / flutterTypesAdapter.
 
-class MappingConverter<T, S> implements ICustomConverter<T> {
-  final T Function(S map) _fromMap;
-  final S Function(T obj) _toMap;
-
-  MappingConverter({required T Function(S map) fromMap, required S Function(T obj) toMap})
-      : _fromMap = fromMap,
-        _toMap = toMap,
-        super();
+class SizeMapper extends SimpleMapper<Size> {
+  const SizeMapper();
 
   @override
-  T fromJSON(dynamic jsonValue, DeserializationContext context) {
-    return _fromMap(jsonValue);
+  Size decode(dynamic value) {
+    final map = value as Map;
+    return Size(map['width'].toDouble(), map['height'].toDouble());
   }
 
   @override
-  dynamic toJSON(T object, SerializationContext context) {
-    return _toMap(object);
+  dynamic encode(Size self) {
+    return {'width': self.width, 'height': self.height};
   }
 }
 
-extension on String {
-  ThemeMode toThemeMode() {
-    return ThemeMode.values.firstWhere((e) => e.name == this);
+class OffsetMapper extends SimpleMapper<Offset> {
+  const OffsetMapper();
+
+  @override
+  Offset decode(dynamic value) {
+    final map = value as Map;
+    return Offset(map['dx'].toDouble(), map['dy'].toDouble());
+  }
+
+  @override
+  dynamic encode(Offset self) {
+    return {'dx': self.dx, 'dy': self.dy};
   }
 }
 
-@jsonSerializable
+class ThemeModeMapper extends SimpleMapper<ThemeMode> {
+  const ThemeModeMapper();
+
+  @override
+  ThemeMode decode(dynamic value) {
+    return ThemeMode.values.firstWhere((e) => e.name == value);
+  }
+
+  @override
+  dynamic encode(ThemeMode self) {
+    return self.name;
+  }
+}
+
+/// Base class for all models. dart_mappable does not generate equals/stringify
+/// (see build.yaml); equality is left to Equatable as before
+/// (props-based == and identity-based hashCode).
 abstract class JsonEquatable extends Equatable {
   const JsonEquatable();
 
   @override
-  @JsonProperty(ignore: true)
   bool get stringify => true;
 
   @override
-  @JsonProperty(ignore: true)
   // ignore: hash_and_equals
   int get hashCode => runtimeType.hashCode ^ identityHashCode(this);
 
   @override
-  @JsonProperty(ignore: true)
   List<Object?> get props => properties();
 
   List<Object?> properties();
-}
-
-final flutterTypesAdapter = JsonMapperAdapter(
-  converters: {
-    Size: MappingConverter<Size, Map>(
-      fromMap: (map) => Size(map['width'].toDouble(), map['height'].toDouble()),
-      toMap: (obj) => {'width': obj.width, 'height': obj.height},
-    ),
-    Offset: MappingConverter<Offset, Map>(
-      fromMap: (map) => Offset(map['dx'].toDouble(), map['dy'].toDouble()),
-      toMap: (obj) => {'dx': obj.dx, 'dy': obj.dy},
-    ),
-    ThemeMode: MappingConverter<ThemeMode, String>(
-      fromMap: (map) => map.toThemeMode(),
-      toMap: (obj) => obj.name,
-    ),
-  },
-  valueDecorators: {},
-);
-
-void initializeJsonReflectable() {
-  initializeJsonMapper(adapters: [flutterTypesAdapter]);
 }

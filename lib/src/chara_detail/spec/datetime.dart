@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,11 +15,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'datetime.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_datetime = "pages.chara_detail.column_predicate.datetime";
 
-@jsonSerializable
-class IsInRangeDateTimePredicate {
+@MappableClass()
+class IsInRangeDateTimePredicate with IsInRangeDateTimePredicateMappable {
   final DateTime? min;
   final DateTime? max;
 
@@ -55,9 +57,8 @@ class DateTimeCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "DateTimeColumnSpec")
-class DateTimeColumnSpec extends ColumnSpec<DateTime> {
+@MappableClass(discriminatorValue: 'DateTimeColumnSpec')
+class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMappable {
   final Parser parser;
   final IsInRangeDateTimePredicate predicate;
 

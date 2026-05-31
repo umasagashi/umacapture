@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,11 +18,13 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'memo.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_memo = "pages.chara_detail.column_predicate.memo";
 
-@jsonSerializable
-class RegExpPredicate {
+@MappableClass()
+class RegExpPredicate with RegExpPredicateMappable {
   final RegExp? pattern;
 
   RegExpPredicate({
@@ -54,9 +56,8 @@ class MemoCellData implements CellData {
   MemoCellData(this.value, this.onSelected);
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "MemoColumnSpec")
-class MemoColumnSpec extends ColumnSpec<String?> {
+@MappableClass(discriminatorValue: 'MemoColumnSpec')
+class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   final Parser parser;
   final RegExpPredicate predicate;
   final String storageKey;

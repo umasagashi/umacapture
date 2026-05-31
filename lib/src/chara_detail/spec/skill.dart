@@ -1,5 +1,5 @@
 import 'package:csv/csv.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,25 +17,27 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'skill.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_skill = "pages.chara_detail.column_predicate.skill";
 
-@jsonSerializable
+@MappableEnum()
 enum SkillSetLogicMode {
   anyOf,
   allOf,
   sumOf,
 }
 
-@jsonSerializable
-class SkillNotation {
+@MappableClass()
+class SkillNotation with SkillNotationMappable {
   final int max;
 
   SkillNotation({required this.max});
 }
 
-@jsonSerializable
-class AggregateSkillPredicate {
+@MappableClass()
+class AggregateSkillPredicate with AggregateSkillPredicateMappable {
   final Set<int> query;
   final SkillSetLogicMode logic;
   final int min;
@@ -105,13 +107,13 @@ class SkillCellData implements CellData {
   SkillCellData(this.skills, this.label);
 
   @override
-  String get csv => const ListToCsvConverter().convert([skills]);
+  String get csv => const CsvEncoder().convert([skills]);
 
   @override
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
+@MappableEnum()
 enum SkillDialogElements {
   selection,
   selectionTags,
@@ -119,9 +121,8 @@ enum SkillDialogElements {
   notationMax,
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "SkillColumnSpec")
-class SkillColumnSpec extends ColumnSpec<List<Skill>> {
+@MappableClass(discriminatorValue: 'SkillColumnSpec')
+class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappable {
   final Parser parser;
   final String labelKey = LabelKeys.skill;
   final AggregateSkillPredicate predicate;

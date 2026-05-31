@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
 
@@ -6,18 +6,6 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/clipboard_alt.dart';
 
 class JsonAdapter<T> extends TypeAdapter<T?> {
-  static const _serializationOptions = SerializationOptions(
-    indent: null,
-    caseStyle: CaseStyle.snake,
-    ignoreNullMembers: true,
-    ignoreDefaultMembers: true,
-    ignoreUnknownTypes: false,
-  );
-
-  static const _deserializationOptions = DeserializationOptions(
-    caseStyle: CaseStyle.snake,
-  );
-
   JsonAdapter(this.typeId);
 
   @override
@@ -25,12 +13,12 @@ class JsonAdapter<T> extends TypeAdapter<T?> {
 
   @override
   T? read(BinaryReader reader) {
-    return JsonMapper.deserialize<T>(reader.readString(), _deserializationOptions);
+    return MapperContainer.globals.fromJson<T>(reader.readString());
   }
 
   @override
   void write(BinaryWriter writer, T? obj) {
-    writer.writeString(JsonMapper.serialize(obj, _serializationOptions));
+    writer.writeString(MapperContainer.globals.toJson<T?>(obj));
   }
 }
 

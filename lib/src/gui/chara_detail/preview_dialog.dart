@@ -1,5 +1,5 @@
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,19 +12,21 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/common.dart';
 
+part 'preview_dialog.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_preview = "pages.chara_detail.preview";
 
-@jsonSerializable
-class Anchor {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Anchor with AnchorMappable {
   final String h;
   final String v;
 
   Anchor(this.h, this.v);
 }
 
-@jsonSerializable
-class Point {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Point with PointMappable {
   final int x;
   final int y;
   final Anchor anchor;
@@ -32,8 +34,8 @@ class Point {
   Point(this.x, this.y, this.anchor);
 }
 
-@jsonSerializable
-class Rect {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Rect with RectMappable {
   final Point topLeft;
   final Point bottomRight;
 
@@ -46,16 +48,16 @@ class Rect {
   Rect(this.topLeft, this.bottomRight);
 }
 
-@jsonSerializable
-class Prediction {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Prediction with PredictionMappable {
   final double confidence;
   final dynamic label;
 
   Prediction(this.confidence, this.label);
 }
 
-@jsonSerializable
-class PredictionData {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class PredictionData with PredictionDataMappable {
   final String model;
   final Rect rect;
   final Prediction prediction;
@@ -101,8 +103,8 @@ class PredictionData {
   }
 }
 
-@jsonSerializable
-class PredictionContainer {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class PredictionContainer with PredictionContainerMappable {
   final List<PredictionData> statusHeader;
   final List<PredictionData> skillTab;
   final List<PredictionData> factorTab;
@@ -111,16 +113,14 @@ class PredictionContainer {
   PredictionContainer(this.statusHeader, this.skillTab, this.factorTab, this.campaignTab);
 
   static PredictionContainer? load(DirectoryPath recordDir) {
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-    return JsonMapper.deserialize<PredictionContainer>(
+    return PredictionContainerMapper.fromJson(
       recordDir.filePath("prediction.json").readAsStringSync(),
-      options,
     );
   }
 }
 
-@jsonSerializable
-class ImageSizeInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class ImageSizeInfo with ImageSizeInfoMappable {
   final Rect intersection;
 
   ImageSizeInfo(this.intersection);

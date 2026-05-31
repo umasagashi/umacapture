@@ -1,14 +1,14 @@
 import 'dart:async';
 
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/clipboard_alt.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
@@ -16,6 +16,8 @@ import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/toast.dart';
+
+part 'storage.mapper.dart';
 
 StreamController<String> _duplicatedCharaEventController = StreamController();
 final duplicatedCharaEventProvider = StreamProvider<String>((ref) {
@@ -66,7 +68,7 @@ final charaDetailRecordRegenerationControllerProvider =
   return CharaDetailRecordRegenerationController(ref);
 });
 
-@jsonSerializable
+@MappableEnum()
 enum CharaDetailRecordImageMode {
   none,
   skillPlain,
@@ -216,12 +218,12 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
 }
 
 CharaDetailRecord? _loadCharaDetailRecord(DirectoryPath directory) {
-  initializeJsonReflectable();
+  initializeMappers();
   return CharaDetailRecord.load(directory);
 }
 
 List<CharaDetailRecord> _loadAllCharaDetailRecord(DirectoryPath directory) {
-  initializeJsonReflectable();
+  initializeMappers();
   return directory
       .listSync(recursive: false, followLinks: false)
       .map((e) => CharaDetailRecord.load(e.asDirectoryPath))

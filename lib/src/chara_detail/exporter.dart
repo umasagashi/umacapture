@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:archive/archive_io.dart';
 import 'package:charset/charset.dart';
 import 'package:csv/csv.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,9 +14,11 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+
+part 'exporter.mapper.dart';
 
 final exportingStateProvider = StateProvider<bool>((ref) {
   return false;
@@ -37,14 +39,19 @@ abstract class Exporter {
 
   void export({PathEntityCallback? onSuccess}) {
     getDownloadsDirectory().then((initialDirectory) {
-      FilePicker.platform
-          .saveFile(dialogTitle: dialogTitle, fileName: defaultFileName, initialDirectory: initialDirectory?.path)
-          .then((path) {
-        if (path != null) {
+      // file_picker 12 removed the `FilePicker.platform` instance accessor and
+      // changed `saveFile` to require the file bytes up-front, which is
+      // incompatible with the path-based exporters below (the Zip encoder and
+      // the isolate-based JSON writer produce the file themselves). Instead we
+      // let the user pick a directory and build the full output path here.
+      FilePicker.getDirectoryPath(dialogTitle: dialogTitle, initialDirectory: initialDirectory?.path)
+          .then((directory) {
+        if (directory != null) {
+          final path = DirectoryPath(directory).filePath(defaultFileName);
           ref.read(exportingStateProvider.notifier).update((_) => true);
-          _export(FilePath(path)).then((_) {
+          _export(path).then((_) {
             ref.read(exportingStateProvider.notifier).update((_) => false);
-            onSuccess?.call(FilePath(path));
+            onSuccess?.call(path);
           });
         }
       });
@@ -83,13 +90,13 @@ class CsvExporter extends Exporter {
       grid.columns.map((e) => e.title).toList(),
       ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()!.csv).toList()).toList(),
     ];
-    final content = const ListToCsvConverter().convert(table);
+    final content = const CsvEncoder().convert(table);
     return path.writeAsBytes(encode(content));
   }
 }
 
-@jsonSerializable
-class JsonExportData {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class JsonExportData with JsonExportDataMappable {
   final List<CharaDetailRecord> charaDetail;
   final LabelMap labels;
 
@@ -107,9 +114,8 @@ class JsonExporter extends Exporter {
   JsonExporter(super.dialogTitle, super.defaultFileName, super.ref);
 
   static void _run(_JsonExporterArgs args) {
-    initializeJsonReflectable();
-    final options = SerializationOptions(caseStyle: CaseStyle.snake, indent: " " * 4);
-    args.path.writeAsStringSync(JsonMapper.serialize(args.data, options));
+    initializeMappers();
+    args.path.writeAsStringSync(const JsonEncoder.withIndent('    ').convert(args.data.toMap()));
   }
 
   @override

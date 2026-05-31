@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:pasteboard/pasteboard.dart';
 
@@ -11,7 +11,9 @@ import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
-@jsonSerializable
+part 'clipboard_alt.mapper.dart';
+
+@MappableEnum()
 enum ClipboardPasteImageMode {
   memory,
   file,

@@ -1,7 +1,8 @@
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,6 +15,8 @@ import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
+
+part 'base.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_common = "pages.chara_detail.column_predicate.common";
@@ -66,8 +69,8 @@ abstract class ColumnBuilder {
   ColumnSpec build(RefBase ref);
 }
 
-@jsonSerializable
-class Tag extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Tag extends JsonEquatable with TagMappable {
   final String id;
   final String name;
 
@@ -77,8 +80,8 @@ class Tag extends JsonEquatable {
   List<Object?> properties() => [id, name];
 }
 
-@jsonSerializable
-class SkillInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class SkillInfo with SkillInfoMappable {
   final int sid;
   final int sortKey;
   final List<String> names;
@@ -87,15 +90,13 @@ class SkillInfo {
 
   SkillInfo(this.sid, this.sortKey, this.names, this.descriptions, this.tags);
 
-  @JsonProperty(ignore: true)
   String get label => names.first;
 
-  @JsonProperty(ignore: true)
   String get tooltip => descriptions.first;
 }
 
-@jsonSerializable
-class FactorInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class FactorInfo with FactorInfoMappable {
   final int sid;
   final int sortKey;
   final List<String> names;
@@ -128,10 +129,8 @@ class FactorInfo {
     );
   }
 
-  @JsonProperty(ignore: true)
   String get label => names.first;
 
-  @JsonProperty(ignore: true)
   String get tooltip {
     String text = descriptions.first;
     if (skillInfo != null) {
@@ -141,8 +140,8 @@ class FactorInfo {
   }
 }
 
-@jsonSerializable
-class CharaCardInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class CharaCardInfo with CharaCardInfoMappable {
   final int sid;
   final int sortKey;
   final List<String> names;
@@ -150,7 +149,7 @@ class CharaCardInfo {
   CharaCardInfo(this.sid, this.sortKey, this.names);
 }
 
-@jsonSerializable
+@MappableEnum()
 enum ColumnSpecCellAction {
   openSkillPreview,
   openFactorPreview,
@@ -170,9 +169,8 @@ extension ColumnSpecCellActionExtension on ColumnSpecCellAction {
   }
 }
 
-@jsonSerializable
-@Json(discriminatorProperty: 'type')
-abstract class ColumnSpec<T> {
+@MappableClass(discriminatorKey: 'type')
+abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   String get type => runtimeType.toString();
 
   String get id;
@@ -200,11 +198,12 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
   final StorageEntry<String> entry;
 
   ColumnSpecSelection(this.entry) : super([]) {
-    final data = JsonMapper.deserialize<List<dynamic>>(entry.pull()) ?? [];
+    final raw = entry.pull();
+    final data = raw == null ? <dynamic>[] : (jsonDecode(raw) as List<dynamic>);
     bool failed = false;
     for (final d in data) {
       try {
-        state.addIfNotNull(JsonMapper.deserialize<ColumnSpec>(d));
+        state.addIfNotNull(ColumnSpecMapper.fromMap(d as Map<String, dynamic>));
       } catch (e) {
         // If the specification of the column spec is changed, it may not be able to load.
         logger.w("Failed to deserialize column spec: error=$e, data=$d");
@@ -281,7 +280,7 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
 
   void rebuild() {
     state = [...state];
-    entry.push(JsonMapper.serialize(state));
+    entry.push(MapperContainer.globals.toJson<List<ColumnSpec>>(state));
   }
 
   void clear() {

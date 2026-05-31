@@ -1,15 +1,13 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
-
-const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
 
 class PathEntity {
   static p.Context context = p.Context();
@@ -163,7 +161,7 @@ class FilePath extends PathEntity {
 
   void writeAsStringSync(String contents) => toFile().writeAsStringSync(contents);
 
-  T? deserializeSync<T>() => JsonMapper.deserialize<T>(readAsStringSync(), deserializationOptions);
+  T deserializeSync<T>() => MapperContainer.globals.fromJson<T>(readAsStringSync());
 }
 
 class DirectoryPath extends PathEntity {

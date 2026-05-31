@@ -1,3 +1,4 @@
+import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -184,6 +185,7 @@ final _versionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
   return result;
 });
 
+@RoutePage()
 class DashboardPage extends ConsumerWidget {
   const DashboardPage({Key? key}) : super(key: key);
 

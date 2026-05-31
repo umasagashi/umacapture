@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,11 +15,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'simple_label.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_simple_label = "pages.chara_detail.column_predicate.simple_label";
 
-@jsonSerializable
-class SimpleLabelPredicate {
+@MappableClass()
+class SimpleLabelPredicate with SimpleLabelPredicateMappable {
   final Set<int> rejects;
 
   SimpleLabelPredicate({
@@ -45,9 +47,8 @@ class SimpleLabelCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "SimpleLabelColumnSpec")
-class SimpleLabelColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'SimpleLabelColumnSpec')
+class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMappable {
   final Parser parser;
   final String labelKey;
   SimpleLabelPredicate predicate;

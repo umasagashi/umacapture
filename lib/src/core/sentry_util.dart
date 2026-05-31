@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart' hide kIsWeb;
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
-import 'package:dio/adapter.dart';
+import 'package:dio/io.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback/feedback.dart';
 import 'package:flutter/foundation.dart';
@@ -11,7 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 
 import '/const.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
@@ -22,20 +22,21 @@ import '/src/preference/privacy_setting.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
-@jsonSerializable
-class SentryRateLimit {
+part 'sentry_util.mapper.dart';
+
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class SentryRateLimit with SentryRateLimitMappable {
   final bool available;
   final int rateLimitPerMonth;
 
   SentryRateLimit(this.available, this.rateLimitPerMonth);
 
   static Future<SentryRateLimit?> download() async {
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    initializeMappers();
     try {
       return await createDiagnosticDio(operation: "download_sentry_rate_limit_config")
           .get(Const.sentryRateLimitConfigUrl)
-          .then((response) => JsonMapper.deserialize<SentryRateLimit>(response.toString(), options));
+          .then((response) => SentryRateLimitMapper.fromJson(response.toString()));
     } catch (exception, stackTrace) {
       logger.e("Failed to download sentry rate limit config.", exception, stackTrace);
       return null;
@@ -236,8 +237,9 @@ Future<Map<String, dynamic>> probeTlsConnection(Uri uri) async {
 Dio createDiagnosticDio({String? operation}) {
   final dio = Dio();
   final adapter = dio.httpClientAdapter;
-  if (!kIsWeb && adapter is DefaultHttpClientAdapter) {
-    adapter.onHttpClientCreate = (client) {
+  if (!kIsWeb && adapter is IOHttpClientAdapter) {
+    adapter.createHttpClient = () {
+      final client = HttpClient();
       client.badCertificateCallback = (certificate, host, port) {
         final context = _certificateContext(certificate, host, port);
         logger.e("Bad certificate rejected. operation=$operation, context=$context");
@@ -325,7 +327,7 @@ FutureOr<void> captureCharaDetailRecord(String message, DirectoryPath directory)
     Sentry.captureMessage(
       message,
       level: SentryLevel.info,
-      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Record"),
+      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Record").toHint(),
       withScope: (Scope scope) {
         getCharaDetailRecordFiles(directory).forEach((path) => scope.addFile(path));
       },
@@ -341,7 +343,7 @@ FutureOr<void> captureScreen(String message, FilePath path) {
     Sentry.captureMessage(
       message,
       level: SentryLevel.info,
-      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Screen"),
+      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Screen").toHint(),
       withScope: (Scope scope) {
         scope.addFile(path);
       },
@@ -363,7 +365,7 @@ OnFeedbackCallback _sendToSentry({
   return (UserFeedback feedback) async {
     final id = await realHub.captureMessage(
       feedback.text,
-      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Feedback"),
+      hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Feedback").toHint(),
       withScope: (scope) {
         scope.addAttachment(SentryAttachment.fromUint8List(
           feedback.screenshot,
@@ -372,11 +374,14 @@ OnFeedbackCallback _sendToSentry({
         ));
       },
     );
-    await realHub.captureUserFeedback(SentryUserFeedback(
-      eventId: id,
-      email: email,
+    // sentry9 replaced Hub.captureUserFeedback/SentryUserFeedback with
+    // captureFeedback/SentryFeedback. The feedback is linked to the message
+    // event above via associatedEventId.
+    await realHub.captureFeedback(SentryFeedback(
+      message: '${feedback.text}\n${feedback.extra.toString()}',
+      contactEmail: email,
       name: name,
-      comments: '${feedback.text}\n${feedback.extra.toString()}',
+      associatedEventId: id,
     ));
   };
 }
@@ -407,6 +412,9 @@ extension ScopeExtension on Scope {
 }
 
 class CustomHint {
+  static const _useUniqueFingerprintKey = "custom_hint_use_unique_fingerprint";
+  static const _titlePrefixKey = "custom_hint_title_prefix";
+
   final bool useUniqueFingerprint;
   final String? titlePrefix;
 
@@ -415,14 +423,25 @@ class CustomHint {
     this.titlePrefix,
   });
 
-  static CustomHint from(dynamic src) {
-    if (src == null) {
-      return CustomHint();
+  // sentry9 no longer accepts arbitrary hint objects; the `hint` parameter is a
+  // typed [Hint] whose key/value storage is the only way to pass custom data
+  // through to [SentryOptions.beforeSend]. We serialize our fields into it and
+  // read them back in [_runWithSentry].
+  Hint toHint() {
+    final hint = Hint();
+    hint.set(_useUniqueFingerprintKey, useUniqueFingerprint);
+    if (titlePrefix != null) {
+      hint.set(_titlePrefixKey, titlePrefix);
     }
-    if (src is CustomHint) {
-      return src;
-    }
-    throw UnsupportedError(src.toString());
+    return hint;
+  }
+
+  static CustomHint from(Hint hint) {
+    final titlePrefix = hint.get(_titlePrefixKey);
+    return CustomHint(
+      useUniqueFingerprint: hint.get(_useUniqueFingerprintKey) == true,
+      titlePrefix: titlePrefix is String ? titlePrefix : null,
+    );
   }
 }
 
@@ -437,7 +456,7 @@ Future<void> _runWithSentry(AppRunner runner) async {
       }
       options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
       options.enablePrintBreadcrumbs = false;
-      options.beforeSend = (SentryEvent event, {dynamic hint}) async {
+      options.beforeSend = (SentryEvent event, Hint hint) async {
         final customHint = CustomHint.from(hint);
         if (customHint.useUniqueFingerprint) {
           event = event.copyWith(fingerprint: [event.eventId.toString()]);

@@ -1,4 +1,3 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,7 +13,7 @@ const tr_chara_detail = "pages.chara_detail";
 
 final specCloneProvider = StateProvider.autoDispose.family<ColumnSpec, String>((ref, specId) {
   final source = ref.read(currentColumnSpecsProvider.notifier).getById(specId)!;
-  return JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(source))!;
+  return ColumnSpecMapper.fromMap(source.toMap());
 });
 
 class SpecProviderAccessor<T extends ColumnSpec> {

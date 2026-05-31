@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
@@ -14,13 +14,15 @@ import 'package:tuple/tuple.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
+
+part 'version_check.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_toast = "toast";
@@ -35,29 +37,26 @@ class ModuleVersion {
   });
 }
 
-@jsonSerializable
-class ModuleVersionRawData {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class ModuleVersionRawData with ModuleVersionRawDataMappable {
   final String formatVersion;
   final String region;
   final String recognizerVersion;
 
-  @JsonProperty(defaultValue: "2021-02-24T00:00:00+0900")
   final String minimumVersion;
 
-  @JsonProperty(defaultValue: "0.0.0")
   final String applicationVersion;
 
-  @JsonProperty(defaultValue: false)
   final bool pinVersion;
 
   ModuleVersionRawData(
     this.formatVersion,
     this.region,
-    this.recognizerVersion,
-    this.minimumVersion,
-    this.applicationVersion,
-    this.pinVersion,
-  );
+    this.recognizerVersion, [
+    this.minimumVersion = "2021-02-24T00:00:00+0900",
+    this.applicationVersion = "0.0.0",
+    this.pinVersion = false,
+  ]);
 
   ModuleVersion toModuleVersion() {
     return ModuleVersion(
@@ -70,23 +69,21 @@ class ModuleVersionRawData {
     if (!file.existsSync()) {
       return Future.value(null);
     }
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    initializeMappers();
     try {
       return await file
           .readAsString()
-          .then((content) => JsonMapper.deserialize<ModuleVersionRawData>(content, options));
+          .then((content) => ModuleVersionRawDataMapper.fromJson(content));
     } catch (e) {
       return null;
     }
   }
 
   static Future<ModuleVersionRawData?> download(Uri url) async {
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    initializeMappers();
     return await createDiagnosticDio(operation: "check_latest_module_version")
         .get(url.toString())
-        .then((response) => JsonMapper.deserialize<ModuleVersionRawData>(response.toString(), options));
+        .then((response) => ModuleVersionRawDataMapper.fromJson(response.toString()));
   }
 }
 
@@ -179,7 +176,7 @@ Future<void> _logNetworkException({
 
 Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
   final stream = InputFileStream(args.item1.path);
-  final archive = ZipDecoder().decodeBuffer(stream);
+  final archive = ZipDecoder().decodeStream(stream);
   extractArchiveToDisk(archive, args.item2.path);
   return stream.close();
 }

@@ -71,8 +71,8 @@ class DeleteRecordDialog extends ConsumerWidget {
               message: "$tr_delete_record.dialog.ok_button.tooltip".tr(),
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  primary: theme.colorScheme.error,
-                  onPrimary: theme.colorScheme.onError,
+                  backgroundColor: theme.colorScheme.error,
+                  foregroundColor: theme.colorScheme.onError,
                 ),
                 icon: const Icon(Icons.delete),
                 label: Text("$tr_delete_record.dialog.ok_button.label".tr()),

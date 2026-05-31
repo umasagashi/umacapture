@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,7 +10,7 @@ import 'package:pluto_grid/pluto_grid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
@@ -18,6 +18,8 @@ import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
+
+part 'loader.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_columns = "pages.chara_detail.columns";
@@ -45,9 +47,8 @@ final moduleInfoLoaders = FutureProvider((ref) async {
 });
 
 Future<T> _loadFromJson<T>(FilePath path) async {
-  initializeJsonReflectable();
-  const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-  return path.toFile().readAsString().then((e) => JsonMapper.deserialize<T>(e, options)!);
+  initializeMappers();
+  return path.toFile().readAsString().then((e) => MapperContainer.globals.fromJson<T>(e));
 }
 
 final labelMapLoader = FutureProvider<LabelMap>((ref) async {
@@ -161,8 +162,8 @@ class _RatingDataWriter {
   _RatingDataWriter(this.path, this.data);
 
   static Future<void> _run(_RatingDataWriter arg) {
-    initializeJsonReflectable();
-    return arg.path.writeAsString(JsonMapper.serialize(arg.data));
+    initializeMappers();
+    return arg.path.writeAsString(arg.data.toJson());
   }
 
   Future<void> run() {
@@ -170,8 +171,8 @@ class _RatingDataWriter {
   }
 }
 
-@jsonSerializable
-class RatingData {
+@MappableClass()
+class RatingData with RatingDataMappable {
   final String title;
   final Map<String, double> data;
 
@@ -179,14 +180,6 @@ class RatingData {
     required this.title,
     required this.data,
   });
-
-  @jsonConstructor
-  RatingData.fromJson(
-    @JsonProperty(name: 'title') String title,
-    @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
-    // ignore: prefer_initializing_formals
-  )   : title = title,
-        data = Map<String, double>.from(data);
 
   RatingData copyWith({
     String? title,
@@ -250,7 +243,7 @@ class RatingStorageData {
 }
 
 Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async {
-  initializeJsonReflectable();
+  initializeMappers();
   if (!directoryPath.existsSync()) {
     return [];
   }
@@ -258,7 +251,7 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
       .listSync()
       .map((e) => RatingStorageData(
             key: e.stem,
-            title: JsonMapper.deserialize<RatingData>(e.asFilePath.readAsStringSync())!.title,
+            title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
           ))
       .toList();
 }
@@ -278,7 +271,7 @@ final charaDetailRecordRatingProvider =
   if (!path.existsSync()) {
     return CharaDetailRecordRatingController(path, RatingData.empty);
   } else {
-    return CharaDetailRecordRatingController(path, JsonMapper.deserialize<RatingData>(path.readAsStringSync())!);
+    return CharaDetailRecordRatingController(path, RatingDataMapper.fromJson(path.readAsStringSync()));
   }
 });
 
@@ -289,8 +282,8 @@ class _MemoDataWriter {
   _MemoDataWriter(this.path, this.data);
 
   static Future<void> _run(_MemoDataWriter arg) {
-    initializeJsonReflectable();
-    return arg.path.writeAsString(JsonMapper.serialize(arg.data));
+    initializeMappers();
+    return arg.path.writeAsString(arg.data.toJson());
   }
 
   Future<void> run() {
@@ -298,8 +291,8 @@ class _MemoDataWriter {
   }
 }
 
-@jsonSerializable
-class MemoData {
+@MappableClass()
+class MemoData with MemoDataMappable {
   final String title;
   final Map<String, String> data;
 
@@ -307,14 +300,6 @@ class MemoData {
     required this.title,
     required this.data,
   });
-
-  @jsonConstructor
-  MemoData.fromJson(
-    @JsonProperty(name: 'title') String title,
-    @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
-    // ignore: prefer_initializing_formals
-  )   : title = title,
-        data = Map<String, String>.from(data);
 
   MemoData copyWith({
     String? title,
@@ -397,7 +382,7 @@ class MemoStorageData {
 }
 
 Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
-  initializeJsonReflectable();
+  initializeMappers();
   if (!directoryPath.existsSync()) {
     return [];
   }
@@ -405,7 +390,7 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
       .listSync()
       .map((e) => MemoStorageData(
             key: e.stem,
-            title: JsonMapper.deserialize<MemoData>(e.asFilePath.readAsStringSync())!.title,
+            title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
           ))
       .toList();
 }
@@ -425,7 +410,7 @@ final charaDetailRecordMemoProvider =
   if (!path.existsSync()) {
     return CharaDetailRecordMemoController(path, MemoData.empty);
   } else {
-    return CharaDetailRecordMemoController(path, JsonMapper.deserialize<MemoData>(path.readAsStringSync())!);
+    return CharaDetailRecordMemoController(path, MemoDataMapper.fromJson(path.readAsStringSync()));
   }
 });
 

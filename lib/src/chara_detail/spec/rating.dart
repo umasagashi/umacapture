@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
@@ -18,13 +18,15 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'rating.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_rating = "pages.chara_detail.column_predicate.rating";
 
 final ratingFormatter = NumberFormat("0.0");
 
-@jsonSerializable
-class IsInRangeRatingPredicate {
+@MappableClass()
+class IsInRangeRatingPredicate with IsInRangeRatingPredicateMappable {
   final double? min;
   final double? max;
 
@@ -63,9 +65,8 @@ class RatingCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RatingColumnSpec")
-class RatingColumnSpec extends ColumnSpec<double?> {
+@MappableClass(discriminatorValue: 'RatingColumnSpec')
+class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable {
   final Parser parser;
   final IsInRangeRatingPredicate predicate;
   final String storageKey;
@@ -79,7 +80,6 @@ class RatingColumnSpec extends ColumnSpec<double?> {
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
-  @JsonProperty(ignore: true)
   final range = Range<double>(min: 0.0, max: 5.0);
 
   RatingColumnSpec({

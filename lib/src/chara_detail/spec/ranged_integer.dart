@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,11 +14,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'ranged_integer.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_ranged_integer = "pages.chara_detail.column_predicate.ranged_integer";
 
-@jsonSerializable
-class IsInRangeIntegerPredicate {
+@MappableClass()
+class IsInRangeIntegerPredicate with IsInRangeIntegerPredicateMappable {
   final int? min;
   final int? max;
 
@@ -54,9 +56,8 @@ class RangedIntegerCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RangedIntegerColumnSpec")
-class RangedIntegerColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'RangedIntegerColumnSpec')
+class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSpecMappable {
   final Parser parser;
   final IsInRangeIntegerPredicate predicate;
 

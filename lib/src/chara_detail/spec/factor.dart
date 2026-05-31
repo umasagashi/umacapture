@@ -1,6 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:csv/csv.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,30 +18,32 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'factor.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
-@jsonSerializable
+@MappableEnum()
 enum FactorSetLogicMode {
   anyOf,
   allOf,
   mixed,
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorSearchSubjectMode {
   trainee,
   family,
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorSearchElementMode {
   starOnly,
   starAndCount,
 }
 
-@jsonSerializable
-class FactorSearchElement {
+@MappableClass()
+class FactorSearchElement with FactorSearchElementMappable {
   final FactorSearchElementMode mode;
   final int star;
   final int count;
@@ -65,15 +67,15 @@ class FactorSearchElement {
   }
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorNotationMode {
   sumOnly,
   traineeAndParents,
   each,
 }
 
-@jsonSerializable
-class FactorNotation {
+@MappableClass()
+class FactorNotation with FactorNotationMappable {
   final FactorNotationMode mode;
   final int max;
 
@@ -145,8 +147,8 @@ class QueriedFactor {
   }
 }
 
-@jsonSerializable
-class AggregateFactorSetPredicate {
+@MappableClass()
+class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   final Set<int> query;
   final FactorSetLogicMode logic;
   final FactorSearchSubjectMode subject;
@@ -155,12 +157,10 @@ class AggregateFactorSetPredicate {
   final Set<String> factorTags;
   final Set<String> skillTags;
 
-  @JsonProperty(ignore: true)
   bool get isStarAndCountAllowed {
     return logic == FactorSetLogicMode.mixed || subject == FactorSearchSubjectMode.family;
   }
 
-  @JsonProperty(ignore: true)
   int get starMaxLimit {
     if (element.mode == FactorSearchElementMode.starAndCount) {
       return 3;
@@ -170,7 +170,6 @@ class AggregateFactorSetPredicate {
     }
   }
 
-  @JsonProperty(ignore: true)
   int get countMaxLimit {
     if (element.mode == FactorSearchElementMode.starOnly) {
       return 1;
@@ -282,15 +281,14 @@ class FactorCellData implements CellData {
   Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorDialogElements {
   selectionTags,
   modeLogic,
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "FactorColumnSpec")
-class FactorColumnSpec extends ColumnSpec<FactorSet> {
+@MappableClass(discriminatorValue: 'FactorColumnSpec')
+class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable {
   final Parser parser;
   final String labelKey = LabelKeys.factor;
   final AggregateFactorSetPredicate predicate;
@@ -384,7 +382,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return PlutoCell(
       value: desc,
-    )..setUserData(FactorCellData(desc, csv: const ListToCsvConverter().convert([notations])));
+    )..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
   }
 
   @override

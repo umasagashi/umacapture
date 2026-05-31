@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -9,9 +9,10 @@ import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/core/utils.dart';
 
-@jsonSerializable
-@Json(discriminatorValue: "CharaRankColumnSpec")
-class CharaRankColumnSpec extends RangedLabelColumnSpec {
+part 'chara_rank.mapper.dart';
+
+@MappableClass(discriminatorValue: 'CharaRankColumnSpec')
+class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpecMappable {
   CharaRankColumnSpec({
     required super.id,
     required super.title,
