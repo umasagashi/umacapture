@@ -199,7 +199,7 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
               child: Container(
                 width: 300,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.1),
+                  color: theme.colorScheme.surfaceContainerHighest,
                   border: Border.all(color: theme.colorScheme.primaryContainer),
                   borderRadius: BorderRadius.circular(8),
                 ),

@@ -201,7 +201,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
       // The top edge of the window frame is not visible, so 1 pixel padding is added instead.
       // But 1 pixel is thicker than the others, so the color is mixed with the title bar to make it look better.
       padding: const EdgeInsets.only(top: 1),
-      color: theme.colorScheme.surface.blend(Colors.black, 50),
+      color: theme.colorScheme.surface,
       child: Scaffold(
         appBar: const WindowCaptionAlt(),
         body: widget.child,
@@ -267,13 +267,6 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
       ),
       chipTheme: base.chipTheme.copyWith(
         labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide.none),
-        side: BorderSide(
-          width: 0.5,
-          color: base.chipTheme.selectedColor ?? base.colorScheme.primaryContainer,
-        ),
-        elevation: 0,
-        pressElevation: 0,
       ),
       textTheme: base.textTheme.copyWith(
         displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
@@ -307,18 +300,12 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     // Rebuild this widget when requested.
     ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));
 
+    // Baseline theme: stick to standard FlexColorScheme / Material-3 usage.
+    // Color-specific tuning (surface blends, app-bar opacity, etc.) is handled
+    // incrementally in a follow-up task rather than reproducing the legacy look.
     final theme = FlexThemeData.light(
       scheme: FlexScheme.blue,
-      surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-      blendLevel: 20,
-      appBarOpacity: 0.95,
-      subThemesData: const FlexSubThemesData(
-        blendOnLevel: 20,
-        blendOnColors: false,
-        navigationRailMutedUnselectedLabel: false,
-        navigationRailMutedUnselectedIcon: false,
-        navigationRailLabelType: NavigationRailLabelType.none,
-      ),
+      subThemesData: const FlexSubThemesData(),
       visualDensity: FlexColorScheme.comfortablePlatformDensity,
       useMaterial3: true,
       fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
@@ -326,16 +313,7 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
     final darkTheme = FlexThemeData.dark(
       scheme: FlexScheme.blue,
-      surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-      blendLevel: 15,
-      appBarStyle: FlexAppBarStyle.background,
-      appBarOpacity: 0.90,
-      subThemesData: const FlexSubThemesData(
-        blendOnLevel: 30,
-        navigationRailMutedUnselectedLabel: false,
-        navigationRailMutedUnselectedIcon: false,
-        navigationRailLabelType: NavigationRailLabelType.none,
-      ),
+      subThemesData: const FlexSubThemesData(),
       visualDensity: FlexColorScheme.comfortablePlatformDensity,
       useMaterial3: true,
       fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,

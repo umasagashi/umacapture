@@ -1,6 +1,5 @@
 import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -64,7 +63,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               child: ActionChip(
                 label: spec.label(),
                 tooltip: spec.tooltip(ref.base),
-                backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
+                backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer : null,
                 onPressed: () {
                   ColumnSpecDialog.show(ref.base, spec);
                 },

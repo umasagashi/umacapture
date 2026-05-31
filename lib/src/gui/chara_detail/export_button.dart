@@ -66,7 +66,7 @@ class CharaDetailExportButton extends ConsumerWidget {
               splashRadius: 24,
               position: PopupMenuPosition.under,
               shape: RoundedRectangleBorder(
-                side: BorderSide(color: theme.colorScheme.outline.withValues(alpha: 0.5)),
+                side: BorderSide(color: theme.colorScheme.outline),
                 borderRadius: BorderRadius.circular(8),
               ),
               itemBuilder: (BuildContext context) {

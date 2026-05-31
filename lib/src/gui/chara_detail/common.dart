@@ -171,7 +171,7 @@ class NoteCard extends ConsumerWidget {
     final baseColor = color ?? theme.colorScheme.primaryContainer;
     return Container(
       decoration: BoxDecoration(
-        color: baseColor.withValues(alpha: 0.2),
+        color: theme.colorScheme.surfaceContainerHighest,
         border: Border.all(color: baseColor),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -325,7 +325,7 @@ class _SelectorExpandButton extends ConsumerWidget {
           avatar: const Icon(Icons.expand_more),
           label: Text("$tr_common.selector.expand_button".tr()),
           side: BorderSide.none,
-          backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+          backgroundColor: theme.colorScheme.primaryContainer,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           onPressed: onPressed,
         ),
@@ -387,7 +387,7 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
             label: Text("$tr_common.selector.control.select_all.label".tr()),
             tooltip: "$tr_common.selector.control.select_all.tooltip".tr(),
             side: BorderSide.none,
-            backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+            backgroundColor: theme.colorScheme.primaryContainer,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             onPressed: () {
               widget.onSelected({...widget.selected}..addAll(widget.candidates.map((e) => e.sid)));
@@ -399,7 +399,7 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
             label: Text("$tr_common.selector.control.deselect_all.label".tr()),
             tooltip: "$tr_common.selector.control.deselect_all.tooltip".tr(),
             side: BorderSide.none,
-            backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+            backgroundColor: theme.colorScheme.primaryContainer,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             onPressed: () {
               widget.onSelected({...widget.selected}..removeAll(widget.candidates.map((e) => e.sid)));

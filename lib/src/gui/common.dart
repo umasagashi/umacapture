@@ -1,6 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback_sentry/feedback_sentry.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -14,7 +13,6 @@ class ListCard extends StatelessWidget {
   final Widget? trailing;
   final EdgeInsetsGeometry? padding;
   final CrossAxisAlignment crossAxisAlignment;
-  final Color? baseColor;
 
   const ListCard({
     super.key,
@@ -23,7 +21,6 @@ class ListCard extends StatelessWidget {
     this.trailing,
     this.padding,
     this.crossAxisAlignment = CrossAxisAlignment.center,
-    this.baseColor,
   });
 
   Widget child() {
@@ -47,22 +44,10 @@ class ListCard extends StatelessWidget {
         children: [
           if (title != null)
             ListTile(
-              tileColor: baseColor != null
-                  ? theme.cardColor.blend(baseColor!, 50)
-                  : theme.scaffoldBackgroundColor.blend(theme.cardColor, 50),
               title: Text(title!, style: theme.textTheme.headlineSmall),
               trailing: trailing,
             ),
-          if (baseColor != null)
-            Theme(
-              data: theme.copyWith(
-                listTileTheme: theme.listTileTheme.copyWith(
-                  tileColor: (theme.listTileTheme.tileColor ?? theme.colorScheme.surface).blend(baseColor!, 15),
-                ),
-              ),
-              child: child(),
-            ),
-          if (baseColor == null) child(),
+          child(),
         ],
       ),
     );
@@ -238,7 +223,7 @@ class _SpinBoxState extends State<SpinBox> {
   Widget button(ThemeData theme, String text, int offset) {
     return TextButton(
       style: OutlinedButton.styleFrom(
-        backgroundColor: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+        backgroundColor: theme.colorScheme.primaryContainer,
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
       ),

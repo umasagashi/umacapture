@@ -177,7 +177,7 @@ class _ScrollStateWidget extends ConsumerWidget {
         header: Text(header),
         center: Text("${(progress * 100).toInt()}%"),
         footer: Text(_progressText()),
-        backgroundColor: Color.lerp(theme.colorScheme.surface, theme.colorScheme.onSurface, 0.1)!,
+        backgroundColor: theme.colorScheme.surfaceContainerHighest,
         progressColor: _progressColor(),
       ),
     );

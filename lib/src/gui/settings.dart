@@ -258,7 +258,7 @@ class PrivacySettingsGroup extends ConsumerWidget {
           description: RichText(
             text: TextSpan(
               style: theme.textTheme.bodyMedium!.copyWith(
-                color: theme.textTheme.bodyMedium!.color!.withValues(alpha: 0.8),
+                color: theme.colorScheme.onSurfaceVariant,
               ),
               children: [
                 TextSpan(text: "$tr_settings.privacy.allow_post_user_data.description".tr()),

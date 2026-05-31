@@ -50,7 +50,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
       },
       child: ActionChip(
         backgroundColor:
-            builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor!.withValues(alpha: 0.2),
+            builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor,
         label: Text(builder.title),
         onPressed: () {
           ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(builder.build(ref.base));
@@ -86,7 +86,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Wrap(
@@ -104,7 +104,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.1),
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Wrap(
@@ -138,7 +138,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             padding: const EdgeInsets.all(8),
             child: Container(
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+                color: theme.colorScheme.surfaceContainerHighest,
                 border: Border.all(color: theme.colorScheme.primaryContainer),
                 borderRadius: BorderRadius.circular(8),
               ),

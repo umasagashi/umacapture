@@ -103,7 +103,6 @@ class AppUpdaterGroup extends ConsumerWidget {
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
       padding: EdgeInsets.zero,
-      baseColor: Colors.amber,
       children: [
         ListTile(
           title: Text("$tr_dashboard.app_updater.subtitle".tr()),

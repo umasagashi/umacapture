@@ -57,7 +57,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       context: context,
       position: RelativeRect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom),
       shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outline.withValues(alpha: 0.5)),
+        side: BorderSide(color: theme.colorScheme.outline),
         borderRadius: BorderRadius.circular(8),
       ),
       items: [
@@ -150,7 +150,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     rowColor: theme.colorScheme.surface,
                     evenRowColor: theme.colorScheme.surfaceContainerHighest,
                     activatedColor: theme.focusColor,
-                    gridBorderColor: theme.colorScheme.outline.withValues(alpha: 0.5),
+                    gridBorderColor: theme.colorScheme.outline,
                     borderColor: theme.focusColor,
                     activatedBorderColor: theme.focusColor,
                     inactivatedBorderColor: theme.focusColor,

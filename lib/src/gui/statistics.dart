@@ -1,7 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -48,7 +47,7 @@ class _StatisticTile extends ConsumerWidget {
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
-          color: theme.colorScheme.primaryContainer.withValues(alpha: 0.5),
+          color: theme.colorScheme.primaryContainer,
           width: 2,
         ),
         borderRadius: BorderRadius.circular(4),
@@ -62,7 +61,7 @@ class _StatisticTile extends ConsumerWidget {
           Expanded(
             child: Container(
               alignment: Alignment.center,
-              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.2),
+              color: theme.colorScheme.surfaceContainerHighest,
               child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),
@@ -210,7 +209,7 @@ class MonthlyFansChartData {
       lineTouchData: LineTouchData(
         enabled: false,
         touchTooltipData: LineTouchTooltipData(
-          getTooltipColor: (touchedSpot) => theme.colorScheme.surface.blend(Colors.cyan, 50),
+          getTooltipColor: (touchedSpot) => theme.colorScheme.surfaceContainerHighest,
           tooltipBorderRadius: BorderRadius.circular(8),
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           fitInsideHorizontally: true,
