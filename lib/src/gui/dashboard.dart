@@ -20,9 +20,14 @@ import '/src/gui/statistics.dart';
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
-final _downloadProgressProvider = StateProvider<Progress?>((ref) {
-  return null;
-});
+class _DownloadProgress extends Notifier<Progress?> {
+  @override
+  Progress? build() => null;
+
+  void set(Progress? value) => state = value;
+}
+
+final _downloadProgressProvider = NotifierProvider<_DownloadProgress, Progress?>(_DownloadProgress.new);
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
@@ -40,7 +45,7 @@ class AppUpdaterGroup extends ConsumerWidget {
   const AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
 
   void downloadAndOpen(WidgetRef ref) {
-    ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: 0, total: 100));
+    ref.read(_downloadProgressProvider.notifier).set(Progress(count: 0, total: 100));
     ref.watch(isInstallerModeLoader.future).then((isInstallerMode) {
       final pathInfo = ref.watch(pathInfoProvider);
       final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
@@ -50,10 +55,10 @@ class AppUpdaterGroup extends ConsumerWidget {
         downloadUrl,
         downloadPath.path,
         onReceiveProgress: (int count, int total) {
-          ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: count, total: total));
+          ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
         },
       ).then((_) {
-        ref.read(_downloadProgressProvider.notifier).update((_) => null);
+        ref.read(_downloadProgressProvider.notifier).set(null);
         (isInstallerMode ? downloadPath : downloadPath.parent).launch();
       });
     });

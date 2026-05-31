@@ -4,6 +4,8 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// riverpod 3 moved ProviderListenable out of the default export surface.
+import 'package:flutter_riverpod/misc.dart';
 import 'package:quiver/iterables.dart';
 import 'package:quiver/time.dart' as qtm;
 import 'package:tuple/tuple.dart';
@@ -326,22 +328,15 @@ class RefBase {
   T watch<T>(ProviderListenable<T> provider) => _ref.watch(provider);
 }
 
-abstract class StateProviderLike<T> {
-  ProviderListenable<T> get listenable;
-
-  ProviderListenable<StateController<T>> get notifier;
-}
-
-class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
-  final AutoDisposeStateProvider<T> provider;
-
-  AutoDisposeStateProviderLike(this.provider);
-
-  @override
-  ProviderListenable<T> get listenable => provider;
-
-  @override
-  ProviderListenable<StateController<T>> get notifier => provider.notifier;
+// Base class for the tag-selector providers (skill/factor tag filters in the
+// column dialogs). Replaces the legacy StateProvider<Set<String>> + the
+// StateProviderLike indirection. Subclasses only override [build] to seed the
+// initial selection; mutation goes through [toggle], which assigns a NEW set so
+// Riverpod's ==-based filtering fires a rebuild.
+abstract class TagSelectionNotifier extends Notifier<Set<String>> {
+  void toggle(String tag, {bool? shouldExists}) {
+    state = {...state}..toggle(tag, shouldExists: shouldExists);
+  }
 }
 
 extension AsyncValueExtension<T> on AsyncValue<T> {

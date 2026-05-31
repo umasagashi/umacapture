@@ -451,15 +451,35 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
 
-final _selectedSkillTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
-  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-  return Set.from(spec.predicate.skillTags);
-});
+class _SelectedSkillTags extends TagSelectionNotifier {
+  _SelectedSkillTags(this.specId);
 
-final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
-  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-  return Set.from(spec.predicate.factorTags);
-});
+  final String specId;
+
+  @override
+  Set<String> build() {
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    return Set.from(spec.predicate.skillTags);
+  }
+}
+
+final _selectedSkillTagsProvider =
+    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedSkillTags.new);
+
+class _SelectedFactorTags extends TagSelectionNotifier {
+  _SelectedFactorTags(this.specId);
+
+  final String specId;
+
+  @override
+  Set<String> build() {
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    return Set.from(spec.predicate.factorTags);
+  }
+}
+
+final _selectedFactorTagsProvider =
+    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedFactorTags.new);
 
 class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
@@ -500,7 +520,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
         children: [
           TagSelector(
             candidateTagsProvider: factorTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedFactorTagsProvider(widget.specId)),
+            selectedTagsProvider: _selectedFactorTagsProvider(widget.specId),
           ),
           Row(
             children: [
@@ -514,7 +534,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
           ),
           TagSelector(
             candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedSkillTagsProvider(widget.specId)),
+            selectedTagsProvider: _selectedSkillTagsProvider(widget.specId),
           ),
         ],
       ),

@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// riverpod 3 moved ProviderListenable out of the default export surface.
+import 'package:flutter_riverpod/misc.dart';
 import 'package:recase/recase.dart';
 
 import '/src/chara_detail/spec/base.dart';
@@ -195,8 +197,8 @@ class NoteCard extends ConsumerWidget {
 }
 
 class TagSelector extends ConsumerWidget {
-  final ProviderBase<List<Tag>> candidateTagsProvider;
-  final StateProviderLike<Set<String>> selectedTagsProvider;
+  final ProviderListenable<List<Tag>> candidateTagsProvider;
+  final NotifierProvider<TagSelectionNotifier, Set<String>> selectedTagsProvider;
 
   const TagSelector({
     Key? key,
@@ -208,7 +210,7 @@ class TagSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final candidateTags = ref.watch(candidateTagsProvider);
-    final selectedTags = ref.watch(selectedTagsProvider.listenable);
+    final selectedTags = ref.watch(selectedTagsProvider);
     return Align(
       alignment: Alignment.topLeft,
       child: Wrap(
@@ -222,9 +224,7 @@ class TagSelector extends ConsumerWidget {
               showCheckmark: false,
               selected: selectedTags.contains(tag.id),
               onSelected: (selected) {
-                ref.read(selectedTagsProvider.notifier).update((tags) {
-                  return Set.from(tags)..toggle(tag.id, shouldExists: !selected);
-                });
+                ref.read(selectedTagsProvider.notifier).toggle(tag.id, shouldExists: !selected);
               },
             ),
         ],

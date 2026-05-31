@@ -1,4 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once Exclusive/BooleanNotifier migrate to Notifier (Phase 2).
+import 'package:flutter_riverpod/legacy.dart';
 
 import '/src/preference/storage_box.dart';
 

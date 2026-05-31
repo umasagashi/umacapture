@@ -80,14 +80,16 @@ class AppLogger {
 
 final logger = AppLogger();
 
-class ProviderLogger extends ProviderObserver {
+// riverpod 3 made ProviderObserver a `base` class and reshaped didUpdateProvider
+// to receive a ProviderObserverContext instead of (provider, container).
+base class ProviderLogger extends ProviderObserver {
   @override
   void didUpdateProvider(
-    ProviderBase provider,
+    ProviderObserverContext context,
     Object? previousValue,
     Object? newValue,
-    ProviderContainer container,
   ) {
+    final provider = context.provider;
     final String p = previousValue.toString();
     final String n = newValue.toString();
     const limit = 300;

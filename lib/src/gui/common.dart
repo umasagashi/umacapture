@@ -4,6 +4,8 @@ import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once DialogController migrates to Notifier (Phase 2).
+import 'package:flutter_riverpod/legacy.dart';
 
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';

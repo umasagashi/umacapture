@@ -6,6 +6,8 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once ColumnSpecSelection migrates to AsyncNotifier (Phase 3).
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';

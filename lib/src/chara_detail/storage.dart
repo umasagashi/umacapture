@@ -5,6 +5,9 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once CharaDetailRecord{Storage,RegenerationController}
+// are migrated to (Async)Notifier in Phase 2/3 of the riverpod 3 migration.
+import 'package:flutter_riverpod/legacy.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/clipboard_alt.dart';
@@ -27,9 +30,14 @@ final duplicatedCharaEventProvider = StreamProvider<String>((ref) {
   return _duplicatedCharaEventController.stream;
 });
 
-final charaCardIconMapProvider = StateProvider<Map<int, FilePath>>((ref) {
-  return {};
-});
+class CharaCardIconMap extends Notifier<Map<int, FilePath>> {
+  @override
+  Map<int, FilePath> build() => {};
+
+  void set(Map<int, FilePath> value) => state = value;
+}
+
+final charaCardIconMapProvider = NotifierProvider<CharaCardIconMap, Map<int, FilePath>>(CharaCardIconMap.new);
 
 class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
   final Ref ref;
@@ -113,7 +121,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   void _updateRecordInfo(CharaDetailRecord record) {
     if (record.evaluationValue > (charaCardMap[record.trainee.card]?.evaluationValue ?? -1)) {
       charaCardMap[record.trainee.card] = record;
-      ref.read(charaCardIconMapProvider.notifier).update((_) => Map.from(charaCardIconMap));
+      ref.read(charaCardIconMapProvider.notifier).set(Map.from(charaCardIconMap));
     }
   }
 
@@ -126,7 +134,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
       _duplicatedCharaEventController.sink.add(record.id);
-      ref.read(charaDetailCaptureStateProvider.notifier).update((state) => state.fail(message: "duplicated_character"));
+      ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
       return;
     }
     _updateRecordInfo(record);
@@ -238,7 +246,11 @@ final charaDetailRecordStorageLoader = FutureProvider<CharaDetailRecordStorage>(
     records.addAll(await compute(_loadAllCharaDetailRecord, pathInfo.charaDetailActiveDir));
   }
   final storage = CharaDetailRecordStorage(ref: ref, rootDirectory: pathInfo.charaDetailActiveDir, records: records);
-  ref.watch(charaDetailRecordCapturedEventProvider.stream).listen((e) => storage.addFromFile(e));
+  // riverpod 3 removed StreamProvider.stream; listen to the AsyncValue and react
+  // to each newly captured record id.
+  ref.listen(charaDetailRecordCapturedEventProvider, (_, next) {
+    next.whenData((e) => storage.addFromFile(e));
+  });
   storage.checkRecordVersion();
   return storage;
 });

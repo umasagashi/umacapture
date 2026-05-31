@@ -72,12 +72,17 @@ class ScreenshotResult {
   bool get hasError => result.isNotEmpty;
 }
 
-final latestScreenshotProvider = StateProvider<ScreenshotResult?>((ref) {
-  return null;
-});
+class LatestScreenshot extends Notifier<ScreenshotResult?> {
+  @override
+  ScreenshotResult? build() => null;
+
+  void set(ScreenshotResult? value) => state = value;
+}
+
+final latestScreenshotProvider = NotifierProvider<LatestScreenshot, ScreenshotResult?>(LatestScreenshot.new);
 
 void takeScreenshot(RefBase ref) {
-  ref.read(latestScreenshotProvider.notifier).update((_) => null);
+  ref.read(latestScreenshotProvider.notifier).set(null);
   final path = ref.read(pathInfoProvider).tempDir.filePath("screenshot.png");
   path.deleteSync(emptyOk: true);
   ref.read(platformControllerProvider)!.takeScreenshot(path);

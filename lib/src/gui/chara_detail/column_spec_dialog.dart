@@ -11,10 +11,24 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-final specCloneProvider = StateProvider.autoDispose.family<ColumnSpec, String>((ref, specId) {
-  final source = ref.read(currentColumnSpecsProvider.notifier).getById(specId)!;
-  return ColumnSpecMapper.fromMap(source.toMap());
-});
+// Holds an editable clone of a ColumnSpec for the duration of the column dialog.
+// autoDispose so the clone is dropped when the dialog closes; [update] mirrors
+// StateController.update for SpecProviderAccessor's `(spec) => apply(spec)` calls.
+class SpecClone extends Notifier<ColumnSpec> {
+  SpecClone(this.specId);
+
+  final String specId;
+
+  @override
+  ColumnSpec build() {
+    final source = ref.read(currentColumnSpecsProvider.notifier).getById(specId)!;
+    return ColumnSpecMapper.fromMap(source.toMap());
+  }
+
+  ColumnSpec update(ColumnSpec Function(ColumnSpec spec) cb) => state = cb(state);
+}
+
+final specCloneProvider = NotifierProvider.autoDispose.family<SpecClone, ColumnSpec, String>(SpecClone.new);
 
 class SpecProviderAccessor<T extends ColumnSpec> {
   T watch(WidgetRef ref, String specId) {

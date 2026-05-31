@@ -29,13 +29,23 @@ final capturingStateProvider = Provider<bool>((ref) {
       });
 });
 
-final capturingFrameSizeProvider = StateProvider<Size?>((ref) {
-  return null;
-});
+class CapturingFrameSize extends Notifier<Size?> {
+  @override
+  Size? build() => null;
 
-final capturingFrameRateProvider = StateProvider<double?>((ref) {
-  return null;
-});
+  void set(Size? value) => state = value;
+}
+
+final capturingFrameSizeProvider = NotifierProvider<CapturingFrameSize, Size?>(CapturingFrameSize.new);
+
+class CapturingFrameRate extends Notifier<double?> {
+  @override
+  double? build() => null;
+
+  void set(double? value) => state = value;
+}
+
+final capturingFrameRateProvider = NotifierProvider<CapturingFrameRate, double?>(CapturingFrameRate.new);
 
 StreamController<String> _errorEventController = StreamController();
 final errorEventProvider = StreamProvider<String>((ref) {
@@ -149,9 +159,21 @@ class CharaDetailCaptureState {
   }
 }
 
-final charaDetailCaptureStateProvider = StateProvider<CharaDetailCaptureState>((ref) {
-  return CharaDetailCaptureState();
-});
+class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> {
+  @override
+  CharaDetailCaptureState build() => CharaDetailCaptureState();
+
+  void reset() => state = state.reset();
+
+  void progress(int index, double progress) => state = state.progress(index, progress);
+
+  void success(String id) => state = state.success(id: id);
+
+  void fail(String message) => state = state.fail(message: message);
+}
+
+final charaDetailCaptureStateProvider =
+    NotifierProvider<CharaDetailCaptureStateNotifier, CharaDetailCaptureState>(CharaDetailCaptureStateNotifier.new);
 
 final trainerIdProvider = Provider<String>((ref) {
   final entry = StorageBox(StorageBoxKey.trainerId).entry<String>("trainer_id");
@@ -260,52 +282,52 @@ class PlatformController {
     switch (dataType) {
       case 'onError':
         _errorEventController.sink.add(data['message']);
-        captureState.update((state) => state.fail(message: data['message']));
+        captureState.fail(data['message']);
         break;
       case 'onCaptureStarted':
         _captureTriggeredEventController.sink.add(true);
-        captureState.update((state) => state.reset());
+        captureState.reset();
         break;
       case 'onCaptureStopped':
         _captureTriggeredEventController.sink.add(false);
-        captureState.update((state) => state.reset());
-        _ref.read(capturingFrameSizeProvider.notifier).state = null;
-        _ref.read(capturingFrameRateProvider.notifier).state = null;
+        captureState.reset();
+        _ref.read(capturingFrameSizeProvider.notifier).set(null);
+        _ref.read(capturingFrameRateProvider.notifier).set(null);
         break;
       case 'onScrollReady':
         _scrollReadyEventController.sink.add(data['index']);
         break;
       case 'onScrollUpdated':
-        captureState.update((state) => state.progress(data['index'], data['progress']));
+        captureState.progress(data['index'], data['progress']);
         break;
       case 'onPageReady':
         _pageReadyEventController.sink.add(data['index']);
-        captureState.update((state) => state.progress(data['index'], 1));
+        captureState.progress(data['index'], 1);
         break;
       case 'onCharaDetailStarted':
-        captureState.update((state) => state.reset());
+        captureState.reset();
         break;
       case 'onCharaDetailFinished':
         if (data['success']) {
           _charaDetailRecordCapturedEventController.sink.add(data['id']);
-          captureState.update((state) => state.success(id: data['id']));
+          captureState.success(data['id']);
         }
         break;
       case 'onCharaDetailUpdated':
         _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
         break;
       case 'onFrameRateReported':
-        _ref.read(capturingFrameRateProvider.notifier).update((_) => data['fps'].toDouble());
+        _ref.read(capturingFrameRateProvider.notifier).set(data['fps'].toDouble());
         break;
       case 'onScreenshotTaken':
         logger.i("path=${data['path']}, result='${data['result']}'");
         _ref
             .read(latestScreenshotProvider.notifier)
-            .update((_) => ScreenshotResult(FilePath(data['path']), data['result']));
+            .set(ScreenshotResult(FilePath(data['path']), data['result']));
         break;
       case 'onFrameSizeReported':
         final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
-        _ref.read(capturingFrameSizeProvider.notifier).update((_) => size);
+        _ref.read(capturingFrameSizeProvider.notifier).set(size);
         break;
       default:
         throw UnimplementedError(dataType);

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once the settings StateNotifierProviders migrate to NotifierProvider (Phase 2).
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
 import 'package:url_launcher/url_launcher.dart';

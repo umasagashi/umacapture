@@ -5,6 +5,9 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once CharaDetailRecord{Rating,Memo}Controller and
+// ColumnSpecSelection are migrated to (Async)Notifier in Phase 2/3.
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -261,9 +264,22 @@ final _charaDetailRecordRatingStorageDataLoader = FutureProvider<List<RatingStor
   return compute(_loadRatings, path);
 });
 
-final charaDetailRecordRatingStorageDataProvider = StateProvider<List<RatingStorageData>>((ref) {
-  return ref.watch(_charaDetailRecordRatingStorageDataLoader).value!;
-});
+// Holds the list of rating/memo storage descriptors. Replaces the legacy
+// StateProvider<List<T>>; [update] mirrors StateController.update so the dialog
+// call sites keep their `(state) => newList` closures unchanged.
+abstract class _StorageDataNotifier<T> extends Notifier<List<T>> {
+  List<T> update(List<T> Function(List<T> state) cb) => state = cb(state);
+}
+
+class CharaDetailRecordRatingStorageDataNotifier extends _StorageDataNotifier<RatingStorageData> {
+  @override
+  List<RatingStorageData> build() => ref.watch(_charaDetailRecordRatingStorageDataLoader).value!;
+}
+
+final charaDetailRecordRatingStorageDataProvider =
+    NotifierProvider<CharaDetailRecordRatingStorageDataNotifier, List<RatingStorageData>>(
+  CharaDetailRecordRatingStorageDataNotifier.new,
+);
 
 final charaDetailRecordRatingProvider =
     StateNotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>((ref, key) {
@@ -400,9 +416,15 @@ final _charaDetailRecordMemoStorageDataLoader = FutureProvider<List<MemoStorageD
   return compute(_loadMemos, path);
 });
 
-final charaDetailRecordMemoStorageDataProvider = StateProvider<List<MemoStorageData>>((ref) {
-  return ref.watch(_charaDetailRecordMemoStorageDataLoader).value!;
-});
+class CharaDetailRecordMemoStorageDataNotifier extends _StorageDataNotifier<MemoStorageData> {
+  @override
+  List<MemoStorageData> build() => ref.watch(_charaDetailRecordMemoStorageDataLoader).value!;
+}
+
+final charaDetailRecordMemoStorageDataProvider =
+    NotifierProvider<CharaDetailRecordMemoStorageDataNotifier, List<MemoStorageData>>(
+  CharaDetailRecordMemoStorageDataNotifier.new,
+);
 
 final charaDetailRecordMemoProvider =
     StateNotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>((ref, key) {

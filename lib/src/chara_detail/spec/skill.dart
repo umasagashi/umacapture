@@ -252,10 +252,20 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
 
 final _clonedSpecProvider = SpecProviderAccessor<SkillColumnSpec>();
 
-final _selectedTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
-  final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
-  return Set.from(spec.predicate.tags);
-});
+class _SelectedTags extends TagSelectionNotifier {
+  _SelectedTags(this.specId);
+
+  final String specId;
+
+  @override
+  Set<String> build() {
+    final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
+    return Set.from(spec.predicate.tags);
+  }
+}
+
+final _selectedTagsProvider =
+    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedTags.new);
 
 class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
@@ -295,7 +305,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
         children: [
           TagSelector(
             candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedTagsProvider(widget.specId)),
+            selectedTagsProvider: _selectedTagsProvider(widget.specId),
           ),
         ],
       ),

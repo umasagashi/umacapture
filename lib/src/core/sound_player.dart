@@ -1,5 +1,7 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+// TODO(riverpod3): remove once SoundSettingNotifier migrates to Notifier (Phase 2).
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:recase/recase.dart';
 
 import '/src/preference/settings_state.dart';

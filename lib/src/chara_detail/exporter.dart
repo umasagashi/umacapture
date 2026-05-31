@@ -20,9 +20,14 @@ import '/src/core/providers.dart';
 
 part 'exporter.mapper.dart';
 
-final exportingStateProvider = StateProvider<bool>((ref) {
-  return false;
-});
+class Exporting extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool value) => state = value;
+}
+
+final exportingStateProvider = NotifierProvider<Exporting, bool>(Exporting.new);
 
 abstract class Exportable {
   String get csv;
@@ -48,9 +53,9 @@ abstract class Exporter {
           .then((directory) {
         if (directory != null) {
           final path = DirectoryPath(directory).filePath(defaultFileName);
-          ref.read(exportingStateProvider.notifier).update((_) => true);
+          ref.read(exportingStateProvider.notifier).set(true);
           _export(path).then((_) {
-            ref.read(exportingStateProvider.notifier).update((_) => false);
+            ref.read(exportingStateProvider.notifier).set(false);
             onSuccess?.call(path);
           });
         }
