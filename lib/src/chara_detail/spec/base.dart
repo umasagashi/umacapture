@@ -6,7 +6,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
@@ -183,9 +183,9 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
 
   List<bool> evaluate(RefBase ref, List<T> values);
 
-  PlutoCell plutoCell(RefBase ref, T value);
+  TrinaCell plutoCell(RefBase ref, T value);
 
-  PlutoColumn plutoColumn(RefBase ref);
+  TrinaColumn plutoColumn(RefBase ref);
 
   String tooltip(RefBase ref);
 
@@ -289,8 +289,8 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
   }
 }
 
-extension PlutoGridStateManagerExtension on PlutoGridStateManager {
-  void autoFitColumnPrecise(BuildContext context, PlutoColumn column) {
+extension TrinaGridStateManagerExtension on TrinaGridStateManager {
+  void autoFitColumnPrecise(BuildContext context, TrinaColumn column) {
     if (refRows.isEmpty) {
       return;
     }
@@ -308,7 +308,7 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       return textPainter.width;
     }).max;
 
-    EdgeInsets cellPadding = column.cellPadding ?? configuration!.style.defaultCellPadding;
+    EdgeInsets cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
 
     resizeColumn(
       column,
@@ -320,7 +320,7 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
     if (refRows.isEmpty) {
       return;
     }
-    final context = gridKey!.currentContext!;
+    final context = gridKey.currentContext!;
     for (final col in columns) {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
@@ -332,19 +332,19 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
     }
   }
 
-  PlutoColumn? getColumn(String field) {
+  TrinaColumn? getColumn(String field) {
     return columns.firstWhereOrNull((e) => e.field == field);
   }
 
-  void sortColumn(PlutoColumn col, PlutoColumnSort order) {
-    if (order == PlutoColumnSort.ascending) {
+  void sortColumn(TrinaColumn col, TrinaColumnSort order) {
+    if (order == TrinaColumnSort.ascending) {
       sortAscending(col);
     } else {
       sortDescending(col);
     }
   }
 
-  void sortColumnByField(String columnField, PlutoColumnSort sortOrder) {
+  void sortColumnByField(String columnField, TrinaColumnSort sortOrder) {
     final col = getColumn(columnField);
     if (col != null) {
       sortColumn(col, sortOrder);
@@ -356,7 +356,7 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
   }
 }
 
-extension PlutoCellExtension on PlutoCell {
+extension TrinaCellExtension on TrinaCell {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -364,7 +364,7 @@ extension PlutoCellExtension on PlutoCell {
   void setUserData<T>(T value) => _userData[this] = value;
 }
 
-extension PlutoRowWithRawData on PlutoRow {
+extension TrinaRowWithRawData on TrinaRow {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -372,7 +372,7 @@ extension PlutoRowWithRawData on PlutoRow {
   void setUserData<T>(T value) => _userData[this] = value;
 }
 
-extension PlutoColumnWithUserData on PlutoColumn {
+extension TrinaColumnWithUserData on TrinaColumn {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -381,5 +381,5 @@ extension PlutoColumnWithUserData on PlutoColumn {
 }
 
 abstract class CellData implements Exportable {
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected;
 }

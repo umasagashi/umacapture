@@ -3,7 +3,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
@@ -110,7 +110,7 @@ class SkillCellData implements CellData {
   String get csv => const CsvEncoder().convert([skills]);
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
 @MappableEnum()
@@ -181,32 +181,32 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, List<Skill> value) {
+  TrinaCell plutoCell(RefBase ref, List<Skill> value) {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final foundSkills = predicate.extract(value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
-      return PlutoCell(
+      return TrinaCell(
         value: foundSkills.length.toString().padLeft(3, "0"),
       )..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
     }
     final desc = skillNames.partial(0, predicate.notation.max).join(", ");
-    return PlutoCell(
+    return TrinaCell(
       value: desc,
     )..setUserData(SkillCellData(skillNames, desc));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SkillCellData>()!;
         return Text(data.label);
       },

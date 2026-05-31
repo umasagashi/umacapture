@@ -4,7 +4,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
@@ -278,7 +278,7 @@ class FactorCellData implements CellData {
   FactorCellData(this.label, {String? csv}) : csv = (csv ?? label);
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
 @MappableEnum()
@@ -363,7 +363,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, FactorSet value) {
+  TrinaCell plutoCell(RefBase ref, FactorSet value) {
     final factors = _extract(value);
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
@@ -372,7 +372,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
         parent1: factors.map((e) => e.parent1).sum,
         parent2: factors.map((e) => e.parent2).sum,
       );
-      return PlutoCell(
+      return TrinaCell(
         value: q.notation(predicate.notation.mode, width: 3),
       )..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
     }
@@ -380,22 +380,22 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
-    return PlutoCell(
+    return TrinaCell(
       value: desc,
     )..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<FactorCellData>()!;
         return Text(data.label);
       },

@@ -2,7 +2,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:uuid/uuid.dart';
 
@@ -54,7 +54,7 @@ class DateTimeCellData implements CellData {
   String get csv => value.toString();
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'DateTimeColumnSpec')
@@ -103,22 +103,22 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, DateTime value) {
+  TrinaCell plutoCell(RefBase ref, DateTime value) {
     final dateString = value.toDateString();
-    return PlutoCell(value: dateString)..setUserData(DateTimeCellData(dateString));
+    return TrinaCell(value: dateString)..setUserData(DateTimeCellData(dateString));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         return Text(context.cell.value, textAlign: TextAlign.center);
       },
     )..setUserData(this);

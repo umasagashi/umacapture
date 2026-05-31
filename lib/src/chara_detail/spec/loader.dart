@@ -5,7 +5,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -424,8 +424,8 @@ final currentColumnSpecsProvider = StateNotifierProvider<ColumnSpecSelection, Li
 });
 
 class Grid {
-  final List<PlutoColumn> columns;
-  final List<PlutoRow> rows;
+  final List<TrinaColumn> columns;
+  final List<TrinaRow> rows;
   final List<int> filteredCounts;
 
   Grid(this.columns, this.rows, this.filteredCounts);
@@ -450,11 +450,11 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   final records = zip2(recordList, rowConditions).where((row) => row.item2).map((row) => row.item1);
 
   final rows = zip2(plutoCells, records)
-      .map((row) => PlutoRow(
+      .map((row) => TrinaRow(
             cells: Map.fromEntries(row.item1),
             sortIdx: -DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
           )..setUserData(row.item2))
-      .sortedBy<num>((e) => e.sortIdx!)
+      .sortedBy<num>((e) => e.sortIdx)
       .toList();
 
   return Grid(columns, rows, filteredCounts);

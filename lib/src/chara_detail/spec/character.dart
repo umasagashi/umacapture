@@ -3,7 +3,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -45,7 +45,7 @@ class CharacterCardCellData implements CellData {
   String get csv => name;
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'CharacterCardColumnSpec')
@@ -94,23 +94,23 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
+  TrinaCell plutoCell(RefBase ref, int value) {
     final card = ref.watch(charaCardInfoProvider)[value];
-    return PlutoCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
+    return TrinaCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
+  TrinaColumn plutoColumn(RefBase ref) {
     final recordRootDir = ref.watch(pathInfoProvider).charaDetailActiveDir;
-    return PlutoColumn(
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.number(),
+      type: TrinaColumnType.number(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
         return Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
       },

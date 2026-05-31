@@ -1,9 +1,5 @@
 import 'dart:async';
 
-import 'package:another_xlider/another_xlider.dart';
-import 'package:another_xlider/models/handler.dart';
-import 'package:another_xlider/models/slider_step.dart';
-import 'package:another_xlider/models/tooltip/tooltip.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -534,60 +530,43 @@ class _CustomRangeSliderState extends ConsumerState<CustomRangeSlider> {
   @override
   Widget build(BuildContext context) {
     assert(widget.min != widget.max);
-    final theme = Theme.of(context);
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        if (start > end || widget.min > widget.max || start < widget.min || widget.max < end) {
-          logger.e("Invalid slider range. start=$start, end=$end, min=${widget.min}, max=${widget.max}");
-          logger.i("${context.getAncestorElements(7)}");
-        }
-        return FlutterSlider(
-          rangeSlider: true,
-          jump: true,
+    if (start > end || widget.min > widget.max || start < widget.min || widget.max < end) {
+      logger.e("Invalid slider range. start=$start, end=$end, min=${widget.min}, max=${widget.max}");
+    }
+    final divisions = ((widget.max - widget.min) / widget.step).round();
+    final clampedStart = start.clamp(widget.min, widget.max);
+    final clampedEnd = end.clamp(widget.min, widget.max);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Tooltip(
+              message: "$tr_common.range.tooltip.min".tr(),
+              child: Chip(label: popup(clampedStart)),
+            ),
+            Tooltip(
+              message: "$tr_common.range.tooltip.max".tr(),
+              child: Chip(label: popup(clampedEnd)),
+            ),
+          ],
+        ),
+        RangeSlider(
           min: widget.min,
           max: widget.max,
-          step: FlutterSliderStep(step: widget.step),
-          handler: FlutterSliderHandler(
-            child: Tooltip(
-              message: "$tr_common.range.tooltip.min".tr(),
-              child: Icon(
-                Icons.arrow_right,
-                color: theme.colorScheme.onPrimary,
-              ),
-            ),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary,
-              shape: BoxShape.circle,
-            ),
-          ),
-          rightHandler: FlutterSliderHandler(
-            child: Tooltip(
-              message: "$tr_common.range.tooltip.max".tr(),
-              child: Icon(
-                Icons.arrow_left,
-                color: theme.colorScheme.onPrimary,
-              ),
-            ),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary,
-              shape: BoxShape.circle,
-            ),
-          ),
-          tooltip: FlutterSliderTooltip(
-            alwaysShowTooltip: true,
-            disableAnimation: true,
-            custom: (value) => Chip(label: popup(value)),
-          ),
-          values: [start, end],
-          onDragging: (handlerIndex, start, end) {
-            widget.onChanged(start, end);
+          divisions: divisions > 0 ? divisions : null,
+          labels: RangeLabels(widget.formatter(clampedStart), widget.formatter(clampedEnd)),
+          values: RangeValues(clampedStart, clampedEnd),
+          onChanged: (values) {
+            widget.onChanged(values.start, values.end);
             setState(() {
-              this.start = start;
-              this.end = end;
+              start = values.start;
+              end = values.end;
             });
           },
-        );
-      },
+        ),
+      ],
     );
   }
 }

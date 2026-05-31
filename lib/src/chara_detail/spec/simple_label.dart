@@ -2,7 +2,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:quiver/iterables.dart';
 import 'package:uuid/uuid.dart';
 
@@ -44,7 +44,7 @@ class SimpleLabelCellData implements CellData {
   String get csv => label;
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'SimpleLabelColumnSpec')
@@ -98,24 +98,24 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
+  TrinaCell plutoCell(RefBase ref, int value) {
     final label = ref.read(labelMapProvider)[labelKey]![value];
-    return PlutoCell(
+    return TrinaCell(
       value: label,
     )..setUserData(SimpleLabelCellData(label));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SimpleLabelCellData>()!;
         return Text(
           data.label,

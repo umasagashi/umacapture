@@ -2,7 +2,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -53,7 +53,7 @@ class RangedIntegerCellData implements CellData {
   String get csv => value.toString();
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'RangedIntegerColumnSpec')
@@ -106,22 +106,22 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
-    return PlutoCell(value: value)..setUserData(RangedIntegerCellData(value));
+  TrinaCell plutoCell(RefBase ref, int value) {
+    return TrinaCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.number(),
-      textAlign: PlutoColumnTextAlign.right,
+      type: TrinaColumnType.number(),
+      textAlign: TrinaColumnTextAlign.right,
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
         return Text(data.value.toNumberString(), textAlign: TextAlign.center);
       },

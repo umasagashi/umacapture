@@ -2,7 +2,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -48,7 +48,7 @@ class MemoCellData implements CellData {
   final String? value;
 
   @override
-  final Predicate<PlutoGridOnSelectedEvent>? onSelected;
+  final Predicate<TrinaGridOnSelectedEvent>? onSelected;
 
   @override
   String get csv => value ?? "";
@@ -107,12 +107,12 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, String? value) {
-    return PlutoCell(
+  TrinaCell plutoCell(RefBase ref, String? value) {
+    return TrinaCell(
       value: value ?? "_" * 20,
     )..setUserData(MemoCellData(
         value,
-        (PlutoGridOnSelectedEvent event) {
+        (TrinaGridOnSelectedEvent event) {
           final record = event.row!.getUserData<CharaDetailRecord>()!;
           final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
           _RecordMemoDialog.show(
@@ -127,15 +127,15 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<MemoCellData>()!;
         if (data.value == null) {
           return Opacity(opacity: 0.4, child: Text("$tr_memo.cell.description".tr()));
