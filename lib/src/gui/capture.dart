@@ -16,23 +16,20 @@ import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_capture = "pages.capture";
 
-final autoStartCaptureStateProvider = BooleanNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final autoStartCaptureStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.autoStartCapture.name),
+    entryKey: SettingsEntryKey.autoStartCapture.name,
     defaultValue: false,
   );
 });
 
-final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider<CharaDetailRecordImageMode>(() {
   return ExclusiveItemsNotifier<CharaDetailRecordImageMode>(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.autoCopyClipboard.name),
+    entryKey: SettingsEntryKey.autoCopyClipboard.name,
     values: CharaDetailRecordImageMode.values,
     defaultValue: CharaDetailRecordImageMode.none,
   );

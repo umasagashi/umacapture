@@ -1,7 +1,5 @@
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once SoundSettingNotifier migrates to Notifier (Phase 2).
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:recase/recase.dart';
 
 import '/src/preference/settings_state.dart';
@@ -13,43 +11,43 @@ enum SoundType {
   error,
 }
 
-final soundSettingProvider = StateNotifierProvider.family<SoundSettingNotifier, SoundSetting, SoundType>((ref, type) {
-  final box = ref.watch(storageBoxProvider);
-  return SoundSettingNotifier(
-    path: StorageEntry(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Path").camelCase),
-    volume: StorageEntry(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Volume").camelCase),
-    defaultValue: SoundSetting.defaultValueOf(type),
-  );
-});
+final soundSettingProvider =
+    NotifierProvider.family<SoundSettingNotifier, SoundSetting, SoundType>(SoundSettingNotifier.new);
 
 final soundEffectProvider = FutureProvider.family<SoundEffect, SoundType>((ref, type) async {
   final setting = ref.watch(soundSettingProvider(type));
   return await SoundEffect.load(setting);
 });
 
-class SoundSettingNotifier extends StateNotifier<SoundSetting> {
-  final StorageEntry _pathEntry;
-  final StorageEntry _volumeEntry;
+class SoundSettingNotifier extends Notifier<SoundSetting> {
+  SoundSettingNotifier(this.type);
 
-  SoundSettingNotifier({
-    required StorageEntry path,
-    required StorageEntry volume,
-    required SoundSetting defaultValue,
-  })  : _pathEntry = path,
-        _volumeEntry = volume,
-        super(SoundSetting(
-          path.pull() ?? defaultValue.path,
-          volume: volume.pull() ?? defaultValue.volume,
-        ));
+  final SoundType type;
+
+  StorageEntry<String>? _pathEntry;
+  StorageEntry<double>? _volumeEntry;
+
+  @override
+  SoundSetting build() {
+    final box = ref.watch(storageBoxProvider);
+    _pathEntry = StorageEntry<String>(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Path").camelCase);
+    _volumeEntry =
+        StorageEntry<double>(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Volume").camelCase);
+    final defaultValue = SoundSetting.defaultValueOf(type);
+    return SoundSetting(
+      _pathEntry!.pull() ?? defaultValue.path,
+      volume: _volumeEntry!.pull() ?? defaultValue.volume,
+    );
+  }
 
   void setPath(String path) {
     state = SoundSetting(path, volume: state.volume);
-    _pathEntry.push(path);
+    _pathEntry!.push(path);
   }
 
   void setVolume(double volume) {
     state = SoundSetting(state.path, volume: volume);
-    _volumeEntry.push(volume);
+    _volumeEntry!.push(volume);
   }
 }
 

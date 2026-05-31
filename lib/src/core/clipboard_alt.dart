@@ -9,7 +9,6 @@ import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
 
 part 'clipboard_alt.mapper.dart';
 
@@ -19,10 +18,9 @@ enum ClipboardPasteImageMode {
   file,
 }
 
-final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider<ClipboardPasteImageMode>(() {
   return ExclusiveItemsNotifier<ClipboardPasteImageMode>(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.clipboardPasteImageMode.name),
+    entryKey: SettingsEntryKey.clipboardPasteImageMode.name,
     values: ClipboardPasteImageMode.values,
     defaultValue: ClipboardPasteImageMode.memory,
   );

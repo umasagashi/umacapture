@@ -39,10 +39,9 @@ class CharaCardIconMap extends Notifier<Map<int, FilePath>> {
 
 final charaCardIconMapProvider = NotifierProvider<CharaCardIconMap, Map<int, FilePath>>(CharaCardIconMap.new);
 
-class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
-  final Ref ref;
-
-  CharaDetailRecordRegenerationController(this.ref) : super(Progress.none);
+class CharaDetailRecordRegenerationController extends Notifier<Progress> {
+  @override
+  Progress build() => Progress.none;
 
   Future<void> start(List<CharaDetailRecord> records) async {
     final platformController = await ref.read(platformControllerLoader.future);
@@ -72,9 +71,7 @@ class CharaDetailRecordRegenerationController extends StateNotifier<Progress> {
 }
 
 final charaDetailRecordRegenerationControllerProvider =
-    StateNotifierProvider<CharaDetailRecordRegenerationController, Progress>((ref) {
-  return CharaDetailRecordRegenerationController(ref);
-});
+    NotifierProvider<CharaDetailRecordRegenerationController, Progress>(CharaDetailRecordRegenerationController.new);
 
 @MappableEnum()
 enum CharaDetailRecordImageMode {

@@ -4,8 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once the settings StateNotifierProviders migrate to NotifierProvider (Phase 2).
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -30,7 +28,7 @@ class ToggleButtonWidget<T> extends ConsumerWidget {
   final String title;
   final String description;
   final Widget Function(T) icon;
-  final StateNotifierProvider<ExclusiveItemsNotifier<T>, T> provider;
+  final ExclusiveItemsNotifierProvider<T> provider;
 
   const ToggleButtonWidget({
     Key? key,
@@ -65,7 +63,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
   final String title;
   final String description;
   final String Function(T) name;
-  final StateNotifierProvider<ExclusiveItemsNotifier<T>, T> provider;
+  final ExclusiveItemsNotifierProvider<T> provider;
 
   const DropdownButtonWidget({
     Key? key,
@@ -114,7 +112,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
 class SwitchWidget extends ConsumerWidget {
   final Widget title;
   final Widget description;
-  final StateNotifierProvider<BooleanNotifier, bool> provider;
+  final BooleanNotifierProvider provider;
 
   const SwitchWidget({
     Key? key,

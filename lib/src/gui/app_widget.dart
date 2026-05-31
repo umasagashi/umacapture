@@ -6,8 +6,6 @@ import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once the settings StateNotifierProviders migrate to NotifierProvider (Phase 2).
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -21,7 +19,6 @@ import '/src/gui/common.dart';
 import '/src/gui/window_manager_alt.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
 import '/src/preference/window_state.dart';
 
 final kIsDesktop = {
@@ -30,27 +27,24 @@ final kIsDesktop = {
   TargetPlatform.macOS,
 }.contains(defaultTargetPlatform);
 
-final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
-  final box = ref.watch(storageBoxProvider);
+final themeSettingProvider = ExclusiveItemsNotifierProvider<ThemeMode>(() {
   return ExclusiveItemsNotifier<ThemeMode>(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.themeMode.name),
+    entryKey: SettingsEntryKey.themeMode.name,
     values: [ThemeMode.light, ThemeMode.dark, ThemeMode.system],
     defaultValue: ThemeMode.system,
   );
 });
 
-final fontBoldSettingProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
-  final box = ref.watch(storageBoxProvider);
+final fontBoldSettingProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.fontBold.name),
+    entryKey: SettingsEntryKey.fontBold.name,
     defaultValue: true,
   );
 });
 
-final sidebarExtendedStateProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
-  final box = ref.watch(storageBoxProvider);
+final sidebarExtendedStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.sidebarExtended.name),
+    entryKey: SettingsEntryKey.sidebarExtended.name,
     defaultValue: true,
   );
 });

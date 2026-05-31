@@ -191,10 +191,9 @@ final trainerIdProvider = Provider<String>((ref) {
   return id;
 });
 
-final forceResizeModeStateProvider = BooleanNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final forceResizeModeStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.forceResizeMode.name),
+    entryKey: SettingsEntryKey.forceResizeMode.name,
     defaultValue: false,
   );
 });

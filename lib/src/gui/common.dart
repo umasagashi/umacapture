@@ -4,8 +4,6 @@ import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once DialogController migrates to Notifier (Phase 2).
-import 'package:flutter_riverpod/legacy.dart';
 
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
@@ -456,8 +454,9 @@ class FeedbackLayer extends StatelessWidget {
   }
 }
 
-class DialogController extends StateNotifier<WidgetBuilder?> {
-  DialogController([super.state]);
+class DialogController extends Notifier<WidgetBuilder?> {
+  @override
+  WidgetBuilder? build() => null;
 
   void show(WidgetBuilder builder) {
     state = builder;
@@ -468,9 +467,7 @@ class DialogController extends StateNotifier<WidgetBuilder?> {
   }
 }
 
-final dialogBuilderProvider = StateNotifierProvider<DialogController, WidgetBuilder?>((ref) {
-  return DialogController();
-});
+final dialogBuilderProvider = NotifierProvider<DialogController, WidgetBuilder?>(DialogController.new);
 
 class DialogLayer extends ConsumerStatefulWidget {
   final Widget child;

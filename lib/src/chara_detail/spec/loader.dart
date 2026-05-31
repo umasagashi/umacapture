@@ -202,10 +202,18 @@ class RatingData with RatingDataMappable {
   }
 }
 
-class CharaDetailRecordRatingController extends StateNotifier<RatingData> {
-  final FilePath path;
+class CharaDetailRecordRatingController extends Notifier<RatingData> {
+  CharaDetailRecordRatingController(this.key);
 
-  CharaDetailRecordRatingController(this.path, super.state);
+  final String key;
+
+  late FilePath path;
+
+  @override
+  RatingData build() {
+    path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
+    return path.existsSync() ? RatingDataMapper.fromJson(path.readAsStringSync()) : RatingData.empty;
+  }
 
   void updateWithoutNotify(String recordId, double rating) {
     state.data[recordId] = rating;
@@ -282,14 +290,9 @@ final charaDetailRecordRatingStorageDataProvider =
 );
 
 final charaDetailRecordRatingProvider =
-    StateNotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>((ref, key) {
-  final path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
-  if (!path.existsSync()) {
-    return CharaDetailRecordRatingController(path, RatingData.empty);
-  } else {
-    return CharaDetailRecordRatingController(path, RatingDataMapper.fromJson(path.readAsStringSync()));
-  }
-});
+    NotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>(
+  CharaDetailRecordRatingController.new,
+);
 
 class _MemoDataWriter {
   final FilePath path;
@@ -335,10 +338,18 @@ class MemoData with MemoDataMappable {
   }
 }
 
-class CharaDetailRecordMemoController extends StateNotifier<MemoData> {
-  final FilePath path;
+class CharaDetailRecordMemoController extends Notifier<MemoData> {
+  CharaDetailRecordMemoController(this.key);
 
-  CharaDetailRecordMemoController(this.path, super.state);
+  final String key;
+
+  late FilePath path;
+
+  @override
+  MemoData build() {
+    path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
+    return path.existsSync() ? MemoDataMapper.fromJson(path.readAsStringSync()) : MemoData.empty;
+  }
 
   String get title => state.title;
 
@@ -427,14 +438,9 @@ final charaDetailRecordMemoStorageDataProvider =
 );
 
 final charaDetailRecordMemoProvider =
-    StateNotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>((ref, key) {
-  final path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
-  if (!path.existsSync()) {
-    return CharaDetailRecordMemoController(path, MemoData.empty);
-  } else {
-    return CharaDetailRecordMemoController(path, MemoDataMapper.fromJson(path.readAsStringSync()));
-  }
-});
+    NotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>(
+  CharaDetailRecordMemoController.new,
+);
 
 final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
   final entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");

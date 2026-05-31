@@ -1,26 +1,34 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once Exclusive/BooleanNotifier migrate to Notifier (Phase 2).
-import 'package:flutter_riverpod/legacy.dart';
 
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
-typedef ExclusiveItemsNotifierProvider<T> = StateNotifierProvider<ExclusiveItemsNotifier<T>, T>;
+typedef ExclusiveItemsNotifierProvider<T> = NotifierProvider<ExclusiveItemsNotifier<T>, T>;
 
-class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
-  final StorageEntry? _entry;
-
+class ExclusiveItemsNotifier<T> extends Notifier<T> {
   // values and indices should be immutable since notifier does not work for them.
   final List<T> values;
   final List<int> indices;
+  final T _defaultValue;
+  final String? _entryKey;
+
+  StorageEntry<T>? _entry;
 
   ExclusiveItemsNotifier({
     required Iterable<T> values,
     required T defaultValue,
-    StorageEntry? entry,
-  })  : _entry = entry,
-        values = List.unmodifiable(values),
+    String? entryKey,
+  })  : values = List.unmodifiable(values),
         indices = List.unmodifiable(List.generate(values.length, (i) => i)),
-        super(entry?.pull() ?? defaultValue);
+        _defaultValue = defaultValue,
+        _entryKey = entryKey;
+
+  @override
+  T build() {
+    final key = _entryKey;
+    _entry = key == null ? null : StorageEntry<T>(box: ref.watch(storageBoxProvider), key: key);
+    return _entry?.pull() ?? _defaultValue;
+  }
 
   int get length => values.length;
 
@@ -46,16 +54,26 @@ class ExclusiveItemsNotifier<T> extends StateNotifier<T> {
   }
 }
 
-typedef BooleanNotifierProvider = StateNotifierProvider<BooleanNotifier, bool>;
+typedef BooleanNotifierProvider = NotifierProvider<BooleanNotifier, bool>;
 
-class BooleanNotifier extends StateNotifier<bool> {
-  final StorageEntry? _entry;
+class BooleanNotifier extends Notifier<bool> {
+  final bool _defaultValue;
+  final String? _entryKey;
+
+  StorageEntry<bool>? _entry;
 
   BooleanNotifier({
     required bool defaultValue,
-    StorageEntry? entry,
-  })  : _entry = entry,
-        super(entry?.pull() ?? defaultValue);
+    String? entryKey,
+  })  : _defaultValue = defaultValue,
+        _entryKey = entryKey;
+
+  @override
+  bool build() {
+    final key = _entryKey;
+    _entry = key == null ? null : StorageEntry<bool>(box: ref.watch(storageBoxProvider), key: key);
+    return _entry?.pull() ?? _defaultValue;
+  }
 
   void set(bool value) {
     state = value;
