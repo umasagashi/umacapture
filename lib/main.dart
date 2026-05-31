@@ -63,6 +63,12 @@ void setupWindowManager() async {
 void run() {
   runApp(
     ProviderScope(
+      // riverpod 3 enables automatic retry (up to 10x with backoff) for any
+      // provider that fails with an Exception. Our network loaders rethrow after
+      // captureException(), so retrying would emit duplicate Sentry reports and
+      // delay the error UI. Disable it globally to keep the riverpod 2 behavior;
+      // re-enable selectively if a loader genuinely benefits from retry.
+      retry: (retryCount, error) => null,
       // observers: [
       //   if (kDebugMode) ProviderLogger(),
       // ],
