@@ -5,10 +5,7 @@ import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-// TODO(riverpod3): ColumnSpecSelection still extends the legacy StateNotifier;
-// this shim (and the flutter_riverpod.dart import) return in Phase 3 when it
-// becomes an AsyncNotifier.
-import 'package:flutter_riverpod/legacy.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -197,16 +194,19 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   Widget selector(ChangeNotifier onDecided);
 }
 
-class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
-  final StorageEntry<String> entry;
+class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
+  late StorageEntry<String> entry;
 
-  ColumnSpecSelection(this.entry) : super([]) {
+  @override
+  List<ColumnSpec> build() {
+    entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
     final raw = entry.pull();
     final data = raw == null ? <dynamic>[] : (jsonDecode(raw) as List<dynamic>);
+    final specs = <ColumnSpec>[];
     bool failed = false;
     for (final d in data) {
       try {
-        state.addIfNotNull(ColumnSpecMapper.fromMap(d as Map<String, dynamic>));
+        specs.addIfNotNull(ColumnSpecMapper.fromMap(d as Map<String, dynamic>));
       } catch (e) {
         // If the specification of the column spec is changed, it may not be able to load.
         logger.w("Failed to deserialize column spec: error=$e, data=$d");
@@ -216,78 +216,77 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
     if (failed) {
       Toaster.show(ToastData.warning(description: "pages.chara_detail.error.loading_spec".tr()));
     }
-    state = [...state];
+    return specs;
   }
 
+  List<ColumnSpec> get _specs => state.requireValue;
+
   ColumnSpec? getById(String id) {
-    return state.firstWhereOrNull((e) => e.id == id);
+    return _specs.firstWhereOrNull((e) => e.id == id);
   }
 
   bool contains(String id) {
-    return state.firstWhereOrNull((e) => e.id == id) != null;
-  }
-
-  void update(ColumnSpec spec) {
-    assert(contains(spec.id));
-    rebuild();
+    return _specs.firstWhereOrNull((e) => e.id == id) != null;
   }
 
   void add(ColumnSpec spec) {
     assert(!contains(spec.id));
-    state.add(spec);
+    _specs.add(spec);
     rebuild();
   }
 
   void addOrUpdate(ColumnSpec spec) {
     if (!contains(spec.id)) {
-      state.add(spec);
+      _specs.add(spec);
     }
     rebuild();
   }
 
   void remove(String id) {
     assert(contains(id));
-    state.removeWhere((e) => e.id == id);
+    _specs.removeWhere((e) => e.id == id);
     rebuild();
   }
 
   void removeIfExists(String id) {
     if (contains(id)) {
-      state.removeWhere((e) => e.id == id);
+      _specs.removeWhere((e) => e.id == id);
       rebuild();
     }
   }
 
   void moveTo(ColumnSpec obj, ColumnSpec target) {
-    assert(state.contains(obj));
-    assert(state.contains(target));
+    final specs = _specs;
+    assert(specs.contains(obj));
+    assert(specs.contains(target));
     if (obj == target) {
       return;
     }
-    final moveRight = state.indexOf(obj) < state.indexOf(target);
-    state.remove(obj);
-    state.insert(state.indexOf(target) + (moveRight ? 1 : 0), obj);
+    final moveRight = specs.indexOf(obj) < specs.indexOf(target);
+    specs.remove(obj);
+    specs.insert(specs.indexOf(target) + (moveRight ? 1 : 0), obj);
     rebuild();
   }
 
   void replaceById(ColumnSpec spec) {
-    final index = state.indexWhere((e) => e.id == spec.id);
+    final specs = _specs;
+    final index = specs.indexWhere((e) => e.id == spec.id);
     if (index != -1) {
-      state.removeAt(index);
-      state.insert(index, spec);
+      specs.removeAt(index);
+      specs.insert(index, spec);
     } else {
-      state.add(spec);
+      specs.add(spec);
     }
     rebuild();
   }
 
   void rebuild() {
-    state = [...state];
-    entry.push(MapperContainer.globals.toJson<List<ColumnSpec>>(state));
+    state = AsyncData([..._specs]);
+    entry.push(MapperContainer.globals.toJson<List<ColumnSpec>>(state.requireValue));
   }
 
   void clear() {
-    state = [];
+    state = AsyncData(<ColumnSpec>[]);
     rebuild();
   }
 }

@@ -5,9 +5,6 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once CharaDetailRecord{Storage,RegenerationController}
-// are migrated to (Async)Notifier in Phase 2/3 of the riverpod 3 migration.
-import 'package:flutter_riverpod/legacy.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/clipboard_alt.dart';
@@ -53,11 +50,11 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   }
 
   Future<void> updated(String id) async {
-    await ref.read(charaDetailRecordStorageProvider.notifier).reload(id);
+    await ref.read(charaDetailRecordStorageLoaderProvider.notifier).reload(id);
     state = state.increment();
     if (state.isCompleted) {
       Future.delayed(const Duration(milliseconds: 200), () {
-        ref.read(charaDetailRecordStorageProvider.notifier).forceRebuild();
+        ref.read(charaDetailRecordStorageLoaderProvider.notifier).forceRebuild();
         Toaster.show(ToastData(
             type: ToastType.success,
             description: "pages.capture.regenerate.success".tr(namedArgs: {
@@ -96,24 +93,38 @@ extension CharaDetailRecordImageModeExtension on CharaDetailRecordImageMode {
   }
 }
 
-class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
-  final Ref ref;
-  final DirectoryPath rootDirectory;
+class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
+  late DirectoryPath rootDirectory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
 
-  CharaDetailRecordStorage({
-    required this.ref,
-    required this.rootDirectory,
-    required List<CharaDetailRecord> records,
-  }) : super(records) {
-    for (var e in records) {
+  @override
+  Future<List<CharaDetailRecord>> build() async {
+    final pathInfo = await ref.watch(pathInfoLoader.future);
+    rootDirectory = pathInfo.charaDetailActiveDir;
+    final List<CharaDetailRecord> records = [];
+    if (rootDirectory.existsSync()) {
+      records.addAll(await compute(_loadAllCharaDetailRecord, rootDirectory));
+    }
+    // Safe to write other providers here: we are past the `await` above, so the
+    // synchronous build frame (which the modify-during-build guard checks) is done.
+    charaCardMap.clear();
+    for (final e in records) {
       _updateRecordInfo(e);
     }
+    // riverpod 3 removed StreamProvider.stream; listen to the AsyncValue and react
+    // to each newly captured record id.
+    ref.listen(charaDetailRecordCapturedEventProvider, (_, next) {
+      next.whenData((e) => addFromFile(e));
+    });
+    _checkRecordVersion(records);
+    return records;
   }
 
-  int get length => state.length;
+  List<CharaDetailRecord> get _records => state.requireValue;
 
-  bool get isEmpty => state.isEmpty;
+  int get length => _records.length;
+
+  bool get isEmpty => _records.isEmpty;
 
   void _updateRecordInfo(CharaDetailRecord record) {
     if (record.evaluationValue > (charaCardMap[record.trainee.card]?.evaluationValue ?? -1)) {
@@ -127,7 +138,8 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   void add(CharaDetailRecord record) {
-    final duplicated = state.firstWhereOrNull((e) => record.isSameChara(e));
+    final records = _records;
+    final duplicated = records.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
       _duplicatedCharaEventController.sink.add(record.id);
@@ -136,7 +148,7 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     }
     _updateRecordInfo(record);
 
-    state = [...state, record];
+    state = AsyncData([...records, record]);
 
     final autoCopy = ref.read(autoCopyClipboardStateProvider);
     if (autoCopy != CharaDetailRecordImageMode.none) {
@@ -155,13 +167,17 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
   }
 
   CharaDetailRecord? getBy({required String id}) {
-    return state.firstWhereOrNull((e) => e.id == id);
+    return _records.firstWhereOrNull((e) => e.id == id);
   }
 
   void replaceBy(CharaDetailRecord record, {required String id}) {
-    final index = state.indexWhere((e) => e.id == id);
+    // Mutates the current list in place without reassigning state, matching the
+    // legacy StateNotifier behavior: reload() replaces records silently and the
+    // grid only rebuilds once forceRebuild() runs at the end of regeneration.
+    final records = _records;
+    final index = records.indexWhere((e) => e.id == id);
     assert(index != -1);
-    state[index] = record;
+    records[index] = record;
   }
 
   DirectoryPath recordPathOf(CharaDetailRecord record) {
@@ -183,14 +199,20 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     ClipboardAlt.pasteImage(ref.base, imagePath);
   }
 
-  List<CharaDetailRecord> get records => state;
+  List<CharaDetailRecord> get records => _records;
 
-  Future<void> checkRecordVersion({bool includeCurrentVersion = false}) async {
+  Future<void> checkRecordVersion({bool includeCurrentVersion = false}) {
+    return _checkRecordVersion(_records, includeCurrentVersion: includeCurrentVersion);
+  }
+
+  // Takes the loaded records explicitly because build() calls this before the
+  // notifier's state has been published.
+  Future<void> _checkRecordVersion(List<CharaDetailRecord> records, {bool includeCurrentVersion = false}) async {
     final moduleVersion = await ref.read(moduleVersionLoader.future);
     if (moduleVersion == null) {
       return Future.value();
     }
-    final obsoletedRecords = state.where((r) {
+    final obsoletedRecords = records.where((r) {
       return r.isObsoleted(moduleVersion, includeCurrentVersion) && r.isSupported(moduleVersion);
     }).toList();
     if (obsoletedRecords.isEmpty) {
@@ -209,16 +231,16 @@ class CharaDetailRecordStorage extends StateNotifier<List<CharaDetailRecord>> {
     assert(record != null);
     final directory = recordPathOf(record!);
     directory.deleteSyncSafeWithCheck();
-    state.remove(record);
+    state = AsyncData(_records.where((e) => e != record).toList());
     forceRebuild();
   }
 
   void forceRebuild() {
     charaCardMap.clear();
-    for (var e in state) {
+    for (final e in _records) {
       _updateRecordInfo(e);
     }
-    state = [...state];
+    state = AsyncData([..._records]);
   }
 }
 
@@ -236,23 +258,12 @@ List<CharaDetailRecord> _loadAllCharaDetailRecord(DirectoryPath directory) {
       .toList();
 }
 
-final charaDetailRecordStorageLoader = FutureProvider<CharaDetailRecordStorage>((ref) async {
-  final pathInfo = await ref.watch(pathInfoLoader.future);
-  final List<CharaDetailRecord> records = [];
-  if (pathInfo.charaDetailActiveDir.existsSync()) {
-    records.addAll(await compute(_loadAllCharaDetailRecord, pathInfo.charaDetailActiveDir));
-  }
-  final storage = CharaDetailRecordStorage(ref: ref, rootDirectory: pathInfo.charaDetailActiveDir, records: records);
-  // riverpod 3 removed StreamProvider.stream; listen to the AsyncValue and react
-  // to each newly captured record id.
-  ref.listen(charaDetailRecordCapturedEventProvider, (_, next) {
-    next.whenData((e) => storage.addFromFile(e));
-  });
-  storage.checkRecordVersion();
-  return storage;
-});
+final charaDetailRecordStorageLoaderProvider =
+    AsyncNotifierProvider<CharaDetailRecordStorage, List<CharaDetailRecord>>(CharaDetailRecordStorage.new);
 
-final charaDetailRecordStorageProvider =
-    StateNotifierProvider<CharaDetailRecordStorage, List<CharaDetailRecord>>((ref) {
-  return ref.watch(charaDetailRecordStorageLoader).value!;
+// Thin synchronous view over the loaded records, so the many `ref.watch(...)`
+// call sites keep receiving a plain List. Mutating callers use
+// charaDetailRecordStorageLoaderProvider.notifier instead.
+final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref) {
+  return ref.watch(charaDetailRecordStorageLoaderProvider).requireValue;
 });

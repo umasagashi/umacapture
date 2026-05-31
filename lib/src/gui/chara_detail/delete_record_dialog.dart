@@ -27,7 +27,7 @@ class DeleteRecordDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final record = storage.getBy(id: recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
@@ -78,7 +78,7 @@ class DeleteRecordDialog extends ConsumerWidget {
                 label: Text("$tr_delete_record.dialog.ok_button.label".tr()),
                 onPressed: () {},
                 onLongPress: () {
-                  ref.read(charaDetailRecordStorageProvider.notifier).delete(recordId);
+                  ref.read(charaDetailRecordStorageLoaderProvider.notifier).delete(recordId);
                   CardDialog.dismiss(ref.base);
                 },
               ),

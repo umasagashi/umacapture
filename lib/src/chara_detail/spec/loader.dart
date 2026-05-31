@@ -5,9 +5,6 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// TODO(riverpod3): remove once CharaDetailRecord{Rating,Memo}Controller and
-// ColumnSpecSelection are migrated to (Async)Notifier in Phase 2/3.
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -43,7 +40,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
     ]).then((_) {
       return Future.wait([
-        ref.watch(_currentColumnSpecsLoader.future),
+        ref.watch(currentColumnSpecsLoaderProvider.future),
       ]);
     });
   });
@@ -442,13 +439,13 @@ final charaDetailRecordMemoProvider =
   CharaDetailRecordMemoController.new,
 );
 
-final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
-  final entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
-  return ColumnSpecSelection(entry);
-});
+final currentColumnSpecsLoaderProvider =
+    AsyncNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>(ColumnSpecSelection.new);
 
-final currentColumnSpecsProvider = StateNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>((ref) {
-  return ref.watch(_currentColumnSpecsLoader).value!;
+// Thin synchronous view over the loaded column specs. Mutating callers use
+// currentColumnSpecsLoaderProvider.notifier instead.
+final currentColumnSpecsProvider = Provider<List<ColumnSpec>>((ref) {
+  return ref.watch(currentColumnSpecsLoaderProvider).requireValue;
 });
 
 class Grid {
@@ -500,7 +497,7 @@ final currentGridProvider = Provider<Grid>((ref) {
     // Cannot change state while building.
     Future.delayed(
       const Duration(milliseconds: 1),
-      () => ref.read(currentColumnSpecsProvider.notifier).clear(), // TODO: Remove only failed specs.
+      () => ref.read(currentColumnSpecsLoaderProvider.notifier).clear(), // TODO: Remove only failed specs.
     );
     Toaster.show(ToastData.error(description: "pages.chara_detail.error.building_grid".tr()));
     return Grid.empty;

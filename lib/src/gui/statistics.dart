@@ -26,7 +26,7 @@ final statisticsInitialLoader = FutureProvider((ref) async {
   ]).then((_) {
     return Future.wait([
       ref.watch(labelMapLoader.future),
-      ref.watch(charaDetailRecordStorageLoader.future),
+      ref.watch(charaDetailRecordStorageLoaderProvider.future),
     ]);
   });
 });
@@ -127,7 +127,7 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
         if (records.isEmpty) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
-        final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+        final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
         final best = records.reduce((a, b) => a.evaluationValue > b.evaluationValue ? a : b);
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,

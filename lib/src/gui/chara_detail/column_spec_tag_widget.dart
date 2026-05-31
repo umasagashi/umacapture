@@ -60,7 +60,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               textAlign: TextAlign.center,
             ),
             child: GestureDetector(
-              onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec.id),
+              onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
                 label: spec.label(),
                 tooltip: spec.tooltip(ref.base),
@@ -81,7 +81,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         setState(() => hoveredSpec = null);
       },
       onAccept: (dropped) {
-        ref.read(currentColumnSpecsProvider.notifier).moveTo(dropped, spec);
+        ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(dropped, spec);
         setState(() => hoveredSpec = null);
       },
     );

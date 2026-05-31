@@ -30,7 +30,7 @@ final charaDetailInitialDataLoader = FutureProvider((ref) async {
   ]).then((_) {
     return Future.wait([
       ref.watch(moduleInfoLoaders.future),
-      ref.watch(charaDetailRecordStorageLoader.future),
+      ref.watch(charaDetailRecordStorageLoaderProvider.future),
     ]);
   });
 });
@@ -49,7 +49,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final rect = offset & const Size(1, 1);
     const height = 40.0;
     final style = theme.textTheme.labelMedium;
@@ -174,7 +174,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   try {
                     final data = event.cell?.getUserData<CellData>();
                     if (!(data?.onSelected?.call(event) ?? false)) {
-                      final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+                      final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
                       final records = stateManager.getSortedRecords().map((e) => storage.recordPathOf(e)).toList();
                       CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
                     }

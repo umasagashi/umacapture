@@ -21,7 +21,7 @@ class SpecClone extends Notifier<ColumnSpec> {
 
   @override
   ColumnSpec build() {
-    final source = ref.read(currentColumnSpecsProvider.notifier).getById(specId)!;
+    final source = ref.read(currentColumnSpecsLoaderProvider.notifier).getById(specId)!;
     return ColumnSpecMapper.fromMap(source.toMap());
   }
 
@@ -85,7 +85,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               icon: const Icon(Icons.delete_forever),
               label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
               onPressed: () {
-                ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
+                ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
                 CardDialog.dismiss(ref.base);
               },
             ),
@@ -98,7 +98,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               onPressed: () {
                 onDecided.notifyListeners();
                 final spec = ref.read(specCloneProvider(specId));
-                ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
+                ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
                 CardDialog.dismiss(ref.base);
               },
             ),

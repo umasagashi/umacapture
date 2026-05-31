@@ -402,7 +402,7 @@ class AboutGroup extends ConsumerWidget {
               child: Icon(Icons.refresh),
             ),
             onTap: () {
-              final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+              final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
               storage.checkRecordVersion(includeCurrentVersion: true);
             },
           ),

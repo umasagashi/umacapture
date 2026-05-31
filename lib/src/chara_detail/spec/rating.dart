@@ -215,7 +215,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final record = storage.getBy(id: widget.recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
@@ -511,7 +511,7 @@ class _StorageController extends ConsumerWidget {
               storageFile.deleteSyncWithCheck();
             }
 
-            ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
+            ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_rating.storage.delete.button".tr()),

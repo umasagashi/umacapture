@@ -213,7 +213,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recordStorage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final recordStorage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final record = recordStorage.getBy(id: widget.recordId)!;
     final iconPath = recordStorage.traineeIconPathOf(record);
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
@@ -423,7 +423,7 @@ class _StorageController extends ConsumerWidget {
               storageFile.deleteSyncWithCheck();
             }
 
-            ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
+            ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_memo.storage.delete.button".tr()),

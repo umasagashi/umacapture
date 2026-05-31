@@ -271,7 +271,7 @@ class PlatformController {
     _platformChannel.setConfig(jsonEncode(config));
 
     // This is not required, but we will need storage later anyway, so start it up.
-    ref.read(charaDetailRecordStorageLoader);
+    ref.read(charaDetailRecordStorageLoaderProvider);
   }
 
   void _handleMessage(String message) {
