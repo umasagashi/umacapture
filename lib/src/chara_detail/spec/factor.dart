@@ -1,10 +1,10 @@
 import 'package:collection/collection.dart';
 import 'package:csv/csv.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
@@ -18,30 +18,32 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'factor.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
-@jsonSerializable
+@MappableEnum()
 enum FactorSetLogicMode {
   anyOf,
   allOf,
   mixed,
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorSearchSubjectMode {
   trainee,
   family,
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorSearchElementMode {
   starOnly,
   starAndCount,
 }
 
-@jsonSerializable
-class FactorSearchElement {
+@MappableClass()
+class FactorSearchElement with FactorSearchElementMappable {
   final FactorSearchElementMode mode;
   final int star;
   final int count;
@@ -65,15 +67,15 @@ class FactorSearchElement {
   }
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorNotationMode {
   sumOnly,
   traineeAndParents,
   each,
 }
 
-@jsonSerializable
-class FactorNotation {
+@MappableClass()
+class FactorNotation with FactorNotationMappable {
   final FactorNotationMode mode;
   final int max;
 
@@ -145,8 +147,8 @@ class QueriedFactor {
   }
 }
 
-@jsonSerializable
-class AggregateFactorSetPredicate {
+@MappableClass()
+class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   final Set<int> query;
   final FactorSetLogicMode logic;
   final FactorSearchSubjectMode subject;
@@ -155,12 +157,10 @@ class AggregateFactorSetPredicate {
   final Set<String> factorTags;
   final Set<String> skillTags;
 
-  @JsonProperty(ignore: true)
   bool get isStarAndCountAllowed {
     return logic == FactorSetLogicMode.mixed || subject == FactorSearchSubjectMode.family;
   }
 
-  @JsonProperty(ignore: true)
   int get starMaxLimit {
     if (element.mode == FactorSearchElementMode.starAndCount) {
       return 3;
@@ -170,7 +170,6 @@ class AggregateFactorSetPredicate {
     }
   }
 
-  @JsonProperty(ignore: true)
   int get countMaxLimit {
     if (element.mode == FactorSearchElementMode.starOnly) {
       return 1;
@@ -279,18 +278,17 @@ class FactorCellData implements CellData {
   FactorCellData(this.label, {String? csv}) : csv = (csv ?? label);
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
+@MappableEnum()
 enum FactorDialogElements {
   selectionTags,
   modeLogic,
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "FactorColumnSpec")
-class FactorColumnSpec extends ColumnSpec<FactorSet> {
+@MappableClass(discriminatorValue: 'FactorColumnSpec')
+class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable {
   final Parser parser;
   final String labelKey = LabelKeys.factor;
   final AggregateFactorSetPredicate predicate;
@@ -365,7 +363,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, FactorSet value) {
+  TrinaCell plutoCell(RefBase ref, FactorSet value) {
     final factors = _extract(value);
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
@@ -374,7 +372,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
         parent1: factors.map((e) => e.parent1).sum,
         parent2: factors.map((e) => e.parent2).sum,
       );
-      return PlutoCell(
+      return TrinaCell(
         value: q.notation(predicate.notation.mode, width: 3),
       )..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
     }
@@ -382,22 +380,22 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
-    return PlutoCell(
+    return TrinaCell(
       value: desc,
-    )..setUserData(FactorCellData(desc, csv: const ListToCsvConverter().convert([notations])));
+    )..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<FactorCellData>()!;
         return Text(data.label);
       },
@@ -453,15 +451,35 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> {
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
 
-final _selectedSkillTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
-  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-  return Set.from(spec.predicate.skillTags);
-});
+class _SelectedSkillTags extends TagSelectionNotifier {
+  _SelectedSkillTags(this.specId);
 
-final _selectedFactorTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
-  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-  return Set.from(spec.predicate.factorTags);
-});
+  final String specId;
+
+  @override
+  Set<String> build() {
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    return Set.from(spec.predicate.skillTags);
+  }
+}
+
+final _selectedSkillTagsProvider =
+    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedSkillTags.new);
+
+class _SelectedFactorTags extends TagSelectionNotifier {
+  _SelectedFactorTags(this.specId);
+
+  final String specId;
+
+  @override
+  Set<String> build() {
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    return Set.from(spec.predicate.factorTags);
+  }
+}
+
+final _selectedFactorTagsProvider =
+    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedFactorTags.new);
 
 class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
@@ -502,7 +520,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
         children: [
           TagSelector(
             candidateTagsProvider: factorTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedFactorTagsProvider(widget.specId)),
+            selectedTagsProvider: _selectedFactorTagsProvider(widget.specId),
           ),
           Row(
             children: [
@@ -516,7 +534,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
           ),
           TagSelector(
             candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedSkillTagsProvider(widget.specId)),
+            selectedTagsProvider: _selectedSkillTagsProvider(widget.specId),
           ),
         ],
       ),
@@ -798,10 +816,10 @@ class FactorColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const FactorColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

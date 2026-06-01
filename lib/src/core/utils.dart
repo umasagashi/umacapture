@@ -1,44 +1,18 @@
 import 'dart:math' as math;
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:collection/collection.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:logger/logger.dart';
-import 'package:quiver/iterables.dart';
-import 'package:quiver/time.dart' as qtm;
-import 'package:tuple/tuple.dart';
+// riverpod 3 moved ProviderListenable out of the default export surface.
+import 'package:flutter_riverpod/misc.dart';
 
-final logger = Logger(
-  level: (kDebugMode) ? Level.verbose : Level.info,
-  filter: ProductionFilter(),
-  printer: PrettyPrinter(
-    printEmojis: false,
-    printTime: true,
-    lineLength: 80,
-    colors: false,
-  ),
-);
+import '/src/core/app_logger.dart';
 
-class ProviderLogger extends ProviderObserver {
-  @override
-  void didUpdateProvider(
-    ProviderBase provider,
-    Object? previousValue,
-    Object? newValue,
-    ProviderContainer container,
-  ) {
-    final String p = previousValue.toString();
-    final String n = newValue.toString();
-    const limit = 300;
-    logger.v(
-      "provider: ${provider.name ?? provider.runtimeType}, "
-      "value: ${p.length < limit ? p : "${p.substring(0, limit)}..."}"
-      " -> ${n.length < limit ? n : "${n.substring(0, limit)}..."}",
-    );
-  }
-}
+export '/src/core/app_logger.dart' show logger, AppLogger, ProviderLogger;
+
+part 'utils.mapper.dart';
 
 class NumberFormatter {
   static final number = NumberFormat("#,###", "en_US");
@@ -168,8 +142,8 @@ extension ListExtension<T> on List<T> {
   }
 }
 
-@jsonSerializable
-class Range<T extends dynamic> {
+@MappableClass()
+class Range<T extends dynamic> with RangeMappable<T> {
   final T min;
   final T max;
 
@@ -259,7 +233,8 @@ extension DateTimeExtension on DateTime {
 
   int get inDays => (this - DateTime(0, 1, 1)).inDays;
 
-  int get daysInMonth => qtm.daysInMonth(year, month);
+  // Day 0 of the next month rolls back to the last day of this month.
+  int get daysInMonth => DateTime(year, month + 1, 0).day;
 
   static DateTime earlier(DateTime a, DateTime b) => b.isAfter(a) ? a : b;
 
@@ -293,15 +268,15 @@ extension StringExtension on String {
   }
 }
 
-Iterable<Tuple2<T1, T2>> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {
-  for (final e in zip([it1, it2])) {
-    yield Tuple2<T1, T2>(e[0] as T1, e[1] as T2);
+Iterable<(T1, T2)> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {
+  for (final e in IterableZip([it1, it2])) {
+    yield (e[0] as T1, e[1] as T2);
   }
 }
 
-Iterable<Tuple3<T1, T2, T3>> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2, Iterable<T3> it3) sync* {
-  for (final e in zip([it1, it2, it3])) {
-    yield Tuple3<T1, T2, T3>(e[0] as T1, e[1] as T2, e[2] as T3);
+Iterable<(T1, T2, T3)> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2, Iterable<T3> it3) sync* {
+  for (final e in IterableZip([it1, it2, it3])) {
+    yield (e[0] as T1, e[1] as T2, e[2] as T3);
   }
 }
 
@@ -345,29 +320,22 @@ extension RefExtension on Ref {
 class RefBase {
   final dynamic _ref;
 
-  RefBase._(ref) : _ref = ref;
+  RefBase._(dynamic ref) : _ref = ref;
 
-  T read<T>(ProviderBase<T> provider) => _ref.read(provider);
+  T read<T>(ProviderListenable<T> provider) => _ref.read(provider);
 
-  T watch<T>(ProviderBase<T> provider) => _ref.watch(provider);
+  T watch<T>(ProviderListenable<T> provider) => _ref.watch(provider);
 }
 
-abstract class StateProviderLike<T> {
-  ProviderListenable<T> get listenable;
-
-  ProviderBase<StateController<T>> get notifier;
-}
-
-class AutoDisposeStateProviderLike<T> extends StateProviderLike<T> {
-  final AutoDisposeStateProvider<T> provider;
-
-  AutoDisposeStateProviderLike(this.provider);
-
-  @override
-  ProviderListenable<T> get listenable => provider;
-
-  @override
-  ProviderBase<StateController<T>> get notifier => provider.notifier;
+// Base class for the tag-selector providers (skill/factor tag filters in the
+// column dialogs). Replaces the legacy StateProvider<Set<String>> + the
+// StateProviderLike indirection. Subclasses only override [build] to seed the
+// initial selection; mutation goes through [toggle], which assigns a NEW set so
+// Riverpod's ==-based filtering fires a rebuild.
+abstract class TagSelectionNotifier extends Notifier<Set<String>> {
+  void toggle(String tag, {bool? shouldExists}) {
+    state = {...state}..toggle(tag, shouldExists: shouldExists);
+  }
 }
 
 extension AsyncValueExtension<T> on AsyncValue<T> {

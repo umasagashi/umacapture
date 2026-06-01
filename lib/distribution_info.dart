@@ -18,8 +18,25 @@ class DistributionInfoBuilder implements Builder {
   final JsonEncoder jsonEncoder = JsonEncoder.withIndent(" " * 4);
 
   FutureOr<String> _buildLicenseInfo(String inputPath) async {
-    final lock = path.join(File(inputPath).parent.path, "pubspec.lock");
-    final license = jsonEncoder.convert(await generateLicenseInfo(pubspecLockPath: lock));
+    // dart_pubspec_licenses 3.x: generateLicenseInfo was removed and replaced by listDependencies.
+    // The Flutter 3.38 SDK layout has no root `version` file, which makes SDK package analysis fail,
+    // so the Flutter SDK bundled packages are ignored (their licenses are handled by LicenseRegistry).
+    final deps = await listDependencies(
+      pubspecYamlPath: inputPath,
+      ignore: const [
+        "flutter",
+        "flutter_localizations",
+        "flutter_web_plugins",
+        "flutter_test",
+        "sky_engine",
+        // dbus is MPL-2.0 (a reject target; it also matches the "General Public License" compatibility
+        // wording inside the MPL text). It is a transitive dependency via file_picker's Linux implementation
+        // and is not included in the Windows (msix) distribution, so it is excluded.
+        // Note: if a Linux build is distributed, decide separately whether bundling MPL is acceptable.
+        "dbus",
+      ],
+    );
+    final license = jsonEncoder.convert(deps.allDependencies.map((e) => e.toJson()).toList());
 
     final context = license.toLowerCase();
     final rejects = [

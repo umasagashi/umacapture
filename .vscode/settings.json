@@ -1,0 +1,52 @@
+{
+  // Use the FVM-pinned Flutter (.fvm/flutter_sdk symlink).
+  "dart.flutterSdkPath": ".fvm/flutter_sdk",
+
+  // Hide heavy/generated directories from the Explorer.
+  "files.exclude": {
+    "**/.fvm/versions": true,
+    "**/build": true,
+    "**/.dart_tool": true,
+    "**/.sentry-native": true
+  },
+
+  // Exclude heavy/generated trees from the file watcher to keep memory usage down.
+  // The native Windows build (build/) emits thousands of CMake/opencv/onnxruntime
+  // artifacts; watching them recursively can exhaust memory.
+  "files.watcherExclude": {
+    "**/.fvm/versions": true,
+    "**/build/**": true,
+    "**/.dart_tool/**": true,
+    "**/.sentry-native/**": true,
+    "**/windows/flutter/ephemeral/**": true,
+    "**/.git/objects/**": true
+  },
+
+  // Exclude the same trees from search.
+  "search.exclude": {
+    "**/.fvm/versions": true,
+    "**/build": true,
+    "**/.dart_tool": true,
+    "**/.sentry-native": true
+  },
+
+  // Keep the Dart analysis server from scanning generated/build output.
+  "dart.analysisExcludedFolders": [
+    "build",
+    ".dart_tool",
+    ".sentry-native"
+  ],
+
+  // Dart code style (matches IntelliJ RIGHT_MARGIN=120 / .editorconfig).
+  "dart.lineLength": 120,
+  "[dart]": {
+    "editor.formatOnSave": true,
+    "editor.rulers": [120],
+    "editor.tabSize": 2,
+    "editor.defaultFormatter": "Dart-Code.dart-code",
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "explicit",
+      "source.organizeImports": "explicit"
+    }
+  }
+}

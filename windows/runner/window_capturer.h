@@ -181,7 +181,20 @@ public:
 
 private:
     void initializeGraphicsCapture() {
-        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        // The thread that constructs the capturer is already COM-initialized as STA
+        // (see CoInitializeEx in main.cpp). Newer Flutter Windows embedders dispatch
+        // platform-channel handlers on that STA thread, so init_apartment(multi_threaded)
+        // raises RPC_E_CHANGED_MODE. That is a winrt::hresult_error (not a std::exception),
+        // so it would escape the method channel's std::exception handler and terminate the
+        // process. COM is usable from either apartment for our capture path, so a
+        // changed-mode result is benign and treated as success.
+        try {
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        } catch (const winrt::hresult_error &error) {
+            if (error.code() != RPC_E_CHANGED_MODE) {
+                throw;
+            }
+        }
 
         D3D_FEATURE_LEVEL feature_levels[] = {
             D3D_FEATURE_LEVEL_11_1,

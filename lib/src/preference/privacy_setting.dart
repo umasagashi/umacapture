@@ -8,10 +8,9 @@ import '/src/preference/storage_box.dart';
 // ignore: constant_identifier_names
 const tr_privacy = "app.privacy";
 
-final allowPostUserDataStateProvider = BooleanNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final allowPostUserDataStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.allowPostUserData.name),
+    entryKey: SettingsEntryKey.allowPostUserData.name,
     defaultValue: true,
   );
 });

@@ -1,7 +1,7 @@
-import 'package:dio/dio.dart';
+import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -20,13 +20,11 @@ import '/src/gui/statistics.dart';
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
-final _downloadProgressProvider = StateProvider<Progress?>((ref) {
-  return null;
-});
+final _downloadProgressProvider = settableNotifierProvider<Progress?>(null);
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
-    return Dio().get(Const.newsUrl).then((response) => response.toString());
+    return createDiagnosticDio(operation: "load_news").get(Const.newsUrl).then((response) => response.toString());
   } catch (error, stackTrace) {
     logger.e("Failed to load news.", error, stackTrace);
     captureException(error, stackTrace);
@@ -37,23 +35,23 @@ final _newsMarkdownLoader = FutureProvider<String>((ref) async {
 class AppUpdaterGroup extends ConsumerWidget {
   final Version version;
 
-  const AppUpdaterGroup({Key? key, required this.version}) : super(key: key);
+  const AppUpdaterGroup({super.key, required this.version});
 
   void downloadAndOpen(WidgetRef ref) {
-    ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: 0, total: 100));
+    ref.read(_downloadProgressProvider.notifier).set(Progress(count: 0, total: 100));
     ref.watch(isInstallerModeLoader.future).then((isInstallerMode) {
       final pathInfo = ref.watch(pathInfoProvider);
       final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
       final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
       logger.d(downloadUrl);
-      Dio().download(
+      createDiagnosticDio(operation: "download_app_update").download(
         downloadUrl,
         downloadPath.path,
         onReceiveProgress: (int count, int total) {
-          ref.read(_downloadProgressProvider.notifier).update((_) => Progress(count: count, total: total));
+          ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
         },
       ).then((_) {
-        ref.read(_downloadProgressProvider.notifier).update((_) => null);
+        ref.read(_downloadProgressProvider.notifier).set(null);
         (isInstallerMode ? downloadPath : downloadPath.parent).launch();
       });
     });
@@ -98,7 +96,6 @@ class AppUpdaterGroup extends ConsumerWidget {
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
       padding: EdgeInsets.zero,
-      baseColor: Colors.amber,
       children: [
         ListTile(
           title: Text("$tr_dashboard.app_updater.subtitle".tr()),
@@ -114,7 +111,7 @@ class AppUpdaterGroup extends ConsumerWidget {
 }
 
 class _NewsGroup extends ConsumerWidget {
-  const _NewsGroup({Key? key}) : super(key: key);
+  const _NewsGroup();
 
   Widget text(String data) {
     return Padding(
@@ -148,7 +145,7 @@ class _NewsGroup extends ConsumerWidget {
 }
 
 class _StatisticGroup extends ConsumerWidget {
-  const _StatisticGroup({Key? key}) : super(key: key);
+  const _StatisticGroup();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -185,8 +182,9 @@ final _versionCheckLoader = FutureProvider<AppVersionCheckResult>((ref) async {
   return result;
 });
 
+@RoutePage()
 class DashboardPage extends ConsumerWidget {
-  const DashboardPage({Key? key}) : super(key: key);
+  const DashboardPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

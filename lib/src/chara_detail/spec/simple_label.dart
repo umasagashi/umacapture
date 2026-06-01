@@ -1,9 +1,8 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
-import 'package:quiver/iterables.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -15,11 +14,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'simple_label.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_simple_label = "pages.chara_detail.column_predicate.simple_label";
 
-@jsonSerializable
-class SimpleLabelPredicate {
+@MappableClass()
+class SimpleLabelPredicate with SimpleLabelPredicateMappable {
   final Set<int> rejects;
 
   SimpleLabelPredicate({
@@ -42,12 +43,11 @@ class SimpleLabelCellData implements CellData {
   String get csv => label;
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "SimpleLabelColumnSpec")
-class SimpleLabelColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'SimpleLabelColumnSpec')
+class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMappable {
   final Parser parser;
   final String labelKey;
   SimpleLabelPredicate predicate;
@@ -97,24 +97,24 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
+  TrinaCell plutoCell(RefBase ref, int value) {
     final label = ref.read(labelMapProvider)[labelKey]![value];
-    return PlutoCell(
+    return TrinaCell(
       value: label,
     )..setUserData(SimpleLabelCellData(label));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       readOnly: true,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SimpleLabelCellData>()!;
         return Text(
           data.label,
@@ -127,7 +127,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> {
   @override
   String tooltip(RefBase ref) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    final indices = range(labels.length).map((e) => e.toInt()).toList();
+    final indices = labels.length.range().toList();
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";
@@ -158,15 +158,14 @@ class _SimpleLabelSelector extends ConsumerWidget {
   final String specId;
 
   const _SimpleLabelSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
-    final indices = range(labels.length).map((e) => e.toInt()).toList();
+    final indices = labels.length.range().toList();
     final theme = Theme.of(context);
     return FormGroup(
       title: Text("$tr_simple_label.selection.label".tr()),
@@ -183,7 +182,7 @@ class _SimpleLabelSelector extends ConsumerWidget {
                 for (final index in indices)
                   FilterChip(
                     label: Text(labels[index].joinLines(" ")),
-                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceVariant,
+                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
                     onSelected: (selected) {
@@ -259,10 +258,10 @@ class SimpleLabelColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const SimpleLabelColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

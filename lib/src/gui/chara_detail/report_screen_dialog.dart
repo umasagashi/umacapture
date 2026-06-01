@@ -12,7 +12,7 @@ import '/src/gui/toast.dart';
 const tr_report_screen = "pages.chara_detail.report_screen";
 
 class ReportScreenDialog extends ConsumerWidget {
-  const ReportScreenDialog({Key? key}) : super(key: key);
+  const ReportScreenDialog({super.key});
 
   static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const ReportScreenDialog());
@@ -47,7 +47,7 @@ class ReportScreenDialog extends ConsumerWidget {
         children: [
           Tooltip(
             message: "$tr_report_screen.dialog.close_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_report_screen.dialog.close_button.label".tr()),
               onPressed: () {
@@ -77,7 +77,7 @@ class ReportScreenDialog extends ConsumerWidget {
         children: [
           Tooltip(
             message: "$tr_report_screen.dialog.close_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_report_screen.dialog.close_button.label".tr()),
               onPressed: () {
@@ -149,7 +149,7 @@ class ReportScreenDialog extends ConsumerWidget {
             disabled: data == null,
             child: Tooltip(
               message: "$tr_report_screen.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.check_circle),
                 label: Text("$tr_report_screen.dialog.ok_button.label".tr()),
                 onPressed: () {

@@ -1,4 +1,3 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,10 +11,24 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-final specCloneProvider = StateProvider.autoDispose.family<ColumnSpec, String>((ref, specId) {
-  final source = ref.read(currentColumnSpecsProvider.notifier).getById(specId)!;
-  return JsonMapper.fromMap<ColumnSpec>(JsonMapper.toMap(source))!;
-});
+// Holds an editable clone of a ColumnSpec for the duration of the column dialog.
+// autoDispose so the clone is dropped when the dialog closes; [update] mirrors
+// StateController.update for SpecProviderAccessor's `(spec) => apply(spec)` calls.
+class SpecClone extends Notifier<ColumnSpec> {
+  SpecClone(this.specId);
+
+  final String specId;
+
+  @override
+  ColumnSpec build() {
+    final source = ref.read(currentColumnSpecsLoaderProvider.notifier).getById(specId)!;
+    return ColumnSpecMapper.fromMap(source.toMap());
+  }
+
+  ColumnSpec update(ColumnSpec Function(ColumnSpec spec) cb) => state = cb(state);
+}
+
+final specCloneProvider = NotifierProvider.autoDispose.family<SpecClone, ColumnSpec, String>(SpecClone.new);
 
 class SpecProviderAccessor<T extends ColumnSpec> {
   T watch(WidgetRef ref, String specId) {
@@ -37,11 +50,11 @@ class ColumnSpecDialog extends ConsumerWidget {
   final Widget child;
 
   const ColumnSpecDialog({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
     required this.child,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, ColumnSpec spec) {
     CardDialog.show(ref, (_) {
@@ -72,20 +85,20 @@ class ColumnSpecDialog extends ConsumerWidget {
               icon: const Icon(Icons.delete_forever),
               label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
               onPressed: () {
-                ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
+                ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
                 CardDialog.dismiss(ref.base);
               },
             ),
           ),
           Tooltip(
             message: "$tr_chara_detail.column_predicate.dialog.ok_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_chara_detail.column_predicate.dialog.ok_button.label".tr()),
               onPressed: () {
                 onDecided.notifyListeners();
                 final spec = ref.read(specCloneProvider(specId));
-                ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
+                ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
                 CardDialog.dismiss(ref.base);
               },
             ),

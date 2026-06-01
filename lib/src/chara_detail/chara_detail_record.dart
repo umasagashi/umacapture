@@ -1,5 +1,5 @@
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 
 import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
@@ -7,10 +7,10 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 
-const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
+part 'chara_detail_record.mapper.dart';
 
-@jsonSerializable
-class Character extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Character extends JsonEquatable with CharacterMappable {
   final int icon;
   final int character;
   final int card;
@@ -22,8 +22,8 @@ class Character extends JsonEquatable {
   List<Object?> properties() => [icon, character, card, rank];
 }
 
-@jsonSerializable
-class CharacterStatus extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class CharacterStatus extends JsonEquatable with CharacterStatusMappable {
   final int speed;
   final int stamina;
   final int power;
@@ -36,8 +36,8 @@ class CharacterStatus extends JsonEquatable {
   List<Object?> properties() => [speed, stamina, power, guts, intelligence];
 }
 
-@jsonSerializable
-class GroundAptitude extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class GroundAptitude extends JsonEquatable with GroundAptitudeMappable {
   final int turf;
   final int dirt;
 
@@ -47,8 +47,8 @@ class GroundAptitude extends JsonEquatable {
   List<Object?> properties() => [turf, dirt];
 }
 
-@jsonSerializable
-class DistanceAptitude extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class DistanceAptitude extends JsonEquatable with DistanceAptitudeMappable {
   final int shortRange;
   final int mileRange;
   final int middleRange;
@@ -62,8 +62,8 @@ class DistanceAptitude extends JsonEquatable {
   List<Object?> properties() => [shortRange, mileRange, middleRange, longRange];
 }
 
-@jsonSerializable
-class StyleAptitude extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class StyleAptitude extends JsonEquatable with StyleAptitudeMappable {
   final int leadPace; // [JP] 逃げ
   final int withPace; // [JP] 先行
   final int offPace; // [JP] 差し
@@ -75,8 +75,8 @@ class StyleAptitude extends JsonEquatable {
   List<Object?> properties() => [leadPace, withPace, offPace, lateCharge];
 }
 
-@jsonSerializable
-class AptitudeSet extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class AptitudeSet extends JsonEquatable with AptitudeSetMappable {
   final GroundAptitude ground;
   final DistanceAptitude distance;
   final StyleAptitude style;
@@ -87,9 +87,8 @@ class AptitudeSet extends JsonEquatable {
   List<Object?> properties() => [ground, distance, style];
 }
 
-@jsonSerializable
-@Json(ignoreNullMembers: true)
-class Skill extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
+class Skill extends JsonEquatable with SkillMappable {
   final int id;
   final int? level;
 
@@ -99,8 +98,8 @@ class Skill extends JsonEquatable {
   List<Object?> properties() => [id, level];
 }
 
-@jsonSerializable
-class Factor extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Factor extends JsonEquatable with FactorMappable {
   final int id;
   final int star;
 
@@ -110,8 +109,8 @@ class Factor extends JsonEquatable {
   List<Object?> properties() => [id, star];
 }
 
-@jsonSerializable
-class FactorSet extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class FactorSet extends JsonEquatable with FactorSetMappable {
   final List<Factor> self;
   final List<Factor> parent1;
   final List<Factor> parent2;
@@ -121,17 +120,15 @@ class FactorSet extends JsonEquatable {
   @override
   List<Object?> properties() => [self, parent1, parent2];
 
-  @JsonProperty(ignore: true)
   List<Factor> get flattened => [...self, ...parent1, ...parent2];
 
-  @JsonProperty(ignore: true)
   Set<int> get uniqueIds => flattened.map((e) => e.id).toSet();
 
   List<List<Factor>> toList() => [self, parent1, parent2];
 }
 
-@jsonSerializable
-class SupportCard extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class SupportCard extends JsonEquatable with SupportCardMappable {
   final int id;
   final int rank;
   final int level;
@@ -142,9 +139,8 @@ class SupportCard extends JsonEquatable {
   List<Object?> properties() => [id, rank, level];
 }
 
-@jsonSerializable
-@Json(ignoreNullMembers: true)
-class Parent extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
+class Parent extends JsonEquatable with ParentMappable {
   final Character self;
   final Character parent1;
   final Character parent2;
@@ -156,8 +152,8 @@ class Parent extends JsonEquatable {
   List<Object?> properties() => [self, parent1, parent2, rental];
 }
 
-@jsonSerializable
-class Family extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Family extends JsonEquatable with FamilyMappable {
   final Parent parent1;
   final Parent parent2;
 
@@ -167,8 +163,8 @@ class Family extends JsonEquatable {
   List<Object?> properties() => [parent1, parent2];
 }
 
-@jsonSerializable
-class Scenario extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Scenario extends JsonEquatable with ScenarioMappable {
   final int id;
 
   const Scenario(this.id);
@@ -177,8 +173,8 @@ class Scenario extends JsonEquatable {
   List<Object?> properties() => [id];
 }
 
-@jsonSerializable
-class Race extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Race extends JsonEquatable with RaceMappable {
   final int title;
   final int place;
   final int ground;
@@ -201,7 +197,6 @@ class Race extends JsonEquatable {
     this.position,
   );
 
-  @JsonProperty(ignore: true)
   bool get won => position == 1;
 
   @override
@@ -218,9 +213,8 @@ class Race extends JsonEquatable {
       ];
 }
 
-@jsonSerializable
-@Json(ignoreNullMembers: true)
-class RecordId extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
+class RecordId extends JsonEquatable with RecordIdMappable {
   final String self;
   final String? parent1;
   final String? parent2;
@@ -231,21 +225,21 @@ class RecordId extends JsonEquatable {
   List<Object?> properties() => [self, parent1, parent2];
 }
 
-@jsonSerializable
+@MappableEnum()
 enum RecordStage {
   active,
 }
 
-@jsonSerializable
+// In the saved data (record.json), record_type is PascalCase ("Standard"/"InheritanceOnly"/"Friend").
+@MappableEnum(caseStyle: CaseStyle.pascalCase)
 enum RecordType {
   standard,
   inheritanceOnly,
   friend,
 }
 
-@jsonSerializable
-@Json(ignoreNullMembers: true)
-class Metadata extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
+class Metadata extends JsonEquatable with MetadataMappable {
   final String formatVersion;
   final String region;
   final RecordId recordId;
@@ -271,7 +265,6 @@ class Metadata extends JsonEquatable {
   );
 
   @override
-  @JsonProperty(ignore: true)
   List<Object?> properties() => [
         formatVersion,
         region,
@@ -285,8 +278,8 @@ class Metadata extends JsonEquatable {
       ];
 }
 
-@jsonSerializable
-class CharaDetailRecord extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   final Metadata metadata;
 
   final Character trainee;
@@ -341,19 +334,16 @@ class CharaDetailRecord extends JsonEquatable {
         races,
       ];
 
-  @JsonProperty(ignore: true)
   String get id => metadata.recordId.self;
 
-  @JsonProperty(ignore: true)
   FilePath get traineeIconPath => DirectoryPath(id).filePath("trainee.jpg");
 
-  @JsonProperty(ignore: true)
   DateTime get trainedDateAsDateTime => trainedDate.replaceAll("/", "-").toDateTime();
 
   static CharaDetailRecord? load(DirectoryPath directory) {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
-      return JsonMapper.deserialize<CharaDetailRecord>(content, deserializationOptions);
+      return CharaDetailRecordMapper.fromJson(content);
     } catch (exception, stackTrace) {
       logger.e("Failed to load record.json.", exception, stackTrace);
       logger.i(directory.listSync().map((e) => e.name).join(", "));

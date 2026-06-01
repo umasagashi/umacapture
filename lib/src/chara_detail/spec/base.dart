@@ -1,11 +1,12 @@
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
@@ -14,6 +15,8 @@ import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
+
+part 'base.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_common = "pages.chara_detail.column_predicate.common";
@@ -66,8 +69,8 @@ abstract class ColumnBuilder {
   ColumnSpec build(RefBase ref);
 }
 
-@jsonSerializable
-class Tag extends JsonEquatable {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Tag extends JsonEquatable with TagMappable {
   final String id;
   final String name;
 
@@ -77,8 +80,8 @@ class Tag extends JsonEquatable {
   List<Object?> properties() => [id, name];
 }
 
-@jsonSerializable
-class SkillInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class SkillInfo with SkillInfoMappable {
   final int sid;
   final int sortKey;
   final List<String> names;
@@ -87,15 +90,13 @@ class SkillInfo {
 
   SkillInfo(this.sid, this.sortKey, this.names, this.descriptions, this.tags);
 
-  @JsonProperty(ignore: true)
   String get label => names.first;
 
-  @JsonProperty(ignore: true)
   String get tooltip => descriptions.first;
 }
 
-@jsonSerializable
-class FactorInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class FactorInfo with FactorInfoMappable {
   final int sid;
   final int sortKey;
   final List<String> names;
@@ -128,10 +129,8 @@ class FactorInfo {
     );
   }
 
-  @JsonProperty(ignore: true)
   String get label => names.first;
 
-  @JsonProperty(ignore: true)
   String get tooltip {
     String text = descriptions.first;
     if (skillInfo != null) {
@@ -141,8 +140,8 @@ class FactorInfo {
   }
 }
 
-@jsonSerializable
-class CharaCardInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class CharaCardInfo with CharaCardInfoMappable {
   final int sid;
   final int sortKey;
   final List<String> names;
@@ -150,7 +149,7 @@ class CharaCardInfo {
   CharaCardInfo(this.sid, this.sortKey, this.names);
 }
 
-@jsonSerializable
+@MappableEnum()
 enum ColumnSpecCellAction {
   openSkillPreview,
   openFactorPreview,
@@ -170,9 +169,8 @@ extension ColumnSpecCellActionExtension on ColumnSpecCellAction {
   }
 }
 
-@jsonSerializable
-@Json(discriminatorProperty: 'type')
-abstract class ColumnSpec<T> {
+@MappableClass(discriminatorKey: 'type')
+abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   String get type => runtimeType.toString();
 
   String get id;
@@ -185,9 +183,9 @@ abstract class ColumnSpec<T> {
 
   List<bool> evaluate(RefBase ref, List<T> values);
 
-  PlutoCell plutoCell(RefBase ref, T value);
+  TrinaCell plutoCell(RefBase ref, T value);
 
-  PlutoColumn plutoColumn(RefBase ref);
+  TrinaColumn plutoColumn(RefBase ref);
 
   String tooltip(RefBase ref);
 
@@ -196,15 +194,19 @@ abstract class ColumnSpec<T> {
   Widget selector(ChangeNotifier onDecided);
 }
 
-class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
-  final StorageEntry<String> entry;
+class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
+  late StorageEntry<String> entry;
 
-  ColumnSpecSelection(this.entry) : super([]) {
-    final data = JsonMapper.deserialize<List<dynamic>>(entry.pull()) ?? [];
+  @override
+  List<ColumnSpec> build() {
+    entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
+    final raw = entry.pull();
+    final data = raw == null ? <dynamic>[] : (jsonDecode(raw) as List<dynamic>);
+    final specs = <ColumnSpec>[];
     bool failed = false;
     for (final d in data) {
       try {
-        state.addIfNotNull(JsonMapper.deserialize<ColumnSpec>(d));
+        specs.addIfNotNull(ColumnSpecMapper.fromMap(d as Map<String, dynamic>));
       } catch (e) {
         // If the specification of the column spec is changed, it may not be able to load.
         logger.w("Failed to deserialize column spec: error=$e, data=$d");
@@ -214,84 +216,86 @@ class ColumnSpecSelection extends StateNotifier<List<ColumnSpec>> {
     if (failed) {
       Toaster.show(ToastData.warning(description: "pages.chara_detail.error.loading_spec".tr()));
     }
-    state = [...state];
+    return specs;
   }
 
+  List<ColumnSpec> get _specs => state.requireValue;
+
   ColumnSpec? getById(String id) {
-    return state.firstWhereOrNull((e) => e.id == id);
+    return _specs.firstWhereOrNull((e) => e.id == id);
   }
 
   bool contains(String id) {
-    return state.firstWhereOrNull((e) => e.id == id) != null;
-  }
-
-  void update(ColumnSpec spec) {
-    assert(contains(spec.id));
-    rebuild();
+    return _specs.firstWhereOrNull((e) => e.id == id) != null;
   }
 
   void add(ColumnSpec spec) {
     assert(!contains(spec.id));
-    state.add(spec);
-    rebuild();
+    _commit([..._specs, spec]);
   }
 
   void addOrUpdate(ColumnSpec spec) {
-    if (!contains(spec.id)) {
-      state.add(spec);
-    }
-    rebuild();
+    _commit(contains(spec.id) ? [..._specs] : [..._specs, spec]);
   }
 
   void remove(String id) {
     assert(contains(id));
-    state.removeWhere((e) => e.id == id);
-    rebuild();
+    _commit(_specs.where((e) => e.id != id).toList());
   }
 
   void removeIfExists(String id) {
     if (contains(id)) {
-      state.removeWhere((e) => e.id == id);
-      rebuild();
+      _commit(_specs.where((e) => e.id != id).toList());
     }
   }
 
   void moveTo(ColumnSpec obj, ColumnSpec target) {
-    assert(state.contains(obj));
-    assert(state.contains(target));
+    final specs = [..._specs];
+    assert(specs.contains(obj));
+    assert(specs.contains(target));
     if (obj == target) {
       return;
     }
-    final moveRight = state.indexOf(obj) < state.indexOf(target);
-    state.remove(obj);
-    state.insert(state.indexOf(target) + (moveRight ? 1 : 0), obj);
-    rebuild();
+    final moveRight = specs.indexOf(obj) < specs.indexOf(target);
+    specs.remove(obj);
+    specs.insert(specs.indexOf(target) + (moveRight ? 1 : 0), obj);
+    _commit(specs);
   }
 
   void replaceById(ColumnSpec spec) {
-    final index = state.indexWhere((e) => e.id == spec.id);
+    final specs = [..._specs];
+    final index = specs.indexWhere((e) => e.id == spec.id);
     if (index != -1) {
-      state.removeAt(index);
-      state.insert(index, spec);
+      specs[index] = spec;
     } else {
-      state.add(spec);
+      specs.add(spec);
     }
-    rebuild();
+    _commit(specs);
   }
 
+  // Re-persist the current selection (e.g. after mutating a spec's internal
+  // state in place). Builds a fresh list so the new AsyncData never shares its
+  // backing list with the previous state.
   void rebuild() {
-    state = [...state];
-    entry.push(JsonMapper.serialize(state));
+    _commit([..._specs]);
   }
 
   void clear() {
-    state = [];
-    rebuild();
+    _commit(<ColumnSpec>[]);
+  }
+
+  // Publish [specs] as the new state and write it back to storage. Callers must
+  // pass a freshly-built list (never state.requireValue) so we don't mutate the
+  // list held by the live AsyncData, which would defeat riverpod's
+  // identity-based change detection and corrupt the previous state value.
+  void _commit(List<ColumnSpec> specs) {
+    state = AsyncData(specs);
+    entry.push(MapperContainer.globals.toJson<List<ColumnSpec>>(specs));
   }
 }
 
-extension PlutoGridStateManagerExtension on PlutoGridStateManager {
-  void autoFitColumnPrecise(BuildContext context, PlutoColumn column) {
+extension TrinaGridStateManagerExtension on TrinaGridStateManager {
+  void autoFitColumnPrecise(BuildContext context, TrinaColumn column) {
     if (refRows.isEmpty) {
       return;
     }
@@ -309,7 +313,7 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
       return textPainter.width;
     }).max;
 
-    EdgeInsets cellPadding = column.cellPadding ?? configuration!.style.defaultCellPadding;
+    EdgeInsets cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
 
     resizeColumn(
       column,
@@ -321,7 +325,7 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
     if (refRows.isEmpty) {
       return;
     }
-    final context = gridKey!.currentContext!;
+    final context = gridKey.currentContext!;
     for (final col in columns) {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
@@ -333,19 +337,19 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
     }
   }
 
-  PlutoColumn? getColumn(String field) {
+  TrinaColumn? getColumn(String field) {
     return columns.firstWhereOrNull((e) => e.field == field);
   }
 
-  void sortColumn(PlutoColumn col, PlutoColumnSort order) {
-    if (order == PlutoColumnSort.ascending) {
+  void sortColumn(TrinaColumn col, TrinaColumnSort order) {
+    if (order == TrinaColumnSort.ascending) {
       sortAscending(col);
     } else {
       sortDescending(col);
     }
   }
 
-  void sortColumnByField(String columnField, PlutoColumnSort sortOrder) {
+  void sortColumnByField(String columnField, TrinaColumnSort sortOrder) {
     final col = getColumn(columnField);
     if (col != null) {
       sortColumn(col, sortOrder);
@@ -353,11 +357,11 @@ extension PlutoGridStateManagerExtension on PlutoGridStateManager {
   }
 
   Iterable<CharaDetailRecord> getSortedRecords() {
-    return refRows.map((e) => e.getUserData<CharaDetailRecord>()).whereNotNull();
+    return refRows.map((e) => e.getUserData<CharaDetailRecord>()).nonNulls;
   }
 }
 
-extension PlutoCellExtension on PlutoCell {
+extension TrinaCellExtension on TrinaCell {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -365,7 +369,7 @@ extension PlutoCellExtension on PlutoCell {
   void setUserData<T>(T value) => _userData[this] = value;
 }
 
-extension PlutoRowWithRawData on PlutoRow {
+extension TrinaRowWithRawData on TrinaRow {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -373,7 +377,7 @@ extension PlutoRowWithRawData on PlutoRow {
   void setUserData<T>(T value) => _userData[this] = value;
 }
 
-extension PlutoColumnWithUserData on PlutoColumn {
+extension TrinaColumnWithUserData on TrinaColumn {
   static final _userData = Expando();
 
   T? getUserData<T>() => _userData[this] as T?;
@@ -382,5 +386,5 @@ extension PlutoColumnWithUserData on PlutoColumn {
 }
 
 abstract class CellData implements Exportable {
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected;
 }

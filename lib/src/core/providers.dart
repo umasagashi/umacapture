@@ -9,6 +9,26 @@ final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
   return PackageInfo.fromPlatform();
 });
 
+/// A minimal [Notifier] holding an externally-settable value seeded with
+/// [initial]. Replaces the many one-off `build() => default; set(v) => state = v`
+/// notifiers the riverpod 3 migration produced when `StateProvider` was dropped.
+/// Use [settableNotifierProvider] to declare a provider backed by it.
+class SettableNotifier<T> extends Notifier<T> {
+  SettableNotifier(this._initial);
+
+  final T _initial;
+
+  @override
+  T build() => _initial;
+
+  void set(T value) => state = value;
+}
+
+/// Convenience constructor for a [NotifierProvider] backed by [SettableNotifier].
+NotifierProvider<SettableNotifier<T>, T> settableNotifierProvider<T>(T initial) {
+  return NotifierProvider<SettableNotifier<T>, T>(() => SettableNotifier<T>(initial));
+}
+
 class PathInfo {
   final DirectoryPath documentDir;
   final DirectoryPath supportDir;

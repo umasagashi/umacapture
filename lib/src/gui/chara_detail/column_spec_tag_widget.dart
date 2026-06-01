@@ -1,6 +1,5 @@
-import 'package:badges/badges.dart';
+import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,7 +15,7 @@ import '/src/gui/chara_detail/export_button.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 class ColumnSpecTagWidget extends ConsumerStatefulWidget {
-  const ColumnSpecTagWidget({Key? key}) : super(key: key);
+  const ColumnSpecTagWidget({super.key});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _ColumnSpecTagWidgetState();
@@ -42,14 +41,17 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             opacity: 0.6,
             child: Chip(label: spec.label()),
           ),
-          child: Badge(
+          child: badges.Badge(
             showBadge: count != null,
-            badgeColor: theme.chipTheme.selectedColor!,
-            position: BadgePosition.topEnd(top: -8, end: -8),
-            shape: BadgeShape.square,
-            borderRadius: BorderRadius.circular(8),
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            alignment: Alignment.center,
+            position: badges.BadgePosition.topEnd(top: -8, end: -8),
+            badgeStyle: badges.BadgeStyle(
+              // flex_color_scheme leaves ChipThemeData.selectedColor null under
+              // Material 3, so fall back like app_widget does for the same value.
+              badgeColor: theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer,
+              shape: badges.BadgeShape.square,
+              borderRadius: BorderRadius.circular(8),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+            ),
             ignorePointer: true,
             badgeContent: Text(
               "$count",
@@ -57,11 +59,11 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               textAlign: TextAlign.center,
             ),
             child: GestureDetector(
-              onSecondaryTap: () => ref.read(currentColumnSpecsProvider.notifier).removeIfExists(spec.id),
+              onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
                 label: spec.label(),
                 tooltip: spec.tooltip(ref.base),
-                backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer.darken(10) : null,
+                backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer : null,
                 onPressed: () {
                   ColumnSpecDialog.show(ref.base, spec);
                 },
@@ -70,15 +72,15 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           ),
         );
       },
-      onWillAccept: (data) {
+      onWillAcceptWithDetails: (data) {
         setState(() => hoveredSpec = spec);
         return true;
       },
       onLeave: (data) {
         setState(() => hoveredSpec = null);
       },
-      onAccept: (dropped) {
-        ref.read(currentColumnSpecsProvider.notifier).moveTo(dropped, spec);
+      onAcceptWithDetails: (dropped) {
+        ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(dropped.data, spec);
         setState(() => hoveredSpec = null);
       },
     );
@@ -133,7 +135,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               runSpacing: 8,
               children: [
                 for (final col in zip2(specs, filteredCounts))
-                  buildSpecChip(context, col.item1, col.item2 == recordCount ? null : col.item2),
+                  buildSpecChip(context, col.$1, col.$2 == recordCount ? null : col.$2),
                 specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
                 const Opacity(
                   // Spacing widget for export button.

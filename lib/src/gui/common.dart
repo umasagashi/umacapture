@@ -1,6 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback_sentry/feedback_sentry.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,23 +7,27 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 
+extension SurfaceTintExtension on ColorScheme {
+  /// A very light blue surface, used for striped table rows and statistic
+  /// card backgrounds. Lighter than the tinted surfaceContainer roles.
+  Color get blueTintedSurface => Color.alphaBlend(primaryContainer.withValues(alpha: 0.10), surface);
+}
+
 class ListCard extends StatelessWidget {
   final String? title;
   final List<Widget> children;
   final Widget? trailing;
   final EdgeInsetsGeometry? padding;
   final CrossAxisAlignment crossAxisAlignment;
-  final Color? baseColor;
 
   const ListCard({
-    Key? key,
+    super.key,
     this.title,
     required this.children,
     this.trailing,
     this.padding,
     this.crossAxisAlignment = CrossAxisAlignment.center,
-    this.baseColor,
-  }) : super(key: key);
+  });
 
   Widget child() {
     return Padding(
@@ -47,22 +50,15 @@ class ListCard extends StatelessWidget {
         children: [
           if (title != null)
             ListTile(
-              tileColor: baseColor != null
-                  ? theme.cardColor.blend(baseColor!, 50)
-                  : theme.scaffoldBackgroundColor.blend(theme.cardColor, 50),
-              title: Text(title!, style: theme.textTheme.headline5),
+              // Header band: blend halfway between the brand-tinted scaffold
+              // background and the (near-white) card surface, giving a subtle
+              // blue band. Surface-container roles carry little blend under the
+              // highScaffoldLowSurface mode, so we derive the tint from scaffold.
+              tileColor: Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5),
+              title: Text(title!, style: theme.textTheme.headlineSmall),
               trailing: trailing,
             ),
-          if (baseColor != null)
-            Theme(
-              data: theme.copyWith(
-                listTileTheme: theme.listTileTheme.copyWith(
-                  tileColor: (theme.listTileTheme.tileColor ?? theme.colorScheme.surface).blend(baseColor!, 15),
-                ),
-              ),
-              child: child(),
-            ),
-          if (baseColor == null) child(),
+          child(),
         ],
       ),
     );
@@ -75,11 +71,11 @@ class ListTilePageRootWidget extends ConsumerStatefulWidget {
   final double? gap;
 
   const ListTilePageRootWidget({
-    Key? key,
+    super.key,
     required this.children,
     this.margin = const EdgeInsets.all(8),
     this.gap = 8,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _ListTilePageRootWidgetState();
@@ -110,11 +106,11 @@ class SingleTilePageRootWidget extends ConsumerStatefulWidget {
   final EdgeInsetsGeometry? padding;
 
   const SingleTilePageRootWidget({
-    Key? key,
+    super.key,
     required this.child,
     this.margin = const EdgeInsets.all(8),
     this.padding = const EdgeInsets.all(8),
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _SingleTilePageRootWidgetState();
@@ -146,11 +142,11 @@ class SingleTileWidget extends ConsumerWidget {
   final EdgeInsetsGeometry? padding;
 
   const SingleTileWidget({
-    Key? key,
+    super.key,
     required this.child,
     this.margin = const EdgeInsets.all(8),
     this.padding = const EdgeInsets.all(8),
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -169,7 +165,7 @@ class SingleTileWidget extends ConsumerWidget {
 class ErrorMessageWidget extends StatelessWidget {
   final String message;
 
-  const ErrorMessageWidget({Key? key, required this.message}) : super(key: key);
+  const ErrorMessageWidget({super.key, required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -212,7 +208,7 @@ class SpinBox extends StatefulWidget {
   final bool use10;
 
   const SpinBox({
-    Key? key,
+    super.key,
     required this.min,
     required this.max,
     required this.value,
@@ -220,8 +216,7 @@ class SpinBox extends StatefulWidget {
     this.width = 48,
     this.height,
     bool? use10,
-  })  : use10 = use10 ?? max > 10,
-        super(key: key);
+  })  : use10 = use10 ?? max > 10;
 
   @override
   State<StatefulWidget> createState() => _SpinBoxState();
@@ -239,7 +234,7 @@ class _SpinBoxState extends State<SpinBox> {
   Widget button(ThemeData theme, String text, int offset) {
     return TextButton(
       style: OutlinedButton.styleFrom(
-        backgroundColor: theme.colorScheme.primaryContainer.withOpacity(0.3),
+        backgroundColor: theme.colorScheme.primaryContainer,
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
       ),
@@ -332,13 +327,13 @@ class CardDialog extends ConsumerWidget {
   final bool usePageView;
 
   const CardDialog({
-    Key? key,
+    super.key,
     required this.dialogTitle,
     this.closeButtonTooltip,
     required this.content,
     this.bottom,
     this.usePageView = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -429,33 +424,56 @@ class _CustomFeedbackLocalizationsDelegate extends GlobalFeedbackLocalizationsDe
   }
 }
 
+/// Wraps [BetterFeedback] around the app.
+///
+/// [BetterFeedback] must sit ABOVE [MaterialApp], not inside it: the feedback
+/// package re-themes its whole child subtree with a [ThemeData] derived from
+/// [FeedbackThemeData]. Placed inside MaterialApp it overrides the app's
+/// ColorScheme for all content (everything falls back to the default M3 purple).
+/// Wrapping MaterialApp lets the app re-establish its own theme below, while the
+/// feedback overlay keeps using the feedback theme.
+///
+/// The app themes are passed in (rather than read via `Theme.of`) because at this
+/// position there is no MaterialApp ancestor to read them from.
 class FeedbackLayer extends StatelessWidget {
   final Widget child;
+  final ThemeData lightTheme;
+  final ThemeData darkTheme;
+  final ThemeMode themeMode;
 
   const FeedbackLayer({
-    Key? key,
+    super.key,
     required this.child,
-  }) : super(key: key);
+    required this.lightTheme,
+    required this.darkTheme,
+    required this.themeMode,
+  });
+
+  FeedbackThemeData _feedbackTheme(ThemeData theme) {
+    return FeedbackThemeData(
+      background: Colors.transparent,
+      feedbackSheetColor: theme.colorScheme.surface,
+      sheetIsDraggable: false, // Not draggable anyway.
+      bottomSheetDescriptionStyle: theme.textTheme.bodyMedium!,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return BetterFeedback(
       localizationsDelegates: [_CustomFeedbackLocalizationsDelegate()],
       localeOverride: _CustomFeedbackLocalizationsDelegate.locale,
-      theme: FeedbackThemeData(
-        background: Colors.transparent,
-        feedbackSheetColor: theme.colorScheme.surface,
-        sheetIsDraggable: false, // Not draggable anyway.
-        bottomSheetDescriptionStyle: theme.textTheme.bodyMedium!,
-      ),
+      themeMode: themeMode,
+      theme: _feedbackTheme(lightTheme),
+      darkTheme: _feedbackTheme(darkTheme),
       child: child,
     );
   }
 }
 
-class DialogController extends StateNotifier<WidgetBuilder?> {
-  DialogController([super.state]);
+class DialogController extends Notifier<WidgetBuilder?> {
+  @override
+  WidgetBuilder? build() => null;
 
   void show(WidgetBuilder builder) {
     state = builder;
@@ -466,17 +484,15 @@ class DialogController extends StateNotifier<WidgetBuilder?> {
   }
 }
 
-final dialogBuilderProvider = StateNotifierProvider<DialogController, WidgetBuilder?>((ref) {
-  return DialogController();
-});
+final dialogBuilderProvider = NotifierProvider<DialogController, WidgetBuilder?>(DialogController.new);
 
 class DialogLayer extends ConsumerStatefulWidget {
   final Widget child;
 
   const DialogLayer({
-    Key? key,
+    super.key,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _DialogLayerState();
@@ -498,7 +514,7 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
               ref.read(dialogBuilderProvider.notifier).dismiss();
             },
             child: Container(
-              color: theme.shadowColor.withOpacity(0.5),
+              color: theme.shadowColor.withValues(alpha: 0.5),
             ),
           ),
           Padding(

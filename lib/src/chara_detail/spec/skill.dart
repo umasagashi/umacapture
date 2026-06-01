@@ -1,9 +1,9 @@
 import 'package:csv/csv.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:recase/recase.dart';
 import 'package:uuid/uuid.dart';
 
@@ -17,25 +17,27 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'skill.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_skill = "pages.chara_detail.column_predicate.skill";
 
-@jsonSerializable
+@MappableEnum()
 enum SkillSetLogicMode {
   anyOf,
   allOf,
   sumOf,
 }
 
-@jsonSerializable
-class SkillNotation {
+@MappableClass()
+class SkillNotation with SkillNotationMappable {
   final int max;
 
   SkillNotation({required this.max});
 }
 
-@jsonSerializable
-class AggregateSkillPredicate {
+@MappableClass()
+class AggregateSkillPredicate with AggregateSkillPredicateMappable {
   final Set<int> query;
   final SkillSetLogicMode logic;
   final int min;
@@ -105,13 +107,13 @@ class SkillCellData implements CellData {
   SkillCellData(this.skills, this.label);
 
   @override
-  String get csv => const ListToCsvConverter().convert([skills]);
+  String get csv => const CsvEncoder().convert([skills]);
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
+@MappableEnum()
 enum SkillDialogElements {
   selection,
   selectionTags,
@@ -119,9 +121,8 @@ enum SkillDialogElements {
   notationMax,
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "SkillColumnSpec")
-class SkillColumnSpec extends ColumnSpec<List<Skill>> {
+@MappableClass(discriminatorValue: 'SkillColumnSpec')
+class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappable {
   final Parser parser;
   final String labelKey = LabelKeys.skill;
   final AggregateSkillPredicate predicate;
@@ -180,32 +181,32 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, List<Skill> value) {
+  TrinaCell plutoCell(RefBase ref, List<Skill> value) {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final foundSkills = predicate.extract(value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
-      return PlutoCell(
+      return TrinaCell(
         value: foundSkills.length.toString().padLeft(3, "0"),
       )..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
     }
     final desc = skillNames.partial(0, predicate.notation.max).join(", ");
-    return PlutoCell(
+    return TrinaCell(
       value: desc,
     )..setUserData(SkillCellData(skillNames, desc));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SkillCellData>()!;
         return Text(data.label);
       },
@@ -251,10 +252,20 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> {
 
 final _clonedSpecProvider = SpecProviderAccessor<SkillColumnSpec>();
 
-final _selectedTagsProvider = StateProvider.autoDispose.family<Set<String>, String>((ref, specId) {
-  final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
-  return Set.from(spec.predicate.tags);
-});
+class _SelectedTags extends TagSelectionNotifier {
+  _SelectedTags(this.specId);
+
+  final String specId;
+
+  @override
+  Set<String> build() {
+    final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
+    return Set.from(spec.predicate.tags);
+  }
+}
+
+final _selectedTagsProvider =
+    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedTags.new);
 
 class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
@@ -294,7 +305,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
         children: [
           TagSelector(
             candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: AutoDisposeStateProviderLike(_selectedTagsProvider(widget.specId)),
+            selectedTagsProvider: _selectedTagsProvider(widget.specId),
           ),
         ],
       ),
@@ -489,10 +500,10 @@ class SkillColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const SkillColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

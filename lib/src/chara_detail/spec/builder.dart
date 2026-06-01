@@ -1,6 +1,5 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:quiver/iterables.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/chara_rank.dart';
@@ -21,7 +20,7 @@ const tr_columns = "pages.chara_detail.columns";
 
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   final labels = ref.watch(labelMapProvider);
-  final strategies = enumerate(labels["race_strategy.name"]!).toList();
+  final strategies = labels["race_strategy.name"]!.indexed.toList();
   final skillInfo = ref.watch(skillInfoProvider);
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
@@ -294,11 +293,11 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     ),
     for (final strategy in strategies)
       SimpleLabelColumnBuilder(
-        title: strategy.value,
+        title: strategy.$2,
         category: ColumnCategory.metadata,
         labelKey: LabelKeys.raceStrategy,
         parser: RaceStrategyParser(),
-        rejects: strategies.where((e) => e.index != strategy.index).map((e) => e.index).toSet(),
+        rejects: strategies.where((e) => e.$1 != strategy.$1).map((e) => e.$1).toSet(),
       ),
     if (ratingStorages.isEmpty)
       RatingColumnBuilder(

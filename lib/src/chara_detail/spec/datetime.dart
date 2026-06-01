@@ -1,8 +1,8 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:uuid/uuid.dart';
 
@@ -15,11 +15,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'datetime.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_datetime = "pages.chara_detail.column_predicate.datetime";
 
-@jsonSerializable
-class IsInRangeDateTimePredicate {
+@MappableClass()
+class IsInRangeDateTimePredicate with IsInRangeDateTimePredicateMappable {
   final DateTime? min;
   final DateTime? max;
 
@@ -52,12 +54,11 @@ class DateTimeCellData implements CellData {
   String get csv => value.toString();
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "DateTimeColumnSpec")
-class DateTimeColumnSpec extends ColumnSpec<DateTime> {
+@MappableClass(discriminatorValue: 'DateTimeColumnSpec')
+class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMappable {
   final Parser parser;
   final IsInRangeDateTimePredicate predicate;
 
@@ -102,22 +103,22 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, DateTime value) {
+  TrinaCell plutoCell(RefBase ref, DateTime value) {
     final dateString = value.toDateString();
-    return PlutoCell(value: dateString)..setUserData(DateTimeCellData(dateString));
+    return TrinaCell(value: dateString)..setUserData(DateTimeCellData(dateString));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         return Text(context.cell.value, textAlign: TextAlign.center);
       },
     )..setUserData(this);
@@ -149,9 +150,8 @@ class _DateTimeSelector extends ConsumerStatefulWidget {
   final String specId;
 
   const _DateTimeSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _DateTimeSelectorState();
@@ -199,7 +199,7 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
               child: Container(
                 width: 300,
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withOpacity(0.1),
+                  color: theme.colorScheme.surfaceContainerHighest,
                   border: Border.all(color: theme.colorScheme.primaryContainer),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -287,10 +287,10 @@ class DateTimeColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const DateTimeColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

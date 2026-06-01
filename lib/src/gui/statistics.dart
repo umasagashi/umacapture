@@ -1,12 +1,9 @@
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import 'package:quiver/iterables.dart';
-import 'package:quiver/time.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -26,7 +23,7 @@ final statisticsInitialLoader = FutureProvider((ref) async {
   ]).then((_) {
     return Future.wait([
       ref.watch(labelMapLoader.future),
-      ref.watch(charaDetailRecordStorageLoader.future),
+      ref.watch(charaDetailRecordStorageLoaderProvider.future),
     ]);
   });
 });
@@ -37,11 +34,10 @@ class _StatisticTile extends ConsumerWidget {
   final InlineBuilder<Widget> builder;
 
   const _StatisticTile({
-    Key? key,
     required this.title,
     required this.bottom,
     required this.builder,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -49,7 +45,7 @@ class _StatisticTile extends ConsumerWidget {
     return Container(
       decoration: BoxDecoration(
         border: Border.all(
-          color: theme.colorScheme.primaryContainer.withOpacity(0.5),
+          color: theme.colorScheme.primaryContainer,
           width: 2,
         ),
         borderRadius: BorderRadius.circular(4),
@@ -63,7 +59,7 @@ class _StatisticTile extends ConsumerWidget {
           Expanded(
             child: Container(
               alignment: Alignment.center,
-              color: theme.colorScheme.primaryContainer.withOpacity(0.2),
+              color: theme.colorScheme.blueTintedSurface,
               child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),
@@ -78,7 +74,7 @@ class _StatisticTile extends ConsumerWidget {
 }
 
 class NumberOfRecordStatisticWidget extends ConsumerWidget {
-  const NumberOfRecordStatisticWidget({Key? key}) : super(key: key);
+  const NumberOfRecordStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(
@@ -106,7 +102,7 @@ class NumberOfRecordStatisticWidget extends ConsumerWidget {
 }
 
 class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
-  const MaxEvaluationValueStatisticWidget({Key? key}) : super(key: key);
+  const MaxEvaluationValueStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(
@@ -127,7 +123,7 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
         if (records.isEmpty) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
-        final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+        final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
         final best = records.reduce((a, b) => a.evaluationValue > b.evaluationValue ? a : b);
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -166,7 +162,7 @@ class MonthlyFansChartData {
       fans.add(fans.last + (fansPerDay[start.inDays + day] ?? 0));
     }
 
-    return enumerate(fans).skip(1).map((e) => FlSpot(e.index.toDouble(), e.value.toDouble())).toList();
+    return fans.indexed.skip(1).map((e) => FlSpot(e.$1.toDouble(), e.$2.toDouble())).toList();
   }
 
   int calcMaxValue(List<FlSpot> spots, int maxX) {
@@ -177,7 +173,7 @@ class MonthlyFansChartData {
 
   LineChart build(ThemeData theme, DateTime month) {
     final start = DateTime(month.year, month.month);
-    final end = start.nextMonth().subtract(aMicrosecond);
+    final end = start.nextMonth().subtract(const Duration(microseconds: 1));
     final now = DateTime.now();
     final List<FlSpot> spots = parse(start: start, end: end.isAfter(now) ? now : end);
     final maxValue = calcMaxValue(spots, end.day);
@@ -211,8 +207,8 @@ class MonthlyFansChartData {
       lineTouchData: LineTouchData(
         enabled: false,
         touchTooltipData: LineTouchTooltipData(
-          tooltipBgColor: theme.colorScheme.surface.blend(Colors.cyan, 50),
-          tooltipRoundedRadius: 8,
+          getTooltipColor: (touchedSpot) => theme.colorScheme.surfaceContainerHighest,
+          tooltipBorderRadius: BorderRadius.circular(8),
           tooltipPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           fitInsideHorizontally: true,
           getTooltipItems: (List<LineBarSpot> lineBarsSpot) {
@@ -233,13 +229,12 @@ class MonthlyFansChartData {
       titlesData: FlTitlesData(
         rightTitles: noTitle,
         leftTitles: AxisTitles(
-          drawBehindEverything: true,
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 70,
             interval: horizontalInterval,
             getTitlesWidget: (value, meta) => SideTitleWidget(
-              axisSide: meta.axisSide,
+              meta: meta,
               space: 8,
               child: Text(value.toLocalCompactNumberString()),
             ),
@@ -247,13 +242,12 @@ class MonthlyFansChartData {
         ),
         topTitles: noTitle,
         bottomTitles: AxisTitles(
-          drawBehindEverything: true,
           sideTitles: SideTitles(
             showTitles: true,
             reservedSize: 30,
             interval: 7,
             getTitlesWidget: (value, meta) => SideTitleWidget(
-              axisSide: meta.axisSide,
+              meta: meta,
               space: 8.0,
               child: Text(value.toLocalCompactNumberString()),
             ),
@@ -265,7 +259,7 @@ class MonthlyFansChartData {
 
     return LineChart(
       lineChartData,
-      swapAnimationDuration: Duration.zero,
+      duration: Duration.zero,
     );
   }
 }
@@ -274,7 +268,7 @@ class MonthlyFansStatisticWidget extends ConsumerStatefulWidget {
   final DateTime start = DateTime(2021, 2);
   final DateTime end = DateTime.now();
 
-  MonthlyFansStatisticWidget({Key? key}) : super(key: key);
+  MonthlyFansStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return StaggeredGridTile.count(
@@ -365,9 +359,9 @@ class CountSRankChartData {
     const targetRank = 7;
     List<int> counts = [0, 0, 0, 0];
     for (final record in records.where((e) => e.metadata.stage == RecordStage.active)) {
-      for (final i in enumerate(record.aptitudes.distance.flatten)) {
-        if (i.value >= targetRank) {
-          counts[i.index]++;
+      for (final i in record.aptitudes.distance.flatten.indexed) {
+        if (i.$2 >= targetRank) {
+          counts[i.$1]++;
         }
       }
     }
@@ -381,7 +375,7 @@ class CountSRankChartData {
     final barTouchData = BarTouchData(
       enabled: false,
       touchTooltipData: BarTouchTooltipData(
-        tooltipBgColor: Colors.transparent,
+        getTooltipColor: (group) => Colors.transparent,
         tooltipPadding: EdgeInsets.zero,
         tooltipMargin: 0,
         getTooltipItem: (BarChartGroupData group, int groupIndex, BarChartRodData rod, int rodIndex) {
@@ -404,7 +398,7 @@ class CountSRankChartData {
           reservedSize: 30,
           getTitlesWidget: (double value, TitleMeta meta) {
             return SideTitleWidget(
-              axisSide: meta.axisSide,
+              meta: meta,
               space: 4,
               child: Text(labels[value.toInt()]),
             );
@@ -418,12 +412,12 @@ class CountSRankChartData {
       titlesData: titlesData,
       borderData: FlBorderData(show: false),
       barGroups: [
-        for (final i in enumerate(counts))
+        for (final i in counts.indexed)
           BarChartGroupData(
-            x: i.index,
+            x: i.$1,
             barRods: [
               BarChartRodData(
-                toY: i.value.toDouble(),
+                toY: i.$2.toDouble(),
                 width: 16,
                 borderRadius: const BorderRadius.all(Radius.circular(2)),
               )
@@ -438,13 +432,13 @@ class CountSRankChartData {
 
     return BarChart(
       barChartData,
-      swapAnimationDuration: Duration.zero,
+      duration: Duration.zero,
     );
   }
 }
 
 class CountSRankStatisticWidget extends ConsumerWidget {
-  const CountSRankStatisticWidget({Key? key}) : super(key: key);
+  const CountSRankStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(
@@ -488,7 +482,7 @@ class CountStrategyChartData {
 
   CountStrategyChartData(this.records, this.labels) {
     counts = parse();
-    indices = enumerate(counts).sortedBy<num>((e) => -e.value).map((e) => e.index).toList();
+    indices = counts.indexed.sortedBy<num>((e) => -e.$2).map((e) => e.$1).toList();
   }
 
   List<int> parse() {
@@ -520,13 +514,13 @@ class CountStrategyChartData {
 
     return PieChart(
       pieChartData,
-      swapAnimationDuration: Duration.zero,
+      duration: Duration.zero,
     );
   }
 }
 
 class CountStrategyStatisticWidget extends ConsumerWidget {
-  const CountStrategyStatisticWidget({Key? key}) : super(key: key);
+  const CountStrategyStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
     return const StaggeredGridTile.count(

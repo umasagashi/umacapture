@@ -1,8 +1,8 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -14,11 +14,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'ranged_integer.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_ranged_integer = "pages.chara_detail.column_predicate.ranged_integer";
 
-@jsonSerializable
-class IsInRangeIntegerPredicate {
+@MappableClass()
+class IsInRangeIntegerPredicate with IsInRangeIntegerPredicateMappable {
   final int? min;
   final int? max;
 
@@ -51,12 +53,11 @@ class RangedIntegerCellData implements CellData {
   String get csv => value.toString();
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RangedIntegerColumnSpec")
-class RangedIntegerColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'RangedIntegerColumnSpec')
+class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSpecMappable {
   final Parser parser;
   final IsInRangeIntegerPredicate predicate;
 
@@ -105,22 +106,22 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
-    return PlutoCell(value: value)..setUserData(RangedIntegerCellData(value));
+  TrinaCell plutoCell(RefBase ref, int value) {
+    return TrinaCell(value: value)..setUserData(RangedIntegerCellData(value));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.number(),
-      textAlign: PlutoColumnTextAlign.right,
+      type: TrinaColumnType.number(),
+      textAlign: TrinaColumnTextAlign.right,
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
         return Text(data.value.toNumberString(), textAlign: TextAlign.center);
       },
@@ -153,9 +154,8 @@ class _RangedIntegerSelector extends ConsumerWidget {
   final String specId;
 
   const _RangedIntegerSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -248,10 +248,10 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const RangedIntegerColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

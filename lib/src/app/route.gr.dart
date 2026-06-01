@@ -1,106 +1,91 @@
-// **************************************************************************
-// AutoRouteGenerator
-// **************************************************************************
-
+// dart format width=80
 // GENERATED CODE - DO NOT MODIFY BY HAND
 
 // **************************************************************************
-// AutoRouteGenerator
+// AutoRouterGenerator
 // **************************************************************************
-//
+
 // ignore_for_file: type=lint
+// coverage:ignore-file
 
-// ignore_for_file: no_leading_underscores_for_library_prefixes
-import 'package:auto_route/auto_route.dart' as _i6;
-import 'package:flutter/material.dart' as _i7;
+part of 'route.dart';
 
-import '../gui/app_widget.dart' as _i1;
-import '../gui/capture.dart' as _i3;
-import '../gui/chara_detail/page.dart' as _i4;
-import '../gui/dashboard.dart' as _i2;
-import '../gui/settings.dart' as _i5;
+/// generated route for
+/// [AppWidget]
+class AppWidgetRoute extends PageRouteInfo<void> {
+  const AppWidgetRoute({List<PageRouteInfo>? children})
+    : super(AppWidgetRoute.name, initialChildren: children);
 
-class AppRouter extends _i6.RootStackRouter {
-  AppRouter([_i7.GlobalKey<_i7.NavigatorState>? navigatorKey])
-      : super(navigatorKey);
+  static const String name = 'AppWidgetRoute';
 
-  @override
-  final Map<String, _i6.PageFactory> pagesMap = {
-    AppWidget.name: (routeData) {
-      return _i6.MaterialPageX<dynamic>(
-          routeData: routeData, child: const _i1.AppWidget());
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      return const AppWidget();
     },
-    DashboardRoute.name: (routeData) {
-      return _i6.MaterialPageX<dynamic>(
-          routeData: routeData, child: const _i2.DashboardPage());
-    },
-    CaptureRoute.name: (routeData) {
-      return _i6.MaterialPageX<dynamic>(
-          routeData: routeData, child: const _i3.CapturePage());
-    },
-    CharaDetailRoute.name: (routeData) {
-      return _i6.MaterialPageX<dynamic>(
-          routeData: routeData, child: const _i4.CharaDetailPage());
-    },
-    SettingsRoute.name: (routeData) {
-      return _i6.MaterialPageX<dynamic>(
-          routeData: routeData, child: const _i5.SettingsPage());
-    }
-  };
-
-  @override
-  List<_i6.RouteConfig> get routes => [
-        _i6.RouteConfig(AppWidget.name, path: '/', children: [
-          _i6.RouteConfig(DashboardRoute.name,
-              path: '', parent: AppWidget.name),
-          _i6.RouteConfig(CaptureRoute.name,
-              path: 'capture-page', parent: AppWidget.name),
-          _i6.RouteConfig(CharaDetailRoute.name,
-              path: 'chara-detail-page', parent: AppWidget.name),
-          _i6.RouteConfig(SettingsRoute.name,
-              path: 'settings-page', parent: AppWidget.name)
-        ])
-      ];
+  );
 }
 
 /// generated route for
-/// [_i1.AppWidget]
-class AppWidget extends _i6.PageRouteInfo<void> {
-  const AppWidget({List<_i6.PageRouteInfo>? children})
-      : super(AppWidget.name, path: '/', initialChildren: children);
-
-  static const String name = 'AppWidget';
-}
-
-/// generated route for
-/// [_i2.DashboardPage]
-class DashboardRoute extends _i6.PageRouteInfo<void> {
-  const DashboardRoute() : super(DashboardRoute.name, path: '');
-
-  static const String name = 'DashboardRoute';
-}
-
-/// generated route for
-/// [_i3.CapturePage]
-class CaptureRoute extends _i6.PageRouteInfo<void> {
-  const CaptureRoute() : super(CaptureRoute.name, path: 'capture-page');
+/// [CapturePage]
+class CaptureRoute extends PageRouteInfo<void> {
+  const CaptureRoute({List<PageRouteInfo>? children})
+    : super(CaptureRoute.name, initialChildren: children);
 
   static const String name = 'CaptureRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      return const CapturePage();
+    },
+  );
 }
 
 /// generated route for
-/// [_i4.CharaDetailPage]
-class CharaDetailRoute extends _i6.PageRouteInfo<void> {
-  const CharaDetailRoute()
-      : super(CharaDetailRoute.name, path: 'chara-detail-page');
+/// [CharaDetailPage]
+class CharaDetailRoute extends PageRouteInfo<void> {
+  const CharaDetailRoute({List<PageRouteInfo>? children})
+    : super(CharaDetailRoute.name, initialChildren: children);
 
   static const String name = 'CharaDetailRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      return const CharaDetailPage();
+    },
+  );
 }
 
 /// generated route for
-/// [_i5.SettingsPage]
-class SettingsRoute extends _i6.PageRouteInfo<void> {
-  const SettingsRoute() : super(SettingsRoute.name, path: 'settings-page');
+/// [DashboardPage]
+class DashboardRoute extends PageRouteInfo<void> {
+  const DashboardRoute({List<PageRouteInfo>? children})
+    : super(DashboardRoute.name, initialChildren: children);
+
+  static const String name = 'DashboardRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      return const DashboardPage();
+    },
+  );
+}
+
+/// generated route for
+/// [SettingsPage]
+class SettingsRoute extends PageRouteInfo<void> {
+  const SettingsRoute({List<PageRouteInfo>? children})
+    : super(SettingsRoute.name, initialChildren: children);
 
   static const String name = 'SettingsRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      return const SettingsPage();
+    },
+  );
 }

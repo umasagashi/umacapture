@@ -1,0 +1,6 @@
+# Flutter regenerates these on every `flutter pub get` / build, writing LF line
+# endings. Without a rule, core.autocrlf rewrites the working copy to CRLF and
+# git reports a spurious (content-identical) diff after each build. Pin them to
+# LF so regeneration matches the committed blob and produces no EOL-only churn.
+windows/flutter/generated_plugin_registrant.* eol=lf
+windows/flutter/generated_plugins.cmake       eol=lf

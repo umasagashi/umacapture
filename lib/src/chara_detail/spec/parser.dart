@@ -1,191 +1,167 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/core/utils.dart';
 
-@jsonSerializable
-@Json(discriminatorProperty: 'type')
-abstract class Parser<T> {
+part 'parser.mapper.dart';
+
+@MappableClass(discriminatorKey: 'type')
+abstract class Parser<T> with ParserMappable<T> {
   String get type => runtimeType.toString();
 
   T parse(CharaDetailRecord record);
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "EvaluationValueParser")
-class EvaluationValueParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'EvaluationValueParser')
+class EvaluationValueParser extends Parser<int> with EvaluationValueParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.evaluationValue;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "CharaCardParser")
-class CharaCardParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'CharaCardParser')
+class CharaCardParser extends Parser<int> with CharaCardParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.trainee.card;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "StatusSpeedParser")
-class StatusSpeedParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'StatusSpeedParser')
+class StatusSpeedParser extends Parser<int> with StatusSpeedParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.status.speed;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "StatusStaminaParser")
-class StatusStaminaParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'StatusStaminaParser')
+class StatusStaminaParser extends Parser<int> with StatusStaminaParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.status.stamina;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "StatusPowerParser")
-class StatusPowerParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'StatusPowerParser')
+class StatusPowerParser extends Parser<int> with StatusPowerParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.status.power;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "StatusGutsParser")
-class StatusGutsParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'StatusGutsParser')
+class StatusGutsParser extends Parser<int> with StatusGutsParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.status.guts;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "StatusIntelligenceParser")
-class StatusIntelligenceParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'StatusIntelligenceParser')
+class StatusIntelligenceParser extends Parser<int> with StatusIntelligenceParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.status.intelligence;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "TurfGroundAptitudeParser")
-class TurfGroundAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'TurfGroundAptitudeParser')
+class TurfGroundAptitudeParser extends Parser<int> with TurfGroundAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.ground.turf;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "DirtGroundAptitudeParser")
-class DirtGroundAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'DirtGroundAptitudeParser')
+class DirtGroundAptitudeParser extends Parser<int> with DirtGroundAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.ground.dirt;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "ShortRangeAptitudeParser")
-class ShortRangeAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'ShortRangeAptitudeParser')
+class ShortRangeAptitudeParser extends Parser<int> with ShortRangeAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.shortRange;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "MileRangeAptitudeParser")
-class MileRangeAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'MileRangeAptitudeParser')
+class MileRangeAptitudeParser extends Parser<int> with MileRangeAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.mileRange;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "MiddleRangeAptitudeParser")
-class MiddleRangeAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'MiddleRangeAptitudeParser')
+class MiddleRangeAptitudeParser extends Parser<int> with MiddleRangeAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.middleRange;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "LongRangeAptitudeParser")
-class LongRangeAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'LongRangeAptitudeParser')
+class LongRangeAptitudeParser extends Parser<int> with LongRangeAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.distance.longRange;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "LeadPaceAptitudeParser")
-class LeadPaceAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'LeadPaceAptitudeParser')
+class LeadPaceAptitudeParser extends Parser<int> with LeadPaceAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.leadPace;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "WithPaceAptitudeParser")
-class WithPaceAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'WithPaceAptitudeParser')
+class WithPaceAptitudeParser extends Parser<int> with WithPaceAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.withPace;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "OffPaceAptitudeParser")
-class OffPaceAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'OffPaceAptitudeParser')
+class OffPaceAptitudeParser extends Parser<int> with OffPaceAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.offPace;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "LateChargeAptitudeParser")
-class LateChargeAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'LateChargeAptitudeParser')
+class LateChargeAptitudeParser extends Parser<int> with LateChargeAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.aptitudes.style.lateCharge;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "SkillParser")
-class SkillParser extends Parser<List<Skill>> {
+@MappableClass(discriminatorValue: 'SkillParser')
+class SkillParser extends Parser<List<Skill>> with SkillParserMappable {
   @override
   List<Skill> parse(CharaDetailRecord record) => record.skills;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "FactorSetParser")
-class FactorSetParser extends Parser<FactorSet> {
+@MappableClass(discriminatorValue: 'FactorSetParser')
+class FactorSetParser extends Parser<FactorSet> with FactorSetParserMappable {
   @override
   FactorSet parse(CharaDetailRecord record) => record.factors;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "FansParser")
-class FansParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'FansParser')
+class FansParser extends Parser<int> with FansParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.fans;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "ForeignAptitudeParser")
-class ForeignAptitudeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'ForeignAptitudeParser')
+class ForeignAptitudeParser extends Parser<int> with ForeignAptitudeParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.foreignAptitude ?? 0;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "TrainedDateParser")
-class TrainedDateParser extends Parser<DateTime> {
+@MappableClass(discriminatorValue: 'TrainedDateParser')
+class TrainedDateParser extends Parser<DateTime> with TrainedDateParserMappable {
   @override
   DateTime parse(CharaDetailRecord record) {
     return record.trainedDate.replaceAll("/", "-").toDateTime();
   }
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "CapturedDateParser")
-class CapturedDateParser extends Parser<DateTime> {
+@MappableClass(discriminatorValue: 'CapturedDateParser')
+class CapturedDateParser extends Parser<DateTime> with CapturedDateParserMappable {
   @override
   DateTime parse(CharaDetailRecord record) {
     return record.metadata.capturedDate.toDateTime().toLocal();
   }
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RaceWinningCountParser")
-class RaceWinningCountParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'RaceWinningCountParser')
+class RaceWinningCountParser extends Parser<int> with RaceWinningCountParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.races.where((e) => e.won).length;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RecordTypeParser")
-class RecordTypeParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'RecordTypeParser')
+class RecordTypeParser extends Parser<int> with RecordTypeParserMappable {
   @override
   int parse(CharaDetailRecord record) {
     final recordType = record.metadata.recordType ?? RecordType.standard;
@@ -193,23 +169,20 @@ class RecordTypeParser extends Parser<int> {
   }
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "CampaignScenarioParser")
-class CampaignScenarioParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'CampaignScenarioParser')
+class CampaignScenarioParser extends Parser<int> with CampaignScenarioParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.scenario.id;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "TraineeIdParser")
-class TraineeIdParser extends Parser<String> {
+@MappableClass(discriminatorValue: 'TraineeIdParser')
+class TraineeIdParser extends Parser<String> with TraineeIdParserMappable {
   @override
   String parse(CharaDetailRecord record) => record.id;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RaceStrategyParser")
-class RaceStrategyParser extends Parser<int> {
+@MappableClass(discriminatorValue: 'RaceStrategyParser')
+class RaceStrategyParser extends Parser<int> with RaceStrategyParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.metadata.strategy;
 }

@@ -1,8 +1,8 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -18,11 +18,13 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'memo.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_memo = "pages.chara_detail.column_predicate.memo";
 
-@jsonSerializable
-class RegExpPredicate {
+@MappableClass()
+class RegExpPredicate with RegExpPredicateMappable {
   final RegExp? pattern;
 
   RegExpPredicate({
@@ -46,7 +48,7 @@ class MemoCellData implements CellData {
   final String? value;
 
   @override
-  final Predicate<PlutoGridOnSelectedEvent>? onSelected;
+  final Predicate<TrinaGridOnSelectedEvent>? onSelected;
 
   @override
   String get csv => value ?? "";
@@ -54,9 +56,8 @@ class MemoCellData implements CellData {
   MemoCellData(this.value, this.onSelected);
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "MemoColumnSpec")
-class MemoColumnSpec extends ColumnSpec<String?> {
+@MappableClass(discriminatorValue: 'MemoColumnSpec')
+class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   final Parser parser;
   final RegExpPredicate predicate;
   final String storageKey;
@@ -106,12 +107,12 @@ class MemoColumnSpec extends ColumnSpec<String?> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, String? value) {
-    return PlutoCell(
+  TrinaCell plutoCell(RefBase ref, String? value) {
+    return TrinaCell(
       value: value ?? "_" * 20,
     )..setUserData(MemoCellData(
         value,
-        (PlutoGridOnSelectedEvent event) {
+        (TrinaGridOnSelectedEvent event) {
           final record = event.row!.getUserData<CharaDetailRecord>()!;
           final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
           _RecordMemoDialog.show(
@@ -126,15 +127,15 @@ class MemoColumnSpec extends ColumnSpec<String?> {
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<MemoCellData>()!;
         if (data.value == null) {
           return Opacity(opacity: 0.4, child: Text("$tr_memo.cell.description".tr()));
@@ -172,11 +173,10 @@ class _RecordMemoDialog extends ConsumerStatefulWidget {
   final String initialMemo;
 
   const _RecordMemoDialog({
-    Key? key,
     required this.recordId,
     required this.storageKey,
     required this.initialMemo,
-  }) : super(key: key);
+  });
 
   static void show(
     RefBase ref, {
@@ -212,7 +212,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recordStorage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final recordStorage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final record = recordStorage.getBy(id: widget.recordId)!;
     final iconPath = recordStorage.traineeIconPathOf(record);
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
@@ -251,7 +251,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
           children: [
             Tooltip(
               message: "$tr_memo.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.check_circle),
                 label: Text("$tr_memo.dialog.ok_button.label".tr()),
                 onPressed: () {
@@ -274,10 +274,9 @@ class _PatternSelector extends ConsumerStatefulWidget {
   final ChangeNotifier onDecided;
 
   const _PatternSelector({
-    Key? key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _PatternSelectorState();
@@ -422,7 +421,7 @@ class _StorageController extends ConsumerWidget {
               storageFile.deleteSyncWithCheck();
             }
 
-            ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
+            ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_memo.storage.delete.button".tr()),
@@ -438,11 +437,11 @@ class MemoColumnSelector extends ConsumerWidget {
   final String storageKey;
 
   const MemoColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
     required this.storageKey,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

@@ -15,7 +15,7 @@ import '/src/gui/common.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 class ColumnBuilderDialog extends ConsumerWidget {
-  const ColumnBuilderDialog({Key? key}) : super(key: key);
+  const ColumnBuilderDialog({super.key});
 
   static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const ColumnBuilderDialog());
@@ -28,7 +28,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
       label: Text("$tr_chara_detail.column_spec.dialog.add_all_button.label".tr()),
       tooltip: "$tr_chara_detail.column_spec.dialog.add_all_button.tooltip".tr(),
       onPressed: () {
-        final specs = ref.read(currentColumnSpecsProvider.notifier);
+        final specs = ref.read(currentColumnSpecsLoaderProvider.notifier);
         for (final builder in targets) {
           if (builder.type == ColumnBuilderType.normal) {
             specs.add(builder.build(ref.base));
@@ -44,16 +44,16 @@ class ColumnBuilderDialog extends ConsumerWidget {
     return GestureDetector(
       onLongPress: () {
         final spec = builder.build(ref.base);
-        ref.read(currentColumnSpecsProvider.notifier).replaceById(spec);
+        ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
         CardDialog.dismiss(ref.base);
         ColumnSpecDialog.show(ref.base, spec);
       },
       child: ActionChip(
         backgroundColor:
-            builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor!.withOpacity(0.2),
+            builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor,
         label: Text(builder.title),
         onPressed: () {
-          ref.read(currentColumnSpecsProvider.notifier).replaceById(builder.build(ref.base));
+          ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(builder.build(ref.base));
           CardDialog.dismiss(ref.base);
         },
       ),
@@ -86,7 +86,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurface.withOpacity(0.1),
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Wrap(
@@ -104,7 +104,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurface.withOpacity(0.1),
+                  color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Wrap(
@@ -138,7 +138,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
             padding: const EdgeInsets.all(8),
             child: Container(
               decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer.withOpacity(0.2),
+                color: theme.colorScheme.surfaceContainerHighest,
                 border: Border.all(color: theme.colorScheme.primaryContainer),
                 borderRadius: BorderRadius.circular(8),
               ),

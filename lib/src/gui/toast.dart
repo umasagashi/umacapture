@@ -44,7 +44,7 @@ class ToastData {
 }
 
 class Toaster {
-  static show(ToastData data) {
+  static void show(ToastData data) {
     assert(data.description != null || data.label != null);
     _plainToastEventController.sink.add(data);
   }
@@ -99,7 +99,7 @@ class Toaster {
               child: data.label ?? Text(data.description!, style: const TextStyle(color: Colors.white, fontSize: 16)),
             ),
           ),
-          style: ButtonStyle(overlayColor: MaterialStateProperty.all<Color>(Colors.transparent)),
+          style: ButtonStyle(overlayColor: WidgetStateProperty.all<Color>(Colors.transparent)),
           onPressed: () {
             snackBar.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
             data.onTap?.call();

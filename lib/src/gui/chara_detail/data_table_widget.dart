@@ -2,7 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -30,13 +30,13 @@ final charaDetailInitialDataLoader = FutureProvider((ref) async {
   ]).then((_) {
     return Future.wait([
       ref.watch(moduleInfoLoaders.future),
-      ref.watch(charaDetailRecordStorageLoader.future),
+      ref.watch(charaDetailRecordStorageLoaderProvider.future),
     ]);
   });
 });
 
 class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
-  const _CharaDetailDataTableWidget({Key? key}) : super(key: key);
+  const _CharaDetailDataTableWidget();
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _CharaDetailDataTableWidgetState();
@@ -44,12 +44,12 @@ class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
 
 class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTableWidget> {
   String? sortColumn;
-  PlutoColumnSort sortOrder = PlutoColumnSort.none;
-  late PlutoGridStateManager stateManager;
+  TrinaColumnSort sortOrder = TrinaColumnSort.none;
+  late TrinaGridStateManager stateManager;
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final rect = offset & const Size(1, 1);
     const height = 40.0;
     final style = theme.textTheme.labelMedium;
@@ -57,7 +57,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       context: context,
       position: RelativeRect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom),
       shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outline.withOpacity(0.5)),
+        side: BorderSide(color: theme.colorScheme.outline),
         borderRadius: BorderRadius.circular(8),
       ),
       items: [
@@ -131,28 +131,26 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         children: [
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
-              return PlutoGrid(
-                // Since PlutoGrid have internal states, it won't rebuilt without changing the key each time.
+              return TrinaGrid(
+                // Since TrinaGrid have internal states, it won't rebuilt without changing the key each time.
                 key: ValueKey(const Uuid().v4()),
                 columns: grid.columns,
                 rows: grid.rows,
-                mode: PlutoGridMode.select,
-                configuration: PlutoGridConfiguration(
-                  enterKeyAction: PlutoGridEnterKeyAction.toggleEditing,
-                  scrollbar: const PlutoGridScrollbarConfig(
+                mode: TrinaGridMode.select,
+                configuration: TrinaGridConfiguration(
+                  enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
+                  scrollbar: const TrinaGridScrollbarConfig(
                     isAlwaysShown: true,
-                    scrollbarRadius: Radius.circular(8),
-                    scrollbarRadiusWhileDragging: Radius.circular(8),
-                    scrollbarThickness: 12,
-                    scrollbarThicknessWhileDragging: 12,
+                    radius: 8,
+                    thickness: 12,
                   ),
-                  style: PlutoGridStyleConfig(
+                  style: TrinaGridStyleConfig(
                     enableCellBorderVertical: false,
                     gridBackgroundColor: theme.colorScheme.surface,
                     rowColor: theme.colorScheme.surface,
-                    evenRowColor: theme.colorScheme.surfaceVariant,
+                    evenRowColor: theme.colorScheme.blueTintedSurface,
                     activatedColor: theme.focusColor,
-                    gridBorderColor: theme.colorScheme.outline.withOpacity(0.5),
+                    gridBorderColor: theme.colorScheme.outline,
                     borderColor: theme.focusColor,
                     activatedBorderColor: theme.focusColor,
                     inactivatedBorderColor: theme.focusColor,
@@ -160,23 +158,23 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     cellTextStyle: theme.textTheme.bodyMedium!,
                   ),
                 ),
-                onLoaded: (PlutoGridOnLoadedEvent event) {
+                onLoaded: (TrinaGridOnLoadedEvent event) {
                   stateManager = event.stateManager;
                   event.stateManager.autoFitColumns();
                   if (sortColumn != null) {
                     event.stateManager.sortColumnByField(sortColumn!, sortOrder);
                   }
                 },
-                onRowSecondaryTap: (PlutoGridOnRowSecondaryTapEvent event) {
-                  final record = event.row!.getUserData<CharaDetailRecord>()!;
-                  final spec = event.cell?.column.getUserData<ColumnSpec>();
-                  showPopup(context, ref, event.offset!, record, spec!.cellAction.tabIdx ?? 0);
+                onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
+                  final record = event.row.getUserData<CharaDetailRecord>()!;
+                  final spec = event.cell.column.getUserData<ColumnSpec>();
+                  showPopup(context, ref, event.offset, record, spec!.cellAction.tabIdx ?? 0);
                 },
-                onSelected: (PlutoGridOnSelectedEvent event) {
+                onSelected: (TrinaGridOnSelectedEvent event) {
                   try {
                     final data = event.cell?.getUserData<CellData>();
                     if (!(data?.onSelected?.call(event) ?? false)) {
-                      final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+                      final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
                       final records = stateManager.getSortedRecords().map((e) => storage.recordPathOf(e)).toList();
                       CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
                     }
@@ -185,10 +183,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     captureException(error, stackTrace);
                   }
                 },
-                onSorted: (PlutoGridOnSortedEvent event) {
-                  if (event.column.sort == PlutoColumnSort.none) {
+                onSorted: (TrinaGridOnSortedEvent event) {
+                  if (event.column.sort == TrinaColumnSort.none) {
                     sortColumn = null;
-                    sortOrder = PlutoColumnSort.none;
+                    sortOrder = TrinaColumnSort.none;
                   } else {
                     sortColumn = event.column.field;
                     sortOrder = event.column.sort;
@@ -205,7 +203,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 }
 
 class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
-  const _CharaDetailDataTablePreCheckLayer({Key? key}) : super(key: key);
+  const _CharaDetailDataTablePreCheckLayer();
 
   Widget regenerationProgressWidget(BuildContext context, Progress regenerationProgress) {
     final theme = Theme.of(context);
@@ -251,7 +249,7 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
 }
 
 class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
-  const CharaDetailDataTableLoaderLayer({Key? key}) : super(key: key);
+  const CharaDetailDataTableLoaderLayer({super.key});
 
   Widget loading() {
     return Center(
@@ -267,7 +265,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     );
   }
 
-  Widget error(errorMessage, stackTrace, theme) {
+  Widget error(Object? errorMessage, Object? stackTrace, ThemeData theme) {
     return Center(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,

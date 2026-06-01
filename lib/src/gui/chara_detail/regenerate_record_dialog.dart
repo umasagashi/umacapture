@@ -14,9 +14,9 @@ class RegenerateRecordDialog extends ConsumerWidget {
   final String recordId;
 
   const RegenerateRecordDialog({
-    Key? key,
+    super.key,
     required this.recordId,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, {required String recordId}) {
     CardDialog.show(ref, (_) {
@@ -27,7 +27,7 @@ class RegenerateRecordDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final record = storage.getBy(id: recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
@@ -72,10 +72,10 @@ class RegenerateRecordDialog extends ConsumerWidget {
             const SizedBox(width: 8),
             Tooltip(
               message: "$tr_regenerate_record.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  primary: theme.colorScheme.error,
-                  onPrimary: theme.colorScheme.onError,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: theme.colorScheme.error,
+                  foregroundColor: theme.colorScheme.onError,
                 ),
                 icon: const Icon(Icons.refresh),
                 label: Text("$tr_regenerate_record.dialog.ok_button.label".tr()),

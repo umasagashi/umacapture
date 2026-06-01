@@ -32,6 +32,11 @@ public:
                         result->Success();
                     } catch (std::exception &err) {
                         result->Error("PlatformMethodError", err.what());
+                    } catch (...) {
+                        // Some native APIs (e.g. WinRT) throw exception types that do not
+                        // derive from std::exception. Report them instead of letting them
+                        // escape into the embedder and terminate the whole process.
+                        result->Error("PlatformMethodError", "Unhandled native exception");
                     }
                 } else {
                     result->NotImplemented();

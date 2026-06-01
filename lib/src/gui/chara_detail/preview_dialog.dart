@@ -1,5 +1,5 @@
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -12,19 +12,21 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/common.dart';
 
+part 'preview_dialog.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_preview = "pages.chara_detail.preview";
 
-@jsonSerializable
-class Anchor {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Anchor with AnchorMappable {
   final String h;
   final String v;
 
   Anchor(this.h, this.v);
 }
 
-@jsonSerializable
-class Point {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Point with PointMappable {
   final int x;
   final int y;
   final Anchor anchor;
@@ -32,8 +34,8 @@ class Point {
   Point(this.x, this.y, this.anchor);
 }
 
-@jsonSerializable
-class Rect {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Rect with RectMappable {
   final Point topLeft;
   final Point bottomRight;
 
@@ -46,16 +48,16 @@ class Rect {
   Rect(this.topLeft, this.bottomRight);
 }
 
-@jsonSerializable
-class Prediction {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class Prediction with PredictionMappable {
   final double confidence;
   final dynamic label;
 
   Prediction(this.confidence, this.label);
 }
 
-@jsonSerializable
-class PredictionData {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class PredictionData with PredictionDataMappable {
   final String model;
   final Rect rect;
   final Prediction prediction;
@@ -101,8 +103,8 @@ class PredictionData {
   }
 }
 
-@jsonSerializable
-class PredictionContainer {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class PredictionContainer with PredictionContainerMappable {
   final List<PredictionData> statusHeader;
   final List<PredictionData> skillTab;
   final List<PredictionData> factorTab;
@@ -111,16 +113,14 @@ class PredictionContainer {
   PredictionContainer(this.statusHeader, this.skillTab, this.factorTab, this.campaignTab);
 
   static PredictionContainer? load(DirectoryPath recordDir) {
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-    return JsonMapper.deserialize<PredictionContainer>(
+    return PredictionContainerMapper.fromJson(
       recordDir.filePath("prediction.json").readAsStringSync(),
-      options,
     );
   }
 }
 
-@jsonSerializable
-class ImageSizeInfo {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class ImageSizeInfo with ImageSizeInfoMappable {
   final Rect intersection;
 
   ImageSizeInfo(this.intersection);
@@ -139,9 +139,9 @@ class ImageSizeContainer {
 
   static ImageSizeContainer? load(DirectoryPath recordDir) {
     return ImageSizeContainer(
-      skill: recordDir.filePath("skill.json").deserializeSync<ImageSizeInfo>()!,
-      factor: recordDir.filePath("factor.json").deserializeSync<ImageSizeInfo>()!,
-      campaign: recordDir.filePath("campaign.json").deserializeSync<ImageSizeInfo>()!,
+      skill: recordDir.filePath("skill.json").deserializeSync<ImageSizeInfo>(),
+      factor: recordDir.filePath("factor.json").deserializeSync<ImageSizeInfo>(),
+      campaign: recordDir.filePath("campaign.json").deserializeSync<ImageSizeInfo>(),
     );
   }
 }
@@ -155,14 +155,14 @@ class ImageViewer extends ConsumerWidget {
   final PredictionContainer? prediction;
 
   const ImageViewer({
-    Key? key,
+    super.key,
     required this.recordDir,
     required this.imageSize,
     required this.overlay,
     required this.transformationController,
     required this.maxScale,
     required this.prediction,
-  }) : super(key: key);
+  });
 
   static ImageViewer? load({
     required DirectoryPath recordDir,
@@ -185,7 +185,7 @@ class ImageViewer extends ConsumerWidget {
       recordDir: recordDir,
       imageSize: imageSize,
       overlay: overlay,
-      transformationController: TransformationController(Matrix4.identity()..scale(scale)),
+      transformationController: TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0)),
       maxScale: scale * 3,
       prediction: prediction,
     );
@@ -200,7 +200,7 @@ class ImageViewer extends ConsumerWidget {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(
       color: Colors.black,
-      backgroundColor: Colors.white.withOpacity(0.5),
+      backgroundColor: Colors.white.withValues(alpha: 0.5),
       fontSize: 9,
     );
     return Stack(
@@ -224,7 +224,7 @@ class ImageViewer extends ConsumerWidget {
                   height: data.rect.height.toDouble() + 1,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.zero,
-                    border: Border.all(color: Colors.black.withOpacity(0.5)),
+                    border: Border.all(color: Colors.black.withValues(alpha: 0.5)),
                   ),
                 ),
                 SizedBox(
@@ -296,10 +296,10 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
   final int initialIdx;
 
   const CharaDetailPreviewDialog({
-    Key? key,
+    super.key,
     required this.recordDirs,
     required this.initialIdx,
-  }) : super(key: key);
+  });
 
   static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx) {
     CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx));
@@ -406,7 +406,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
             ),
             Tooltip(
               message: "$tr_preview.dialog.close_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.close),
                 label: Text("$tr_preview.dialog.close_button.label".tr()),
                 onPressed: () {

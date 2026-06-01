@@ -1,9 +1,9 @@
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -16,11 +16,13 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'character.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_character = "pages.chara_detail.column_predicate.character";
 
-@jsonSerializable
-class CharacterCardPredicate {
+@MappableClass()
+class CharacterCardPredicate with CharacterCardPredicateMappable {
   final Set<int> rejects;
 
   CharacterCardPredicate({
@@ -43,12 +45,11 @@ class CharacterCardCellData implements CellData {
   String get csv => name;
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "CharacterCardColumnSpec")
-class CharacterCardColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'CharacterCardColumnSpec')
+class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSpecMappable {
   final Parser parser;
   final CharacterCardPredicate predicate;
 
@@ -93,23 +94,23 @@ class CharacterCardColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
+  TrinaCell plutoCell(RefBase ref, int value) {
     final card = ref.watch(charaCardInfoProvider)[value];
-    return PlutoCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
+    return TrinaCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
+  TrinaColumn plutoColumn(RefBase ref) {
     final recordRootDir = ref.watch(pathInfoProvider).charaDetailActiveDir;
-    return PlutoColumn(
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.number(),
+      type: TrinaColumnType.number(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
         return Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
       },
@@ -169,7 +170,7 @@ class _CharaCardChip extends ConsumerWidget {
               padding: const EdgeInsets.only(left: 36),
               child: Text(card.cardInfo.names.first),
             ),
-            backgroundColor: selected ? null : theme.colorScheme.surfaceVariant,
+            backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
             showCheckmark: false,
             selected: selected,
             onSelected: (selected) {
@@ -206,9 +207,8 @@ class _CharacterCardSelector extends ConsumerWidget {
   final String specId;
 
   const _CharacterCardSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -295,10 +295,10 @@ class CharacterCardColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const CharacterCardColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

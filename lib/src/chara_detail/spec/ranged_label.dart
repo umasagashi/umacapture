@@ -1,8 +1,8 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -16,6 +16,8 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
+part 'ranged_label.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
 
@@ -28,12 +30,11 @@ class RangedLabelCellData implements CellData {
   String get csv => label;
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RangedLabelColumnSpec")
-class RangedLabelColumnSpec extends ColumnSpec<int> {
+@MappableClass(discriminatorValue: 'RangedLabelColumnSpec')
+class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMappable {
   final Parser parser;
   final String labelKey;
   IsInRangeIntegerPredicate predicate;
@@ -83,24 +84,24 @@ class RangedLabelColumnSpec extends ColumnSpec<int> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, int value) {
+  TrinaCell plutoCell(RefBase ref, int value) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    return PlutoCell(
+    return TrinaCell(
       value: value,
     )..setUserData(RangedLabelCellData(labels[value]));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
-    return PlutoColumn(
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.number(),
+      type: TrinaColumnType.number(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedLabelCellData>()!;
         return Text(
           data.label,
@@ -137,9 +138,8 @@ class _RangedLabelSelector extends ConsumerWidget {
   final String specId;
 
   const _RangedLabelSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -233,10 +233,10 @@ class RangedLabelColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
 
   const RangedLabelColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

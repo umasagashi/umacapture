@@ -1,4 +1,4 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:pasteboard/pasteboard.dart';
 
@@ -9,18 +9,21 @@ import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
 
-@jsonSerializable
+part 'clipboard_alt.mapper.dart';
+
+// snake_case matches the pre-dart_mappable Hive JsonAdapter's CaseStyle.snake
+// encoding. Current values are single-word (so identical either way), but the
+// explicit style keeps stored data stable if a multi-word value is added.
+@MappableEnum(caseStyle: CaseStyle.snakeCase)
 enum ClipboardPasteImageMode {
   memory,
   file,
 }
 
-final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider<ClipboardPasteImageMode>(() {
   return ExclusiveItemsNotifier<ClipboardPasteImageMode>(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.clipboardPasteImageMode.name),
+    entryKey: SettingsEntryKey.clipboardPasteImageMode.name,
     values: ClipboardPasteImageMode.values,
     defaultValue: ClipboardPasteImageMode.memory,
   );

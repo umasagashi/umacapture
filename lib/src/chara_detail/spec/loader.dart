@@ -1,23 +1,24 @@
 import 'dart:async';
 
 import 'package:collection/collection.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/toast.dart';
-import '/src/preference/storage_box.dart';
+
+part 'loader.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_columns = "pages.chara_detail.columns";
@@ -38,16 +39,15 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
     ]).then((_) {
       return Future.wait([
-        ref.watch(_currentColumnSpecsLoader.future),
+        ref.watch(currentColumnSpecsLoaderProvider.future),
       ]);
     });
   });
 });
 
 Future<T> _loadFromJson<T>(FilePath path) async {
-  initializeJsonReflectable();
-  const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-  return path.toFile().readAsString().then((e) => JsonMapper.deserialize<T>(e, options)!);
+  initializeMappers();
+  return path.toFile().readAsString().then((e) => MapperContainer.globals.fromJson<T>(e));
 }
 
 final labelMapLoader = FutureProvider<LabelMap>((ref) async {
@@ -161,8 +161,8 @@ class _RatingDataWriter {
   _RatingDataWriter(this.path, this.data);
 
   static Future<void> _run(_RatingDataWriter arg) {
-    initializeJsonReflectable();
-    return arg.path.writeAsString(JsonMapper.serialize(arg.data));
+    initializeMappers();
+    return arg.path.writeAsString(arg.data.toJson());
   }
 
   Future<void> run() {
@@ -170,8 +170,8 @@ class _RatingDataWriter {
   }
 }
 
-@jsonSerializable
-class RatingData {
+@MappableClass()
+class RatingData with RatingDataMappable {
   final String title;
   final Map<String, double> data;
 
@@ -179,14 +179,6 @@ class RatingData {
     required this.title,
     required this.data,
   });
-
-  @jsonConstructor
-  RatingData.fromJson(
-    @JsonProperty(name: 'title') String title,
-    @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
-    // ignore: prefer_initializing_formals
-  )   : title = title,
-        data = Map<String, double>.from(data);
 
   RatingData copyWith({
     String? title,
@@ -206,10 +198,18 @@ class RatingData {
   }
 }
 
-class CharaDetailRecordRatingController extends StateNotifier<RatingData> {
-  final FilePath path;
+class CharaDetailRecordRatingController extends Notifier<RatingData> {
+  CharaDetailRecordRatingController(this.key);
 
-  CharaDetailRecordRatingController(this.path, super.state);
+  final String key;
+
+  late FilePath path;
+
+  @override
+  RatingData build() {
+    path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
+    return path.existsSync() ? RatingDataMapper.fromJson(path.readAsStringSync()) : RatingData.empty;
+  }
 
   void updateWithoutNotify(String recordId, double rating) {
     state.data[recordId] = rating;
@@ -250,7 +250,7 @@ class RatingStorageData {
 }
 
 Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async {
-  initializeJsonReflectable();
+  initializeMappers();
   if (!directoryPath.existsSync()) {
     return [];
   }
@@ -258,7 +258,7 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
       .listSync()
       .map((e) => RatingStorageData(
             key: e.stem,
-            title: JsonMapper.deserialize<RatingData>(e.asFilePath.readAsStringSync())!.title,
+            title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
           ))
       .toList();
 }
@@ -268,19 +268,27 @@ final _charaDetailRecordRatingStorageDataLoader = FutureProvider<List<RatingStor
   return compute(_loadRatings, path);
 });
 
-final charaDetailRecordRatingStorageDataProvider = StateProvider<List<RatingStorageData>>((ref) {
-  return ref.watch(_charaDetailRecordRatingStorageDataLoader).value!;
-});
+// Holds the list of rating/memo storage descriptors. Replaces the legacy
+// StateProvider<List<T>>; [update] mirrors StateController.update so the dialog
+// call sites keep their `(state) => newList` closures unchanged.
+abstract class _StorageDataNotifier<T> extends Notifier<List<T>> {
+  List<T> update(List<T> Function(List<T> state) cb) => state = cb(state);
+}
+
+class CharaDetailRecordRatingStorageDataNotifier extends _StorageDataNotifier<RatingStorageData> {
+  @override
+  List<RatingStorageData> build() => ref.watch(_charaDetailRecordRatingStorageDataLoader).value!;
+}
+
+final charaDetailRecordRatingStorageDataProvider =
+    NotifierProvider<CharaDetailRecordRatingStorageDataNotifier, List<RatingStorageData>>(
+  CharaDetailRecordRatingStorageDataNotifier.new,
+);
 
 final charaDetailRecordRatingProvider =
-    StateNotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>((ref, key) {
-  final path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
-  if (!path.existsSync()) {
-    return CharaDetailRecordRatingController(path, RatingData.empty);
-  } else {
-    return CharaDetailRecordRatingController(path, JsonMapper.deserialize<RatingData>(path.readAsStringSync())!);
-  }
-});
+    NotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>(
+  CharaDetailRecordRatingController.new,
+);
 
 class _MemoDataWriter {
   final FilePath path;
@@ -289,8 +297,8 @@ class _MemoDataWriter {
   _MemoDataWriter(this.path, this.data);
 
   static Future<void> _run(_MemoDataWriter arg) {
-    initializeJsonReflectable();
-    return arg.path.writeAsString(JsonMapper.serialize(arg.data));
+    initializeMappers();
+    return arg.path.writeAsString(arg.data.toJson());
   }
 
   Future<void> run() {
@@ -298,8 +306,8 @@ class _MemoDataWriter {
   }
 }
 
-@jsonSerializable
-class MemoData {
+@MappableClass()
+class MemoData with MemoDataMappable {
   final String title;
   final Map<String, String> data;
 
@@ -307,14 +315,6 @@ class MemoData {
     required this.title,
     required this.data,
   });
-
-  @jsonConstructor
-  MemoData.fromJson(
-    @JsonProperty(name: 'title') String title,
-    @JsonProperty(name: 'data') Map<dynamic, dynamic> data,
-    // ignore: prefer_initializing_formals
-  )   : title = title,
-        data = Map<String, String>.from(data);
 
   MemoData copyWith({
     String? title,
@@ -334,10 +334,18 @@ class MemoData {
   }
 }
 
-class CharaDetailRecordMemoController extends StateNotifier<MemoData> {
-  final FilePath path;
+class CharaDetailRecordMemoController extends Notifier<MemoData> {
+  CharaDetailRecordMemoController(this.key);
 
-  CharaDetailRecordMemoController(this.path, super.state);
+  final String key;
+
+  late FilePath path;
+
+  @override
+  MemoData build() {
+    path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
+    return path.existsSync() ? MemoDataMapper.fromJson(path.readAsStringSync()) : MemoData.empty;
+  }
 
   String get title => state.title;
 
@@ -397,7 +405,7 @@ class MemoStorageData {
 }
 
 Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
-  initializeJsonReflectable();
+  initializeMappers();
   if (!directoryPath.existsSync()) {
     return [];
   }
@@ -405,7 +413,7 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
       .listSync()
       .map((e) => MemoStorageData(
             key: e.stem,
-            title: JsonMapper.deserialize<MemoData>(e.asFilePath.readAsStringSync())!.title,
+            title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
           ))
       .toList();
 }
@@ -415,32 +423,33 @@ final _charaDetailRecordMemoStorageDataLoader = FutureProvider<List<MemoStorageD
   return compute(_loadMemos, path);
 });
 
-final charaDetailRecordMemoStorageDataProvider = StateProvider<List<MemoStorageData>>((ref) {
-  return ref.watch(_charaDetailRecordMemoStorageDataLoader).value!;
-});
+class CharaDetailRecordMemoStorageDataNotifier extends _StorageDataNotifier<MemoStorageData> {
+  @override
+  List<MemoStorageData> build() => ref.watch(_charaDetailRecordMemoStorageDataLoader).value!;
+}
+
+final charaDetailRecordMemoStorageDataProvider =
+    NotifierProvider<CharaDetailRecordMemoStorageDataNotifier, List<MemoStorageData>>(
+  CharaDetailRecordMemoStorageDataNotifier.new,
+);
 
 final charaDetailRecordMemoProvider =
-    StateNotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>((ref, key) {
-  final path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
-  if (!path.existsSync()) {
-    return CharaDetailRecordMemoController(path, MemoData.empty);
-  } else {
-    return CharaDetailRecordMemoController(path, JsonMapper.deserialize<MemoData>(path.readAsStringSync())!);
-  }
-});
+    NotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>(
+  CharaDetailRecordMemoController.new,
+);
 
-final _currentColumnSpecsLoader = FutureProvider<ColumnSpecSelection>((ref) async {
-  final entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
-  return ColumnSpecSelection(entry);
-});
+final currentColumnSpecsLoaderProvider =
+    AsyncNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>(ColumnSpecSelection.new);
 
-final currentColumnSpecsProvider = StateNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>((ref) {
-  return ref.watch(_currentColumnSpecsLoader).value!;
+// Thin synchronous view over the loaded column specs. Mutating callers use
+// currentColumnSpecsLoaderProvider.notifier instead.
+final currentColumnSpecsProvider = Provider<List<ColumnSpec>>((ref) {
+  return ref.watch(currentColumnSpecsLoaderProvider).requireValue;
 });
 
 class Grid {
-  final List<PlutoColumn> columns;
-  final List<PlutoRow> rows;
+  final List<TrinaColumn> columns;
+  final List<TrinaRow> rows;
   final List<int> filteredCounts;
 
   Grid(this.columns, this.rows, this.filteredCounts);
@@ -450,7 +459,7 @@ class Grid {
 
 Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
   final columnValues = specList.map((spec) => spec.parse(ref, recordList)).toList();
-  final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(ref, e.item2)).toList();
+  final columnConditions = zip2(specList, columnValues).map((e) => e.$1.evaluate(ref, e.$2)).toList();
 
   final filteredCounts = columnConditions.map((e) => e.countTrue()).toList();
   final columns = specList.map((spec) => spec.plutoColumn(ref)).toList();
@@ -459,17 +468,17 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   final rowConditions = columnConditions.transpose().map((e) => e.everyIn()).toList();
 
   final plutoCells = zip2(rowValues, rowConditions)
-      .where((row) => row.item2)
-      .map((row) => zip2(specList, row.item1).map((c) => MapEntry(c.item1.id, c.item1.plutoCell(ref, c.item2))));
+      .where((row) => row.$2)
+      .map((row) => zip2(specList, row.$1).map((c) => MapEntry(c.$1.id, c.$1.plutoCell(ref, c.$2))));
 
-  final records = zip2(recordList, rowConditions).where((row) => row.item2).map((row) => row.item1);
+  final records = zip2(recordList, rowConditions).where((row) => row.$2).map((row) => row.$1);
 
   final rows = zip2(plutoCells, records)
-      .map((row) => PlutoRow(
-            cells: Map.fromEntries(row.item1),
-            sortIdx: -DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
-          )..setUserData(row.item2))
-      .sortedBy<num>((e) => e.sortIdx!)
+      .map((row) => TrinaRow(
+            cells: Map.fromEntries(row.$1),
+            sortIdx: -DateTime.parse(row.$2.metadata.capturedDate).millisecondsSinceEpoch,
+          )..setUserData(row.$2))
+      .sortedBy<num>((e) => e.sortIdx)
       .toList();
 
   return Grid(columns, rows, filteredCounts);
@@ -487,7 +496,7 @@ final currentGridProvider = Provider<Grid>((ref) {
     // Cannot change state while building.
     Future.delayed(
       const Duration(milliseconds: 1),
-      () => ref.read(currentColumnSpecsProvider.notifier).clear(), // TODO: Remove only failed specs.
+      () => ref.read(currentColumnSpecsLoaderProvider.notifier).clear(), // TODO: Remove only failed specs.
     );
     Toaster.show(ToastData.error(description: "pages.chara_detail.error.building_grid".tr()));
     return Grid.empty;

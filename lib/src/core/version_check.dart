@@ -3,24 +3,25 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive_io.dart';
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
-import 'package:tuple/tuple.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
-import '/src/core/json_adapter.dart';
+import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
+
+part 'version_check.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_toast = "toast";
@@ -35,29 +36,26 @@ class ModuleVersion {
   });
 }
 
-@jsonSerializable
-class ModuleVersionRawData {
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class ModuleVersionRawData with ModuleVersionRawDataMappable {
   final String formatVersion;
   final String region;
   final String recognizerVersion;
 
-  @JsonProperty(defaultValue: "2021-02-24T00:00:00+0900")
   final String minimumVersion;
 
-  @JsonProperty(defaultValue: "0.0.0")
   final String applicationVersion;
 
-  @JsonProperty(defaultValue: false)
   final bool pinVersion;
 
   ModuleVersionRawData(
     this.formatVersion,
     this.region,
-    this.recognizerVersion,
-    this.minimumVersion,
-    this.applicationVersion,
-    this.pinVersion,
-  );
+    this.recognizerVersion, [
+    this.minimumVersion = "2021-02-24T00:00:00+0900",
+    this.applicationVersion = "0.0.0",
+    this.pinVersion = false,
+  ]);
 
   ModuleVersion toModuleVersion() {
     return ModuleVersion(
@@ -70,27 +68,21 @@ class ModuleVersionRawData {
     if (!file.existsSync()) {
       return Future.value(null);
     }
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
+    initializeMappers();
     try {
       return await file
           .readAsString()
-          .then((content) => JsonMapper.deserialize<ModuleVersionRawData>(content, options));
+          .then((content) => ModuleVersionRawDataMapper.fromJson(content));
     } catch (e) {
       return null;
     }
   }
 
   static Future<ModuleVersionRawData?> download(Uri url) async {
-    initializeJsonReflectable();
-    const options = DeserializationOptions(caseStyle: CaseStyle.snake);
-    try {
-      return await Dio()
-          .get(url.toString())
-          .then((response) => JsonMapper.deserialize<ModuleVersionRawData>(response.toString(), options));
-    } catch (e) {
-      return null;
-    }
+    initializeMappers();
+    return await createDiagnosticDio(operation: "check_latest_module_version")
+        .get(url.toString())
+        .then((response) => ModuleVersionRawDataMapper.fromJson(response.toString()));
   }
 }
 
@@ -110,10 +102,81 @@ void sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode co
   });
 }
 
-Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
-  final stream = InputFileStream(args.item1.path);
-  final archive = ZipDecoder().decodeBuffer(stream);
-  extractArchiveToDisk(archive, args.item2.path);
+Map<String, dynamic> _networkExceptionContext({
+  required String operation,
+  required Object exception,
+  String? url,
+}) {
+  final dioError = exception is DioException ? exception : null;
+  final requestUri = dioError?.requestOptions.uri;
+  final fallbackUri = url == null ? null : Uri.tryParse(url);
+  final uri = requestUri ?? fallbackUri;
+  final response = dioError?.response;
+  final innerError = dioError?.error;
+
+  return {
+    "operation": operation,
+    "url": uri?.toString() ?? url,
+    "host": uri?.host,
+    "scheme": uri?.scheme,
+    "dio_type": dioError?.type.toString(),
+    "http_status": response?.statusCode,
+    "inner_error_type": innerError?.runtimeType.toString(),
+    "inner_error": innerError?.toString(),
+    "is_handshake_error": exception is HandshakeException || innerError is HandshakeException,
+    "os": Platform.operatingSystem,
+    "os_version": Platform.operatingSystemVersion,
+    "locale": Platform.localeName,
+  };
+}
+
+Future<void> _logNetworkException({
+  required String operation,
+  required Object exception,
+  required StackTrace stackTrace,
+  String? url,
+}) async {
+  final context = _networkExceptionContext(operation: operation, exception: exception, url: url);
+  logger.e("Network request failed. context=$context", exception, stackTrace);
+
+  Map<String, dynamic>? probe;
+  final probeUri = (exception is DioException ? exception.requestOptions.uri : null) ??
+      (url == null ? null : Uri.tryParse(url));
+  if (probeUri != null) {
+    try {
+      probe = await probeTlsConnection(probeUri);
+      logger.i("TLS probe result. operation=$operation, probe=$probe");
+    } catch (probeError, probeStack) {
+      logger.w("TLS probe itself failed. operation=$operation", probeError, probeStack);
+      probe = {
+        "probe_outcome": "probe_failure",
+        "probe_error_type": probeError.runtimeType.toString(),
+        "probe_error_message": probeError.toString(),
+      };
+    }
+  }
+
+  captureExceptionWithScope(
+    exception,
+    stackTrace,
+    tags: {
+      "network.operation": operation,
+      if (context["host"] != null) "network.host": context["host"] as String,
+      if (context["is_handshake_error"] == true) "network.tls_handshake": "true",
+      if (probe != null && probe["probe_outcome"] != null)
+        "network.tls_probe": probe["probe_outcome"] as String,
+    },
+    contexts: {
+      "network_failure": context,
+      "tls_probe": ?probe,
+    },
+  );
+}
+
+Future<void> _extractArchive((FilePath, DirectoryPath) args) {
+  final stream = InputFileStream(args.$1.path);
+  final archive = ZipDecoder().decodeStream(stream);
+  extractArchiveToDisk(archive, args.$2.path);
   return stream.close();
 }
 
@@ -125,7 +188,17 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
 
   final pathInfo = await ref.watch(pathInfoLoader.future);
   final local = await compute(ModuleVersionRawData.load, pathInfo.modulesDir.filePath("version_info.json"));
-  final latest = await compute(ModuleVersionRawData.download, Uri.parse(Const.moduleVersionInfoUrl));
+  ModuleVersionRawData? latest;
+  try {
+    latest = await ModuleVersionRawData.download(Uri.parse(Const.moduleVersionInfoUrl));
+  } catch (exception, stackTrace) {
+    await _logNetworkException(
+      operation: "check_latest_module_version",
+      exception: exception,
+      stackTrace: stackTrace,
+      url: Const.moduleVersionInfoUrl,
+    );
+  }
   logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
   if (kDebugMode) {
@@ -158,11 +231,16 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
 
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
-    await Dio().download(Const.moduleZipUrl, downloadPath.path);
-    await compute(_extractArchive, Tuple2(downloadPath, pathInfo.supportDir));
+    await createDiagnosticDio(operation: "download_modules").download(Const.moduleZipUrl, downloadPath.path);
+    await compute(_extractArchive, (downloadPath, pathInfo.supportDir));
     downloadPath.toFile().delete();
   } catch (exception, stackTrace) {
-    logger.e("Failed to download modules.", exception, stackTrace);
+    await _logNetworkException(
+      operation: "download_modules",
+      exception: exception,
+      stackTrace: stackTrace,
+      url: Const.moduleZipUrl,
+    );
     if (exception is FileSystemException && exception.osError?.errorCode == 5) {
       sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
     } else {
@@ -171,7 +249,6 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
       } else {
         sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
       }
-      captureException(exception, stackTrace);
     }
     return local?.toModuleVersion();
   }
@@ -252,18 +329,21 @@ FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
     lastAppVersionCheckedEntry.push(DateTime.now());
     localAppVersionEntry.push(currentLocalVersion.toString());
     latestAppVersionEntry.delete();
-    final latest = await Dio()
+    final latest = await createDiagnosticDio(operation: "check_latest_app_version")
         .get(Const.appVersionInfoUrl)
         .then((response) => Version.parse(jsonDecode(response.toString())['version']));
     latestAppVersionEntry.push(latest.toString());
     logger.d("latest=$latest");
     return latest;
   } catch (exception, stackTrace) {
-    logger.e("Failed to get latest app version.", exception, stackTrace);
+    await _logNetworkException(
+      operation: "check_latest_app_version",
+      exception: exception,
+      stackTrace: stackTrace,
+      url: Const.appVersionInfoUrl,
+    );
     if (exception is FileSystemException && exception.osError?.errorCode == 5) {
       _sendAppVersionCheckToast(ToastType.error, AppVersionCheckResultCode.accessDenied);
-    } else {
-      captureException(exception, stackTrace);
     }
     return null;
   }

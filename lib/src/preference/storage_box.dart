@@ -1,4 +1,4 @@
-import 'package:hive_flutter/adapters.dart';
+import 'package:hive_ce_flutter/adapters.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart';
 import 'package:recase/recase.dart';

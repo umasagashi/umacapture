@@ -1,9 +1,9 @@
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pluto_grid/pluto_grid.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -18,13 +18,15 @@ import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
+part 'rating.mapper.dart';
+
 // ignore: constant_identifier_names
 const tr_rating = "pages.chara_detail.column_predicate.rating";
 
 final ratingFormatter = NumberFormat("0.0");
 
-@jsonSerializable
-class IsInRangeRatingPredicate {
+@MappableClass()
+class IsInRangeRatingPredicate with IsInRangeRatingPredicateMappable {
   final double? min;
   final double? max;
 
@@ -60,12 +62,11 @@ class RatingCellData implements CellData {
   String get csv => value == null ? "" : ratingFormatter.format(value);
 
   @override
-  Predicate<PlutoGridOnSelectedEvent>? get onSelected => null;
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@jsonSerializable
-@Json(discriminatorValue: "RatingColumnSpec")
-class RatingColumnSpec extends ColumnSpec<double?> {
+@MappableClass(discriminatorValue: 'RatingColumnSpec')
+class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable {
   final Parser parser;
   final IsInRangeRatingPredicate predicate;
   final String storageKey;
@@ -79,7 +80,6 @@ class RatingColumnSpec extends ColumnSpec<double?> {
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
-  @JsonProperty(ignore: true)
   final range = Range<double>(min: 0.0, max: 5.0);
 
   RatingColumnSpec({
@@ -118,24 +118,24 @@ class RatingColumnSpec extends ColumnSpec<double?> {
   }
 
   @override
-  PlutoCell plutoCell(RefBase ref, double? value) {
-    return PlutoCell(
+  TrinaCell plutoCell(RefBase ref, double? value) {
+    return TrinaCell(
       value: "M" * 7 + ratingFormatter.format(value ?? 6.0),
     )..setUserData(RatingCellData(value));
   }
 
   @override
-  PlutoColumn plutoColumn(RefBase ref) {
+  TrinaColumn plutoColumn(RefBase ref) {
     final ratings = ref.watch(charaDetailRecordRatingProvider(storageKey));
-    return PlutoColumn(
+    return TrinaColumn(
       title: title,
       field: id,
-      type: PlutoColumnType.text(),
+      type: TrinaColumnType.text(),
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      renderer: (PlutoColumnRendererContext context) {
+      renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
         return _RecordRatingWidget(
           storageKey: storageKey,
@@ -175,12 +175,11 @@ class _RecordRatingDialog extends ConsumerStatefulWidget {
   final ValueChanged<double> onRatingUpdate;
 
   const _RecordRatingDialog({
-    Key? key,
     required this.recordId,
     required this.initialRating,
     required this.ratingTitle,
     required this.onRatingUpdate,
-  }) : super(key: key);
+  });
 
   static void show(
     RefBase ref, {
@@ -215,7 +214,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageProvider.notifier);
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
     final record = storage.getBy(id: widget.recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
@@ -266,7 +265,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
           children: [
             Tooltip(
               message: "$tr_rating.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.check_circle),
                 label: Text("$tr_rating.dialog.ok_button.label".tr()),
                 onPressed: () {
@@ -381,9 +380,8 @@ class _RatingSelector extends ConsumerWidget {
   final String specId;
 
   const _RatingSelector({
-    Key? key,
     required this.specId,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -511,7 +509,7 @@ class _StorageController extends ConsumerWidget {
               storageFile.deleteSyncWithCheck();
             }
 
-            ref.read(currentColumnSpecsProvider.notifier).removeIfExists(specId);
+            ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
             CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_rating.storage.delete.button".tr()),
@@ -527,11 +525,11 @@ class RatingColumnSelector extends ConsumerWidget {
   final String storageKey;
 
   const RatingColumnSelector({
-    Key? key,
+    super.key,
     required this.specId,
     required this.onDecided,
     required this.storageKey,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

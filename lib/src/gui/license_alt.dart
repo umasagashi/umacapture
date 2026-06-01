@@ -40,12 +40,12 @@ class LicensePage extends StatefulWidget {
   /// The licenses shown on the [LicensePage] are those returned by the
   /// [LicenseRegistry] API, which can be used to add more licenses to the list.
   const LicensePage({
-    Key? key,
+    super.key,
     this.applicationName,
     this.applicationVersion,
     this.applicationIcon,
     this.applicationLegalese,
-  }) : super(key: key);
+  });
 
   /// The name of the application.
   ///
@@ -119,14 +119,12 @@ class _LicensePageState extends State<LicensePage> {
 
 class _AboutProgram extends StatelessWidget {
   const _AboutProgram({
-    Key? key,
     required this.name,
     required this.version,
     this.icon,
     this.legalese,
   })  : assert(name != null),
-        assert(version != null),
-        super(key: key);
+        assert(version != null);
 
   final String name;
   final String version;
@@ -144,7 +142,7 @@ class _AboutProgram extends StatelessWidget {
         children: <Widget>[
           Text(
             name,
-            style: Theme.of(context).textTheme.headline5,
+            style: Theme.of(context).textTheme.headlineSmall,
             textAlign: TextAlign.center,
           ),
           if (icon != null) IconTheme(data: Theme.of(context).iconTheme, child: icon!),
@@ -153,20 +151,20 @@ class _AboutProgram extends StatelessWidget {
               padding: const EdgeInsets.only(bottom: _textVerticalSeparation),
               child: Text(
                 version,
-                style: Theme.of(context).textTheme.bodyText2,
+                style: Theme.of(context).textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),
             ),
           if (legalese != null && legalese != '')
             Text(
               legalese!,
-              style: Theme.of(context).textTheme.caption,
+              style: Theme.of(context).textTheme.bodySmall,
               textAlign: TextAlign.center,
             ),
           const SizedBox(height: _textVerticalSeparation),
           Text(
             'Powered by Flutter',
-            style: Theme.of(context).textTheme.bodyText2,
+            style: Theme.of(context).textTheme.bodyMedium,
             textAlign: TextAlign.center,
           ),
         ],
@@ -177,13 +175,11 @@ class _AboutProgram extends StatelessWidget {
 
 class _PackagesView extends StatefulWidget {
   const _PackagesView({
-    Key? key,
     required this.about,
     required this.isLateral,
     required this.selectedId,
   })  : assert(about != null),
-        assert(isLateral != null),
-        super(key: key);
+        assert(isLateral != null);
 
   final Widget about;
   final bool isLateral;
@@ -295,13 +291,12 @@ class _PackagesViewState extends State<_PackagesView> {
 
 class _PackageListTile extends StatelessWidget {
   const _PackageListTile({
-    Key? key,
     required this.packageName,
     this.index,
     required this.isSelected,
     required this.numberLicenses,
     this.onTap,
-  }) : super(key: key);
+  });
 
   final String packageName;
   final int? index;
@@ -387,7 +382,7 @@ class _DetailArguments {
   final List<LicenseEntry> licenseEntries;
 
   @override
-  bool operator ==(final dynamic other) {
+  bool operator ==(Object other) {
     if (other is _DetailArguments) {
       return other.packageName == packageName;
     }
@@ -400,11 +395,10 @@ class _DetailArguments {
 
 class _PackageLicensePage extends StatefulWidget {
   const _PackageLicensePage({
-    Key? key,
     required this.packageName,
     required this.licenseEntries,
     required this.scrollController,
-  }) : super(key: key);
+  });
 
   final String packageName;
   final List<LicenseEntry> licenseEntries;
@@ -509,7 +503,7 @@ class _PackageLicensePageState extends State<_PackageLicensePage> {
           title: _PackageLicensePageTitle(
             title,
             subtitle,
-            theme.appBarTheme.textTheme ?? theme.primaryTextTheme,
+            theme.primaryTextTheme,
           ),
         ),
         body: Center(
@@ -560,7 +554,7 @@ class _PackageLicensePageState extends State<_PackageLicensePage> {
       );
     }
     return DefaultTextStyle(
-      style: theme.textTheme.caption!,
+      style: theme.textTheme.bodySmall!,
       child: page,
     );
   }
@@ -570,9 +564,7 @@ class _PackageLicensePageTitle extends StatelessWidget {
   const _PackageLicensePageTitle(
     this.title,
     this.subtitle,
-    this.theme, {
-    Key? key,
-  }) : super(key: key);
+    this.theme);
 
   final String title;
   final String subtitle;
@@ -586,8 +578,8 @@ class _PackageLicensePageTitle extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
-        Text(title, style: theme.headline6?.copyWith(color: color)),
-        Text(subtitle, style: theme.subtitle2?.copyWith(color: color)),
+        Text(title, style: theme.titleLarge?.copyWith(color: color)),
+        Text(subtitle, style: theme.titleSmall?.copyWith(color: color)),
       ],
     );
   }
@@ -674,7 +666,6 @@ class _MasterDetailFlow extends StatefulWidget {
   /// Creates a master detail navigation flow which is either nested or
   /// lateral depending on screen width.
   const _MasterDetailFlow({
-    Key? key,
     required this.detailPageBuilder,
     required this.masterViewBuilder,
     this.automaticallyImplyLeading = true,
@@ -684,8 +675,7 @@ class _MasterDetailFlow extends StatefulWidget {
   })  : assert(masterViewBuilder != null),
         assert(automaticallyImplyLeading != null),
         assert(detailPageBuilder != null),
-        assert(displayMode != null),
-        super(key: key);
+        assert(displayMode != null);
 
   /// Builder for the master view for lateral navigation.
   ///
@@ -890,7 +880,7 @@ class _MasterDetailFlowState extends State<_MasterDetailFlow> implements _PageOp
   Widget _lateralUI(BuildContext context) {
     _builtLayout = _LayoutMode.lateral;
     return _MasterDetailScaffold(
-      actionBuilder: (_, __) => const <Widget>[],
+      actionBuilder: (_, _) => const <Widget>[],
       automaticallyImplyLeading: widget.automaticallyImplyLeading,
       detailPageBuilder: (BuildContext context, Object? args, ScrollController? scrollController) =>
           widget.detailPageBuilder(context, args ?? _cachedDetailArguments, scrollController),
@@ -904,12 +894,11 @@ class _MasterDetailFlowState extends State<_MasterDetailFlow> implements _PageOp
 
 class _MasterPage extends StatelessWidget {
   const _MasterPage({
-    Key? key,
     this.leading,
     this.title,
     this.masterViewBuilder,
     required this.automaticallyImplyLeading,
-  }) : super(key: key);
+  });
 
   final _MasterViewBuilder? masterViewBuilder;
   final Widget? title;
@@ -937,7 +926,6 @@ const double _kDetailPageFABGutterWidth = 84.0;
 
 class _MasterDetailScaffold extends StatefulWidget {
   const _MasterDetailScaffold({
-    Key? key,
     required this.detailPageBuilder,
     required this.masterViewBuilder,
     this.actionBuilder,
@@ -946,8 +934,7 @@ class _MasterDetailScaffold extends StatefulWidget {
     required this.automaticallyImplyLeading,
     this.detailPageFABlessGutterWidth,
   })  : assert(detailPageBuilder != null),
-        assert(masterViewBuilder != null),
-        super(key: key);
+        assert(masterViewBuilder != null);
 
   final _MasterViewBuilder masterViewBuilder;
 
@@ -1087,13 +1074,11 @@ class _MasterDetailScaffoldState extends State<_MasterDetailScaffold> implements
 
 class _DetailView extends StatelessWidget {
   const _DetailView({
-    Key? key,
     required _DetailPageBuilder builder,
     Object? arguments,
   })  : assert(builder != null),
         _builder = builder,
-        _arguments = arguments,
-        super(key: key);
+        _arguments = arguments;
 
   final _DetailPageBuilder _builder;
   final Object? _arguments;

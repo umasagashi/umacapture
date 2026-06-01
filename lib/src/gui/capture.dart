@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
-import '/src/app/route.gr.dart';
+import '/src/app/route.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
@@ -16,23 +16,20 @@ import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_capture = "pages.capture";
 
-final autoStartCaptureStateProvider = BooleanNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final autoStartCaptureStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.autoStartCapture.name),
+    entryKey: SettingsEntryKey.autoStartCapture.name,
     defaultValue: false,
   );
 });
 
-final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider((ref) {
-  final box = ref.watch(storageBoxProvider);
+final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider<CharaDetailRecordImageMode>(() {
   return ExclusiveItemsNotifier<CharaDetailRecordImageMode>(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.autoCopyClipboard.name),
+    entryKey: SettingsEntryKey.autoCopyClipboard.name,
     values: CharaDetailRecordImageMode.values,
     defaultValue: CharaDetailRecordImageMode.none,
   );
@@ -47,14 +44,14 @@ class StackedIndicator extends StatelessWidget {
   final Widget child;
 
   const StackedIndicator({
-    Key? key,
+    super.key,
     this.size = 20,
     this.strokeWidth = 2,
     this.alignment = AlignmentDirectional.center,
     this.reverseColor = false,
     required this.child,
     required this.loading,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -85,14 +82,13 @@ class _TwoStateButton extends ConsumerStatefulWidget {
   final Provider<bool> provider;
 
   const _TwoStateButton({
-    Key? key,
     required this.trueWidget,
     required this.falseWidget,
     required this.onTruePressed,
     required this.onFalsePressed,
     this.elevateWhen = true,
     required this.provider,
-  }) : super(key: key);
+  });
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _TwoStateButtonState();
@@ -119,7 +115,7 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
     final handler = _buildOnPressedHandler(state);
     final child = state ? widget.trueWidget : widget.falseWidget;
     if (state == widget.elevateWhen) {
-      return ElevatedButton(onPressed: handler, child: child);
+      return FilledButton(onPressed: handler, child: child);
     } else {
       return OutlinedButton(onPressed: handler, child: child);
     }
@@ -144,11 +140,10 @@ class _ScrollStateWidget extends ConsumerWidget {
   final bool disable;
 
   const _ScrollStateWidget({
-    Key? key,
     required this.header,
     required this.progress,
     required this.disable,
-  }) : super(key: key);
+  });
 
   Color _progressColor() {
     if (disable) {
@@ -182,7 +177,7 @@ class _ScrollStateWidget extends ConsumerWidget {
         header: Text(header),
         center: Text("${(progress * 100).toInt()}%"),
         footer: Text(_progressText()),
-        backgroundColor: Color.lerp(theme.colorScheme.surface, theme.colorScheme.onSurface, 0.1)!,
+        backgroundColor: theme.colorScheme.surfaceContainerHighest,
         progressColor: _progressColor(),
       ),
     );
@@ -436,7 +431,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
 }
 
 class CaptureControlGroup extends ConsumerWidget {
-  const CaptureControlGroup({Key? key}) : super(key: key);
+  const CaptureControlGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -484,7 +479,7 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
     );
   }
 
-  Widget error(errorMessage, stackTrace, theme) {
+  Widget error(Object? errorMessage, Object? stackTrace, ThemeData theme) {
     return SingleTileWidget(
       child: Center(
         child: Column(
@@ -526,8 +521,9 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
   }
 }
 
+@RoutePage()
 class CapturePage extends ConsumerWidget {
-  const CapturePage({Key? key}) : super(key: key);
+  const CapturePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

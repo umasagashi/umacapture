@@ -10,7 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/src/app/pages.dart';
-import '/src/app/route.gr.dart';
+import '/src/app/route.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/utils.dart';
@@ -19,7 +19,6 @@ import '/src/gui/common.dart';
 import '/src/gui/window_manager_alt.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
-import '/src/preference/storage_box.dart';
 import '/src/preference/window_state.dart';
 
 final kIsDesktop = {
@@ -28,27 +27,24 @@ final kIsDesktop = {
   TargetPlatform.macOS,
 }.contains(defaultTargetPlatform);
 
-final themeSettingProvider = StateNotifierProvider<ExclusiveItemsNotifier<ThemeMode>, ThemeMode>((ref) {
-  final box = ref.watch(storageBoxProvider);
+final themeSettingProvider = ExclusiveItemsNotifierProvider<ThemeMode>(() {
   return ExclusiveItemsNotifier<ThemeMode>(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.themeMode.name),
+    entryKey: SettingsEntryKey.themeMode.name,
     values: [ThemeMode.light, ThemeMode.dark, ThemeMode.system],
     defaultValue: ThemeMode.system,
   );
 });
 
-final fontBoldSettingProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
-  final box = ref.watch(storageBoxProvider);
+final fontBoldSettingProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.fontBold.name),
+    entryKey: SettingsEntryKey.fontBold.name,
     defaultValue: true,
   );
 });
 
-final sidebarExtendedStateProvider = StateNotifierProvider<BooleanNotifier, bool>((ref) {
-  final box = ref.watch(storageBoxProvider);
+final sidebarExtendedStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(
-    entry: StorageEntry(box: box, key: SettingsEntryKey.sidebarExtended.name),
+    entryKey: SettingsEntryKey.sidebarExtended.name,
     defaultValue: true,
   );
 });
@@ -89,7 +85,7 @@ class _Sidebar extends ConsumerWidget {
           left: 0,
           right: 0,
           child: TextButton(
-            style: ButtonStyle(shape: MaterialStateProperty.all(const RoundedRectangleBorder())),
+            style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
             child: Icon(isExtended ? Icons.chevron_left : Icons.chevron_right),
             onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
           ),
@@ -100,7 +96,7 @@ class _Sidebar extends ConsumerWidget {
 }
 
 class _Drawer extends StatelessWidget {
-  const _Drawer({Key? key}) : super(key: key);
+  const _Drawer();
 
   @override
   Widget build(BuildContext context) {
@@ -127,9 +123,8 @@ class _ResponsiveScaffold extends StatelessWidget {
   final Widget child;
 
   const _ResponsiveScaffold({
-    Key? key,
     required this.child,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -167,9 +162,8 @@ class _WindowFrame extends ConsumerStatefulWidget {
   final Widget child;
   final WindowStateBox _windowStateBox;
 
-  _WindowFrame({Key? key, required this.child})
-      : _windowStateBox = WindowStateBox(),
-        super(key: key);
+  _WindowFrame({required this.child})
+      : _windowStateBox = WindowStateBox();
 
   @override
   ConsumerState<_WindowFrame> createState() => _WindowFrameState();
@@ -207,7 +201,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
       // The top edge of the window frame is not visible, so 1 pixel padding is added instead.
       // But 1 pixel is thicker than the others, so the color is mixed with the title bar to make it look better.
       padding: const EdgeInsets.only(top: 1),
-      color: theme.colorScheme.surface.blend(Colors.black, 50),
+      color: theme.colorScheme.surface,
       child: Scaffold(
         appBar: const WindowCaptionAlt(),
         body: widget.child,
@@ -216,8 +210,9 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
   }
 }
 
+@RoutePage(name: 'AppWidgetRoute')
 class AppWidget extends StatelessWidget {
-  const AppWidget({Key? key}) : super(key: key);
+  const AppWidget({super.key});
 
   Widget root(Widget child) {
     return DialogLayer(
@@ -227,17 +222,15 @@ class AppWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FeedbackLayer(
-      child: AutoTabsRouter(
-        routes: Pages.routes,
-        builder: (context, child, animation) {
-          if (!kIsWeb && kIsDesktop) {
-            return _WindowFrame(child: root(child));
-          } else {
-            return root(child);
-          }
-        },
-      ),
+    return AutoTabsRouter(
+      routes: Pages.routes,
+      builder: (context, child) {
+        if (!kIsWeb && kIsDesktop) {
+          return _WindowFrame(child: root(child));
+        } else {
+          return root(child);
+        }
+      },
     );
   }
 }
@@ -245,7 +238,7 @@ class AppWidget extends StatelessWidget {
 class ApplicationWidget extends ConsumerStatefulWidget {
   final router = AppRouter();
 
-  ApplicationWidget({Key? key}) : super(key: key);
+  ApplicationWidget({super.key});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => ApplicationWidgetState();
@@ -253,14 +246,33 @@ class ApplicationWidget extends ConsumerStatefulWidget {
 
 class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {
-    return base?.copyWith(
-        fontWeight: FontWeight
-            .values[Math.min((base.fontWeight?.index ?? FontWeight.normal.index) + offset, FontWeight.w900.index)]);
+    // FontWeight.index was deprecated in favor of the numeric `value` (100-900).
+    // Reproduce the old index (value ~/ 100 - 1, clamped to 0..8) and step by `offset`,
+    // capping at w900 (index 8), then pick from the still-supported `values` list.
+    const maxIndex = 8; // FontWeight.w900 is the last of the 9 standard weights.
+    final baseValue = base?.fontWeight?.value ?? FontWeight.normal.value;
+    final baseIndex = (baseValue ~/ 100 - 1).clamp(0, maxIndex);
+    return base?.copyWith(fontWeight: FontWeight.values[Math.min(baseIndex + offset, maxIndex)]);
+  }
+
+  // Material 3 derives the surfaceContainer* ramp from the near-neutral palette,
+  // so background panels/chips/rows that read these roles look plain gray and the
+  // FlexColorScheme surface blend cannot tint them. Blend the light-blue
+  // primaryContainer into the container ramp so those surfaces read as blue rather
+  // than gray, without darkening them the way primary would. Tune via [blend].
+  ColorScheme tintSurfaceContainers(ColorScheme scheme) {
+    final blend = scheme.brightness == Brightness.light ? 0.20 : 0.18;
+    Color tint(Color c) => Color.alphaBlend(scheme.primaryContainer.withValues(alpha: blend), c);
+    return scheme.copyWith(
+      surfaceContainerHigh: tint(scheme.surfaceContainerHigh),
+      surfaceContainerHighest: tint(scheme.surfaceContainerHighest),
+    );
   }
 
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
     final offset = ref.watch(fontBoldSettingProvider) ? 3 : 0;
     return base.copyWith(
+      colorScheme: tintSurfaceContainers(base.colorScheme),
       tooltipTheme: base.tooltipTheme.copyWith(
         textStyle: modifyFontWeight(base.tooltipTheme.textStyle, offset),
         waitDuration: const Duration(milliseconds: 100),
@@ -268,13 +280,6 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
       ),
       chipTheme: base.chipTheme.copyWith(
         labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide.none),
-        side: BorderSide(
-          width: 0.5,
-          color: base.chipTheme.selectedColor ?? base.colorScheme.primaryContainer,
-        ),
-        elevation: 0,
-        pressElevation: 0,
       ),
       textTheme: base.textTheme.copyWith(
         displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
@@ -306,53 +311,55 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     ref.read(charaDetailInitialDataLoader);
 
     // Rebuild this widget when requested.
-    ref.listen(_applicationWidgetRebuildEventProvider, (_, __) => setState(() {}));
+    ref.listen(_applicationWidgetRebuildEventProvider, (_, _) => setState(() {}));
 
-    final theme = FlexThemeData.light(
-      scheme: FlexScheme.blue,
-      surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-      blendLevel: 20,
-      appBarOpacity: 0.95,
-      subThemesData: const FlexSubThemesData(
-        blendOnLevel: 20,
-        blendOnColors: false,
-        navigationRailMutedUnselectedLabel: false,
-        navigationRailMutedUnselectedIcon: false,
-        navigationRailLabelType: NavigationRailLabelType.none,
+    // Standard FlexColorScheme / Material-3 baseline, plus a light surface blend
+    // (surfaceMode + blendLevel) to restore the previous brand-tinted surfaces.
+    // Other legacy tuning (app-bar opacity/style, on-level blends) stays dropped
+    // and is reapplied incrementally if needed.
+    final lightTheme = modifyTheme(
+      ref,
+      FlexThemeData.light(
+        scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 20,
+        subThemesData: const FlexSubThemesData(),
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
       ),
-      visualDensity: FlexColorScheme.comfortablePlatformDensity,
-      useMaterial3: true,
-      fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
     );
 
-    final darkTheme = FlexThemeData.dark(
-      scheme: FlexScheme.blue,
-      surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
-      blendLevel: 15,
-      appBarStyle: FlexAppBarStyle.background,
-      appBarOpacity: 0.90,
-      subThemesData: const FlexSubThemesData(
-        blendOnLevel: 30,
-        navigationRailMutedUnselectedLabel: false,
-        navigationRailMutedUnselectedIcon: false,
-        navigationRailLabelType: NavigationRailLabelType.none,
+    final darkTheme = modifyTheme(
+      ref,
+      FlexThemeData.dark(
+        scheme: FlexScheme.blue,
+        surfaceMode: FlexSurfaceMode.highScaffoldLowSurface,
+        blendLevel: 15,
+        subThemesData: const FlexSubThemesData(),
+        visualDensity: FlexColorScheme.comfortablePlatformDensity,
+        useMaterial3: true,
+        fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
       ),
-      visualDensity: FlexColorScheme.comfortablePlatformDensity,
-      useMaterial3: true,
-      fontFamily: GoogleFonts.mPlusRounded1c().fontFamily,
     );
 
     final themeMode = ref.watch(themeSettingProvider);
-    return MaterialApp.router(
-      title: 'umacapture',
-      theme: modifyTheme(ref, theme),
-      darkTheme: modifyTheme(ref, darkTheme),
+    // BetterFeedback wraps MaterialApp (see FeedbackLayer docs): inside MaterialApp
+    // it would override the app ColorScheme for all content.
+    return FeedbackLayer(
+      lightTheme: lightTheme,
+      darkTheme: darkTheme,
       themeMode: themeMode,
-      localizationsDelegates: context.localizationDelegates,
-      supportedLocales: context.supportedLocales,
-      locale: context.locale,
-      routerDelegate: widget.router.delegate(),
-      routeInformationParser: widget.router.defaultRouteParser(),
+      child: MaterialApp.router(
+        title: 'umacapture',
+        theme: lightTheme,
+        darkTheme: darkTheme,
+        themeMode: themeMode,
+        localizationsDelegates: context.localizationDelegates,
+        supportedLocales: context.supportedLocales,
+        locale: context.locale,
+        routerConfig: widget.router.config(),
+      ),
     );
   }
 }

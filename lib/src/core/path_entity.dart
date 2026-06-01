@@ -1,7 +1,6 @@
 import 'dart:io';
-import 'dart:typed_data';
 
-import 'package:dart_json_mapper/dart_json_mapper.dart';
+import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -9,14 +8,12 @@ import 'package:path/path.dart' as p;
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 
-const deserializationOptions = DeserializationOptions(caseStyle: CaseStyle.snake);
-
 class PathEntity {
   static p.Context context = p.Context();
 
   final List<String> segments;
 
-  static List<String> parseSegments(src) {
+  static List<String> parseSegments(dynamic src) {
     if (src is String) {
       return context.split(src);
     } else if (src is Directory || src is File) {
@@ -36,16 +33,16 @@ class PathEntity {
     return src.startsWith("/") || src.startsWith("\\");
   }
 
-  static bool isFilePathCompatible(src) {
+  static bool isFilePathCompatible(dynamic src) {
     return (src is String || src is PathEntity || src is FileSystemEntity) &&
         (src is! DirectoryPath && src is! Directory);
   }
 
-  static bool isDirectoryPathCompatible(src) {
+  static bool isDirectoryPathCompatible(dynamic src) {
     return (src is String || src is PathEntity || src is FileSystemEntity) && (src is! FilePath && src is! File);
   }
 
-  PathEntity(src) : segments = parseSegments(src);
+  PathEntity(dynamic src) : segments = parseSegments(src);
 
   DirectoryPath get parent {
     return DirectoryPath(segments.sublist(0, segments.length - 1));
@@ -163,23 +160,23 @@ class FilePath extends PathEntity {
 
   void writeAsStringSync(String contents) => toFile().writeAsStringSync(contents);
 
-  T? deserializeSync<T>() => JsonMapper.deserialize<T>(readAsStringSync(), deserializationOptions);
+  T deserializeSync<T>() => MapperContainer.globals.fromJson<T>(readAsStringSync());
 }
 
 class DirectoryPath extends PathEntity {
   DirectoryPath(super.src);
 
-  FilePath filePath(other) {
+  FilePath filePath(dynamic other) {
     assert(PathEntity.isFilePathCompatible(other));
     return FilePath([...segments, ...PathEntity.parseSegments(other)]);
   }
 
-  DirectoryPath _directoryPath(other) {
+  DirectoryPath _directoryPath(dynamic other) {
     assert(PathEntity.isDirectoryPathCompatible(other));
     return DirectoryPath([...segments, ...PathEntity.parseSegments(other)]);
   }
 
-  DirectoryPath operator /(other) => _directoryPath(other);
+  DirectoryPath operator /(dynamic other) => _directoryPath(other);
 
   @override
   bool get isFileSync => false;
