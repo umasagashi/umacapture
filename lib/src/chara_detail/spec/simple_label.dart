@@ -183,7 +183,7 @@ class _SimpleLabelSelector extends ConsumerWidget {
                 for (final index in indices)
                   FilterChip(
                     label: Text(labels[index].joinLines(" ")),
-                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceContainerHighest,
+                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
                     onSelected: (selected) {

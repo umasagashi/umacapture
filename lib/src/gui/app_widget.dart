@@ -255,9 +255,24 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     return base?.copyWith(fontWeight: FontWeight.values[Math.min(baseIndex + offset, maxIndex)]);
   }
 
+  // Material 3 derives the surfaceContainer* ramp from the near-neutral palette,
+  // so background panels/chips/rows that read these roles look plain gray and the
+  // FlexColorScheme surface blend cannot tint them. Blend the light-blue
+  // primaryContainer into the container ramp so those surfaces read as blue rather
+  // than gray, without darkening them the way primary would. Tune via [blend].
+  ColorScheme tintSurfaceContainers(ColorScheme scheme) {
+    final blend = scheme.brightness == Brightness.light ? 0.20 : 0.18;
+    Color tint(Color c) => Color.alphaBlend(scheme.primaryContainer.withValues(alpha: blend), c);
+    return scheme.copyWith(
+      surfaceContainerHigh: tint(scheme.surfaceContainerHigh),
+      surfaceContainerHighest: tint(scheme.surfaceContainerHighest),
+    );
+  }
+
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
     final offset = ref.watch(fontBoldSettingProvider) ? 3 : 0;
     return base.copyWith(
+      colorScheme: tintSurfaceContainers(base.colorScheme),
       tooltipTheme: base.tooltipTheme.copyWith(
         textStyle: modifyFontWeight(base.tooltipTheme.textStyle, offset),
         waitDuration: const Duration(milliseconds: 100),

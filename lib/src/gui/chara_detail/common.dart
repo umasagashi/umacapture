@@ -219,7 +219,7 @@ class TagSelector extends ConsumerWidget {
           for (final tag in candidateTags)
             FilterChip(
               label: Text(tag.name),
-              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceContainerHighest,
+              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceContainerLow,
               showCheckmark: false,
               selected: selectedTags.contains(tag.id),
               onSelected: (selected) {
@@ -263,7 +263,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
       child: ChoiceChip(
         label: Text("$prefix.${value.name.snakeCase}.label".tr()),
         tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
-        backgroundColor: isSelected ? null : theme.colorScheme.surfaceContainerHighest,
+        backgroundColor: isSelected ? null : theme.colorScheme.surfaceContainerLow,
         selected: isSelected,
         onSelected: (_) => onSelected(value),
       ),
@@ -299,7 +299,7 @@ class _SelectorChip extends ConsumerWidget {
     final theme = Theme.of(context);
     return FilterChip(
       label: label,
-      backgroundColor: selected ? null : theme.colorScheme.surfaceContainerHighest,
+      backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
       showCheckmark: false,
       tooltip: tooltip,
       selected: selected,
