@@ -32,11 +32,11 @@ class CharaDetailRecordImageModeMapper
     switch (value) {
       case r'none':
         return CharaDetailRecordImageMode.none;
-      case r'skillPlain':
+      case r'skill_plain':
         return CharaDetailRecordImageMode.skillPlain;
-      case r'factorPlain':
+      case r'factor_plain':
         return CharaDetailRecordImageMode.factorPlain;
-      case r'campaignPlain':
+      case r'campaign_plain':
         return CharaDetailRecordImageMode.campaignPlain;
       default:
         throw MapperException.unknownEnumValue(value);
@@ -49,11 +49,11 @@ class CharaDetailRecordImageModeMapper
       case CharaDetailRecordImageMode.none:
         return r'none';
       case CharaDetailRecordImageMode.skillPlain:
-        return r'skillPlain';
+        return r'skill_plain';
       case CharaDetailRecordImageMode.factorPlain:
-        return r'factorPlain';
+        return r'factor_plain';
       case CharaDetailRecordImageMode.campaignPlain:
-        return r'campaignPlain';
+        return r'campaign_plain';
     }
   }
 }

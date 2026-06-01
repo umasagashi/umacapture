@@ -28,23 +28,9 @@ final capturingStateProvider = Provider<bool>((ref) {
       });
 });
 
-class CapturingFrameSize extends Notifier<Size?> {
-  @override
-  Size? build() => null;
+final capturingFrameSizeProvider = settableNotifierProvider<Size?>(null);
 
-  void set(Size? value) => state = value;
-}
-
-final capturingFrameSizeProvider = NotifierProvider<CapturingFrameSize, Size?>(CapturingFrameSize.new);
-
-class CapturingFrameRate extends Notifier<double?> {
-  @override
-  double? build() => null;
-
-  void set(double? value) => state = value;
-}
-
-final capturingFrameRateProvider = NotifierProvider<CapturingFrameRate, double?>(CapturingFrameRate.new);
+final capturingFrameRateProvider = settableNotifierProvider<double?>(null);
 
 StreamController<String> _errorEventController = StreamController();
 final errorEventProvider = StreamProvider<String>((ref) {

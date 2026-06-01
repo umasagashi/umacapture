@@ -231,32 +231,26 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
 
   void add(ColumnSpec spec) {
     assert(!contains(spec.id));
-    _specs.add(spec);
-    rebuild();
+    _commit([..._specs, spec]);
   }
 
   void addOrUpdate(ColumnSpec spec) {
-    if (!contains(spec.id)) {
-      _specs.add(spec);
-    }
-    rebuild();
+    _commit(contains(spec.id) ? [..._specs] : [..._specs, spec]);
   }
 
   void remove(String id) {
     assert(contains(id));
-    _specs.removeWhere((e) => e.id == id);
-    rebuild();
+    _commit(_specs.where((e) => e.id != id).toList());
   }
 
   void removeIfExists(String id) {
     if (contains(id)) {
-      _specs.removeWhere((e) => e.id == id);
-      rebuild();
+      _commit(_specs.where((e) => e.id != id).toList());
     }
   }
 
   void moveTo(ColumnSpec obj, ColumnSpec target) {
-    final specs = _specs;
+    final specs = [..._specs];
     assert(specs.contains(obj));
     assert(specs.contains(target));
     if (obj == target) {
@@ -265,29 +259,38 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     final moveRight = specs.indexOf(obj) < specs.indexOf(target);
     specs.remove(obj);
     specs.insert(specs.indexOf(target) + (moveRight ? 1 : 0), obj);
-    rebuild();
+    _commit(specs);
   }
 
   void replaceById(ColumnSpec spec) {
-    final specs = _specs;
+    final specs = [..._specs];
     final index = specs.indexWhere((e) => e.id == spec.id);
     if (index != -1) {
-      specs.removeAt(index);
-      specs.insert(index, spec);
+      specs[index] = spec;
     } else {
       specs.add(spec);
     }
-    rebuild();
+    _commit(specs);
   }
 
+  // Re-persist the current selection (e.g. after mutating a spec's internal
+  // state in place). Builds a fresh list so the new AsyncData never shares its
+  // backing list with the previous state.
   void rebuild() {
-    state = AsyncData([..._specs]);
-    entry.push(MapperContainer.globals.toJson<List<ColumnSpec>>(state.requireValue));
+    _commit([..._specs]);
   }
 
   void clear() {
-    state = AsyncData(<ColumnSpec>[]);
-    rebuild();
+    _commit(<ColumnSpec>[]);
+  }
+
+  // Publish [specs] as the new state and write it back to storage. Callers must
+  // pass a freshly-built list (never state.requireValue) so we don't mutate the
+  // list held by the live AsyncData, which would defeat riverpod's
+  // identity-based change detection and corrupt the previous state value.
+  void _commit(List<ColumnSpec> specs) {
+    state = AsyncData(specs);
+    entry.push(MapperContainer.globals.toJson<List<ColumnSpec>>(specs));
   }
 }
 

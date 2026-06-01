@@ -20,14 +20,7 @@ import '/src/gui/statistics.dart';
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
-class _DownloadProgress extends Notifier<Progress?> {
-  @override
-  Progress? build() => null;
-
-  void set(Progress? value) => state = value;
-}
-
-final _downloadProgressProvider = NotifierProvider<_DownloadProgress, Progress?>(_DownloadProgress.new);
+final _downloadProgressProvider = settableNotifierProvider<Progress?>(null);
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {

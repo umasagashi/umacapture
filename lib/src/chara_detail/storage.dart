@@ -27,14 +27,7 @@ final duplicatedCharaEventProvider = StreamProvider<String>((ref) {
   return _duplicatedCharaEventController.stream;
 });
 
-class CharaCardIconMap extends Notifier<Map<int, FilePath>> {
-  @override
-  Map<int, FilePath> build() => {};
-
-  void set(Map<int, FilePath> value) => state = value;
-}
-
-final charaCardIconMapProvider = NotifierProvider<CharaCardIconMap, Map<int, FilePath>>(CharaCardIconMap.new);
+final charaCardIconMapProvider = settableNotifierProvider<Map<int, FilePath>>({});
 
 class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   @override
@@ -70,7 +63,11 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
 final charaDetailRecordRegenerationControllerProvider =
     NotifierProvider<CharaDetailRecordRegenerationController, Progress>(CharaDetailRecordRegenerationController.new);
 
-@MappableEnum()
+// snake_case keeps decoding values written by the pre-dart_mappable Hive
+// JsonAdapter, which serialized every enum with CaseStyle.snake (e.g.
+// "skill_plain"). Without this, a previously-saved multi-word value throws
+// MapperException.unknownEnumValue on read.
+@MappableEnum(caseStyle: CaseStyle.snakeCase)
 enum CharaDetailRecordImageMode {
   none,
   skillPlain,
@@ -120,7 +117,13 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     return records;
   }
 
-  List<CharaDetailRecord> get _records => state.requireValue;
+  // Holds silent updates accumulated during a regeneration batch. While
+  // non-null, reads see it instead of the published state; forceRebuild()
+  // publishes it. Kept separate so we never mutate the list held by the live
+  // AsyncData (which would defeat riverpod's identity-based change detection).
+  List<CharaDetailRecord>? _pendingRecords;
+
+  List<CharaDetailRecord> get _records => _pendingRecords ?? state.requireValue;
 
   int get length => _records.length;
 
@@ -148,6 +151,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     }
     _updateRecordInfo(record);
 
+    // `records` already folds in any pending batch updates, so publishing it
+    // and clearing the buffer keeps the next replaceBy re-snapshotting cleanly.
+    _pendingRecords = null;
     state = AsyncData([...records, record]);
 
     final autoCopy = ref.read(autoCopyClipboardStateProvider);
@@ -171,10 +177,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
   }
 
   void replaceBy(CharaDetailRecord record, {required String id}) {
-    // Mutates the current list in place without reassigning state, matching the
-    // legacy StateNotifier behavior: reload() replaces records silently and the
-    // grid only rebuilds once forceRebuild() runs at the end of regeneration.
-    final records = _records;
+    // Accumulate into a private buffer instead of mutating the list held by the
+    // live AsyncData. reload() replaces records silently during regeneration;
+    // the grid only rebuilds once forceRebuild() publishes the buffer.
+    final records = _pendingRecords ??= [...state.requireValue];
     final index = records.indexWhere((e) => e.id == id);
     assert(index != -1);
     records[index] = record;
@@ -231,16 +237,20 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     assert(record != null);
     final directory = recordPathOf(record!);
     directory.deleteSyncSafeWithCheck();
-    state = AsyncData(_records.where((e) => e != record).toList());
+    // Stage the filtered list in the buffer and let forceRebuild() publish it
+    // once (rebuilding the card map), instead of emitting state twice.
+    _pendingRecords = _records.where((e) => e != record).toList();
     forceRebuild();
   }
 
   void forceRebuild() {
+    final records = _records;
+    _pendingRecords = null;
     charaCardMap.clear();
-    for (final e in _records) {
+    for (final e in records) {
       _updateRecordInfo(e);
     }
-    state = AsyncData([..._records]);
+    state = AsyncData([...records]);
   }
 }
 

@@ -20,14 +20,7 @@ import '/src/core/providers.dart';
 
 part 'exporter.mapper.dart';
 
-class Exporting extends Notifier<bool> {
-  @override
-  bool build() => false;
-
-  void set(bool value) => state = value;
-}
-
-final exportingStateProvider = NotifierProvider<Exporting, bool>(Exporting.new);
+final exportingStateProvider = settableNotifierProvider<bool>(false);
 
 abstract class Exportable {
   String get csv;

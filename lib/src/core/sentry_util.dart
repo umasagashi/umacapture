@@ -7,7 +7,6 @@ import 'package:dio/io.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback/feedback.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
@@ -74,14 +73,7 @@ class ScreenshotResult {
   bool get hasError => result.isNotEmpty;
 }
 
-class LatestScreenshot extends Notifier<ScreenshotResult?> {
-  @override
-  ScreenshotResult? build() => null;
-
-  void set(ScreenshotResult? value) => state = value;
-}
-
-final latestScreenshotProvider = NotifierProvider<LatestScreenshot, ScreenshotResult?>(LatestScreenshot.new);
+final latestScreenshotProvider = settableNotifierProvider<ScreenshotResult?>(null);
 
 void takeScreenshot(RefBase ref) {
   ref.read(latestScreenshotProvider.notifier).set(null);
@@ -453,41 +445,64 @@ class CustomHint {
 }
 
 Future<void> _runWithSentry(AppRunner runner) async {
-  final appVersion = await loadLocalAppVersion();
-  // The sentry-native (crashpad) database defaults to `.sentry-native` in the current
-  // working directory. For a Program Files install without admin rights that directory
-  // is not writable, so native crash capture would silently fail. Pin it to a
-  // user-writable, persistent location under the app support directory (the same base
-  // PathInfo uses), as recommended by the Sentry docs for production deployments.
-  final supportDir = await getApplicationSupportDirectory();
-  final nativeDatabasePath = p.join(supportDir.path, "sentry-native");
-  await SentryFlutter.init(
-    (SentryFlutterOptions options) {
-      options.nativeDatabasePath = nativeDatabasePath;
-      if (kDebugMode) {
-        options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
-      } else {
-        options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
-      }
-      options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
-      options.enablePrintBreadcrumbs = false;
-      options.beforeSend = (SentryEvent event, Hint hint) async {
-        final customHint = CustomHint.from(hint);
-        if (customHint.useUniqueFingerprint) {
-          // SentryEvent.copyWith is deprecated; assign fields directly.
-          event.fingerprint = [event.eventId.toString()];
+  // Guard so the app is started exactly once: SentryFlutter.init invokes
+  // appRunner internally, but if any pre-init step (loadLocalAppVersion,
+  // getApplicationSupportDirectory) or init itself throws, appRunner may never
+  // be called. Falling back here guarantees runApp() always runs, otherwise a
+  // startup failure leaves a blank white window with no error UI.
+  var appStarted = false;
+  void startAppOnce() {
+    if (appStarted) {
+      return;
+    }
+    appStarted = true;
+    runner();
+  }
+
+  try {
+    final appVersion = await loadLocalAppVersion();
+    // The sentry-native (crashpad) database defaults to `.sentry-native` in the current
+    // working directory. For a Program Files install without admin rights that directory
+    // is not writable, so native crash capture would silently fail. Pin it to a
+    // user-writable, persistent location under the app support directory (the same base
+    // PathInfo uses), as recommended by the Sentry docs for production deployments.
+    final supportDir = await getApplicationSupportDirectory();
+    final nativeDatabasePath = p.join(supportDir.path, "sentry-native");
+    // sentry-native does not create missing parent directories, so the crash DB
+    // (and thus native crash capture) is silently dropped unless we create it.
+    await Directory(nativeDatabasePath).create(recursive: true);
+    await SentryFlutter.init(
+      (SentryFlutterOptions options) {
+        options.nativeDatabasePath = nativeDatabasePath;
+        if (kDebugMode) {
+          options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
+        } else {
+          options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
         }
-        if (customHint.titlePrefix != null) {
-          final message = event.message;
-          if (message != null) {
-            message.formatted = "[${customHint.titlePrefix}] ${message.formatted}";
+        options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
+        options.enablePrintBreadcrumbs = false;
+        options.beforeSend = (SentryEvent event, Hint hint) async {
+          final customHint = CustomHint.from(hint);
+          if (customHint.useUniqueFingerprint) {
+            // SentryEvent.copyWith is deprecated; assign fields directly.
+            event.fingerprint = [event.eventId.toString()];
           }
-        }
-        return event;
-      };
-    },
-    appRunner: runner,
-  );
+          if (customHint.titlePrefix != null) {
+            final message = event.message;
+            if (message != null) {
+              message.formatted = "[${customHint.titlePrefix}] ${message.formatted}";
+            }
+          }
+          return event;
+        };
+      },
+      appRunner: startAppOnce,
+    );
+  } catch (exception, stackTrace) {
+    // Never let a Sentry/startup-prep failure prevent the app from launching.
+    logger.e("Failed to initialize Sentry; starting app without it.", exception, stackTrace);
+    startAppOnce();
+  }
 }
 
 Future<void> runWithSentry(AppRunner runner) async {
