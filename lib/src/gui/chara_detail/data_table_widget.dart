@@ -148,7 +148,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     enableCellBorderVertical: false,
                     gridBackgroundColor: theme.colorScheme.surface,
                     rowColor: theme.colorScheme.surface,
-                    evenRowColor: theme.colorScheme.surfaceContainerHighest,
+                    evenRowColor: theme.colorScheme.blueTintedSurface,
                     activatedColor: theme.focusColor,
                     gridBorderColor: theme.colorScheme.outline,
                     borderColor: theme.focusColor,

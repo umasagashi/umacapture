@@ -7,6 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 
+extension SurfaceTintExtension on ColorScheme {
+  /// A very light blue surface, used for striped table rows and statistic
+  /// card backgrounds. Lighter than the tinted surfaceContainer roles.
+  Color get blueTintedSurface => Color.alphaBlend(primaryContainer.withValues(alpha: 0.10), surface);
+}
+
 class ListCard extends StatelessWidget {
   final String? title;
   final List<Widget> children;
