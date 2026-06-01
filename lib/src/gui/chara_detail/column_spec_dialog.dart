@@ -92,7 +92,7 @@ class ColumnSpecDialog extends ConsumerWidget {
           ),
           Tooltip(
             message: "$tr_chara_detail.column_predicate.dialog.ok_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_chara_detail.column_predicate.dialog.ok_button.label".tr()),
               onPressed: () {

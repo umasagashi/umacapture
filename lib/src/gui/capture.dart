@@ -115,7 +115,7 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
     final handler = _buildOnPressedHandler(state);
     final child = state ? widget.trueWidget : widget.falseWidget;
     if (state == widget.elevateWhen) {
-      return ElevatedButton(onPressed: handler, child: child);
+      return FilledButton(onPressed: handler, child: child);
     } else {
       return OutlinedButton(onPressed: handler, child: child);
     }

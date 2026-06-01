@@ -265,7 +265,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
           children: [
             Tooltip(
               message: "$tr_rating.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.check_circle),
                 label: Text("$tr_rating.dialog.ok_button.label".tr()),
                 onPressed: () {

@@ -69,8 +69,8 @@ class DeleteRecordDialog extends ConsumerWidget {
             const SizedBox(width: 8),
             Tooltip(
               message: "$tr_delete_record.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
                   backgroundColor: theme.colorScheme.error,
                   foregroundColor: theme.colorScheme.onError,
                 ),

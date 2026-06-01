@@ -54,7 +54,7 @@ class ReportRecordDialog extends ConsumerWidget {
         children: [
           Tooltip(
             message: "$tr_report_record.dialog.close_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_report_record.dialog.close_button.label".tr()),
               onPressed: () {
@@ -84,7 +84,7 @@ class ReportRecordDialog extends ConsumerWidget {
         children: [
           Tooltip(
             message: "$tr_report_record.dialog.close_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_report_record.dialog.close_button.label".tr()),
               onPressed: () {
@@ -162,7 +162,7 @@ class ReportRecordDialog extends ConsumerWidget {
           const SizedBox(width: 8),
           Tooltip(
             message: "$tr_report_record.dialog.ok_button.tooltip".tr(),
-            child: ElevatedButton.icon(
+            child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_report_record.dialog.ok_button.label".tr()),
               onPressed: () {

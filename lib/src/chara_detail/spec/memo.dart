@@ -251,7 +251,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
           children: [
             Tooltip(
               message: "$tr_memo.dialog.ok_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.check_circle),
                 label: Text("$tr_memo.dialog.ok_button.label".tr()),
                 onPressed: () {

@@ -406,7 +406,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
             ),
             Tooltip(
               message: "$tr_preview.dialog.close_button.tooltip".tr(),
-              child: ElevatedButton.icon(
+              child: FilledButton.icon(
                 icon: const Icon(Icons.close),
                 label: Text("$tr_preview.dialog.close_button.label".tr()),
                 onPressed: () {
