@@ -4,8 +4,6 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
-import 'package:quiver/iterables.dart';
-import 'package:quiver/time.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -164,7 +162,7 @@ class MonthlyFansChartData {
       fans.add(fans.last + (fansPerDay[start.inDays + day] ?? 0));
     }
 
-    return enumerate(fans).skip(1).map((e) => FlSpot(e.index.toDouble(), e.value.toDouble())).toList();
+    return fans.indexed.skip(1).map((e) => FlSpot(e.$1.toDouble(), e.$2.toDouble())).toList();
   }
 
   int calcMaxValue(List<FlSpot> spots, int maxX) {
@@ -175,7 +173,7 @@ class MonthlyFansChartData {
 
   LineChart build(ThemeData theme, DateTime month) {
     final start = DateTime(month.year, month.month);
-    final end = start.nextMonth().subtract(aMicrosecond);
+    final end = start.nextMonth().subtract(const Duration(microseconds: 1));
     final now = DateTime.now();
     final List<FlSpot> spots = parse(start: start, end: end.isAfter(now) ? now : end);
     final maxValue = calcMaxValue(spots, end.day);
@@ -361,9 +359,9 @@ class CountSRankChartData {
     const targetRank = 7;
     List<int> counts = [0, 0, 0, 0];
     for (final record in records.where((e) => e.metadata.stage == RecordStage.active)) {
-      for (final i in enumerate(record.aptitudes.distance.flatten)) {
-        if (i.value >= targetRank) {
-          counts[i.index]++;
+      for (final i in record.aptitudes.distance.flatten.indexed) {
+        if (i.$2 >= targetRank) {
+          counts[i.$1]++;
         }
       }
     }
@@ -414,12 +412,12 @@ class CountSRankChartData {
       titlesData: titlesData,
       borderData: FlBorderData(show: false),
       barGroups: [
-        for (final i in enumerate(counts))
+        for (final i in counts.indexed)
           BarChartGroupData(
-            x: i.index,
+            x: i.$1,
             barRods: [
               BarChartRodData(
-                toY: i.value.toDouble(),
+                toY: i.$2.toDouble(),
                 width: 16,
                 borderRadius: const BorderRadius.all(Radius.circular(2)),
               )
@@ -484,7 +482,7 @@ class CountStrategyChartData {
 
   CountStrategyChartData(this.records, this.labels) {
     counts = parse();
-    indices = enumerate(counts).sortedBy<num>((e) => -e.value).map((e) => e.index).toList();
+    indices = counts.indexed.sortedBy<num>((e) => -e.$2).map((e) => e.$1).toList();
   }
 
   List<int> parse() {

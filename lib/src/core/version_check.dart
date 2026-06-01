@@ -10,7 +10,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
-import 'package:tuple/tuple.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
@@ -174,10 +173,10 @@ Future<void> _logNetworkException({
   );
 }
 
-Future<void> _extractArchive(Tuple2<FilePath, DirectoryPath> args) {
-  final stream = InputFileStream(args.item1.path);
+Future<void> _extractArchive((FilePath, DirectoryPath) args) {
+  final stream = InputFileStream(args.$1.path);
   final archive = ZipDecoder().decodeStream(stream);
-  extractArchiveToDisk(archive, args.item2.path);
+  extractArchiveToDisk(archive, args.$2.path);
   return stream.close();
 }
 
@@ -233,7 +232,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
     await createDiagnosticDio(operation: "download_modules").download(Const.moduleZipUrl, downloadPath.path);
-    await compute(_extractArchive, Tuple2(downloadPath, pathInfo.supportDir));
+    await compute(_extractArchive, (downloadPath, pathInfo.supportDir));
     downloadPath.toFile().delete();
   } catch (exception, stackTrace) {
     await _logNetworkException(

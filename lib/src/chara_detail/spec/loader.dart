@@ -459,7 +459,7 @@ class Grid {
 
 Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
   final columnValues = specList.map((spec) => spec.parse(ref, recordList)).toList();
-  final columnConditions = zip2(specList, columnValues).map((e) => e.item1.evaluate(ref, e.item2)).toList();
+  final columnConditions = zip2(specList, columnValues).map((e) => e.$1.evaluate(ref, e.$2)).toList();
 
   final filteredCounts = columnConditions.map((e) => e.countTrue()).toList();
   final columns = specList.map((spec) => spec.plutoColumn(ref)).toList();
@@ -468,16 +468,16 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   final rowConditions = columnConditions.transpose().map((e) => e.everyIn()).toList();
 
   final plutoCells = zip2(rowValues, rowConditions)
-      .where((row) => row.item2)
-      .map((row) => zip2(specList, row.item1).map((c) => MapEntry(c.item1.id, c.item1.plutoCell(ref, c.item2))));
+      .where((row) => row.$2)
+      .map((row) => zip2(specList, row.$1).map((c) => MapEntry(c.$1.id, c.$1.plutoCell(ref, c.$2))));
 
-  final records = zip2(recordList, rowConditions).where((row) => row.item2).map((row) => row.item1);
+  final records = zip2(recordList, rowConditions).where((row) => row.$2).map((row) => row.$1);
 
   final rows = zip2(plutoCells, records)
       .map((row) => TrinaRow(
-            cells: Map.fromEntries(row.item1),
-            sortIdx: -DateTime.parse(row.item2.metadata.capturedDate).millisecondsSinceEpoch,
-          )..setUserData(row.item2))
+            cells: Map.fromEntries(row.$1),
+            sortIdx: -DateTime.parse(row.$2.metadata.capturedDate).millisecondsSinceEpoch,
+          )..setUserData(row.$2))
       .sortedBy<num>((e) => e.sortIdx)
       .toList();
 

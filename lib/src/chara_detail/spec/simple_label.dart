@@ -3,7 +3,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
-import 'package:quiver/iterables.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -128,7 +127,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   @override
   String tooltip(RefBase ref) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    final indices = range(labels.length).map((e) => e.toInt()).toList();
+    final indices = labels.length.range().toList();
     const sep = "\n";
     if (predicate.rejects.isEmpty) {
       return "Any";
@@ -166,7 +165,7 @@ class _SimpleLabelSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
-    final indices = range(labels.length).map((e) => e.toInt()).toList();
+    final indices = labels.length.range().toList();
     final theme = Theme.of(context);
     return FormGroup(
       title: Text("$tr_simple_label.selection.label".tr()),

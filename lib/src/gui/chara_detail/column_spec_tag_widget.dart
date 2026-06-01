@@ -135,7 +135,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               runSpacing: 8,
               children: [
                 for (final col in zip2(specs, filteredCounts))
-                  buildSpecChip(context, col.item1, col.item2 == recordCount ? null : col.item2),
+                  buildSpecChip(context, col.$1, col.$2 == recordCount ? null : col.$2),
                 specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
                 const Opacity(
                   // Spacing widget for export button.

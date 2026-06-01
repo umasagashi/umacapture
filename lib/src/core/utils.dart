@@ -1,14 +1,12 @@
 import 'dart:math' as math;
 
+import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // riverpod 3 moved ProviderListenable out of the default export surface.
 import 'package:flutter_riverpod/misc.dart';
-import 'package:quiver/iterables.dart';
-import 'package:quiver/time.dart' as qtm;
-import 'package:tuple/tuple.dart';
 
 import '/src/core/app_logger.dart';
 
@@ -235,7 +233,8 @@ extension DateTimeExtension on DateTime {
 
   int get inDays => (this - DateTime(0, 1, 1)).inDays;
 
-  int get daysInMonth => qtm.daysInMonth(year, month);
+  // Day 0 of the next month rolls back to the last day of this month.
+  int get daysInMonth => DateTime(year, month + 1, 0).day;
 
   static DateTime earlier(DateTime a, DateTime b) => b.isAfter(a) ? a : b;
 
@@ -269,15 +268,15 @@ extension StringExtension on String {
   }
 }
 
-Iterable<Tuple2<T1, T2>> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {
-  for (final e in zip([it1, it2])) {
-    yield Tuple2<T1, T2>(e[0] as T1, e[1] as T2);
+Iterable<(T1, T2)> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {
+  for (final e in IterableZip([it1, it2])) {
+    yield (e[0] as T1, e[1] as T2);
   }
 }
 
-Iterable<Tuple3<T1, T2, T3>> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2, Iterable<T3> it3) sync* {
-  for (final e in zip([it1, it2, it3])) {
-    yield Tuple3<T1, T2, T3>(e[0] as T1, e[1] as T2, e[2] as T3);
+Iterable<(T1, T2, T3)> zip3<T1, T2, T3>(Iterable<T1> it1, Iterable<T2> it2, Iterable<T3> it3) sync* {
+  for (final e in IterableZip([it1, it2, it3])) {
+    yield (e[0] as T1, e[1] as T2, e[2] as T3);
   }
 }
 

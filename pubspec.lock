@@ -1109,14 +1109,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "3.0.2"
-  quiver:
-    dependency: "direct main"
-    description:
-      name: quiver
-      sha256: ea0b925899e64ecdfbf9c7becb60d5b50e706ade44a85b2363be2a22d88117d2
-      url: "https://pub.dev"
-    source: hosted
-    version: "3.2.2"
   recase:
     dependency: "direct main"
     description:
@@ -1371,7 +1363,7 @@ packages:
     source: hosted
     version: "1.12.1"
   state_notifier:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: state_notifier
       sha256: b8677376aa54f2d7c58280d5a007f9e8774f1968d1fb1c096adcb4792fba29bb
@@ -1466,14 +1458,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.2"
-  tuple:
-    dependency: "direct main"
-    description:
-      name: tuple
-      sha256: a97ce2013f240b2f3807bcbaf218765b6f301c3eff91092bcfa23a039e7dd151
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.0.2"
   two_dimensional_scrollables:
     dependency: transitive
     description:
