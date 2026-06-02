@@ -7,7 +7,7 @@ import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/base.dart' hide tr_common;
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/core/callback.dart';
@@ -181,19 +181,102 @@ class _CharaCardChip extends ConsumerWidget {
   }
 }
 
-class _CharacterCardSelector extends ConsumerWidget {
+class _CharacterCardSelector extends ConsumerStatefulWidget {
   final String specId;
 
   const _CharacterCardSelector({required this.specId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConsumerStatefulWidget> createState() => _CharacterCardSelectorState();
+}
+
+class _CharacterCardSelectorState extends ConsumerState<_CharacterCardSelector> {
+  String textQuery = "";
+
+  List<AvailableCharaCardInfo> _filterCards(List<AvailableCharaCardInfo> cards) {
+    final normalizedQuery = textQuery.toLowerCase().trim();
+    if (normalizedQuery.isEmpty) {
+      return cards;
+    }
+    return cards.where((card) {
+      return card.cardInfo.names.any((name) => name.toLowerCase().contains(normalizedQuery));
+    }).toList();
+  }
+
+  Widget _controlWidget(BuildContext context, List<AvailableCharaCardInfo> candidates) {
+    final theme = Theme.of(context);
+    const EdgeInsetsGeometry padding = EdgeInsets.all(8);
+    return Align(
+      alignment: Alignment.topLeft,
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          ActionChip(
+            padding: padding,
+            avatar: const Icon(Icons.select_all, size: 20),
+            label: Text("$tr_common.selector.control.select_all.label".tr()),
+            tooltip: "$tr_common.selector.control.select_all.tooltip".tr(),
+            side: BorderSide.none,
+            backgroundColor: theme.colorScheme.primaryContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            onPressed: () {
+              _clonedSpecProvider.update(ref, widget.specId, (spec) {
+                return spec.copyWith(
+                  predicate: CharacterCardPredicate(
+                    rejects: {...spec.predicate.rejects}..removeAll(candidates.map((e) => e.cardInfo.sid)),
+                  ),
+                );
+              });
+            },
+          ),
+          ActionChip(
+            padding: padding,
+            avatar: const Icon(Icons.deselect, size: 20),
+            label: Text("$tr_common.selector.control.deselect_all.label".tr()),
+            tooltip: "$tr_common.selector.control.deselect_all.tooltip".tr(),
+            side: BorderSide.none,
+            backgroundColor: theme.colorScheme.primaryContainer,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            onPressed: () {
+              _clonedSpecProvider.update(ref, widget.specId, (spec) {
+                return spec.copyWith(
+                  predicate: CharacterCardPredicate(
+                    rejects: {...spec.predicate.rejects}..addAll(candidates.map((e) => e.cardInfo.sid)),
+                  ),
+                );
+              });
+            },
+          ),
+          Tooltip(
+            message: "$tr_common.selector.control.text_search.tooltip".tr(),
+            child: DenseTextField(
+              initialText: "",
+              debounce: const Duration(milliseconds: 200),
+              hintText: "$tr_common.selector.control.text_search.label".tr(),
+              allowEmpty: true,
+              onChanged: (text) => setState(() => textQuery = text),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final charaCards = ref.watch(availableCharaCardsProvider);
-    final rejected = _clonedSpecProvider.watch(ref, specId).predicate.rejects;
+    final rejected = _clonedSpecProvider.watch(ref, widget.specId).predicate.rejects;
+    final candidates = _filterCards(charaCards);
     return FormGroup(
       title: Text("$tr_character.selection.label".tr()),
       description: Text("$tr_character.selection.description".tr()),
       children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
+          child: _controlWidget(context, candidates),
+        ),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Align(
@@ -202,8 +285,9 @@ class _CharacterCardSelector extends ConsumerWidget {
               spacing: 8,
               runSpacing: 2,
               children: [
-                for (final card in charaCards)
-                  _CharaCardChip(specId: specId, card: card, selected: !rejected.contains(card.cardInfo.sid)),
+                if (candidates.isEmpty) Text("$tr_common.selector.not_found_message".tr()),
+                for (final card in candidates)
+                  _CharaCardChip(specId: widget.specId, card: card, selected: !rejected.contains(card.cardInfo.sid)),
               ],
             ),
           ),
