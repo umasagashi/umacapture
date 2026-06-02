@@ -10,9 +10,30 @@
 // Self-contained (no on-disk data), so it always runs in CI.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
+import 'package:umacapture/src/chara_detail/spec/factor.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+
+// A complete, current-format FactorColumnSpec map.
+Map<String, dynamic> completeFactorMap() => <String, dynamic>{
+      'type': 'FactorColumnSpec',
+      'id': 'factor-id',
+      'title': '因子',
+      'parser': <String, dynamic>{'type': 'FactorSetParser'},
+      'predicate': <String, dynamic>{
+        'query': <int>[],
+        'logic': 'anyOf',
+        'subject': 'family',
+        'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
+        'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
+        'factorTags': <String>[],
+        'skillTags': <String>[],
+      },
+      'showAllWhenQueryIsEmpty': true,
+      'showAvailableOnly': true,
+      'hiddenElements': <String>[],
+    };
 
 void main() {
   setUpAll(initializeMappers);
@@ -66,5 +87,31 @@ void main() {
         );
       }
     }
+  });
+
+  test('legacy FactorColumnSpec missing factorTags/skillTags recovers with defaults', () {
+    final legacy = completeFactorMap();
+    (legacy['predicate'] as Map<String, dynamic>).remove('factorTags');
+    (legacy['predicate'] as Map<String, dynamic>).remove('skillTags');
+
+    final spec = ColumnSpecMapper.fromMap(legacy);
+
+    expect(spec, isA<FactorColumnSpec>());
+    expect((spec as FactorColumnSpec).predicate.factorTags, isEmpty);
+    expect(spec.predicate.skillTags, isEmpty);
+  });
+
+  test('isSpecMapIncomplete flags only the legacy map, not the complete one', () {
+    final complete = completeFactorMap();
+    final completeSpec = ColumnSpecMapper.fromMap(complete);
+    // A round-tripped complete spec must never be flagged as broken.
+    expect(isSpecMapIncomplete(complete, completeSpec.toMap()), isFalse);
+    expect(isSpecMapIncomplete(completeSpec.toMap(), completeSpec.toMap()), isFalse);
+
+    final legacy = completeFactorMap();
+    (legacy['predicate'] as Map<String, dynamic>).remove('factorTags');
+    (legacy['predicate'] as Map<String, dynamic>).remove('skillTags');
+    final legacySpec = ColumnSpecMapper.fromMap(legacy);
+    expect(isSpecMapIncomplete(legacy, legacySpec.toMap()), isTrue);
   });
 }

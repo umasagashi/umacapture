@@ -24,7 +24,7 @@ class SimpleLabelPredicate with SimpleLabelPredicateMappable {
   final Set<int> rejects;
 
   SimpleLabelPredicate({
-    required this.rejects,
+    this.rejects = const {},
   });
 
   SimpleLabelPredicate.any() : rejects = {};

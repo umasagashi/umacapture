@@ -180,13 +180,13 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   }
 
   AggregateFactorSetPredicate({
-    required this.query,
-    required this.logic,
-    required this.subject,
+    this.query = const {},
+    this.logic = FactorSetLogicMode.anyOf,
+    this.subject = FactorSearchSubjectMode.family,
     required this.element,
     required this.notation,
-    required this.factorTags,
-    required this.skillTags,
+    this.factorTags = const {},
+    this.skillTags = const {},
   });
 
   AggregateFactorSetPredicate.any()

@@ -404,14 +404,21 @@ class AggregateFactorSetPredicateMapper
   static const Field<AggregateFactorSetPredicate, Set<int>> _f$query = Field(
     'query',
     _$query,
+    opt: true,
+    def: const {},
   );
   static FactorSetLogicMode _$logic(AggregateFactorSetPredicate v) => v.logic;
   static const Field<AggregateFactorSetPredicate, FactorSetLogicMode> _f$logic =
-      Field('logic', _$logic);
+      Field('logic', _$logic, opt: true, def: FactorSetLogicMode.anyOf);
   static FactorSearchSubjectMode _$subject(AggregateFactorSetPredicate v) =>
       v.subject;
   static const Field<AggregateFactorSetPredicate, FactorSearchSubjectMode>
-  _f$subject = Field('subject', _$subject);
+  _f$subject = Field(
+    'subject',
+    _$subject,
+    opt: true,
+    def: FactorSearchSubjectMode.family,
+  );
   static FactorSearchElement _$element(AggregateFactorSetPredicate v) =>
       v.element;
   static const Field<AggregateFactorSetPredicate, FactorSearchElement>
@@ -422,10 +429,10 @@ class AggregateFactorSetPredicateMapper
   static Set<String> _$factorTags(AggregateFactorSetPredicate v) =>
       v.factorTags;
   static const Field<AggregateFactorSetPredicate, Set<String>> _f$factorTags =
-      Field('factorTags', _$factorTags);
+      Field('factorTags', _$factorTags, opt: true, def: const {});
   static Set<String> _$skillTags(AggregateFactorSetPredicate v) => v.skillTags;
   static const Field<AggregateFactorSetPredicate, Set<String>> _f$skillTags =
-      Field('skillTags', _$skillTags);
+      Field('skillTags', _$skillTags, opt: true, def: const {});
 
   @override
   final MappableFields<AggregateFactorSetPredicate> fields = const {
