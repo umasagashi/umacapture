@@ -200,17 +200,7 @@ class Race extends JsonEquatable with RaceMappable {
   bool get won => position == 1;
 
   @override
-  List<Object?> properties() => [
-        title,
-        place,
-        ground,
-        distance,
-        variation,
-        weather,
-        strategy,
-        turn,
-        position,
-      ];
+  List<Object?> properties() => [title, place, ground, distance, variation, weather, strategy, turn, position];
 }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
@@ -226,17 +216,11 @@ class RecordId extends JsonEquatable with RecordIdMappable {
 }
 
 @MappableEnum()
-enum RecordStage {
-  active,
-}
+enum RecordStage { active }
 
 // In the saved data (record.json), record_type is PascalCase ("Standard"/"InheritanceOnly"/"Friend").
 @MappableEnum(caseStyle: CaseStyle.pascalCase)
-enum RecordType {
-  standard,
-  inheritanceOnly,
-  friend,
-}
+enum RecordType { standard, inheritanceOnly, friend }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Metadata extends JsonEquatable with MetadataMappable {
@@ -266,16 +250,16 @@ class Metadata extends JsonEquatable with MetadataMappable {
 
   @override
   List<Object?> properties() => [
-        formatVersion,
-        region,
-        recordId,
-        trainerId,
-        capturedDate,
-        recognizerVersion,
-        stage,
-        strategy,
-        relationBonus,
-      ];
+    formatVersion,
+    region,
+    recordId,
+    trainerId,
+    capturedDate,
+    recognizerVersion,
+    stage,
+    strategy,
+    relationBonus,
+  ];
 }
 
 /// Outcome of attempting to load a single record directory.
@@ -343,22 +327,22 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
 
   @override
   List<Object?> properties() => [
-        metadata,
-        trainee,
-        evaluationValue,
-        status,
-        aptitudes,
-        skills,
-        factors,
-        supportCards,
-        family,
-        fans,
-        scenario,
-        foreignAptitude,
-        uafWins,
-        trainedDate,
-        races,
-      ];
+    metadata,
+    trainee,
+    evaluationValue,
+    status,
+    aptitudes,
+    skills,
+    factors,
+    supportCards,
+    family,
+    fans,
+    scenario,
+    foreignAptitude,
+    uafWins,
+    trainedDate,
+    races,
+  ];
 
   String get id => metadata.recordId.self;
 

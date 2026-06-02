@@ -55,21 +55,12 @@ class ColumnSpecDialog extends ConsumerWidget {
   final PlainChangeNotifier onDecided;
   final Widget child;
 
-  const ColumnSpecDialog({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-    required this.child,
-  });
+  const ColumnSpecDialog({super.key, required this.specId, required this.onDecided, required this.child});
 
   static void show(RefBase ref, ColumnSpec spec) {
     CardDialog.show(ref, (_) {
       final notifier = PlainChangeNotifier();
-      return ColumnSpecDialog(
-        specId: spec.id,
-        onDecided: notifier,
-        child: spec.selector(notifier),
-      );
+      return ColumnSpecDialog(specId: spec.id, onDecided: notifier, child: spec.selector(notifier));
     });
   }
 

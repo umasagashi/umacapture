@@ -16,10 +16,7 @@ part 'clipboard_alt.mapper.dart';
 // encoding. Current values are single-word (so identical either way), but the
 // explicit style keeps stored data stable if a multi-word value is added.
 @MappableEnum(caseStyle: CaseStyle.snakeCase)
-enum ClipboardPasteImageMode {
-  memory,
-  file,
-}
+enum ClipboardPasteImageMode { memory, file }
 
 final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider<ClipboardPasteImageMode>(() {
   return ExclusiveItemsNotifier<ClipboardPasteImageMode>(

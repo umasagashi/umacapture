@@ -18,13 +18,8 @@ import '/src/gui/common.dart';
 const tr_statistics = "pages.statistics";
 
 final statisticsInitialLoader = FutureProvider((ref) async {
-  return Future.wait([
-    ref.watch(moduleVersionLoader.future),
-  ]).then((_) {
-    return Future.wait([
-      ref.watch(labelMapLoader.future),
-      ref.watch(charaDetailRecordStorageLoaderProvider.future),
-    ]);
+  return Future.wait([ref.watch(moduleVersionLoader.future)]).then((_) {
+    return Future.wait([ref.watch(labelMapLoader.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
   });
 });
 
@@ -33,29 +28,19 @@ class _StatisticTile extends ConsumerWidget {
   final Widget bottom;
   final InlineBuilder<Widget> builder;
 
-  const _StatisticTile({
-    required this.title,
-    required this.bottom,
-    required this.builder,
-  });
+  const _StatisticTile({required this.title, required this.bottom, required this.builder});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(
-          color: theme.colorScheme.primaryContainer,
-          width: 2,
-        ),
+        border: Border.all(color: theme.colorScheme.primaryContainer, width: 2),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.all(4),
-            child: title,
-          ),
+          Padding(padding: const EdgeInsets.all(4), child: title),
           Expanded(
             child: Container(
               alignment: Alignment.center,
@@ -63,10 +48,7 @@ class _StatisticTile extends ConsumerWidget {
               child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.all(4),
-            child: bottom,
-          ),
+          Padding(padding: const EdgeInsets.all(4), child: bottom),
         ],
       ),
     );
@@ -92,10 +74,7 @@ class NumberOfRecordStatisticWidget extends ConsumerWidget {
       builder: () {
         final theme = Theme.of(context);
         final records = ref.watch(charaDetailRecordStorageProvider);
-        return Text(
-          "${records.length}",
-          style: theme.textTheme.headlineLarge,
-        );
+        return Text("${records.length}", style: theme.textTheme.headlineLarge);
       },
     );
   }
@@ -128,14 +107,8 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.file(
-              storage.traineeIconPathOf(best).toFile(),
-              height: 56,
-            ),
-            Text(
-              best.evaluationValue.toNumberString(),
-              style: theme.textTheme.headlineMedium,
-            ),
+            Image.file(storage.traineeIconPathOf(best).toFile(), height: 56),
+            Text(best.evaluationValue.toNumberString(), style: theme.textTheme.headlineMedium),
           ],
         );
       },
@@ -200,9 +173,7 @@ class MonthlyFansChartData {
       maxY: maxValue.toDouble(),
       lineBarsData: lineBarsData,
       showingTooltipIndicators: [
-        ShowingTooltipIndicators([
-          LineBarSpot(lineBarsData.first, 0, spots.last),
-        ]),
+        ShowingTooltipIndicators([LineBarSpot(lineBarsData.first, 0, spots.last)]),
       ],
       lineTouchData: LineTouchData(
         enabled: false,
@@ -233,11 +204,8 @@ class MonthlyFansChartData {
             showTitles: true,
             reservedSize: 70,
             interval: horizontalInterval,
-            getTitlesWidget: (value, meta) => SideTitleWidget(
-              meta: meta,
-              space: 8,
-              child: Text(value.toLocalCompactNumberString()),
-            ),
+            getTitlesWidget: (value, meta) =>
+                SideTitleWidget(meta: meta, space: 8, child: Text(value.toLocalCompactNumberString())),
           ),
         ),
         topTitles: noTitle,
@@ -246,21 +214,15 @@ class MonthlyFansChartData {
             showTitles: true,
             reservedSize: 30,
             interval: 7,
-            getTitlesWidget: (value, meta) => SideTitleWidget(
-              meta: meta,
-              space: 8.0,
-              child: Text(value.toLocalCompactNumberString()),
-            ),
+            getTitlesWidget: (value, meta) =>
+                SideTitleWidget(meta: meta, space: 8.0, child: Text(value.toLocalCompactNumberString())),
           ),
         ),
       ),
       borderData: FlBorderData(border: Border.all(width: 0.5)),
     );
 
-    return LineChart(
-      lineChartData,
-      duration: Duration.zero,
-    );
+    return LineChart(lineChartData, duration: Duration.zero);
   }
 }
 
@@ -271,11 +233,7 @@ class MonthlyFansStatisticWidget extends ConsumerStatefulWidget {
   MonthlyFansStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
-    return StaggeredGridTile.count(
-      crossAxisCellCount: 2,
-      mainAxisCellCount: 2,
-      child: MonthlyFansStatisticWidget(),
-    );
+    return StaggeredGridTile.count(crossAxisCellCount: 2, mainAxisCellCount: 2, child: MonthlyFansStatisticWidget());
   }
 
   @override
@@ -379,10 +337,7 @@ class CountSRankChartData {
         tooltipPadding: EdgeInsets.zero,
         tooltipMargin: 0,
         getTooltipItem: (BarChartGroupData group, int groupIndex, BarChartRodData rod, int rodIndex) {
-          return BarTooltipItem(
-            rod.toY.round().toString(),
-            theme.textTheme.titleMedium!,
-          );
+          return BarTooltipItem(rod.toY.round().toString(), theme.textTheme.titleMedium!);
         },
       ),
     );
@@ -397,11 +352,7 @@ class CountSRankChartData {
           showTitles: true,
           reservedSize: 30,
           getTitlesWidget: (double value, TitleMeta meta) {
-            return SideTitleWidget(
-              meta: meta,
-              space: 4,
-              child: Text(labels[value.toInt()]),
-            );
+            return SideTitleWidget(meta: meta, space: 4, child: Text(labels[value.toInt()]));
           },
         ),
       ),
@@ -420,7 +371,7 @@ class CountSRankChartData {
                 toY: i.$2.toDouble(),
                 width: 16,
                 borderRadius: const BorderRadius.all(Radius.circular(2)),
-              )
+              ),
             ],
             showingTooltipIndicators: [0],
           ),
@@ -430,10 +381,7 @@ class CountSRankChartData {
       maxY: maxValue,
     );
 
-    return BarChart(
-      barChartData,
-      duration: Duration.zero,
-    );
+    return BarChart(barChartData, duration: Duration.zero);
   }
 }
 
@@ -473,12 +421,7 @@ class CountStrategyChartData {
 
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
-  final colors = [
-    const Color(0xff0293ee),
-    const Color(0xfff8b250),
-    const Color(0xff845bef),
-    const Color(0xff13d38e),
-  ];
+  final colors = [const Color(0xff0293ee), const Color(0xfff8b250), const Color(0xff845bef), const Color(0xff13d38e)];
 
   CountStrategyChartData(this.records, this.labels) {
     counts = parse();
@@ -508,14 +451,11 @@ class CountStrategyChartData {
             radius: space / 2,
             titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
             titlePositionPercentageOffset: 0.65,
-          )
+          ),
       ],
     );
 
-    return PieChart(
-      pieChartData,
-      duration: Duration.zero,
-    );
+    return PieChart(pieChartData, duration: Duration.zero);
   }
 }
 
@@ -564,13 +504,10 @@ class CountStrategyStatisticWidget extends ConsumerWidget {
                         Container(
                           width: 12,
                           height: 12,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: chart.colors[i],
-                          ),
+                          decoration: BoxDecoration(shape: BoxShape.circle, color: chart.colors[i]),
                         ),
                         const SizedBox(width: 4),
-                        Text(labels[i])
+                        Text(labels[i]),
                       ],
                     ),
                 ],

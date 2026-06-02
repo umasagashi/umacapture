@@ -21,10 +21,7 @@ import '/src/preference/settings_state.dart';
 const tr_capture = "pages.capture";
 
 final autoStartCaptureStateProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(
-    entryKey: SettingsEntryKey.autoStartCapture.name,
-    defaultValue: false,
-  );
+  return BooleanNotifier(entryKey: SettingsEntryKey.autoStartCapture.name, defaultValue: false);
 });
 
 final autoCopyClipboardStateProvider = ExclusiveItemsNotifierProvider<CharaDetailRecordImageMode>(() {
@@ -104,10 +101,7 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
     final state = ref.watch(widget.provider);
     return StackedIndicator(
       loading: _isInTransition,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 100),
-        child: _buildButton(state),
-      ),
+      child: AnimatedSwitcher(duration: const Duration(milliseconds: 100), child: _buildButton(state)),
     );
   }
 
@@ -139,11 +133,7 @@ class _ScrollStateWidget extends ConsumerWidget {
   final double progress;
   final bool disable;
 
-  const _ScrollStateWidget({
-    required this.header,
-    required this.progress,
-    required this.disable,
-  });
+  const _ScrollStateWidget({required this.header, required this.progress, required this.disable});
 
   Color _progressColor() {
     if (disable) {
@@ -227,10 +217,7 @@ class _CharaDetailStateWidget extends ConsumerWidget {
               padding: const EdgeInsets.all(16),
               child: Text(
                 "$tr_capture.capture_control.error.${state.error!}".tr(),
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onErrorContainer,
-                ),
+                style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onErrorContainer),
               ),
             ),
           ),
@@ -277,9 +264,7 @@ class _CharaDetailStateWidget extends ConsumerWidget {
         Flexible(
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: Center(
-              child: Text(additionalInfoText(ref)),
-            ),
+            child: Center(child: Text(additionalInfoText(ref))),
           ),
         ),
       ],
@@ -334,19 +319,13 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
     return Tooltip(
       message: tooltip,
       child: Container(
-        decoration: BoxDecoration(
-          color: colorMap[requirement],
-          borderRadius: BorderRadius.circular(16),
-        ),
+        decoration: BoxDecoration(color: colorMap[requirement], borderRadius: BorderRadius.circular(16)),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           children: [
             Icon(iconMap[requirement], color: Colors.white, size: 14),
             const SizedBox(width: 4),
-            Text(
-              label,
-              style: theme.textTheme.labelSmall?.copyWith(color: Colors.white),
-            ),
+            Text(label, style: theme.textTheme.labelSmall?.copyWith(color: Colors.white)),
           ],
         ),
       ),
@@ -364,8 +343,8 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
     final requirement = (size.width >= goodSize.width && size.height >= goodSize.height)
         ? _Requirement.good
         : ((size.width >= unsureSize.width && size.height >= unsureSize.height)
-            ? _Requirement.unsure
-            : _Requirement.insufficient);
+              ? _Requirement.unsure
+              : _Requirement.insufficient);
     return chip(
       theme: theme,
       label: "${size.width.toInt()} x ${size.height.toInt()}",
@@ -411,10 +390,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
               child: Tooltip(
                 message: "$tr_capture.capture_control.report_screen.tooltip".tr(),
                 child: TextButton(
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: Size.zero,
-                    padding: const EdgeInsets.all(6),
-                  ),
+                  style: OutlinedButton.styleFrom(minimumSize: Size.zero, padding: const EdgeInsets.all(6)),
                   onPressed: () {
                     takeScreenshot(ref.base);
                     ReportScreenDialog.show(ref.base);
@@ -469,11 +445,7 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.center,
-          children: const [
-            CircularProgressIndicator(),
-            SizedBox(height: 8),
-            Text("Loading"),
-          ],
+          children: const [CircularProgressIndicator(), SizedBox(height: 8), Text("Loading")],
         ),
       ),
     );
@@ -501,12 +473,7 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
   }
 
   Widget data(BuildContext context, WidgetRef ref) {
-    return const ListTilePageRootWidget(
-      children: [
-        CaptureControlGroup(),
-        CaptureSettingsGroup(),
-      ],
-    );
+    return const ListTilePageRootWidget(children: [CaptureControlGroup(), CaptureSettingsGroup()]);
   }
 
   @override

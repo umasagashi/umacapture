@@ -147,16 +147,10 @@ class Range<T extends dynamic> with RangeMappable<T> {
   final T min;
   final T max;
 
-  Range({
-    required this.min,
-    required this.max,
-  });
+  Range({required this.min, required this.max});
 
   Range<double> toDouble() {
-    return Range<double>(
-      min: min.toDouble(),
-      max: max.toDouble(),
-    );
+    return Range<double>(min: min.toDouble(), max: max.toDouble());
   }
 }
 
@@ -340,11 +334,7 @@ abstract class TagSelectionNotifier extends Notifier<Set<String>> {
 
 extension AsyncValueExtension<T> on AsyncValue<T> {
   Widget guarded(Widget Function(T) data) {
-    return when(
-      loading: () => const CircularProgressIndicator(),
-      error: (e, _) => Text("ERROR: $e"),
-      data: data,
-    );
+    return when(loading: () => const CircularProgressIndicator(), error: (e, _) => Text("ERROR: $e"), data: data);
   }
 }
 

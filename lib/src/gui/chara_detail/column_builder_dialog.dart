@@ -49,8 +49,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         ColumnSpecDialog.show(ref.base, spec);
       },
       child: ActionChip(
-        backgroundColor:
-            builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor,
+        backgroundColor: builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor,
         label: Text(builder.title),
         onPressed: () {
           ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(builder.build(ref.base));

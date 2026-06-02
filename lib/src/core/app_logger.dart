@@ -35,23 +35,17 @@ SentryLevel _toSentryLevel(Level level) {
 class AppLogger {
   static const _maxBreadcrumbMessageLength = 1000;
 
-  void v(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.trace, message, error, stackTrace);
+  void v(dynamic message, [dynamic error, StackTrace? stackTrace]) => log(Level.trace, message, error, stackTrace);
 
-  void d(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.debug, message, error, stackTrace);
+  void d(dynamic message, [dynamic error, StackTrace? stackTrace]) => log(Level.debug, message, error, stackTrace);
 
-  void i(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.info, message, error, stackTrace);
+  void i(dynamic message, [dynamic error, StackTrace? stackTrace]) => log(Level.info, message, error, stackTrace);
 
-  void w(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.warning, message, error, stackTrace);
+  void w(dynamic message, [dynamic error, StackTrace? stackTrace]) => log(Level.warning, message, error, stackTrace);
 
-  void e(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.error, message, error, stackTrace);
+  void e(dynamic message, [dynamic error, StackTrace? stackTrace]) => log(Level.error, message, error, stackTrace);
 
-  void wtf(dynamic message, [dynamic error, StackTrace? stackTrace]) =>
-      log(Level.fatal, message, error, stackTrace);
+  void wtf(dynamic message, [dynamic error, StackTrace? stackTrace]) => log(Level.fatal, message, error, stackTrace);
 
   void log(Level level, dynamic message, [dynamic error, StackTrace? stackTrace]) {
     _consoleLogger.log(level, message, error: error, stackTrace: stackTrace);
@@ -68,13 +62,15 @@ class AppLogger {
       text = '${text.substring(0, _maxBreadcrumbMessageLength)}...';
     }
 
-    Sentry.addBreadcrumb(Breadcrumb(
-      message: text,
-      level: _toSentryLevel(level),
-      category: 'log',
-      timestamp: DateTime.now().toUtc(),
-      data: error == null ? null : {'error': error.toString()},
-    ));
+    Sentry.addBreadcrumb(
+      Breadcrumb(
+        message: text,
+        level: _toSentryLevel(level),
+        category: 'log',
+        timestamp: DateTime.now().toUtc(),
+        data: error == null ? null : {'error': error.toString()},
+      ),
+    );
   }
 }
 
@@ -84,11 +80,7 @@ final logger = AppLogger();
 // to receive a ProviderObserverContext instead of (provider, container).
 base class ProviderLogger extends ProviderObserver {
   @override
-  void didUpdateProvider(
-    ProviderObserverContext context,
-    Object? previousValue,
-    Object? newValue,
-  ) {
+  void didUpdateProvider(ProviderObserverContext context, Object? previousValue, Object? newValue) {
     final provider = context.provider;
     final String p = previousValue.toString();
     final String n = newValue.toString();

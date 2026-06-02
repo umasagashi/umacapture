@@ -25,9 +25,7 @@ const tr_character = "pages.chara_detail.column_predicate.character";
 class CharacterCardPredicate with CharacterCardPredicateMappable {
   final Set<int> rejects;
 
-  CharacterCardPredicate({
-    this.rejects = const {},
-  });
+  CharacterCardPredicate({this.rejects = const {}});
 
   CharacterCardPredicate.any() : rejects = {};
 
@@ -62,19 +60,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
-  CharacterCardColumnSpec({
-    required this.id,
-    required this.title,
-    required this.parser,
-    required this.predicate,
-  });
+  CharacterCardColumnSpec({required this.id, required this.title, required this.parser, required this.predicate});
 
-  CharacterCardColumnSpec copyWith({
-    String? id,
-    String? title,
-    Parser? parser,
-    CharacterCardPredicate? predicate,
-  }) {
+  CharacterCardColumnSpec copyWith({String? id, String? title, Parser? parser, CharacterCardPredicate? predicate}) {
     return CharacterCardColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
@@ -137,10 +125,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return CharacterCardColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return CharacterCardColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -151,11 +136,7 @@ class _CharaCardChip extends ConsumerWidget {
   final AvailableCharaCardInfo card;
   final bool selected;
 
-  const _CharaCardChip({
-    required this.specId,
-    required this.card,
-    required this.selected,
-  });
+  const _CharaCardChip({required this.specId, required this.card, required this.selected});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -166,10 +147,7 @@ class _CharaCardChip extends ConsumerWidget {
         Padding(
           padding: const EdgeInsets.only(left: 4),
           child: FilterChip(
-            label: Padding(
-              padding: const EdgeInsets.only(left: 36),
-              child: Text(card.cardInfo.names.first),
-            ),
+            label: Padding(padding: const EdgeInsets.only(left: 36), child: Text(card.cardInfo.names.first)),
             backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
             showCheckmark: false,
             selected: selected,
@@ -206,9 +184,7 @@ class _CharaCardChip extends ConsumerWidget {
 class _CharacterCardSelector extends ConsumerWidget {
   final String specId;
 
-  const _CharacterCardSelector({
-    required this.specId,
-  });
+  const _CharacterCardSelector({required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -227,11 +203,7 @@ class _CharacterCardSelector extends ConsumerWidget {
               runSpacing: 2,
               children: [
                 for (final card in charaCards)
-                  _CharaCardChip(
-                    specId: specId,
-                    card: card,
-                    selected: !rejected.contains(card.cardInfo.sid),
-                  ),
+                  _CharaCardChip(specId: specId, card: card, selected: !rejected.contains(card.cardInfo.sid)),
               ],
             ),
           ),
@@ -245,10 +217,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -294,11 +263,7 @@ class CharacterCardColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const CharacterCardColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const CharacterCardColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -321,11 +286,7 @@ class CharacterCardColumnBuilder extends ColumnBuilder {
   @override
   final ColumnCategory category;
 
-  CharacterCardColumnBuilder({
-    required this.title,
-    required this.category,
-    required this.parser,
-  });
+  CharacterCardColumnBuilder({required this.title, required this.category, required this.parser});
 
   @override
   CharacterCardColumnSpec build(RefBase ref) {

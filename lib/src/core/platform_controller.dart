@@ -19,13 +19,16 @@ import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
 final capturingStateProvider = Provider<bool>((ref) {
-  return ref.watch(captureTriggeredEventProvider).when(
-      data: (data) => data,
-      loading: () => false,
-      error: (error, stack) {
-        logger.e("error: $error, $stack");
-        return false;
-      });
+  return ref
+      .watch(captureTriggeredEventProvider)
+      .when(
+        data: (data) => data,
+        loading: () => false,
+        error: (error, stack) {
+          logger.e("error: $error, $stack");
+          return false;
+        },
+      );
 });
 
 final capturingFrameSizeProvider = settableNotifierProvider<Size?>(null);
@@ -157,8 +160,9 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   void fail(String message) => state = state.fail(message: message);
 }
 
-final charaDetailCaptureStateProvider =
-    NotifierProvider<CharaDetailCaptureStateNotifier, CharaDetailCaptureState>(CharaDetailCaptureStateNotifier.new);
+final charaDetailCaptureStateProvider = NotifierProvider<CharaDetailCaptureStateNotifier, CharaDetailCaptureState>(
+  CharaDetailCaptureStateNotifier.new,
+);
 
 final trainerIdProvider = Provider<String>((ref) {
   final entry = StorageBox(StorageBoxKey.trainerId).entry<String>("trainer_id");
@@ -177,10 +181,7 @@ final trainerIdProvider = Provider<String>((ref) {
 });
 
 final forceResizeModeStateProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(
-    entryKey: SettingsEntryKey.forceResizeMode.name,
-    defaultValue: false,
-  );
+  return BooleanNotifier(entryKey: SettingsEntryKey.forceResizeMode.name, defaultValue: false);
 });
 
 typedef JsonMap = Map<String, dynamic>;
@@ -249,9 +250,9 @@ class PlatformController {
   final Map<String, dynamic> nativeConfig;
 
   PlatformController(Ref ref, Map<String, dynamic> config)
-      : _ref = ref,
-        nativeConfig = config,
-        _platformChannel = PlatformChannel() {
+    : _ref = ref,
+      nativeConfig = config,
+      _platformChannel = PlatformChannel() {
     _platformChannel.setCallback((message) => _handleMessage(message));
     _platformChannel.setConfig(jsonEncode(config));
 
@@ -305,9 +306,7 @@ class PlatformController {
         break;
       case 'onScreenshotTaken':
         logger.i("path=${data['path']}, result='${data['result']}'");
-        _ref
-            .read(latestScreenshotProvider.notifier)
-            .set(ScreenshotResult(FilePath(data['path']), data['result']));
+        _ref.read(latestScreenshotProvider.notifier).set(ScreenshotResult(FilePath(data['path']), data['result']));
         break;
       case 'onFrameSizeReported':
         final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
@@ -330,9 +329,7 @@ class PlatformController {
 
   Future<void> setForceResizeMode(bool enable) {
     final config = {
-      "window_recorder": {
-        "force_resize": enable,
-      }
+      "window_recorder": {"force_resize": enable},
     };
     return _platformChannel.setPlatformConfig(jsonEncode(config));
   }

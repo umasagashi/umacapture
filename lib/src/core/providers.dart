@@ -69,8 +69,9 @@ final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
   late final DirectoryPath documentDir;
   if (CurrentPlatform.isAndroid()) {
     // To make it easier for users to export manually.
-    documentDir =
-        DirectoryPath(await getExternalStorageDirectories(type: StorageDirectory.documents).then((e) => e!.first));
+    documentDir = DirectoryPath(
+      await getExternalStorageDirectories(type: StorageDirectory.documents).then((e) => e!.first),
+    );
   } else {
     documentDir = DirectoryPath(await getApplicationDocumentsDirectory());
   }

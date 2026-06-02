@@ -28,13 +28,13 @@ void main() {
   });
 
   ColumnSpec makeSpec(String id, String title) => ColumnSpecMapper.fromMap(<String, dynamic>{
-        'type': 'RangedIntegerColumnSpec',
-        'id': id,
-        'title': title,
-        'parser': <String, dynamic>{'type': 'FansParser'},
-        'predicate': <String, dynamic>{'min': null, 'max': null},
-        'cellAction': 'openCampaignPreview',
-      });
+    'type': 'RangedIntegerColumnSpec',
+    'id': id,
+    'title': title,
+    'parser': <String, dynamic>{'type': 'FansParser'},
+    'predicate': <String, dynamic>{'min': null, 'max': null},
+    'cellAction': 'openCampaignPreview',
+  });
 
   test('add / reorder / remove reflect in the sync view and persist', () async {
     final container = ProviderContainer.test();

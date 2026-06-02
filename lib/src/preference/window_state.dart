@@ -2,10 +2,7 @@ import 'dart:ui';
 
 import 'storage_box.dart';
 
-enum _WindowStateEntryKey {
-  windowSize,
-  windowOffset,
-}
+enum _WindowStateEntryKey { windowSize, windowOffset }
 
 class WindowStateBox {
   final StorageBox _box;

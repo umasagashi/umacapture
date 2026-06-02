@@ -23,11 +23,7 @@ part 'skill.mapper.dart';
 const tr_skill = "pages.chara_detail.column_predicate.skill";
 
 @MappableEnum()
-enum SkillSetLogicMode {
-  anyOf,
-  allOf,
-  sumOf,
-}
+enum SkillSetLogicMode { anyOf, allOf, sumOf }
 
 @MappableClass()
 class SkillNotation with SkillNotationMappable {
@@ -53,13 +49,11 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
   });
 
   AggregateSkillPredicate.any()
-      : query = {},
-        logic = SkillSetLogicMode.anyOf,
-        min = 1,
-        notation = SkillNotation(
-          max: 3,
-        ),
-        tags = {};
+    : query = {},
+      logic = SkillSetLogicMode.anyOf,
+      min = 1,
+      notation = SkillNotation(max: 3),
+      tags = {};
 
   AggregateSkillPredicate copyWith({
     Set<int>? query,
@@ -114,12 +108,7 @@ class SkillCellData implements CellData {
 }
 
 @MappableEnum()
-enum SkillDialogElements {
-  selection,
-  selectionTags,
-  mode,
-  notationMax,
-}
+enum SkillDialogElements { selection, selectionTags, mode, notationMax }
 
 @MappableClass(discriminatorValue: 'SkillColumnSpec')
 class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappable {
@@ -186,14 +175,11 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     final foundSkills = predicate.extract(value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
-      return TrinaCell(
-        value: foundSkills.length.toString().padLeft(3, "0"),
-      )..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
+      return TrinaCell(value: foundSkills.length.toString().padLeft(3, "0"))
+        ..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
     }
     final desc = skillNames.partial(0, predicate.notation.max).join(", ");
-    return TrinaCell(
-      value: desc,
-    )..setUserData(SkillCellData(skillNames, desc));
+    return TrinaCell(value: desc)..setUserData(SkillCellData(skillNames, desc));
   }
 
   @override
@@ -243,10 +229,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return SkillColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return SkillColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -264,15 +247,14 @@ class _SelectedTags extends TagSelectionNotifier {
   }
 }
 
-final _selectedTagsProvider =
-    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedTags.new);
+final _selectedTagsProvider = NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(
+  _SelectedTags.new,
+);
 
 class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
 
-  const _SelectionSelector({
-    required this.specId,
-  });
+  const _SelectionSelector({required this.specId});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
@@ -321,11 +303,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
       selected: selected,
       onSelected: (newSelected) {
         _clonedSpecProvider.update(ref, widget.specId, (spec) {
-          return spec.copyWith(
-            predicate: spec.predicate.copyWith(
-              query: newSelected,
-            ),
-          );
+          return spec.copyWith(predicate: spec.predicate.copyWith(query: newSelected));
         });
       },
       onTextQueryChanged: (query) => setState(() => textQuery = query),
@@ -348,20 +326,14 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
 class _ModeSelector extends ConsumerWidget {
   final String specId;
 
-  const _ModeSelector({
-    required this.specId,
-  });
+  const _ModeSelector({required this.specId});
 
   Widget descriptionWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    final selection = "$tr_skill.mode.${predicate.logic.name.snakeCase}.description".tr(namedArgs: {
-      "count": predicate.min.toString(),
-    });
-    return NoteCard(
-      description: Text("$tr_skill.mode.template".tr(namedArgs: {
-        "selection": selection,
-      })),
+    final selection = "$tr_skill.mode.${predicate.logic.name.snakeCase}.description".tr(
+      namedArgs: {"count": predicate.min.toString()},
     );
+    return NoteCard(description: Text("$tr_skill.mode.template".tr(namedArgs: {"selection": selection})));
   }
 
   Widget logicChoiceWidget(BuildContext context, WidgetRef ref) {
@@ -410,10 +382,7 @@ class _ModeSelector extends ConsumerWidget {
     return FormGroup(
       title: Text("$tr_skill.mode.label".tr()),
       description: descriptionWidget(context, ref),
-      children: [
-        logicChoiceWidget(context, ref),
-        minCountWidget(context, ref),
-      ],
+      children: [logicChoiceWidget(context, ref), minCountWidget(context, ref)],
     );
   }
 }
@@ -422,10 +391,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -499,11 +465,7 @@ class SkillColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const SkillColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const SkillColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -533,11 +495,7 @@ class SkillColumnBuilder extends ColumnBuilder {
   @override
   final ColumnCategory category;
 
-  SkillColumnBuilder({
-    required this.title,
-    required this.category,
-    required this.parser,
-  });
+  SkillColumnBuilder({required this.title, required this.category, required this.parser});
 
   @override
   ColumnSpec<List<Skill>> build(RefBase ref) {
@@ -583,9 +541,7 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
         query: initialIds,
         logic: SkillSetLogicMode.anyOf,
         min: 1,
-        notation: SkillNotation(
-          max: 3,
-        ),
+        notation: SkillNotation(max: 3),
         tags: initialTags,
       ),
       hiddenElements: {
@@ -595,9 +551,7 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
           SkillDialogElements.selectionTags,
           SkillDialogElements.notationMax,
         },
-        if (initialTags.isNotEmpty) ...{
-          SkillDialogElements.selectionTags,
-        },
+        if (initialTags.isNotEmpty) ...{SkillDialogElements.selectionTags},
       },
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,

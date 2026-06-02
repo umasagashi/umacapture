@@ -160,11 +160,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: LongRangeAptitudeParser(),
       min: 7,
     ),
-    SkillColumnBuilder(
-      title: "$tr_columns.skill.title".tr(),
-      category: ColumnCategory.skill,
-      parser: SkillParser(),
-    ),
+    SkillColumnBuilder(title: "$tr_columns.skill.title".tr(), category: ColumnCategory.skill, parser: SkillParser()),
     FilteredSkillColumnBuilder(
       title: "$tr_columns.skill.shortcuts.status_up.title".tr(),
       category: ColumnCategory.skill,

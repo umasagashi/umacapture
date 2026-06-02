@@ -78,7 +78,8 @@ mobile platforms.
 * **Error Handling:** Anticipate and handle potential errors. Don't let your
   code fail silently.
 * **Styling:**
-    * Line length: Lines should be 80 characters or fewer.
+    * Line length: this project uses a 120-column page width (see
+      `analysis_options.yaml` `formatter.page_width`), not the upstream 80.
     * Use `PascalCase` for classes, `camelCase` for
       members/variables/functions/enums, and `snake_case` for files.
 * **Functions:**

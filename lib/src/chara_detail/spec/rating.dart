@@ -30,10 +30,7 @@ class IsInRangeRatingPredicate with IsInRangeRatingPredicateMappable {
   final double? min;
   final double? max;
 
-  IsInRangeRatingPredicate({
-    this.min,
-    this.max,
-  });
+  IsInRangeRatingPredicate({this.min, this.max});
 
   bool apply(double? value) {
     if (value == null) {
@@ -42,14 +39,8 @@ class IsInRangeRatingPredicate with IsInRangeRatingPredicateMappable {
     return (min ?? value) <= value && value <= (max ?? value);
   }
 
-  IsInRangeRatingPredicate copyWith({
-    double? min,
-    double? max,
-  }) {
-    return IsInRangeRatingPredicate(
-      min: min ?? this.min,
-      max: max ?? this.max,
-    );
+  IsInRangeRatingPredicate copyWith({double? min, double? max}) {
+    return IsInRangeRatingPredicate(min: min ?? this.min, max: max ?? this.max);
   }
 }
 
@@ -119,9 +110,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   TrinaCell plutoCell(RefBase ref, double? value) {
-    return TrinaCell(
-      value: "M" * 7 + ratingFormatter.format(value ?? 6.0),
-    )..setUserData(RatingCellData(value));
+    return TrinaCell(value: "M" * 7 + ratingFormatter.format(value ?? 6.0))..setUserData(RatingCellData(value));
   }
 
   @override
@@ -160,11 +149,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return RatingColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-      storageKey: storageKey,
-    );
+    return RatingColumnSelector(specId: id, onDecided: onDecided, storageKey: storageKey);
   }
 }
 
@@ -218,10 +203,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
     final record = storage.getBy(id: widget.recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
-      constraints: const BoxConstraints(
-        maxWidth: 400,
-        maxHeight: 400,
-      ),
+      constraints: const BoxConstraints(maxWidth: 400, maxHeight: 400),
       child: CardDialog(
         dialogTitle: "$tr_rating.dialog.title".tr(),
         closeButtonTooltip: "$tr_rating.dialog.close_button.tooltip".tr(),
@@ -249,10 +231,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                   });
                 },
                 itemBuilder: (BuildContext context, int index) {
-                  return const Icon(
-                    Icons.star,
-                    color: Colors.amber,
-                  );
+                  return const Icon(Icons.star, color: Colors.amber);
                 },
               ),
               const SizedBox(height: 8),
@@ -348,10 +327,7 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
               }
             },
             itemBuilder: (BuildContext context, int index) {
-              return const Icon(
-                Icons.star,
-                color: Colors.amber,
-              );
+              return const Icon(Icons.star, color: Colors.amber);
             },
           ),
         ),
@@ -362,10 +338,7 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
               opacity: 0.4,
               child: Padding(
                 padding: const EdgeInsets.only(top: 24),
-                child: Text(
-                  "$tr_rating.cell.description".tr(),
-                  style: theme.textTheme.labelMedium,
-                ),
+                child: Text("$tr_rating.cell.description".tr(), style: theme.textTheme.labelMedium),
               ),
             ),
           ),
@@ -379,9 +352,7 @@ final _clonedSpecProvider = SpecProviderAccessor<RatingColumnSpec>();
 class _RatingSelector extends ConsumerWidget {
   final String specId;
 
-  const _RatingSelector({
-    required this.specId,
-  });
+  const _RatingSelector({required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -423,11 +394,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final ChangeNotifier onDecided;
   final String storageKey;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-    required this.storageKey,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided, required this.storageKey});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -484,10 +451,7 @@ class _StorageController extends ConsumerWidget {
   final String specId;
   final String storageKey;
 
-  const _StorageController({
-    required this.specId,
-    required this.storageKey,
-  });
+  const _StorageController({required this.specId, required this.storageKey});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -513,7 +477,7 @@ class _StorageController extends ConsumerWidget {
             CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_rating.storage.delete.button".tr()),
-        )
+        ),
       ],
     );
   }
@@ -524,12 +488,7 @@ class RatingColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
   final String storageKey;
 
-  const RatingColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-    required this.storageKey,
-  });
+  const RatingColumnSelector({super.key, required this.specId, required this.onDecided, required this.storageKey});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

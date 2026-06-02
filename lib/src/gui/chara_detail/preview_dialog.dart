@@ -113,9 +113,7 @@ class PredictionContainer with PredictionContainerMappable {
   PredictionContainer(this.statusHeader, this.skillTab, this.factorTab, this.campaignTab);
 
   static PredictionContainer? load(DirectoryPath recordDir) {
-    return PredictionContainerMapper.fromJson(
-      recordDir.filePath("prediction.json").readAsStringSync(),
-    );
+    return PredictionContainerMapper.fromJson(recordDir.filePath("prediction.json").readAsStringSync());
   }
 }
 
@@ -131,11 +129,7 @@ class ImageSizeContainer {
   final ImageSizeInfo factor;
   final ImageSizeInfo campaign;
 
-  ImageSizeContainer({
-    required this.skill,
-    required this.factor,
-    required this.campaign,
-  });
+  ImageSizeContainer({required this.skill, required this.factor, required this.campaign});
 
   static ImageSizeContainer? load(DirectoryPath recordDir) {
     return ImageSizeContainer(
@@ -164,11 +158,7 @@ class ImageViewer extends ConsumerWidget {
     required this.prediction,
   });
 
-  static ImageViewer? load({
-    required DirectoryPath recordDir,
-    required Size viewportSize,
-    required bool overlay,
-  }) {
+  static ImageViewer? load({required DirectoryPath recordDir, required Size viewportSize, required bool overlay}) {
     final imageSize = ImageSizeContainer.load(recordDir);
     if (imageSize == null) {
       return null;
@@ -198,11 +188,7 @@ class ImageViewer extends ConsumerWidget {
     List<PredictionData>? predictions,
   ) {
     final labelMap = ref.watch(labelMapProvider);
-    final textStyle = TextStyle(
-      color: Colors.black,
-      backgroundColor: Colors.white.withValues(alpha: 0.5),
-      fontSize: 9,
-    );
+    final textStyle = TextStyle(color: Colors.black, backgroundColor: Colors.white.withValues(alpha: 0.5), fontSize: 9);
     return Stack(
       children: [
         Image.file(
@@ -229,12 +215,7 @@ class ImageViewer extends ConsumerWidget {
                 ),
                 SizedBox(
                   width: data.rect.width.toDouble() + (sizeInfo.intersection.width * 0.04),
-                  child: Text(
-                    data.toFormatString(labelMap),
-                    style: textStyle.copyWith(
-                      color: data.getColor(),
-                    ),
-                  ),
+                  child: Text(data.toFormatString(labelMap), style: textStyle.copyWith(color: data.getColor())),
                 ),
               ],
             ),
@@ -295,11 +276,7 @@ class CharaDetailPreviewDialog extends ConsumerStatefulWidget {
   final List<DirectoryPath> recordDirs;
   final int initialIdx;
 
-  const CharaDetailPreviewDialog({
-    super.key,
-    required this.recordDirs,
-    required this.initialIdx,
-  });
+  const CharaDetailPreviewDialog({super.key, required this.recordDirs, required this.initialIdx});
 
   static void show(RefBase ref, List<DirectoryPath> recordDirs, int initialIdx) {
     CardDialog.show(ref, (_) => CharaDetailPreviewDialog(recordDirs: recordDirs, initialIdx: initialIdx));
@@ -399,11 +376,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                 ),
               ),
             ),
-            const VerticalDivider(
-              width: 20,
-              indent: 8,
-              endIndent: 8,
-            ),
+            const VerticalDivider(width: 20, indent: 8, endIndent: 8),
             Tooltip(
               message: "$tr_preview.dialog.close_button.tooltip".tr(),
               child: FilledButton.icon(

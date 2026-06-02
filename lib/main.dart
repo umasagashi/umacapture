@@ -30,11 +30,7 @@ void setupLicense() {
 void setupWindowManager() async {
   await windowManager.ensureInitialized();
   windowManager.waitUntilReadyToShow(
-    const WindowOptions(
-      titleBarStyle: TitleBarStyle.hidden,
-      minimumSize: Size(600, 400),
-      center: true,
-    ),
+    const WindowOptions(titleBarStyle: TitleBarStyle.hidden, minimumSize: Size(600, 400), center: true),
     () async {
       final box = WindowStateBox();
       final size = box.getSize();
@@ -52,10 +48,7 @@ void setupWindowManager() async {
 
       // The application sometimes starts with a blank white screen.
       // This is probably due to the order of flutter build and windows paint, so force rebuild here.
-      Future.delayed(
-        const Duration(milliseconds: 16),
-        () => applicationWidgetRebuildEventController.sink.add(null),
-      );
+      Future.delayed(const Duration(milliseconds: 16), () => applicationWidgetRebuildEventController.sink.add(null));
     },
   );
 }
@@ -77,9 +70,7 @@ void run() {
         path: "assets/translations",
         useOnlyLangCode: true,
         useFallbackTranslations: true,
-        supportedLocales: const [
-          Locale('ja'),
-        ],
+        supportedLocales: const [Locale('ja')],
         fallbackLocale: const Locale('ja'),
         child: ApplicationWidget(),
       ),

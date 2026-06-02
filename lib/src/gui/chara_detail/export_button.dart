@@ -23,22 +23,12 @@ final recordExportEventProvider = StreamProvider<PathEntity>((ref) {
 class CharaDetailExportButton extends ConsumerWidget {
   const CharaDetailExportButton({super.key});
 
-  Widget menu({
-    required double height,
-    required String tooltip,
-    required String label,
-    required TextStyle? style,
-  }) {
+  Widget menu({required double height, required String tooltip, required String label, required TextStyle? style}) {
     return Tooltip(
       message: tooltip,
       child: SizedBox(
         height: height,
-        child: Center(
-          child: Text(
-            label,
-            style: style,
-          ),
-        ),
+        child: Center(child: Text(label, style: style)),
       ),
     );
   }
@@ -75,9 +65,11 @@ class CharaDetailExportButton extends ConsumerWidget {
                   PopupMenuItem(
                     height: menuHeight,
                     onTap: () {
-                      CsvExporter(title, "records.csv", ref, CharCodec.shiftJis).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
+                      CsvExporter(title, "records.csv", ref, CharCodec.shiftJis).export(
+                        onSuccess: (path) {
+                          _recordExportEventController.sink.add(path);
+                        },
+                      );
                     },
                     padding: EdgeInsets.zero,
                     child: menu(
@@ -90,9 +82,11 @@ class CharaDetailExportButton extends ConsumerWidget {
                   PopupMenuItem(
                     height: menuHeight,
                     onTap: () {
-                      CsvExporter(title, "records.csv", ref, CharCodec.utf8Bom).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
+                      CsvExporter(title, "records.csv", ref, CharCodec.utf8Bom).export(
+                        onSuccess: (path) {
+                          _recordExportEventController.sink.add(path);
+                        },
+                      );
                     },
                     padding: EdgeInsets.zero,
                     child: menu(
@@ -105,9 +99,11 @@ class CharaDetailExportButton extends ConsumerWidget {
                   PopupMenuItem(
                     height: menuHeight,
                     onTap: () {
-                      JsonExporter(title, "records.json", ref).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
+                      JsonExporter(title, "records.json", ref).export(
+                        onSuccess: (path) {
+                          _recordExportEventController.sink.add(path);
+                        },
+                      );
                     },
                     padding: EdgeInsets.zero,
                     child: menu(
@@ -120,9 +116,11 @@ class CharaDetailExportButton extends ConsumerWidget {
                   PopupMenuItem(
                     height: menuHeight,
                     onTap: () {
-                      ZipExporter(title, "records.zip", ref).export(onSuccess: (path) {
-                        _recordExportEventController.sink.add(path);
-                      });
+                      ZipExporter(title, "records.zip", ref).export(
+                        onSuccess: (path) {
+                          _recordExportEventController.sink.add(path);
+                        },
+                      );
                     },
                     padding: EdgeInsets.zero,
                     child: menu(
@@ -138,11 +136,7 @@ class CharaDetailExportButton extends ConsumerWidget {
           ),
           if (exporting)
             const IgnorePointer(
-              child: SizedBox(
-                width: buttonSize,
-                height: buttonSize,
-                child: CircularProgressIndicator(),
-              ),
+              child: SizedBox(width: buttonSize, height: buttonSize, child: CircularProgressIndicator()),
             ),
         ],
       ),

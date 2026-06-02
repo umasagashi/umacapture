@@ -17,23 +17,23 @@ import 'package:umacapture/src/core/mapper_init.dart';
 
 // A complete, current-format FactorColumnSpec map.
 Map<String, dynamic> completeFactorMap() => <String, dynamic>{
-      'type': 'FactorColumnSpec',
-      'id': 'factor-id',
-      'title': '因子',
-      'parser': <String, dynamic>{'type': 'FactorSetParser'},
-      'predicate': <String, dynamic>{
-        'query': <int>[],
-        'logic': 'anyOf',
-        'subject': 'family',
-        'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
-        'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
-        'factorTags': <String>[],
-        'skillTags': <String>[],
-      },
-      'showAllWhenQueryIsEmpty': true,
-      'showAvailableOnly': true,
-      'hiddenElements': <String>[],
-    };
+  'type': 'FactorColumnSpec',
+  'id': 'factor-id',
+  'title': '因子',
+  'parser': <String, dynamic>{'type': 'FactorSetParser'},
+  'predicate': <String, dynamic>{
+    'query': <int>[],
+    'logic': 'anyOf',
+    'subject': 'family',
+    'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
+    'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
+    'factorTags': <String>[],
+    'skillTags': <String>[],
+  },
+  'showAllWhenQueryIsEmpty': true,
+  'showAvailableOnly': true,
+  'hiddenElements': <String>[],
+};
 
 void main() {
   setUpAll(initializeMappers);

@@ -5,14 +5,11 @@ import 'package:recase/recase.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
-enum SoundType {
-  attentionWeak,
-  attentionNormal,
-  error,
-}
+enum SoundType { attentionWeak, attentionNormal, error }
 
-final soundSettingProvider =
-    NotifierProvider.family<SoundSettingNotifier, SoundSetting, SoundType>(SoundSettingNotifier.new);
+final soundSettingProvider = NotifierProvider.family<SoundSettingNotifier, SoundSetting, SoundType>(
+  SoundSettingNotifier.new,
+);
 
 final soundEffectProvider = FutureProvider.family<SoundEffect, SoundType>((ref, type) async {
   final setting = ref.watch(soundSettingProvider(type));
@@ -30,14 +27,16 @@ class SoundSettingNotifier extends Notifier<SoundSetting> {
   @override
   SoundSetting build() {
     final box = ref.watch(storageBoxProvider);
-    _pathEntry = StorageEntry<String>(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Path").camelCase);
-    _volumeEntry =
-        StorageEntry<double>(box: box, key: ("${SettingsEntryKey.soundEffect.name}${type.name}Volume").camelCase);
-    final defaultValue = SoundSetting.defaultValueOf(type);
-    return SoundSetting(
-      _pathEntry!.pull() ?? defaultValue.path,
-      volume: _volumeEntry!.pull() ?? defaultValue.volume,
+    _pathEntry = StorageEntry<String>(
+      box: box,
+      key: ("${SettingsEntryKey.soundEffect.name}${type.name}Path").camelCase,
     );
+    _volumeEntry = StorageEntry<double>(
+      box: box,
+      key: ("${SettingsEntryKey.soundEffect.name}${type.name}Volume").camelCase,
+    );
+    final defaultValue = SoundSetting.defaultValueOf(type);
+    return SoundSetting(_pathEntry!.pull() ?? defaultValue.path, volume: _volumeEntry!.pull() ?? defaultValue.volume);
   }
 
   void setPath(String path) {
@@ -55,10 +54,7 @@ class SoundSetting {
   final String path;
   final double volume;
 
-  SoundSetting(
-    this.path, {
-    this.volume = 0.5,
-  });
+  SoundSetting(this.path, {this.volume = 0.5});
 
   static SoundSetting defaultValueOf(SoundType type) {
     return SoundSetting('sound/${type.name.snakeCase}.wav');

@@ -5,13 +5,7 @@ import 'package:recase/recase.dart';
 
 import '/src/preference/hive_adapter.dart';
 
-enum StorageBoxKey {
-  settings,
-  windowState,
-  trainerId,
-  columnSpec,
-  versionCheck,
-}
+enum StorageBoxKey { settings, windowState, trainerId, columnSpec, versionCheck }
 
 extension _BoxKeyExtension on StorageBoxKey {
   static Iterable<String> get names {
@@ -61,11 +55,7 @@ class StorageEntry<T> {
   final StorageBox _box;
   final String _key;
 
-  StorageEntry({
-    required StorageBox box,
-    required String key,
-  })  : _box = box,
-        _key = key;
+  StorageEntry({required StorageBox box, required String key}) : _box = box, _key = key;
 
   T? pull() {
     return _box.pull<T>(_key);

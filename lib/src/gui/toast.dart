@@ -14,12 +14,7 @@ final plainToastEventProvider = StreamProvider<ToastData>((ref) {
   return _plainToastEventController.stream;
 });
 
-enum ToastType {
-  success,
-  info,
-  warning,
-  error,
-}
+enum ToastType { success, info, warning, error }
 
 class ToastData {
   final ToastType type;
@@ -32,15 +27,15 @@ class ToastData {
   ToastData({required this.type, this.description, this.label, this.duration, this.onTap, this.navigateOnTab});
 
   ToastData.success({this.description, this.label, this.duration, this.onTap, this.navigateOnTab})
-      : type = ToastType.success;
+    : type = ToastType.success;
 
   ToastData.info({this.description, this.label, this.duration, this.onTap, this.navigateOnTab}) : type = ToastType.info;
 
   ToastData.warning({this.description, this.label, this.duration, this.onTap, this.navigateOnTab})
-      : type = ToastType.warning;
+    : type = ToastType.warning;
 
   ToastData.error({this.description, this.label, this.duration, this.onTap, this.navigateOnTab})
-      : type = ToastType.error;
+    : type = ToastType.error;
 }
 
 class Toaster {
@@ -69,9 +64,7 @@ class Toaster {
     ToastType.error: Colors.red.shade400,
   };
 
-  Toaster({
-    this.narrowWidth = 600.0,
-  });
+  Toaster({this.narrowWidth = 600.0});
 
   void showToast(BuildContext context, ToastData data) {
     final messenger = ScaffoldMessenger.of(context);

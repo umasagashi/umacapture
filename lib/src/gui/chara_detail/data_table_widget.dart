@@ -25,13 +25,8 @@ import '/src/gui/toast.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 final charaDetailInitialDataLoader = FutureProvider((ref) async {
-  return Future.wait([
-    ref.watch(pathInfoLoader.future),
-  ]).then((_) {
-    return Future.wait([
-      ref.watch(moduleInfoLoaders.future),
-      ref.watch(charaDetailRecordStorageLoaderProvider.future),
-    ]);
+  return Future.wait([ref.watch(pathInfoLoader.future)]).then((_) {
+    return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
   });
 });
 
@@ -139,11 +134,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                 mode: TrinaGridMode.select,
                 configuration: TrinaGridConfiguration(
                   enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
-                  scrollbar: const TrinaGridScrollbarConfig(
-                    isAlwaysShown: true,
-                    radius: 8,
-                    thickness: 12,
-                  ),
+                  scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
                   style: TrinaGridStyleConfig(
                     enableCellBorderVertical: false,
                     gridBackgroundColor: theme.colorScheme.surface,
@@ -311,11 +302,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: const [
-          CircularProgressIndicator(),
-          SizedBox(height: 8),
-          Text("Loading"),
-        ],
+        children: const [CircularProgressIndicator(), SizedBox(height: 8), Text("Loading")],
       ),
     );
   }

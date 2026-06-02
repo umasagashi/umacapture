@@ -9,10 +9,7 @@ class WindowTarget with WindowTargetMappable {
   final String? windowClass;
   final String? windowTitle;
 
-  const WindowTarget({
-    this.windowClass,
-    this.windowTitle,
-  });
+  const WindowTarget({this.windowClass, this.windowTitle});
 }
 
 @MappableClass()
@@ -20,10 +17,7 @@ class AspectRatioRange with AspectRatioRangeMappable {
   final double? min;
   final double? max;
 
-  const AspectRatioRange({
-    this.min,
-    this.max,
-  });
+  const AspectRatioRange({this.min, this.max});
 }
 
 @MappableClass()
@@ -31,10 +25,7 @@ class CropProfile with CropProfileMappable {
   final AspectRatioRange? windowAspectRatio;
   final Size? clientAspectRatio;
 
-  const CropProfile({
-    this.windowAspectRatio,
-    this.clientAspectRatio,
-  });
+  const CropProfile({this.windowAspectRatio, this.clientAspectRatio});
 }
 
 @MappableClass()
@@ -44,21 +35,14 @@ class RecorderConfig with RecorderConfigMappable {
   final int? recordingFps;
   final Size? minimumSize;
 
-  const RecorderConfig({
-    this.windowTargets,
-    this.cropProfiles,
-    this.recordingFps,
-    this.minimumSize,
-  });
+  const RecorderConfig({this.windowTargets, this.cropProfiles, this.recordingFps, this.minimumSize});
 }
 
 @MappableClass()
 class WindowsConfig with WindowsConfigMappable {
   final RecorderConfig? windowRecorder;
 
-  const WindowsConfig({
-    this.windowRecorder,
-  });
+  const WindowsConfig({this.windowRecorder});
 }
 
 @MappableClass()
@@ -66,18 +50,9 @@ class NativeConfig with NativeConfigMappable {
   final WindowsConfig? windows;
   final String? directory;
 
-  const NativeConfig({
-    this.windows,
-    this.directory,
-  });
+  const NativeConfig({this.windows, this.directory});
 
-  NativeConfig copyWith({
-    WindowsConfig? windows,
-    String? directory,
-  }) {
-    return NativeConfig(
-      windows: windows ?? this.windows,
-      directory: directory ?? this.directory,
-    );
+  NativeConfig copyWith({WindowsConfig? windows, String? directory}) {
+    return NativeConfig(windows: windows ?? this.windows, directory: directory ?? this.directory);
   }
 }

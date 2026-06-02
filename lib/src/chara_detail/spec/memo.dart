@@ -27,20 +27,14 @@ const tr_memo = "pages.chara_detail.column_predicate.memo";
 class RegExpPredicate with RegExpPredicateMappable {
   final RegExp? pattern;
 
-  RegExpPredicate({
-    this.pattern,
-  });
+  RegExpPredicate({this.pattern});
 
   bool apply(String? value) {
     return pattern?.hasMatch(value ?? "") ?? true;
   }
 
-  RegExpPredicate copyWith({
-    RegExp? pattern,
-  }) {
-    return RegExpPredicate(
-      pattern: pattern ?? this.pattern,
-    );
+  RegExpPredicate copyWith({RegExp? pattern}) {
+    return RegExpPredicate(pattern: pattern ?? this.pattern);
   }
 }
 
@@ -79,13 +73,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     required this.storageKey,
   });
 
-  MemoColumnSpec copyWith({
-    String? id,
-    String? title,
-    Parser? parser,
-    RegExpPredicate? predicate,
-    String? storageKey,
-  }) {
+  MemoColumnSpec copyWith({String? id, String? title, Parser? parser, RegExpPredicate? predicate, String? storageKey}) {
     return MemoColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
@@ -108,22 +96,19 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   TrinaCell plutoCell(RefBase ref, String? value) {
-    return TrinaCell(
-      value: value ?? "_" * 20,
-    )..setUserData(MemoCellData(
-        value,
-        (TrinaGridOnSelectedEvent event) {
-          final record = event.row!.getUserData<CharaDetailRecord>()!;
-          final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
-          _RecordMemoDialog.show(
-            ref,
-            recordId: record.id,
-            storageKey: storageKey,
-            initialMemo: memos.data[record.id] ?? "",
-          );
-          return true;
-        },
-      ));
+    return TrinaCell(value: value ?? "_" * 20)..setUserData(
+      MemoCellData(value, (TrinaGridOnSelectedEvent event) {
+        final record = event.row!.getUserData<CharaDetailRecord>()!;
+        final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
+        _RecordMemoDialog.show(
+          ref,
+          recordId: record.id,
+          storageKey: storageKey,
+          initialMemo: memos.data[record.id] ?? "",
+        );
+        return true;
+      }),
+    );
   }
 
   @override
@@ -159,11 +144,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return MemoColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-      storageKey: storageKey,
-    );
+    return MemoColumnSelector(specId: id, onDecided: onDecided, storageKey: storageKey);
   }
 }
 
@@ -172,24 +153,11 @@ class _RecordMemoDialog extends ConsumerStatefulWidget {
   final String storageKey;
   final String initialMemo;
 
-  const _RecordMemoDialog({
-    required this.recordId,
-    required this.storageKey,
-    required this.initialMemo,
-  });
+  const _RecordMemoDialog({required this.recordId, required this.storageKey, required this.initialMemo});
 
-  static void show(
-    RefBase ref, {
-    required String recordId,
-    required String storageKey,
-    required String initialMemo,
-  }) {
+  static void show(RefBase ref, {required String recordId, required String storageKey, required String initialMemo}) {
     CardDialog.show(ref, (_) {
-      return _RecordMemoDialog(
-        recordId: recordId,
-        storageKey: storageKey,
-        initialMemo: initialMemo,
-      );
+      return _RecordMemoDialog(recordId: recordId, storageKey: storageKey, initialMemo: initialMemo);
     });
   }
 
@@ -217,10 +185,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
     final iconPath = recordStorage.traineeIconPathOf(record);
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
     return ConstrainedBox(
-      constraints: const BoxConstraints(
-        maxWidth: 800,
-        maxHeight: 400,
-      ),
+      constraints: const BoxConstraints(maxWidth: 800, maxHeight: 400),
       child: CardDialog(
         dialogTitle: memoStorage.title,
         closeButtonTooltip: "$tr_memo.dialog.close_button.tooltip".tr(),
@@ -273,10 +238,7 @@ class _PatternSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _PatternSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _PatternSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _PatternSelectorState();
@@ -326,11 +288,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final ChangeNotifier onDecided;
   final String storageKey;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-    required this.storageKey,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided, required this.storageKey});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -396,10 +354,7 @@ class _StorageController extends ConsumerWidget {
   final String specId;
   final String storageKey;
 
-  const _StorageController({
-    required this.specId,
-    required this.storageKey,
-  });
+  const _StorageController({required this.specId, required this.storageKey});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -425,7 +380,7 @@ class _StorageController extends ConsumerWidget {
             CardDialog.dismiss(ref.base);
           },
           child: Text("$tr_memo.storage.delete.button".tr()),
-        )
+        ),
       ],
     );
   }
@@ -436,12 +391,7 @@ class MemoColumnSelector extends ConsumerWidget {
   final ChangeNotifier onDecided;
   final String storageKey;
 
-  const MemoColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-    required this.storageKey,
-  });
+  const MemoColumnSelector({super.key, required this.specId, required this.onDecided, required this.storageKey});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

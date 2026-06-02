@@ -32,12 +32,7 @@ class ListCard extends StatelessWidget {
   Widget child() {
     return Padding(
       padding: padding ?? const EdgeInsets.all(8),
-      child: Column(
-        crossAxisAlignment: crossAxisAlignment,
-        children: [
-          ...children,
-        ],
-      ),
+      child: Column(crossAxisAlignment: crossAxisAlignment, children: [...children]),
     );
   }
 
@@ -127,10 +122,7 @@ class _SingleTilePageRootWidgetState extends ConsumerState<SingleTilePageRootWid
     return Scaffold(
       body: Card(
         margin: widget.margin ?? EdgeInsets.zero,
-        child: Padding(
-          padding: widget.padding ?? EdgeInsets.zero,
-          child: widget.child,
-        ),
+        child: Padding(padding: widget.padding ?? EdgeInsets.zero, child: widget.child),
       ),
     );
   }
@@ -153,10 +145,7 @@ class SingleTileWidget extends ConsumerWidget {
     return Scaffold(
       body: Card(
         margin: margin ?? EdgeInsets.zero,
-        child: Padding(
-          padding: padding ?? EdgeInsets.zero,
-          child: child,
-        ),
+        child: Padding(padding: padding ?? EdgeInsets.zero, child: child),
       ),
     );
   }
@@ -185,10 +174,7 @@ class ErrorMessageWidget extends StatelessWidget {
               padding: const EdgeInsets.all(16),
               child: Text(
                 message,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onErrorContainer,
-                ),
+                style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onErrorContainer),
               ),
             ),
           ),
@@ -216,7 +202,7 @@ class SpinBox extends StatefulWidget {
     this.width = 48,
     this.height,
     bool? use10,
-  })  : use10 = use10 ?? max > 10;
+  }) : use10 = use10 ?? max > 10;
 
   @override
   State<StatefulWidget> createState() => _SpinBoxState();
@@ -258,10 +244,7 @@ class _SpinBoxState extends State<SpinBox> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          if (widget.use10) ...[
-            button(theme, "-10", -10),
-            const SizedBox(width: 4),
-          ],
+          if (widget.use10) ...[button(theme, "-10", -10), const SizedBox(width: 4)],
           button(theme, "-1", -1),
           Container(
             constraints: BoxConstraints(minWidth: widget.width),
@@ -269,10 +252,7 @@ class _SpinBoxState extends State<SpinBox> {
             child: Text(_value.toString(), style: const TextStyle(fontSize: 16)),
           ),
           button(theme, "+1", 1),
-          if (widget.use10) ...[
-            const SizedBox(width: 4),
-            button(theme, "+10", 10),
-          ],
+          if (widget.use10) ...[const SizedBox(width: 4), button(theme, "+10", 10)],
         ],
       ),
     );
@@ -284,20 +264,12 @@ class Disabled extends StatelessWidget {
   final String? tooltip;
   final Widget child;
 
-  const Disabled({
-    super.key,
-    required this.disabled,
-    this.tooltip,
-    required this.child,
-  });
+  const Disabled({super.key, required this.disabled, this.tooltip, required this.child});
 
   Widget wrappedChild() {
     return IgnorePointer(
       ignoring: disabled,
-      child: Opacity(
-        opacity: disabled ? 0.5 : 1,
-        child: child,
-      ),
+      child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
     );
   }
 
@@ -346,12 +318,7 @@ class CardDialog extends ConsumerWidget {
           ListTile(
             tileColor: theme.colorScheme.primary,
             shape: Border(bottom: BorderSide(color: theme.dividerColor)),
-            title: Text(
-              dialogTitle,
-              style: theme.textTheme.titleLarge?.copyWith(
-                color: theme.colorScheme.onPrimary,
-              ),
-            ),
+            title: Text(dialogTitle, style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary)),
             trailing: closeButtonTooltip == null
                 ? null
                 : Tooltip(
@@ -371,11 +338,7 @@ class CardDialog extends ConsumerWidget {
                 thumbVisibility: true,
                 trackVisibility: true,
                 controller: controller,
-                child: SingleChildScrollView(
-                  controller: controller,
-                  padding: const EdgeInsets.all(8),
-                  child: content,
-                ),
+                child: SingleChildScrollView(controller: controller, padding: const EdgeInsets.all(8), child: content),
               ),
             ),
           if (!usePageView) content,
@@ -489,10 +452,7 @@ final dialogBuilderProvider = NotifierProvider<DialogController, WidgetBuilder?>
 class DialogLayer extends ConsumerStatefulWidget {
   final Widget child;
 
-  const DialogLayer({
-    super.key,
-    required this.child,
-  });
+  const DialogLayer({super.key, required this.child});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _DialogLayerState();
@@ -513,17 +473,13 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
             onTap: () {
               ref.read(dialogBuilderProvider.notifier).dismiss();
             },
-            child: Container(
-              color: theme.shadowColor.withValues(alpha: 0.5),
-            ),
+            child: Container(color: theme.shadowColor.withValues(alpha: 0.5)),
           ),
           Padding(
             padding: const EdgeInsets.all(32),
-            child: Center(
-              child: builder(context),
-            ),
+            child: Center(child: builder(context)),
           ),
-        ]
+        ],
       ],
     );
   }

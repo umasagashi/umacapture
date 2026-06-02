@@ -21,11 +21,7 @@ import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/window_state.dart';
 
-final kIsDesktop = {
-  TargetPlatform.windows,
-  TargetPlatform.linux,
-  TargetPlatform.macOS,
-}.contains(defaultTargetPlatform);
+final kIsDesktop = {TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS}.contains(defaultTargetPlatform);
 
 final themeSettingProvider = ExclusiveItemsNotifierProvider<ThemeMode>(() {
   return ExclusiveItemsNotifier<ThemeMode>(
@@ -36,17 +32,11 @@ final themeSettingProvider = ExclusiveItemsNotifierProvider<ThemeMode>(() {
 });
 
 final fontBoldSettingProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(
-    entryKey: SettingsEntryKey.fontBold.name,
-    defaultValue: true,
-  );
+  return BooleanNotifier(entryKey: SettingsEntryKey.fontBold.name, defaultValue: true);
 });
 
 final sidebarExtendedStateProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(
-    entryKey: SettingsEntryKey.sidebarExtended.name,
-    defaultValue: true,
-  );
+  return BooleanNotifier(entryKey: SettingsEntryKey.sidebarExtended.name, defaultValue: true);
 });
 
 StreamController<void> applicationWidgetRebuildEventController = StreamController();
@@ -112,7 +102,7 @@ class _Drawer extends StatelessWidget {
                 tabsRouter.setActiveIndex(entry.key);
                 context.router.pop();
               },
-            )
+            ),
         ],
       ),
     );
@@ -122,9 +112,7 @@ class _Drawer extends StatelessWidget {
 class _ResponsiveScaffold extends StatelessWidget {
   final Widget child;
 
-  const _ResponsiveScaffold({
-    required this.child,
-  });
+  const _ResponsiveScaffold({required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -162,8 +150,7 @@ class _WindowFrame extends ConsumerStatefulWidget {
   final Widget child;
   final WindowStateBox _windowStateBox;
 
-  _WindowFrame({required this.child})
-      : _windowStateBox = WindowStateBox();
+  _WindowFrame({required this.child}) : _windowStateBox = WindowStateBox();
 
   @override
   ConsumerState<_WindowFrame> createState() => _WindowFrameState();
@@ -202,10 +189,7 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
       // But 1 pixel is thicker than the others, so the color is mixed with the title bar to make it look better.
       padding: const EdgeInsets.only(top: 1),
       color: theme.colorScheme.surface,
-      child: Scaffold(
-        appBar: const WindowCaptionAlt(),
-        body: widget.child,
-      ),
+      child: Scaffold(appBar: const WindowCaptionAlt(), body: widget.child),
     );
   }
 }
@@ -215,9 +199,7 @@ class AppWidget extends StatelessWidget {
   const AppWidget({super.key});
 
   Widget root(Widget child) {
-    return DialogLayer(
-      child: _ResponsiveScaffold(child: child),
-    );
+    return DialogLayer(child: _ResponsiveScaffold(child: child));
   }
 
   @override
@@ -278,9 +260,7 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         waitDuration: const Duration(milliseconds: 100),
         showDuration: Duration.zero,
       ),
-      chipTheme: base.chipTheme.copyWith(
-        labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
-      ),
+      chipTheme: base.chipTheme.copyWith(labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset)),
       textTheme: base.textTheme.copyWith(
         displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
         displayMedium: modifyFontWeight(base.textTheme.displayMedium, offset),
@@ -358,9 +338,7 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         localizationsDelegates: context.localizationDelegates,
         supportedLocales: context.supportedLocales,
         locale: context.locale,
-        routerConfig: widget.router.config(
-          navigatorObservers: () => [AutoRouteObserver()],
-        ),
+        routerConfig: widget.router.config(navigatorObservers: () => [AutoRouteObserver()]),
       ),
     );
   }

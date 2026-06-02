@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Reject commits whose staged Dart files are not `dart format`-clean.
+#
+# The page width is read from analysis_options.yaml (`formatter.page_width`), so
+# this stays in sync with the project setting. Enable it once per clone with:
+#
+#   git config core.hooksPath tool/hooks
+#
+# Override the Dart executable via the DART env var if FVM lives elsewhere.
+set -euo pipefail
+
+DART="${DART:-.fvm/flutter_sdk/bin/dart}"
+
+mapfile -t files < <(git diff --cached --name-only --diff-filter=ACM -- '*.dart')
+if [ "${#files[@]}" -eq 0 ]; then
+  exit 0
+fi
+
+if ! "$DART" format --output=none --set-exit-if-changed "${files[@]}"; then
+  echo "" >&2
+  echo "✖ Staged Dart files are not formatted. Run:" >&2
+  echo "    $DART format ${files[*]}" >&2
+  echo "  then re-stage and commit." >&2
+  exit 1
+fi

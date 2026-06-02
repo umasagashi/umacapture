@@ -37,10 +37,7 @@ class ReportScreenDialog extends ConsumerWidget {
       content: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 16),
-          Text("$tr_report_screen.dialog.unavailable".tr()),
-        ],
+        children: [const SizedBox(height: 16), Text("$tr_report_screen.dialog.unavailable".tr())],
       ),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -67,10 +64,7 @@ class ReportScreenDialog extends ConsumerWidget {
       content: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 16),
-          Text("$tr_report_screen.dialog.limit_reached".tr()),
-        ],
+        children: [const SizedBox(height: 16), Text("$tr_report_screen.dialog.limit_reached".tr())],
       ),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -96,11 +90,7 @@ class ReportScreenDialog extends ConsumerWidget {
       return const CircularProgressIndicator();
     }
     if (data.hasError) {
-      return Center(
-        child: NoteCard(
-          description: Text("$tr_report_screen.dialog.screenshot_error".tr()),
-        ),
-      );
+      return Center(child: NoteCard(description: Text("$tr_report_screen.dialog.screenshot_error".tr())));
     }
     return Center(child: Image.memory(data.path.readAsBytesSync()));
   }
@@ -126,7 +116,7 @@ class ReportScreenDialog extends ConsumerWidget {
             if (limit - count <= 10) ...[
               const SizedBox(height: 16),
               Text("${"$tr_report_screen.dialog.available_count".tr()} (${limit - count} / $limit)"),
-            ]
+            ],
           ],
         ),
       ),

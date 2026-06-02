@@ -1,0 +1,3 @@
+# Migrate to standard `dart format` output at a 120-col page width.
+# Logic-free mechanical reformat; ignore it in `git blame`.
+1165fa35aa4d03aa3223b018e02c29d71de96891

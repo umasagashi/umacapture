@@ -35,9 +35,9 @@ class SentryRateLimit with SentryRateLimitMappable {
   static Future<SentryRateLimit?> download() async {
     initializeMappers();
     try {
-      return await createDiagnosticDio(operation: "download_sentry_rate_limit_config")
-          .get(Const.sentryRateLimitConfigUrl)
-          .then((response) => SentryRateLimitMapper.fromJson(response.toString()));
+      return await createDiagnosticDio(
+        operation: "download_sentry_rate_limit_config",
+      ).get(Const.sentryRateLimitConfigUrl).then((response) => SentryRateLimitMapper.fromJson(response.toString()));
     } catch (exception, stackTrace) {
       logger.e("Failed to download sentry rate limit config.", exception, stackTrace);
       return null;
@@ -146,11 +146,7 @@ const _requestStartedAtKey = "diagnostic_request_started_at";
 
 Map<String, dynamic> _proxyConfigSummary(Uri uri) {
   final proxyConfig = HttpClient.findProxyFromEnvironment(uri);
-  final entries = proxyConfig
-      .split(";")
-      .map((e) => e.trim())
-      .where((e) => e.isNotEmpty)
-      .toList();
+  final entries = proxyConfig.split(";").map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
   final proxyEntries = entries.where((e) => e.toUpperCase() != "DIRECT").toList();
   return {
     "environment_proxy_present": proxyEntries.isNotEmpty,
@@ -245,14 +241,8 @@ Dio createDiagnosticDio({String? operation}) {
         captureMessageWithScope(
           "Bad certificate rejected.",
           level: SentryLevel.error,
-          tags: {
-            "network.operation": ?operation,
-            "network.host": host,
-            "network.bad_certificate": "true",
-          },
-          contexts: {
-            "bad_certificate": context,
-          },
+          tags: {"network.operation": ?operation, "network.host": host, "network.bad_certificate": "true"},
+          contexts: {"bad_certificate": context},
         );
         return false;
       };
@@ -260,46 +250,48 @@ Dio createDiagnosticDio({String? operation}) {
     };
   }
 
-  dio.interceptors.add(InterceptorsWrapper(
-    onRequest: (options, handler) {
-      options.extra[_requestStartedAtKey] = DateTime.now().millisecondsSinceEpoch;
-      logger.d(
-        "Network request started. operation=$operation"
-        ", method=${options.method}"
-        ", url=${options.uri}"
-        ", proxy=${_proxyConfigSummary(options.uri)}",
-      );
-      handler.next(options);
-    },
-    onResponse: (response, handler) {
-      final startedAt = response.requestOptions.extra[_requestStartedAtKey] as int?;
-      final elapsed = startedAt == null ? null : DateTime.now().millisecondsSinceEpoch - startedAt;
-      logger.d(
-        "Network request completed. operation=$operation"
-        ", method=${response.requestOptions.method}"
-        ", url=${response.requestOptions.uri}"
-        ", status=${response.statusCode}"
-        ", elapsed_ms=$elapsed",
-      );
-      handler.next(response);
-    },
-    onError: (error, handler) {
-      final startedAt = error.requestOptions.extra[_requestStartedAtKey] as int?;
-      final elapsed = startedAt == null ? null : DateTime.now().millisecondsSinceEpoch - startedAt;
-      logger.e(
-        "Network request error. operation=$operation"
-        ", method=${error.requestOptions.method}"
-        ", url=${error.requestOptions.uri}"
-        ", type=${error.type}"
-        ", status=${error.response?.statusCode}"
-        ", elapsed_ms=$elapsed"
-        ", proxy=${_proxyConfigSummary(error.requestOptions.uri)}",
-        error,
-        error.stackTrace,
-      );
-      handler.next(error);
-    },
-  ));
+  dio.interceptors.add(
+    InterceptorsWrapper(
+      onRequest: (options, handler) {
+        options.extra[_requestStartedAtKey] = DateTime.now().millisecondsSinceEpoch;
+        logger.d(
+          "Network request started. operation=$operation"
+          ", method=${options.method}"
+          ", url=${options.uri}"
+          ", proxy=${_proxyConfigSummary(options.uri)}",
+        );
+        handler.next(options);
+      },
+      onResponse: (response, handler) {
+        final startedAt = response.requestOptions.extra[_requestStartedAtKey] as int?;
+        final elapsed = startedAt == null ? null : DateTime.now().millisecondsSinceEpoch - startedAt;
+        logger.d(
+          "Network request completed. operation=$operation"
+          ", method=${response.requestOptions.method}"
+          ", url=${response.requestOptions.uri}"
+          ", status=${response.statusCode}"
+          ", elapsed_ms=$elapsed",
+        );
+        handler.next(response);
+      },
+      onError: (error, handler) {
+        final startedAt = error.requestOptions.extra[_requestStartedAtKey] as int?;
+        final elapsed = startedAt == null ? null : DateTime.now().millisecondsSinceEpoch - startedAt;
+        logger.e(
+          "Network request error. operation=$operation"
+          ", method=${error.requestOptions.method}"
+          ", url=${error.requestOptions.uri}"
+          ", type=${error.type}"
+          ", status=${error.response?.statusCode}"
+          ", elapsed_ms=$elapsed"
+          ", proxy=${_proxyConfigSummary(error.requestOptions.uri)}",
+          error,
+          error.stackTrace,
+        );
+        handler.next(error);
+      },
+    ),
+  );
 
   return dio;
 }
@@ -354,11 +346,7 @@ FutureOr<void> captureScreen(String message, FilePath path) {
   }
 }
 
-OnFeedbackCallback _sendToSentry({
-  Hub? hub,
-  String? name,
-  String? email,
-}) {
+OnFeedbackCallback _sendToSentry({Hub? hub, String? name, String? email}) {
   final realHub = hub ?? HubAdapter();
 
   return (UserFeedback feedback) async {
@@ -366,22 +354,22 @@ OnFeedbackCallback _sendToSentry({
       feedback.text,
       hint: CustomHint(useUniqueFingerprint: true, titlePrefix: "Feedback").toHint(),
       withScope: (scope) {
-        scope.addAttachment(SentryAttachment.fromUint8List(
-          feedback.screenshot,
-          'screenshot.png',
-          contentType: 'image/png',
-        ));
+        scope.addAttachment(
+          SentryAttachment.fromUint8List(feedback.screenshot, 'screenshot.png', contentType: 'image/png'),
+        );
       },
     );
     // sentry9 replaced Hub.captureUserFeedback/SentryUserFeedback with
     // captureFeedback/SentryFeedback. The feedback is linked to the message
     // event above via associatedEventId.
-    await realHub.captureFeedback(SentryFeedback(
-      message: '${feedback.text}\n${feedback.extra.toString()}',
-      contactEmail: email,
-      name: name,
-      associatedEventId: id,
-    ));
+    await realHub.captureFeedback(
+      SentryFeedback(
+        message: '${feedback.text}\n${feedback.extra.toString()}',
+        contactEmail: email,
+        name: name,
+        associatedEventId: id,
+      ),
+    );
   };
 }
 
@@ -397,11 +385,13 @@ extension ScopeExtension on Scope {
   FutureOr<void> addFile(FilePath path) {
     try {
       if (path.existsSync()) {
-        addAttachment(SentryAttachment.fromLoader(
-          loader: () => path.readAsBytes(),
-          filename: path.name,
-          contentType: path.contentType,
-        ));
+        addAttachment(
+          SentryAttachment.fromLoader(
+            loader: () => path.readAsBytes(),
+            filename: path.name,
+            contentType: path.contentType,
+          ),
+        );
       }
     } catch (exception, stackTrace) {
       logger.e("Failed to add file attachment. file=${path.path}", exception, stackTrace);
@@ -417,10 +407,7 @@ class CustomHint {
   final bool useUniqueFingerprint;
   final String? titlePrefix;
 
-  CustomHint({
-    this.useUniqueFingerprint = false,
-    this.titlePrefix,
-  });
+  CustomHint({this.useUniqueFingerprint = false, this.titlePrefix});
 
   // sentry9 no longer accepts arbitrary hint objects; the `hint` parameter is a
   // typed [Hint] whose key/value storage is the only way to pass custom data
@@ -471,33 +458,30 @@ Future<void> _runWithSentry(AppRunner runner) async {
     // sentry-native does not create missing parent directories, so the crash DB
     // (and thus native crash capture) is silently dropped unless we create it.
     await Directory(nativeDatabasePath).create(recursive: true);
-    await SentryFlutter.init(
-      (SentryFlutterOptions options) {
-        options.nativeDatabasePath = nativeDatabasePath;
-        if (kDebugMode) {
-          options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
-        } else {
-          options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
+    await SentryFlutter.init((SentryFlutterOptions options) {
+      options.nativeDatabasePath = nativeDatabasePath;
+      if (kDebugMode) {
+        options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
+      } else {
+        options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
+      }
+      options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
+      options.enablePrintBreadcrumbs = false;
+      options.beforeSend = (SentryEvent event, Hint hint) async {
+        final customHint = CustomHint.from(hint);
+        if (customHint.useUniqueFingerprint) {
+          // SentryEvent.copyWith is deprecated; assign fields directly.
+          event.fingerprint = [event.eventId.toString()];
         }
-        options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
-        options.enablePrintBreadcrumbs = false;
-        options.beforeSend = (SentryEvent event, Hint hint) async {
-          final customHint = CustomHint.from(hint);
-          if (customHint.useUniqueFingerprint) {
-            // SentryEvent.copyWith is deprecated; assign fields directly.
-            event.fingerprint = [event.eventId.toString()];
+        if (customHint.titlePrefix != null) {
+          final message = event.message;
+          if (message != null) {
+            message.formatted = "[${customHint.titlePrefix}] ${message.formatted}";
           }
-          if (customHint.titlePrefix != null) {
-            final message = event.message;
-            if (message != null) {
-              message.formatted = "[${customHint.titlePrefix}] ${message.formatted}";
-            }
-          }
-          return event;
-        };
-      },
-      appRunner: startAppOnce,
-    );
+        }
+        return event;
+      };
+    }, appRunner: startAppOnce);
   } catch (exception, stackTrace) {
     // Never let a Sentry/startup-prep failure prevent the app from launching.
     logger.e("Failed to initialize Sentry; starting app without it.", exception, stackTrace);
