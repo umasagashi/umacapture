@@ -100,7 +100,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     rootDirectory = pathInfo.charaDetailActiveDir;
     final List<CharaDetailRecord> records = [];
     if (rootDirectory.existsSync()) {
-      records.addAll(await compute(_loadAllCharaDetailRecord, rootDirectory));
+      final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
+      records.addAll(results.whereType<RecordLoaded>().map((e) => e.record));
+      _surfaceQuarantines(results.whereType<RecordQuarantined>().toList());
     }
     // Safe to write other providers here: we are past the `await` above, so the
     // synchronous build frame (which the modify-during-build guard checks) is done.
@@ -162,14 +164,43 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     }
   }
 
-  void addIfNotNull(CharaDetailRecord? record) {
-    if (record != null) {
-      add(record);
+  void addFromFile(String id) {
+    final result = CharaDetailRecord.load(rootDirectory / id);
+    switch (result) {
+      case RecordLoaded(:final record):
+        add(record);
+      case RecordQuarantined():
+        _surfaceQuarantines([result]);
     }
   }
 
-  void addFromFile(String id) {
-    addIfNotNull(CharaDetailRecord.load(rootDirectory / id));
+  /// Shows a single aggregated toast for records quarantined during a load.
+  ///
+  /// Centralized here on the main isolate so every load path surfaces the
+  /// outcome: the bulk startup load and [reload] run [CharaDetailRecord.load]
+  /// inside a `compute` isolate, where `Toaster.show` would be a no-op.
+  void _surfaceQuarantines(List<RecordQuarantined> quarantined) {
+    if (quarantined.isEmpty) {
+      return;
+    }
+    final destinations = quarantined.map((e) => e.destination).whereType<DirectoryPath>().toList();
+    final failed = quarantined.length - destinations.length;
+    if (destinations.isNotEmpty) {
+      // All quarantined records share the same quarantine folder; tapping the
+      // toast opens it in the file explorer so the user can inspect/recover them.
+      final quarantineDir = destinations.first.parent;
+      Toaster.show(ToastData.warning(
+        description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
+        onTap: () => quarantineDir.launch(),
+      ));
+      // Refresh the persistent banner on the chara_detail tab.
+      ref.invalidate(charaDetailQuarantineCountProvider);
+    }
+    if (failed > 0) {
+      Toaster.show(ToastData.error(
+        description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"}),
+      ));
+    }
   }
 
   CharaDetailRecord? getBy({required String id}) {
@@ -228,8 +259,13 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
   }
 
   Future<void> reload(String id) async {
-    final record = await compute(_loadCharaDetailRecord, rootDirectory / id);
-    replaceBy(record!, id: id);
+    final result = await compute(_loadCharaDetailRecord, rootDirectory / id);
+    switch (result) {
+      case RecordLoaded(:final record):
+        replaceBy(record, id: id);
+      case RecordQuarantined():
+        _surfaceQuarantines([result]);
+    }
   }
 
   void delete(String id) {
@@ -254,17 +290,16 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
   }
 }
 
-CharaDetailRecord? _loadCharaDetailRecord(DirectoryPath directory) {
+RecordLoadResult _loadCharaDetailRecord(DirectoryPath directory) {
   initializeMappers();
   return CharaDetailRecord.load(directory);
 }
 
-List<CharaDetailRecord> _loadAllCharaDetailRecord(DirectoryPath directory) {
+List<RecordLoadResult> _loadAllCharaDetailRecord(DirectoryPath directory) {
   initializeMappers();
   return directory
       .listSync(recursive: false, followLinks: false)
       .map((e) => CharaDetailRecord.load(e.asDirectoryPath))
-      .nonNulls
       .toList();
 }
 
@@ -276,4 +311,17 @@ final charaDetailRecordStorageLoaderProvider =
 // charaDetailRecordStorageLoaderProvider.notifier instead.
 final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref) {
   return ref.watch(charaDetailRecordStorageLoaderProvider).requireValue;
+});
+
+/// Number of records currently sitting in the quarantine folder.
+///
+/// Read from the filesystem, so it also reflects records quarantined in earlier
+/// sessions (which are never re-scanned from `active/`). [CharaDetailRecordStorage]
+/// invalidates this when it quarantines records at runtime so the banner updates.
+final charaDetailQuarantineCountProvider = Provider<int>((ref) {
+  final dir = ref.watch(pathInfoProvider).charaDetailQuarantineDir;
+  if (!dir.existsSync()) {
+    return 0;
+  }
+  return dir.listSync(recursive: false, followLinks: false).length;
 });

@@ -52,6 +52,8 @@ class PathInfo {
 
   DirectoryPath get charaDetailActiveDir => charaDetailDir / "active";
 
+  DirectoryPath get charaDetailQuarantineDir => charaDetailDir / "quarantine";
+
   DirectoryPath get charaDetailMetadataDir => charaDetailDir / "metadata";
 
   DirectoryPath get charaDetailRatingDir => charaDetailMetadataDir / "rating";
