@@ -19,11 +19,7 @@ class FormLine extends ConsumerWidget {
   final Widget title;
   final List<Widget> children;
 
-  const FormLine({
-    super.key,
-    required this.title,
-    required this.children,
-  });
+  const FormLine({super.key, required this.title, required this.children});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -36,10 +32,7 @@ class FormLine extends ConsumerWidget {
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: title,
-            ),
+            Padding(padding: const EdgeInsets.only(right: 4), child: title),
             ...children,
           ],
         ),
@@ -53,12 +46,7 @@ class FormGroup extends ConsumerWidget {
   final Widget? description;
   final List<Widget> children;
 
-  const FormGroup({
-    super.key,
-    required this.title,
-    this.description,
-    required this.children,
-  });
+  const FormGroup({super.key, required this.title, this.description, required this.children});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -74,10 +62,7 @@ class FormGroup extends ConsumerWidget {
         if (description != null)
           Padding(
             padding: const EdgeInsets.all(8),
-            child: Align(
-              alignment: Alignment.topLeft,
-              child: description,
-            ),
+            child: Align(alignment: Alignment.topLeft, child: description),
           ),
         ...children,
       ],
@@ -101,7 +86,7 @@ class DenseTextField extends ConsumerStatefulWidget {
     this.debounce,
     this.allowEmpty = false,
     this.hintText,
-  })  : assert((initialText == null) != (controller == null));
+  }) : assert((initialText == null) != (controller == null));
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => DenseTextFieldState();
@@ -158,12 +143,7 @@ class NoteCard extends ConsumerWidget {
   final List<Widget> children;
   final Color? color;
 
-  const NoteCard({
-    super.key,
-    required this.description,
-    this.children = const [],
-    this.color,
-  });
+  const NoteCard({super.key, required this.description, this.children = const [], this.color});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -180,14 +160,8 @@ class NoteCard extends ConsumerWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: description,
-            ),
-            if (children.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              ...children,
-            ]
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: description),
+            if (children.isNotEmpty) ...[const SizedBox(height: 12), ...children],
           ],
         ),
       ),
@@ -199,11 +173,7 @@ class TagSelector extends ConsumerWidget {
   final ProviderListenable<List<Tag>> candidateTagsProvider;
   final NotifierProvider<TagSelectionNotifier, Set<String>> selectedTagsProvider;
 
-  const TagSelector({
-    super.key,
-    required this.candidateTagsProvider,
-    required this.selectedTagsProvider,
-  });
+  const TagSelector({super.key, required this.candidateTagsProvider, required this.selectedTagsProvider});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -272,12 +242,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return FormLine(
-      title: title,
-      children: [
-        for (final value in values) chip(context, ref, value),
-      ],
-    );
+    return FormLine(title: title, children: [for (final value in values) chip(context, ref, value)]);
   }
 }
 
@@ -287,12 +252,7 @@ class _SelectorChip extends ConsumerWidget {
   final bool selected;
   final ValueChanged<bool> onSelected;
 
-  const _SelectorChip({
-    required this.label,
-    required this.tooltip,
-    required this.selected,
-    required this.onSelected,
-  });
+  const _SelectorChip({required this.label, required this.tooltip, required this.selected, required this.onSelected});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -427,14 +387,8 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
-          child: widget.description,
-        ),
-        Padding(
-          padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4),
-          child: controlWidget(context),
-        ),
+        Padding(padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4), child: widget.description),
+        Padding(padding: const EdgeInsets.only(left: 8, right: 8, top: 4, bottom: 4), child: controlWidget(context)),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Align(

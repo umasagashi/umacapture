@@ -11,9 +11,7 @@ import 'package:umacapture/src/preference/notifier.dart';
 
 // Mirrors the real settings providers (e.g. fontBoldSettingProvider) without
 // depending on their concrete keys/defaults.
-final _flagProvider = BooleanNotifierProvider(
-  () => BooleanNotifier(entryKey: 'test_flag', defaultValue: false),
-);
+final _flagProvider = BooleanNotifierProvider(() => BooleanNotifier(entryKey: 'test_flag', defaultValue: false));
 
 void main() {
   setUpAll(() async {

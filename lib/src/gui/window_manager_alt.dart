@@ -11,12 +11,7 @@ class WindowCaptionButtonAlt extends StatefulWidget {
   final String tooltip;
   final VoidCallback onPressed;
 
-  const WindowCaptionButtonAlt({
-    super.key,
-    required this.icon,
-    this.tooltip = "",
-    required this.onPressed,
-  });
+  const WindowCaptionButtonAlt({super.key, required this.icon, this.tooltip = "", required this.onPressed});
 
   @override
   State<WindowCaptionButtonAlt> createState() => _WindowCaptionButtonState();
@@ -41,9 +36,7 @@ class _WindowCaptionButtonState extends State<WindowCaptionButtonAlt> {
             decoration: BoxDecoration(
               color: hovering ? theme.colorScheme.onSurface.withValues(alpha: 0.06) : Colors.transparent,
             ),
-            child: Center(
-              child: widget.icon,
-            ),
+            child: Center(child: widget.icon),
           ),
         ),
       ),
@@ -98,11 +91,7 @@ class _WindowCaptionAltState extends ConsumerState<WindowCaptionAlt> with Window
                 children: [
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Image.asset(
-                      "assets/image/app_icon.png",
-                      filterQuality: FilterQuality.medium,
-                      height: 24,
-                    ),
+                    child: Image.asset("assets/image/app_icon.png", filterQuality: FilterQuality.medium, height: 24),
                   ),
                   Text('umacapture', style: theme.textTheme.bodyMedium!),
                 ],
@@ -111,11 +100,7 @@ class _WindowCaptionAltState extends ConsumerState<WindowCaptionAlt> with Window
           ),
           if (isFeedbackAvailable(ref))
             WindowCaptionButtonAlt(
-              icon: Icon(
-                Icons.feedback_outlined,
-                size: 20,
-                color: theme.colorScheme.onSurface,
-              ),
+              icon: Icon(Icons.feedback_outlined, size: 20, color: theme.colorScheme.onSurface),
               tooltip: "app.feedback.tooltip".tr(),
               onPressed: () {
                 showFeedbackDialog(context);

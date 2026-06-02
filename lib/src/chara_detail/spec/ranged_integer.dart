@@ -24,23 +24,14 @@ class IsInRangeIntegerPredicate with IsInRangeIntegerPredicateMappable {
   final int? min;
   final int? max;
 
-  IsInRangeIntegerPredicate({
-    this.min,
-    this.max,
-  });
+  IsInRangeIntegerPredicate({this.min, this.max});
 
   bool apply(int value) {
     return (min ?? value) <= value && value <= (max ?? value);
   }
 
-  IsInRangeIntegerPredicate copyWith({
-    int? min,
-    int? max,
-  }) {
-    return IsInRangeIntegerPredicate(
-      min: min ?? this.min,
-      max: max ?? this.max,
-    );
+  IsInRangeIntegerPredicate copyWith({int? min, int? max}) {
+    return IsInRangeIntegerPredicate(min: min ?? this.min, max: max ?? this.max);
   }
 }
 
@@ -141,10 +132,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return RangedIntegerColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return RangedIntegerColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -153,9 +141,7 @@ final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
 class _RangedIntegerSelector extends ConsumerWidget {
   final String specId;
 
-  const _RangedIntegerSelector({
-    required this.specId,
-  });
+  const _RangedIntegerSelector({required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -198,10 +184,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -247,11 +230,7 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const RangedIntegerColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const RangedIntegerColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -275,12 +254,7 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
   @override
   final ColumnCategory category;
 
-  RangedIntegerColumnBuilder({
-    required this.title,
-    required this.category,
-    required this.parser,
-    this.cellAction,
-  });
+  RangedIntegerColumnBuilder({required this.title, required this.category, required this.parser, this.cellAction});
 
   @override
   RangedIntegerColumnSpec build(RefBase ref) {

@@ -25,7 +25,8 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
   List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
     final charaRankBorder = ref.watch(charaRankBorderProvider);
     return List<int>.from(
-        records.map(parser.parse).map((evaluation) => charaRankBorder.indexWhere((border) => border > evaluation)));
+      records.map(parser.parse).map((evaluation) => charaRankBorder.indexWhere((border) => border > evaluation)),
+    );
   }
 
   @override
@@ -60,13 +61,8 @@ class CharaRankColumnBuilder extends ColumnBuilder {
   @override
   final ColumnBuilderType type;
 
-  CharaRankColumnBuilder({
-    required this.title,
-    required this.category,
-    required this.parser,
-    this.min,
-    this.max,
-  }) : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+  CharaRankColumnBuilder({required this.title, required this.category, required this.parser, this.min, this.max})
+    : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
   CharaRankColumnSpec build(RefBase ref) {
@@ -75,10 +71,7 @@ class CharaRankColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       labelKey: LabelKeys.charaRank,
-      predicate: IsInRangeIntegerPredicate(
-        min: min,
-        max: max,
-      ),
+      predicate: IsInRangeIntegerPredicate(min: min, max: max),
     );
   }
 }

@@ -42,8 +42,7 @@ abstract class Exporter {
       // incompatible with the path-based exporters below (the Zip encoder and
       // the isolate-based JSON writer produce the file themselves). Instead we
       // let the user pick a directory and build the full output path here.
-      FilePicker.getDirectoryPath(dialogTitle: dialogTitle, initialDirectory: initialDirectory?.path)
-          .then((directory) {
+      FilePicker.getDirectoryPath(dialogTitle: dialogTitle, initialDirectory: initialDirectory?.path).then((directory) {
         if (directory != null) {
           final path = DirectoryPath(directory).filePath(defaultFileName);
           ref.read(exportingStateProvider.notifier).set(true);
@@ -59,11 +58,7 @@ abstract class Exporter {
   Future<dynamic> _export(FilePath path);
 }
 
-enum CharCodec {
-  shiftJis,
-  utf8Bom,
-  utf16leBom,
-}
+enum CharCodec { shiftJis, utf8Bom, utf16leBom }
 
 class CsvExporter extends Exporter {
   final CharCodec encoding;

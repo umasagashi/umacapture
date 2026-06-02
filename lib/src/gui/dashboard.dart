@@ -44,16 +44,18 @@ class AppUpdaterGroup extends ConsumerWidget {
       final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
       final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
       logger.d(downloadUrl);
-      createDiagnosticDio(operation: "download_app_update").download(
-        downloadUrl,
-        downloadPath.path,
-        onReceiveProgress: (int count, int total) {
-          ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
-        },
-      ).then((_) {
-        ref.read(_downloadProgressProvider.notifier).set(null);
-        (isInstallerMode ? downloadPath : downloadPath.parent).launch();
-      });
+      createDiagnosticDio(operation: "download_app_update")
+          .download(
+            downloadUrl,
+            downloadPath.path,
+            onReceiveProgress: (int count, int total) {
+              ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
+            },
+          )
+          .then((_) {
+            ref.read(_downloadProgressProvider.notifier).set(null);
+            (isInstallerMode ? downloadPath : downloadPath.parent).launch();
+          });
     });
   }
 
@@ -79,11 +81,15 @@ class AppUpdaterGroup extends ConsumerWidget {
             ),
           ),
           Flexible(
-            child: Text("$tr_dashboard.app_updater.downloading.template".tr(namedArgs: {
-              "file": isInstallerMode
-                  ? "$tr_dashboard.app_updater.downloading.exe".tr()
-                  : "$tr_dashboard.app_updater.downloading.zip".tr(),
-            })),
+            child: Text(
+              "$tr_dashboard.app_updater.downloading.template".tr(
+                namedArgs: {
+                  "file": isInstallerMode
+                      ? "$tr_dashboard.app_updater.downloading.exe".tr()
+                      : "$tr_dashboard.app_updater.downloading.zip".tr(),
+                },
+              ),
+            ),
           ),
         ],
       );
@@ -116,19 +122,12 @@ class _NewsGroup extends ConsumerWidget {
   Widget text(String data) {
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Text(data),
-      ),
+      child: Align(alignment: Alignment.topLeft, child: Text(data)),
     );
   }
 
   Widget markdown(String data) {
-    return Markdown(
-      data: data,
-      shrinkWrap: true,
-      extensionSet: md.ExtensionSet.gitHubFlavored,
-    );
+    return Markdown(data: data, shrinkWrap: true, extensionSet: md.ExtensionSet.gitHubFlavored);
   }
 
   @override
@@ -137,9 +136,7 @@ class _NewsGroup extends ConsumerWidget {
     return ListCard(
       title: "$tr_dashboard.news.title".tr(),
       padding: EdgeInsets.zero,
-      children: [
-        loader.guarded((data) => markdown(data)),
-      ],
+      children: [loader.guarded((data) => markdown(data))],
     );
   }
 }

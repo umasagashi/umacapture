@@ -30,10 +30,7 @@ class ModuleVersion {
   final DateTime recognizerVersion;
   final DateTime minimumVersion;
 
-  ModuleVersion({
-    required this.recognizerVersion,
-    required this.minimumVersion,
-  });
+  ModuleVersion({required this.recognizerVersion, required this.minimumVersion});
 }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase)
@@ -70,9 +67,7 @@ class ModuleVersionRawData with ModuleVersionRawDataMappable {
     }
     initializeMappers();
     try {
-      return await file
-          .readAsString()
-          .then((content) => ModuleVersionRawDataMapper.fromJson(content));
+      return await file.readAsString().then((content) => ModuleVersionRawDataMapper.fromJson(content));
     } catch (e) {
       return null;
     }
@@ -80,9 +75,9 @@ class ModuleVersionRawData with ModuleVersionRawDataMappable {
 
   static Future<ModuleVersionRawData?> download(Uri url) async {
     initializeMappers();
-    return await createDiagnosticDio(operation: "check_latest_module_version")
-        .get(url.toString())
-        .then((response) => ModuleVersionRawDataMapper.fromJson(response.toString()));
+    return await createDiagnosticDio(
+      operation: "check_latest_module_version",
+    ).get(url.toString()).then((response) => ModuleVersionRawDataMapper.fromJson(response.toString()));
   }
 }
 
@@ -102,11 +97,7 @@ void sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode co
   });
 }
 
-Map<String, dynamic> _networkExceptionContext({
-  required String operation,
-  required Object exception,
-  String? url,
-}) {
+Map<String, dynamic> _networkExceptionContext({required String operation, required Object exception, String? url}) {
   final dioError = exception is DioException ? exception : null;
   final requestUri = dioError?.requestOptions.uri;
   final fallbackUri = url == null ? null : Uri.tryParse(url);
@@ -140,8 +131,8 @@ Future<void> _logNetworkException({
   logger.e("Network request failed. context=$context", exception, stackTrace);
 
   Map<String, dynamic>? probe;
-  final probeUri = (exception is DioException ? exception.requestOptions.uri : null) ??
-      (url == null ? null : Uri.tryParse(url));
+  final probeUri =
+      (exception is DioException ? exception.requestOptions.uri : null) ?? (url == null ? null : Uri.tryParse(url));
   if (probeUri != null) {
     try {
       probe = await probeTlsConnection(probeUri);
@@ -163,13 +154,9 @@ Future<void> _logNetworkException({
       "network.operation": operation,
       if (context["host"] != null) "network.host": context["host"] as String,
       if (context["is_handshake_error"] == true) "network.tls_handshake": "true",
-      if (probe != null && probe["probe_outcome"] != null)
-        "network.tls_probe": probe["probe_outcome"] as String,
+      if (probe != null && probe["probe_outcome"] != null) "network.tls_probe": probe["probe_outcome"] as String,
     },
-    contexts: {
-      "network_failure": context,
-      "tls_probe": ?probe,
-    },
+    contexts: {"network_failure": context, "tls_probe": ?probe},
   );
 }
 
@@ -262,21 +249,12 @@ class AppVersionCheckResult {
   final Version latest;
   final bool hasError;
 
-  AppVersionCheckResult({
-    required this.local,
-    required this.latest,
-    this.hasError = false,
-  });
+  AppVersionCheckResult({required this.local, required this.latest, this.hasError = false});
 
   bool get isUpdatable => local != latest;
 }
 
-enum AppVersionCheckResultCode {
-  noUpdateRequired,
-  newVersionAvailable,
-  latestVersionNotAvailable,
-  accessDenied,
-}
+enum AppVersionCheckResultCode { noUpdateRequired, newVersionAvailable, latestVersionNotAvailable, accessDenied }
 
 void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
   // This function can be called before EasyLocalization is initialized.
@@ -286,11 +264,7 @@ void _sendAppVersionCheckToast(ToastType type, AppVersionCheckResultCode code) {
   });
 }
 
-enum VersionCheckEntryKey {
-  lastAppVersionChecked,
-  latestAppVersion,
-  localAppVersion,
-}
+enum VersionCheckEntryKey { lastAppVersionChecked, latestAppVersion, localAppVersion }
 
 extension StringExtension on String {
   Version toVersion() {
@@ -329,9 +303,9 @@ FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
     lastAppVersionCheckedEntry.push(DateTime.now());
     localAppVersionEntry.push(currentLocalVersion.toString());
     latestAppVersionEntry.delete();
-    final latest = await createDiagnosticDio(operation: "check_latest_app_version")
-        .get(Const.appVersionInfoUrl)
-        .then((response) => Version.parse(jsonDecode(response.toString())['version']));
+    final latest = await createDiagnosticDio(
+      operation: "check_latest_app_version",
+    ).get(Const.appVersionInfoUrl).then((response) => Version.parse(jsonDecode(response.toString())['version']));
     latestAppVersionEntry.push(latest.toString());
     logger.d("latest=$latest");
     return latest;

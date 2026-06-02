@@ -86,9 +86,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   TrinaCell plutoCell(RefBase ref, int value) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    return TrinaCell(
-      value: value,
-    )..setUserData(RangedLabelCellData(labels[value]));
+    return TrinaCell(value: value)..setUserData(RangedLabelCellData(labels[value]));
   }
 
   @override
@@ -103,10 +101,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedLabelCellData>()!;
-        return Text(
-          data.label,
-          textAlign: TextAlign.center,
-        );
+        return Text(data.label, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }
@@ -125,10 +120,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return RangedLabelColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return RangedLabelColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -137,9 +129,7 @@ final _clonedSpecProvider = SpecProviderAccessor<RangedLabelColumnSpec>();
 class _RangedLabelSelector extends ConsumerWidget {
   final String specId;
 
-  const _RangedLabelSelector({
-    required this.specId,
-  });
+  const _RangedLabelSelector({required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -183,10 +173,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -232,11 +219,7 @@ class RangedLabelColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const RangedLabelColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const RangedLabelColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -282,9 +265,7 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
       parser: parser,
       labelKey: labelKey,
       cellAction: cellAction,
-      predicate: IsInRangeIntegerPredicate(
-        min: min,
-      ),
+      predicate: IsInRangeIntegerPredicate(min: min),
     );
   }
 }

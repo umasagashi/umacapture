@@ -24,23 +24,13 @@ part 'factor.mapper.dart';
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
 @MappableEnum()
-enum FactorSetLogicMode {
-  anyOf,
-  allOf,
-  mixed,
-}
+enum FactorSetLogicMode { anyOf, allOf, mixed }
 
 @MappableEnum()
-enum FactorSearchSubjectMode {
-  trainee,
-  family,
-}
+enum FactorSearchSubjectMode { trainee, family }
 
 @MappableEnum()
-enum FactorSearchElementMode {
-  starOnly,
-  starAndCount,
-}
+enum FactorSearchElementMode { starOnly, starAndCount }
 
 @MappableClass()
 class FactorSearchElement with FactorSearchElementMappable {
@@ -48,50 +38,25 @@ class FactorSearchElement with FactorSearchElementMappable {
   final int star;
   final int count;
 
-  FactorSearchElement({
-    required this.mode,
-    required this.star,
-    required this.count,
-  });
+  FactorSearchElement({required this.mode, required this.star, required this.count});
 
-  FactorSearchElement copyWith({
-    FactorSearchElementMode? mode,
-    int? star,
-    int? count,
-  }) {
-    return FactorSearchElement(
-      mode: mode ?? this.mode,
-      star: star ?? this.star,
-      count: count ?? this.count,
-    );
+  FactorSearchElement copyWith({FactorSearchElementMode? mode, int? star, int? count}) {
+    return FactorSearchElement(mode: mode ?? this.mode, star: star ?? this.star, count: count ?? this.count);
   }
 }
 
 @MappableEnum()
-enum FactorNotationMode {
-  sumOnly,
-  traineeAndParents,
-  each,
-}
+enum FactorNotationMode { sumOnly, traineeAndParents, each }
 
 @MappableClass()
 class FactorNotation with FactorNotationMappable {
   final FactorNotationMode mode;
   final int max;
 
-  FactorNotation({
-    required this.mode,
-    required this.max,
-  });
+  FactorNotation({required this.mode, required this.max});
 
-  FactorNotation copyWith({
-    FactorNotationMode? mode,
-    int? max,
-  }) {
-    return FactorNotation(
-      mode: mode ?? this.mode,
-      max: max ?? this.max,
-    );
+  FactorNotation copyWith({FactorNotationMode? mode, int? max}) {
+    return FactorNotation(mode: mode ?? this.mode, max: max ?? this.max);
   }
 }
 
@@ -111,12 +76,7 @@ class QueriedFactor {
     return self + parent1 + parent2;
   }
 
-  QueriedFactor({
-    required this.id,
-    required this.self,
-    required this.parent1,
-    required this.parent2,
-  });
+  QueriedFactor({required this.id, required this.self, required this.parent1, required this.parent2});
 
   static List<QueriedFactor> extract(Iterable<int> targetIds, FactorSet factorSet, bool traineeOnly) {
     assert(targetIds.isNotEmpty);
@@ -190,20 +150,13 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   });
 
   AggregateFactorSetPredicate.any()
-      : query = {},
-        logic = FactorSetLogicMode.anyOf,
-        subject = FactorSearchSubjectMode.family,
-        element = FactorSearchElement(
-          mode: FactorSearchElementMode.starOnly,
-          star: 1,
-          count: 1,
-        ),
-        notation = FactorNotation(
-          mode: FactorNotationMode.sumOnly,
-          max: 3,
-        ),
-        factorTags = {},
-        skillTags = {};
+    : query = {},
+      logic = FactorSetLogicMode.anyOf,
+      subject = FactorSearchSubjectMode.family,
+      element = FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
+      notation = FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
+      factorTags = {},
+      skillTags = {};
 
   AggregateFactorSetPredicate checked() {
     return AggregateFactorSetPredicate(
@@ -282,10 +235,7 @@ class FactorCellData implements CellData {
 }
 
 @MappableEnum()
-enum FactorDialogElements {
-  selectionTags,
-  modeLogic,
-}
+enum FactorDialogElements { selectionTags, modeLogic }
 
 @MappableClass(discriminatorValue: 'FactorColumnSpec')
 class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable {
@@ -372,17 +322,14 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
         parent1: factors.map((e) => e.parent1).sum,
         parent2: factors.map((e) => e.parent2).sum,
       );
-      return TrinaCell(
-        value: q.notation(predicate.notation.mode, width: 3),
-      )..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
+      return TrinaCell(value: q.notation(predicate.notation.mode, width: 3))
+        ..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
-    return TrinaCell(
-      value: desc,
-    )..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
+    return TrinaCell(value: desc)..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
   }
 
   @override
@@ -442,10 +389,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return FactorColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return FactorColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -463,8 +407,9 @@ class _SelectedSkillTags extends TagSelectionNotifier {
   }
 }
 
-final _selectedSkillTagsProvider =
-    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedSkillTags.new);
+final _selectedSkillTagsProvider = NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(
+  _SelectedSkillTags.new,
+);
 
 class _SelectedFactorTags extends TagSelectionNotifier {
   _SelectedFactorTags(this.specId);
@@ -478,15 +423,14 @@ class _SelectedFactorTags extends TagSelectionNotifier {
   }
 }
 
-final _selectedFactorTagsProvider =
-    NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(_SelectedFactorTags.new);
+final _selectedFactorTagsProvider = NotifierProvider.autoDispose.family<TagSelectionNotifier, Set<String>, String>(
+  _SelectedFactorTags.new,
+);
 
 class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
 
-  const _SelectionSelector({
-    required this.specId,
-  });
+  const _SelectionSelector({required this.specId});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
@@ -525,10 +469,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
           Row(
             children: [
               const Expanded(child: Divider()),
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text("$tr_factor.selection.tags.skill_tags.label".tr()),
-              ),
+              Padding(padding: const EdgeInsets.all(8), child: Text("$tr_factor.selection.tags.skill_tags.label".tr())),
               const Expanded(child: Divider()),
             ],
           ),
@@ -550,11 +491,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
       selected: selected,
       onSelected: (newSelected) {
         _clonedSpecProvider.update(ref, widget.specId, (spec) {
-          return spec.copyWith(
-            predicate: spec.predicate.copyWith(
-              query: newSelected,
-            ),
-          );
+          return spec.copyWith(predicate: spec.predicate.copyWith(query: newSelected));
         });
       },
       onTextQueryChanged: (query) => setState(() => textQuery = query),
@@ -577,24 +514,19 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
 class _ModeSelector extends ConsumerWidget {
   final String specId;
 
-  const _ModeSelector({
-    required this.specId,
-  });
+  const _ModeSelector({required this.specId});
 
   Widget descriptionWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     final selection = "$tr_factor.mode.logic.${predicate.logic.name.snakeCase}.description".tr();
     final subject = "$tr_factor.mode.subject.${predicate.subject.name.snakeCase}.description".tr();
-    final count = "$tr_factor.mode.element.${predicate.element.mode.name.snakeCase}.description".tr(namedArgs: {
-      "star": predicate.element.star.toString(),
-      "count": predicate.element.count.toString(),
-    });
+    final count = "$tr_factor.mode.element.${predicate.element.mode.name.snakeCase}.description".tr(
+      namedArgs: {"star": predicate.element.star.toString(), "count": predicate.element.count.toString()},
+    );
     return NoteCard(
-      description: Text("$tr_factor.mode.template".tr(namedArgs: {
-        "selection": selection,
-        "subject": subject,
-        "count": count,
-      })),
+      description: Text(
+        "$tr_factor.mode.template".tr(namedArgs: {"selection": selection, "subject": subject, "count": count}),
+      ),
     );
   }
 
@@ -719,10 +651,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -772,9 +701,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           onChanged: (value) {
             _clonedSpecProvider.update(ref, widget.specId, (spec) {
               return spec.copyWith(
-                predicate: spec.predicate.copyWith(
-                  notation: spec.predicate.notation.copyWith(max: value),
-                ),
+                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
               );
             });
           },
@@ -802,11 +729,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     return FormGroup(
       title: Text("$tr_factor.notation.label".tr()),
       description: Text("$tr_factor.notation.description".tr()),
-      children: [
-        notationChoiceWidget(context, ref),
-        notationMaxWidget(ref),
-        notationTitleWidget(ref),
-      ],
+      children: [notationChoiceWidget(context, ref), notationMaxWidget(ref), notationTitleWidget(ref)],
     );
   }
 }
@@ -815,11 +738,7 @@ class FactorColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const FactorColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const FactorColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -844,11 +763,7 @@ class FactorColumnBuilder extends ColumnBuilder {
   @override
   final ColumnCategory category;
 
-  FactorColumnBuilder({
-    required this.title,
-    required this.category,
-    required this.parser,
-  });
+  FactorColumnBuilder({required this.title, required this.category, required this.parser});
 
   @override
   ColumnSpec<FactorSet> build(RefBase ref) {
@@ -898,22 +813,12 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
         query: initialIds,
         logic: FactorSetLogicMode.mixed,
         subject: FactorSearchSubjectMode.family,
-        element: FactorSearchElement(
-          mode: FactorSearchElementMode.starOnly,
-          star: initialStar,
-          count: 1,
-        ),
-        notation: FactorNotation(
-          mode: FactorNotationMode.sumOnly,
-          max: 3,
-        ),
+        element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: initialStar, count: 1),
+        notation: FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
         factorTags: initialFactorTags,
         skillTags: initialSkillTags,
       ),
-      hiddenElements: {
-        FactorDialogElements.selectionTags,
-        FactorDialogElements.modeLogic,
-      },
+      hiddenElements: {FactorDialogElements.selectionTags, FactorDialogElements.modeLogic},
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
     );

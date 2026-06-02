@@ -10,12 +10,7 @@ class PageLabel {
   final Icon selectedIcon;
   final Icon unselectedIcon;
 
-  const PageLabel({
-    required this.route,
-    required this.label,
-    required this.selectedIcon,
-    required this.unselectedIcon,
-  });
+  const PageLabel({required this.route, required this.label, required this.selectedIcon, required this.unselectedIcon});
 }
 
 class Pages {

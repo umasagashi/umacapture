@@ -13,10 +13,7 @@ const tr_delete_record = "pages.chara_detail.delete_record";
 class DeleteRecordDialog extends ConsumerWidget {
   final String recordId;
 
-  const DeleteRecordDialog({
-    super.key,
-    required this.recordId,
-  });
+  const DeleteRecordDialog({super.key, required this.recordId});
 
   static void show(RefBase ref, {required String recordId}) {
     CardDialog.show(ref, (_) {
@@ -31,10 +28,7 @@ class DeleteRecordDialog extends ConsumerWidget {
     final record = storage.getBy(id: recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
-      constraints: const BoxConstraints(
-        maxWidth: 500,
-        maxHeight: 400,
-      ),
+      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
       child: CardDialog(
         dialogTitle: "$tr_delete_record.dialog.title".tr(),
         closeButtonTooltip: "$tr_delete_record.dialog.close_button.tooltip".tr(),
@@ -46,10 +40,7 @@ class DeleteRecordDialog extends ConsumerWidget {
               Image.file(iconPath.toFile()),
               Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
-              NoteCard(
-                description: Text("$tr_delete_record.dialog.description".tr()),
-                color: theme.colorScheme.error,
-              ),
+              NoteCard(description: Text("$tr_delete_record.dialog.description".tr()), color: theme.colorScheme.error),
             ],
           ),
         ),

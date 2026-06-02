@@ -14,8 +14,7 @@ class CharaDetailPage extends ConsumerStatefulWidget {
   ConsumerState<CharaDetailPage> createState() => _CharaDetailPageState();
 }
 
-class _CharaDetailPageState extends ConsumerState<CharaDetailPage>
-    with AutoRouteAwareStateMixin<CharaDetailPage> {
+class _CharaDetailPageState extends ConsumerState<CharaDetailPage> with AutoRouteAwareStateMixin<CharaDetailPage> {
   // Re-check the quarantine folder whenever this tab is opened, so the banner
   // clears once the user has emptied the folder from outside the app.
   @override
@@ -30,8 +29,6 @@ class _CharaDetailPageState extends ConsumerState<CharaDetailPage>
 
   @override
   Widget build(BuildContext context) {
-    return const SingleTilePageRootWidget(
-      child: CharaDetailDataTableLoaderLayer(),
-    );
+    return const SingleTilePageRootWidget(child: CharaDetailDataTableLoaderLayer());
   }
 }

@@ -87,11 +87,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
         tooltip: '',
         initialValue: current,
         itemBuilder: (BuildContext context) => <PopupMenuEntry<T>>[
-          for (final item in values)
-            PopupMenuItem<T>(
-              value: item,
-              child: Text(name(item)),
-            ),
+          for (final item in values) PopupMenuItem<T>(value: item, child: Text(name(item))),
         ],
         onSelected: (T item) => ref.read(provider.notifier).setValue(item),
         child: Container(
@@ -114,12 +110,7 @@ class SwitchWidget extends ConsumerWidget {
   final Widget description;
   final BooleanNotifierProvider provider;
 
-  const SwitchWidget({
-    super.key,
-    required this.title,
-    required this.description,
-    required this.provider,
-  });
+  const SwitchWidget({super.key, required this.title, required this.description, required this.provider});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -129,10 +120,7 @@ class SwitchWidget extends ConsumerWidget {
       subtitle: description,
       trailing: Align(
         widthFactor: 1,
-        child: Switch(
-          value: ref.watch(provider),
-          onChanged: (enabled) => ref.read(provider.notifier).set(enabled),
-        ),
+        child: Switch(value: ref.watch(provider), onChanged: (enabled) => ref.read(provider.notifier).set(enabled)),
       ),
       onTap: () => ref.read(provider.notifier).toggle(),
     );
@@ -252,14 +240,10 @@ class PrivacySettingsGroup extends ConsumerWidget {
       padding: EdgeInsets.zero,
       children: [
         SwitchWidget(
-          title: Text(
-            "$tr_settings.privacy.allow_post_user_data.title".tr(),
-          ),
+          title: Text("$tr_settings.privacy.allow_post_user_data.title".tr()),
           description: RichText(
             text: TextSpan(
-              style: theme.textTheme.bodyMedium!.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              style: theme.textTheme.bodyMedium!.copyWith(color: theme.colorScheme.onSurfaceVariant),
               children: [
                 TextSpan(text: "$tr_settings.privacy.allow_post_user_data.description".tr()),
                 TextSpan(
@@ -327,9 +311,7 @@ class _LicensePageDialog extends ConsumerWidget {
             DefaultMaterialLocalizations.delegate,
           ],
           locale: const Locale('en'),
-          child: license.LicensePage(
-            applicationVersion: ref.read(localAppVersionLoader).value.toString(),
-          ),
+          child: license.LicensePage(applicationVersion: ref.read(localAppVersionLoader).value.toString()),
         ),
       ),
     );
@@ -340,7 +322,9 @@ class AboutGroup extends ConsumerWidget {
   const AboutGroup({super.key});
 
   String moduleVersion(WidgetRef ref) {
-    return ref.watch(moduleVersionLoader).when(
+    return ref
+        .watch(moduleVersionLoader)
+        .when(
           loading: () => "checking...",
           error: (e, _) => "ERROR: $e",
           data: (data) {
@@ -350,18 +334,15 @@ class AboutGroup extends ConsumerWidget {
   }
 
   String appVersion(WidgetRef ref) {
-    return ref.watch(appVersionCheckLoader).when(
-          loading: () => "checking...",
-          error: (e, _) => "ERROR: $e",
-          data: (data) => data.local.toString(),
-        );
+    return ref
+        .watch(appVersionCheckLoader)
+        .when(loading: () => "checking...", error: (e, _) => "ERROR: $e", data: (data) => data.local.toString());
   }
 
   String versionString(WidgetRef ref) {
-    return "$tr_settings.about.version.description".tr(namedArgs: {
-      "app_version": appVersion(ref),
-      "module_version": moduleVersion(ref),
-    });
+    return "$tr_settings.about.version.description".tr(
+      namedArgs: {"app_version": appVersion(ref), "module_version": moduleVersion(ref)},
+    );
   }
 
   @override
@@ -383,10 +364,7 @@ class AboutGroup extends ConsumerWidget {
           subtitle: Text(versionString(ref)),
           trailing: const Align(
             widthFactor: 1,
-            child: Padding(
-              padding: EdgeInsets.only(right: 16),
-              child: Icon(Icons.paste),
-            ),
+            child: Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.paste)),
           ),
           onTap: () => Pasteboard.writeText(versionString(ref)),
         ),
@@ -395,10 +373,7 @@ class AboutGroup extends ConsumerWidget {
           child: ListTile(
             title: Text("$tr_settings.about.regenerate.title".tr()),
             subtitle: Text("$tr_settings.about.regenerate.description".tr()),
-            trailing: const Padding(
-              padding: EdgeInsets.only(right: 16),
-              child: Icon(Icons.refresh),
-            ),
+            trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.refresh)),
             onTap: () {
               final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
               storage.checkRecordVersion(includeCurrentVersion: true);
@@ -417,13 +392,7 @@ class SettingsPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return const ListTilePageRootWidget(
-      children: [
-        StyleSettingsGroup(),
-        CaptureSettingsGroup(),
-        SystemGroup(),
-        PrivacySettingsGroup(),
-        AboutGroup(),
-      ],
+      children: [StyleSettingsGroup(), CaptureSettingsGroup(), SystemGroup(), PrivacySettingsGroup(), AboutGroup()],
     );
   }
 }

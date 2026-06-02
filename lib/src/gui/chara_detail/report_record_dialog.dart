@@ -16,10 +16,7 @@ class ReportRecordDialog extends ConsumerWidget {
   final DirectoryPath directory;
   final List<FilePath> files;
 
-  ReportRecordDialog({
-    super.key,
-    required this.directory,
-  })  : files = getCharaDetailRecordFiles(directory);
+  ReportRecordDialog({super.key, required this.directory}) : files = getCharaDetailRecordFiles(directory);
 
   static void show(RefBase ref, DirectoryPath directory) {
     CardDialog.show(ref, (_) => ReportRecordDialog(directory: directory));
@@ -44,10 +41,7 @@ class ReportRecordDialog extends ConsumerWidget {
       content: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 16),
-          Text("$tr_report_record.dialog.unavailable".tr()),
-        ],
+        children: [const SizedBox(height: 16), Text("$tr_report_record.dialog.unavailable".tr())],
       ),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -74,10 +68,7 @@ class ReportRecordDialog extends ConsumerWidget {
       content: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 16),
-          Text("$tr_report_record.dialog.limit_reached".tr()),
-        ],
+        children: [const SizedBox(height: 16), Text("$tr_report_record.dialog.limit_reached".tr())],
       ),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.end,
@@ -142,7 +133,7 @@ class ReportRecordDialog extends ConsumerWidget {
             if (limit - count <= 10) ...[
               const SizedBox(height: 16),
               Text("${"$tr_report_record.dialog.available_count".tr()} (${limit - count} / $limit)"),
-            ]
+            ],
           ],
         ),
       ),

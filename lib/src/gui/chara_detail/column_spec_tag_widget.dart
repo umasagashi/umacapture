@@ -32,15 +32,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           data: spec,
           feedback: Material(
             color: Colors.transparent,
-            child: Opacity(
-              opacity: 0.6,
-              child: Chip(label: spec.label()),
-            ),
+            child: Opacity(opacity: 0.6, child: Chip(label: spec.label())),
           ),
-          childWhenDragging: Opacity(
-            opacity: 0.6,
-            child: Chip(label: spec.label()),
-          ),
+          childWhenDragging: Opacity(opacity: 0.6, child: Chip(label: spec.label())),
           child: badges.Badge(
             showBadge: count != null,
             position: badges.BadgePosition.topEnd(top: -8, end: -8),
@@ -53,17 +47,11 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               padding: const EdgeInsets.symmetric(horizontal: 4),
             ),
             ignorePointer: true,
-            badgeContent: Text(
-              "$count",
-              style: theme.textTheme.labelSmall,
-              textAlign: TextAlign.center,
-            ),
+            badgeContent: Text("$count", style: theme.textTheme.labelSmall, textAlign: TextAlign.center),
             child: GestureDetector(
               onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
-                avatar: broken
-                    ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer)
-                    : null,
+                avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
                 label: spec.label(),
                 tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
                 backgroundColor: spec == hoveredSpec
@@ -151,10 +139,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
                 const Opacity(
                   // Spacing widget for export button.
                   opacity: 0,
-                  child: Chip(
-                    padding: EdgeInsets.zero,
-                    label: SizedBox(width: 16),
-                  ),
+                  child: Chip(padding: EdgeInsets.zero, label: SizedBox(width: 16)),
                 ),
               ],
             ),

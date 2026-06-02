@@ -24,9 +24,7 @@ part 'loader.mapper.dart';
 const tr_columns = "pages.chara_detail.columns";
 
 final moduleInfoLoaders = FutureProvider((ref) async {
-  return Future.wait([
-    ref.watch(moduleVersionLoader.future),
-  ]).then((_) {
+  return Future.wait([ref.watch(moduleVersionLoader.future)]).then((_) {
     return Future.wait([
       ref.watch(labelMapLoader.future),
       ref.watch(_skillInfoLoader.future),
@@ -38,9 +36,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
       ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
     ]).then((_) {
-      return Future.wait([
-        ref.watch(currentColumnSpecsLoaderProvider.future),
-      ]);
+      return Future.wait([ref.watch(currentColumnSpecsLoaderProvider.future)]);
     });
   });
 });
@@ -53,8 +49,10 @@ Future<T> _loadFromJson<T>(FilePath path) async {
 final labelMapLoader = FutureProvider<LabelMap>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<Map<String, dynamic>>, path.modulesDir.filePath("labels.json"))
-      .then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v))));
+  return compute(
+    _loadFromJson<Map<String, dynamic>>,
+    path.modulesDir.filePath("labels.json"),
+  ).then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v))));
 });
 
 final labelMapProvider = Provider<LabelMap>((ref) {
@@ -64,8 +62,10 @@ final labelMapProvider = Provider<LabelMap>((ref) {
 final _skillInfoLoader = FutureProvider<List<SkillInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<SkillInfo>>, path.modulesDir.filePath("skill_info.json"))
-      .then((e) => e.sortedBy<num>((e) => e.sortKey));
+  return compute(
+    _loadFromJson<List<SkillInfo>>,
+    path.modulesDir.filePath("skill_info.json"),
+  ).then((e) => e.sortedBy<num>((e) => e.sortKey));
 });
 
 final skillInfoProvider = Provider<List<SkillInfo>>((ref) {
@@ -175,26 +175,14 @@ class RatingData with RatingDataMappable {
   final String title;
   final Map<String, double> data;
 
-  RatingData({
-    required this.title,
-    required this.data,
-  });
+  RatingData({required this.title, required this.data});
 
-  RatingData copyWith({
-    String? title,
-    Map<String, double>? data,
-  }) {
-    return RatingData(
-      title: title ?? this.title,
-      data: data ?? this.data,
-    );
+  RatingData copyWith({String? title, Map<String, double>? data}) {
+    return RatingData(title: title ?? this.title, data: data ?? this.data);
   }
 
   static RatingData get empty {
-    return RatingData(
-      title: "pages.chara_detail.columns.rating.title".tr(),
-      data: {},
-    );
+    return RatingData(title: "pages.chara_detail.columns.rating.title".tr(), data: {});
   }
 }
 
@@ -233,19 +221,10 @@ class RatingStorageData {
   final String key;
   final String title;
 
-  RatingStorageData({
-    required this.key,
-    required this.title,
-  });
+  RatingStorageData({required this.key, required this.title});
 
-  RatingStorageData copyWith({
-    String? key,
-    String? title,
-  }) {
-    return RatingStorageData(
-      key: key ?? this.key,
-      title: title ?? this.title,
-    );
+  RatingStorageData copyWith({String? key, String? title}) {
+    return RatingStorageData(key: key ?? this.key, title: title ?? this.title);
   }
 }
 
@@ -256,10 +235,9 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
   }
   return directoryPath
       .listSync()
-      .map((e) => RatingStorageData(
-            key: e.stem,
-            title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
-          ))
+      .map(
+        (e) => RatingStorageData(key: e.stem, title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title),
+      )
       .toList();
 }
 
@@ -282,11 +260,10 @@ class CharaDetailRecordRatingStorageDataNotifier extends _StorageDataNotifier<Ra
 
 final charaDetailRecordRatingStorageDataProvider =
     NotifierProvider<CharaDetailRecordRatingStorageDataNotifier, List<RatingStorageData>>(
-  CharaDetailRecordRatingStorageDataNotifier.new,
-);
+      CharaDetailRecordRatingStorageDataNotifier.new,
+    );
 
-final charaDetailRecordRatingProvider =
-    NotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>(
+final charaDetailRecordRatingProvider = NotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>(
   CharaDetailRecordRatingController.new,
 );
 
@@ -311,26 +288,14 @@ class MemoData with MemoDataMappable {
   final String title;
   final Map<String, String> data;
 
-  MemoData({
-    required this.title,
-    required this.data,
-  });
+  MemoData({required this.title, required this.data});
 
-  MemoData copyWith({
-    String? title,
-    Map<String, String>? data,
-  }) {
-    return MemoData(
-      title: title ?? this.title,
-      data: data ?? this.data,
-    );
+  MemoData copyWith({String? title, Map<String, String>? data}) {
+    return MemoData(title: title ?? this.title, data: data ?? this.data);
   }
 
   static MemoData get empty {
-    return MemoData(
-      title: "pages.chara_detail.columns.memo.title".tr(),
-      data: {},
-    );
+    return MemoData(title: "pages.chara_detail.columns.memo.title".tr(), data: {});
   }
 }
 
@@ -349,10 +314,7 @@ class CharaDetailRecordMemoController extends Notifier<MemoData> {
 
   String get title => state.title;
 
-  void _update({
-    required String recordId,
-    required String memo,
-  }) {
+  void _update({required String recordId, required String memo}) {
     state.data[recordId] = memo;
     state = state.copyWith();
   }
@@ -371,10 +333,7 @@ class CharaDetailRecordMemoController extends Notifier<MemoData> {
     _MemoDataWriter(path, state).run();
   }
 
-  void update({
-    required String recordId,
-    required String? memo,
-  }) {
+  void update({required String recordId, required String? memo}) {
     if (memo?.isEmpty ?? true) {
       _remove(recordId: recordId);
     } else {
@@ -388,19 +347,10 @@ class MemoStorageData {
   final String key;
   final String title;
 
-  MemoStorageData({
-    required this.key,
-    required this.title,
-  });
+  MemoStorageData({required this.key, required this.title});
 
-  MemoStorageData copyWith({
-    String? key,
-    String? title,
-  }) {
-    return MemoStorageData(
-      key: key ?? this.key,
-      title: title ?? this.title,
-    );
+  MemoStorageData copyWith({String? key, String? title}) {
+    return MemoStorageData(key: key ?? this.key, title: title ?? this.title);
   }
 }
 
@@ -411,10 +361,7 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   }
   return directoryPath
       .listSync()
-      .map((e) => MemoStorageData(
-            key: e.stem,
-            title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
-          ))
+      .map((e) => MemoStorageData(key: e.stem, title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title))
       .toList();
 }
 
@@ -430,16 +377,16 @@ class CharaDetailRecordMemoStorageDataNotifier extends _StorageDataNotifier<Memo
 
 final charaDetailRecordMemoStorageDataProvider =
     NotifierProvider<CharaDetailRecordMemoStorageDataNotifier, List<MemoStorageData>>(
-  CharaDetailRecordMemoStorageDataNotifier.new,
-);
+      CharaDetailRecordMemoStorageDataNotifier.new,
+    );
 
-final charaDetailRecordMemoProvider =
-    NotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>(
+final charaDetailRecordMemoProvider = NotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>(
   CharaDetailRecordMemoController.new,
 );
 
-final currentColumnSpecsLoaderProvider =
-    AsyncNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>(ColumnSpecSelection.new);
+final currentColumnSpecsLoaderProvider = AsyncNotifierProvider<ColumnSpecSelection, List<ColumnSpec>>(
+  ColumnSpecSelection.new,
+);
 
 // Thin synchronous view over the loaded column specs. Mutating callers use
 // currentColumnSpecsLoaderProvider.notifier instead.
@@ -482,10 +429,12 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   final records = zip2(recordList, rowConditions).where((row) => row.$2).map((row) => row.$1);
 
   final rows = zip2(plutoCells, records)
-      .map((row) => TrinaRow(
-            cells: Map.fromEntries(row.$1),
-            sortIdx: -DateTime.parse(row.$2.metadata.capturedDate).millisecondsSinceEpoch,
-          )..setUserData(row.$2))
+      .map(
+        (row) => TrinaRow(
+          cells: Map.fromEntries(row.$1),
+          sortIdx: -DateTime.parse(row.$2.metadata.capturedDate).millisecondsSinceEpoch,
+        )..setUserData(row.$2),
+      )
       .sortedBy<num>((e) => e.sortIdx)
       .toList();
 

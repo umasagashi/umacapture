@@ -13,10 +13,7 @@ const tr_regenerate_record = "pages.chara_detail.regenerate_record";
 class RegenerateRecordDialog extends ConsumerWidget {
   final String recordId;
 
-  const RegenerateRecordDialog({
-    super.key,
-    required this.recordId,
-  });
+  const RegenerateRecordDialog({super.key, required this.recordId});
 
   static void show(RefBase ref, {required String recordId}) {
     CardDialog.show(ref, (_) {
@@ -31,10 +28,7 @@ class RegenerateRecordDialog extends ConsumerWidget {
     final record = storage.getBy(id: recordId)!;
     final iconPath = storage.traineeIconPathOf(record);
     return ConstrainedBox(
-      constraints: const BoxConstraints(
-        maxWidth: 500,
-        maxHeight: 400,
-      ),
+      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
       child: CardDialog(
         dialogTitle: "$tr_regenerate_record.dialog.title".tr(),
         closeButtonTooltip: "$tr_regenerate_record.dialog.close_button.tooltip".tr(),
@@ -44,10 +38,7 @@ class RegenerateRecordDialog extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Image.file(iconPath.toFile()),
-              Text(
-                record.metadata.capturedDate.toDateTime().toLocal().toString(),
-                style: theme.textTheme.titleMedium,
-              ),
+              Text(record.metadata.capturedDate.toDateTime().toLocal().toString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               NoteCard(
                 description: Text("$tr_regenerate_record.dialog.description".tr()),

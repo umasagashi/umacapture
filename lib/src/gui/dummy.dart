@@ -23,12 +23,7 @@ class _DummyPageState extends ConsumerState<DummyPage> with AutomaticKeepAliveCl
     super.build(context);
     return Scaffold(
       body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Text("Under Construction"),
-          ],
-        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: const [Text("Under Construction")]),
       ),
     );
   }

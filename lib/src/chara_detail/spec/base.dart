@@ -24,18 +24,7 @@ const tr_common = "pages.chara_detail.column_predicate.common";
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
-enum ColumnCategory {
-  trainee,
-  status,
-  aptitude,
-  skill,
-  factor,
-  supportCard,
-  family,
-  campaign,
-  race,
-  metadata,
-}
+enum ColumnCategory { trainee, status, aptitude, skill, factor, supportCard, family, campaign, race, metadata }
 
 class LabelKeys {
   static String get aptitude => "aptitude.name";
@@ -53,11 +42,7 @@ class LabelKeys {
   static String get recordType => "record_type.name";
 }
 
-enum ColumnBuilderType {
-  normal,
-  filter,
-  add,
-}
+enum ColumnBuilderType { normal, filter, add }
 
 abstract class ColumnBuilder {
   String get title;
@@ -115,9 +100,7 @@ class FactorInfo with FactorInfoMappable {
     this.skillInfo,
   });
 
-  FactorInfo copyWith({
-    SkillInfo? skillInfo,
-  }) {
+  FactorInfo copyWith({SkillInfo? skillInfo}) {
     return FactorInfo(
       sid: sid,
       sortKey: sortKey,
@@ -150,11 +133,7 @@ class CharaCardInfo with CharaCardInfoMappable {
 }
 
 @MappableEnum()
-enum ColumnSpecCellAction {
-  openSkillPreview,
-  openFactorPreview,
-  openCampaignPreview,
-}
+enum ColumnSpecCellAction { openSkillPreview, openFactorPreview, openCampaignPreview }
 
 extension ColumnSpecCellActionExtension on ColumnSpecCellAction {
   int? get tabIdx {
@@ -246,8 +225,8 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   final String title;
 
   BrokenPlaceholderSpec(this.rawMap)
-      : id = (rawMap["id"] as String?) ?? "broken:${rawMap["type"] ?? "unknown"}",
-        title = (rawMap["title"] as String?) ?? (rawMap["type"] as String?) ?? "Unknown";
+    : id = (rawMap["id"] as String?) ?? "broken:${rawMap["type"] ?? "unknown"}",
+      title = (rawMap["title"] as String?) ?? (rawMap["type"] as String?) ?? "Unknown";
 
   @override
   String get type => (rawMap["type"] as String?) ?? runtimeType.toString();
@@ -452,24 +431,15 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
     final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
     final maxWidth = values.toSet().map((value) {
-      TextSpan textSpan = TextSpan(
-        style: DefaultTextStyle.of(context).style,
-        text: value,
-      );
-      TextPainter textPainter = TextPainter(
-        text: textSpan,
-        textDirection: ui.TextDirection.ltr,
-      );
+      TextSpan textSpan = TextSpan(style: DefaultTextStyle.of(context).style, text: value);
+      TextPainter textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr);
       textPainter.layout();
       return textPainter.width;
     }).max;
 
     EdgeInsets cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
 
-    resizeColumn(
-      column,
-      maxWidth - column.width + (cellPadding.left + cellPadding.right) + 8,
-    );
+    resizeColumn(column, maxWidth - column.width + (cellPadding.left + cellPadding.right) + 8);
   }
 
   void autoFitColumns() {

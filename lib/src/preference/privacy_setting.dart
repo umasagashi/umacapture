@@ -9,21 +9,14 @@ import '/src/preference/storage_box.dart';
 const tr_privacy = "app.privacy";
 
 final allowPostUserDataStateProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(
-    entryKey: SettingsEntryKey.allowPostUserData.name,
-    defaultValue: true,
-  );
+  return BooleanNotifier(entryKey: SettingsEntryKey.allowPostUserData.name, defaultValue: true);
 });
 
 StorageEntry<bool> _getAllowPostUserDataSettingEntry() {
   return StorageBox(StorageBoxKey.settings).entry<bool>(SettingsEntryKey.allowPostUserData.name);
 }
 
-enum PostUserData {
-  notConfirmed,
-  allow,
-  deny,
-}
+enum PostUserData { notConfirmed, allow, deny }
 
 PostUserData allowPostUserData() {
   final value = _getAllowPostUserDataSettingEntry().pull();

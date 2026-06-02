@@ -48,11 +48,12 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     if (state.isCompleted) {
       Future.delayed(const Duration(milliseconds: 200), () {
         ref.read(charaDetailRecordStorageLoaderProvider.notifier).forceRebuild();
-        Toaster.show(ToastData(
+        Toaster.show(
+          ToastData(
             type: ToastType.success,
-            description: "pages.capture.regenerate.success".tr(namedArgs: {
-              "count": state.total.toString(),
-            })));
+            description: "pages.capture.regenerate.success".tr(namedArgs: {"count": state.total.toString()}),
+          ),
+        );
         state = Progress.none;
       });
     }
@@ -68,12 +69,7 @@ final charaDetailRecordRegenerationControllerProvider =
 // "skill_plain"). Without this, a previously-saved multi-word value throws
 // MapperException.unknownEnumValue on read.
 @MappableEnum(caseStyle: CaseStyle.snakeCase)
-enum CharaDetailRecordImageMode {
-  none,
-  skillPlain,
-  factorPlain,
-  campaignPlain,
-}
+enum CharaDetailRecordImageMode { none, skillPlain, factorPlain, campaignPlain }
 
 extension CharaDetailRecordImageModeExtension on CharaDetailRecordImageMode {
   String get fileName {
@@ -189,17 +185,17 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       // All quarantined records share the same quarantine folder; tapping the
       // toast opens it in the file explorer so the user can inspect/recover them.
       final quarantineDir = destinations.first.parent;
-      Toaster.show(ToastData.warning(
-        description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
-        onTap: () => quarantineDir.launch(),
-      ));
+      Toaster.show(
+        ToastData.warning(
+          description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
+          onTap: () => quarantineDir.launch(),
+        ),
+      );
       // Refresh the persistent banner on the chara_detail tab.
       ref.invalidate(charaDetailQuarantineCountProvider);
     }
     if (failed > 0) {
-      Toaster.show(ToastData.error(
-        description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"}),
-      ));
+      Toaster.show(ToastData.error(description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"})));
     }
   }
 
@@ -303,8 +299,9 @@ List<RecordLoadResult> _loadAllCharaDetailRecord(DirectoryPath directory) {
       .toList();
 }
 
-final charaDetailRecordStorageLoaderProvider =
-    AsyncNotifierProvider<CharaDetailRecordStorage, List<CharaDetailRecord>>(CharaDetailRecordStorage.new);
+final charaDetailRecordStorageLoaderProvider = AsyncNotifierProvider<CharaDetailRecordStorage, List<CharaDetailRecord>>(
+  CharaDetailRecordStorage.new,
+);
 
 // Thin synchronous view over the loaded records, so the many `ref.watch(...)`
 // call sites keep receiving a plain List. Mutating callers use

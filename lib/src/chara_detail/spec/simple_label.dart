@@ -23,9 +23,7 @@ const tr_simple_label = "pages.chara_detail.column_predicate.simple_label";
 class SimpleLabelPredicate with SimpleLabelPredicateMappable {
   final Set<int> rejects;
 
-  SimpleLabelPredicate({
-    this.rejects = const {},
-  });
+  SimpleLabelPredicate({this.rejects = const {}});
 
   SimpleLabelPredicate.any() : rejects = {};
 
@@ -99,9 +97,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   @override
   TrinaCell plutoCell(RefBase ref, int value) {
     final label = ref.read(labelMapProvider)[labelKey]![value];
-    return TrinaCell(
-      value: label,
-    )..setUserData(SimpleLabelCellData(label));
+    return TrinaCell(value: label)..setUserData(SimpleLabelCellData(label));
   }
 
   @override
@@ -116,10 +112,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
       readOnly: true,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SimpleLabelCellData>()!;
-        return Text(
-          data.label,
-          textAlign: TextAlign.center,
-        );
+        return Text(data.label, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }
@@ -145,10 +138,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return SimpleLabelColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return SimpleLabelColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -157,9 +147,7 @@ final _clonedSpecProvider = SpecProviderAccessor<SimpleLabelColumnSpec>();
 class _SimpleLabelSelector extends ConsumerWidget {
   final String specId;
 
-  const _SimpleLabelSelector({
-    required this.specId,
-  });
+  const _SimpleLabelSelector({required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -182,7 +170,9 @@ class _SimpleLabelSelector extends ConsumerWidget {
                 for (final index in indices)
                   FilterChip(
                     label: Text(labels[index].joinLines(" ")),
-                    backgroundColor: !spec.predicate.rejects.contains(index) ? null : theme.colorScheme.surfaceContainerLow,
+                    backgroundColor: !spec.predicate.rejects.contains(index)
+                        ? null
+                        : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
                     onSelected: (selected) {
@@ -208,10 +198,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -257,11 +244,7 @@ class SimpleLabelColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const SimpleLabelColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const SimpleLabelColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {

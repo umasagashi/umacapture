@@ -25,23 +25,14 @@ class IsInRangeDateTimePredicate with IsInRangeDateTimePredicateMappable {
   final DateTime? min;
   final DateTime? max;
 
-  IsInRangeDateTimePredicate({
-    this.min,
-    this.max,
-  });
+  IsInRangeDateTimePredicate({this.min, this.max});
 
   bool apply(DateTime value) {
     return value.isInRange(min ?? value, max ?? value);
   }
 
-  IsInRangeDateTimePredicate copyWith({
-    DateTime? min,
-    DateTime? max,
-  }) {
-    return IsInRangeDateTimePredicate(
-      min: min ?? this.min,
-      max: max ?? this.max,
-    );
+  IsInRangeDateTimePredicate copyWith({DateTime? min, DateTime? max}) {
+    return IsInRangeDateTimePredicate(min: min ?? this.min, max: max ?? this.max);
   }
 }
 
@@ -71,19 +62,9 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openCampaignPreview;
 
-  DateTimeColumnSpec({
-    required this.id,
-    required this.title,
-    required this.parser,
-    required this.predicate,
-  });
+  DateTimeColumnSpec({required this.id, required this.title, required this.parser, required this.predicate});
 
-  DateTimeColumnSpec copyWith({
-    String? id,
-    String? title,
-    Parser? parser,
-    IsInRangeDateTimePredicate? predicate,
-  }) {
+  DateTimeColumnSpec copyWith({String? id, String? title, Parser? parser, IsInRangeDateTimePredicate? predicate}) {
     return DateTimeColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
@@ -137,10 +118,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return DateTimeColumnSelector(
-      specId: id,
-      onDecided: onDecided,
-    );
+    return DateTimeColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
@@ -149,9 +127,7 @@ final _clonedSpecProvider = SpecProviderAccessor<DateTimeColumnSpec>();
 class _DateTimeSelector extends ConsumerStatefulWidget {
   final String specId;
 
-  const _DateTimeSelector({
-    required this.specId,
-  });
+  const _DateTimeSelector({required this.specId});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _DateTimeSelectorState();
@@ -184,12 +160,7 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
               child: TextButton(
                 onPressed: () {
                   _clonedSpecProvider.update(ref, widget.specId, (spec) {
-                    return spec.copyWith(
-                      predicate: IsInRangeDateTimePredicate(
-                        min: null,
-                        max: null,
-                      ),
-                    );
+                    return spec.copyWith(predicate: IsInRangeDateTimePredicate(min: null, max: null));
                   });
                 },
                 child: Text("$tr_datetime.range.reset_button".tr()),
@@ -227,7 +198,7 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
               ),
             ),
           ],
-        )
+        ),
       ],
     );
   }
@@ -237,10 +208,7 @@ class _NotationSelector extends ConsumerStatefulWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const _NotationSelector({
-    required this.specId,
-    required this.onDecided,
-  });
+  const _NotationSelector({required this.specId, required this.onDecided});
 
   @override
   ConsumerState<ConsumerStatefulWidget> createState() => _NotationSelectorState();
@@ -286,11 +254,7 @@ class DateTimeColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const DateTimeColumnSelector({
-    super.key,
-    required this.specId,
-    required this.onDecided,
-  });
+  const DateTimeColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -313,11 +277,7 @@ class DateTimeColumnBuilder extends ColumnBuilder {
   @override
   final ColumnCategory category;
 
-  DateTimeColumnBuilder({
-    required this.title,
-    required this.category,
-    required this.parser,
-  });
+  DateTimeColumnBuilder({required this.title, required this.category, required this.parser});
 
   @override
   DateTimeColumnSpec build(RefBase ref) {

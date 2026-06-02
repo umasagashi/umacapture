@@ -39,11 +39,7 @@ class DistributionInfoBuilder implements Builder {
     final license = jsonEncoder.convert(deps.allDependencies.map((e) => e.toJson()).toList());
 
     final context = license.toLowerCase();
-    final rejects = [
-      "GENERAL PUBLIC LICENSE",
-      "EUROPEAN UNION PUBLIC LICENCE",
-      "Mozilla Public License",
-    ];
+    final rejects = ["GENERAL PUBLIC LICENSE", "EUROPEAN UNION PUBLIC LICENCE", "Mozilla Public License"];
     for (final key in rejects) {
       if (context.contains(key.toLowerCase())) {
         throw Exception("Rejected key found: $key");
@@ -93,9 +89,7 @@ class DistributionInfoBuilder implements Builder {
       throw FormatException("Illegal version string. pubspec=$version, parsed=$parsed");
     }
 
-    final info = {
-      "version": version,
-    };
+    final info = {"version": version};
     return jsonEncoder.convert(info);
   }
 
@@ -120,11 +114,7 @@ class DistributionInfoBuilder implements Builder {
   @override
   Map<String, List<String>> get buildExtensions {
     return {
-      "pubspec.yaml": [
-        "assets/version_info.json",
-        "assets/license_info.json",
-        "assets/additional_license_info.json",
-      ],
+      "pubspec.yaml": ["assets/version_info.json", "assets/license_info.json", "assets/additional_license_info.json"],
     };
   }
 }

@@ -17,23 +17,23 @@ import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
 Map<String, dynamic> completeFactorMap(String id) => <String, dynamic>{
-      'type': 'FactorColumnSpec',
-      'id': id,
-      'title': '因子',
-      'parser': <String, dynamic>{'type': 'FactorSetParser'},
-      'predicate': <String, dynamic>{
-        'query': <int>[],
-        'logic': 'anyOf',
-        'subject': 'family',
-        'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
-        'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
-        'factorTags': <String>[],
-        'skillTags': <String>[],
-      },
-      'showAllWhenQueryIsEmpty': true,
-      'showAvailableOnly': true,
-      'hiddenElements': <String>[],
-    };
+  'type': 'FactorColumnSpec',
+  'id': id,
+  'title': '因子',
+  'parser': <String, dynamic>{'type': 'FactorSetParser'},
+  'predicate': <String, dynamic>{
+    'query': <int>[],
+    'logic': 'anyOf',
+    'subject': 'family',
+    'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
+    'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
+    'factorTags': <String>[],
+    'skillTags': <String>[],
+  },
+  'showAllWhenQueryIsEmpty': true,
+  'showAvailableOnly': true,
+  'hiddenElements': <String>[],
+};
 
 Map<String, dynamic> legacyFactorMap(String id) {
   final map = completeFactorMap(id);
@@ -43,13 +43,13 @@ Map<String, dynamic> legacyFactorMap(String id) {
 }
 
 Map<String, dynamic> rangedIntegerMap(String id) => <String, dynamic>{
-      'type': 'RangedIntegerColumnSpec',
-      'id': id,
-      'title': 'ファン数',
-      'parser': <String, dynamic>{'type': 'FansParser'},
-      'predicate': <String, dynamic>{'min': null, 'max': null},
-      'cellAction': 'openCampaignPreview',
-    };
+  'type': 'RangedIntegerColumnSpec',
+  'id': id,
+  'title': 'ファン数',
+  'parser': <String, dynamic>{'type': 'FansParser'},
+  'predicate': <String, dynamic>{'min': null, 'max': null},
+  'cellAction': 'openCampaignPreview',
+};
 
 void seed(List<Map<String, dynamic>> maps) {
   Hive.box('column_spec').put('current_column_specs', jsonEncode(maps));
