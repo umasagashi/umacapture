@@ -17,3 +17,8 @@ assets/version_info.json                       eol=lf
 # The flutter-ai-rules-sync skill regenerates this vendored rules file with LF.
 # Same rationale as above: pin to LF so re-syncing produces no EOL-only churn.
 .claude/rules/flutter-ai-rules.md              eol=lf
+
+# Git hooks are executed by bash (Git for Windows). With core.autocrlf=true a
+# fresh clone would write CRLF, and a `#!/usr/bin/env bash\r` shebang fails to
+# run. Pin to LF so the hook stays executable on Windows.
+tool/hooks/pre-commit                          eol=lf
