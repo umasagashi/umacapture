@@ -33,7 +33,7 @@ enum SkillSetLogicMode {
 class SkillNotation with SkillNotationMappable {
   final int max;
 
-  SkillNotation({required this.max});
+  SkillNotation({this.max = 3});
 }
 
 @MappableClass()
@@ -45,11 +45,11 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
   final Set<String> tags;
 
   AggregateSkillPredicate({
-    required this.query,
-    required this.logic,
-    required this.min,
+    this.query = const {},
+    this.logic = SkillSetLogicMode.anyOf,
+    this.min = 1,
     required this.notation,
-    required this.tags,
+    this.tags = const {},
   });
 
   AggregateSkillPredicate.any()

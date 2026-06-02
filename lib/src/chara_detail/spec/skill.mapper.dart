@@ -127,7 +127,12 @@ class SkillNotationMapper extends ClassMapperBase<SkillNotation> {
   final String id = 'SkillNotation';
 
   static int _$max(SkillNotation v) => v.max;
-  static const Field<SkillNotation, int> _f$max = Field('max', _$max);
+  static const Field<SkillNotation, int> _f$max = Field(
+    'max',
+    _$max,
+    opt: true,
+    def: 3,
+  );
 
   @override
   final MappableFields<SkillNotation> fields = const {#max: _f$max};
@@ -185,12 +190,19 @@ class AggregateSkillPredicateMapper
   static const Field<AggregateSkillPredicate, Set<int>> _f$query = Field(
     'query',
     _$query,
+    opt: true,
+    def: const {},
   );
   static SkillSetLogicMode _$logic(AggregateSkillPredicate v) => v.logic;
   static const Field<AggregateSkillPredicate, SkillSetLogicMode> _f$logic =
-      Field('logic', _$logic);
+      Field('logic', _$logic, opt: true, def: SkillSetLogicMode.anyOf);
   static int _$min(AggregateSkillPredicate v) => v.min;
-  static const Field<AggregateSkillPredicate, int> _f$min = Field('min', _$min);
+  static const Field<AggregateSkillPredicate, int> _f$min = Field(
+    'min',
+    _$min,
+    opt: true,
+    def: 1,
+  );
   static SkillNotation _$notation(AggregateSkillPredicate v) => v.notation;
   static const Field<AggregateSkillPredicate, SkillNotation> _f$notation =
       Field('notation', _$notation);
@@ -198,6 +210,8 @@ class AggregateSkillPredicateMapper
   static const Field<AggregateSkillPredicate, Set<String>> _f$tags = Field(
     'tags',
     _$tags,
+    opt: true,
+    def: const {},
   );
 
   @override

@@ -26,7 +26,7 @@ class CharacterCardPredicate with CharacterCardPredicateMappable {
   final Set<int> rejects;
 
   CharacterCardPredicate({
-    required this.rejects,
+    this.rejects = const {},
   });
 
   CharacterCardPredicate.any() : rejects = {};

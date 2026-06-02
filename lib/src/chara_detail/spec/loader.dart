@@ -447,6 +447,14 @@ final currentColumnSpecsProvider = Provider<List<ColumnSpec>>((ref) {
   return ref.watch(currentColumnSpecsLoaderProvider).requireValue;
 });
 
+// Ids of specs that were loaded from incomplete/undecodable data (see
+// ColumnSpecSelection). The UI renders these as broken chips so the user is
+// prompted to review them. Recomputed whenever the selection changes.
+final currentColumnSpecBrokenIdsProvider = Provider<Set<String>>((ref) {
+  ref.watch(currentColumnSpecsLoaderProvider);
+  return ref.read(currentColumnSpecsLoaderProvider.notifier).brokenIds;
+});
+
 class Grid {
   final List<TrinaColumn> columns;
   final List<TrinaRow> rows;
@@ -493,11 +501,9 @@ final currentGridProvider = Provider<Grid>((ref) {
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);
-    // Cannot change state while building.
-    Future.delayed(
-      const Duration(milliseconds: 1),
-      () => ref.read(currentColumnSpecsLoaderProvider.notifier).clear(), // TODO: Remove only failed specs.
-    );
+    // Render an empty grid for this session without touching storage. Clearing
+    // the selection here would re-serialize an empty list and permanently erase
+    // every saved column on a transient build failure.
     Toaster.show(ToastData.error(description: "pages.chara_detail.error.building_grid".tr()));
     return Grid.empty;
   }

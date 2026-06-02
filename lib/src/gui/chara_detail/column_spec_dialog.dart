@@ -22,6 +22,12 @@ class SpecClone extends Notifier<ColumnSpec> {
   @override
   ColumnSpec build() {
     final source = ref.read(currentColumnSpecsLoaderProvider.notifier).getById(specId)!;
+    // An unrecoverable placeholder cannot round-trip through fromMap (its raw map
+    // has an unknown/undecodable shape); edit it in place so the dialog can still
+    // show its info and the delete button.
+    if (source is BrokenPlaceholderSpec) {
+      return source;
+    }
     return ColumnSpecMapper.fromMap(source.toMap());
   }
 

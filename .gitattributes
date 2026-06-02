@@ -4,3 +4,12 @@
 # LF so regeneration matches the committed blob and produces no EOL-only churn.
 windows/flutter/generated_plugin_registrant.* eol=lf
 windows/flutter/generated_plugins.cmake       eol=lf
+
+# build_runner / auto_route / distribution_info regenerate these with LF too.
+# Same rationale as above: pin to LF so codegen produces no EOL-only churn.
+*.mapper.dart                                  eol=lf
+*.gr.dart                                      eol=lf
+lib/generated/assets.dart                      eol=lf
+lib/distribution_info.dart                     eol=lf
+assets/license_info.json                       eol=lf
+assets/version_info.json                       eol=lf

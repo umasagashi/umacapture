@@ -26,6 +26,8 @@ class SimpleLabelPredicateMapper extends ClassMapperBase<SimpleLabelPredicate> {
   static const Field<SimpleLabelPredicate, Set<int>> _f$rejects = Field(
     'rejects',
     _$rejects,
+    opt: true,
+    def: const {},
   );
 
   @override

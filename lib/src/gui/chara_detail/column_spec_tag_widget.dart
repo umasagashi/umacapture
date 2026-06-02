@@ -24,7 +24,7 @@ class ColumnSpecTagWidget extends ConsumerStatefulWidget {
 class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   ColumnSpec? hoveredSpec;
 
-  Widget buildSpecChip(BuildContext context, ColumnSpec spec, int? count) {
+  Widget buildSpecChip(BuildContext context, ColumnSpec spec, int? count, {bool broken = false}) {
     final theme = Theme.of(context);
     return DragTarget<ColumnSpec>(
       builder: (context, candidateData, rejectedData) {
@@ -61,9 +61,14 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             child: GestureDetector(
               onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
               child: ActionChip(
+                avatar: broken
+                    ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer)
+                    : null,
                 label: spec.label(),
-                tooltip: spec.tooltip(ref.base),
-                backgroundColor: spec == hoveredSpec ? theme.colorScheme.secondaryContainer : null,
+                tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
+                backgroundColor: spec == hoveredSpec
+                    ? theme.colorScheme.secondaryContainer
+                    : (broken ? theme.colorScheme.errorContainer : null),
                 onPressed: () {
                   ColumnSpecDialog.show(ref.base, spec);
                 },
@@ -122,6 +127,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final theme = Theme.of(context);
     final recordCount = ref.watch(charaDetailRecordStorageProvider).length;
     final specs = ref.watch(currentColumnSpecsProvider);
+    final brokenIds = ref.watch(currentColumnSpecBrokenIdsProvider);
     final filteredCounts = ref.watch(currentGridProvider).filteredCounts;
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 8),
@@ -135,7 +141,12 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               runSpacing: 8,
               children: [
                 for (final col in zip2(specs, filteredCounts))
-                  buildSpecChip(context, col.$1, col.$2 == recordCount ? null : col.$2),
+                  buildSpecChip(
+                    context,
+                    col.$1,
+                    col.$2 == recordCount ? null : col.$2,
+                    broken: brokenIds.contains(col.$1.id),
+                  ),
                 specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
                 const Opacity(
                   // Spacing widget for export button.

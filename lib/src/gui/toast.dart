@@ -74,12 +74,13 @@ class Toaster {
   });
 
   void showToast(BuildContext context, ToastData data) {
-    final snackBar = ScaffoldMessenger.of(context);
+    final messenger = ScaffoldMessenger.of(context);
     final parentSize = MediaQuery.of(context).size;
     final barWidth = Math.min(parentSize.width - 20.0, narrowWidth);
     final isNarrow = barWidth < narrowWidth;
+    final duration = data.duration ?? durationMap[data.type]!;
 
-    snackBar.showSnackBar(
+    final controller = messenger.showSnackBar(
       SnackBar(
         width: barWidth,
         padding: const EdgeInsets.symmetric(vertical: 10),
@@ -87,7 +88,7 @@ class Toaster {
         backgroundColor: colorMap[data.type],
         behavior: SnackBarBehavior.floating,
         dismissDirection: isNarrow ? DismissDirection.horizontal : DismissDirection.down,
-        duration: data.duration ?? durationMap[data.type]!,
+        duration: duration,
         action: isNarrow ? null : SnackBarAction(textColor: Colors.white, label: 'CLOSE', onPressed: () {}),
         content: TextButton.icon(
           icon: Icon(iconMap[data.type], color: Colors.white),
@@ -101,7 +102,7 @@ class Toaster {
           ),
           style: ButtonStyle(overlayColor: WidgetStateProperty.all<Color>(Colors.transparent)),
           onPressed: () {
-            snackBar.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
+            messenger.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
             data.onTap?.call();
             if (data.navigateOnTab != null) {
               AutoTabsRouter.of(context).navigate(data.navigateOnTab!);
@@ -110,5 +111,20 @@ class Toaster {
         ),
       ),
     );
+
+    // ScaffoldMessenger only schedules its built-in auto-dismiss timer when the
+    // messenger's enclosing route isCurrent (see ScaffoldMessengerState.build);
+    // in this app that condition is not met, so the SnackBar would otherwise
+    // stay until manually closed. Drive the dismissal ourselves so [duration] is
+    // always honored, cancelling if the user dismisses it first.
+    Timer? autoDismiss;
+    autoDismiss = Timer(duration, () {
+      try {
+        controller.close();
+      } catch (_) {
+        // Already removed (manual dismiss or queue reordering); nothing to do.
+      }
+    });
+    controller.closed.then((_) => autoDismiss?.cancel());
   }
 }

@@ -27,6 +27,8 @@ class CharacterCardPredicateMapper
   static const Field<CharacterCardPredicate, Set<int>> _f$rejects = Field(
     'rejects',
     _$rejects,
+    opt: true,
+    def: const {},
   );
 
   @override
