@@ -260,7 +260,10 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         waitDuration: const Duration(milliseconds: 100),
         showDuration: Duration.zero,
       ),
-      chipTheme: base.chipTheme.copyWith(labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset)),
+      chipTheme: base.chipTheme.copyWith(
+        labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
+        shape: StadiumBorder(side: base.chipTheme.shape?.side ?? BorderSide.none),
+      ),
       textTheme: base.textTheme.copyWith(
         displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
         displayMedium: modifyFontWeight(base.textTheme.displayMedium, offset),
