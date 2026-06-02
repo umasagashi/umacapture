@@ -13,3 +13,7 @@ lib/generated/assets.dart                      eol=lf
 lib/distribution_info.dart                     eol=lf
 assets/license_info.json                       eol=lf
 assets/version_info.json                       eol=lf
+
+# The flutter-ai-rules-sync skill regenerates this vendored rules file with LF.
+# Same rationale as above: pin to LF so re-syncing produces no EOL-only churn.
+.claude/rules/flutter-ai-rules.md              eol=lf

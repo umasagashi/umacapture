@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "dart": {
+      "type": "stdio",
+      "command": ".fvm\\flutter_sdk\\bin\\dart.bat",
+      "args": [
+        "mcp-server",
+        "--disable",
+        "create_project"
+      ],
+      "env": {}
+    }
+  }
+}
