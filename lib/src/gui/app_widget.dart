@@ -358,7 +358,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         localizationsDelegates: context.localizationDelegates,
         supportedLocales: context.supportedLocales,
         locale: context.locale,
-        routerConfig: widget.router.config(),
+        routerConfig: widget.router.config(
+          navigatorObservers: () => [AutoRouteObserver()],
+        ),
       ),
     );
   }

@@ -7,7 +7,9 @@
             "draw": "ペイント",
             "submit": "フィードバックを送信"
         },
-        "file_deletion_error": "ファイルの削除が許可されていません。エクスプローラーで削除してください。"
+        "file_deletion_error": "ファイルの削除が許可されていません。エクスプローラーで削除してください。",
+        "record_quarantined": "読み込めない記録を {count} 件 隔離フォルダへ退避しました。（クリックでフォルダを開く）",
+        "record_quarantine_error": "読み込めない記録 {count} 件の退避に失敗しました。"
     },
     "pages": {
         "dashboard": {
@@ -96,6 +98,11 @@
                 "tooltip": "表示列を新規追加"
             },
             "regenerating_message": "認識結果を更新しています",
+            "quarantine_banner": {
+                "message": "読み込めない記録が {count} 件 隔離フォルダに退避されています。",
+                "open": "フォルダを開く",
+                "refresh": "更新"
+            },
             "error": {
                 "building_grid": "殿堂入り管理画面の表の生成に失敗したため、リセットしました。",
                 "loading_spec": "殿堂入り管理画面の列の読み込みに失敗しました。内容を確認してください。"

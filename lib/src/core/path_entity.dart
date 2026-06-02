@@ -193,6 +193,24 @@ class DirectoryPath extends PathEntity {
 
   Future<void> create({bool recursive = false}) => toDirectory().create(recursive: recursive);
 
+  /// Moves this directory to [destination], creating the destination's parent
+  /// folders as needed.
+  ///
+  /// Unlike [deleteSyncSafeWithCheck] this preserves the contents; it is meant
+  /// for quarantining data that must not be erased. Returns the destination on
+  /// success, or `null` if the move failed (e.g. a file lock), in which case the
+  /// directory is left untouched.
+  DirectoryPath? moveSyncSafe(DirectoryPath destination) {
+    try {
+      destination.parent.toDirectory().createSync(recursive: true);
+      toDirectory().renameSync(destination.path);
+      return destination;
+    } catch (error, stackTrace) {
+      logger.e("Failed to move directory.", error, stackTrace);
+      return null;
+    }
+  }
+
   void deleteSyncSafeWithCheck() {
     try {
       listSync(recursive: false, followLinks: false).forEach((e) => e.deleteSync(recursive: false));

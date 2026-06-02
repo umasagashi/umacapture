@@ -248,6 +248,61 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
   }
 }
 
+/// Persistent banner shown at the top of the chara_detail tab while one or more
+/// records sit in the quarantine folder, with a shortcut to open that folder.
+class _QuarantineBannerWidget extends ConsumerWidget {
+  const _QuarantineBannerWidget();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final count = ref.watch(charaDetailQuarantineCountProvider);
+    if (count == 0) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final quarantineDir = ref.watch(pathInfoProvider).charaDetailQuarantineDir;
+    // Flat buttons tinted with the banner's own foreground color so they read as
+    // part of the error-themed banner rather than standing out as separate chips.
+    final buttonStyle = TextButton.styleFrom(foregroundColor: theme.colorScheme.onErrorContainer);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: theme.colorScheme.errorContainer,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  "$tr_chara_detail.quarantine_banner.message".tr(namedArgs: {"count": "$count"}),
+                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => ref.invalidate(charaDetailQuarantineCountProvider),
+                icon: const Icon(Icons.refresh),
+                label: Text("$tr_chara_detail.quarantine_banner.refresh".tr()),
+                style: buttonStyle,
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => quarantineDir.launch(),
+                icon: const Icon(Icons.folder_open),
+                label: Text("$tr_chara_detail.quarantine_banner.open".tr()),
+                style: buttonStyle,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
   const CharaDetailDataTableLoaderLayer({super.key});
 
@@ -287,6 +342,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
   Widget data(BuildContext context, WidgetRef ref) {
     return Column(
       children: const [
+        _QuarantineBannerWidget(),
         ColumnSpecTagWidget(),
         SizedBox(height: 8),
         _CharaDetailDataTablePreCheckLayer(),

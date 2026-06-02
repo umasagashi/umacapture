@@ -278,6 +278,32 @@ class Metadata extends JsonEquatable with MetadataMappable {
       ];
 }
 
+/// Outcome of attempting to load a single record directory.
+///
+/// Returned by [CharaDetailRecord.load] so the (potentially isolate-bound)
+/// loader can report what happened as data, leaving any UI surfacing to the
+/// caller on the main isolate.
+sealed class RecordLoadResult {
+  const RecordLoadResult();
+}
+
+/// The record decoded successfully.
+class RecordLoaded extends RecordLoadResult {
+  final CharaDetailRecord record;
+
+  const RecordLoaded(this.record);
+}
+
+/// The record could not be decoded and its directory was quarantined.
+///
+/// [destination] is the quarantine folder it was moved to, or `null` if the
+/// move itself failed (e.g. a file lock), leaving the directory in place.
+class RecordQuarantined extends RecordLoadResult {
+  final DirectoryPath? destination;
+
+  const RecordQuarantined(this.destination);
+}
+
 @MappableClass(caseStyle: CaseStyle.snakeCase)
 class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   final Metadata metadata;
@@ -340,17 +366,42 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
 
   DateTime get trainedDateAsDateTime => trainedDate.replaceAll("/", "-").toDateTime();
 
-  static CharaDetailRecord? load(DirectoryPath directory) {
+  /// Loads the record in [directory], quarantining it if it cannot be decoded.
+  ///
+  /// Returns a [RecordLoaded] on success, or a [RecordQuarantined] if decoding
+  /// failed. This runs inside a `compute` isolate on the bulk/reload paths, so
+  /// it performs no UI side effects: surfacing the outcome (a toast) is the
+  /// caller's responsibility on the main isolate, driven by the returned value.
+  static RecordLoadResult load(DirectoryPath directory) {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
-      return CharaDetailRecordMapper.fromJson(content);
+      return RecordLoaded(CharaDetailRecordMapper.fromJson(content));
     } catch (exception, stackTrace) {
       logger.e("Failed to load record.json.", exception, stackTrace);
       logger.i(directory.listSync().map((e) => e.name).join(", "));
       captureException(exception, stackTrace);
     }
-    directory.deleteSyncSafeWithCheck();
-    return null;
+    // A record that fails to decode (unknown enum value, missing required
+    // field, legacy/hand-edited file) is moved aside instead of being deleted,
+    // so its images and json survive for later inspection or recovery.
+    return RecordQuarantined(quarantine(directory));
+  }
+
+  /// Moves a record directory whose `record.json` could not be decoded into a
+  /// sibling `quarantine/` folder, preserving it for recovery.
+  ///
+  /// Records live at `<root>/active/<id>`; the quarantine folder is the sibling
+  /// `<root>/quarantine/`, which lies outside the scanned `active/` tree so a
+  /// quarantined record is not re-loaded (and re-quarantined) on restart. A name
+  /// collision with an already-quarantined id is resolved with an `_<n>` suffix.
+  /// Returns the destination, or `null` if the move failed.
+  static DirectoryPath? quarantine(DirectoryPath directory) {
+    final quarantineRoot = directory.parent.parent / "quarantine";
+    var destination = quarantineRoot / directory.name;
+    for (var n = 1; destination.existsSync(); n++) {
+      destination = quarantineRoot / "${directory.name}_$n";
+    }
+    return directory.moveSyncSafe(destination);
   }
 
   /// Determines if another record represents the same character based on key attributes.
