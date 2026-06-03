@@ -252,6 +252,9 @@
                         "title": {
                             "label": "表示名"
                         }
+                    },
+                    "marker": {
+                        "friend": "レンタル"
                     }
                 },
                 "skill": {

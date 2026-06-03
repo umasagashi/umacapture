@@ -100,7 +100,8 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
-        return Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
+        final icon = Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
+        return record.isFriend ? _FriendMarkedIcon(icon: icon) : icon;
       },
     )..setUserData(this);
   }
@@ -126,6 +127,44 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   @override
   Widget selector(ChangeNotifier onDecided) {
     return CharacterCardColumnSelector(specId: id, onDecided: onDecided);
+  }
+}
+
+/// A trainee icon with a pink "rental" banner across its bottom edge, marking a
+/// friend's (practice-partner) record. The banner is overlaid at display time; the
+/// underlying `trainee.jpg` is never modified.
+class _FriendMarkedIcon extends StatelessWidget {
+  final Widget icon;
+
+  const _FriendMarkedIcon({required this.icon});
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.passthrough,
+      children: [
+        icon,
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: FractionallySizedBox(
+            widthFactor: 0.6,
+            child: Container(
+              decoration: const ShapeDecoration(color: Color(0xFFEC6A8E), shape: StadiumBorder()),
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  "$tr_character.marker.friend".tr(),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 }
 

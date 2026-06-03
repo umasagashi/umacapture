@@ -348,6 +348,10 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
 
   String get id => metadata.recordId.self;
 
+  /// Whether this is a friend's (practice-partner) record, full or inheritance-only.
+  bool get isFriend =>
+      metadata.recordType == RecordType.friendStandard || metadata.recordType == RecordType.friendInheritance;
+
   FilePath get traineeIconPath => DirectoryPath(id).filePath("trainee.jpg");
 
   DateTime get trainedDateAsDateTime => trainedDate.replaceAll("/", "-").toDateTime();
