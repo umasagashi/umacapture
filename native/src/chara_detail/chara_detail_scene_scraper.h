@@ -127,7 +127,12 @@ public:
         // Scroll is purely vertical, so a tiny horizontal translation is accepted as matching noise. A larger one is
         // verified by overlaying the frames (see estimate()) rather than trusted on the feature match alone.
         double horizontal_threshold = 1.5;
-        double vertical_threshold = 50.;
+        // Half-width of the keypoint-acceptance window centred on the scroll-bar guess, as a fraction of the frame
+        // width (the project's length unit) so it is resolution-independent. The guess error scales with the frame's
+        // pixel size, so an absolute-pixel window would clip genuine matches on higher-resolution screens. Measured on
+        // 736px-wide footage the worst genuine keypoint sits 0.0586*width from the guess and the tightest periodic-row
+        // pitch is 0.0815*width, so 0.068 stays clear of both (it equals the previous 50px on that width).
+        double vertical_threshold = 0.068;
         // When the horizontal translation exceeds horizontal_threshold, the vertical offset is confirmed by overlapping
         // the two frames and requiring at least this normalized cross-correlation. Measured genuine scrolls score
         // >=0.95 and wrong alignments <=0.56, so 0.8 separates them with margin.
@@ -180,7 +185,9 @@ public:
         std::vector<std::vector<cv::DMatch>> matches;
         matcher->knnMatch(from.descriptors, to.descriptors, matches, 2);
 
-        const Range<double> valid_range = {guess - vertical_threshold, guess + vertical_threshold};
+        // vertical_threshold is a fraction of the frame width; scale it to pixels to match the keypoint coordinates.
+        const double vertical_margin = vertical_threshold * from.frame.width();
+        const Range<double> valid_range = {guess - vertical_margin, guess + vertical_margin};
         std::vector<cv::Point2f> valid_key_points_of_from;
         std::vector<cv::Point2f> valid_key_points_of_to;
         for (const auto &knn_match : matches) {
