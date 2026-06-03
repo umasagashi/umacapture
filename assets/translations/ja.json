@@ -62,6 +62,7 @@
                         }
                     }
                 },
+                "record_type": "認識中の種別：{type}",
                 "progress": {
                     "skill": "スキル",
                     "factor": "因子",

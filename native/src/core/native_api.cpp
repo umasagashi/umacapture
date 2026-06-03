@@ -51,7 +51,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto chara_detail_opened_connection = scraper_runner->makeConnection<chara_detail::SceneInfo>();
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>();
 
-    chara_detail_opened_connection->listen([this](const auto &) { notifyCharaDetailStarted(); });
+    chara_detail_opened_connection->listen([this](const auto &info) { notifyCharaDetailStarted(info.record_type); });
 
     {
         const auto scene_context = std::make_shared<chara_detail::CharaDetailSceneContext>(

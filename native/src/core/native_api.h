@@ -70,7 +70,9 @@ public:
 
     void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
 
-    void notifyCharaDetailStarted() { notify(json_util::Json{{"type", "onCharaDetailStarted"}}.dump()); }
+    void notifyCharaDetailStarted(chara_detail::record::RecordType record_type) {
+        notify(json_util::Json{{"type", "onCharaDetailStarted"}, {"record_type", static_cast<int>(record_type)}}.dump());
+    }
     void notifyCharaDetailFinished(const chara_detail::RecordInfo &info, bool success) {
         notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", info.record_id}, {"success", success}}.dump());
     }
