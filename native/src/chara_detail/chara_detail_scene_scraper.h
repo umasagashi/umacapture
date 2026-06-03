@@ -350,14 +350,11 @@ public:
     }
 
     [[nodiscard]] bool ready() const {
-        switch (record_type) {
-            case record::RecordType::InheritanceOnly: {
-                return base_ready && factor_box_->ready() && campaign_box_->ready();
-            }
-            default: {
-                return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
-            }
+        // Inheritance-only records (own or a friend's) have no skill page to scrape.
+        if (record::isInheritanceOnly(record_type)) {
+            return base_ready && factor_box_->ready() && campaign_box_->ready();
         }
+        return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
     }
 
 private:
@@ -737,8 +734,7 @@ public:
 
         // The Friend layout puts a "register practice partner" button above the tab bar,
         // shifting the tab bar and scroll area down, so it needs its own coordinate set.
-        const auto &common =
-            (info.record_type == record::RecordType::Friend) ? config.friend_common : config.common;
+        const auto &common = record::isFriend(info.record_type) ? config.friend_common : config.common;
 
         scraping_box = std::make_shared<scraper_impl::SceneScrapingBox>(
             config.skill_scans,

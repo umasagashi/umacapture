@@ -625,7 +625,8 @@
                     "values": {
                         "standard": "育成",
                         "inheritance_only": "継承",
-                        "friend": "フレンド"
+                        "friend_standard": "フレンド育成",
+                        "friend_inheritance": "フレンド継承"
                     }
                 },
                 "race_strategy": {

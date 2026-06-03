@@ -12,9 +12,23 @@ namespace uma::chara_detail::record {
 enum RecordType {
     Standard = 0,
     InheritanceOnly = 1,
-    Friend = 2,
+    FriendStandard = 2,
+    FriendInheritance = 3,
 };
-EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, Friend)
+EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
+
+// RecordType encodes two independent axes. The content axis (full training record vs
+// inheritance-only) decides which data exists to recognize; the layout axis (own vs a
+// friend's hall of fame, which adds a "register practice partner" button that shifts the
+// tab bar and scroll area down) decides the scrape coordinates. These predicates let
+// downstream code test one axis without enumerating every combination.
+[[nodiscard]] inline bool isInheritanceOnly(RecordType type) {
+    return type == InheritanceOnly || type == FriendInheritance;
+}
+
+[[nodiscard]] inline bool isFriend(RecordType type) {
+    return type == FriendStandard || type == FriendInheritance;
+}
 
 struct Character {
     int icon;

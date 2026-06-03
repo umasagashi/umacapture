@@ -117,26 +117,50 @@ private:
         });
     }
 
+    // RecordType is two independent axes: the friend layout (a friend's hall of fame adds
+    // the green "register practice partner" button) and the inheritance-only content signal
+    // (a mid-screen white gap where a full training record shows data). The four branches
+    // below are the mutually exclusive combinations, so their order within recordTypes()
+    // only has to follow the enum, not rely on fall-through.
+
     [[nodiscard]] ConditionBase standardRecordType() const {
-        // Standard is the fallback: anything that is neither InheritanceOnly nor Friend.
-        // It must exclude Friend too — the active record_type is the first matching
-        // branch's index, so without this a Friend screen (which is not InheritanceOnly)
-        // would match Standard first and be misclassified.
-        return logicalNot(anyOf({inheritanceOnlyRecordType(), friendRecordType()}));
+        // Own, full training record: neither axis is set.
+        return allOf({logicalNot(friendLayout()), logicalNot(inheritanceSignal())});
     }
 
     [[nodiscard]] ConditionBase inheritanceOnlyRecordType() const {
+        // Own, inheritance-only record.
+        return allOf({logicalNot(friendLayout()), inheritanceSignal()});
+    }
+
+    [[nodiscard]] ConditionBase friendStandardRecordType() const {
+        // A friend's full training record.
+        return allOf({friendLayout(), logicalNot(inheritanceSignal())});
+    }
+
+    [[nodiscard]] ConditionBase friendInheritanceRecordType() const {
+        // A friend's inheritance-only record. The only friend signal we have is the green
+        // "register practice partner" button, which is absent on a friend's inheritance-only
+        // screen, so this branch does not fire yet and such screens fall through to
+        // InheritanceOnly above. Telling the two inheritance-only cases apart needs an extra
+        // signal (TODO: add a friend-inheritance marker).
+        return allOf({friendLayout(), inheritanceSignal()});
+    }
+
+    // Mid-screen white gap present only on inheritance-only records (the trained-data block
+    // is absent), independent of the owner.
+    [[nodiscard]] ConditionBase inheritanceSignal() const {
         return anyOf({
             lineCheck(lineToX({0.0500, 0.4981, IS}, 0.0963), colorRange({255, 255, 255}, 5), full_length),
             lineCheck(lineToX({0.8000, 0.4981, IS}, 0.8444), colorRange({255, 255, 255}, 5), full_length),
         });
     }
 
-    [[nodiscard]] ConditionBase friendRecordType() const {
-        // A Friend record (another trainer's hall-of-fame Uma) shows a green
-        // "練習パートナー登録" (register as practice partner) button between the aptitudes
-        // and the tab bar. That button both identifies the type and pushes the tab bar
-        // down, so detect both: the button itself and the tab bar at the Friend Y.
+    [[nodiscard]] ConditionBase friendLayout() const {
+        // A friend's hall-of-fame screen shows a green "練習パートナー登録" (register as practice
+        // partner) button between the aptitudes and the tab bar. That button both identifies
+        // the friend layout and pushes the tab bar down, so detect both: the button itself
+        // and the tab bar at the Friend Y.
         return allOf({
             friendRegisterButton(),
             friendTabBar(),
@@ -168,11 +192,14 @@ private:
 
     [[nodiscard]] ConditionBase recordTypes() const {
         // The following only determines which type fits, assuming all other conditions are met.
+        // Branch order must match the RecordType enum: the active record_type is the index of
+        // the first matching branch.
         return anyOf(
             {
-                standardRecordType(),
-                inheritanceOnlyRecordType(),
-                friendRecordType(),
+                standardRecordType(),           // 0: Standard
+                inheritanceOnlyRecordType(),    // 1: InheritanceOnly
+                friendStandardRecordType(),     // 2: FriendStandard
+                friendInheritanceRecordType(),  // 3: FriendInheritance
             },
             "record_type");
     }

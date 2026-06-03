@@ -66,7 +66,8 @@ List<String> _recordTypeLabels() {
     final key = switch (type) {
       RecordType.standard => "standard",
       RecordType.inheritanceOnly => "inheritance_only",
-      RecordType.friend => "friend",
+      RecordType.friendStandard => "friend_standard",
+      RecordType.friendInheritance => "friend_inheritance",
     };
     return "$tr_columns.record_type.values.$key".tr();
   }).toList();

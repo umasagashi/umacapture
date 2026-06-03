@@ -201,7 +201,7 @@ public:
         const RecordInfo &record_info,
         record::CharaDetailRecord &record,
         PredictionHistory &history) const {
-        if (record_info.record_type.value() != record::InheritanceOnly) {
+        if (!record::isInheritanceOnly(record_info.record_type.value())) {
             record.evaluation_value = predict(evaluation_value_model, frame, config.evaluation.rect, history);
             record.status = predict(status_value_model, frame, config.status.rects, history);
         }
@@ -229,7 +229,7 @@ public:
         const RecordInfo &record_info,
         record::CharaDetailRecord &record,
         PredictionHistory &history) const {
-        if (record_info.record_type == record::RecordType::InheritanceOnly) {
+        if (record::isInheritanceOnly(record_info.record_type.value())) {
             record.skills = {};
             return;
         }
@@ -354,7 +354,7 @@ private:
         const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + reference_offset;
         const auto icon = predict(character_model, frame, chara_rect, history);
 
-        const auto rank = record_info.record_type.value() != record::InheritanceOnly
+        const auto rank = !record::isInheritanceOnly(record_info.record_type.value())
                             ? predict(character_rank_model, frame, rank_rect, history)
                             : 0;
 

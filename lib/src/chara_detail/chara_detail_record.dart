@@ -218,9 +218,11 @@ class RecordId extends JsonEquatable with RecordIdMappable {
 @MappableEnum()
 enum RecordStage { active }
 
-// In the saved data (record.json), record_type is PascalCase ("Standard"/"InheritanceOnly"/"Friend").
+// In the saved data (record.json), record_type is PascalCase, e.g. "Standard" / "FriendStandard".
+// The order must stay aligned with the native RecordType enum, since record_type columns map
+// the value to a label by index.
 @MappableEnum(caseStyle: CaseStyle.pascalCase)
-enum RecordType { standard, inheritanceOnly, friend }
+enum RecordType { standard, inheritanceOnly, friendStandard, friendInheritance }
 
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Metadata extends JsonEquatable with MetadataMappable {

@@ -73,8 +73,10 @@ class RecordTypeMapper extends EnumMapper<RecordType> {
         return RecordType.standard;
       case r'InheritanceOnly':
         return RecordType.inheritanceOnly;
-      case r'Friend':
-        return RecordType.friend;
+      case r'FriendStandard':
+        return RecordType.friendStandard;
+      case r'FriendInheritance':
+        return RecordType.friendInheritance;
       default:
         throw MapperException.unknownEnumValue(value);
     }
@@ -87,8 +89,10 @@ class RecordTypeMapper extends EnumMapper<RecordType> {
         return r'Standard';
       case RecordType.inheritanceOnly:
         return r'InheritanceOnly';
-      case RecordType.friend:
-        return r'Friend';
+      case RecordType.friendStandard:
+        return r'FriendStandard';
+      case RecordType.friendInheritance:
+        return r'FriendInheritance';
     }
   }
 }
