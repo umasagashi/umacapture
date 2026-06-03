@@ -124,8 +124,21 @@ class ImageOffsetEstimator {
 public:
     struct ImageOffsetEstimatorConfig {
         double trust_ratio = 0.5;
+        // Scroll is purely vertical, so a tiny horizontal translation is accepted as matching noise. A larger one is
+        // verified by overlaying the frames (see estimate()) rather than trusted on the feature match alone.
         double horizontal_threshold = 1.5;
         double vertical_threshold = 50.;
+        // When the horizontal translation exceeds horizontal_threshold, the vertical offset is confirmed by overlapping
+        // the two frames and requiring at least this normalized cross-correlation. Measured genuine scrolls score
+        // >=0.95 and wrong alignments <=0.56, so 0.8 separates them with margin.
+        double minimum_overlap_score = 0.8;
+        // The overlap must be at least this tall (as a fraction of the frame width, the project's length unit) for the
+        // correlation to be meaningful. A thinner band -- only possible when the scroll is nearly a full frame -- is
+        // too little evidence to trust a large stitch on, and a near-uniform sliver could even correlate spuriously.
+        double minimum_overlap_height = 0.05;
+        // Downscale factor applied before the overlap correlation. The renderer is not pixel-exact (sub-pixel shifts),
+        // so averaging neighbours makes the score robust to that noise (and cheaper).
+        int overlap_downscale = 4;
         int minimum_key_points = 10;
         int descriptor_channels = 3;
         float descriptor_threshold = 0.001f;
@@ -139,6 +152,9 @@ public:
     explicit ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
         : trust_ratio(config.trust_ratio)
         , horizontal_threshold(config.horizontal_threshold)
+        , minimum_overlap_score(config.minimum_overlap_score)
+        , minimum_overlap_height(config.minimum_overlap_height)
+        , overlap_downscale(config.overlap_downscale)
         , minimum_key_points(config.minimum_key_points)
         , vertical_threshold(config.vertical_threshold)
         , detector(
@@ -195,11 +211,22 @@ public:
         std::vector<double> matrix((double *) result.datastart, (double *) result.dataend);
         const Point<double> offset = {matrix[2], matrix[5]};
 
-        // The result should only be a vertical translation. If not, something went wrong.
+        // The result should only be a translation; a non-identity scale/rotation/shear means the match is wrong.
         matrix[2] = 0.0;
         matrix[5] = 0.0;
         const std::vector<double> eye{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-        if (!closeEnough(matrix, eye, 0.1) || std::abs(offset.x()) > horizontal_threshold) {
+        if (!closeEnough(matrix, eye, 0.1)) {
+            return std::nullopt;
+        }
+
+        // The scroll is vertical, so the horizontal translation should be ~0. A tiny value is sub-pixel matching noise
+        // and is accepted directly. A larger one (e.g. a fast scroll that leaves little frame overlap) is verified
+        // against pixel evidence instead of trusting the feature match, which can be self-consistent yet wrong:
+        // overlay the two frames using only the vertical offset and require a high overlap correlation. Rejecting these
+        // frames outright would freeze the reference descriptor and stall the page (the scroll-bar guess then grows
+        // unbounded), so this confirms the result the estimator actually returns before keeping it.
+        if (std::abs(offset.x()) > horizontal_threshold
+            && overlapScore(from.frame.data(), to.frame.data(), std::lround(offset.y())) < minimum_overlap_score) {
             return std::nullopt;
         }
 
@@ -215,10 +242,46 @@ private:
             descriptor.frame.data(), cv::noArray(), descriptor.key_points, descriptor.descriptors);
     }
 
+    // Overlays the two frames shifted by the vertical offset and returns the normalized cross-correlation of their
+    // shared region. A point at row y in `to` lands at row y + offset_pixels in `from`, so those row ranges hold the
+    // overlapping content. Returns 0 when the overlap is too thin to verify (a non-positive scroll, or a band shorter
+    // than minimum_overlap_height of the frame width), which the caller treats as a failed match.
+    [[nodiscard]] double overlapScore(const cv::Mat &from_frame, const cv::Mat &to_frame, long offset_pixels) const {
+        const int height = from_frame.rows;
+        const long overlap_height = height - offset_pixels;
+        if (offset_pixels <= 0 || overlap_height < minimum_overlap_height * from_frame.cols) {
+            return 0.0;
+        }
+        const auto gray = [](const cv::Mat &frame) {
+            if (frame.channels() == 1) {
+                return frame;
+            }
+            cv::Mat result;
+            cv::cvtColor(frame, result, cv::COLOR_BGR2GRAY);
+            return result;
+        };
+        cv::Mat from_overlap = gray(from_frame).rowRange(static_cast<int>(offset_pixels), height);
+        cv::Mat to_overlap = gray(to_frame).rowRange(0, height - static_cast<int>(offset_pixels));
+        if (overlap_downscale > 1) {
+            const cv::Size size = {
+                std::max(1, from_overlap.cols / overlap_downscale),
+                std::max(1, from_overlap.rows / overlap_downscale),
+            };
+            cv::resize(from_overlap, from_overlap, size, 0, 0, cv::INTER_AREA);
+            cv::resize(to_overlap, to_overlap, size, 0, 0, cv::INTER_AREA);
+        }
+        cv::Mat score;
+        cv::matchTemplate(from_overlap, to_overlap, score, cv::TM_CCOEFF_NORMED);
+        return score.at<float>(0, 0);
+    }
+
     const cv::Ptr<cv::Feature2D> detector;
     const cv::Ptr<cv::FlannBasedMatcher> matcher;
     const double trust_ratio;
     const double horizontal_threshold;
+    const double minimum_overlap_score;
+    const double minimum_overlap_height;
+    const int overlap_downscale;
     const int minimum_key_points;
     const double vertical_threshold;
 };
