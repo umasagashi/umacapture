@@ -621,7 +621,12 @@
                     "title": "勝利数"
                 },
                 "record_type": {
-                    "title": "育成種別"
+                    "title": "育成種別",
+                    "values": {
+                        "standard": "育成",
+                        "inheritance_only": "継承",
+                        "friend": "フレンド"
+                    }
                 },
                 "race_strategy": {
                     "title": "作戦"

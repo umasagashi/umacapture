@@ -52,8 +52,25 @@ final labelMapLoader = FutureProvider<LabelMap>((ref) async {
   return compute(
     _loadFromJson<Map<String, dynamic>>,
     path.modulesDir.filePath("labels.json"),
-  ).then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v))));
+  ).then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v)))).then((map) {
+    // record_type maps to the app-side RecordType enum, so its labels come from
+    // translations rather than the downloaded module. This keeps a newly added
+    // RecordType (e.g. friend) labeled without waiting for a module update, and
+    // avoids a range error when the module label list lags behind the enum.
+    return {...map, LabelKeys.recordType: _recordTypeLabels()};
+  });
 });
+
+List<String> _recordTypeLabels() {
+  return RecordType.values.map((type) {
+    final key = switch (type) {
+      RecordType.standard => "standard",
+      RecordType.inheritanceOnly => "inheritance_only",
+      RecordType.friend => "friend",
+    };
+    return "$tr_columns.record_type.values.$key".tr();
+  }).toList();
+}
 
 final labelMapProvider = Provider<LabelMap>((ref) {
   return ref.watch(labelMapLoader).value!;
