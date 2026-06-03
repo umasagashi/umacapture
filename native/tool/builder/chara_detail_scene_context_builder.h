@@ -129,8 +129,9 @@ private:
     }
 
     [[nodiscard]] ConditionBase inheritanceOnlyRecordType() const {
-        // Own, inheritance-only record.
-        return allOf({logicalNot(friendLayout()), inheritanceSignal()});
+        // Own, inheritance-only record. It shares the standard (unshifted) layout with a
+        // friend's inheritance-only record, so the player's own edit button distinguishes it.
+        return allOf({logicalNot(friendLayout()), inheritanceSignal(), playerEditButton()});
     }
 
     [[nodiscard]] ConditionBase friendStandardRecordType() const {
@@ -139,12 +140,11 @@ private:
     }
 
     [[nodiscard]] ConditionBase friendInheritanceRecordType() const {
-        // A friend's inheritance-only record. The only friend signal we have is the green
-        // "register practice partner" button, which is absent on a friend's inheritance-only
-        // screen, so this branch does not fire yet and such screens fall through to
-        // InheritanceOnly above. Telling the two inheritance-only cases apart needs an extra
-        // signal (TODO: add a friend-inheritance marker).
-        return allOf({friendLayout(), inheritanceSignal()});
+        // A friend's inheritance-only record. It has no "register practice partner" button (so
+        // the layout is not shifted and friendLayout() is false) and no player edit button, so
+        // it is identified by the inheritance content signal together with the absence of that
+        // edit button, which separates it from the player's own inheritance-only record above.
+        return allOf({logicalNot(friendLayout()), inheritanceSignal(), logicalNot(playerEditButton())});
     }
 
     // Mid-screen white gap present only on inheritance-only records (the trained-data block
@@ -187,6 +187,30 @@ private:
             // plain card background. (A Standard screen's full-width scroll column header
             // sits at a similar Y but would be green here — this check rejects it.)
             lineCheck(lineToX({0.1200, y, IS}, 0.1700), background, full_length),
+        });
+    }
+
+    [[nodiscard]] ConditionBase playerEditButton() const {
+        // The player's own hall-of-fame records show a round white "edit" button with a brown
+        // pencil at the top-right of the header (you can edit your own entry); a friend's record
+        // has none, leaving the plain cream card background there instead. Pinned to
+        // player_inheritance.png (736 px wide): the pencil body runs diagonally from its tip
+        // (lower-left) to the eraser (upper-right), and the circle around it is pure white. We
+        // check a brown line along the pencil body and a parallel white line in the gap beside
+        // it; the friend's uniform cream matches neither, so both checks together reject it.
+        const auto pencil_brown = colorRange({150, 90, 40}, 55);
+        const auto circle_white = colorRange({255, 255, 255}, 8);
+        const Range<Color> along_pencil = {Color(-45), Color(45)};  // the pencil body is shaded
+        return allOf({
+            lineCheck(
+                {{682.0 / 736.0, 272.0 / 736.0, IS}, {692.0 / 736.0, 262.0 / 736.0, IS}},
+                pencil_brown,
+                {0.7, 1.0},
+                along_pencil),
+            lineCheck(
+                {{674.0 / 736.0, 265.0 / 736.0, IS}, {686.0 / 736.0, 253.0 / 736.0, IS}},
+                circle_white,
+                full_length),
         });
     }
 

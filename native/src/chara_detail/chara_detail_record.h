@@ -18,10 +18,12 @@ enum RecordType {
 EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
 
 // RecordType encodes two independent axes. The content axis (full training record vs
-// inheritance-only) decides which data exists to recognize; the layout axis (own vs a
-// friend's hall of fame, which adds a "register practice partner" button that shifts the
-// tab bar and scroll area down) decides the scrape coordinates. These predicates let
-// downstream code test one axis without enumerating every combination.
+// inheritance-only) decides which data exists to recognize. The owner axis (own vs a friend's
+// hall of fame) decides how the record is labelled. Note these axes are independent of the
+// scrape layout: only a friend's FULL record shows the "register practice partner" button that
+// shifts the tab bar and scroll area down, so the shifted coordinates apply to FriendStandard
+// alone (see the scraper), not to every friend record. These predicates let downstream code
+// test one axis without enumerating every combination.
 [[nodiscard]] inline bool isInheritanceOnly(RecordType type) {
     return type == InheritanceOnly || type == FriendInheritance;
 }

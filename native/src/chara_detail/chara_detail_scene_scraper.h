@@ -732,9 +732,13 @@ public:
             info.record_type,
         };
 
-        // The Friend layout puts a "register practice partner" button above the tab bar,
-        // shifting the tab bar and scroll area down, so it needs its own coordinate set.
-        const auto &common = record::isFriend(info.record_type) ? config.friend_common : config.common;
+        // The "register practice partner" button that shifts the tab bar and scroll area down
+        // appears only on a friend's FULL training record; a friend's inheritance-only record
+        // has no such button and keeps the standard layout. So the shifted coordinate set
+        // applies to that one case (friend and not inheritance-only), not to every friend record.
+        const bool uses_friend_layout =
+            record::isFriend(info.record_type) && !record::isInheritanceOnly(info.record_type);
+        const auto &common = uses_friend_layout ? config.friend_common : config.common;
 
         scraping_box = std::make_shared<scraper_impl::SceneScrapingBox>(
             config.skill_scans,
