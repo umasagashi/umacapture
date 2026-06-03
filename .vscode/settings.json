@@ -48,5 +48,6 @@
       "source.fixAll": "explicit",
       "source.organizeImports": "explicit"
     }
-  }
+  },
+  "cmake.ignoreCMakeListsMissing": true
 }
