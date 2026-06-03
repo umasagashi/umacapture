@@ -87,6 +87,10 @@ public:
 
     void update(const InputType &input) override {
         child->update(input);
+        // Make the current frame's video time available to time-based rules through their state, so they
+        // debounce on video time rather than the wall clock (a no-op for rules that don't track time).
+        // Found by ADL in the state's namespace; relies on the condition input being a frame.
+        setFrameTimestamp(state, input.timestamp());
         met_ = rule.met(child->met(), state);
     }
 

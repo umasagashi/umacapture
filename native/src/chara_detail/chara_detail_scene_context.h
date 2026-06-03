@@ -58,39 +58,37 @@ public:
         met_ = child->met() && tab_page.has_value() && record_type.has_value();
 
         if (met_) {
-            const auto canceled = cancelSceneEndTimer();
-            if (!previous_condition && !canceled) {  // When end is canceled, no need to call begin either.
+            scene_end_pending_since = std::nullopt;  // A reappearance within the timeout keeps the same scene.
+            if (!scene_active) {
                 on_scene_begin->send({record_type.value()});
+                scene_active = true;
             }
-            on_scene_updated->send(input, { tab_page.value()});
-        } else if (previous_condition) {
+            on_scene_updated->send(input, {tab_page.value()});
+        } else if (scene_active) {
+            // Debounce the scene end by video time (frame timestamps), not wall-clock. A wall-clock timer
+            // running on its own thread made scene closing depend on how fast frames were fed during
+            // offline video replay; keying off the frame timestamp keeps this deterministic. Frame
+            // timestamps track real time in live capture, so live behavior is unchanged.
             if (scene_end_timeout == chrono_util::time_unit::zero()) {
-                on_scene_end->send();
-            } else {
-                startSceneEndTimer();
+                endScene();
+            } else if (!scene_end_pending_since) {
+                scene_end_pending_since = input.timestamp();
+            } else if (input.timestamp() - scene_end_pending_since.value() >= sceneEndTimeoutMs()) {
+                endScene();
             }
         }
-
-        previous_condition = met_;
     }
 
     [[nodiscard]] bool met() const override { return met_; }
 
 private:
-    bool cancelSceneEndTimer() {
-        if (scene_end_timer) {
-            scene_end_timer->cancel();
-            const auto expired = scene_end_timer->hasExpired();
-            scene_end_timer = nullptr;
-            return expired.has_value() && !expired.value();
-        }
-        return false;
+    void endScene() {
+        on_scene_end->send();
+        scene_active = false;
+        scene_end_pending_since = std::nullopt;
     }
 
-    void startSceneEndTimer() {
-        cancelSceneEndTimer();
-        scene_end_timer = std::make_unique<thread_util::Timer>(scene_end_timeout, [this]() { on_scene_end->send(); });
-    }
+    [[nodiscard]] uint64 sceneEndTimeoutMs() const { return static_cast<uint64>(scene_end_timeout.count()); }
 
     template<typename T>
     [[nodiscard]] std::optional<T> getActiveIndexAs(const TabCondition *cond) const {
@@ -117,10 +115,10 @@ private:
     const event_util::Sender<Frame, SceneState> on_scene_updated;
     const event_util::Sender<> on_scene_end;
 
-    std::unique_ptr<thread_util::Timer> scene_end_timer;
     const chrono_util::time_unit scene_end_timeout;
 
-    bool previous_condition = false;
+    std::optional<uint64> scene_end_pending_since;
+    bool scene_active = false;
     bool met_ = false;
 };
 

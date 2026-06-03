@@ -9,8 +9,21 @@ namespace uma::state {
 struct Empty {};
 
 struct TimestampState {
-    uint64_t timestamp = 0;
+    uint64_t since = 0;  // Video time when the parent first became continuously true (debounce start).
+    uint64_t now = 0;  // Current frame's video time, written by the owning condition each update.
+    bool started = false;
 };
+
+// Records the current frame's video time into rule state that tracks time; a no-op for rules whose
+// state does not. The owning condition calls this each update so time-based rules (rule::Stable)
+// debounce on video time instead of the wall clock. In live capture the frame timestamp already
+// tracks wall time, so live behavior is unchanged.
+template<typename StateType>
+inline void setFrameTimestamp(StateType &, uint64_t) {}
+
+inline void setFrameTimestamp(TimestampState &state, uint64_t now) {
+    state.now = now;
+}
 
 }  // namespace uma::state
 
@@ -41,14 +54,21 @@ public:
         : threshold(threshold) {}
 
     [[nodiscard]] bool met(const bool &parent, state::TimestampState &state) const override {
+        // Debounce in video time: state.now is the current frame's timestamp, written by the owning
+        // condition each update (see state::setFrameTimestamp). This keeps detection deterministic and
+        // independent of how fast frames are fed during offline video replay; in live capture the frame
+        // timestamp tracks wall time, so behavior is unchanged. A `started` flag rather than a zero
+        // sentinel is used because a video's first frame has timestamp 0.
         if (parent) {
-            if (state.timestamp == 0) {
-                state.timestamp = chrono_util::to_timestamp(chrono_util::local_now());
-            } else if (chrono_util::to_timestamp(chrono_util::local_now()) - state.timestamp > threshold) {
+            if (!state.started) {
+                state.started = true;
+                state.since = state.now;
+            } else if (state.now - state.since > static_cast<uint64_t>(threshold)) {
                 return true;
             }
         } else {
-            state.timestamp = 0;
+            state.started = false;
+            state.since = 0;
         }
         return false;
     }
