@@ -93,9 +93,9 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
 
     const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
 
-    const auto crop_rect =
-        windows_config.window_recorder->crop_profiles.value()[0].crop_rect;  // For horizontal screen.
-    // const std::optional<Rect<double>> crop_rect = {};  // For vertical screen.
+    // const auto crop_rect =
+    //     windows_config.window_recorder->crop_profiles.value()[0].crop_rect;  // For horizontal screen.
+    const std::optional<Rect<double>> crop_rect = {};  // For vertical screen.
 
     recorder_runner->start();
 

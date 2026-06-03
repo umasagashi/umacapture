@@ -635,14 +635,14 @@ public:
     BaseFrameCatcher(
         const StationaryFrameCatcher &base_frame_catcher,
         const Rect<double> &base_image_rect,
-        const Line<double> &snackbar_scan_line,
-        const Range<Color> &snackbar_bg_color_range,
-        const uint64 snackbar_time_threshold)
+        const Line<double> &header_scan_line,
+        const Range<Color> &header_color_range,
+        const uint64 header_visible_time_threshold)
         : base_frame_catcher(base_frame_catcher)
         , base_image_rect(base_image_rect)
-        , snackbar_scan_line(snackbar_scan_line)
-        , snackbar_bg_color_range(snackbar_bg_color_range)
-        , snackbar_time_threshold(snackbar_time_threshold) {}
+        , header_scan_line(header_scan_line)
+        , header_color_range(header_color_range)
+        , header_visible_time_threshold(header_visible_time_threshold) {}
 
     void update(const Frame &frame) {
         if (ready()) {  // Keep the valid image.
@@ -650,31 +650,44 @@ public:
         }
 
         base_frame_catcher.update(frame);
-        log_trace("base image: {}", base_frame_catcher.ready());
 
-        if (isSnackbarVisible(frame)) {
-            last_snackbar_visible = frame.timestamp();
-        } else if (frame.timestamp() - last_snackbar_visible.value_or(0) > snackbar_time_threshold) {
-            last_snackbar_visible = std::nullopt;
+        last_timestamp = frame.timestamp();
+        if (isHeaderVisible(frame)) {
+            if (!header_visible_since) {
+                header_visible_since = frame.timestamp();
+            }
+        } else {
+            header_visible_since = std::nullopt;
         }
     }
 
-    [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && !last_snackbar_visible; }
+    [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && snackbarCleared(); }
 
     [[nodiscard]] inline Frame frame() const { return base_frame_catcher.fullSizeFrame().view(base_image_rect); }
 
 private:
-    [[nodiscard]] bool isSnackbarVisible(const Frame &frame) const {
-        return frame.isIn(snackbar_bg_color_range, snackbar_scan_line);
+    // The snackbar is treated as cleared only once the green title-bar banner has been fully
+    // visible (every point on the scan line green) continuously for the threshold. Scanning the
+    // banner keeps this independent of the character, whose illustration above the banner can be
+    // near-white where the previous top scan mistook it for a snackbar. This only gates the
+    // snackbar; the base frame still requires the header region to be stationary.
+    [[nodiscard]] bool snackbarCleared() const {
+        return header_visible_since.has_value()
+            && (last_timestamp - header_visible_since.value()) > header_visible_time_threshold;
+    }
+
+    [[nodiscard]] bool isHeaderVisible(const Frame &frame) const {
+        return frame.isAllIn(header_color_range, header_scan_line);
     }
 
     const Rect<double> base_image_rect;
-    const Line<double> snackbar_scan_line;
-    const Range<Color> snackbar_bg_color_range;
-    const uint64 snackbar_time_threshold;
+    const Line<double> header_scan_line;
+    const Range<Color> header_color_range;
+    const uint64 header_visible_time_threshold;
 
     StationaryFrameCatcher base_frame_catcher;
-    std::optional<uint64> last_snackbar_visible;
+    std::optional<uint64> header_visible_since;
+    uint64 last_timestamp = 0;
 };
 
 }  // namespace scraper_impl
@@ -722,6 +735,11 @@ public:
             info.record_type,
         };
 
+        // The Friend layout puts a "register practice partner" button above the tab bar,
+        // shifting the tab bar and scroll area down, so it needs its own coordinate set.
+        const auto &common =
+            (info.record_type == record::RecordType::Friend) ? config.friend_common : config.common;
+
         scraping_box = std::make_shared<scraper_impl::SceneScrapingBox>(
             config.skill_scans,
             config.factor_scans,
@@ -730,34 +748,34 @@ public:
             scraping_root_dir / current_record_info.record_id);
 
         skill_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            config.common,
+            common,
             scraping_box->skill_box(),
             on_scroll_ready->bindLeft(TabPage::SkillPage),
             on_scroll_updated->bindLeft(TabPage::SkillPage));
 
         factor_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            config.common,
+            common,
             scraping_box->factor_box(),
             on_scroll_ready->bindLeft(TabPage::FactorPage),
             on_scroll_updated->bindLeft(TabPage::FactorPage));
 
         campaign_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            config.common,
+            common,
             scraping_box->campaign_box(),
             on_scroll_ready->bindLeft(TabPage::CampaignPage),
             on_scroll_updated->bindLeft(TabPage::CampaignPage));
 
         base_frame_catcher = std::make_unique<scraper_impl::BaseFrameCatcher>(
             scraper_impl::StationaryFrameCatcher{
-                config.common.stationary_time_threshold,
-                config.common.minimum_color_threshold,
-                config.common.stationary_color_threshold,
-                config.common.base_image_stationary_rect,
+                common.stationary_time_threshold,
+                common.minimum_color_threshold,
+                common.stationary_color_threshold,
+                common.base_image_stationary_rect,
             },
-            config.common.base_image_rect,
-            config.snackbar_scan_line,
-            config.snackbar_color_range,
-            config.snackbar_time_threshold);
+            common.base_image_rect,
+            config.header_scan_line,
+            config.header_color_range,
+            config.header_visible_time_threshold);
 
         scraping_state = scraper_impl::Updatable;
     }

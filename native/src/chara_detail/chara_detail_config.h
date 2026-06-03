@@ -82,22 +82,24 @@ struct ScanParameter {
 
 struct CharaDetailSceneScraperConfig {
     SceneScraperConfig common;
+    SceneScraperConfig friend_common;
     std::vector<ScanParameter> skill_scans;
     std::vector<ScanParameter> factor_scans;
     std::vector<ScanParameter> campaign_scans;
-    Line<double> snackbar_scan_line;
-    Range<Color> snackbar_color_range;
-    uint64 snackbar_time_threshold;
+    Line<double> header_scan_line;
+    Range<Color> header_color_range;
+    uint64 header_visible_time_threshold;
 
     EXTENDED_JSON_TYPE_NDC(
         CharaDetailSceneScraperConfig,
         common,
+        friend_common,
         skill_scans,
         factor_scans,
         campaign_scans,
-        snackbar_scan_line,
-        snackbar_color_range,
-        snackbar_time_threshold);
+        header_scan_line,
+        header_color_range,
+        header_visible_time_threshold);
 };
 
 }  // namespace scraper_config

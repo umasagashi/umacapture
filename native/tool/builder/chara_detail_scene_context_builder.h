@@ -38,27 +38,33 @@ private:
     }
 
     [[nodiscard]] ConditionBase tabBarButtons() const {
-        const auto selected_color = colorRange({165, 223, 5}, 30);
-        const auto not_selected_color = colorRange({255, 255, 255}, 30);
         return anyOf(
             {
-                allOf({
-                    leftTabButton(selected_color),
-                    middleTabButton(not_selected_color),
-                    rightTabButton(not_selected_color),
-                }),
-                allOf({
-                    leftTabButton(not_selected_color),
-                    middleTabButton(selected_color),
-                    rightTabButton(not_selected_color),
-                }),
-                allOf({
-                    leftTabButton(not_selected_color),
-                    middleTabButton(not_selected_color),
-                    rightTabButton(selected_color),
-                }),
+                tabPageSelected(0),  // SkillPage
+                tabPageSelected(1),  // FactorPage
+                tabPageSelected(2),  // CampaignPage
             },
             "tab_page");
+    }
+
+    // The tab at `selected` (0/1/2 = left/middle/right) is highlighted while the other two
+    // are not, matched in either the Standard or the Friend layout — the bar sits at a
+    // different Y in each because the Friend "register" button pushes it down.
+    [[nodiscard]] ConditionBase tabPageSelected(int selected) const {
+        return anyOf({
+            tabBarAt(standard_tab_bar_y, selected),
+            tabBarAt(friend_tab_bar_y, selected),
+        });
+    }
+
+    [[nodiscard]] ConditionBase tabBarAt(double y, int selected) const {
+        const auto selected_color = colorRange({165, 223, 5}, 30);
+        const auto not_selected_color = colorRange({255, 255, 255}, 30);
+        return allOf({
+            leftTabButton(y, selected == 0 ? selected_color : not_selected_color),
+            middleTabButton(y, selected == 1 ? selected_color : not_selected_color),
+            rightTabButton(y, selected == 2 ? selected_color : not_selected_color),
+        });
     }
 
     [[nodiscard]] ConditionBase tabButton(
@@ -73,25 +79,33 @@ private:
         });
     }
 
-    const double tab_bar_y = 0.7463;
+    // Tab bar Y for the Standard / InheritanceOnly layout.
+    const double standard_tab_bar_y = 0.7463;
+    // Tab bar Y for the Friend layout: the green "練習パートナー登録" button between the
+    // aptitudes and the tab bar pushes the bar down (pinned to friend.png row 682 of the
+    // 736 px wide intersection).
+    const double friend_tab_bar_y = 682.0 / 736.0;
 
-    [[nodiscard]] ConditionBase leftTabButton(const Range<Color> &color_range) const {
-        return tabButton({0.0555, tab_bar_y, IS}, 0.0833, {0.3314, tab_bar_y, IS}, 0.3036, color_range);
+    [[nodiscard]] ConditionBase leftTabButton(double y, const Range<Color> &color_range) const {
+        return tabButton({0.0555, y, IS}, 0.0833, {0.3314, y, IS}, 0.3036, color_range);
     }
 
-    [[nodiscard]] ConditionBase middleTabButton(const Range<Color> &color_range) const {
-        return tabButton({0.3499, tab_bar_y, IS}, 0.3777, {0.6479, tab_bar_y, IS}, 0.6202, color_range);
+    [[nodiscard]] ConditionBase middleTabButton(double y, const Range<Color> &color_range) const {
+        return tabButton({0.3499, y, IS}, 0.3777, {0.6479, y, IS}, 0.6202, color_range);
     }
 
-    [[nodiscard]] ConditionBase rightTabButton(const Range<Color> &color_range) const {
-        return tabButton({0.6664, tab_bar_y, IS}, 0.6942, {0.9460, tab_bar_y, IS}, 0.9182, color_range);
+    [[nodiscard]] ConditionBase rightTabButton(double y, const Range<Color> &color_range) const {
+        return tabButton({0.6664, y, IS}, 0.6942, {0.9460, y, IS}, 0.9182, color_range);
     }
 
     [[nodiscard]] ConditionBase tabBarBorders() const {
         // There are two borders, but one may be hidden by the tap effect, so if the other is visible, consider it good.
+        // Accept either layout (Standard or Friend tab bar Y).
         return anyOf({
-            tabBorder({{0.3129, tab_bar_y, IS}, {0.3684, tab_bar_y, IS}}),
-            tabBorder({{0.6294, tab_bar_y, IS}, {0.6850, tab_bar_y, IS}}),
+            tabBorder({{0.3129, standard_tab_bar_y, IS}, {0.3684, standard_tab_bar_y, IS}}),
+            tabBorder({{0.6294, standard_tab_bar_y, IS}, {0.6850, standard_tab_bar_y, IS}}),
+            tabBorder({{0.3129, friend_tab_bar_y, IS}, {0.3684, friend_tab_bar_y, IS}}),
+            tabBorder({{0.6294, friend_tab_bar_y, IS}, {0.6850, friend_tab_bar_y, IS}}),
         });
     }
 
@@ -103,7 +117,13 @@ private:
         });
     }
 
-    [[nodiscard]] ConditionBase standardRecordType() const { return logicalNot(inheritanceOnlyRecordType()); }
+    [[nodiscard]] ConditionBase standardRecordType() const {
+        // Standard is the fallback: anything that is neither InheritanceOnly nor Friend.
+        // It must exclude Friend too — the active record_type is the first matching
+        // branch's index, so without this a Friend screen (which is not InheritanceOnly)
+        // would match Standard first and be misclassified.
+        return logicalNot(anyOf({inheritanceOnlyRecordType(), friendRecordType()}));
+    }
 
     [[nodiscard]] ConditionBase inheritanceOnlyRecordType() const {
         return anyOf({
@@ -112,7 +132,39 @@ private:
         });
     }
 
-    [[nodiscard]] ConditionBase friendRecordType() const { return alwaysFalse(); }
+    [[nodiscard]] ConditionBase friendRecordType() const {
+        // A Friend record (another trainer's hall-of-fame Uma) shows a green
+        // "練習パートナー登録" (register as practice partner) button between the aptitudes
+        // and the tab bar. That button both identifies the type and pushes the tab bar
+        // down, so detect both: the button itself and the tab bar at the Friend Y.
+        return allOf({
+            friendRegisterButton(),
+            friendTabBar(),
+        });
+    }
+
+    [[nodiscard]] ConditionBase friendTabBar() const {
+        // Any one of the three tabs is highlighted at the Friend tab bar Y.
+        return anyOf({
+            tabBarAt(friend_tab_bar_y, 0),
+            tabBarAt(friend_tab_bar_y, 1),
+            tabBarAt(friend_tab_bar_y, 2),
+        });
+    }
+
+    [[nodiscard]] ConditionBase friendRegisterButton() const {
+        const double y = 620.0 / 736.0;  // button body row in friend.png
+        const auto button_green = colorRange({110, 195, 10}, 50);
+        const auto background = colorRange({250, 250, 250}, 12);
+        return allOf({
+            // Green button fill near the center.
+            lineCheck(lineToX({0.4000, y, IS}, 0.4500), button_green, full_length),
+            // The button is centered and does not reach the edges, so the left margin is
+            // plain card background. (A Standard screen's full-width scroll column header
+            // sits at a similar Y but would be green here — this check rejects it.)
+            lineCheck(lineToX({0.1200, y, IS}, 0.1700), background, full_length),
+        });
+    }
 
     [[nodiscard]] ConditionBase recordTypes() const {
         // The following only determines which type fits, assuming all other conditions are met.

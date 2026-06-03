@@ -258,6 +258,16 @@ public:
         });
     }
 
+    [[nodiscard]] bool isAllIn(const Range<Color> &color_range, const Line<double> &line) const {
+        const Range<BGR> &bgr_range = asBGRRange(color_range);
+        const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
+
+        return stds::all_of(linspace(0., 1., (int) mapped_line.length()), [&](const auto &ratio) {
+            const auto &p = mapped_line.pointAt(ratio).round();
+            return bgr_range.contains(bgrAt(p.x(), p.y()));
+        });
+    }
+
     [[nodiscard]] std::optional<double> lengthIn(const Range<Color> &color_range, const Line<double> &line) const {
         const Range<BGR> &bgr_range = asBGRRange(color_range);
         const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
