@@ -17,6 +17,7 @@
 #include "chara_detail/record_info.h"
 #include "cv/frame.h"
 #include "cv/frame_distributor.h"
+#include "cv/frame_stall_watchdog.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
 
@@ -132,6 +133,7 @@ private:
     event_util::EventRunnerController event_runners;
 
     std::unique_ptr<distributor::FrameDistributor> frame_distributor;
+    std::unique_ptr<distributor::FrameStallWatchdog> frame_stall_watchdog;
     std::unique_ptr<chara_detail::CharaDetailSceneScraper> chara_detail_scene_scraper;
     std::unique_ptr<chara_detail::CharaDetailSceneStitcher> chara_detail_scene_stitcher;
     std::unique_ptr<chara_detail::CharaDetailRecognizer> chara_detail_recognizer;

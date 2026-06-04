@@ -116,6 +116,17 @@ public:
 
     [[nodiscard]] bool met() const override { return met_; }
 
+    // The live frame stream stalled. The frame-timestamp scene-end debounce cannot advance without frames, so
+    // close an already-committed scene here; a scene still in the begin debounce never committed, so just drop
+    // its pending window. Invoked on the distributor runner thread, the same thread as update().
+    void onIdle() override {
+        if (scene_active) {
+            endScene();
+        }
+        scene_begin_pending_since = std::nullopt;
+        scene_begin_pending_type = std::nullopt;
+    }
+
 private:
     // Commit the scene only once the same record_type has stayed met for the begin timeout. The record_type is
     // locked here for the whole scene, so a transient first-match during the opening animation must not win — it
