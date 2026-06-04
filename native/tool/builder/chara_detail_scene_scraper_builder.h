@@ -17,11 +17,16 @@ public:
             // Base frame is captured only while the green title-bar banner is fully visible
             // (no snackbar overlay). Scan a short vertical span of the banner at x=0.8259,
             // y 60->40 px of the 736 px intersection. The banner is character-independent,
-            // unlike the illustration area above it. The color is the banner green as it
-            // appears in the recorded/live video (R133-149 G226-235 B13-18 measured across
-            // player/friend clips) — brighter than the dimmer green seen in still PNGs.
+            // unlike the illustration area above it. The measured banner band spans R129-149
+            // G207-235 B8-18 across live WinRT capture (dimmer/less-saturated, e.g. G207-215)
+            // and recorded clips (G226-235); an earlier range centred on G230 clipped the live
+            // band's lower rows (G207-208 < 210) so the all-green check never passed. This only
+            // has to separate the banner from the whitish save snackbar (R>=231 G>=229 B>=234),
+            // so centre on the band and allow ~30 each side: the tightest margin (G) is then 30,
+            // while the snackbar is still rejected by R (48) and B (177) — the two channels that
+            // actually differ (the snackbar's G overlaps the banner's, so G does not separate).
             lineToY({0.8259, 60.0 / 736.0, {IS, SS}}, 40.0 / 736.0),
-            colorRange({141, 230, 15}, 20),
+            colorRange({139, 221, 13}, 44),
             100,
         };
     }

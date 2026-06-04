@@ -407,14 +407,14 @@
   },
   "header_color_range": {
     "min": {
-      "r": 121,
-      "g": 210,
+      "r": 95,
+      "g": 177,
       "b": 0
     },
     "max": {
-      "r": 161,
-      "g": 250,
-      "b": 35
+      "r": 183,
+      "g": 255,
+      "b": 57
     }
   },
   "header_visible_time_threshold": 100

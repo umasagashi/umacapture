@@ -744,8 +744,15 @@ private:
     // near-white where the previous top scan mistook it for a snackbar. This only gates the
     // snackbar; the base frame still requires the header region to be stationary.
     [[nodiscard]] bool snackbarCleared() const {
-        return header_visible_since.has_value()
-            && (last_timestamp - header_visible_since.value()) > header_visible_time_threshold;
+        if (!header_visible_since.has_value()) {
+            return false;
+        }
+        // Frame timestamps come from system_clock (non-monotonic). Guard the unsigned subtraction so a
+        // backward clock step cannot wrap to a huge value and clear the snackbar instantly; treat
+        // since-ahead-of-now as zero elapsed (not cleared yet) and let the next frame re-evaluate.
+        const uint64 since = header_visible_since.value();
+        const uint64 elapsed = last_timestamp >= since ? last_timestamp - since : 0;
+        return elapsed > header_visible_time_threshold;
     }
 
     [[nodiscard]] bool isHeaderVisible(const Frame &frame) const {
