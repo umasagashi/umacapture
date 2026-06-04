@@ -24,15 +24,16 @@ enum TabPage {
 };
 
 // Stable tag for each tab-page branch, mirroring record::recordTypeTag. The builder names each branch
-// with this tag and the scene context resolves the active tab by tag, not by position. Exhaustive on
-// purpose so a new TabPage forces a tag here.
+// with this tag and the scene context resolves the active tab by tag, not by position. The default-less
+// switch plus /we4062 (see native/CMakeLists.txt) makes a new TabPage that forgets a case here a
+// compile error.
 [[nodiscard]] inline std::string tabPageTag(TabPage page) {
     switch (page) {
         case SkillPage: return "tab_page.SkillPage";
         case FactorPage: return "tab_page.FactorPage";
         case CampaignPage: return "tab_page.CampaignPage";
     }
-    return "";  // unreachable; silences non-void control-flow warnings
+    return "";  // out-of-range fallback; also silences C4715 (not all paths return a value)
 }
 
 inline constexpr std::array<TabPage, 3> kAllTabPages{

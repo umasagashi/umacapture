@@ -27,8 +27,9 @@ EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, F
 
 // Stable tag for each record-type branch in the scene-context condition tree. The builder names each
 // branch with this tag and the scene context resolves the active type by looking the tag up and
-// testing met(), so both sides MUST derive the name from this one function. The switch is exhaustive
-// on purpose: adding a RecordType makes it non-exhaustive and the compiler flags the missing tag.
+// testing met(), so both sides MUST derive the name from this one function. The switch has no default
+// on purpose: /we4062 (see native/CMakeLists.txt) promotes "enumerator not handled" to a compile
+// error, so adding a RecordType that forgets a case here fails the build.
 [[nodiscard]] inline std::string recordTypeTag(RecordType type) {
     switch (type) {
         case Standard: return "record_type.Standard";
@@ -36,7 +37,7 @@ EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, F
         case FriendStandard: return "record_type.FriendStandard";
         case FriendInheritance: return "record_type.FriendInheritance";
     }
-    return "";  // unreachable; silences non-void control-flow warnings
+    return "";  // out-of-range fallback; also silences C4715 (not all paths return a value)
 }
 
 // All record types in enum-value order. The order is the documented tie-breaker when overlapping

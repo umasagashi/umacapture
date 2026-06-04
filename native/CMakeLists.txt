@@ -32,6 +32,9 @@ target_compile_options(
         /wd4068
         /wd4819
         /wd4996
+        /we4062    # Treat "enumerator not handled in switch (no default)" as an error, so a
+                   # default-less switch over an enum must stay exhaustive (e.g. recordTypeTag,
+                   # tabPageTag). Not /we4061, which also fires when a default IS present.
         /bigobj
 )
 
