@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 
@@ -279,7 +280,11 @@ private:
         }
         cv::Mat score;
         cv::matchTemplate(from_overlap, to_overlap, score, cv::TM_CCOEFF_NORMED);
-        return score.at<float>(0, 0);
+        // TM_CCOEFF_NORMED is NaN when either band has zero variance (a near-uniform overlap, e.g. a long blank
+        // scroll gap). NaN must not slip through as a pass: `NaN < minimum_overlap_score` is false, which would
+        // skip the rejection and accept the suspect offset. Treat a non-finite score as no evidence (0.0).
+        const float result = score.at<float>(0, 0);
+        return std::isfinite(result) ? result : 0.0;
     }
 
     const cv::Ptr<cv::Feature2D> detector;
