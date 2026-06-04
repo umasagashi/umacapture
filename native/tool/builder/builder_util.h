@@ -37,8 +37,9 @@ inline Line<double> lineToY(const Point<double> &point, double y) {
     return {point, {point.x(), y, point.anchor()}};
 }
 
-inline ConditionBase allOf(const std::vector<ConditionBase> &children) {
-    return std::make_shared<condition::ParallelCondition<Frame, rule::LogicalAnd>>(rule::LogicalAnd(), children);
+inline ConditionBase
+allOf(const std::vector<ConditionBase> &children, const std::optional<std::string> &name = std::nullopt) {
+    return std::make_shared<condition::ParallelCondition<Frame, rule::LogicalAnd>>(rule::LogicalAnd(), children, name);
 }
 
 inline ConditionBase
@@ -52,6 +53,10 @@ inline ConditionBase stable(int threshold, const ConditionBase &child) {
 
 inline ConditionBase pointColor(const Point<double> &point, const Range<Color> &color_range) {
     return std::make_shared<condition::PlainCondition<Frame, rule::PointColor>>(rule::PointColor(point, color_range));
+}
+
+inline ConditionBase lineColor(const Line<double> &line, const Range<Color> &color_range) {
+    return std::make_shared<condition::PlainCondition<Frame, rule::LineColor>>(rule::LineColor(line, color_range));
 }
 
 inline ConditionBase

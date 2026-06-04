@@ -51,7 +51,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto chara_detail_opened_connection = scraper_runner->makeConnection<chara_detail::SceneInfo>();
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>();
 
-    chara_detail_opened_connection->listen([this](const auto &) { notifyCharaDetailStarted(); });
+    chara_detail_opened_connection->listen([this](const auto &info) { notifyCharaDetailStarted(info.record_type); });
 
     {
         const auto scene_context = std::make_shared<chara_detail::CharaDetailSceneContext>(
@@ -59,6 +59,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             chara_detail_opened_connection,
             chara_detail_updated_connection,
             chara_detail_closed_connection,
+            std::chrono::milliseconds(200),
             std::chrono::milliseconds(1000));
 
         frame_distributor = std::make_unique<distributor::FrameDistributor>(
@@ -67,6 +68,22 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             },
             frame_captured_connection,
             nullptr);
+    }
+
+    // Live capture only: close an open scene when frames stop arriving. The scene-end debounce keys off frame
+    // timestamps and cannot advance once the frame source stalls (window closed/minimized). The watchdog detects
+    // that stall on the wall clock and posts an idle event onto the distributor runner, so the scene context is
+    // closed from the same thread that processes frames. In video mode frames arrive in bursts, so a wall-clock
+    // gap is not a real stall; the watchdog is left null there to keep offline replay deterministic.
+    if (!video_mode) {
+        const auto frame_stalled_connection = distributor_runner->makeConnection<>();
+        frame_stalled_connection->listen([this]() {
+            if (frame_distributor != nullptr) {
+                frame_distributor->onIdle();
+            }
+        });
+        frame_stall_watchdog = std::make_unique<distributor::FrameStallWatchdog>(
+            std::chrono::milliseconds(2000), [frame_stalled_connection]() { frame_stalled_connection->send(); });
     }
 
     const auto stitcher_runner =
@@ -163,12 +180,23 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
 
     event_runners->start();
+
+    // Start after the runners so the stall callback never posts onto a runner that is not yet running.
+    if (frame_stall_watchdog != nullptr) {
+        frame_stall_watchdog->start();
+    }
 }
 
 void NativeApi::joinEventLoop() {
     vlog_debug(isRunning());
     if (!isRunning()) {
         return;
+    }
+
+    // Stop the watchdog before the runners so it cannot post an idle event onto a runner being torn down.
+    if (frame_stall_watchdog != nullptr) {
+        frame_stall_watchdog->join();
+        frame_stall_watchdog = nullptr;
     }
 
     assert_(event_runners != nullptr);
@@ -187,6 +215,9 @@ bool NativeApi::isRunning() const {
 
 void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) {
     on_frame_captured->send(frame);
+    if (frame_stall_watchdog != nullptr) {
+        frame_stall_watchdog->notifyFrame();
+    }
     const auto &now = std::chrono::steady_clock::now();
     if (now - last_size_reported > report_interval) {
         notifyFrameSizeReported(original_size);

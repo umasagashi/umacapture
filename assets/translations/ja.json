@@ -62,6 +62,7 @@
                         }
                     }
                 },
+                "record_type": "認識中の種別：{type}",
                 "progress": {
                     "skill": "スキル",
                     "factor": "因子",
@@ -252,6 +253,9 @@
                         "title": {
                             "label": "表示名"
                         }
+                    },
+                    "marker": {
+                        "friend": "レンタル"
                     }
                 },
                 "skill": {
@@ -621,7 +625,13 @@
                     "title": "勝利数"
                 },
                 "record_type": {
-                    "title": "育成種別"
+                    "title": "育成種別",
+                    "values": {
+                        "standard": "育成",
+                        "inheritance_only": "継承",
+                        "friend_standard": "フレンド育成",
+                        "friend_inheritance": "フレンド継承"
+                    }
                 },
                 "race_strategy": {
                     "title": "作戦"

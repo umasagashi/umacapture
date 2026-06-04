@@ -126,6 +126,133 @@
     "minimum_color_threshold": 18,
     "stationary_color_threshold": 100
   },
+  "friend_common": {
+    "base_image_stationary_rect": {
+      "top_left": {
+        "x": 0.1,
+        "y": 0.0556,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.9,
+        "y": 0.8074,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      }
+    },
+    "base_image_rect": {
+      "top_left": {
+        "x": 0.0,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.0,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectLogicalEnd",
+          "v": "IntersectLogicalEnd"
+        }
+      }
+    },
+    "tab_button_rect": {
+      "top_left": {
+        "x": 0.0222,
+        "y": 0.9062304347826087,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.9759,
+        "y": 0.9840304347826087,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      }
+    },
+    "scroll_area_rect": {
+      "top_left": {
+        "x": 0.0,
+        "y": 0.9896304347826087,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.0,
+        "y": -0.2426,
+        "anchor": {
+          "h": "IntersectPixelEnd",
+          "v": "IntersectLogicalEnd"
+        }
+      }
+    },
+    "scroll_area_stationary_rect": {
+      "top_left": {
+        "x": 0.0222,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": -0.0222,
+        "y": 0.0,
+        "anchor": {
+          "h": "IntersectLogicalEnd",
+          "v": "IntersectPixelEnd"
+        }
+      }
+    },
+    "scroll_bar_bg_color": {
+      "min": {
+        "r": 153,
+        "g": 151,
+        "b": 170
+      },
+      "max": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      }
+    },
+    "scroll_bar_scan_line": {
+      "p1": {
+        "x": 0.9676,
+        "y": 0.0092,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "p2": {
+        "x": 0.9676,
+        "y": -0.0092,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectLogicalEnd"
+        }
+      }
+    },
+    "initial_scroll_threshold": 0.01,
+    "minimum_scroll_threshold": 0.05,
+    "stationary_time_threshold": 200,
+    "minimum_color_threshold": 18,
+    "stationary_color_threshold": 100
+  },
   "skill_scans": [
     {
       "x": 0.0,
@@ -260,10 +387,10 @@
       }
     }
   ],
-  "snackbar_scan_line": {
+  "header_scan_line": {
     "p1": {
       "x": 0.8259,
-      "y": 0.0,
+      "y": 0.08152173913043478,
       "anchor": {
         "h": "IntersectStart",
         "v": "ScreenStart"
@@ -271,24 +398,24 @@
     },
     "p2": {
       "x": 0.8259,
-      "y": 0.05,
+      "y": 0.05434782608695652,
       "anchor": {
         "h": "IntersectStart",
         "v": "ScreenStart"
       }
     }
   },
-  "snackbar_color_range": {
+  "header_color_range": {
     "min": {
-      "r": 231,
-      "g": 229,
-      "b": 234
+      "r": 95,
+      "g": 177,
+      "b": 0
     },
     "max": {
-      "r": 255,
+      "r": 183,
       "g": 255,
-      "b": 255
+      "b": 57
     }
   },
-  "snackbar_time_threshold": 50
+  "header_visible_time_threshold": 100
 }

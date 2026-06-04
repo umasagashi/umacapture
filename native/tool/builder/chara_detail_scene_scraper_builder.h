@@ -10,16 +10,33 @@ public:
     [[nodiscard]] chara_detail::scraper_config::CharaDetailSceneScraperConfig build() const {
         return {
             common(),
+            friendCommon(),
             skillScanParameters(),
             factorScanParameters(),
             campaignScanParameters(),
-            lineToY({0.8259, 0.0000, {IS, SS}}, 0.0500),
-            Range<Color>{Color{241, 239, 244} - 10, {255, 255, 255}},
-            50,
+            // Base frame is captured only while the green title-bar banner is fully visible
+            // (no snackbar overlay). Scan a short vertical span of the banner at x=0.8259,
+            // y 60->40 px of the 736 px intersection. The banner is character-independent,
+            // unlike the illustration area above it. The measured banner band spans R129-149
+            // G207-235 B8-18 across live WinRT capture (dimmer/less-saturated, e.g. G207-215)
+            // and recorded clips (G226-235); an earlier range centred on G230 clipped the live
+            // band's lower rows (G207-208 < 210) so the all-green check never passed. This only
+            // has to separate the banner from the whitish save snackbar (R>=231 G>=229 B>=234),
+            // so centre on the band and allow ~30 each side: the tightest margin (G) is then 30,
+            // while the snackbar is still rejected by R (48) and B (177) — the two channels that
+            // actually differ (the snackbar's G overlaps the banner's, so G does not separate).
+            lineToY({0.8259, 60.0 / 736.0, {IS, SS}}, 40.0 / 736.0),
+            colorRange({139, 221, 13}, 44),
+            100,
         };
     }
 
 private:
+    // Vertical drop of the tab bar / scroll area in the Friend layout, where a green
+    // "練習パートナー登録" button sits above the tab bar. Pinned from the Friend tab bar at
+    // row 682 of the 736 px wide intersection vs. the Standard tab bar at 0.7463.
+    static constexpr double friend_layout_shift = 682.0 / 736.0 - 0.7463;
+
     [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig common() const {
         return {
             Rect<double>{{0.1, 0.0556, IS}, {0.9, 0.8074, IS}},
@@ -35,6 +52,18 @@ private:
             18,
             100,
         };
+    }
+
+    // The Friend layout differs from Standard only by shifting the tab bar and the scroll
+    // area down. The scroll-bar scan line, scroll-area stationary rect and scan parameters
+    // are all relative to the cropped scroll area, so only the two absolute, top-anchored
+    // rects move; the scroll area bottom stays anchored to the screen bottom (ILE).
+    [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig friendCommon() const {
+        auto config = common();
+        const double shift = friend_layout_shift;
+        config.tab_button_rect = {{0.0222, 0.7259 + shift, IS}, {0.9759, 0.8037 + shift, IS}};
+        config.scroll_area_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
+        return config;
     }
 
     [[nodiscard]] Range<Color> scrollAreaBgColor() const { return colorRange({242, 243, 242}, 10); }

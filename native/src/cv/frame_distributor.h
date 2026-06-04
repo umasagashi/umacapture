@@ -21,6 +21,14 @@ public:
         this->frame_supplier->listen([this](const auto &image) { this->update(image); });
     }
 
+    // Forward a frame-stall signal to every scene context. Must be invoked on the same runner thread as
+    // update() (e.g. via a queued connection) so the contexts' state is touched from a single thread.
+    void onIdle() {
+        for (auto &context : scene_contexts) {
+            context->onIdle();
+        }
+    }
+
 private:
     void update(const Frame &image) {
         bool has_active = false;

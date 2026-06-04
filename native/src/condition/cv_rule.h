@@ -51,6 +51,24 @@ private:
     const Range<Color> color_range;
 };
 
+class LineColor : public Rule<Frame, state::Empty> {
+public:
+    LineColor(const Line<double> &line, const Range<Color> &color_range) noexcept
+        : line(line)
+        , color_range(color_range) {}
+
+    // True if any pixel along the line falls in the (absolute) color range, i.e. the color is
+    // present somewhere on the line. Unlike LineLength this is position-agnostic: it scans for a
+    // color rather than measuring a contiguous run from p1.
+    [[nodiscard]] bool met(const Frame &frame, state::Empty &) const override { return frame.isIn(color_range, line); }
+
+    EXTENDED_JSON_TYPE_NDC(LineColor, line, color_range);
+
+private:
+    const Line<double> line;
+    const Range<Color> color_range;
+};
+
 class LineLength : public Rule<Frame, state::Empty> {
 public:
     LineLength(const LineMeasurer &line_measurer, const Range<double> &length_range) noexcept

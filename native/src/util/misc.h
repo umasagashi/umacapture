@@ -24,6 +24,18 @@ auto ms(std::chrono::duration<T, S> duration) {
     return std::chrono::duration_cast<std::chrono::milliseconds>(duration).count();
 }
 
+// Elapsed time between two frame timestamps, safe against a non-monotonic clock. Live-capture frame
+// timestamps come from system_clock (see local_now), which can step backward (NTP correction, manual
+// change). A plain `now - since` is an unsigned subtraction that would wrap to a huge value on a backward
+// step and instantly trip any timeout. When `since` is ahead of `now`, restart the window at `now` (by
+// reference) and report zero elapsed, so the debounce simply starts over instead of firing prematurely.
+inline uint64_t monotonicElapsed(uint64_t now, uint64_t &since) {
+    if (now < since) {
+        since = now;
+    }
+    return now - since;
+}
+
 inline std::string to_datetime_string(std::chrono::system_clock::time_point tp) {
     const time_t unix_ts = std::chrono::system_clock::to_time_t(tp);
     std::tm datetime{};

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,12 +10,59 @@
 
 namespace uma::chara_detail::record {
 
+// The integer VALUE of each entry is a cross-layer contract — do not reorder or renumber it:
+//   - the wire event sends static_cast<int>(record_type), and Dart reads it as RecordType.values[int];
+//   - the Dart enum, its column labels, and saved column specs all map by this index;
+//   - record.json stores the NAME (see EXTENDED_JSON_TYPE_ENUM below), which is order-independent.
+// The scene context resolves which type is active by branch NAME, not position (see recordTypeTag and
+// CharaDetailSceneContext), so reordering the condition branches cannot silently change the mapping;
+// only this enum's value order is load-bearing, and it is pinned by the contract above.
 enum RecordType {
     Standard = 0,
     InheritanceOnly = 1,
-    Friend = 2,
+    FriendStandard = 2,
+    FriendInheritance = 3,
 };
-EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, Friend)
+EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
+
+// Stable tag for each record-type branch in the scene-context condition tree. The builder names each
+// branch with this tag and the scene context resolves the active type by looking the tag up and
+// testing met(), so both sides MUST derive the name from this one function. The switch has no default
+// on purpose: /we4062 (see native/CMakeLists.txt) promotes "enumerator not handled" to a compile
+// error, so adding a RecordType that forgets a case here fails the build.
+[[nodiscard]] inline std::string recordTypeTag(RecordType type) {
+    switch (type) {
+        case Standard: return "record_type.Standard";
+        case InheritanceOnly: return "record_type.InheritanceOnly";
+        case FriendStandard: return "record_type.FriendStandard";
+        case FriendInheritance: return "record_type.FriendInheritance";
+    }
+    return "";  // out-of-range fallback; also silences C4715 (not all paths return a value)
+}
+
+// All record types in enum-value order. The order is the documented tie-breaker when overlapping
+// branches could both match (see CharaDetailSceneContext::firstMet).
+inline constexpr std::array<RecordType, 4> kAllRecordTypes{
+    Standard,
+    InheritanceOnly,
+    FriendStandard,
+    FriendInheritance,
+};
+
+// RecordType encodes two independent axes. The content axis (full training record vs
+// inheritance-only) decides which data exists to recognize. The owner axis (own vs a friend's
+// hall of fame) decides how the record is labelled. Note these axes are independent of the
+// scrape layout: only a friend's FULL record shows the "register practice partner" button that
+// shifts the tab bar and scroll area down, so the shifted coordinates apply to FriendStandard
+// alone (see the scraper), not to every friend record. These predicates let downstream code
+// test one axis without enumerating every combination.
+[[nodiscard]] inline bool isInheritanceOnly(RecordType type) {
+    return type == InheritanceOnly || type == FriendInheritance;
+}
+
+[[nodiscard]] inline bool isFriend(RecordType type) {
+    return type == FriendStandard || type == FriendInheritance;
+}
 
 struct Character {
     int icon;

@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
 import '/src/app/route.dart';
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/spec/loader.dart' show tr_columns;
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
@@ -175,6 +177,33 @@ class _ScrollStateWidget extends ConsumerWidget {
 }
 
 class _CharaDetailStateWidget extends ConsumerWidget {
+  String _recordTypeName(RecordType type) {
+    return "$tr_columns.record_type.values.${type.translationKey}".tr();
+  }
+
+  Widget _buildRecordType(BuildContext context, RecordType recordType) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          decoration: BoxDecoration(
+            color: theme.colorScheme.secondaryContainer,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+          child: Text(
+            "$tr_capture.capture_control.record_type".tr(namedArgs: {"type": _recordTypeName(recordType)}),
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.onSecondaryContainer,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget? _buildProgress(WidgetRef ref) {
     final state = ref.watch(charaDetailCaptureStateProvider);
     return Row(
@@ -280,6 +309,12 @@ class _CharaDetailStateWidget extends ConsumerWidget {
         AnimatedSwitcher(
           duration: animationDuration,
           child: (state.isCapturing || state.error != null) ? _buildProgress(ref) : Container(),
+        ),
+        AnimatedSwitcher(
+          duration: animationDuration,
+          child: (state.recordType != null && state.error == null)
+              ? _buildRecordType(context, state.recordType!)
+              : Container(),
         ),
         AnimatedSwitcher(
           duration: animationDuration,

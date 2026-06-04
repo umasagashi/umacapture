@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 
@@ -124,8 +125,26 @@ class ImageOffsetEstimator {
 public:
     struct ImageOffsetEstimatorConfig {
         double trust_ratio = 0.5;
+        // Scroll is purely vertical, so a tiny horizontal translation is accepted as matching noise. A larger one is
+        // verified by overlaying the frames (see estimate()) rather than trusted on the feature match alone.
         double horizontal_threshold = 1.5;
-        double vertical_threshold = 50.;
+        // Half-width of the keypoint-acceptance window centred on the scroll-bar guess, as a fraction of the frame
+        // width (the project's length unit) so it is resolution-independent. The guess error scales with the frame's
+        // pixel size, so an absolute-pixel window would clip genuine matches on higher-resolution screens. Measured on
+        // 736px-wide footage the worst genuine keypoint sits 0.0586*width from the guess and the tightest periodic-row
+        // pitch is 0.0815*width, so 0.068 stays clear of both (it equals the previous 50px on that width).
+        double vertical_threshold = 0.068;
+        // When the horizontal translation exceeds horizontal_threshold, the vertical offset is confirmed by overlapping
+        // the two frames and requiring at least this normalized cross-correlation. Measured genuine scrolls score
+        // >=0.95 and wrong alignments <=0.56, so 0.8 separates them with margin.
+        double minimum_overlap_score = 0.8;
+        // The overlap must be at least this tall (as a fraction of the frame width, the project's length unit) for the
+        // correlation to be meaningful. A thinner band -- only possible when the scroll is nearly a full frame -- is
+        // too little evidence to trust a large stitch on, and a near-uniform sliver could even correlate spuriously.
+        double minimum_overlap_height = 0.05;
+        // Downscale factor applied before the overlap correlation. The renderer is not pixel-exact (sub-pixel shifts),
+        // so averaging neighbours makes the score robust to that noise (and cheaper).
+        int overlap_downscale = 4;
         int minimum_key_points = 10;
         int descriptor_channels = 3;
         float descriptor_threshold = 0.001f;
@@ -139,6 +158,9 @@ public:
     explicit ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
         : trust_ratio(config.trust_ratio)
         , horizontal_threshold(config.horizontal_threshold)
+        , minimum_overlap_score(config.minimum_overlap_score)
+        , minimum_overlap_height(config.minimum_overlap_height)
+        , overlap_downscale(config.overlap_downscale)
         , minimum_key_points(config.minimum_key_points)
         , vertical_threshold(config.vertical_threshold)
         , detector(
@@ -164,7 +186,9 @@ public:
         std::vector<std::vector<cv::DMatch>> matches;
         matcher->knnMatch(from.descriptors, to.descriptors, matches, 2);
 
-        const Range<double> valid_range = {guess - vertical_threshold, guess + vertical_threshold};
+        // vertical_threshold is a fraction of the frame width; scale it to pixels to match the keypoint coordinates.
+        const double vertical_margin = vertical_threshold * from.frame.width();
+        const Range<double> valid_range = {guess - vertical_margin, guess + vertical_margin};
         std::vector<cv::Point2f> valid_key_points_of_from;
         std::vector<cv::Point2f> valid_key_points_of_to;
         for (const auto &knn_match : matches) {
@@ -195,11 +219,22 @@ public:
         std::vector<double> matrix((double *) result.datastart, (double *) result.dataend);
         const Point<double> offset = {matrix[2], matrix[5]};
 
-        // The result should only be a vertical translation. If not, something went wrong.
+        // The result should only be a translation; a non-identity scale/rotation/shear means the match is wrong.
         matrix[2] = 0.0;
         matrix[5] = 0.0;
         const std::vector<double> eye{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-        if (!closeEnough(matrix, eye, 0.1) || std::abs(offset.x()) > horizontal_threshold) {
+        if (!closeEnough(matrix, eye, 0.1)) {
+            return std::nullopt;
+        }
+
+        // The scroll is vertical, so the horizontal translation should be ~0. A tiny value is sub-pixel matching noise
+        // and is accepted directly. A larger one (e.g. a fast scroll that leaves little frame overlap) is verified
+        // against pixel evidence instead of trusting the feature match, which can be self-consistent yet wrong:
+        // overlay the two frames using only the vertical offset and require a high overlap correlation. Rejecting these
+        // frames outright would freeze the reference descriptor and stall the page (the scroll-bar guess then grows
+        // unbounded), so this confirms the result the estimator actually returns before keeping it.
+        if (std::abs(offset.x()) > horizontal_threshold
+            && overlapScore(from.frame.data(), to.frame.data(), std::lround(offset.y())) < minimum_overlap_score) {
             return std::nullopt;
         }
 
@@ -215,10 +250,50 @@ private:
             descriptor.frame.data(), cv::noArray(), descriptor.key_points, descriptor.descriptors);
     }
 
+    // Overlays the two frames shifted by the vertical offset and returns the normalized cross-correlation of their
+    // shared region. A point at row y in `to` lands at row y + offset_pixels in `from`, so those row ranges hold the
+    // overlapping content. Returns 0 when the overlap is too thin to verify (a non-positive scroll, or a band shorter
+    // than minimum_overlap_height of the frame width), which the caller treats as a failed match.
+    [[nodiscard]] double overlapScore(const cv::Mat &from_frame, const cv::Mat &to_frame, long offset_pixels) const {
+        const int height = from_frame.rows;
+        const long overlap_height = height - offset_pixels;
+        if (offset_pixels <= 0 || overlap_height < minimum_overlap_height * from_frame.cols) {
+            return 0.0;
+        }
+        const auto gray = [](const cv::Mat &frame) {
+            if (frame.channels() == 1) {
+                return frame;
+            }
+            cv::Mat result;
+            cv::cvtColor(frame, result, cv::COLOR_BGR2GRAY);
+            return result;
+        };
+        cv::Mat from_overlap = gray(from_frame).rowRange(static_cast<int>(offset_pixels), height);
+        cv::Mat to_overlap = gray(to_frame).rowRange(0, height - static_cast<int>(offset_pixels));
+        if (overlap_downscale > 1) {
+            const cv::Size size = {
+                std::max(1, from_overlap.cols / overlap_downscale),
+                std::max(1, from_overlap.rows / overlap_downscale),
+            };
+            cv::resize(from_overlap, from_overlap, size, 0, 0, cv::INTER_AREA);
+            cv::resize(to_overlap, to_overlap, size, 0, 0, cv::INTER_AREA);
+        }
+        cv::Mat score;
+        cv::matchTemplate(from_overlap, to_overlap, score, cv::TM_CCOEFF_NORMED);
+        // TM_CCOEFF_NORMED is NaN when either band has zero variance (a near-uniform overlap, e.g. a long blank
+        // scroll gap). NaN must not slip through as a pass: `NaN < minimum_overlap_score` is false, which would
+        // skip the rejection and accept the suspect offset. Treat a non-finite score as no evidence (0.0).
+        const float result = score.at<float>(0, 0);
+        return std::isfinite(result) ? result : 0.0;
+    }
+
     const cv::Ptr<cv::Feature2D> detector;
     const cv::Ptr<cv::FlannBasedMatcher> matcher;
     const double trust_ratio;
     const double horizontal_threshold;
+    const double minimum_overlap_score;
+    const double minimum_overlap_height;
+    const int overlap_downscale;
     const int minimum_key_points;
     const double vertical_threshold;
 };
@@ -350,14 +425,11 @@ public:
     }
 
     [[nodiscard]] bool ready() const {
-        switch (record_type) {
-            case record::RecordType::InheritanceOnly: {
-                return base_ready && factor_box_->ready() && campaign_box_->ready();
-            }
-            default: {
-                return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
-            }
+        // Inheritance-only records (own or a friend's) have no skill page to scrape.
+        if (record::isInheritanceOnly(record_type)) {
+            return base_ready && factor_box_->ready() && campaign_box_->ready();
         }
+        return base_ready && skill_box_->ready() && factor_box_->ready() && campaign_box_->ready();
     }
 
 private:
@@ -635,14 +707,14 @@ public:
     BaseFrameCatcher(
         const StationaryFrameCatcher &base_frame_catcher,
         const Rect<double> &base_image_rect,
-        const Line<double> &snackbar_scan_line,
-        const Range<Color> &snackbar_bg_color_range,
-        const uint64 snackbar_time_threshold)
+        const Line<double> &header_scan_line,
+        const Range<Color> &header_color_range,
+        const uint64 header_visible_time_threshold)
         : base_frame_catcher(base_frame_catcher)
         , base_image_rect(base_image_rect)
-        , snackbar_scan_line(snackbar_scan_line)
-        , snackbar_bg_color_range(snackbar_bg_color_range)
-        , snackbar_time_threshold(snackbar_time_threshold) {}
+        , header_scan_line(header_scan_line)
+        , header_color_range(header_color_range)
+        , header_visible_time_threshold(header_visible_time_threshold) {}
 
     void update(const Frame &frame) {
         if (ready()) {  // Keep the valid image.
@@ -650,31 +722,51 @@ public:
         }
 
         base_frame_catcher.update(frame);
-        log_trace("base image: {}", base_frame_catcher.ready());
 
-        if (isSnackbarVisible(frame)) {
-            last_snackbar_visible = frame.timestamp();
-        } else if (frame.timestamp() - last_snackbar_visible.value_or(0) > snackbar_time_threshold) {
-            last_snackbar_visible = std::nullopt;
+        last_timestamp = frame.timestamp();
+        if (isHeaderVisible(frame)) {
+            if (!header_visible_since) {
+                header_visible_since = frame.timestamp();
+            }
+        } else {
+            header_visible_since = std::nullopt;
         }
     }
 
-    [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && !last_snackbar_visible; }
+    [[nodiscard]] bool ready() const { return base_frame_catcher.ready() && snackbarCleared(); }
 
     [[nodiscard]] inline Frame frame() const { return base_frame_catcher.fullSizeFrame().view(base_image_rect); }
 
 private:
-    [[nodiscard]] bool isSnackbarVisible(const Frame &frame) const {
-        return frame.isIn(snackbar_bg_color_range, snackbar_scan_line);
+    // The snackbar is treated as cleared only once the green title-bar banner has been fully
+    // visible (every point on the scan line green) continuously for the threshold. Scanning the
+    // banner keeps this independent of the character, whose illustration above the banner can be
+    // near-white where the previous top scan mistook it for a snackbar. This only gates the
+    // snackbar; the base frame still requires the header region to be stationary.
+    [[nodiscard]] bool snackbarCleared() const {
+        if (!header_visible_since.has_value()) {
+            return false;
+        }
+        // Frame timestamps come from system_clock (non-monotonic). Guard the unsigned subtraction so a
+        // backward clock step cannot wrap to a huge value and clear the snackbar instantly; treat
+        // since-ahead-of-now as zero elapsed (not cleared yet) and let the next frame re-evaluate.
+        const uint64 since = header_visible_since.value();
+        const uint64 elapsed = last_timestamp >= since ? last_timestamp - since : 0;
+        return elapsed > header_visible_time_threshold;
+    }
+
+    [[nodiscard]] bool isHeaderVisible(const Frame &frame) const {
+        return frame.isAllIn(header_color_range, header_scan_line);
     }
 
     const Rect<double> base_image_rect;
-    const Line<double> snackbar_scan_line;
-    const Range<Color> snackbar_bg_color_range;
-    const uint64 snackbar_time_threshold;
+    const Line<double> header_scan_line;
+    const Range<Color> header_color_range;
+    const uint64 header_visible_time_threshold;
 
     StationaryFrameCatcher base_frame_catcher;
-    std::optional<uint64> last_snackbar_visible;
+    std::optional<uint64> header_visible_since;
+    uint64 last_timestamp = 0;
 };
 
 }  // namespace scraper_impl
@@ -722,6 +814,14 @@ public:
             info.record_type,
         };
 
+        // The "register practice partner" button that shifts the tab bar and scroll area down
+        // appears only on a friend's FULL training record; a friend's inheritance-only record
+        // has no such button and keeps the standard layout. So the shifted coordinate set
+        // applies to that one case (friend and not inheritance-only), not to every friend record.
+        const bool uses_friend_layout =
+            record::isFriend(info.record_type) && !record::isInheritanceOnly(info.record_type);
+        const auto &common = uses_friend_layout ? config.friend_common : config.common;
+
         scraping_box = std::make_shared<scraper_impl::SceneScrapingBox>(
             config.skill_scans,
             config.factor_scans,
@@ -730,34 +830,34 @@ public:
             scraping_root_dir / current_record_info.record_id);
 
         skill_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            config.common,
+            common,
             scraping_box->skill_box(),
             on_scroll_ready->bindLeft(TabPage::SkillPage),
             on_scroll_updated->bindLeft(TabPage::SkillPage));
 
         factor_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            config.common,
+            common,
             scraping_box->factor_box(),
             on_scroll_ready->bindLeft(TabPage::FactorPage),
             on_scroll_updated->bindLeft(TabPage::FactorPage));
 
         campaign_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            config.common,
+            common,
             scraping_box->campaign_box(),
             on_scroll_ready->bindLeft(TabPage::CampaignPage),
             on_scroll_updated->bindLeft(TabPage::CampaignPage));
 
         base_frame_catcher = std::make_unique<scraper_impl::BaseFrameCatcher>(
             scraper_impl::StationaryFrameCatcher{
-                config.common.stationary_time_threshold,
-                config.common.minimum_color_threshold,
-                config.common.stationary_color_threshold,
-                config.common.base_image_stationary_rect,
+                common.stationary_time_threshold,
+                common.minimum_color_threshold,
+                common.stationary_color_threshold,
+                common.base_image_stationary_rect,
             },
-            config.common.base_image_rect,
-            config.snackbar_scan_line,
-            config.snackbar_color_range,
-            config.snackbar_time_threshold);
+            common.base_image_rect,
+            config.header_scan_line,
+            config.header_color_range,
+            config.header_visible_time_threshold);
 
         scraping_state = scraper_impl::Updatable;
     }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_channel.dart';
@@ -90,6 +91,8 @@ class CharaDetailCaptureState {
 
   double campaignTabProgress;
 
+  RecordType? recordType;
+
   CharaDetailLink? link;
   String? error;
 
@@ -98,6 +101,7 @@ class CharaDetailCaptureState {
     this.skillTabProgress = 0,
     this.factorTabProgress = 0,
     this.campaignTabProgress = 0,
+    this.recordType,
     this.link,
     this.error,
   });
@@ -108,6 +112,7 @@ class CharaDetailCaptureState {
       skillTabProgress: skillTabProgress,
       factorTabProgress: factorTabProgress,
       campaignTabProgress: campaignTabProgress,
+      recordType: recordType,
       link: link,
       error: error,
     );
@@ -115,6 +120,12 @@ class CharaDetailCaptureState {
 
   CharaDetailCaptureState reset() {
     return CharaDetailCaptureState();
+  }
+
+  CharaDetailCaptureState started(RecordType recordType) {
+    final state = reset();
+    state.recordType = recordType;
+    return state;
   }
 
   CharaDetailCaptureState progress(int index, double progress) {
@@ -152,6 +163,8 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   CharaDetailCaptureState build() => CharaDetailCaptureState();
 
   void reset() => state = state.reset();
+
+  void started(RecordType recordType) => state = state.started(recordType);
 
   void progress(int index, double progress) => state = state.progress(index, progress);
 
@@ -290,7 +303,7 @@ class PlatformController {
         captureState.progress(data['index'], 1);
         break;
       case 'onCharaDetailStarted':
-        captureState.reset();
+        captureState.started(RecordType.values[data['record_type'] as int]);
         break;
       case 'onCharaDetailFinished':
         if (data['success']) {

@@ -258,6 +258,20 @@ public:
         });
     }
 
+    [[nodiscard]] bool isAllIn(const Range<Color> &color_range, const Line<double> &line) const {
+        const Range<BGR> &bgr_range = asBGRRange(color_range);
+        const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
+
+        // Sample at least the two endpoints. linspace asserts num >= 2 (and writes out of bounds at num == 0, a
+        // no-op assert in release), and an all_of over an empty/single-point range would report "all in" without
+        // actually scanning the line. Clamping keeps a short or steeply-foreshortened line from passing vacuously.
+        const int samples = std::max(2, (int) mapped_line.length());
+        return stds::all_of(linspace(0., 1., samples), [&](const auto &ratio) {
+            const auto &p = mapped_line.pointAt(ratio).round();
+            return bgr_range.contains(bgrAt(p.x(), p.y()));
+        });
+    }
+
     [[nodiscard]] std::optional<double> lengthIn(const Range<Color> &color_range, const Line<double> &line) const {
         const Range<BGR> &bgr_range = asBGRRange(color_range);
         const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
