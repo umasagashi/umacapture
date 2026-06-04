@@ -59,6 +59,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             chara_detail_opened_connection,
             chara_detail_updated_connection,
             chara_detail_closed_connection,
+            std::chrono::milliseconds(200),
             std::chrono::milliseconds(1000));
 
         frame_distributor = std::make_unique<distributor::FrameDistributor>(

@@ -35,6 +35,7 @@ public:
         const event_util::Sender<SceneInfo> &on_scene_begin,
         const event_util::Sender<Frame, SceneState> &on_scene_updated,
         const event_util::Sender<> &on_scene_end,
+        const chrono_util::time_unit &scene_begin_timeout,
         const chrono_util::time_unit &scene_end_timeout)
         : child(child)
         , tab_page_condition(dynamic_cast<const TabCondition *>(child->findByTag("tab_page")))
@@ -42,6 +43,7 @@ public:
         , on_scene_begin(on_scene_begin)
         , on_scene_updated(on_scene_updated)
         , on_scene_end(on_scene_end)
+        , scene_begin_timeout(scene_begin_timeout)
         , scene_end_timeout(scene_end_timeout) {
         if (tab_page_condition == nullptr) {
             throw std::runtime_error("tab_page condition not found");
@@ -60,21 +62,30 @@ public:
         if (met_) {
             scene_end_pending_since = std::nullopt;  // A reappearance within the timeout keeps the same scene.
             if (!scene_active) {
-                on_scene_begin->send({record_type.value()});
-                scene_active = true;
+                beginSceneWhenStable(input, record_type.value());
             }
-            on_scene_updated->send(input, {tab_page.value()});
-        } else if (scene_active) {
-            // Debounce the scene end by video time (frame timestamps), not wall-clock. A wall-clock timer
-            // running on its own thread made scene closing depend on how fast frames were fed during
-            // offline video replay; keying off the frame timestamp keeps this deterministic. Frame
-            // timestamps track real time in live capture, so live behavior is unchanged.
-            if (scene_end_timeout == chrono_util::time_unit::zero()) {
-                endScene();
-            } else if (!scene_end_pending_since) {
-                scene_end_pending_since = input.timestamp();
-            } else if (input.timestamp() - scene_end_pending_since.value() >= sceneEndTimeoutMs()) {
-                endScene();
+            // Scrape only after the scene has actually begun. Holding back until the begin debounce commits
+            // also makes the scraper's reference frame a settled, post-animation still instead of one captured
+            // mid-animation.
+            if (scene_active) {
+                on_scene_updated->send(input, {tab_page.value()});
+            }
+        } else {
+            // Any drop before commit resets the begin window; the same record_type must persist uninterrupted.
+            scene_begin_pending_since = std::nullopt;
+            scene_begin_pending_type = std::nullopt;
+            if (scene_active) {
+                // Debounce the scene end by video time (frame timestamps), not wall-clock. A wall-clock timer
+                // running on its own thread made scene closing depend on how fast frames were fed during
+                // offline video replay; keying off the frame timestamp keeps this deterministic. Frame
+                // timestamps track real time in live capture, so live behavior is unchanged.
+                if (scene_end_timeout == chrono_util::time_unit::zero()) {
+                    endScene();
+                } else if (!scene_end_pending_since) {
+                    scene_end_pending_since = input.timestamp();
+                } else if (input.timestamp() - scene_end_pending_since.value() >= sceneEndTimeoutMs()) {
+                    endScene();
+                }
             }
         }
     }
@@ -82,11 +93,35 @@ public:
     [[nodiscard]] bool met() const override { return met_; }
 
 private:
+    // Commit the scene only once the same record_type has stayed met for the begin timeout. The record_type is
+    // locked here for the whole scene, so a transient first-match during the opening animation must not win — it
+    // has to persist. Keyed off frame timestamps for replay-deterministic timing, mirroring the scene-end
+    // debounce. A zero timeout commits on the first met frame (legacy behavior).
+    void beginSceneWhenStable(const Frame &input, record::RecordType record_type) {
+        if (scene_begin_timeout == chrono_util::time_unit::zero()) {
+            beginScene(record_type);
+        } else if (!scene_begin_pending_since || scene_begin_pending_type != record_type) {
+            scene_begin_pending_since = input.timestamp();
+            scene_begin_pending_type = record_type;
+        } else if (input.timestamp() - scene_begin_pending_since.value() >= sceneBeginTimeoutMs()) {
+            beginScene(record_type);
+        }
+    }
+
+    void beginScene(record::RecordType record_type) {
+        on_scene_begin->send({record_type});
+        scene_active = true;
+        scene_begin_pending_since = std::nullopt;
+        scene_begin_pending_type = std::nullopt;
+    }
+
     void endScene() {
         on_scene_end->send();
         scene_active = false;
         scene_end_pending_since = std::nullopt;
     }
+
+    [[nodiscard]] uint64 sceneBeginTimeoutMs() const { return static_cast<uint64>(scene_begin_timeout.count()); }
 
     [[nodiscard]] uint64 sceneEndTimeoutMs() const { return static_cast<uint64>(scene_end_timeout.count()); }
 
@@ -115,8 +150,11 @@ private:
     const event_util::Sender<Frame, SceneState> on_scene_updated;
     const event_util::Sender<> on_scene_end;
 
+    const chrono_util::time_unit scene_begin_timeout;
     const chrono_util::time_unit scene_end_timeout;
 
+    std::optional<uint64> scene_begin_pending_since;
+    std::optional<record::RecordType> scene_begin_pending_type;
     std::optional<uint64> scene_end_pending_since;
     bool scene_active = false;
     bool met_ = false;
