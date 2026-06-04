@@ -236,6 +236,7 @@
       "rule": null,
       "children": [
         {
+          "name": "tab_page.SkillPage",
           "type": "ParallelCondition<Frame,LogicalOr,Empty>",
           "rule": null,
           "children": [
@@ -1154,6 +1155,7 @@
           ]
         },
         {
+          "name": "tab_page.FactorPage",
           "type": "ParallelCondition<Frame,LogicalOr,Empty>",
           "rule": null,
           "children": [
@@ -2072,6 +2074,7 @@
           ]
         },
         {
+          "name": "tab_page.CampaignPage",
           "type": "ParallelCondition<Frame,LogicalOr,Empty>",
           "rule": null,
           "children": [
@@ -3355,6 +3358,7 @@
       "rule": null,
       "children": [
         {
+          "name": "record_type.Standard",
           "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
@@ -5049,6 +5053,7 @@
           ]
         },
         {
+          "name": "record_type.InheritanceOnly",
           "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
@@ -6889,6 +6894,7 @@
           ]
         },
         {
+          "name": "record_type.FriendStandard",
           "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [
@@ -8579,6 +8585,7 @@
           ]
         },
         {
+          "name": "record_type.FriendInheritance",
           "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
           "rule": null,
           "children": [

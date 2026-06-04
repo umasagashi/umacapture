@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -9,6 +10,13 @@
 
 namespace uma::chara_detail::record {
 
+// The integer VALUE of each entry is a cross-layer contract — do not reorder or renumber it:
+//   - the wire event sends static_cast<int>(record_type), and Dart reads it as RecordType.values[int];
+//   - the Dart enum, its column labels, and saved column specs all map by this index;
+//   - record.json stores the NAME (see EXTENDED_JSON_TYPE_ENUM below), which is order-independent.
+// The scene context resolves which type is active by branch NAME, not position (see recordTypeTag and
+// CharaDetailSceneContext), so reordering the condition branches cannot silently change the mapping;
+// only this enum's value order is load-bearing, and it is pinned by the contract above.
 enum RecordType {
     Standard = 0,
     InheritanceOnly = 1,
@@ -16,6 +24,29 @@ enum RecordType {
     FriendInheritance = 3,
 };
 EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
+
+// Stable tag for each record-type branch in the scene-context condition tree. The builder names each
+// branch with this tag and the scene context resolves the active type by looking the tag up and
+// testing met(), so both sides MUST derive the name from this one function. The switch is exhaustive
+// on purpose: adding a RecordType makes it non-exhaustive and the compiler flags the missing tag.
+[[nodiscard]] inline std::string recordTypeTag(RecordType type) {
+    switch (type) {
+        case Standard: return "record_type.Standard";
+        case InheritanceOnly: return "record_type.InheritanceOnly";
+        case FriendStandard: return "record_type.FriendStandard";
+        case FriendInheritance: return "record_type.FriendInheritance";
+    }
+    return "";  // unreachable; silences non-void control-flow warnings
+}
+
+// All record types in enum-value order. The order is the documented tie-breaker when overlapping
+// branches could both match (see CharaDetailSceneContext::firstMet).
+inline constexpr std::array<RecordType, 4> kAllRecordTypes{
+    Standard,
+    InheritanceOnly,
+    FriendStandard,
+    FriendInheritance,
+};
 
 // RecordType encodes two independent axes. The content axis (full training record vs
 // inheritance-only) decides which data exists to recognize. The owner axis (own vs a friend's

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include "chara_detail/chara_detail_record.h"
 #include "condition/basic_condition.h"
 #include "condition/condition.h"
@@ -8,6 +10,7 @@
 #include "cv/scene_context.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
+#include "util/misc.h"
 #include "util/stds.h"
 
 namespace uma::chara_detail {
@@ -16,6 +19,24 @@ using TabCondition = condition::ParallelCondition<Frame, rule::LogicalOr>;
 
 enum TabPage {
     SkillPage = 0,
+    FactorPage,
+    CampaignPage,
+};
+
+// Stable tag for each tab-page branch, mirroring record::recordTypeTag. The builder names each branch
+// with this tag and the scene context resolves the active tab by tag, not by position. Exhaustive on
+// purpose so a new TabPage forces a tag here.
+[[nodiscard]] inline std::string tabPageTag(TabPage page) {
+    switch (page) {
+        case SkillPage: return "tab_page.SkillPage";
+        case FactorPage: return "tab_page.FactorPage";
+        case CampaignPage: return "tab_page.CampaignPage";
+    }
+    return "";  // unreachable; silences non-void control-flow warnings
+}
+
+inline constexpr std::array<TabPage, 3> kAllTabPages{
+    SkillPage,
     FactorPage,
     CampaignPage,
 };
@@ -51,6 +72,8 @@ public:
         if (record_type_condition == nullptr) {
             throw std::runtime_error("record_type condition not found");
         }
+        record_type_branches = resolveBranches(record_type_condition, record::kAllRecordTypes, record::recordTypeTag);
+        tab_page_branches = resolveBranches(tab_page_condition, kAllTabPages, tabPageTag);
     }
 
     void update(const Frame &input) override {
@@ -125,27 +148,61 @@ private:
 
     [[nodiscard]] uint64 sceneEndTimeoutMs() const { return static_cast<uint64>(scene_end_timeout.count()); }
 
-    template<typename T>
-    [[nodiscard]] std::optional<T> getActiveIndexAs(const TabCondition *cond) const {
-        const auto states = cond->metDetail();
-        const auto active = stds::find(states, true);
-        if (active == states.end()) {
-            return std::nullopt;
+    // Bind each enum value to its named branch in `cond` once, at construction. Resolving by tag (not by
+    // child position) means reordering the branch list cannot silently remap a value, and a missing or
+    // misnamed branch throws here instead of misclassifying at runtime. The branch count is checked too,
+    // so a stray extra branch is caught as well.
+    template<typename Enum, size_t N, typename TagFn>
+    [[nodiscard]] std::array<const condition::Condition<Frame> *, N>
+    resolveBranches(const TabCondition *cond, const std::array<Enum, N> &values, TagFn tag) const {
+        if (cond->metDetail().size() != N) {
+            throw std::runtime_error("condition branch count does not match the enum");
         }
-        return static_cast<T>(std::distance(states.begin(), active));
+        std::array<const condition::Condition<Frame> *, N> branches{};
+        for (size_t i = 0; i < N; ++i) {
+            branches[i] = cond->findByTag(tag(values[i]));
+            if (branches[i] == nullptr) {
+                throw std::runtime_error("condition branch not found: " + tag(values[i]));
+            }
+        }
+        return branches;
+    }
+
+    // Resolve the active enum by testing each named branch's met() in enum-value order. That order IS the
+    // documented tie-breaker: when overlapping branches could both match (e.g. InheritanceOnly vs
+    // FriendInheritance, which share the (not friendLayout) and (inheritanceSignal) prefix and are told
+    // apart by mutually exclusive owner markers), the earlier enum value wins. A simultaneous match beyond
+    // that overlap means a discrimination assumption broke; surface it in Debug, keep first-match in Release.
+    template<typename Enum, size_t N>
+    [[nodiscard]] std::optional<Enum> firstMet(
+        const std::array<const condition::Condition<Frame> *, N> &branches,
+        const std::array<Enum, N> &values) const {
+        std::optional<Enum> found;
+        for (size_t i = 0; i < N; ++i) {
+            if (branches[i]->met()) {
+                if (!found.has_value()) {
+                    found = values[i];
+                } else {
+                    assert_(false);
+                }
+            }
+        }
+        return found;
     }
 
     [[nodiscard]] std::optional<TabPage> getActiveTabIndex() const {
-        return getActiveIndexAs<TabPage>(tab_page_condition);
+        return firstMet(tab_page_branches, kAllTabPages);
     }
 
     [[nodiscard]] std::optional<record::RecordType> getRecordType() const {
-        return getActiveIndexAs<record::RecordType>(record_type_condition);
+        return firstMet(record_type_branches, record::kAllRecordTypes);
     }
 
     const std::shared_ptr<condition::Condition<Frame>> child;
     const condition::ParallelCondition<Frame, rule::LogicalOr> *tab_page_condition;
     const condition::ParallelCondition<Frame, rule::LogicalOr> *record_type_condition;
+    std::array<const condition::Condition<Frame> *, kAllTabPages.size()> tab_page_branches{};
+    std::array<const condition::Condition<Frame> *, record::kAllRecordTypes.size()> record_type_branches{};
     const event_util::Sender<SceneInfo> on_scene_begin;
     const event_util::Sender<Frame, SceneState> on_scene_updated;
     const event_util::Sender<> on_scene_end;

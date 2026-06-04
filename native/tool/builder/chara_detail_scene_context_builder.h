@@ -11,6 +11,9 @@
 
 namespace uma::tool {
 
+namespace cd = uma::chara_detail;
+namespace rec = uma::chara_detail::record;
+
 class CharaDetailSceneContextBuilder {
 public:
     [[nodiscard]] ConditionBase build() const {
@@ -40,21 +43,24 @@ private:
     [[nodiscard]] ConditionBase tabBarButtons() const {
         return anyOf(
             {
-                tabPageSelected(0),  // SkillPage
-                tabPageSelected(1),  // FactorPage
-                tabPageSelected(2),  // CampaignPage
+                tabPageSelected(cd::SkillPage),
+                tabPageSelected(cd::FactorPage),
+                tabPageSelected(cd::CampaignPage),
             },
             "tab_page");
     }
 
-    // The tab at `selected` (0/1/2 = left/middle/right) is highlighted while the other two
-    // are not, matched in either the Standard or the Friend layout — the bar sits at a
-    // different Y in each because the Friend "register" button pushes it down.
-    [[nodiscard]] ConditionBase tabPageSelected(int selected) const {
-        return anyOf({
-            tabBarAt(standard_tab_bar_y, selected),
-            tabBarAt(friend_tab_bar_y, selected),
-        });
+    // The given tab (left/middle/right) is highlighted while the other two are not, matched in either
+    // the Standard or the Friend layout — the bar sits at a different Y in each because the Friend
+    // "register" button pushes it down. Named by tabPageTag so the scene context resolves the active
+    // tab by name, not by branch position.
+    [[nodiscard]] ConditionBase tabPageSelected(cd::TabPage page) const {
+        return anyOf(
+            {
+                tabBarAt(standard_tab_bar_y, page),
+                tabBarAt(friend_tab_bar_y, page),
+            },
+            cd::tabPageTag(page));
     }
 
     [[nodiscard]] ConditionBase tabBarAt(double y, int selected) const {
@@ -117,15 +123,22 @@ private:
         });
     }
 
-    // RecordType is two independent axes: the friend layout (a friend's hall of fame adds
-    // the green "register practice partner" button) and the inheritance-only content signal
-    // (a mid-screen white gap where a full training record shows data). The four branches
-    // below are the mutually exclusive combinations, so their order within recordTypes()
-    // only has to follow the enum, not rely on fall-through.
+    // RecordType is two axes: the friend layout (a friend's hall of fame adds the green "register
+    // practice partner" button) and the inheritance-only content signal (a mid-screen white gap where
+    // a full training record shows data). Each branch is named with record::recordTypeTag, and the
+    // scene context resolves the active type by looking that name up and testing met() — never by branch
+    // position — so reordering the list here cannot silently remap a type.
+    //
+    // The branches are NOT all structurally exclusive: InheritanceOnly and FriendInheritance share the
+    // (not friendLayout) and (inheritanceSignal) prefix and differ only by which owner marker is present
+    // (the player's edit button vs the friend's "トレーナー" pill). Those two markers never appear
+    // together in practice, but the boolean logic does not enforce it; if both were ever seen at once,
+    // the scene context's first-match-in-enum-order resolution is the tie-breaker (InheritanceOnly wins,
+    // and a Debug assert fires). So the enum VALUE order in chara_detail_record.h is load-bearing here.
 
     [[nodiscard]] ConditionBase standardRecordType() const {
         // Own, full training record: neither axis is set.
-        return allOf({logicalNot(friendLayout()), logicalNot(inheritanceSignal())});
+        return allOf({logicalNot(friendLayout()), logicalNot(inheritanceSignal())}, rec::recordTypeTag(rec::Standard));
     }
 
     [[nodiscard]] ConditionBase inheritanceOnlyRecordType() const {
@@ -135,12 +148,14 @@ private:
         // positive marker, so when neither is visible yet (e.g. a tap effect right after opening)
         // no inheritance branch matches and the scene waits to begin rather than guessing. A
         // briefly hidden edit button therefore no longer mislabels the record as a friend's.
-        return allOf({logicalNot(friendLayout()), inheritanceSignal(), playerEditButton()});
+        return allOf(
+            {logicalNot(friendLayout()), inheritanceSignal(), playerEditButton()},
+            rec::recordTypeTag(rec::InheritanceOnly));
     }
 
     [[nodiscard]] ConditionBase friendStandardRecordType() const {
         // A friend's full training record.
-        return allOf({friendLayout(), logicalNot(inheritanceSignal())});
+        return allOf({friendLayout(), logicalNot(inheritanceSignal())}, rec::recordTypeTag(rec::FriendStandard));
     }
 
     [[nodiscard]] ConditionBase friendInheritanceRecordType() const {
@@ -150,7 +165,9 @@ private:
         // the player's own record never shows. Keying off this positive signal — rather than the
         // mere absence of the edit button — stops a player's record from being mislabeled a
         // friend's while the edit button is briefly occluded.
-        return allOf({logicalNot(friendLayout()), inheritanceSignal(), friendInheritanceSignal()});
+        return allOf(
+            {logicalNot(friendLayout()), inheritanceSignal(), friendInheritanceSignal()},
+            rec::recordTypeTag(rec::FriendInheritance));
     }
 
     // Mid-screen white gap present only on inheritance-only records (the trained-data block
@@ -251,15 +268,16 @@ private:
     }
 
     [[nodiscard]] ConditionBase recordTypes() const {
-        // The following only determines which type fits, assuming all other conditions are met.
-        // Branch order must match the RecordType enum: the active record_type is the index of
-        // the first matching branch.
+        // Determines which record type fits, assuming all other conditions are met. The active type is
+        // resolved by the scene context by branch NAME (record::recordTypeTag), so the order of this list
+        // does not affect the mapping. The listing still follows the enum for readability; the enum VALUE
+        // order is the tie-breaker for the overlapping inheritance branches (see the note above).
         return anyOf(
             {
-                standardRecordType(),           // 0: Standard
-                inheritanceOnlyRecordType(),    // 1: InheritanceOnly
-                friendStandardRecordType(),     // 2: FriendStandard
-                friendInheritanceRecordType(),  // 3: FriendInheritance
+                standardRecordType(),
+                inheritanceOnlyRecordType(),
+                friendStandardRecordType(),
+                friendInheritanceRecordType(),
             },
             "record_type");
     }
