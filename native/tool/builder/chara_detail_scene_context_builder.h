@@ -129,8 +129,12 @@ private:
     }
 
     [[nodiscard]] ConditionBase inheritanceOnlyRecordType() const {
-        // Own, inheritance-only record. It shares the standard (unshifted) layout with a
-        // friend's inheritance-only record, so the player's own edit button distinguishes it.
+        // Own, inheritance-only record. It shares the standard (unshifted) layout with a friend's
+        // inheritance-only record; the two are told apart by which owner-specific marker is
+        // present — here, the player's own edit button. Each inheritance branch keys off its own
+        // positive marker, so when neither is visible yet (e.g. a tap effect right after opening)
+        // no inheritance branch matches and the scene waits to begin rather than guessing. A
+        // briefly hidden edit button therefore no longer mislabels the record as a friend's.
         return allOf({logicalNot(friendLayout()), inheritanceSignal(), playerEditButton()});
     }
 
@@ -140,11 +144,13 @@ private:
     }
 
     [[nodiscard]] ConditionBase friendInheritanceRecordType() const {
-        // A friend's inheritance-only record. It has no "register practice partner" button (so
-        // the layout is not shifted and friendLayout() is false) and no player edit button, so
-        // it is identified by the inheritance content signal together with the absence of that
-        // edit button, which separates it from the player's own inheritance-only record above.
-        return allOf({logicalNot(friendLayout()), inheritanceSignal(), logicalNot(playerEditButton())});
+        // A friend's inheritance-only record. It has no "register practice partner" button (so the
+        // layout is not shifted and friendLayout() is false) and no player edit button. It is
+        // identified positively by the friend "トレーナー" pill (friendInheritanceSignal()), which
+        // the player's own record never shows. Keying off this positive signal — rather than the
+        // mere absence of the edit button — stops a player's record from being mislabeled a
+        // friend's while the edit button is briefly occluded.
+        return allOf({logicalNot(friendLayout()), inheritanceSignal(), friendInheritanceSignal()});
     }
 
     // Mid-screen white gap present only on inheritance-only records (the trained-data block
@@ -159,10 +165,10 @@ private:
     [[nodiscard]] ConditionBase friendLayout() const {
         // A friend's hall-of-fame screen shows a green "練習パートナー登録" (register as practice
         // partner) button between the aptitudes and the tab bar. That button both identifies
-        // the friend layout and pushes the tab bar down, so detect both: the button itself
-        // and the tab bar at the Friend Y.
+        // the friend layout and pushes the tab bar down, so detect both: the wide card-background
+        // margins flanking the centered button, and the tab bar at the Friend Y.
         return allOf({
-            friendRegisterButton(),
+            friendRegisterMargins(),
             friendTabBar(),
         });
     }
@@ -176,18 +182,24 @@ private:
         });
     }
 
-    [[nodiscard]] ConditionBase friendRegisterButton() const {
-        const double y = 620.0 / 736.0;  // button body row in friend.png
-        const auto button_green = colorRange({110, 195, 10}, 50);
-        const auto background = colorRange({250, 250, 250}, 12);
-        return allOf({
-            // Green button fill near the center.
-            lineCheck(lineToX({0.4000, y, IS}, 0.4500), button_green, full_length),
-            // The button is centered and does not reach the edges, so the left margin is
-            // plain card background. (A Standard screen's full-width scroll column header
-            // sits at a similar Y but would be green here — this check rejects it.)
-            lineCheck(lineToX({0.1200, y, IS}, 0.1700), background, full_length),
+    // The centered "練習パートナー登録" button leaves a tall band of plain card background on
+    // each side of it. We detect that whitespace instead of the button's green fill: a similar
+    // green appears elsewhere on the screen and is fiddly to tune, whereas the flanking margins
+    // are a clean, uniform signal. A vertical scan line down each margin must stay within the
+    // card background color for its full length. Either side alone is enough (OR), so a tap
+    // effect covering one side still confirms the layout. On a Standard / inheritance-only record
+    // the tab bar sits higher and full-width list content fills this Y, so neither scan line
+    // stays uniform there.
+    [[nodiscard]] ConditionBase friendRegisterMargins() const {
+        return anyOf({
+            backgroundColumn(164.0 / 736.0),  // left of the button
+            backgroundColumn(563.0 / 736.0),  // right of the button
         });
+    }
+
+    [[nodiscard]] ConditionBase backgroundColumn(double x) const {
+        const auto background = colorRange({250, 250, 250}, 12);
+        return lineCheck(lineToY({x, 557.0 / 736.0, IS}, 648.0 / 736.0), background, full_length);
     }
 
     [[nodiscard]] ConditionBase playerEditButton() const {
@@ -211,6 +223,30 @@ private:
                 {{674.0 / 736.0, 265.0 / 736.0, IS}, {686.0 / 736.0, 253.0 / 736.0, IS}},
                 circle_white,
                 full_length),
+        });
+    }
+
+    [[nodiscard]] ConditionBase friendInheritanceSignal() const {
+        // A friend's hall-of-fame inheritance record shows a "トレーナー" pill in the header — a
+        // cream rounded label with brown text — where the player's own record shows the character
+        // art instead. Detect both the pill's cream background and its brown label text: the cream
+        // check rejects the varied character-art backgrounds (some of which can hold brown-ish
+        // pixels), and the brown check confirms the label. (Pinned to the label row y = 281 on a
+        // 736 px wide frame.) A friend's FULL record shows the same pill, but that is FriendStandard
+        // via friendLayout() and never reaches the inheritance branches, so it is irrelevant here.
+        const auto cream = colorRange({235, 228, 222}, 30);
+        const auto brown = colorRange({150, 90, 40}, 55);
+        const double y = 281.0 / 736.0;
+        return allOf({
+            // The pill's cream background, in the margin between the rounded edge and the text.
+            // Kept clear of the text's left edge so a slight horizontal shift of the label does not
+            // let a character stroke break this uniform run.
+            lineCheck(lineToX({260.0 / 736.0, y, IS}, 280.0 / 736.0), cream, full_length, {Color(-20), Color(20)}),
+            // The brown label text just past the cream margin (lineColor = any pixel on the line).
+            // It starts where the cream scan ends and stays short: the first character sits right
+            // there, so a short line catches it while tolerating the text's slight horizontal shift,
+            // and a longer line would risk picking up brown-ish pixels elsewhere in the background.
+            lineColor(lineToX({280.0 / 736.0, y, IS}, 300.0 / 736.0), brown),
         });
     }
 

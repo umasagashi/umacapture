@@ -3366,7 +3366,7 @@
                 "rule": null,
                 "children": [
                   {
-                    "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
+                    "type": "ParallelCondition<Frame,LogicalOr,Empty>",
                     "rule": null,
                     "children": [
                       {
@@ -3377,8 +3377,8 @@
                             "type": "PlainCondition<Frame,PointColor,Empty>",
                             "rule": {
                               "point": {
-                                "x": 0.4,
-                                "y": 0.842391304347826,
+                                "x": 0.22282608695652173,
+                                "y": 0.7567934782608695,
                                 "anchor": {
                                   "h": "IntersectStart",
                                   "v": "IntersectStart"
@@ -3386,14 +3386,14 @@
                               },
                               "color_range": {
                                 "min": {
-                                  "r": 60,
-                                  "g": 145,
-                                  "b": 0
+                                  "r": 238,
+                                  "g": 238,
+                                  "b": 238
                                 },
                                 "max": {
-                                  "r": 160,
-                                  "g": 245,
-                                  "b": 60
+                                  "r": 255,
+                                  "g": 255,
+                                  "b": 255
                                 }
                               }
                             }
@@ -3404,16 +3404,16 @@
                               "line_measurer": {
                                 "line": {
                                   "p1": {
-                                    "x": 0.4,
-                                    "y": 0.842391304347826,
+                                    "x": 0.22282608695652173,
+                                    "y": 0.7567934782608695,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
                                     }
                                   },
                                   "p2": {
-                                    "x": 0.45,
-                                    "y": 0.842391304347826,
+                                    "x": 0.22282608695652173,
+                                    "y": 0.8804347826086957,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
@@ -3449,8 +3449,8 @@
                             "type": "PlainCondition<Frame,PointColor,Empty>",
                             "rule": {
                               "point": {
-                                "x": 0.12,
-                                "y": 0.842391304347826,
+                                "x": 0.7649456521739131,
+                                "y": 0.7567934782608695,
                                 "anchor": {
                                   "h": "IntersectStart",
                                   "v": "IntersectStart"
@@ -3476,16 +3476,16 @@
                               "line_measurer": {
                                 "line": {
                                   "p1": {
-                                    "x": 0.12,
-                                    "y": 0.842391304347826,
+                                    "x": 0.7649456521739131,
+                                    "y": 0.7567934782608695,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
                                     }
                                   },
                                   "p2": {
-                                    "x": 0.17,
-                                    "y": 0.842391304347826,
+                                    "x": 0.7649456521739131,
+                                    "y": 0.8804347826086957,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
@@ -5060,7 +5060,7 @@
                 "rule": null,
                 "children": [
                   {
-                    "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
+                    "type": "ParallelCondition<Frame,LogicalOr,Empty>",
                     "rule": null,
                     "children": [
                       {
@@ -5071,8 +5071,8 @@
                             "type": "PlainCondition<Frame,PointColor,Empty>",
                             "rule": {
                               "point": {
-                                "x": 0.4,
-                                "y": 0.842391304347826,
+                                "x": 0.22282608695652173,
+                                "y": 0.7567934782608695,
                                 "anchor": {
                                   "h": "IntersectStart",
                                   "v": "IntersectStart"
@@ -5080,14 +5080,14 @@
                               },
                               "color_range": {
                                 "min": {
-                                  "r": 60,
-                                  "g": 145,
-                                  "b": 0
+                                  "r": 238,
+                                  "g": 238,
+                                  "b": 238
                                 },
                                 "max": {
-                                  "r": 160,
-                                  "g": 245,
-                                  "b": 60
+                                  "r": 255,
+                                  "g": 255,
+                                  "b": 255
                                 }
                               }
                             }
@@ -5098,16 +5098,16 @@
                               "line_measurer": {
                                 "line": {
                                   "p1": {
-                                    "x": 0.4,
-                                    "y": 0.842391304347826,
+                                    "x": 0.22282608695652173,
+                                    "y": 0.7567934782608695,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
                                     }
                                   },
                                   "p2": {
-                                    "x": 0.45,
-                                    "y": 0.842391304347826,
+                                    "x": 0.22282608695652173,
+                                    "y": 0.8804347826086957,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
@@ -5143,8 +5143,8 @@
                             "type": "PlainCondition<Frame,PointColor,Empty>",
                             "rule": {
                               "point": {
-                                "x": 0.12,
-                                "y": 0.842391304347826,
+                                "x": 0.7649456521739131,
+                                "y": 0.7567934782608695,
                                 "anchor": {
                                   "h": "IntersectStart",
                                   "v": "IntersectStart"
@@ -5170,16 +5170,16 @@
                               "line_measurer": {
                                 "line": {
                                   "p1": {
-                                    "x": 0.12,
-                                    "y": 0.842391304347826,
+                                    "x": 0.7649456521739131,
+                                    "y": 0.7567934782608695,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
                                     }
                                   },
                                   "p2": {
-                                    "x": 0.17,
-                                    "y": 0.842391304347826,
+                                    "x": 0.7649456521739131,
+                                    "y": 0.8804347826086957,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
@@ -6897,7 +6897,7 @@
               "rule": null,
               "children": [
                 {
-                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
+                  "type": "ParallelCondition<Frame,LogicalOr,Empty>",
                   "rule": null,
                   "children": [
                     {
@@ -6908,8 +6908,8 @@
                           "type": "PlainCondition<Frame,PointColor,Empty>",
                           "rule": {
                             "point": {
-                              "x": 0.4,
-                              "y": 0.842391304347826,
+                              "x": 0.22282608695652173,
+                              "y": 0.7567934782608695,
                               "anchor": {
                                 "h": "IntersectStart",
                                 "v": "IntersectStart"
@@ -6917,14 +6917,14 @@
                             },
                             "color_range": {
                               "min": {
-                                "r": 60,
-                                "g": 145,
-                                "b": 0
+                                "r": 238,
+                                "g": 238,
+                                "b": 238
                               },
                               "max": {
-                                "r": 160,
-                                "g": 245,
-                                "b": 60
+                                "r": 255,
+                                "g": 255,
+                                "b": 255
                               }
                             }
                           }
@@ -6935,16 +6935,16 @@
                             "line_measurer": {
                               "line": {
                                 "p1": {
-                                  "x": 0.4,
-                                  "y": 0.842391304347826,
+                                  "x": 0.22282608695652173,
+                                  "y": 0.7567934782608695,
                                   "anchor": {
                                     "h": "IntersectStart",
                                     "v": "IntersectStart"
                                   }
                                 },
                                 "p2": {
-                                  "x": 0.45,
-                                  "y": 0.842391304347826,
+                                  "x": 0.22282608695652173,
+                                  "y": 0.8804347826086957,
                                   "anchor": {
                                     "h": "IntersectStart",
                                     "v": "IntersectStart"
@@ -6980,8 +6980,8 @@
                           "type": "PlainCondition<Frame,PointColor,Empty>",
                           "rule": {
                             "point": {
-                              "x": 0.12,
-                              "y": 0.842391304347826,
+                              "x": 0.7649456521739131,
+                              "y": 0.7567934782608695,
                               "anchor": {
                                 "h": "IntersectStart",
                                 "v": "IntersectStart"
@@ -7007,16 +7007,16 @@
                             "line_measurer": {
                               "line": {
                                 "p1": {
-                                  "x": 0.12,
-                                  "y": 0.842391304347826,
+                                  "x": 0.7649456521739131,
+                                  "y": 0.7567934782608695,
                                   "anchor": {
                                     "h": "IntersectStart",
                                     "v": "IntersectStart"
                                   }
                                 },
                                 "p2": {
-                                  "x": 0.17,
-                                  "y": 0.842391304347826,
+                                  "x": 0.7649456521739131,
+                                  "y": 0.8804347826086957,
                                   "anchor": {
                                     "h": "IntersectStart",
                                     "v": "IntersectStart"
@@ -8590,7 +8590,7 @@
                 "rule": null,
                 "children": [
                   {
-                    "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
+                    "type": "ParallelCondition<Frame,LogicalOr,Empty>",
                     "rule": null,
                     "children": [
                       {
@@ -8601,8 +8601,8 @@
                             "type": "PlainCondition<Frame,PointColor,Empty>",
                             "rule": {
                               "point": {
-                                "x": 0.4,
-                                "y": 0.842391304347826,
+                                "x": 0.22282608695652173,
+                                "y": 0.7567934782608695,
                                 "anchor": {
                                   "h": "IntersectStart",
                                   "v": "IntersectStart"
@@ -8610,14 +8610,14 @@
                               },
                               "color_range": {
                                 "min": {
-                                  "r": 60,
-                                  "g": 145,
-                                  "b": 0
+                                  "r": 238,
+                                  "g": 238,
+                                  "b": 238
                                 },
                                 "max": {
-                                  "r": 160,
-                                  "g": 245,
-                                  "b": 60
+                                  "r": 255,
+                                  "g": 255,
+                                  "b": 255
                                 }
                               }
                             }
@@ -8628,16 +8628,16 @@
                               "line_measurer": {
                                 "line": {
                                   "p1": {
-                                    "x": 0.4,
-                                    "y": 0.842391304347826,
+                                    "x": 0.22282608695652173,
+                                    "y": 0.7567934782608695,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
                                     }
                                   },
                                   "p2": {
-                                    "x": 0.45,
-                                    "y": 0.842391304347826,
+                                    "x": 0.22282608695652173,
+                                    "y": 0.8804347826086957,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
@@ -8673,8 +8673,8 @@
                             "type": "PlainCondition<Frame,PointColor,Empty>",
                             "rule": {
                               "point": {
-                                "x": 0.12,
-                                "y": 0.842391304347826,
+                                "x": 0.7649456521739131,
+                                "y": 0.7567934782608695,
                                 "anchor": {
                                   "h": "IntersectStart",
                                   "v": "IntersectStart"
@@ -8700,16 +8700,16 @@
                               "line_measurer": {
                                 "line": {
                                   "p1": {
-                                    "x": 0.12,
-                                    "y": 0.842391304347826,
+                                    "x": 0.7649456521739131,
+                                    "y": 0.7567934782608695,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
                                     }
                                   },
                                   "p2": {
-                                    "x": 0.17,
-                                    "y": 0.842391304347826,
+                                    "x": 0.7649456521739131,
+                                    "y": 0.8804347826086957,
                                     "anchor": {
                                       "h": "IntersectStart",
                                       "v": "IntersectStart"
@@ -10267,158 +10267,117 @@
               ]
             },
             {
-              "type": "NestedCondition<Frame,LogicalNot,Empty>",
+              "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
               "rule": null,
-              "child": {
-                "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
-                "rule": null,
-                "children": [
-                  {
-                    "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
-                    "rule": null,
-                    "children": [
-                      {
-                        "type": "PlainCondition<Frame,PointColor,Empty>",
-                        "rule": {
-                          "point": {
-                            "x": 0.9266304347826086,
-                            "y": 0.3695652173913043,
-                            "anchor": {
-                              "h": "IntersectStart",
-                              "v": "IntersectStart"
-                            }
-                          },
-                          "color_range": {
-                            "min": {
-                              "r": 95,
-                              "g": 35,
-                              "b": 0
-                            },
-                            "max": {
-                              "r": 205,
-                              "g": 145,
-                              "b": 95
-                            }
+              "children": [
+                {
+                  "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
+                  "rule": null,
+                  "children": [
+                    {
+                      "type": "PlainCondition<Frame,PointColor,Empty>",
+                      "rule": {
+                        "point": {
+                          "x": 0.3532608695652174,
+                          "y": 0.38179347826086957,
+                          "anchor": {
+                            "h": "IntersectStart",
+                            "v": "IntersectStart"
                           }
-                        }
-                      },
-                      {
-                        "type": "PlainCondition<Frame,LineLength,Empty>",
-                        "rule": {
-                          "line_measurer": {
-                            "line": {
-                              "p1": {
-                                "x": 0.9266304347826086,
-                                "y": 0.3695652173913043,
-                                "anchor": {
-                                  "h": "IntersectStart",
-                                  "v": "IntersectStart"
-                                }
-                              },
-                              "p2": {
-                                "x": 0.9402173913043478,
-                                "y": 0.35597826086956524,
-                                "anchor": {
-                                  "h": "IntersectStart",
-                                  "v": "IntersectStart"
-                                }
-                              }
-                            },
-                            "color_deviation": {
-                              "min": {
-                                "r": -45,
-                                "g": -45,
-                                "b": -45
-                              },
-                              "max": {
-                                "r": 45,
-                                "g": 45,
-                                "b": 45
-                              }
-                            }
+                        },
+                        "color_range": {
+                          "min": {
+                            "r": 205,
+                            "g": 198,
+                            "b": 192
                           },
-                          "length_range": {
-                            "min": 0.7,
-                            "max": 1.0
+                          "max": {
+                            "r": 255,
+                            "g": 255,
+                            "b": 252
                           }
                         }
                       }
-                    ]
-                  },
-                  {
-                    "type": "ParallelCondition<Frame,LogicalAnd,Empty>",
-                    "rule": null,
-                    "children": [
-                      {
-                        "type": "PlainCondition<Frame,PointColor,Empty>",
-                        "rule": {
-                          "point": {
-                            "x": 0.9157608695652174,
-                            "y": 0.360054347826087,
-                            "anchor": {
-                              "h": "IntersectStart",
-                              "v": "IntersectStart"
+                    },
+                    {
+                      "type": "PlainCondition<Frame,LineLength,Empty>",
+                      "rule": {
+                        "line_measurer": {
+                          "line": {
+                            "p1": {
+                              "x": 0.3532608695652174,
+                              "y": 0.38179347826086957,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
+                            },
+                            "p2": {
+                              "x": 0.3804347826086957,
+                              "y": 0.38179347826086957,
+                              "anchor": {
+                                "h": "IntersectStart",
+                                "v": "IntersectStart"
+                              }
                             }
                           },
-                          "color_range": {
+                          "color_deviation": {
                             "min": {
-                              "r": 247,
-                              "g": 247,
-                              "b": 247
+                              "r": -20,
+                              "g": -20,
+                              "b": -20
                             },
                             "max": {
-                              "r": 255,
-                              "g": 255,
-                              "b": 255
+                              "r": 20,
+                              "g": 20,
+                              "b": 20
                             }
                           }
-                        }
-                      },
-                      {
-                        "type": "PlainCondition<Frame,LineLength,Empty>",
-                        "rule": {
-                          "line_measurer": {
-                            "line": {
-                              "p1": {
-                                "x": 0.9157608695652174,
-                                "y": 0.360054347826087,
-                                "anchor": {
-                                  "h": "IntersectStart",
-                                  "v": "IntersectStart"
-                                }
-                              },
-                              "p2": {
-                                "x": 0.9320652173913043,
-                                "y": 0.34375,
-                                "anchor": {
-                                  "h": "IntersectStart",
-                                  "v": "IntersectStart"
-                                }
-                              }
-                            },
-                            "color_deviation": {
-                              "min": {
-                                "r": -10,
-                                "g": -10,
-                                "b": -10
-                              },
-                              "max": {
-                                "r": 10,
-                                "g": 10,
-                                "b": 10
-                              }
-                            }
-                          },
-                          "length_range": {
-                            "min": 1.0,
-                            "max": 1.0
-                          }
+                        },
+                        "length_range": {
+                          "min": 1.0,
+                          "max": 1.0
                         }
                       }
-                    ]
+                    }
+                  ]
+                },
+                {
+                  "type": "PlainCondition<Frame,LineColor,Empty>",
+                  "rule": {
+                    "line": {
+                      "p1": {
+                        "x": 0.3804347826086957,
+                        "y": 0.38179347826086957,
+                        "anchor": {
+                          "h": "IntersectStart",
+                          "v": "IntersectStart"
+                        }
+                      },
+                      "p2": {
+                        "x": 0.4076086956521739,
+                        "y": 0.38179347826086957,
+                        "anchor": {
+                          "h": "IntersectStart",
+                          "v": "IntersectStart"
+                        }
+                      }
+                    },
+                    "color_range": {
+                      "min": {
+                        "r": 95,
+                        "g": 35,
+                        "b": 0
+                      },
+                      "max": {
+                        "r": 205,
+                        "g": 145,
+                        "b": 95
+                      }
+                    }
                   }
-                ]
-              }
+                }
+              ]
             }
           ]
         }

@@ -11,6 +11,7 @@ namespace {
 
 const auto CONDITION_BUILDERS /* NOLINT(cert-err58-cpp)*/ = {
     Builder<ConditionBase>::create<PlainCondition<Frame, rule::PointColor>>(),
+    Builder<ConditionBase>::create<PlainCondition<Frame, rule::LineColor>>(),
     Builder<ConditionBase>::create<PlainCondition<Frame, rule::LineLength>>(),
     Builder<ConditionBase>::create<PlainCondition<Frame, rule::StableLineLength>>(),
     Builder<ConditionBase>::create<NestedCondition<Frame, rule::Stable>>(),

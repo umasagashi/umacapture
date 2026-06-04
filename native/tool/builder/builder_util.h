@@ -54,6 +54,10 @@ inline ConditionBase pointColor(const Point<double> &point, const Range<Color> &
     return std::make_shared<condition::PlainCondition<Frame, rule::PointColor>>(rule::PointColor(point, color_range));
 }
 
+inline ConditionBase lineColor(const Line<double> &line, const Range<Color> &color_range) {
+    return std::make_shared<condition::PlainCondition<Frame, rule::LineColor>>(rule::LineColor(line, color_range));
+}
+
 inline ConditionBase
 lineLength(const Line<double> &line, const Range<double> &length_range, const Range<Color> &color_deviation) {
     return std::make_shared<condition::PlainCondition<Frame, rule::LineLength>>(
