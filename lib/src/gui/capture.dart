@@ -8,6 +8,7 @@ import 'package:percent_indicator/circular_percent_indicator.dart';
 
 import '/src/app/route.dart';
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/spec/loader.dart' show tr_columns;
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
@@ -177,13 +178,7 @@ class _ScrollStateWidget extends ConsumerWidget {
 
 class _CharaDetailStateWidget extends ConsumerWidget {
   String _recordTypeName(RecordType type) {
-    final key = switch (type) {
-      RecordType.standard => "standard",
-      RecordType.inheritanceOnly => "inheritance_only",
-      RecordType.friendStandard => "friend_standard",
-      RecordType.friendInheritance => "friend_inheritance",
-    };
-    return "pages.chara_detail.columns.record_type.values.$key".tr();
+    return "$tr_columns.record_type.values.${type.translationKey}".tr();
   }
 
   Widget _buildRecordType(BuildContext context, RecordType recordType) {

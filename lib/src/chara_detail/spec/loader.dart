@@ -62,15 +62,7 @@ final labelMapLoader = FutureProvider<LabelMap>((ref) async {
 });
 
 List<String> _recordTypeLabels() {
-  return RecordType.values.map((type) {
-    final key = switch (type) {
-      RecordType.standard => "standard",
-      RecordType.inheritanceOnly => "inheritance_only",
-      RecordType.friendStandard => "friend_standard",
-      RecordType.friendInheritance => "friend_inheritance",
-    };
-    return "$tr_columns.record_type.values.$key".tr();
-  }).toList();
+  return RecordType.values.map((type) => "$tr_columns.record_type.values.${type.translationKey}".tr()).toList();
 }
 
 final labelMapProvider = Provider<LabelMap>((ref) {

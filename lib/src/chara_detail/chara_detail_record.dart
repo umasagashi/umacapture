@@ -224,6 +224,20 @@ enum RecordStage { active }
 @MappableEnum(caseStyle: CaseStyle.pascalCase)
 enum RecordType { standard, inheritanceOnly, friendStandard, friendInheritance }
 
+extension RecordTypeTranslation on RecordType {
+  /// Leaf translation key for this record type, under
+  /// `pages.chara_detail.columns.record_type.values`.
+  ///
+  /// The single source for the type-to-key mapping; callers prepend their own
+  /// namespace. The exhaustive `switch` makes a forgotten case a compile error.
+  String get translationKey => switch (this) {
+    RecordType.standard => "standard",
+    RecordType.inheritanceOnly => "inheritance_only",
+    RecordType.friendStandard => "friend_standard",
+    RecordType.friendInheritance => "friend_inheritance",
+  };
+}
+
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Metadata extends JsonEquatable with MetadataMappable {
   final String formatVersion;
