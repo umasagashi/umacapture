@@ -63,7 +63,9 @@ public:
             if (!state.started) {
                 state.started = true;
                 state.since = state.now;
-            } else if (state.now - state.since > static_cast<uint64_t>(threshold)) {
+            } else if (chrono_util::monotonicElapsed(state.now, state.since) > static_cast<uint64_t>(threshold)) {
+                // monotonicElapsed restarts the window if the clock stepped backward (system_clock is not
+                // monotonic in live capture), so a backward jump cannot wrap the subtraction and fire instantly.
                 return true;
             }
         } else {

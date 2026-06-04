@@ -106,7 +106,8 @@ public:
                     endScene();
                 } else if (!scene_end_pending_since) {
                     scene_end_pending_since = input.timestamp();
-                } else if (input.timestamp() - scene_end_pending_since.value() >= sceneEndTimeoutMs()) {
+                } else if (chrono_util::monotonicElapsed(input.timestamp(), scene_end_pending_since.value())
+                           >= sceneEndTimeoutMs()) {
                     endScene();
                 }
             }
@@ -126,7 +127,8 @@ private:
         } else if (!scene_begin_pending_since || scene_begin_pending_type != record_type) {
             scene_begin_pending_since = input.timestamp();
             scene_begin_pending_type = record_type;
-        } else if (input.timestamp() - scene_begin_pending_since.value() >= sceneBeginTimeoutMs()) {
+        } else if (chrono_util::monotonicElapsed(input.timestamp(), scene_begin_pending_since.value())
+                   >= sceneBeginTimeoutMs()) {
             beginScene(record_type);
         }
     }
