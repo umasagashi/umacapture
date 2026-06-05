@@ -24,7 +24,7 @@ const tr_common = "pages.chara_detail.column_predicate.common";
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
-enum ColumnCategory { trainee, status, aptitude, skill, factor, supportCard, family, campaign, race, metadata }
+enum ColumnCategory { trainee, status, aptitude, skill, factor, supportCard, family, campaign, race, metadata, script }
 
 class LabelKeys {
   static String get aptitude => "aptitude.name";

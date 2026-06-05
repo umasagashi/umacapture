@@ -12,6 +12,7 @@ import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
+import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 
@@ -348,5 +349,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.metadata,
       parser: CapturedDateParser(),
     ),
+    ScriptColumnBuilder(title: "$tr_columns.script.title".tr(), category: ColumnCategory.script),
   ];
 });

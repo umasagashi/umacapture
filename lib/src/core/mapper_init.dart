@@ -13,6 +13,7 @@ import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
+import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
 import '/src/chara_detail/storage.dart';
@@ -55,6 +56,7 @@ void initializeMappers() {
   DateTimeColumnSpecMapper.ensureInitialized();
   RatingColumnSpecMapper.ensureInitialized();
   MemoColumnSpecMapper.ensureInitialized();
+  ScriptColumnSpecMapper.ensureInitialized();
   ParserMapper.ensureInitialized();
   CharaDetailRecordMapper.ensureInitialized();
 

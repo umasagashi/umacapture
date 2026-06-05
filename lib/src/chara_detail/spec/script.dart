@@ -1,0 +1,816 @@
+import 'dart:async';
+import 'dart:isolate';
+
+import 'package:dart_eval/dart_eval.dart';
+import 'package:dart_eval/dart_eval_bridge.dart';
+import 'package:dart_mappable/dart_mappable.dart';
+import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:trina_grid/trina_grid.dart';
+import 'package:uuid/uuid.dart';
+
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/script_facade.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/core/callback.dart';
+import '/src/core/utils.dart';
+import '/src/gui/chara_detail/column_spec_dialog.dart';
+import '/src/gui/chara_detail/common.dart';
+
+part 'script.mapper.dart';
+
+// ignore: constant_identifier_names
+const tr_script = "pages.chara_detail.column_predicate.script";
+
+/// The library uri the user's compiled script lives under.
+const _scriptLib = 'package:script/script.dart';
+
+/// Current facade API contract version. Persisted with the spec so a future
+/// incompatible API change can migrate or warn instead of silently misbehaving.
+const scriptApiVersion = 1;
+
+// --- Enrichment: CharaDetailRecord -> plain nested Map ----------------------
+
+Map<String, dynamic> _coded(int code, String name) => {'code': code, 'name': name};
+
+String _label(LabelMap labels, String key, int index) {
+  final list = labels[key];
+  if (list == null || index < 0 || index >= list.length) return index.toString();
+  return list[index];
+}
+
+/// Precomputed lookups shared across all records (built once per grid build).
+class _Enricher {
+  final LabelMap labels;
+  final Map<int, SkillInfo> skillInfo;
+  final Map<int, FactorInfo> factorInfo;
+  final Map<String, Map<String, double>> ratingsByRecord;
+
+  _Enricher(this.labels, this.skillInfo, this.factorInfo, this.ratingsByRecord);
+
+  Map<String, dynamic> _aptitudeRank(int level) => _coded(level + 1, _label(labels, LabelKeys.aptitude, level));
+
+  Map<String, dynamic> _distance(int meterIndex) {
+    final meters = int.tryParse(_label(labels, 'race_place.distance', meterIndex)) ?? 0;
+    final (code, key) = meters <= 1400
+        ? (0, 'short_range')
+        : meters <= 1800
+        ? (1, 'mile_range')
+        : meters <= 2400
+        ? (2, 'middle_range')
+        : (3, 'long_range');
+    return _coded(code, "pages.chara_detail.columns.aptitude.$key.title".tr());
+  }
+
+  Map<String, dynamic> _aptitudes(AptitudeSet a) => {
+    'ground': {'turf': _aptitudeRank(a.ground.turf), 'dirt': _aptitudeRank(a.ground.dirt)},
+    'distance': {
+      'short': _aptitudeRank(a.distance.shortRange),
+      'mile': _aptitudeRank(a.distance.mileRange),
+      'middle': _aptitudeRank(a.distance.middleRange),
+      'long': _aptitudeRank(a.distance.longRange),
+    },
+    'style': {
+      'leadPace': _aptitudeRank(a.style.leadPace),
+      'withPace': _aptitudeRank(a.style.withPace),
+      'offPace': _aptitudeRank(a.style.offPace),
+      'lateCharge': _aptitudeRank(a.style.lateCharge),
+    },
+  };
+
+  List<String> _skillTags(int id) => skillInfo[id]?.tags.toList() ?? const [];
+
+  List<String> _factorTags(int id) => factorInfo[id]?.tags.toList() ?? const [];
+
+  List<Map<String, dynamic>> _skills(List<Skill> skills) => [
+    for (final s in skills)
+      {'id': s.id, 'level': s.level, 'name': _label(labels, LabelKeys.skill, s.id), 'tags': _skillTags(s.id)},
+  ];
+
+  List<Map<String, dynamic>> _factors(FactorSet factors) => [
+    for (final entry in [(0, '本人', factors.self), (1, '親1', factors.parent1), (2, '親2', factors.parent2)])
+      for (final f in entry.$3)
+        {
+          'id': f.id,
+          'star': f.star,
+          'name': _label(labels, LabelKeys.factor, f.id),
+          'tags': _factorTags(f.id),
+          'subject': _coded(entry.$1, "$tr_script.subject.${["self", "parent1", "parent2"][entry.$1]}".tr()),
+        },
+  ];
+
+  List<Map<String, dynamic>> _factorGroups(FactorSet factors) {
+    final order = <int>[];
+    final stars = <int, List<int>>{};
+    void accumulate(List<Factor> list, int subject) {
+      for (final f in list) {
+        final slot = stars.putIfAbsent(f.id, () {
+          order.add(f.id);
+          return [0, 0, 0];
+        });
+        slot[subject] += f.star;
+      }
+    }
+
+    accumulate(factors.self, 0);
+    accumulate(factors.parent1, 1);
+    accumulate(factors.parent2, 2);
+    return [
+      for (final id in order)
+        {
+          'id': id,
+          'name': _label(labels, LabelKeys.factor, id),
+          'tags': _factorTags(id),
+          'selfStar': stars[id]![0],
+          'parent1Star': stars[id]![1],
+          'parent2Star': stars[id]![2],
+          'totalStar': stars[id]!.fold<int>(0, (a, b) => a + b),
+        },
+    ];
+  }
+
+  List<Map<String, dynamic>> _races(List<Race> races) => [
+    for (final e in races)
+      {
+        'title': _coded(e.title, _label(labels, 'race_title.name', e.title)),
+        'place': e.place,
+        'position': e.position,
+        'won': e.won,
+        'ground': _coded(e.ground, _label(labels, 'race_place.ground', e.ground)),
+        'distance': _distance(e.distance),
+        'strategy': _coded(e.strategy, _label(labels, LabelKeys.raceStrategy, e.strategy)),
+        'weather': _coded(e.weather, _label(labels, 'race_weather.name', e.weather)),
+      },
+  ];
+
+  List<Map<String, dynamic>> _supportCards(List<SupportCard> cards) => [
+    for (final c in cards)
+      {
+        'id': c.id,
+        'rank': _coded(c.rank, c.rank < _supportCardRanks.length ? _supportCardRanks[c.rank] : c.rank.toString()),
+        'level': c.level,
+      },
+  ];
+
+  Map<String, dynamic> _metadata(CharaDetailRecord record) {
+    final typeIndex = RecordType.values.indexOf(record.metadata.recordType ?? RecordType.standard);
+    return {
+      'recordType': _coded(typeIndex, _label(labels, LabelKeys.recordType, typeIndex)),
+      'strategy': _coded(record.metadata.strategy, _label(labels, LabelKeys.raceStrategy, record.metadata.strategy)),
+      'isFriend': record.isFriend,
+    };
+  }
+
+  Map<String, dynamic> enrich(CharaDetailRecord record) {
+    final status = record.status;
+    return {
+      'id': record.id,
+      'evaluationValue': record.evaluationValue,
+      'fans': record.fans,
+      'trainedDate': record.trainedDate,
+      'ratings': ratingsByRecord[record.id] ?? const <String, double>{},
+      'status': {
+        'speed': status.speed,
+        'stamina': status.stamina,
+        'power': status.power,
+        'guts': status.guts,
+        'intelligence': status.intelligence,
+      },
+      'aptitudes': _aptitudes(record.aptitudes),
+      'skills': _skills(record.skills),
+      'factors': _factors(record.factors),
+      'factorGroups': _factorGroups(record.factors),
+      'races': _races(record.races),
+      'supportCards': _supportCards(record.supportCards),
+      'scenario': {
+        'id': record.scenario.id,
+        'name': _label(labels, LabelKeys.campaignScenario, record.scenario.id).split('\n').first,
+      },
+      'metadata': _metadata(record),
+    };
+  }
+}
+
+/// Support-card rarity labels (ascending). The recognizer emits an index but the
+/// repository carries no label source, so this fixed map provides `.name` while
+/// `.code` exposes the raw, order-stable index.
+const _supportCardRanks = ['R', 'SR', 'SSR'];
+
+final _enricherProvider = Provider<_Enricher>((ref) {
+  final labels = ref.watch(labelMapProvider);
+  final skillInfo = {for (final s in ref.watch(skillInfoProvider)) s.sid: s};
+  final factorInfo = {for (final f in ref.watch(factorInfoProvider)) f.sid: f};
+  final ratingsByRecord = <String, Map<String, double>>{};
+  for (final storage in ref.watch(charaDetailRecordRatingStorageDataProvider)) {
+    ref.watch(charaDetailRecordRatingProvider(storage.key)).data.forEach((recordId, value) {
+      (ratingsByRecord[recordId] ??= {})[storage.key] = value;
+    });
+  }
+  return _Enricher(labels, skillInfo, factorInfo, ratingsByRecord);
+});
+
+final _recordIndexProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
+  return {for (final r in ref.watch(charaDetailRecordStorageProvider)) r.id: r};
+});
+
+/// The enriched plain Map for one record, cached and shared across script
+/// columns. Only built when a [ScriptColumnSpec] reads it, so non-script users
+/// pay nothing.
+final enrichedRecordProvider = Provider.family<Map<String, dynamic>, String>((ref, recordId) {
+  final record = ref.watch(_recordIndexProvider)[recordId];
+  if (record == null) return const <String, dynamic>{};
+  return ref.watch(_enricherProvider).enrich(record);
+});
+
+// --- Compilation ------------------------------------------------------------
+
+/// A compiled user script, or the compile error that prevented it.
+class CompiledScript {
+  final Runtime? runtime;
+  final String? error;
+
+  CompiledScript._(this.runtime, this.error);
+
+  static CompiledScript compile(String source) {
+    try {
+      final compiler = Compiler()
+        ..addPlugin(FacadePlugin())
+        ..entrypoints.add(_scriptLib);
+      final program = compiler.compile({
+        'script': {'script.dart': "import 'package:script/facade.dart';\n$source"},
+      });
+      final runtime = Runtime.ofProgram(program)..addPlugin(FacadePlugin());
+      return CompiledScript._(runtime, null);
+    } catch (e) {
+      return CompiledScript._(null, e.toString());
+    }
+  }
+}
+
+/// Compiles a script source once and caches it, keyed by the source text.
+/// autoDispose so editing in the dialog does not pile up programs.
+final compiledScriptProvider = Provider.autoDispose.family<CompiledScript, String>((ref, source) {
+  return CompiledScript.compile(source);
+});
+
+// --- Cell result / data -----------------------------------------------------
+
+/// The per-record outcome of running filter + display, computed once in
+/// [ScriptColumnSpec.parse] and shared by evaluate / plutoCell / plutoColumn.
+class ScriptCellResult {
+  final bool visible;
+  final String display;
+  final Comparable? sortValue;
+  final String? color;
+  final String? background;
+  final String? icon;
+  final String? iconColor;
+  final String? error;
+
+  const ScriptCellResult({
+    required this.visible,
+    required this.display,
+    this.sortValue,
+    this.color,
+    this.background,
+    this.icon,
+    this.iconColor,
+    this.error,
+  });
+
+  /// Normalizes an arbitrary display-script return value into a result.
+  factory ScriptCellResult.fromDisplay(Object? value) {
+    if (value is Map) {
+      // A `Cell(...)` — the wrapped {display, sort, color, background, icon, iconColor}.
+      return ScriptCellResult(
+        visible: true,
+        display: (value['display'] ?? '').toString(),
+        sortValue: value['sort'] is Comparable ? value['sort'] as Comparable : null,
+        color: value['color'] as String?,
+        background: value['background'] as String?,
+        icon: value['icon'] as String?,
+        iconColor: value['iconColor'] as String?,
+      );
+    }
+    if (value is num) return ScriptCellResult(visible: true, display: value.toString(), sortValue: value);
+    if (value is bool) return ScriptCellResult(visible: true, display: value.toString());
+    if (value is List) {
+      return ScriptCellResult(visible: true, display: value.map((e) => '$e').join(', '));
+    }
+    if (value == null) return const ScriptCellResult(visible: true, display: '');
+    return ScriptCellResult(visible: true, display: value.toString());
+  }
+}
+
+class ScriptCellData implements CellData {
+  final ScriptCellResult result;
+
+  ScriptCellData(this.result);
+
+  @override
+  String get csv => result.display;
+
+  @override
+  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+}
+
+// --- Color / icon resolution (renderer side) --------------------------------
+
+Color? _resolveColor(String? source) {
+  final argb = resolveColorArgb(source);
+  return argb == null ? null : Color(argb);
+}
+
+const Map<String, IconData> _iconMap = {
+  'star': Icons.star,
+  'star_border': Icons.star_border,
+  'check': Icons.check,
+  'check_circle': Icons.check_circle,
+  'close': Icons.close,
+  'cancel': Icons.cancel,
+  'warning': Icons.warning,
+  'error': Icons.error,
+  'info': Icons.info,
+  'flag': Icons.flag,
+  'bolt': Icons.bolt,
+  'favorite': Icons.favorite,
+  'circle': Icons.circle,
+  'square': Icons.square,
+  'arrow_upward': Icons.arrow_upward,
+  'arrow_downward': Icons.arrow_downward,
+  'trending_up': Icons.trending_up,
+  'trending_down': Icons.trending_down,
+  'lock': Icons.lock,
+  'verified': Icons.verified,
+};
+
+// --- Spec -------------------------------------------------------------------
+
+@MappableClass(discriminatorValue: 'ScriptColumnSpec')
+class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpecMappable {
+  @override
+  final String id;
+
+  @override
+  final String title;
+
+  /// The single source holding `filter`, `display`, and any shared helpers.
+  final String source;
+
+  /// Facade API contract version this script was written against.
+  final int apiVersion;
+
+  // Whether every visible row carried a numeric sort key (set during parse).
+  // Not a constructor field, so dart_mappable never serializes it.
+  bool _numericSort = false;
+
+  ScriptColumnSpec({required this.id, required this.title, required this.source, this.apiVersion = scriptApiVersion});
+
+  ScriptColumnSpec copyWith({String? id, String? title, String? source, int? apiVersion}) {
+    return ScriptColumnSpec(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      source: source ?? this.source,
+      apiVersion: apiVersion ?? this.apiVersion,
+    );
+  }
+
+  @override
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
+
+  @override
+  List<ScriptCellResult> parse(RefBase ref, List<CharaDetailRecord> records) {
+    final compiled = ref.read(compiledScriptProvider(source));
+    if (compiled.error != null) {
+      _numericSort = false;
+      return [for (final _ in records) ScriptCellResult(visible: true, display: '', error: compiled.error)];
+    }
+    final runtime = compiled.runtime!;
+    final results = records.map((record) => _run(ref, runtime, record)).toList();
+    _numericSort =
+        results.any((r) => r.visible && r.sortValue is num) &&
+        results.where((r) => r.visible).every((r) => r.sortValue is num);
+    return results;
+  }
+
+  ScriptCellResult _run(RefBase ref, Runtime runtime, CharaDetailRecord record) {
+    try {
+      final map = ref.read(enrichedRecordProvider(record.id));
+      final visible = _unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
+      if (!visible) return const ScriptCellResult(visible: false, display: '');
+      final display = _unwrap(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
+      final normalized = ScriptCellResult.fromDisplay(display);
+      return normalized;
+    } catch (e) {
+      return ScriptCellResult(visible: true, display: '', error: e.toString());
+    }
+  }
+
+  static Object? _unwrap(Object? result) => result is $Value ? result.$value : result;
+
+  @override
+  List<bool> evaluate(RefBase ref, List<ScriptCellResult> values) {
+    return values.map((e) => e.visible).toList();
+  }
+
+  @override
+  TrinaCell plutoCell(RefBase ref, ScriptCellResult value) {
+    final cellValue = value.error != null
+        ? '⚠'
+        : (_numericSort && value.sortValue is num ? value.sortValue : value.display);
+    return TrinaCell(value: cellValue)..setUserData(ScriptCellData(value));
+  }
+
+  @override
+  TrinaColumn plutoColumn(RefBase ref) {
+    return TrinaColumn(
+      title: title,
+      field: id,
+      type: _numericSort ? TrinaColumnType.number() : TrinaColumnType.text(),
+      textAlign: _numericSort ? TrinaColumnTextAlign.right : TrinaColumnTextAlign.left,
+      enableContextMenu: false,
+      enableDropToResize: false,
+      enableColumnDrag: false,
+      enableEditingMode: false,
+      renderer: (context) => _ScriptCell(result: context.cell.getUserData<ScriptCellData>()!.result),
+    )..setUserData(this);
+  }
+
+  @override
+  String tooltip(RefBase ref) => title;
+
+  @override
+  Widget label() => Text(title);
+
+  @override
+  Widget selector(ChangeNotifier onDecided) => ScriptColumnSelector(specId: id, onDecided: onDecided);
+}
+
+class _ScriptCell extends StatelessWidget {
+  final ScriptCellResult result;
+
+  const _ScriptCell({required this.result});
+
+  @override
+  Widget build(BuildContext context) {
+    if (result.error != null) {
+      return Tooltip(
+        message: result.error!,
+        child: const Icon(Icons.error_outline, size: 18, color: Colors.orange),
+      );
+    }
+    final iconData = result.icon == null ? null : _iconMap[result.icon!];
+    final text = Text(
+      result.display,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: _resolveColor(result.color)),
+    );
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (iconData != null) ...[
+          Icon(iconData, size: 16, color: _resolveColor(result.iconColor)),
+          const SizedBox(width: 4),
+        ],
+        Flexible(child: text),
+      ],
+    );
+    final background = _resolveColor(result.background);
+    if (background == null) return row;
+    return Container(
+      color: background,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      alignment: Alignment.centerLeft,
+      child: row,
+    );
+  }
+}
+
+// --- Preview (separate isolate + timeout) -----------------------------------
+
+/// Number of leading records the preview runs against.
+const _previewSampleSize = 20;
+
+/// Hard cap on a preview run; exceeding it rejects the save (infinite loops,
+/// pathologically heavy scripts).
+const _previewTimeout = Duration(seconds: 3);
+
+/// Estimated full-grid cost above which the user is warned (soft) before saving.
+const _costWarnMicros = 1500000; // ~1.5s across all records.
+
+class _PreviewRequest {
+  final SendPort port;
+  final String source;
+  final List<Map<String, dynamic>> records;
+
+  _PreviewRequest(this.port, this.source, this.records);
+}
+
+class ScriptPreviewRow {
+  final bool visible;
+  final String display;
+  final String? error;
+
+  ScriptPreviewRow(this.visible, this.display, this.error);
+}
+
+class ScriptPreviewResult {
+  final List<ScriptPreviewRow> rows;
+  final double microsPerRecord;
+  final String? compileError;
+  final bool timedOut;
+
+  ScriptPreviewResult({this.rows = const [], this.microsPerRecord = 0, this.compileError, this.timedOut = false});
+
+  bool get ok => compileError == null && !timedOut && rows.every((r) => r.error == null);
+}
+
+/// Isolate entry: recompiles the (already main-side-validated) source and runs
+/// filter + display over the sampled records, timing the whole pass. Runs in a
+/// killable isolate so an infinite loop can be aborted by the caller's timeout.
+void _previewEntry(_PreviewRequest request) {
+  final compiled = CompiledScript.compile(request.source);
+  if (compiled.error != null) {
+    request.port.send(ScriptPreviewResult(compileError: compiled.error));
+    return;
+  }
+  final runtime = compiled.runtime!;
+  final rows = <ScriptPreviewRow>[];
+  final stopwatch = Stopwatch()..start();
+  for (final map in request.records) {
+    try {
+      final visible = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
+      var display = '';
+      if (visible) {
+        final value = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
+        display = ScriptCellResult.fromDisplay(value).display;
+      }
+      rows.add(ScriptPreviewRow(visible, display, null));
+    } catch (e) {
+      rows.add(ScriptPreviewRow(true, '', e.toString()));
+    }
+  }
+  stopwatch.stop();
+  final micros = request.records.isEmpty ? 0.0 : stopwatch.elapsedMicroseconds / request.records.length;
+  request.port.send(ScriptPreviewResult(rows: rows, microsPerRecord: micros));
+}
+
+Future<ScriptPreviewResult> runScriptPreview(String source, List<Map<String, dynamic>> records) async {
+  final receivePort = ReceivePort();
+  final isolate = await Isolate.spawn(_previewEntry, _PreviewRequest(receivePort.sendPort, source, records));
+  try {
+    final result = await receivePort.first.timeout(_previewTimeout);
+    return result as ScriptPreviewResult;
+  } on TimeoutException {
+    isolate.kill(priority: Isolate.immediate);
+    return ScriptPreviewResult(timedOut: true);
+  } finally {
+    receivePort.close();
+  }
+}
+
+// --- Selector ---------------------------------------------------------------
+
+final _clonedSpecProvider = SpecProviderAccessor<ScriptColumnSpec>();
+
+class ScriptColumnSelector extends ConsumerStatefulWidget {
+  final String specId;
+  final ChangeNotifier onDecided;
+
+  const ScriptColumnSelector({super.key, required this.specId, required this.onDecided});
+
+  @override
+  ConsumerState<ScriptColumnSelector> createState() => _ScriptColumnSelectorState();
+}
+
+class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
+  late String title;
+  late final TextEditingController _codeController;
+
+  // The last source whose preview succeeded. Only this is committed on OK, so a
+  // script that fails to compile / times out / throws is never saved (the only
+  // guard against an infinite loop freezing the synchronous grid build).
+  late String _validatedSource;
+
+  ScriptPreviewResult? _result;
+  bool _running = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final spec = _clonedSpecProvider.read(ref, widget.specId);
+    title = spec.title;
+    _codeController = TextEditingController(text: spec.source);
+    _validatedSource = spec.source;
+    widget.onDecided.addListener(() {
+      _clonedSpecProvider.update(ref, widget.specId, (spec) => spec.copyWith(title: title, source: _validatedSource));
+    });
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _evaluate() async {
+    setState(() => _running = true);
+    final source = _codeController.text;
+    // Compile on the main isolate first: compilation always terminates, so it is
+    // safe here and surfaces syntax errors without spawning an isolate.
+    final compiled = CompiledScript.compile(source);
+    if (compiled.error != null) {
+      setState(() {
+        _running = false;
+        _result = ScriptPreviewResult(compileError: compiled.error);
+      });
+      return;
+    }
+    final records = ref
+        .read(charaDetailRecordStorageProvider)
+        .take(_previewSampleSize)
+        .map((r) => ref.read(enrichedRecordProvider(r.id)))
+        .toList();
+    final result = await runScriptPreview(source, records);
+    if (!mounted) return;
+    setState(() {
+      _running = false;
+      _result = result;
+      if (result.ok) _validatedSource = source;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        FormGroup(
+          title: Text("$tr_script.notation.label".tr()),
+          description: Text("$tr_script.notation.description".tr()),
+          children: [
+            FormLine(
+              title: Text("$tr_script.notation.title.label".tr()),
+              children: [DenseTextField(initialText: title, onChanged: (value) => title = value)],
+            ),
+          ],
+        ),
+        const SizedBox(height: 32),
+        FormGroup(
+          title: Text("$tr_script.code.label".tr()),
+          description: Text("$tr_script.code.description".tr()),
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: TextField(
+                controller: _codeController,
+                maxLines: null,
+                minLines: 12,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                decoration: const InputDecoration(border: OutlineInputBorder()),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 32),
+        FormGroup(
+          title: Text("$tr_script.preview.label".tr()),
+          description: Text("$tr_script.preview.description".tr()),
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: FilledButton.icon(
+                  onPressed: _running ? null : _evaluate,
+                  icon: _running
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.play_arrow),
+                  label: Text("$tr_script.preview.button".tr()),
+                ),
+              ),
+            ),
+            if (_result != null)
+              _PreviewPanel(result: _result!, recordCount: ref.read(charaDetailRecordStorageProvider).length),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _PreviewPanel extends StatelessWidget {
+  final ScriptPreviewResult result;
+  final int recordCount;
+
+  const _PreviewPanel({required this.result, required this.recordCount});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (result.compileError != null) {
+      return _message(theme, "$tr_script.preview.compile_error".tr(), result.compileError!, theme.colorScheme.error);
+    }
+    if (result.timedOut) {
+      return _message(theme, "$tr_script.preview.timeout".tr(), '', theme.colorScheme.error);
+    }
+    final firstError = result.rows
+        .firstWhere((r) => r.error != null, orElse: () => ScriptPreviewRow(true, '', null))
+        .error;
+    final visible = result.rows.where((r) => r.visible).length;
+    final estTotal = (result.microsPerRecord * recordCount).round();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 16,
+            children: [
+              Text(
+                "$tr_script.preview.average_time".tr(namedArgs: {"time": result.microsPerRecord.toStringAsFixed(0)}),
+              ),
+              Text(
+                "$tr_script.preview.visible_count".tr(
+                  namedArgs: {"visible": "$visible", "total": "${result.rows.length}"},
+                ),
+              ),
+            ],
+          ),
+          if (estTotal > _costWarnMicros)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                "$tr_script.preview.cost_warning".tr(
+                  namedArgs: {"count": "$recordCount", "total": "${(estTotal / 1000).round()}ms"},
+                ),
+                style: TextStyle(color: theme.colorScheme.tertiary),
+              ),
+            ),
+          if (firstError != null)
+            _message(theme, "$tr_script.preview.runtime_error".tr(), firstError, theme.colorScheme.error),
+          if (result.ok)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text("$tr_script.preview.ok".tr(), style: TextStyle(color: theme.colorScheme.primary)),
+            ),
+          const SizedBox(height: 8),
+          for (final row in result.rows.take(8))
+            Text(
+              row.error != null ? '⚠ ${row.error}' : (row.visible ? row.display : '—'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _message(ThemeData theme, String title, String body, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          ),
+          if (body.isNotEmpty)
+            Text(
+              body,
+              style: theme.textTheme.bodySmall?.copyWith(color: color, fontFamily: 'monospace'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Builder ----------------------------------------------------------------
+
+class ScriptColumnBuilder extends ColumnBuilder {
+  @override
+  final String title;
+
+  @override
+  final ColumnCategory category;
+
+  @override
+  final ColumnBuilderType type;
+
+  ScriptColumnBuilder({required this.title, required this.category, this.type = ColumnBuilderType.normal});
+
+  @override
+  ScriptColumnSpec build(RefBase ref) {
+    return ScriptColumnSpec(
+      id: const Uuid().v4(),
+      title: title,
+      source:
+          "bool filter(CharaRecord r) {\n  return true;\n}\n\ndynamic display(CharaRecord r) {\n  return r.status.speed;\n}\n",
+    );
+  }
+}

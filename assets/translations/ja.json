@@ -158,7 +158,8 @@
                 "family": "継承ウマ",
                 "campaign": "戦績",
                 "race": "出走履歴",
-                "metadata": "メタデータ"
+                "metadata": "メタデータ",
+                "script": "スクリプト"
             },
             "column_predicate": {
                 "broken": {
@@ -492,6 +493,38 @@
                             "button": "長押しで削除"
                         }
                     }
+                },
+                "script": {
+                    "notation": {
+                        "label": "表記",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "タイトル"
+                        }
+                    },
+                    "code": {
+                        "label": "コード",
+                        "description": "filter（行の表示可否）と display（セルの内容）の2関数を書きます。共有ヘルパも同じ欄に書けます。",
+                        "hint": "bool filter(CharaRecord r) { ... }\ndynamic display(CharaRecord r) { ... }"
+                    },
+                    "preview": {
+                        "label": "プレビュー",
+                        "description": "先頭の数件で実際に実行し、結果と平均実行時間を確認します。",
+                        "button": "評価",
+                        "running": "実行中…",
+                        "average_time": "平均 {time} µs/件",
+                        "visible_count": "表示 {visible}/{total} 件",
+                        "compile_error": "コンパイルエラー",
+                        "runtime_error": "実行時エラー",
+                        "timeout": "処理が重すぎます（タイムアウト）。保存できません。",
+                        "cost_warning": "全 {count} 件では約 {total} 推定。グリッドが重くなる可能性があります。",
+                        "ok": "保存できます。"
+                    },
+                    "subject": {
+                        "self": "本人",
+                        "parent1": "親1",
+                        "parent2": "親2"
+                    }
                 }
             },
             "columns": {
@@ -644,6 +677,9 @@
                 },
                 "captured_date": {
                     "title": "キャプチャ日"
+                },
+                "script": {
+                    "title": "スクリプト"
                 }
             },
             "context_menu": {

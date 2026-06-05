@@ -54,16 +54,16 @@
 
 ## 3. 2つの関数：`filter` と `display`
 
-コード欄には、必ず次の 2 つの関数を書きます。**関数名（`filter`/`display`）と引数の型（`Record`）は固定**です（引数名は自由）。
+コード欄には、必ず次の 2 つの関数を書きます。**関数名（`filter`/`display`）と引数の型（`CharaRecord`）は固定**です（引数名は自由）。
 
 ```dart
 // 行を表示するなら true、隠すなら false を返す
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.status.speed >= 1000;
 }
 
 // セルに表示する内容を返す（文字列・数値・Cell など）
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return r.status.speed;
 }
 ```
@@ -71,13 +71,13 @@ dynamic display(Record r) {
 - **絞り込みをしたくない**場合も `filter` は必要です。下のように `true` を返せば全行が表示されます。
 
   ```dart
-  bool filter(Record r) {
+  bool filter(CharaRecord r) {
     return true;
   }
   ```
 
 - このマニュアルでは読みやすさのため、関数の中身を `{ return ...; }` の形で統一して書きます。
-  これは表記を揃えるためのもので、あなたが `bool filter(Record r) => r.status.speed >= 1000;` のような
+  これは表記を揃えるためのもので、あなたが `bool filter(CharaRecord r) => r.status.speed >= 1000;` のような
   アロー記法（`=>`）で書いても構いません。お好みでどうぞ。
 
 ### 共有ヘルパ
@@ -86,15 +86,15 @@ dynamic display(Record r) {
 
 ```dart
 // 本人＋親のスピード因子の星合計（filter と display の両方から使う）
-num speedStars(Record r) {
+num speedStars(CharaRecord r) {
   return r.factorGroups.where((g) => g.name == "スピード").map((g) => g.totalStar).sum;
 }
 
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return speedStars(r) >= 4;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return "スピード因子 ${speedStars(r).toInt()}★";
 }
 ```
@@ -106,11 +106,11 @@ dynamic display(Record r) {
 「スピードが 1000 以上の行だけを表示し、スピード値をセルに出す」だけなら：
 
 ```dart
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.status.speed >= 1000;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return r.status.speed;
 }
 ```
@@ -363,23 +363,23 @@ r.skills.where((s) => (s.level ?? 0) > 1)
 
 ```dart
 // 単純なしきい値
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.status.speed >= 1100;
 }
 
 // 複数条件（かつ／または）
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.status.speed >= 1000 &&
       (r.status.stamina >= 600 || r.status.power >= 900);
 }
 
 // スキル名で
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.skills.any((s) => s.name.contains("スピード"));
 }
 
 // 絞り込みをしない（全行表示）
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return true;
 }
 ```
@@ -399,15 +399,15 @@ bool filter(Record r) {
 | `null` | 空欄 | なし |
 
 ```dart
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return r.status.speed;                          // 数値（数値順ソート）
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return "${r.status.speed}/${r.status.stamina}"; // 文字列
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return r.skills.map((s) => s.name);             // 一覧 → 「, 」連結
 }
 ```
@@ -435,22 +435,27 @@ Cell(表示文字列, {sort: 並べ替えキー, color: 文字色, background: �
 
 ```dart
 // 表示は文字・並びは星合計（数値）
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final n = r.factorGroups.where((g) => g.name == "スピード").map((g) => g.totalStar).sum.toInt();
   return Cell("スピード ${n}★", sort: n);
 }
 
 // 条件で色を変える＋アイコン
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final s = r.status.speed;
+  final high = s >= 1200;                 // 条件は先に変数へ（理由は 16 章）
   return Cell("$s",
       sort: s,
-      color: s >= 1200 ? "white" : null,
-      background: s >= 1200 ? "green" : null,
-      icon: s >= 1200 ? "star" : null,
+      color: when(high, "white"),         // high なら "white"、そうでなければ既定
+      background: when(high, "green"),
+      icon: when(high, "star"),
       iconColor: "amber");
 }
 ```
+
+> **`when(条件, 値)`** は「`条件` が成り立てば `値`、そうでなければ既定（`null`）」を表す関数です。
+> 色・アイコン・`sort` を**条件で出し分けたいときは必ず `when(...)` を使ってください**。
+> `条件 ? 値 : null` という書き方は内部の制約でうまく動かないことがあります（[16 章](#16-使える書き方避ける書き方)）。
 
 ---
 
@@ -498,7 +503,7 @@ icon: "check_circle", iconColor: "green"
 
 ```dart
 // スピードの高さを背景のヒートマップに
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final s = r.status.speed;
   return Cell("$s", sort: s, background: heat(s, min: 600, max: 1800));
 }
@@ -507,8 +512,9 @@ dynamic display(Record r) {
 background: lerpColor("blue", "red", 0.3)
 ```
 
-> 段階的に色を分けたいだけなら、関数を使わず三項演算子でも書けます：
-> `color: v >= 1500 ? "green" : "red"`
+> 段階的に色を分けたいだけなら、関数を使わず三項演算子でも書けます。ただし**両方の分岐が色（文字列）**のときだけです：
+> `color: v >= 1500 ? "green" : "red"`（OK）。
+> 片方を「既定（色なし）」にしたいときは `null` ではなく **`when(...)`** を使ってください（[16 章](#16-使える書き方避ける書き方)）。
 
 ---
 
@@ -524,7 +530,7 @@ background: lerpColor("blue", "red", 0.3)
 
 ```dart
 // 表示は "A"〜"G" だが、並びは内部ランク（数値）で
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final c = r.aptitudes.distance.long;   // $Coded
   return Cell(c.name, sort: c.code);     // 表示=ランク文字、並び=ランクの大きさ
 }
@@ -541,6 +547,9 @@ dynamic display(Record r) {
 - **保存できない条件**：コンパイルエラーがある／プレビューで例外が出る／処理が**重すぎる**
   （例：終わらないループ。`while (true) { }` のような無限ループはタイムアウトで弾かれます）。
   また、1 行あたりの実行時間 × 件数が大きすぎる場合は、表全体が遅くなるため警告されます。
+- **コードを編集したら、保存前に必ず「評価」してください。** 保存されるのは**最後に評価が通ったコード**です。
+  編集後に評価せず保存すると、その編集は反映されません（無限ループなどの危険なコードが保存されるのを防ぐ仕組みです）。
+  評価が通ると「保存できます」と表示されます。
 
 ---
 
@@ -550,8 +559,9 @@ dynamic display(Record r) {
 
 - 変数：`final x = ...;`
 - 演算子：`+ - * / %`、比較 `== != < <= > >=`、論理 `&& || !`、`?? ?. !`
-- 三項演算子：`条件 ? A : B`
+- 三項演算子：`条件 ? A : B`（**両方の分岐に値があるとき**。片方を「無し」にしたいときは `when(...)`）
 - 文字列：補間 `"…${式}…"`、`.contains("…")`、`==`
+- `when(条件, 値)`：`条件` が真なら `値`、偽なら既定（`null`）。色・アイコン・`sort` の条件出し分けに使う
 - ヘルパ関数・定数を同じ欄に定義して `filter`/`display` から呼ぶ
 - メソッドのチェーン（`.where(...).map(...).sum` など）
 - アロー記法 `=>`（`where((e) => ...)` のクロージャや、短い関数の定義に使えます）
@@ -563,6 +573,10 @@ dynamic display(Record r) {
 - **`null` かもしれない値をそのまま比較する** → `!= null` で確かめるか `?? 既定値` を使う（[7 章](#7-null値が無いかもしれない項目の扱い)）
 - **`!`（否定）を数値や `null` 許容値に付ける** → 比較（`== / >=` など）で `bool` にしてから使う
 - **条件をいったん変数に入れて使い回す**（関数を値として持ち回る）→ 条件は式の中に直接書く（`&& || !` で合成）
+- **`条件 ? 値 : null`（片方が `null` の三項演算子）** → 代わりに `when(条件, 値)` を使う
+- **`Cell(...)` の中で、同じ数値変数を「その場の比較」と引数の両方に書く**
+  （例 `Cell("$n", sort: n, color: when(n >= 6, "white"))`）→ 比較は**先に変数へ**：
+  `final hot = n >= 6;` としてから `Cell("$n", sort: n, color: when(hot, "white"))`
 
 ---
 
@@ -573,11 +587,11 @@ dynamic display(Record r) {
 ### スピード上位だけを赤〜緑のヒートマップで
 
 ```dart
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.status.speed >= 1000;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final s = r.status.speed;
   return Cell("$s", sort: s, background: heat(s, min: 1000, max: 1800));
 }
@@ -586,15 +600,15 @@ dynamic display(Record r) {
 ### スピード因子（本人＋親）が合計 4★以上
 
 ```dart
-num speedStars(Record r) {
+num speedStars(CharaRecord r) {
   return r.factorGroups.where((g) => g.name == "スピード").map((g) => g.totalStar).sum;
 }
 
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return speedStars(r) >= 4;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return Cell("${speedStars(r).toInt()}★", sort: speedStars(r));
 }
 ```
@@ -602,12 +616,12 @@ dynamic display(Record r) {
 ### 逃げスキルを持っていて、長距離適性が A
 
 ```dart
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return r.skills.any((s) => s.hasTag("nige")) &&
       r.aptitudes.distance.long.name == "A";
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return r.skills.where((s) => s.hasTag("nige")).map((s) => s.name).join(", ");
 }
 ```
@@ -615,11 +629,11 @@ dynamic display(Record r) {
 ### 芝のレースで勝った回数
 
 ```dart
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return true;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final n = r.races.where((e) => e.ground.name == "芝" && e.won).length;
   return Cell("$n 勝", sort: n);
 }
@@ -628,27 +642,28 @@ dynamic display(Record r) {
 ### レーティングが 4.0 以上の行だけ、値を色付きで
 
 ```dart
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return (r.ratings.get("main") ?? 0.0) >= 4.0;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   final v = r.ratings.get("main") ?? 0.0;
+  final high = v >= 4.5;               // 条件は先に変数へ（16 章）
   return Cell(v.toStringAsFixed(1),
       sort: v,
-      color: v >= 4.5 ? "white" : null,
-      background: v >= 4.5 ? "green" : null);
+      color: when(high, "white"),
+      background: when(high, "green"));
 }
 ```
 
 ### 所持スキルを全部「, 」で並べる
 
 ```dart
-bool filter(Record r) {
+bool filter(CharaRecord r) {
   return true;
 }
 
-dynamic display(Record r) {
+dynamic display(CharaRecord r) {
   return r.skills.map((s) => s.name).join(", ");
 }
 ```
@@ -659,8 +674,8 @@ dynamic display(Record r) {
 
 ```text
 関数（必ず書く。中身は { return ...; } で書く）
-  bool    filter(Record r)     行を表示するなら true
-  dynamic display(Record r)    セルの内容（String / num / Cell / 一覧 / null）
+  bool    filter(CharaRecord r)     行を表示するなら true
+  dynamic display(CharaRecord r)    セルの内容（String / num / Cell / 一覧 / null）
   （ヘルパ関数・定数も同じ欄に定義可。両方から呼べる）
 
 レコード r
@@ -694,4 +709,6 @@ Cell        Cell(文字列, {sort:, color:, background:, icon:, iconColor:})
 アイコン     star check check_circle close warning flag bolt favorite
             arrow_upward arrow_downward trending_up trending_down lock verified …
 カラーマップ heat(値,{min:,max:}) -> 色 ／ lerpColor(色A,色B,t) -> 色
+条件出し分け when(条件, 値) -> 条件が真なら値・偽なら既定（色/アイコン/sort の ? : null の代わり）
+注意        Cell内で同じ数値を「比較」と「引数」に同時使用しない（比較は先に final 変数へ）
 ```
