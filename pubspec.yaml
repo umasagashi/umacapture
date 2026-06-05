@@ -18,12 +18,13 @@ dependencies:
 
   archive: ^4.0.9
   audioplayers: ^6.7.0
-  auto_route: ^11.0.0
+  auto_route: ^10.1.0
+  dart_eval: ^0.8.5
   badges: ^3.2.0
   charset: ^2.0.1
   collection: ^1.16.0
   csv: ^8.0.0
-  dart_mappable: ^4.8.0
+  dart_mappable: 4.6.1
   dio: ^5.9.2
   easy_localization: ^3.0.1
   equatable: ^2.0.5
@@ -66,9 +67,9 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  auto_route_generator: ^10.4.0
+  auto_route_generator: 10.2.5
   build_runner: ^2.2.0
-  dart_mappable_builder: ^4.8.0
+  dart_mappable_builder: 4.6.1
   flutter_lints: ^6.0.0
   flutter_oss_licenses: ^3.2.0
   msix: ^3.6.3
