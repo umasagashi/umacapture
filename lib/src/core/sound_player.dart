@@ -76,8 +76,11 @@ class SoundEffect {
     return SoundEffect._(player);
   }
 
-  void play() {
-    _player.stop();
-    _player.resume();
+  Future<void> play() async {
+    // The player instance is cached and reused, so a previous take may still be playing or already
+    // completed. Await stop() to bring it back to a clean stopped state (position reset to 0) before
+    // resume(), which restarts playback from the beginning on every call.
+    await _player.stop();
+    await _player.resume();
   }
 }

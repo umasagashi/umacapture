@@ -19,8 +19,13 @@ import '/src/gui/toast.dart';
 
 part 'storage.mapper.dart';
 
-StreamController<String> _duplicatedCharaEventController = StreamController();
-final duplicatedCharaEventProvider = StreamProvider<String>((ref) {
+// Monotonic id so each duplicated-chara event yields a distinct StreamProvider value; the sound
+// listener uses ref.listen(), which would otherwise dedupe equal consecutive AsyncData and skip
+// repeated duplicate detections. See _soundEventSequence in platform_controller.dart.
+int _duplicatedCharaEventSequence = 0;
+
+StreamController<int> _duplicatedCharaEventController = StreamController();
+final duplicatedCharaEventProvider = StreamProvider<int>((ref) {
   if (_duplicatedCharaEventController.hasListener) {
     _duplicatedCharaEventController = StreamController();
   }
@@ -143,7 +148,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     final duplicated = records.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
-      _duplicatedCharaEventController.sink.add(record.id);
+      _duplicatedCharaEventController.sink.add(_duplicatedCharaEventSequence++);
       ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
       return;
     }

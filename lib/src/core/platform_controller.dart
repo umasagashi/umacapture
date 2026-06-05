@@ -36,8 +36,14 @@ final capturingFrameSizeProvider = settableNotifierProvider<Size?>(null);
 
 final capturingFrameRateProvider = settableNotifierProvider<double?>(null);
 
-StreamController<String> _errorEventController = StreamController();
-final errorEventProvider = StreamProvider<String>((ref) {
+// Monotonic id so every sound-trigger event yields a distinct StreamProvider value. The sound
+// listeners use ref.listen(), which skips equal consecutive AsyncData; without a changing payload a
+// repeated event (same scroll index, same error message) would be deduplicated and play no sound
+// (e.g. retrying a capture quickly, or opening/closing the same tab repeatedly).
+int _soundEventSequence = 0;
+
+StreamController<int> _errorEventController = StreamController();
+final errorEventProvider = StreamProvider<int>((ref) {
   if (_errorEventController.hasListener) {
     _errorEventController = StreamController();
   }
@@ -279,7 +285,7 @@ class PlatformController {
     final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
     switch (dataType) {
       case 'onError':
-        _errorEventController.sink.add(data['message']);
+        _errorEventController.sink.add(_soundEventSequence++);
         captureState.fail(data['message']);
         break;
       case 'onCaptureStarted':
@@ -293,13 +299,13 @@ class PlatformController {
         _ref.read(capturingFrameRateProvider.notifier).set(null);
         break;
       case 'onScrollReady':
-        _scrollReadyEventController.sink.add(data['index']);
+        _scrollReadyEventController.sink.add(_soundEventSequence++);
         break;
       case 'onScrollUpdated':
         captureState.progress(data['index'], data['progress']);
         break;
       case 'onPageReady':
-        _pageReadyEventController.sink.add(data['index']);
+        _pageReadyEventController.sink.add(_soundEventSequence++);
         captureState.progress(data['index'], 1);
         break;
       case 'onCharaDetailStarted':
