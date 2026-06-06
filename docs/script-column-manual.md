@@ -139,11 +139,16 @@ dynamic display(CharaRecord r) {
 | `r.races` | レースの一覧 | 出走したレース |
 | `r.supportCards` | サポカの一覧 | 編成サポートカード |
 | `r.scenario` | Scenario | シナリオ |
-| `r.ratings` | Ratings | レーティング（[5.8](#58-サポカシナリオレーティング)） |
+| `r.trainee` | $Coded | ウマ娘（`.name` がキャラ名、[5.10](#510-コード化された項目coded--namecode)） |
+| `r.charaRank` | $Coded | キャラランク（`.name` が `"SS"` など。評価値から算出） |
+| `r.family` | Family | 継承の親・祖父母（[5.11](#511-継承の親family)） |
+| `r.ratings` | Ratings | レーティング（[5.8](#58-サポカシナリオレーティングメモ)） |
+| `r.memos` | Memos | メモ（[5.8](#58-サポカシナリオレーティングメモ)） |
 | `r.metadata` | Metadata | 記録の付帯情報 |
 | `r.evaluationValue` | int | 評価値 |
 | `r.fans` | int | ファン数 |
 | `r.trainedDate` | String | 育成日（文字列） |
+| `r.capturedDate` | String | 取得日時（文字列） |
 | `r.id` | String | レコードの内部 ID（通常は使いません） |
 
 ### 5.2 Status（ステータス）
@@ -229,7 +234,7 @@ r.aptitudes.distance.long.code >= 5     // C 以上か（A=7,B=6,C=5,…）
 | `e.strategy` | $Coded | 脚質（`.name` が `"逃げ"`/`"先行"`/`"差し"`/`"追込"`） |
 | `e.weather` | $Coded | 天候（`.name` が `"晴"`/`"曇"`/`"雨"`/`"雪"`） |
 
-### 5.8 サポカ・シナリオ・レーティング
+### 5.8 サポカ・シナリオ・レーティング・メモ
 
 ```dart
 // r.supportCards の各要素
@@ -242,12 +247,15 @@ r.scenario.id     // int（内部 ID）
 r.scenario.name   // String（例 "アオハル杯"）
 ```
 
-レーティングは**キー**で参照します。キーは、レーティング設定で作った各レーティングのキー
-（対応する標準のレーティング列で使っているものと同じ）です。
+レーティングとメモは、どちらも**キー**で参照します。キーは、レーティング設定・メモ列で作った
+各枠のキー（対応する標準のレーティング列／メモ列で使っているものと同じ）です。値が無ければ `null`。
 
 ```dart
 r.ratings.get("main")          // double?（そのキーが無ければ null）
 r.ratings.get("main") ?? 0.0   // 無いとき 0.0 として扱う（推奨）
+
+r.memos.get("main")            // String?（そのキーが無ければ null）
+(r.memos.get("main") ?? "")    // 無いとき空文字として扱う（推奨）
 ```
 
 ### 5.9 Metadata（付帯情報）
@@ -272,6 +280,31 @@ r.aptitudes.distance.long.code >= 5   // 長距離適性が C 以上
 ```
 
 > ラベルの正確な表記は、対応する標準列の表示に合わせてください（上の例は代表値です）。
+
+### 5.11 継承の親（`family`）
+
+`r.family` は継承元（親 2 体）と、その親（祖父母）のツリーです。各人物は `$Coded`
+（[5.10](#510-コード化された項目coded--namecode)）で、`.name` がウマ娘名・`.code` が内部コードです。
+
+| 書き方 | 型 | 説明 |
+|---|---|---|
+| `r.family.parent1` | Parent | 親 1（とその親 2 体） |
+| `r.family.parent2` | Parent | 親 2（とその親 2 体） |
+| `r.family.parent1.self` | $Coded | 親 1 本人（ウマ娘名） |
+| `r.family.parent1.parent1` | $Coded | 親 1 の親（祖父母）|
+| `r.family.parent1.parent2` | $Coded | 親 1 のもう一方の親 |
+| `r.family.parent1.rental` | bool? | 親 1 がレンタル（フレンド）か（不明なら `null`） |
+
+`parent2` も同じ構造です。
+
+```dart
+// 親のどちらかが特定のウマ娘か
+r.family.parent1.self.name == "サイレンススズカ" ||
+    r.family.parent2.self.name == "サイレンススズカ"
+
+// レンタル親を使っているか（null は false 扱い）
+(r.family.parent1.rental ?? false) || (r.family.parent2.rental ?? false)
+```
 
 ---
 
@@ -713,8 +746,10 @@ dynamic display(CharaRecord r) {
 
 レコード r
   r.status / r.aptitudes / r.skills / r.factors / r.factorGroups / r.races
-  r.supportCards / r.scenario / r.ratings / r.metadata
-  r.evaluationValue(int) / r.fans(int) / r.trainedDate(String) / r.id(String)
+  r.supportCards / r.scenario / r.family / r.ratings / r.memos / r.metadata
+  r.trainee($Coded) / r.charaRank($Coded)
+  r.evaluationValue(int) / r.fans(int)
+  r.trainedDate(String) / r.capturedDate(String) / r.id(String)
 
 Status        speed stamina power guts intelligence（int）
 Aptitudes     ground.{turf,dirt} / distance.{short,mile,middle,long}
@@ -725,7 +760,9 @@ FactorGroup   id name totalStar selfStar parent1Star parent2Star hasTag(name)
 Race          title($Coded) place position won(bool) ground/distance/strategy/weather($Coded)
 SupportCard   id rank($Coded) level
 Scenario      id name
+Family        parent1/parent2 -> Parent{ self, parent1, parent2 ($Coded), rental(bool?) }
 Ratings       get(key) -> double?
+Memos         get(key) -> String?
 Metadata      recordType($Coded) strategy($Coded) isFriend(bool)
 $Coded        .name(ラベル) / .code(int、順序あり項目は大小比較可)
 ID と code    すべて umacapture 内部の値（ゲーム内 ID ではない）。順序に意味なし・将来も不変。

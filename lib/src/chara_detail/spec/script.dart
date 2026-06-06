@@ -54,10 +54,44 @@ class _Enricher {
   final Map<int, SkillInfo> skillInfo;
   final Map<int, FactorInfo> factorInfo;
   final Map<String, Map<String, double>> ratingsByRecord;
+  final Map<String, Map<String, String>> memosByRecord;
+  final List<int> charaRankBorder;
+  final List<String> charaCardNames;
 
-  _Enricher(this.labels, this.skillInfo, this.factorInfo, this.ratingsByRecord);
+  _Enricher(
+    this.labels,
+    this.skillInfo,
+    this.factorInfo,
+    this.ratingsByRecord,
+    this.memosByRecord,
+    this.charaRankBorder,
+    this.charaCardNames,
+  );
 
   Map<String, dynamic> _aptitudeRank(int level) => _coded(level + 1, _label(labels, LabelKeys.aptitude, level));
+
+  /// Maps an evaluation value to its rank bucket, mirroring [CharaRankColumnSpec.parse].
+  Map<String, dynamic> _charaRank(int evaluation) {
+    // indexWhere returns -1 when the evaluation exceeds every border (top bucket);
+    // map it to the last rank index so the highest rank stays reachable.
+    final index = charaRankBorder.indexWhere((border) => border > evaluation);
+    final rank = index < 0 ? charaRankBorder.length : index;
+    return _coded(rank, _label(labels, LabelKeys.charaRank, rank));
+  }
+
+  /// A character (trainee or inheritance ancestor) as a coded card index + name.
+  /// `card` directly indexes [charaCardNames], matching [CharacterCardColumnSpec.plutoCell].
+  Map<String, dynamic> _chara(int card) =>
+      _coded(card, card >= 0 && card < charaCardNames.length ? charaCardNames[card] : card.toString());
+
+  Map<String, dynamic> _parent(Parent p) => {
+    'self': _chara(p.self.card),
+    'parent1': _chara(p.parent1.card),
+    'parent2': _chara(p.parent2.card),
+    'rental': p.rental,
+  };
+
+  Map<String, dynamic> _family(Family f) => {'parent1': _parent(f.parent1), 'parent2': _parent(f.parent2)};
 
   Map<String, dynamic> _distance(int meterIndex) {
     final meters = int.tryParse(_label(labels, 'race_place.distance', meterIndex)) ?? 0;
@@ -174,10 +208,15 @@ class _Enricher {
     final status = record.status;
     return {
       'id': record.id,
+      'trainee': _chara(record.trainee.card),
+      'charaRank': _charaRank(record.evaluationValue),
+      'capturedDate': record.metadata.capturedDate,
+      'family': _family(record.family),
       'evaluationValue': record.evaluationValue,
       'fans': record.fans,
       'trainedDate': record.trainedDate,
       'ratings': ratingsByRecord[record.id] ?? const <String, double>{},
+      'memos': memosByRecord[record.id] ?? const <String, String>{},
       'status': {
         'speed': status.speed,
         'stamina': status.stamina,
@@ -215,7 +254,15 @@ final _enricherProvider = Provider<_Enricher>((ref) {
       (ratingsByRecord[recordId] ??= {})[storage.key] = value;
     });
   }
-  return _Enricher(labels, skillInfo, factorInfo, ratingsByRecord);
+  final memosByRecord = <String, Map<String, String>>{};
+  for (final storage in ref.watch(charaDetailRecordMemoStorageDataProvider)) {
+    ref.watch(charaDetailRecordMemoProvider(storage.key)).data.forEach((recordId, value) {
+      (memosByRecord[recordId] ??= {})[storage.key] = value;
+    });
+  }
+  final charaRankBorder = ref.watch(charaRankBorderProvider);
+  final charaCardNames = ref.watch(charaCardInfoProvider).map((e) => e.names.first).toList();
+  return _Enricher(labels, skillInfo, factorInfo, ratingsByRecord, memosByRecord, charaRankBorder, charaCardNames);
 });
 
 final _recordIndexProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
@@ -757,9 +804,11 @@ List<String> _distinctNonEmpty(Iterable<String> names) {
 /// that produces it. Each name list is derived with the SAME transform the
 /// enricher uses (see [_Enricher]), so a copied string equals the script's
 /// `.name` verbatim.
-List<_LookupCategory> _buildLookupCategories(LabelMap labels) {
+List<_LookupCategory> _buildLookupCategories(LabelMap labels, List<String> charaNames) {
   List<String> label(String key) => labels[key] ?? const [];
   return [
+    _LookupCategory('r.trainee.name', 'trainee', _distinctNonEmpty(charaNames)),
+    _LookupCategory('r.charaRank.name', 'chara_rank', _distinctNonEmpty(label(LabelKeys.charaRank))),
     _LookupCategory('r.skills[].name', 'skill', _distinctNonEmpty(label(LabelKeys.skill))),
     _LookupCategory('r.factors[].name', 'factor', _distinctNonEmpty(label(LabelKeys.factor))),
     _LookupCategory(
@@ -837,7 +886,8 @@ class _NameLookupState extends ConsumerState<_NameLookup> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final categories = _buildLookupCategories(ref.watch(labelMapProvider));
+    final charaNames = ref.watch(charaCardInfoProvider).map((e) => e.names.first).toList();
+    final categories = _buildLookupCategories(ref.watch(labelMapProvider), charaNames);
     final category = _categoryIndex == null ? null : categories[_categoryIndex!];
     final query = _query.trim().toLowerCase();
     final matched = category == null

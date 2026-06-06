@@ -55,7 +55,10 @@ const raceType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Race'));
 const supportCardListType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'SupportCardList'));
 const supportCardType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'SupportCard'));
 const scenarioType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Scenario'));
+const familyType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Family'));
+const parentType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Parent'));
 const ratingsType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Ratings'));
+const memosType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Memos'));
 const metadataType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Metadata'));
 const valueListType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'ValueList'));
 const cellType = BridgeTypeRef(BridgeTypeSpec(facadeUri, 'Cell'));
@@ -266,10 +269,15 @@ class $Record extends _MapInstance {
       'supportCards': _getter(supportCardListType),
       'scenario': _getter(scenarioType),
       'ratings': _getter(ratingsType),
+      'memos': _getter(memosType),
       'metadata': _getter(metadataType),
+      'trainee': _getter(codedType),
+      'charaRank': _getter(codedType),
+      'family': _getter(familyType),
       'evaluationValue': _getter(_intT),
       'fans': _getter(_intT),
       'trainedDate': _getter(_stringT),
+      'capturedDate': _getter(_stringT),
       'id': _getter(_stringT),
     },
     wrap: true,
@@ -299,14 +307,24 @@ class $Record extends _MapInstance {
         return $Scenario.wrap($value['scenario'] as Map);
       case 'ratings':
         return $Ratings.wrap($value['ratings'] as Map);
+      case 'memos':
+        return $Memos.wrap($value['memos'] as Map);
       case 'metadata':
         return $Metadata.wrap($value['metadata'] as Map);
+      case 'trainee':
+        return $Coded.wrap($value['trainee'] as Map);
+      case 'charaRank':
+        return $Coded.wrap($value['charaRank'] as Map);
+      case 'family':
+        return $Family.wrap($value['family'] as Map);
       case 'evaluationValue':
         return $int($value['evaluationValue'] as int);
       case 'fans':
         return $int($value['fans'] as int);
       case 'trainedDate':
         return $String($value['trainedDate'] as String);
+      case 'capturedDate':
+        return $String($value['capturedDate'] as String);
       case 'id':
         return $String($value['id'] as String);
     }
@@ -754,6 +772,65 @@ class $Scenario extends _MapInstance {
   }
 }
 
+// --- Family (inheritance tree) -----------------------------------------------
+
+class $Family extends _MapInstance {
+  $Family.wrap(super.$value);
+
+  static final declaration = BridgeClassDef(
+    BridgeClassType(familyType),
+    constructors: const {},
+    getters: {'parent1': _getter(parentType), 'parent2': _getter(parentType)},
+    wrap: true,
+  );
+
+  @override
+  BridgeTypeRef get $typeRef => familyType;
+
+  @override
+  $Value? $getProperty(Runtime rt, String id) {
+    switch (id) {
+      case 'parent1':
+      case 'parent2':
+        return $Parent.wrap($value[id] as Map);
+    }
+    return _fallback(rt, id);
+  }
+}
+
+class $Parent extends _MapInstance {
+  $Parent.wrap(super.$value);
+
+  static final declaration = BridgeClassDef(
+    BridgeClassType(parentType),
+    constructors: const {},
+    getters: {
+      'self': _getter(codedType),
+      'parent1': _getter(codedType),
+      'parent2': _getter(codedType),
+      'rental': _getter(_boolT, nullable: true),
+    },
+    wrap: true,
+  );
+
+  @override
+  BridgeTypeRef get $typeRef => parentType;
+
+  @override
+  $Value? $getProperty(Runtime rt, String id) {
+    switch (id) {
+      case 'self':
+      case 'parent1':
+      case 'parent2':
+        return $Coded.wrap($value[id] as Map);
+      case 'rental':
+        final rental = $value['rental'];
+        return rental == null ? $null() : $bool(rental == true);
+    }
+    return _fallback(rt, id);
+  }
+}
+
 // --- Ratings -----------------------------------------------------------------
 
 class $Ratings extends _MapInstance {
@@ -775,6 +852,33 @@ class $Ratings extends _MapInstance {
       return $Function((rt, t, a) {
         final v = (t!.$value as Map)[a[0]?.$value];
         return v == null ? $null() : $double((v as num).toDouble());
+      });
+    }
+    return _fallback(rt, id);
+  }
+}
+
+// --- Memos -------------------------------------------------------------------
+
+class $Memos extends _MapInstance {
+  $Memos.wrap(super.$value);
+
+  static final declaration = BridgeClassDef(
+    BridgeClassType(memosType),
+    constructors: const {},
+    methods: {'get': _keyMethod(_stringT, nullable: true)},
+    wrap: true,
+  );
+
+  @override
+  BridgeTypeRef get $typeRef => memosType;
+
+  @override
+  $Value? $getProperty(Runtime rt, String id) {
+    if (id == 'get') {
+      return $Function((rt, t, a) {
+        final v = (t!.$value as Map)[a[0]?.$value];
+        return v == null ? $null() : $String(v as String);
       });
     }
     return _fallback(rt, id);
@@ -1119,7 +1223,10 @@ class FacadePlugin implements EvalPlugin {
     $SupportCardList.declaration,
     $SupportCard.declaration,
     $Scenario.declaration,
+    $Family.declaration,
+    $Parent.declaration,
     $Ratings.declaration,
+    $Memos.declaration,
     $Metadata.declaration,
     $ValueList.declaration,
     $Cell.declaration,

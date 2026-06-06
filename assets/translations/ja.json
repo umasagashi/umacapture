@@ -544,6 +544,8 @@
                         "category_hint": "対象を選んでください",
                         "search_hint": "絞り込み",
                         "hints": {
+                            "trainee": "ウマ娘",
+                            "chara_rank": "ランク",
                             "skill": "スキル",
                             "factor": "因子",
                             "subject": "因子の所有者",
