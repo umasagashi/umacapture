@@ -158,7 +158,8 @@
                 "family": "継承ウマ",
                 "campaign": "戦績",
                 "race": "出走履歴",
-                "metadata": "メタデータ"
+                "metadata": "メタデータ",
+                "script": "スクリプト"
             },
             "column_predicate": {
                 "broken": {
@@ -169,7 +170,8 @@
                     "title": "フィルタカスタマイズ",
                     "ok_button": {
                         "label": "OK",
-                        "tooltip": "この設定でテーブルに反映"
+                        "tooltip": "この設定でテーブルに反映",
+                        "disabled_tooltip": "先にチェックを実行してください"
                     },
                     "delete_button": {
                         "label": "列を削除",
@@ -447,6 +449,9 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
+                        },
+                        "tooltip_field": {
+                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -483,6 +488,9 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
+                        },
+                        "tooltip_field": {
+                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -490,6 +498,78 @@
                         "description": "このメモデータを完全に削除します。一度削除すると復元はできません。",
                         "delete": {
                             "button": "長押しで削除"
+                        }
+                    }
+                },
+                "script": {
+                    "notation": {
+                        "label": "表記",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "タイトル"
+                        },
+                        "tooltip_field": {
+                            "label": "説明"
+                        }
+                    },
+                    "tooltip": {
+                        "empty": "説明がありません"
+                    },
+                    "code": {
+                        "label": "コード",
+                        "description": "filter（行の表示可否）と display（セルの内容）の2関数を定義してください。",
+                        "hint": "bool filter(CharaRecord r) { ... }\ndynamic display(CharaRecord r) { ... }"
+                    },
+                    "preview": {
+                        "label": "チェック",
+                        "description": "上記スクリプトの動作を確認します。チェックが通った場合のみ保存できます。",
+                        "button": "チェック",
+                        "running": "実行中…",
+                        "compile_error": "コンパイルエラー",
+                        "runtime_error": "実行時エラー",
+                        "timeout": "処理が重すぎます（タイムアウト）。保存できません。",
+                        "cost_warning": "テーブル全体が重くなる可能性があります。",
+                        "ok": "正常に動作しました。保存できます。",
+                        "no_rows": "表示対象の行がありません",
+                        "estimated_total": "フルサイズ（全 {count} 件）で約 {time}（推定）",
+                        "zero_records_warning": "レコードが0件のためチェックできません。この結果は信頼できません。",
+                        "showing_first": "先頭 {shown} 件を表示中（全 {total} 件）",
+                        "unit": {
+                            "seconds": "秒",
+                            "milliseconds": "ms",
+                            "microseconds": "µs"
+                        }
+                    },
+                    "subject": {
+                        "self": "本人",
+                        "parent1": "親1",
+                        "parent2": "親2"
+                    },
+                    "copy": {
+                        "tooltip": "クリップボードにコピー",
+                        "done": "クリップボードにコピーしました"
+                    },
+                    "name_lookup": {
+                        "label": "名称を調べる",
+                        "description": "スクリプト内で使える名称を検索します。チップをクリックするとクリップボードにコピーします。",
+                        "category_label": "カテゴリ",
+                        "category_hint": "対象を選んでください",
+                        "search_hint": "絞り込み",
+                        "hints": {
+                            "trainee": "ウマ娘",
+                            "chara_rank": "ランク",
+                            "skill": "スキル",
+                            "factor": "因子",
+                            "subject": "因子の所有者",
+                            "scenario": "シナリオ",
+                            "aptitude": "適性ランク",
+                            "race_title": "レース名",
+                            "ground": "バ場",
+                            "distance": "距離区分",
+                            "strategy": "脚質",
+                            "weather": "天候",
+                            "record_type": "レコード種別",
+                            "support_rank": "サポカランク"
                         }
                     }
                 }
@@ -644,6 +724,9 @@
                 },
                 "captured_date": {
                     "title": "キャプチャ日"
+                },
+                "script": {
+                    "title": "スクリプト"
                 }
             },
             "context_menu": {

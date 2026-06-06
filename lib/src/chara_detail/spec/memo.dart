@@ -23,6 +23,10 @@ part 'memo.mapper.dart';
 // ignore: constant_identifier_names
 const tr_memo = "pages.chara_detail.column_predicate.memo";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableClass()
 class RegExpPredicate with RegExpPredicateMappable {
   final RegExp? pattern;
@@ -50,7 +54,7 @@ class MemoCellData implements CellData {
   MemoCellData(this.value, this.onSelected);
 }
 
-@MappableClass(discriminatorValue: 'MemoColumnSpec')
+@MappableClass(discriminatorValue: 'MemoColumnSpec', ignoreNull: true)
 class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   final Parser parser;
   final RegExpPredicate predicate;
@@ -62,6 +66,12 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   @override
   final String title;
 
+  /// User-provided tooltip text shown on the column chip above the filter
+  /// condition. Null/empty means "no tooltip"; omitted from the serialized map
+  /// (via the class-level `ignoreNull`) so pre-existing specs are never flagged
+  /// as broken by [isSpecMapIncomplete].
+  final String? description;
+
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
@@ -71,15 +81,24 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     required this.parser,
     required this.predicate,
     required this.storageKey,
+    this.description,
   });
 
-  MemoColumnSpec copyWith({String? id, String? title, Parser? parser, RegExpPredicate? predicate, String? storageKey}) {
+  MemoColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    RegExpPredicate? predicate,
+    String? storageKey,
+    Object? description = _unset,
+  }) {
     return MemoColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       storageKey: storageKey ?? this.storageKey,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -133,10 +152,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   String tooltip(RefBase ref) {
-    if (predicate.pattern?.pattern.isEmpty ?? true) {
-      return "Any";
-    }
-    return 'Pattern: "${predicate.pattern?.pattern}"';
+    final filter = (predicate.pattern?.pattern.isEmpty ?? true) ? "Any" : 'Pattern: "${predicate.pattern?.pattern}"';
+    final desc = description?.trim() ?? "";
+    return desc.isEmpty ? filter : "$desc\n──────────\n$filter";
   }
 
   @override
@@ -296,14 +314,17 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late String description;
 
   @override
   void initState() {
     super.initState();
-    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    final spec = _clonedSpecProvider.read(ref, widget.specId);
+    title = spec.title;
+    description = spec.description ?? "";
     widget.onDecided.addListener(() {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
-        return spec.copyWith(title: title);
+        return spec.copyWith(title: title, description: description.trim().isEmpty ? null : description.trim());
       });
 
       final memoController = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
@@ -341,6 +362,18 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
               initialText: title,
               onChanged: (value) {
                 title = value;
+              },
+            ),
+          ],
+        ),
+        FormLine(
+          title: Text("$tr_memo.notation.tooltip_field.label".tr()),
+          children: [
+            DenseTextField(
+              initialText: description,
+              allowEmpty: true,
+              onChanged: (value) {
+                description = value;
               },
             ),
           ],

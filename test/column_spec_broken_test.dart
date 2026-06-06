@@ -14,6 +14,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
+import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
 Map<String, dynamic> completeFactorMap(String id) => <String, dynamic>{
@@ -49,6 +50,17 @@ Map<String, dynamic> rangedIntegerMap(String id) => <String, dynamic>{
   'parser': <String, dynamic>{'type': 'FansParser'},
   'predicate': <String, dynamic>{'min': null, 'max': null},
   'cellAction': 'openCampaignPreview',
+};
+
+// A ScriptColumnSpec persisted against an earlier facade contract version.
+Map<String, dynamic> staleScriptMap(String id) => <String, dynamic>{
+  'type': 'ScriptColumnSpec',
+  'id': id,
+  'title': 'script',
+  'source':
+      'bool filter(CharaRecord r) => true;\n'
+      'dynamic display(CharaRecord r) => 1;',
+  'apiVersion': scriptApiVersion - 1,
 };
 
 void seed(List<Map<String, dynamic>> maps) {
@@ -126,6 +138,28 @@ void main() {
     // The reordered legacy entry is still persisted as its original incomplete raw.
     final stored = storedSpecs().firstWhere((e) => (e as Map)['id'] == 'legacy') as Map;
     expect(stored['predicate'], isNot(contains('factorTags')));
+  });
+
+  test('script column on an old contract version loads broken and heals on re-save', () async {
+    seed([staleScriptMap('script')]);
+    final c1 = ProviderContainer.test();
+    await c1.read(currentColumnSpecsLoaderProvider.future);
+
+    // Fully decodable (not a placeholder), but flagged broken via isObsolete.
+    expect(c1.read(currentColumnSpecsProvider).single, isA<ScriptColumnSpec>());
+    expect(c1.read(currentColumnSpecBrokenIdsProvider), contains('script'));
+
+    // Heal: re-save with the current contract version stamped, as the dialog
+    // does once the script passes its check.
+    final n1 = c1.read(currentColumnSpecsLoaderProvider.notifier);
+    final healed = (n1.getById('script')! as ScriptColumnSpec).copyWith(apiVersion: scriptApiVersion);
+    n1.replaceById(healed);
+    expect(c1.read(currentColumnSpecBrokenIdsProvider), isNot(contains('script')));
+
+    // Reload after healing: no longer broken.
+    final c2 = ProviderContainer.test();
+    await c2.read(currentColumnSpecsLoaderProvider.future);
+    expect(c2.read(currentColumnSpecBrokenIdsProvider), isEmpty);
   });
 
   test('unknown type is kept as a placeholder that round-trips and can be removed', () async {

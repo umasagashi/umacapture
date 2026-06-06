@@ -25,7 +25,13 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
   List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
     final charaRankBorder = ref.watch(charaRankBorderProvider);
     return List<int>.from(
-      records.map(parser.parse).map((evaluation) => charaRankBorder.indexWhere((border) => border > evaluation)),
+      records.map(parser.parse).map((evaluation) {
+        // indexWhere returns -1 when the evaluation exceeds every border, i.e. the
+        // top-most bucket. Map it to the last rank index instead so the highest rank
+        // (e.g. LS24) stays reachable for both display and filtering.
+        final index = charaRankBorder.indexWhere((border) => border > evaluation);
+        return index < 0 ? charaRankBorder.length : index;
+      }),
     );
   }
 

@@ -24,7 +24,7 @@ const tr_common = "pages.chara_detail.column_predicate.common";
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
-enum ColumnCategory { trainee, status, aptitude, skill, factor, supportCard, family, campaign, race, metadata }
+enum ColumnCategory { trainee, status, aptitude, skill, factor, supportCard, family, campaign, race, metadata, script }
 
 class LabelKeys {
   static String get aptitude => "aptitude.name";
@@ -157,6 +157,13 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   String get title;
 
   ColumnSpecCellAction get cellAction;
+
+  /// Whether this spec was saved against an incompatible contract version and
+  /// should be surfaced as broken until the user re-validates it.
+  ///
+  /// Checked at load alongside [isSpecMapIncomplete]. Defaults to compatible;
+  /// specs that carry a versioned contract (e.g. the script column) override it.
+  bool get isObsolete => false;
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
@@ -315,7 +322,7 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       final map = d as Map<String, dynamic>;
       try {
         final spec = ColumnSpecMapper.fromMap(map);
-        if (isSpecMapIncomplete(map, spec.toMap())) {
+        if (spec.isObsolete || isSpecMapIncomplete(map, spec.toMap())) {
           _brokenIds.add(spec.id);
           _rawById[spec.id] = map;
           broken = true;
