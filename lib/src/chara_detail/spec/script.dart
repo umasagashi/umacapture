@@ -393,6 +393,12 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
+  /// A script saved against a different facade contract is surfaced as broken
+  /// until the user reopens it, passes the check, and re-saves (which restamps
+  /// [apiVersion] to [scriptApiVersion] and clears the broken flag).
+  @override
+  bool get isObsolete => apiVersion != scriptApiVersion;
+
   @override
   List<ScriptCellResult> parse(RefBase ref, List<CharaDetailRecord> records) {
     final compiled = ref.read(compiledScriptProvider(source));
@@ -886,7 +892,14 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _setSaveEnabled(false));
     _codeController.addListener(_onCodeChanged);
     widget.onDecided.addListener(() {
-      _clonedSpecProvider.update(ref, widget.specId, (spec) => spec.copyWith(title: title, source: _validatedSource));
+      // Stamp the current contract version: saving is gated on a passing check,
+      // so a committed source is, by definition, validated against the current
+      // facade. This clears the obsolete/broken flag for a re-saved old script.
+      _clonedSpecProvider.update(
+        ref,
+        widget.specId,
+        (spec) => spec.copyWith(title: title, source: _validatedSource, apiVersion: scriptApiVersion),
+      );
     });
   }
 

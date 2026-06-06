@@ -227,4 +227,18 @@ void main() {
     expect(cell['sort'], 7);
     expect((cell['background'] as String).startsWith('#'), isTrue);
   });
+
+  // The `sep` param is typed `String?`, so a non-string literal is a compile
+  // error — but a `dynamic` value slips past the static check and would hit the
+  // runtime cast. It must coerce, not throw a ClassCastError.
+  test('join coerces a dynamic non-string separator instead of throwing', () {
+    final run = compileScript(
+      'bool filter(CharaRecord r) => true;\n'
+      'dynamic display(CharaRecord r) {\n'
+      '  dynamic sep = 0;\n'
+      '  return r.skills.map((s) => s.name).join(sep);\n'
+      '}',
+    );
+    expect(run('display'), 'スピードスター0集中力');
+  });
 }

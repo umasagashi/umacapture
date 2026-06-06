@@ -123,6 +123,28 @@ void main() {
     // A round-tripped spec must never be flagged broken (would prompt the user
     // to review a healthy column).
     expect(isSpecMapIncomplete(spec.toMap(), decoded.toMap()), isFalse);
+    // ...nor obsolete: a freshly-encoded script carries the current contract.
+    expect(script.isObsolete, isFalse);
+  });
+
+  test('ScriptColumnSpec saved against another contract version is obsolete', () {
+    final spec = ScriptColumnSpec(
+      id: 'script-id',
+      title: 'old column',
+      source:
+          'bool filter(CharaRecord r) => true;\n'
+          'dynamic display(CharaRecord r) => r.status.speed;',
+    );
+
+    // Simulate JSON persisted under a different facade contract version.
+    final stale = spec.toMap()..['apiVersion'] = scriptApiVersion - 1;
+    final decoded = ColumnSpecMapper.fromMap(stale) as ScriptColumnSpec;
+    expect(decoded.apiVersion, scriptApiVersion - 1);
+    expect(decoded.isObsolete, isTrue);
+
+    // Re-stamping the version (as the dialog does on a passing check) heals it.
+    final healed = decoded.copyWith(apiVersion: scriptApiVersion);
+    expect(healed.isObsolete, isFalse);
   });
 
   test('isSpecMapIncomplete flags only the legacy map, not the complete one', () {

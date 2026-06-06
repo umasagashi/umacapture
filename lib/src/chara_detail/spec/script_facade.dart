@@ -852,7 +852,7 @@ class $ValueList implements $Instance {
         return $value.isEmpty ? $null() : $double(_numbers.fold<num>(0, (a, b) => a + b) / $value.length);
       case 'join':
         return $Function((rt, t, a) {
-          final sep = (a.isNotEmpty ? a[0]?.$value as String? : null) ?? ', ';
+          final sep = (a.isNotEmpty ? a[0]?.$value?.toString() : null) ?? ', ';
           return $String($value.map((e) => '$e').join(sep));
         });
     }
