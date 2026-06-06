@@ -22,60 +22,116 @@ class ColumnSpecTagWidget extends ConsumerStatefulWidget {
 }
 
 class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
-  ColumnSpec? hoveredSpec;
+  // Id of the chip/container currently highlighted as a drop target.
+  String? hoveredId;
 
-  Widget buildSpecChip(BuildContext context, ColumnSpec spec, int? count, {bool broken = false}) {
+  // The interactive chip itself (badge + action chip), shared by leaf and logic
+  // columns. The badge shows how many records pass this column's condition,
+  // hidden when every record passes (i.e. the column filters nothing).
+  Widget _actionChip(BuildContext context, ColumnSpec spec, int? count, {required bool broken}) {
     final theme = Theme.of(context);
-    return DragTarget<ColumnSpec>(
-      builder: (context, candidateData, rejectedData) {
-        return Draggable<ColumnSpec>(
-          data: spec,
-          feedback: Material(
-            color: Colors.transparent,
-            child: Opacity(opacity: 0.6, child: Chip(label: spec.label())),
-          ),
-          childWhenDragging: Opacity(opacity: 0.6, child: Chip(label: spec.label())),
-          child: badges.Badge(
-            showBadge: count != null,
-            position: badges.BadgePosition.topEnd(top: -8, end: -8),
-            badgeStyle: badges.BadgeStyle(
-              // flex_color_scheme leaves ChipThemeData.selectedColor null under
-              // Material 3, so fall back like app_widget does for the same value.
-              badgeColor: theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer,
-              shape: badges.BadgeShape.square,
-              borderRadius: BorderRadius.circular(8),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+    return badges.Badge(
+      showBadge: count != null,
+      position: badges.BadgePosition.topEnd(top: -8, end: -8),
+      badgeStyle: badges.BadgeStyle(
+        badgeColor: theme.chipTheme.selectedColor ?? theme.colorScheme.primaryContainer,
+        shape: badges.BadgeShape.square,
+        borderRadius: BorderRadius.circular(8),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+      ),
+      ignorePointer: true,
+      badgeContent: Text("$count", style: theme.textTheme.labelSmall, textAlign: TextAlign.center),
+      child: GestureDetector(
+        onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
+        child: ActionChip(
+          avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
+          label: spec.label(),
+          tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
+          backgroundColor: spec.id == hoveredId
+              ? theme.colorScheme.secondaryContainer
+              : (broken ? theme.colorScheme.errorContainer : null),
+          onPressed: () {
+            ColumnSpecDialog.show(ref.base, spec);
+          },
+        ),
+      ),
+    );
+  }
+
+  // Recursively builds a chip for [spec]. Leaf columns render a single draggable
+  // chip; logic columns render a bordered container holding their header chip and
+  // the nested child chips, growing one step larger per nesting level.
+  Widget _buildSpecChip(BuildContext context, ColumnSpec spec, Map<String, int> counts, int recordCount) {
+    final theme = Theme.of(context);
+    final brokenIds = ref.watch(currentColumnSpecBrokenIdsProvider);
+    final broken = brokenIds.contains(spec.id);
+    final passed = counts[spec.id];
+    final count = passed == null || passed == recordCount ? null : passed;
+
+    final Widget body;
+    if (spec.acceptsChildren) {
+      // Logic container: a drop target for injection, wrapping its header chip and
+      // the nested children.
+      body = DragTarget<ColumnSpec>(
+        builder: (context, candidateData, rejectedData) {
+          return Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: spec.id == hoveredId
+                  ? theme.colorScheme.secondaryContainer
+                  : theme.colorScheme.surfaceContainerHighest,
+              border: Border.all(color: theme.colorScheme.primaryContainer),
+              borderRadius: BorderRadius.circular(12),
             ),
-            ignorePointer: true,
-            badgeContent: Text("$count", style: theme.textTheme.labelSmall, textAlign: TextAlign.center),
-            child: GestureDetector(
-              onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
-              child: ActionChip(
-                avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
-                label: spec.label(),
-                tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
-                backgroundColor: spec == hoveredSpec
-                    ? theme.colorScheme.secondaryContainer
-                    : (broken ? theme.colorScheme.errorContainer : null),
-                onPressed: () {
-                  ColumnSpecDialog.show(ref.base, spec);
-                },
-              ),
+            // Header chip and child chips laid out horizontally, vertically
+            // centered, wrapping to a new line only when they overflow.
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _actionChip(context, spec, count, broken: broken),
+                for (final child in spec.children) _buildSpecChip(context, child, counts, recordCount),
+              ],
             ),
-          ),
-        );
-      },
-      onWillAcceptWithDetails: (data) {
-        setState(() => hoveredSpec = spec);
-        return true;
-      },
-      onLeave: (data) {
-        setState(() => hoveredSpec = null);
-      },
-      onAcceptWithDetails: (dropped) {
-        ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(dropped.data, spec);
-        setState(() => hoveredSpec = null);
-      },
+          );
+        },
+        onWillAcceptWithDetails: (details) {
+          if (details.data.id == spec.id) return false;
+          setState(() => hoveredId = spec.id);
+          return true;
+        },
+        onLeave: (_) => setState(() => hoveredId = null),
+        onAcceptWithDetails: (details) {
+          ref.read(currentColumnSpecsLoaderProvider.notifier).injectInto(spec, details.data);
+          setState(() => hoveredId = null);
+        },
+      );
+    } else {
+      // Leaf column: a drop target that reorders the dropped chip next to it.
+      body = DragTarget<ColumnSpec>(
+        builder: (context, candidateData, rejectedData) => _actionChip(context, spec, count, broken: broken),
+        onWillAcceptWithDetails: (details) {
+          if (details.data.id == spec.id) return false;
+          setState(() => hoveredId = spec.id);
+          return true;
+        },
+        onLeave: (_) => setState(() => hoveredId = null),
+        onAcceptWithDetails: (details) {
+          ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(details.data, spec);
+          setState(() => hoveredId = null);
+        },
+      );
+    }
+
+    return Draggable<ColumnSpec>(
+      data: spec,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Opacity(opacity: 0.6, child: Chip(label: spec.label())),
+      ),
+      childWhenDragging: Opacity(opacity: 0.4, child: body),
+      child: body,
     );
   }
 
@@ -115,8 +171,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final theme = Theme.of(context);
     final recordCount = ref.watch(charaDetailRecordStorageProvider).length;
     final specs = ref.watch(currentColumnSpecsProvider);
-    final brokenIds = ref.watch(currentColumnSpecBrokenIdsProvider);
-    final filteredCounts = ref.watch(currentGridProvider).filteredCounts;
+    final counts = ref.watch(currentGridProvider).filteredCounts;
+    // The whole tag area is a drop target: releasing a (possibly nested) chip over
+    // empty space extracts it back to a top-level column.
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 8),
       child: Stack(
@@ -124,24 +181,27 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         children: [
           Align(
             alignment: Alignment.topLeft,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final col in zip2(specs, filteredCounts))
-                  buildSpecChip(
-                    context,
-                    col.$1,
-                    col.$2 == recordCount ? null : col.$2,
-                    broken: brokenIds.contains(col.$1.id),
-                  ),
-                specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
-                const Opacity(
-                  // Spacing widget for export button.
-                  opacity: 0,
-                  child: Chip(padding: EdgeInsets.zero, label: SizedBox(width: 16)),
-                ),
-              ],
+            child: DragTarget<ColumnSpec>(
+              builder: (context, candidateData, rejectedData) {
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    for (final spec in specs) _buildSpecChip(context, spec, counts, recordCount),
+                    specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
+                    const Opacity(
+                      // Spacing widget for export button.
+                      opacity: 0,
+                      child: Chip(padding: EdgeInsets.zero, label: SizedBox(width: 16)),
+                    ),
+                  ],
+                );
+              },
+              onAcceptWithDetails: (details) {
+                ref.read(currentColumnSpecsLoaderProvider.notifier).extract(details.data);
+                setState(() => hoveredId = null);
+              },
             ),
           ),
           const CharaDetailExportButton(),

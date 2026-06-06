@@ -163,7 +163,8 @@
                 "campaign": "戦績",
                 "race": "出走履歴",
                 "metadata": "メタデータ",
-                "script": "スクリプト"
+                "script": "スクリプト",
+                "logic": "論理"
             },
             "column_predicate": {
                 "broken": {
@@ -576,6 +577,35 @@
                             "support_rank": "サポカランク"
                         }
                     }
+                },
+                "logic": {
+                    "mode": {
+                        "and": "AND",
+                        "or": "OR",
+                        "not": "NOT"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "列名"
+                        }
+                    },
+                    "tooltip": {
+                        "empty": "入力なし（すべての行を通過）"
+                    },
+                    "error": {
+                        "cycle": "そのカラムはこの論理カラムを含んでいるため、注入できません。",
+                        "not_single_input": "NOTカラムは入力を1つだけ持てます。"
+                    },
+                    "builder": {
+                        "and": "すべての入力カラムの条件を満たす行だけを通します。",
+                        "or": "いずれかの入力カラムの条件を満たす行を通します。",
+                        "not": "入力カラム（1つ）の条件を満たさない行を通します。"
+                    },
+                    "truth_table": {
+                        "output": "出力"
+                    }
                 }
             },
             "columns": {
@@ -731,6 +761,17 @@
                 },
                 "script": {
                     "title": "スクリプト"
+                },
+                "logic": {
+                    "and": {
+                        "title": "AND"
+                    },
+                    "or": {
+                        "title": "OR"
+                    },
+                    "not": {
+                        "title": "NOT"
+                    }
                 }
             },
             "context_menu": {

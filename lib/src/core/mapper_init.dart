@@ -8,6 +8,7 @@ import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
@@ -57,6 +58,7 @@ void initializeMappers() {
   RatingColumnSpecMapper.ensureInitialized();
   MemoColumnSpecMapper.ensureInitialized();
   ScriptColumnSpecMapper.ensureInitialized();
+  LogicColumnSpecMapper.ensureInitialized();
   ParserMapper.ensureInitialized();
   CharaDetailRecordMapper.ensureInitialized();
 

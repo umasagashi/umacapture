@@ -7,6 +7,7 @@ import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
@@ -350,5 +351,8 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: CapturedDateParser(),
     ),
     ScriptColumnBuilder(title: "$tr_columns.script.title".tr(), category: ColumnCategory.script),
+    LogicColumnBuilder(title: "$tr_columns.logic.and.title".tr(), logic: LogicMode.and),
+    LogicColumnBuilder(title: "$tr_columns.logic.or.title".tr(), logic: LogicMode.or),
+    LogicColumnBuilder(title: "$tr_columns.logic.not.title".tr(), logic: LogicMode.not),
   ];
 });

@@ -24,7 +24,20 @@ const tr_common = "pages.chara_detail.column_predicate.common";
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
-enum ColumnCategory { trainee, status, aptitude, skill, factor, supportCard, family, campaign, race, metadata, script }
+enum ColumnCategory {
+  trainee,
+  status,
+  aptitude,
+  skill,
+  factor,
+  supportCard,
+  family,
+  campaign,
+  race,
+  metadata,
+  script,
+  logic,
+}
 
 class LabelKeys {
   static String get aptitude => "aptitude.name";
@@ -50,6 +63,19 @@ abstract class ColumnBuilder {
   ColumnCategory get category;
 
   ColumnBuilderType get type => ColumnBuilderType.normal;
+
+  /// Optional explanatory tooltip shown on the builder chip in the add-column
+  /// dialog. Null means no tooltip (the default for data columns).
+  String? get tooltip => null;
+
+  /// Optional truth table rendered beneath [tooltip] in the add-column dialog.
+  /// The first row is the header; remaining rows are the cells. Null means no
+  /// table (the default). The dialog turns this data into a `Table` widget.
+  List<List<String>>? get truthTable => null;
+
+  /// Whether this builder participates in the category's "add all" shortcut.
+  /// Logic columns opt out so the shortcut never bulk-adds empty operators.
+  bool get includeInAddAll => true;
 
   ColumnSpec build(RefBase ref);
 }
@@ -164,6 +190,23 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// Checked at load alongside [isSpecMapIncomplete]. Defaults to compatible;
   /// specs that carry a versioned contract (e.g. the script column) override it.
   bool get isObsolete => false;
+
+  /// Child specs nested under this column. Only container columns (logic columns)
+  /// have children; leaf columns return an empty list. Used by the tree-aware
+  /// selection operations and the recursive chip UI.
+  List<ColumnSpec> get children => const [];
+
+  /// Returns a copy of this spec with its [children] replaced. Leaf columns ignore
+  /// the argument and return themselves, so generic tree walks can call this
+  /// unconditionally.
+  ColumnSpec withChildren(List<ColumnSpec> children) => this;
+
+  /// Whether this column can hold child columns at all (i.e. is a container).
+  bool get acceptsChildren => false;
+
+  /// Whether this container still has room for another child. Containers with a
+  /// fixed arity (e.g. a NOT logic column) return false once full.
+  bool get acceptsMoreChildren => false;
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
@@ -347,12 +390,134 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
 
   List<ColumnSpec> get _specs => state.requireValue;
 
+  // ---- Tree helpers ---------------------------------------------------------
+  // The selection is a forest: top-level specs may be logic columns whose
+  // children are themselves specs (recursively). These pure helpers operate on a
+  // list of roots and return freshly built lists so _commit never aliases the
+  // live AsyncData backing list (see _commit's contract).
+
+  static ColumnSpec? _findInList(List<ColumnSpec> list, String id) {
+    for (final spec in list) {
+      if (spec.id == id) return spec;
+      final found = _findInList(spec.children, id);
+      if (found != null) return found;
+    }
+    return null;
+  }
+
+  static bool _isDescendantOrSelf(ColumnSpec node, String id) {
+    if (node.id == id) return true;
+    return node.children.any((c) => _isDescendantOrSelf(c, id));
+  }
+
+  // Removes [id] from anywhere in the tree, returning (newList, removedSpec).
+  // removedSpec is null when [id] was not found (newList is then unchanged).
+  static (List<ColumnSpec>, ColumnSpec?) _detach(List<ColumnSpec> list, String id) {
+    final result = <ColumnSpec>[];
+    ColumnSpec? removed;
+    for (final spec in list) {
+      if (spec.id == id) {
+        removed = spec;
+        continue;
+      }
+      final (newChildren, childRemoved) = _detach(spec.children, id);
+      if (childRemoved != null) {
+        removed = childRemoved;
+        result.add(spec.withChildren(newChildren));
+      } else {
+        result.add(spec);
+      }
+    }
+    return (result, removed);
+  }
+
+  // Inserts [child] at the end of [targetId]'s children, anywhere in the tree.
+  static List<ColumnSpec> _insertInto(List<ColumnSpec> list, String targetId, ColumnSpec child) {
+    return list.map((spec) {
+      if (spec.id == targetId) {
+        return spec.withChildren([...spec.children, child]);
+      }
+      return spec.withChildren(_insertInto(spec.children, targetId, child));
+    }).toList();
+  }
+
+  // Removes [id] and lifts its children into the slot it occupied (logic columns
+  // dissolve back into normal columns). Returns null when [id] is not found.
+  static List<ColumnSpec>? _removeLifting(List<ColumnSpec> list, String id) {
+    var changed = false;
+    final result = <ColumnSpec>[];
+    for (final spec in list) {
+      if (spec.id == id) {
+        changed = true;
+        result.addAll(spec.children);
+        continue;
+      }
+      final newChildren = _removeLifting(spec.children, id);
+      if (newChildren != null) {
+        changed = true;
+        result.add(spec.withChildren(newChildren));
+      } else {
+        result.add(spec);
+      }
+    }
+    return changed ? result : null;
+  }
+
+  // Replaces the spec with the same id, anywhere in the tree. Returns null when
+  // no spec with that id exists.
+  static List<ColumnSpec>? _replaceInList(List<ColumnSpec> list, ColumnSpec replacement) {
+    var changed = false;
+    final result = <ColumnSpec>[];
+    for (final spec in list) {
+      if (spec.id == replacement.id) {
+        changed = true;
+        result.add(replacement);
+        continue;
+      }
+      final newChildren = _replaceInList(spec.children, replacement);
+      if (newChildren != null) {
+        changed = true;
+        result.add(spec.withChildren(newChildren));
+      } else {
+        result.add(spec);
+      }
+    }
+    return changed ? result : null;
+  }
+
+  // Reorders [objId] relative to [targetId] within whichever sibling list holds
+  // both. Returns null when they are not siblings anywhere in the tree.
+  static List<ColumnSpec>? _reorderSiblings(List<ColumnSpec> list, String objId, String targetId) {
+    final ids = list.map((e) => e.id).toList();
+    if (ids.contains(objId) && ids.contains(targetId)) {
+      final newList = [...list];
+      final obj = newList.firstWhere((e) => e.id == objId);
+      final moveRight = newList.indexWhere((e) => e.id == objId) < newList.indexWhere((e) => e.id == targetId);
+      newList.removeWhere((e) => e.id == objId);
+      final targetIndex = newList.indexWhere((e) => e.id == targetId);
+      newList.insert(targetIndex + (moveRight ? 1 : 0), obj);
+      return newList;
+    }
+    var changed = false;
+    final result = list.map((spec) {
+      final newChildren = _reorderSiblings(spec.children, objId, targetId);
+      if (newChildren != null) {
+        changed = true;
+        return spec.withChildren(newChildren);
+      }
+      return spec;
+    }).toList();
+    return changed ? result : null;
+  }
+
+  // ---- Public API -----------------------------------------------------------
+
   ColumnSpec? getById(String id) {
-    return _specs.firstWhereOrNull((e) => e.id == id);
+    return _findInList(_specs, id);
   }
 
   bool contains(String id) {
-    return _specs.firstWhereOrNull((e) => e.id == id) != null;
+    return _findInList(_specs, id) != null;
   }
 
   void add(ColumnSpec spec) {
@@ -366,42 +531,68 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
 
   void remove(String id) {
     assert(contains(id));
-    _clearBroken(id);
-    _commit(_specs.where((e) => e.id != id).toList());
+    removeIfExists(id);
   }
 
   void removeIfExists(String id) {
-    if (contains(id)) {
+    final result = _removeLifting(_specs, id);
+    if (result != null) {
       _clearBroken(id);
-      _commit(_specs.where((e) => e.id != id).toList());
+      _commit(result);
     }
   }
 
   void moveTo(ColumnSpec obj, ColumnSpec target) {
-    final specs = [..._specs];
-    assert(specs.contains(obj));
-    assert(specs.contains(target));
-    if (obj == target) {
+    if (obj.id == target.id) {
       return;
     }
-    final moveRight = specs.indexOf(obj) < specs.indexOf(target);
-    specs.remove(obj);
-    specs.insert(specs.indexOf(target) + (moveRight ? 1 : 0), obj);
-    _commit(specs);
+    final result = _reorderSiblings(_specs, obj.id, target.id);
+    if (result != null) {
+      _commit(result);
+    }
+  }
+
+  // Injects [dragged] as a child of the [target] container column. Detaches
+  // [dragged] from its current position first. Rejected (with a toast) when the
+  // target is full (e.g. a NOT column already holding one input) or when the move
+  // would create a cycle (injecting an ancestor into its own descendant).
+  void injectInto(ColumnSpec target, ColumnSpec dragged) {
+    if (target.id == dragged.id || !target.acceptsChildren) {
+      return;
+    }
+    if (_isDescendantOrSelf(dragged, target.id)) {
+      Toaster.show(ToastData.warning(description: "pages.chara_detail.column_predicate.logic.error.cycle".tr()));
+      return;
+    }
+    if (!target.acceptsMoreChildren) {
+      Toaster.show(
+        ToastData.warning(description: "pages.chara_detail.column_predicate.logic.error.not_single_input".tr()),
+      );
+      return;
+    }
+    final (detached, removed) = _detach(_specs, dragged.id);
+    if (removed == null) {
+      return;
+    }
+    _commit(_insertInto(detached, target.id, removed));
+  }
+
+  // Detaches [spec] from its container and re-appends it at the top level,
+  // turning an injected column back into a normal one.
+  void extract(ColumnSpec spec) {
+    final (detached, removed) = _detach(_specs, spec.id);
+    if (removed == null) {
+      return;
+    }
+    _commit([...detached, removed]);
   }
 
   void replaceById(ColumnSpec spec) {
-    final specs = [..._specs];
-    final index = specs.indexWhere((e) => e.id == spec.id);
-    if (index != -1) {
-      specs[index] = spec;
-    } else {
-      specs.add(spec);
-    }
+    final result = _replaceInList(_specs, spec) ?? [..._specs, spec];
     // The user has reviewed/updated this column via the settings dialog, so the
     // broken flag is cleared and the next _commit persists the healed spec.
     _clearBroken(spec.id);
-    _commit(specs);
+    _commit(result);
   }
 
   // Re-persist the current selection (e.g. after mutating a spec's internal
