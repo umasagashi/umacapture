@@ -519,7 +519,12 @@
                         "cost_warning": "テーブル全体が重くなる可能性があります。",
                         "ok": "正常に動作しました。保存できます。",
                         "no_rows": "表示対象の行がありません",
-                        "estimated_total": "フルサイズ（全 {count} 件）で約 {time}（推定）"
+                        "estimated_total": "フルサイズ（全 {count} 件）で約 {time}（推定）",
+                        "unit": {
+                            "seconds": "秒",
+                            "milliseconds": "ms",
+                            "microseconds": "µs"
+                        }
                     },
                     "subject": {
                         "self": "本人",

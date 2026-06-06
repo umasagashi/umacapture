@@ -257,8 +257,15 @@ class CompiledScript {
 }
 
 /// Compiles a script source once and caches it, keyed by the source text.
-/// autoDispose so editing in the dialog does not pile up programs.
-final compiledScriptProvider = Provider.autoDispose.family<CompiledScript, String>((ref, source) {
+///
+/// This is the render-path cache only: [parse] reads it for every grid build.
+/// The dialog's edit/preview path compiles directly via [CompiledScript.compile]
+/// (see [_ScriptColumnSelectorState._evaluate] and [_previewEntry]) and never
+/// touches this provider, so it is NOT autoDispose — that would drop the program
+/// after each build and force a recompile on every grid rebuild. The cache is
+/// keyed by committed source text, so it is bounded by the number of distinct
+/// saved script columns; mid-edit sources never reach it.
+final compiledScriptProvider = Provider.family<CompiledScript, String>((ref, source) {
   return CompiledScript.compile(source);
 });
 
@@ -363,9 +370,12 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   /// Facade API contract version this script was written against.
   final int apiVersion;
 
-  // Whether every visible row carried a numeric sort key, and whether any cell
-  // renders a leading icon. Both are set during parse and steer plutoColumn; they
-  // are not constructor fields, so dart_mappable never serializes them.
+  // Render-phase scratch state: whether every visible row carried a numeric sort
+  // key, and whether any cell renders a leading icon. Derived from the parsed
+  // results and read by plutoColumn/plutoCell, which receive only `ref` (no column
+  // aggregate). They are set ONLY through [_applyHints]; they are not constructor
+  // fields, so dart_mappable never serializes them. Fully immutable handling would
+  // require threading the aggregate through the shared ColumnSpec interface.
   bool _numericSort = false;
   bool _hasIcon = false;
 
@@ -393,11 +403,26 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     }
     final runtime = compiled.runtime!;
     final results = records.map((record) => _run(ref, runtime, record)).toList();
-    _numericSort =
-        results.any((r) => r.visible && r.sortValue is num) &&
-        results.where((r) => r.visible).every((r) => r.sortValue is num);
-    _hasIcon = results.any((r) => r.visible && r.icon != null);
+    _applyHints(results.where((r) => r.visible));
     return results;
+  }
+
+  /// Derives the render hints from the visible cell results. A column sorts
+  /// numerically only when every visible row carries a numeric sort key.
+  static ({bool numericSort, bool hasIcon}) _renderHints(Iterable<ScriptCellResult> visible) {
+    final list = visible.toList();
+    return (
+      numericSort: list.isNotEmpty && list.every((r) => r.sortValue is num),
+      hasIcon: list.any((r) => r.icon != null),
+    );
+  }
+
+  /// Sets [_numericSort]/[_hasIcon] from the visible results. The only writer of
+  /// the render-phase scratch state, shared by [parse] and the preview grid.
+  void _applyHints(Iterable<ScriptCellResult> visible) {
+    final hints = _renderHints(visible);
+    _numericSort = hints.numericSort;
+    _hasIcon = hints.hasIcon;
   }
 
   ScriptCellResult _run(RefBase ref, Runtime runtime, CharaDetailRecord record) {
@@ -511,9 +536,9 @@ const _costWarnMicros = 1500000; // ~1.5s across all records.
 
 /// Formats a microsecond duration for the estimated full-table cost line.
 String _formatMicros(int micros) {
-  if (micros >= 1000000) return '${(micros / 1000000).toStringAsFixed(1)} 秒';
-  if (micros >= 1000) return '${(micros / 1000).round()} ms';
-  return '$micros µs';
+  if (micros >= 1000000) return '${(micros / 1000000).toStringAsFixed(1)} ${"$tr_script.preview.unit.seconds".tr()}';
+  if (micros >= 1000) return '${(micros / 1000).round()} ${"$tr_script.preview.unit.milliseconds".tr()}';
+  return '$micros ${"$tr_script.preview.unit.microseconds".tr()}';
 }
 
 class _PreviewRequest {
@@ -1103,8 +1128,7 @@ class _PreviewGrid extends StatelessWidget {
     // A throwaway spec drives the production rendering path. plutoColumn/plutoCell
     // for a script column read no providers, so the RefBase is only a pass-through.
     final spec = ScriptColumnSpec(id: 'preview', title: title, source: '');
-    spec._numericSort = shown.every((r) => r.sortValue is num);
-    spec._hasIcon = shown.any((r) => r.icon != null);
+    spec._applyHints(shown);
     final column = spec.plutoColumn(refBase);
     final trinaRows = [
       for (final result in shown) TrinaRow(cells: {spec.id: spec.plutoCell(refBase, result)}),

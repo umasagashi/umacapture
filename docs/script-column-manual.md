@@ -320,6 +320,9 @@ r.factorGroups.map((g) => g.totalStar).max ?? 0       // 一番多い因子の�
 r.skills.map((s) => s.name).join(", ")                // スキル名を「, 」でつなぐ
 ```
 
+> `null` になり得る項目（例: `s.level`）を `.map` で取り出して集計するとエラーになります。
+> [7.1 節](#71-null-を含む一覧の集計に注意)を参照してください。
+
 ### 6.3 つなげて書く（チェーン）
 
 メソッドはつなげられます。
@@ -354,6 +357,23 @@ r.skills.where((s) => (s.level ?? 0) > 1)
 - `x ?? 既定値` … `x` が `null` なら「既定値」を使う。
 - `x?.プロパティ` … `x` が `null` なら全体が `null`（エラーにしない）。
 - `x!` … 「`x` は `null` でない」と断言（`!= null` で確かめた後にだけ使う）。
+
+### 7.1 `null` を含む一覧の集計に注意
+
+`s.level` のような **`null` になり得る項目**を `.map(...)` で取り出してから `.sum` / `.average` /
+`.max` / `.min` で集計すると、`null` が混ざった時点でエラーになります（その行は ⚠ 表示になります）。
+集計の前に `null` を取り除くか、既定値に置き換えてください。
+
+```dart
+// 誤: level が null のスキルがあるとエラーになる
+r.skills.map((s) => s.level).average
+
+// 正: 先に null を除外してから集計する
+r.skills.where((s) => s.level != null).map((s) => s.level!).average
+
+// 正: map の中で既定値（ここでは 0）に置き換える
+r.skills.map((s) => s.level ?? 0).average
+```
 
 ---
 
