@@ -112,6 +112,12 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
     'storageKey',
     _$storageKey,
   );
+  static String? _$description(RatingColumnSpec v) => v.description;
+  static const Field<RatingColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
   static Range<double> _$range(RatingColumnSpec v) => v.range;
   static const Field<RatingColumnSpec, Range<double>> _f$range = Field(
     'range',
@@ -126,8 +132,11 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
     #parser: _f$parser,
     #predicate: _f$predicate,
     #storageKey: _f$storageKey,
+    #description: _f$description,
     #range: _f$range,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -148,6 +157,7 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
       parser: data.dec(_f$parser),
       predicate: data.dec(_f$predicate),
       storageKey: data.dec(_f$storageKey),
+      description: data.dec(_f$description),
     );
   }
 

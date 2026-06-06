@@ -449,6 +449,9 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
+                        },
+                        "tooltip_field": {
+                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -485,6 +488,9 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
+                        },
+                        "tooltip_field": {
+                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -501,7 +507,13 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "タイトル"
+                        },
+                        "tooltip_field": {
+                            "label": "説明"
                         }
+                    },
+                    "tooltip": {
+                        "empty": "説明がありません"
                     },
                     "code": {
                         "label": "コード",

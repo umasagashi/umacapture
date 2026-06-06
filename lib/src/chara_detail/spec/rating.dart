@@ -25,6 +25,10 @@ const tr_rating = "pages.chara_detail.column_predicate.rating";
 
 final ratingFormatter = NumberFormat("0.0");
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableClass()
 class IsInRangeRatingPredicate with IsInRangeRatingPredicateMappable {
   final double? min;
@@ -56,7 +60,7 @@ class RatingCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'RatingColumnSpec')
+@MappableClass(discriminatorValue: 'RatingColumnSpec', ignoreNull: true)
 class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable {
   final Parser parser;
   final IsInRangeRatingPredicate predicate;
@@ -67,6 +71,12 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   final String title;
+
+  /// User-provided tooltip text shown on the column chip above the filter
+  /// condition. Null/empty means "no tooltip"; omitted from the serialized map
+  /// (via the class-level `ignoreNull`) so pre-existing specs are never flagged
+  /// as broken by [isSpecMapIncomplete].
+  final String? description;
 
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
@@ -79,6 +89,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     required this.parser,
     required this.predicate,
     required this.storageKey,
+    this.description,
   });
 
   RatingColumnSpec copyWith({
@@ -87,6 +98,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     Parser? parser,
     IsInRangeRatingPredicate? predicate,
     String? storageKey,
+    Object? description = _unset,
   }) {
     return RatingColumnSpec(
       id: id ?? this.id,
@@ -94,6 +106,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       storageKey: storageKey ?? this.storageKey,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -138,10 +151,11 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   String tooltip(RefBase ref) {
-    if (predicate.min == null && predicate.max == null) {
-      return "Any";
-    }
-    return "Range: [${predicate.min ?? "Any"}, ${predicate.max ?? "Any"}]";
+    final filter = (predicate.min == null && predicate.max == null)
+        ? "Any"
+        : "Range: [${predicate.min ?? "Any"}, ${predicate.max ?? "Any"}]";
+    final desc = description?.trim() ?? "";
+    return desc.isEmpty ? filter : "$desc\n──────────\n$filter";
   }
 
   @override
@@ -402,14 +416,17 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late String description;
 
   @override
   void initState() {
     super.initState();
-    title = _clonedSpecProvider.read(ref, widget.specId).title;
+    final spec = _clonedSpecProvider.read(ref, widget.specId);
+    title = spec.title;
+    description = spec.description ?? "";
     widget.onDecided.addListener(() {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
-        return spec.copyWith(title: title);
+        return spec.copyWith(title: title, description: description.trim().isEmpty ? null : description.trim());
       });
 
       final ratingController = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
@@ -438,6 +455,18 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
               initialText: title,
               onChanged: (value) {
                 title = value;
+              },
+            ),
+          ],
+        ),
+        FormLine(
+          title: Text("$tr_rating.notation.tooltip_field.label".tr()),
+          children: [
+            DenseTextField(
+              initialText: description,
+              allowEmpty: true,
+              onChanged: (value) {
+                description = value;
               },
             ),
           ],

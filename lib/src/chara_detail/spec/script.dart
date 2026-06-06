@@ -38,6 +38,10 @@ const _scriptLib = 'package:script/script.dart';
 /// incompatible API change can migrate or warn instead of silently misbehaving.
 const scriptApiVersion = 1;
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 // --- Enrichment: CharaDetailRecord -> plain nested Map ----------------------
 
 /// A coded leaf (`{code, name}`). [category] tags the value with its lookup
@@ -473,7 +477,7 @@ const Map<String, IconData> _iconMap = {
 
 // --- Spec -------------------------------------------------------------------
 
-@MappableClass(discriminatorValue: 'ScriptColumnSpec')
+@MappableClass(discriminatorValue: 'ScriptColumnSpec', ignoreNull: true)
 class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpecMappable {
   @override
   final String id;
@@ -487,6 +491,12 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   /// Facade API contract version this script was written against.
   final int apiVersion;
 
+  /// User-provided tooltip text shown on the column chip. Null/empty means "no
+  /// tooltip" (the chip then shows a localized "no description" fallback).
+  /// Omitted from the serialized map (via the class-level `ignoreNull`) so
+  /// pre-existing specs are never flagged as broken by [isSpecMapIncomplete].
+  final String? description;
+
   // Render-phase scratch state: whether every visible row carried a numeric sort
   // key, and whether any cell renders a leading icon. Derived from the parsed
   // results and read by plutoColumn/plutoCell, which receive only `ref` (no column
@@ -496,14 +506,27 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   bool _numericSort = false;
   bool _hasIcon = false;
 
-  ScriptColumnSpec({required this.id, required this.title, required this.source, this.apiVersion = scriptApiVersion});
+  ScriptColumnSpec({
+    required this.id,
+    required this.title,
+    required this.source,
+    this.apiVersion = scriptApiVersion,
+    this.description,
+  });
 
-  ScriptColumnSpec copyWith({String? id, String? title, String? source, int? apiVersion}) {
+  ScriptColumnSpec copyWith({
+    String? id,
+    String? title,
+    String? source,
+    int? apiVersion,
+    Object? description = _unset,
+  }) {
     return ScriptColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       source: source ?? this.source,
       apiVersion: apiVersion ?? this.apiVersion,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -619,7 +642,8 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   }
 
   @override
-  String tooltip(RefBase ref) => title;
+  String tooltip(RefBase ref) =>
+      (description?.trim().isEmpty ?? true) ? "$tr_script.tooltip.empty".tr() : description!.trim();
 
   @override
   Widget label() => Text(title);
@@ -1063,6 +1087,7 @@ class ScriptColumnSelector extends ConsumerStatefulWidget {
 
 class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
   late String title;
+  late String description;
   late final DartHighlightController _codeController;
 
   // The last source whose preview succeeded. Only this is committed on OK, so a
@@ -1082,6 +1107,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
+    description = spec.description ?? "";
     _codeController = DartHighlightController(text: spec.source);
     _validatedSource = spec.source;
     _lastText = spec.source;
@@ -1096,7 +1122,12 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
       _clonedSpecProvider.update(
         ref,
         widget.specId,
-        (spec) => spec.copyWith(title: title, source: _validatedSource, apiVersion: scriptApiVersion),
+        (spec) => spec.copyWith(
+          title: title,
+          source: _validatedSource,
+          apiVersion: scriptApiVersion,
+          description: description.trim().isEmpty ? null : description.trim(),
+        ),
       );
     });
   }
@@ -1162,6 +1193,12 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
             FormLine(
               title: Text("$tr_script.notation.title.label".tr()),
               children: [DenseTextField(initialText: title, onChanged: (value) => title = value)],
+            ),
+            FormLine(
+              title: Text("$tr_script.notation.tooltip_field.label".tr()),
+              children: [
+                DenseTextField(initialText: description, allowEmpty: true, onChanged: (value) => description = value),
+              ],
             ),
           ],
         ),

@@ -41,6 +41,12 @@ class ScriptColumnSpecMapper extends SubClassMapperBase<ScriptColumnSpec> {
     opt: true,
     def: scriptApiVersion,
   );
+  static String? _$description(ScriptColumnSpec v) => v.description;
+  static const Field<ScriptColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<ScriptColumnSpec> fields = const {
@@ -48,7 +54,10 @@ class ScriptColumnSpecMapper extends SubClassMapperBase<ScriptColumnSpec> {
     #title: _f$title,
     #source: _f$source,
     #apiVersion: _f$apiVersion,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -68,6 +77,7 @@ class ScriptColumnSpecMapper extends SubClassMapperBase<ScriptColumnSpec> {
       title: data.dec(_f$title),
       source: data.dec(_f$source),
       apiVersion: data.dec(_f$apiVersion),
+      description: data.dec(_f$description),
     );
   }
 
