@@ -62,6 +62,7 @@ dependencies:
   version: ^3.0.2
   window_manager: ^0.5.1
   yaml: ^3.1.1
+  highlight: ^0.7.0
 
 dev_dependencies:
   flutter_test:
