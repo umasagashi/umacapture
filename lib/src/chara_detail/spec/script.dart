@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:dart_eval/dart_eval.dart';
@@ -610,6 +611,215 @@ class _CopyButton extends StatelessWidget {
   }
 }
 
+// --- Name lookup ------------------------------------------------------------
+
+// The "common" selector translation prefix. Inlined as a literal because both
+// base.dart and gui/chara_detail/common.dart export a `tr_common` const with
+// this value, so referencing the bare identifier here would be ambiguous.
+const _trCommonSelector = "pages.chara_detail.column_predicate.common.selector";
+
+/// One selectable lookup category: the script accessor [path] that yields these
+/// [names], plus a [hintKey] for the dimmed Japanese label shown beside it.
+class _LookupCategory {
+  final String path;
+  final String hintKey;
+  final List<String> names;
+
+  const _LookupCategory(this.path, this.hintKey, this.names);
+}
+
+/// Drops blanks and removes duplicates while preserving first-seen order.
+List<String> _distinctNonEmpty(Iterable<String> names) {
+  final seen = <String>{};
+  final result = <String>[];
+  for (final raw in names) {
+    final name = raw.trim();
+    if (name.isNotEmpty && seen.add(name)) result.add(name);
+  }
+  return result;
+}
+
+/// Every category of `.name` a script can read, paired with the accessor path
+/// that produces it. Each name list is derived with the SAME transform the
+/// enricher uses (see [_Enricher]), so a copied string equals the script's
+/// `.name` verbatim.
+List<_LookupCategory> _buildLookupCategories(LabelMap labels) {
+  List<String> label(String key) => labels[key] ?? const [];
+  return [
+    _LookupCategory('r.skills[].name', 'skill', _distinctNonEmpty(label(LabelKeys.skill))),
+    _LookupCategory('r.factors[].name', 'factor', _distinctNonEmpty(label(LabelKeys.factor))),
+    _LookupCategory(
+      'r.factors[].subject.name',
+      'subject',
+      _distinctNonEmpty(['self', 'parent1', 'parent2'].map((k) => "$tr_script.subject.$k".tr())),
+    ),
+    _LookupCategory(
+      'r.scenario.name',
+      'scenario',
+      _distinctNonEmpty(label(LabelKeys.campaignScenario).map((e) => e.split('\n').first)),
+    ),
+    _LookupCategory('r.aptitudes.*.name', 'aptitude', _distinctNonEmpty(label(LabelKeys.aptitude))),
+    _LookupCategory('r.races[].title.name', 'race_title', _distinctNonEmpty(label('race_title.name'))),
+    _LookupCategory('r.races[].ground.name', 'ground', _distinctNonEmpty(label('race_place.ground'))),
+    _LookupCategory(
+      'r.races[].distance.name',
+      'distance',
+      _distinctNonEmpty(
+        [
+          'short_range',
+          'mile_range',
+          'middle_range',
+          'long_range',
+        ].map((k) => "pages.chara_detail.columns.aptitude.$k.title".tr()),
+      ),
+    ),
+    _LookupCategory('r.races[].strategy.name', 'strategy', _distinctNonEmpty(label(LabelKeys.raceStrategy))),
+    _LookupCategory('r.races[].weather.name', 'weather', _distinctNonEmpty(label('race_weather.name'))),
+    _LookupCategory('r.metadata.recordType.name', 'record_type', _distinctNonEmpty(label(LabelKeys.recordType))),
+    _LookupCategory('r.supportCards[].rank.name', 'support_rank', _distinctNonEmpty(_supportCardRanks)),
+  ];
+}
+
+/// A reference helper inside the script dialog: pick a category (labeled by its
+/// script accessor path), filter by substring, and click a chip to copy the
+/// name to the clipboard. Purely a reference — it never touches the save gate.
+class _NameLookup extends ConsumerStatefulWidget {
+  const _NameLookup();
+
+  @override
+  ConsumerState<_NameLookup> createState() => _NameLookupState();
+}
+
+class _NameLookupState extends ConsumerState<_NameLookup> {
+  int? _categoryIndex;
+  String _query = '';
+  bool _collapsed = true;
+  late final TextEditingController _searchController;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// Copies [name] as a Dart string literal so it pastes ready to use.
+  ///
+  /// [jsonEncode] yields a double-quoted, escaped literal (handling `"`, `\` and
+  /// control characters); it leaves non-ASCII characters intact. JSON has no
+  /// notion of Dart's `$` interpolation, so that one character is escaped on top
+  /// — the only escaping not delegated to the standard library.
+  void _copyName(String name) {
+    final literal = jsonEncode(name).replaceAll(r'$', r'\$');
+    Clipboard.setData(ClipboardData(text: literal));
+    Toaster.show(ToastData.success(description: "$tr_script.copy.done".tr()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final categories = _buildLookupCategories(ref.watch(labelMapProvider));
+    final category = _categoryIndex == null ? null : categories[_categoryIndex!];
+    final query = _query.trim().toLowerCase();
+    final matched = category == null
+        ? const <String>[]
+        : (query.isEmpty
+              ? category.names
+              : category.names.where((name) => name.toLowerCase().contains(query)).toList());
+    final needCollapse = _collapsed && matched.length > 30;
+    final reduced = needCollapse ? matched.partial(0, 30) : matched;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              DropdownButton<int>(
+                value: _categoryIndex,
+                hint: Text("$tr_script.name_lookup.category_hint".tr()),
+                borderRadius: BorderRadius.circular(8),
+                items: [
+                  for (final (index, c) in categories.indexed)
+                    DropdownMenuItem<int>(
+                      value: index,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(c.path, style: GoogleFonts.mPlus1Code(fontSize: 14)),
+                          const SizedBox(width: 8),
+                          Text(
+                            "$tr_script.name_lookup.hints.${c.hintKey}".tr(),
+                            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    _categoryIndex = value;
+                    _collapsed = true;
+                  });
+                },
+              ),
+              if (category != null)
+                Tooltip(
+                  message: "$tr_script.name_lookup.search_hint".tr(),
+                  child: DenseTextField(
+                    controller: _searchController,
+                    debounce: const Duration(milliseconds: 200),
+                    hintText: "$tr_script.name_lookup.search_hint".tr(),
+                    allowEmpty: true,
+                    onChanged: (text) => setState(() => _query = text),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (category != null)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  if (matched.isEmpty) Text("$_trCommonSelector.not_found_message".tr()),
+                  for (final name in reduced)
+                    ActionChip(
+                      label: Text(name),
+                      backgroundColor: theme.colorScheme.surfaceContainerLow,
+                      onPressed: () => _copyName(name),
+                    ),
+                  if (needCollapse)
+                    ActionChip(
+                      avatar: const Icon(Icons.expand_more),
+                      label: Text("$_trCommonSelector.expand_button".tr()),
+                      side: BorderSide.none,
+                      backgroundColor: theme.colorScheme.primaryContainer,
+                      onPressed: () => setState(() => _collapsed = false),
+                    ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 final _clonedSpecProvider = SpecProviderAccessor<ScriptColumnSpec>();
 
 class ScriptColumnSelector extends ConsumerStatefulWidget {
@@ -739,6 +949,23 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
               ),
             ),
           ],
+        ),
+        const SizedBox(height: 32),
+        Card(
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          clipBehavior: Clip.antiAlias,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            side: BorderSide(color: Theme.of(context).colorScheme.outline),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: ExpansionTile(
+            title: Text("$tr_script.name_lookup.label".tr()),
+            subtitle: Text("$tr_script.name_lookup.description".tr()),
+            expandedAlignment: Alignment.centerLeft,
+            expandedCrossAxisAlignment: CrossAxisAlignment.start,
+            children: const [_NameLookup()],
+          ),
         ),
         const SizedBox(height: 32),
         FormGroup(

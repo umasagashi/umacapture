@@ -529,6 +529,27 @@
                     "copy": {
                         "tooltip": "クリップボードにコピー",
                         "done": "クリップボードにコピーしました"
+                    },
+                    "name_lookup": {
+                        "label": "名称を調べる",
+                        "description": "スクリプト内で使える名称を検索します。チップをクリックするとクリップボードにコピーします。",
+                        "category_label": "カテゴリ",
+                        "category_hint": "対象を選んでください",
+                        "search_hint": "絞り込み",
+                        "hints": {
+                            "skill": "スキル",
+                            "factor": "因子",
+                            "subject": "因子の所有者",
+                            "scenario": "シナリオ",
+                            "aptitude": "適性ランク",
+                            "race_title": "レース名",
+                            "ground": "バ場",
+                            "distance": "距離区分",
+                            "strategy": "脚質",
+                            "weather": "天候",
+                            "record_type": "レコード種別",
+                            "support_rank": "サポカランク"
+                        }
                     }
                 }
             },
