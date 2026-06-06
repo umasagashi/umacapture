@@ -15,12 +15,17 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/module_update_dialog.dart';
 import '/src/gui/statistics.dart';
 
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
 final _downloadProgressProvider = settableNotifierProvider<Progress?>(null);
+
+/// Title/background color for attention-grabbing updater cards on the dashboard
+/// (app update available, recognition module update needed).
+final _updaterCardTitleColor = Colors.amber.shade200;
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
@@ -101,6 +106,7 @@ class AppUpdaterGroup extends ConsumerWidget {
     final downloadProgress = ref.watch(_downloadProgressProvider);
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
+      titleColor: _updaterCardTitleColor,
       padding: EdgeInsets.zero,
       children: [
         ListTile(
@@ -110,6 +116,28 @@ class AppUpdaterGroup extends ConsumerWidget {
         AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
           child: (downloadProgress == null) ? Container() : downloadProgressWidget(context, ref, downloadProgress),
+        ),
+      ],
+    );
+  }
+}
+
+/// Persistent dashboard card shown when the recognition module could not be
+/// obtained automatically (capture is unavailable). Mirrors [AppUpdaterGroup]
+/// and opens the manual update dialog so the user can recover offline.
+class ModuleUpdaterGroup extends ConsumerWidget {
+  const ModuleUpdaterGroup({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_dashboard.module_updater.title".tr(),
+      titleColor: _updaterCardTitleColor,
+      padding: EdgeInsets.zero,
+      children: [
+        ListTile(
+          title: Text("$tr_dashboard.module_updater.subtitle".tr()),
+          onTap: () => ModuleManualUpdateDialog.show(ref.base),
         ),
       ],
     );
@@ -186,8 +214,15 @@ class DashboardPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final result = ref.watch(_versionCheckLoader).asData?.value;
+    // Watch moduleVersionLoader to ensure the automatic check runs, then drive
+    // the banner from the failure state (true when the module could not be
+    // obtained OR the latest could not be downloaded but an old one is in use).
+    // hasError is a fallback for an unexpected exception inside the loader.
+    final moduleAsync = ref.watch(moduleVersionLoader);
+    final moduleUpdateFailed = ref.watch(moduleUpdateFailedProvider) || moduleAsync.hasError;
     return ListTilePageRootWidget(
       children: [
+        if (moduleUpdateFailed) const ModuleUpdaterGroup(),
         if (result?.isUpdatable ?? false) AppUpdaterGroup(version: result!.latest),
         const _NewsGroup(),
         const _StatisticGroup(),

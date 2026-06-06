@@ -12,7 +12,9 @@ class Const {
 
   static String get sentryRateLimitConfigUrl => "$moduleUrlRoot/sentry_rate_limit.json";
 
-  static String get moduleZipUrl => "$moduleUrlRoot/modules.zip";
+  static String get moduleZipName => "modules.zip";
+
+  static String get moduleZipUrl => "$moduleUrlRoot/$moduleZipName";
 
   static String get appVersionInfoUrl => "$appUrlRoot/version_info.json";
 

@@ -19,6 +19,7 @@ class ListCard extends StatelessWidget {
   final Widget? trailing;
   final EdgeInsetsGeometry? padding;
   final CrossAxisAlignment crossAxisAlignment;
+  final Color? titleColor;
 
   const ListCard({
     super.key,
@@ -27,6 +28,7 @@ class ListCard extends StatelessWidget {
     this.trailing,
     this.padding,
     this.crossAxisAlignment = CrossAxisAlignment.center,
+    this.titleColor,
   });
 
   Widget child() {
@@ -49,8 +51,18 @@ class ListCard extends StatelessWidget {
               // background and the (near-white) card surface, giving a subtle
               // blue band. Surface-container roles carry little blend under the
               // highScaffoldLowSurface mode, so we derive the tint from scaffold.
-              tileColor: Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5),
-              title: Text(title!, style: theme.textTheme.headlineSmall),
+              // [titleColor] overrides this to call out attention-grabbing cards.
+              tileColor: titleColor ?? Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5),
+              title: Text(
+                title!,
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  color: titleColor == null
+                      ? null
+                      : (ThemeData.estimateBrightnessForColor(titleColor!) == Brightness.dark
+                            ? Colors.white
+                            : Colors.black),
+                ),
+              ),
               trailing: trailing,
             ),
           child(),
