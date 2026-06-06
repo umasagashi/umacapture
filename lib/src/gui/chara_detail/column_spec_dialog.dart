@@ -36,6 +36,24 @@ class SpecClone extends Notifier<ColumnSpec> {
 
 final specCloneProvider = NotifierProvider.autoDispose.family<SpecClone, ColumnSpec, String>(SpecClone.new);
 
+/// Gates the dialog's OK/save button. Defaults to enabled; a selector that needs
+/// validation before saving (e.g. the script column, which must pass a check)
+/// flips it off. autoDispose resets it each time the dialog opens.
+class ColumnSpecSaveEnabled extends Notifier<bool> {
+  ColumnSpecSaveEnabled(this.specId);
+
+  final String specId;
+
+  @override
+  bool build() => true;
+
+  void set(bool value) => state = value;
+}
+
+final columnSpecSaveEnabledProvider = NotifierProvider.autoDispose.family<ColumnSpecSaveEnabled, bool, String>(
+  ColumnSpecSaveEnabled.new,
+);
+
 class SpecProviderAccessor<T extends ColumnSpec> {
   T watch(WidgetRef ref, String specId) {
     return ref.watch(specCloneProvider(specId)) as T;
@@ -68,6 +86,7 @@ class ColumnSpecDialog extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Ensure that the cloned spec will not be disposed while the dialog is still open.
     ref.watch(specCloneProvider(specId));
+    final saveEnabled = ref.watch(columnSpecSaveEnabledProvider(specId));
 
     return CardDialog(
       dialogTitle: "$tr_chara_detail.column_predicate.dialog.title".tr(),
@@ -88,16 +107,20 @@ class ColumnSpecDialog extends ConsumerWidget {
             ),
           ),
           Tooltip(
-            message: "$tr_chara_detail.column_predicate.dialog.ok_button.tooltip".tr(),
+            message: saveEnabled
+                ? "$tr_chara_detail.column_predicate.dialog.ok_button.tooltip".tr()
+                : "$tr_chara_detail.column_predicate.dialog.ok_button.disabled_tooltip".tr(),
             child: FilledButton.icon(
               icon: const Icon(Icons.check_circle),
               label: Text("$tr_chara_detail.column_predicate.dialog.ok_button.label".tr()),
-              onPressed: () {
-                onDecided.notifyListeners();
-                final spec = ref.read(specCloneProvider(specId));
-                ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
-                CardDialog.dismiss(ref.base);
-              },
+              onPressed: !saveEnabled
+                  ? null
+                  : () {
+                      onDecided.notifyListeners();
+                      final spec = ref.read(specCloneProvider(specId));
+                      ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
+                      CardDialog.dismiss(ref.base);
+                    },
             ),
           ),
         ],
