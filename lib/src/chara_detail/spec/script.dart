@@ -6,7 +6,9 @@ import 'package:dart_eval/dart_eval_bridge.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
@@ -17,8 +19,11 @@ import '/src/chara_detail/spec/script_facade.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/code_highlight_field.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
+import '/src/gui/common.dart';
+import '/src/gui/toast.dart';
 
 part 'script.mapper.dart';
 
@@ -324,27 +329,21 @@ Color? _resolveColor(String? source) {
   return argb == null ? null : Color(argb);
 }
 
+/// Stand-in characters whose width approximates the leading icon (16px) plus its
+/// gap (4px), prepended to the auto-fit measurement string of icon-bearing
+/// columns so the icon never squeezes the text into an ellipsis.
+const _iconWidthReserve = 'MM';
+
 const Map<String, IconData> _iconMap = {
-  'star': Icons.star,
-  'star_border': Icons.star_border,
-  'check': Icons.check,
-  'check_circle': Icons.check_circle,
-  'close': Icons.close,
-  'cancel': Icons.cancel,
-  'warning': Icons.warning,
-  'error': Icons.error,
-  'info': Icons.info,
-  'flag': Icons.flag,
-  'bolt': Icons.bolt,
-  'favorite': Icons.favorite,
-  'circle': Icons.circle,
-  'square': Icons.square,
-  'arrow_upward': Icons.arrow_upward,
-  'arrow_downward': Icons.arrow_downward,
-  'trending_up': Icons.trending_up,
-  'trending_down': Icons.trending_down,
-  'lock': Icons.lock,
-  'verified': Icons.verified,
+  'cross': Icons.close, // ×
+  'circle': Icons.circle_outlined, // ○
+  'double_circle': Icons.radio_button_checked, // ◎
+  'check': Icons.check, // ✓
+  'star': Icons.star_border, // ☆ (outline)
+  'favorite': Icons.favorite_border, // ♡ (outline)
+  'flag': Icons.flag_outlined, // ⚑ (outline)
+  'arrow_upward': Icons.arrow_upward, // ↑
+  'arrow_downward': Icons.arrow_downward, // ↓
 };
 
 // --- Spec -------------------------------------------------------------------
@@ -363,9 +362,11 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   /// Facade API contract version this script was written against.
   final int apiVersion;
 
-  // Whether every visible row carried a numeric sort key (set during parse).
-  // Not a constructor field, so dart_mappable never serializes it.
+  // Whether every visible row carried a numeric sort key, and whether any cell
+  // renders a leading icon. Both are set during parse and steer plutoColumn; they
+  // are not constructor fields, so dart_mappable never serializes them.
   bool _numericSort = false;
+  bool _hasIcon = false;
 
   ScriptColumnSpec({required this.id, required this.title, required this.source, this.apiVersion = scriptApiVersion});
 
@@ -386,6 +387,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     final compiled = ref.read(compiledScriptProvider(source));
     if (compiled.error != null) {
       _numericSort = false;
+      _hasIcon = false;
       return [for (final _ in records) ScriptCellResult(visible: true, display: '', error: compiled.error)];
     }
     final runtime = compiled.runtime!;
@@ -393,6 +395,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     _numericSort =
         results.any((r) => r.visible && r.sortValue is num) &&
         results.where((r) => r.visible).every((r) => r.sortValue is num);
+    _hasIcon = results.any((r) => r.visible && r.icon != null);
     return results;
   }
 
@@ -435,6 +438,10 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
+      // Auto-fit measures the formatted value's text width only; the renderer
+      // also draws a leading icon. When any cell has one, reserve its width in
+      // the measured string (the renderer, not this, controls the visible text).
+      formatter: _hasIcon ? (value) => '$_iconWidthReserve$value' : null,
       renderer: (context) => _ScriptCell(result: context.cell.getUserData<ScriptCellData>()!.result),
     )..setUserData(this);
   }
@@ -472,7 +479,7 @@ class _ScriptCell extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (iconData != null) ...[
-          Icon(iconData, size: 16, color: _resolveColor(result.iconColor)),
+          Icon(iconData, size: 18, color: _resolveColor(result.iconColor)),
           const SizedBox(width: 4),
         ],
         Flexible(child: text),
@@ -501,6 +508,13 @@ const _previewTimeout = Duration(seconds: 3);
 /// Estimated full-grid cost above which the user is warned (soft) before saving.
 const _costWarnMicros = 1500000; // ~1.5s across all records.
 
+/// Formats a microsecond duration for the estimated full-table cost line.
+String _formatMicros(int micros) {
+  if (micros >= 1000000) return '${(micros / 1000000).toStringAsFixed(1)} 秒';
+  if (micros >= 1000) return '${(micros / 1000).round()} ms';
+  return '$micros µs';
+}
+
 class _PreviewRequest {
   final SendPort port;
   final String source;
@@ -509,16 +523,11 @@ class _PreviewRequest {
   _PreviewRequest(this.port, this.source, this.records);
 }
 
-class ScriptPreviewRow {
-  final bool visible;
-  final String display;
-  final String? error;
-
-  ScriptPreviewRow(this.visible, this.display, this.error);
-}
-
 class ScriptPreviewResult {
-  final List<ScriptPreviewRow> rows;
+  // Full styled cell results (display + color/background/icon/sort/error), so the
+  // preview can render each row exactly as the production grid would. The fields
+  // are plain values, so the list crosses the isolate boundary unchanged.
+  final List<ScriptCellResult> rows;
   final double microsPerRecord;
   final String? compileError;
   final bool timedOut;
@@ -538,19 +547,19 @@ void _previewEntry(_PreviewRequest request) {
     return;
   }
   final runtime = compiled.runtime!;
-  final rows = <ScriptPreviewRow>[];
+  final rows = <ScriptCellResult>[];
   final stopwatch = Stopwatch()..start();
   for (final map in request.records) {
     try {
       final visible = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
-      var display = '';
-      if (visible) {
-        final value = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
-        display = ScriptCellResult.fromDisplay(value).display;
+      if (!visible) {
+        rows.add(const ScriptCellResult(visible: false, display: ''));
+        continue;
       }
-      rows.add(ScriptPreviewRow(visible, display, null));
+      final value = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
+      rows.add(ScriptCellResult.fromDisplay(value));
     } catch (e) {
-      rows.add(ScriptPreviewRow(true, '', e.toString()));
+      rows.add(ScriptCellResult(visible: true, display: '', error: e.toString()));
     }
   }
   stopwatch.stop();
@@ -574,6 +583,33 @@ Future<ScriptPreviewResult> runScriptPreview(String source, List<Map<String, dyn
 
 // --- Selector ---------------------------------------------------------------
 
+/// Copies [text] to the clipboard and confirms with a toast.
+void _copyToClipboard(String text) {
+  Clipboard.setData(ClipboardData(text: text));
+  Toaster.show(ToastData.success(description: "$tr_script.copy.done".tr()));
+}
+
+/// A small copy-to-clipboard affordance shared by the code field and the error
+/// log; the actual text is resolved lazily so it always copies the latest.
+class _CopyButton extends StatelessWidget {
+  final String Function() text;
+  final Color? color;
+
+  const _CopyButton({required this.text, this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: "$tr_script.copy.tooltip".tr(),
+      child: IconButton(
+        icon: Icon(Icons.copy, size: 18, color: color),
+        visualDensity: VisualDensity.compact,
+        onPressed: () => _copyToClipboard(text()),
+      ),
+    );
+  }
+}
+
 final _clonedSpecProvider = SpecProviderAccessor<ScriptColumnSpec>();
 
 class ScriptColumnSelector extends ConsumerStatefulWidget {
@@ -588,12 +624,16 @@ class ScriptColumnSelector extends ConsumerStatefulWidget {
 
 class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
   late String title;
-  late final TextEditingController _codeController;
+  late final DartHighlightController _codeController;
 
   // The last source whose preview succeeded. Only this is committed on OK, so a
   // script that fails to compile / times out / throws is never saved (the only
   // guard against an infinite loop freezing the synchronous grid build).
   late String _validatedSource;
+
+  // Last seen code text, to tell a real edit from a mere cursor/selection move
+  // (the controller notifies listeners on both).
+  late String _lastText;
 
   ScriptPreviewResult? _result;
   bool _running = false;
@@ -603,8 +643,13 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
-    _codeController = TextEditingController(text: spec.source);
+    _codeController = DartHighlightController(text: spec.source);
     _validatedSource = spec.source;
+    _lastText = spec.source;
+    // Saving is gated on a passing check: disabled until the user runs the check,
+    // and disabled again whenever the code is edited.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _setSaveEnabled(false));
+    _codeController.addListener(_onCodeChanged);
     widget.onDecided.addListener(() {
       _clonedSpecProvider.update(ref, widget.specId, (spec) => spec.copyWith(title: title, source: _validatedSource));
     });
@@ -612,8 +657,22 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
 
   @override
   void dispose() {
+    _codeController.removeListener(_onCodeChanged);
     _codeController.dispose();
     super.dispose();
+  }
+
+  void _setSaveEnabled(bool value) {
+    if (!mounted) return;
+    ref.read(columnSpecSaveEnabledProvider(widget.specId).notifier).set(value);
+  }
+
+  void _onCodeChanged() {
+    // Ignore selection/cursor-only notifications; only a real text edit
+    // invalidates the last check.
+    if (_codeController.text == _lastText) return;
+    _lastText = _codeController.text;
+    _setSaveEnabled(false);
   }
 
   Future<void> _evaluate() async {
@@ -623,6 +682,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     // safe here and surfaces syntax errors without spawning an isolate.
     final compiled = CompiledScript.compile(source);
     if (compiled.error != null) {
+      _setSaveEnabled(false);
       setState(() {
         _running = false;
         _result = ScriptPreviewResult(compileError: compiled.error);
@@ -636,6 +696,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
         .toList();
     final result = await runScriptPreview(source, records);
     if (!mounted) return;
+    _setSaveEnabled(result.ok);
     setState(() {
       _running = false;
       _result = result;
@@ -660,15 +721,20 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
         const SizedBox(height: 32),
         FormGroup(
           title: Text("$tr_script.code.label".tr()),
-          description: Text("$tr_script.code.description".tr()),
+          description: Row(
+            children: [
+              Expanded(child: Text("$tr_script.code.description".tr())),
+              _CopyButton(text: () => _codeController.text),
+            ],
+          ),
           children: [
             Padding(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               child: TextField(
                 controller: _codeController,
                 maxLines: null,
                 minLines: 12,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+                style: GoogleFonts.mPlus1Code(fontSize: 15),
                 decoration: const InputDecoration(border: OutlineInputBorder()),
               ),
             ),
@@ -693,7 +759,12 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
               ),
             ),
             if (_result != null)
-              _PreviewPanel(result: _result!, recordCount: ref.read(charaDetailRecordStorageProvider).length),
+              _PreviewPanel(
+                result: _result!,
+                recordCount: ref.read(charaDetailRecordStorageProvider).length,
+                title: title,
+                refBase: ref.base,
+              ),
           ],
         ),
       ],
@@ -704,8 +775,10 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
 class _PreviewPanel extends StatelessWidget {
   final ScriptPreviewResult result;
   final int recordCount;
+  final String title;
+  final RefBase refBase;
 
-  const _PreviewPanel({required this.result, required this.recordCount});
+  const _PreviewPanel({required this.result, required this.recordCount, required this.title, required this.refBase});
 
   @override
   Widget build(BuildContext context) {
@@ -717,37 +790,23 @@ class _PreviewPanel extends StatelessWidget {
       return _message(theme, "$tr_script.preview.timeout".tr(), '', theme.colorScheme.error);
     }
     final firstError = result.rows
-        .firstWhere((r) => r.error != null, orElse: () => ScriptPreviewRow(true, '', null))
+        .firstWhere((r) => r.error != null, orElse: () => const ScriptCellResult(visible: true, display: ''))
         .error;
-    final visible = result.rows.where((r) => r.visible).length;
     final estTotal = (result.microsPerRecord * recordCount).round();
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            spacing: 16,
-            children: [
-              Text(
-                "$tr_script.preview.average_time".tr(namedArgs: {"time": result.microsPerRecord.toStringAsFixed(0)}),
-              ),
-              Text(
-                "$tr_script.preview.visible_count".tr(
-                  namedArgs: {"visible": "$visible", "total": "${result.rows.length}"},
-                ),
-              ),
-            ],
+          Text(
+            "$tr_script.preview.estimated_total".tr(
+              namedArgs: {"count": "$recordCount", "time": _formatMicros(estTotal)},
+            ),
           ),
           if (estTotal > _costWarnMicros)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(
-                "$tr_script.preview.cost_warning".tr(
-                  namedArgs: {"count": "$recordCount", "total": "${(estTotal / 1000).round()}ms"},
-                ),
-                style: TextStyle(color: theme.colorScheme.tertiary),
-              ),
+              child: Text("$tr_script.preview.cost_warning".tr(), style: TextStyle(color: theme.colorScheme.tertiary)),
             ),
           if (firstError != null)
             _message(theme, "$tr_script.preview.runtime_error".tr(), firstError, theme.colorScheme.error),
@@ -757,13 +816,7 @@ class _PreviewPanel extends StatelessWidget {
               child: Text("$tr_script.preview.ok".tr(), style: TextStyle(color: theme.colorScheme.primary)),
             ),
           const SizedBox(height: 8),
-          for (final row in result.rows.take(8))
-            Text(
-              row.error != null ? '⚠ ${row.error}' : (row.visible ? row.display : '—'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(fontFamily: 'monospace'),
-            ),
+          _PreviewGrid(refBase: refBase, title: title, rows: result.rows),
         ],
       ),
     );
@@ -775,16 +828,90 @@ class _PreviewPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: TextStyle(color: color, fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              Text(
+                title,
+                style: TextStyle(color: color, fontWeight: FontWeight.bold),
+              ),
+              if (body.isNotEmpty) _CopyButton(text: () => body, color: color),
+            ],
           ),
           if (body.isNotEmpty)
             Text(
               body,
-              style: theme.textTheme.bodySmall?.copyWith(color: color, fontFamily: 'monospace'),
+              style: GoogleFonts.mPlus1Code(textStyle: theme.textTheme.bodySmall, color: color),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Renders the visible preview rows in a real [TrinaGrid], built from the spec's
+/// own [ScriptColumnSpec.plutoColumn]/[ScriptColumnSpec.plutoCell] and styled
+/// like the production data table, so the preview is the actual table widget —
+/// not an approximation — including header, sorting, alternating rows, and the
+/// cell renderer (colors, icons, backgrounds, ⚠ markers).
+class _PreviewGrid extends StatelessWidget {
+  final RefBase refBase;
+  final String title;
+  final List<ScriptCellResult> rows;
+
+  const _PreviewGrid({required this.refBase, required this.title, required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // Production hides filtered-out rows; mirror that. Error rows stay visible
+    // (they render a ⚠ marker), matching the grid.
+    final shown = rows.where((r) => r.visible).toList();
+    if (shown.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Text("$tr_script.preview.no_rows".tr(), style: TextStyle(color: theme.disabledColor)),
+      );
+    }
+
+    // A throwaway spec drives the production rendering path. plutoColumn/plutoCell
+    // for a script column read no providers, so the RefBase is only a pass-through.
+    final spec = ScriptColumnSpec(id: 'preview', title: title, source: '');
+    spec._numericSort = shown.every((r) => r.sortValue is num);
+    spec._hasIcon = shown.any((r) => r.icon != null);
+    final column = spec.plutoColumn(refBase);
+    final trinaRows = [
+      for (final result in shown) TrinaRow(cells: {spec.id: spec.plutoCell(refBase, result)}),
+    ];
+
+    return SizedBox(
+      height: 280,
+      child: TrinaGrid(
+        // Key on every rendered field: TrinaGrid caches its rows in the state
+        // manager and won't refresh unless the key changes, so any styling tweak
+        // (e.g. background only) must alter the key.
+        key: ValueKey(
+          Object.hashAll(
+            shown.map(
+              (r) => '${r.display}|${r.sortValue}|${r.color}|${r.background}|${r.icon}|${r.iconColor}|${r.error}',
+            ),
+          ),
+        ),
+        columns: [column],
+        rows: trinaRows,
+        mode: TrinaGridMode.readOnly,
+        configuration: TrinaGridConfiguration(
+          scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
+          style: TrinaGridStyleConfig(
+            enableCellBorderVertical: false,
+            gridBackgroundColor: theme.colorScheme.surface,
+            rowColor: theme.colorScheme.surface,
+            evenRowColor: theme.colorScheme.blueTintedSurface,
+            gridBorderColor: theme.colorScheme.outline,
+            columnTextStyle: theme.textTheme.titleSmall!,
+            cellTextStyle: theme.textTheme.bodyMedium!,
+          ),
+        ),
+        onLoaded: (event) => event.stateManager.autoFitColumns(),
       ),
     );
   }

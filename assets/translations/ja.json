@@ -170,7 +170,8 @@
                     "title": "フィルタカスタマイズ",
                     "ok_button": {
                         "label": "OK",
-                        "tooltip": "この設定でテーブルに反映"
+                        "tooltip": "この設定でテーブルに反映",
+                        "disabled_tooltip": "先にチェックを実行してください"
                     },
                     "delete_button": {
                         "label": "列を削除",
@@ -504,26 +505,30 @@
                     },
                     "code": {
                         "label": "コード",
-                        "description": "filter（行の表示可否）と display（セルの内容）の2関数を書きます。共有ヘルパも同じ欄に書けます。",
+                        "description": "filter（行の表示可否）と display（セルの内容）の2関数を定義してください。",
                         "hint": "bool filter(CharaRecord r) { ... }\ndynamic display(CharaRecord r) { ... }"
                     },
                     "preview": {
-                        "label": "プレビュー",
-                        "description": "先頭の数件で実際に実行し、結果と平均実行時間を確認します。",
-                        "button": "評価",
+                        "label": "チェック",
+                        "description": "上記スクリプトの動作を確認します。チェックが通った場合のみ保存できます。",
+                        "button": "チェック",
                         "running": "実行中…",
-                        "average_time": "平均 {time} µs/件",
-                        "visible_count": "表示 {visible}/{total} 件",
                         "compile_error": "コンパイルエラー",
                         "runtime_error": "実行時エラー",
                         "timeout": "処理が重すぎます（タイムアウト）。保存できません。",
-                        "cost_warning": "全 {count} 件では約 {total} 推定。グリッドが重くなる可能性があります。",
-                        "ok": "保存できます。"
+                        "cost_warning": "テーブル全体が重くなる可能性があります。",
+                        "ok": "正常に動作しました。保存できます。",
+                        "no_rows": "表示対象の行がありません",
+                        "estimated_total": "フルサイズ（全 {count} 件）で約 {time}（推定）"
                     },
                     "subject": {
                         "self": "本人",
                         "parent1": "親1",
                         "parent2": "親2"
+                    },
+                    "copy": {
+                        "tooltip": "クリップボードにコピー",
+                        "done": "クリップボードにコピーしました"
                     }
                 }
             },
