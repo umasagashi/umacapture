@@ -520,6 +520,8 @@
                         "ok": "正常に動作しました。保存できます。",
                         "no_rows": "表示対象の行がありません",
                         "estimated_total": "フルサイズ（全 {count} 件）で約 {time}（推定）",
+                        "zero_records_warning": "レコードが0件のためチェックできません。この結果は信頼できません。",
+                        "showing_first": "先頭 {shown} 件を表示中（全 {total} 件）",
                         "unit": {
                             "seconds": "秒",
                             "milliseconds": "ms",

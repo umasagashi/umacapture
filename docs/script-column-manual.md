@@ -417,6 +417,11 @@ bool filter(CharaRecord r) {
 | 一覧（`map` の結果など） | 各要素を `", "` でつないで表示 | なし（辞書順） |
 | `Cell(...)`（[10 章](#10-cell表示を細かく制御する)） | `Cell` の指定どおり | `Cell` の `sort` |
 | `null` | 空欄 | なし |
+| `$Coded` などのオブジェクトをそのまま | **エラー（⚠）** | — |
+
+> **注意：** コード化項目（`$Coded`、[5.10](#510-コード化された項目coded--namecode)）やレコードの一部を
+> **そのまま返すとエラー**になります（以前は空欄になっていました）。`.name` / `.code` で値を取り出すか、
+> `Cell(...)` を使ってください。例：`return r.scenario;` ではなく `return r.scenario.name;`。
 
 ```dart
 dynamic display(CharaRecord r) {

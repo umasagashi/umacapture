@@ -271,6 +271,16 @@ final compiledScriptProvider = Provider.family<CompiledScript, String>((ref, sou
 
 // --- Cell result / data -----------------------------------------------------
 
+// Diagnostic messages stored in [ScriptCellResult.error]. They are deliberately
+// plain (non-localized) strings: the same normalization runs inside the preview
+// isolate (see [_previewEntry]), where easy_localization's global is not
+// initialized and `.tr()` would fail. Raw dart_eval exceptions are already shown
+// untranslated through the same ⚠ path, so this is consistent.
+const _displayObjectError =
+    'display() returned an object. Return a number, string, or Cell(...). '
+    'For coded fields use .name (e.g. r.scenario.name).';
+const _budgetError = 'Execution budget exceeded; this and the remaining rows were not evaluated.';
+
 /// The per-record outcome of running filter + display, computed once in
 /// [ScriptColumnSpec.parse] and shared by evaluate / plutoCell / plutoColumn.
 class ScriptCellResult {
@@ -294,26 +304,34 @@ class ScriptCellResult {
     this.error,
   });
 
-  /// Normalizes an arbitrary display-script return value into a result.
+  /// Builds a result from a `Cell(...)`'s backing map: the wrapped
+  /// {display, sort, color, background, icon, iconColor}.
+  factory ScriptCellResult.fromCell(Map value) {
+    return ScriptCellResult(
+      visible: true,
+      display: (value['display'] ?? '').toString(),
+      sortValue: value['sort'] is Comparable ? value['sort'] as Comparable : null,
+      color: value['color'] as String?,
+      background: value['background'] as String?,
+      icon: value['icon'] as String?,
+      iconColor: value['iconColor'] as String?,
+    );
+  }
+
+  /// Normalizes a plain (already unwrapped) display-script return value.
+  ///
+  /// A `Cell(...)` is handled earlier by [fromCell]; any other [Map] reaching
+  /// here is a facade object the script returned by mistake (e.g. a `$Coded`
+  /// like `r.scenario` instead of `r.scenario.name`), which would otherwise
+  /// render as a silent blank — so it is surfaced as an error instead.
   factory ScriptCellResult.fromDisplay(Object? value) {
-    if (value is Map) {
-      // A `Cell(...)` — the wrapped {display, sort, color, background, icon, iconColor}.
-      return ScriptCellResult(
-        visible: true,
-        display: (value['display'] ?? '').toString(),
-        sortValue: value['sort'] is Comparable ? value['sort'] as Comparable : null,
-        color: value['color'] as String?,
-        background: value['background'] as String?,
-        icon: value['icon'] as String?,
-        iconColor: value['iconColor'] as String?,
-      );
-    }
     if (value is num) return ScriptCellResult(visible: true, display: value.toString(), sortValue: value);
     if (value is bool) return ScriptCellResult(visible: true, display: value.toString());
     if (value is List) {
       return ScriptCellResult(visible: true, display: value.map((e) => '$e').join(', '));
     }
     if (value == null) return const ScriptCellResult(visible: true, display: '');
+    if (value is Map) return const ScriptCellResult(visible: true, display: '', error: _displayObjectError);
     return ScriptCellResult(visible: true, display: value.toString());
   }
 }
@@ -328,6 +346,42 @@ class ScriptCellData implements CellData {
 
   @override
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+}
+
+/// Column type for script cells: the whole [ScriptCellResult] lives in
+/// `cell.value`, so sorting reads the numeric sort key while the column
+/// `formatter` (and thus auto-fit) and the renderer use the display text. It
+/// mirrors the minimal surface of the built-in text type; `applyFormat*` come
+/// from trina's default extension (a no-op for a non-format type).
+class _ScriptColumnType with TrinaColumnTypeDefaultMixin implements TrinaColumnType {
+  const _ScriptColumnType();
+
+  @override
+  dynamic get defaultValue => null;
+
+  @override
+  bool isValid(dynamic value) => true;
+
+  @override
+  dynamic makeCompareValue(dynamic v) {
+    final result = v as ScriptCellResult;
+    return result.sortValue ?? result.display;
+  }
+
+  @override
+  int compare(dynamic a, dynamic b) {
+    if (a == null || b == null) return a == b ? 0 : (a == null ? -1 : 1);
+    if (a is num && b is num) return a.compareTo(b);
+    return a.toString().compareTo(b.toString());
+  }
+
+  // The column always supplies its own `renderer` and disables editing, so this
+  // default cell is effectively unused; mirror the renderer for safety.
+  @override
+  Widget buildCell(TrinaGridStateManager stateManager, TrinaCell cell, TrinaColumn column, TrinaRow row) {
+    final data = cell.getUserData<ScriptCellData>();
+    return data == null ? const SizedBox.shrink() : _ScriptCell(result: data.result);
+  }
 }
 
 // --- Color / icon resolution (renderer side) --------------------------------
@@ -408,7 +462,23 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       return [for (final _ in records) ScriptCellResult(visible: true, display: '', error: compiled.error)];
     }
     final runtime = compiled.runtime!;
-    final results = records.map((record) => _run(ref, runtime, record)).toList();
+    // Production has no hard per-call timeout: dart_eval exposes no instruction
+    // hook, so a single runaway record cannot be interrupted here. The save-time
+    // check runs the whole record set under [_previewTimeout], which is what
+    // guarantees no such script is committed. As a softer secondary guard against
+    // cumulative cost (e.g. far more records than existed at check time), abort
+    // once the looser [_productionBudget] is spent and mark the remaining rows.
+    final stopwatch = Stopwatch()..start();
+    final results = <ScriptCellResult>[];
+    var aborted = false;
+    for (final record in records) {
+      if (aborted) {
+        results.add(const ScriptCellResult(visible: true, display: '', error: _budgetError));
+        continue;
+      }
+      results.add(_run(ref, runtime, record));
+      if (stopwatch.elapsedMicroseconds > _productionBudget.inMicroseconds) aborted = true;
+    }
     _applyHints(results.where((r) => r.visible));
     return results;
   }
@@ -436,15 +506,21 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       final map = ref.read(enrichedRecordProvider(record.id));
       final visible = _unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
       if (!visible) return const ScriptCellResult(visible: false, display: '');
-      final display = _unwrap(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
-      final normalized = ScriptCellResult.fromDisplay(display);
-      return normalized;
+      return _displayResult(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
     } catch (e) {
       return ScriptCellResult(visible: true, display: '', error: e.toString());
     }
   }
 
   static Object? _unwrap(Object? result) => result is $Value ? result.$value : result;
+
+  /// Normalizes a raw `display` return value, distinguishing a real `Cell` from
+  /// any other facade object (an error) before unwrapping. Shared by the render
+  /// path and the preview isolate so both treat return values identically.
+  static ScriptCellResult _displayResult(Object? raw) {
+    if (raw is $Cell) return ScriptCellResult.fromCell(raw.$value);
+    return ScriptCellResult.fromDisplay(_unwrap(raw));
+  }
 
   @override
   List<bool> evaluate(RefBase ref, List<ScriptCellResult> values) {
@@ -453,10 +529,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
 
   @override
   TrinaCell plutoCell(RefBase ref, ScriptCellResult value) {
-    final cellValue = value.error != null
-        ? '⚠'
-        : (_numericSort && value.sortValue is num ? value.sortValue : value.display);
-    return TrinaCell(value: cellValue)..setUserData(ScriptCellData(value));
+    // The full result is the cell value (see [_ScriptColumnType]); the renderer
+    // and formatter read it for display/measurement, sorting for the sort key.
+    return TrinaCell(value: value)..setUserData(ScriptCellData(value));
   }
 
   @override
@@ -464,16 +539,16 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     return TrinaColumn(
       title: title,
       field: id,
-      type: _numericSort ? TrinaColumnType.number() : TrinaColumnType.text(),
+      type: const _ScriptColumnType(),
       textAlign: _numericSort ? TrinaColumnTextAlign.right : TrinaColumnTextAlign.left,
       enableContextMenu: false,
       enableDropToResize: false,
       enableColumnDrag: false,
       enableEditingMode: false,
-      // Auto-fit measures the formatted value's text width only; the renderer
-      // also draws a leading icon. When any cell has one, reserve its width in
-      // the measured string (the renderer, not this, controls the visible text).
-      formatter: _hasIcon ? (value) => '$_iconWidthReserve$value' : null,
+      // Auto-fit measures formattedValueForDisplay(cell.value); make that the real
+      // display text (the renderer draws the same), plus an icon-width reserve when
+      // any cell renders a leading icon so the icon never squeezes text to ellipsis.
+      formatter: (value) => '${_hasIcon ? _iconWidthReserve : ''}${(value as ScriptCellResult).display}',
       renderer: (context) => _ScriptCell(result: context.cell.getUserData<ScriptCellData>()!.result),
     )..setUserData(this);
   }
@@ -530,12 +605,21 @@ class _ScriptCell extends StatelessWidget {
 
 // --- Preview (separate isolate + timeout) -----------------------------------
 
-/// Number of leading records the preview runs against.
-const _previewSampleSize = 20;
+/// Maximum number of rows the preview grid widget renders. The check itself runs
+/// against every record; this only bounds how many result rows are shown (and
+/// hashed into the grid key) so a large dataset stays responsive in the dialog.
+const _previewDisplayLimit = 100;
 
-/// Hard cap on a preview run; exceeding it rejects the save (infinite loops,
-/// pathologically heavy scripts).
+/// Hard cap on a save-time check, now run over the FULL record set; exceeding it
+/// rejects the save (infinite loops, pathologically heavy scripts).
 const _previewTimeout = Duration(seconds: 3);
+
+/// Looser wall-clock budget for the synchronous production grid build. A script
+/// that passed the stricter full-set check stays well under this; the headroom
+/// absorbs slower hardware or more records added after the check. See
+/// [ScriptColumnSpec.parse]. dart_eval cannot interrupt a single runaway record,
+/// so this only bounds cumulative cost across rows.
+const _productionBudget = Duration(seconds: 10);
 
 /// Estimated full-grid cost above which the user is warned (soft) before saving.
 const _costWarnMicros = 1500000; // ~1.5s across all records.
@@ -588,8 +672,7 @@ void _previewEntry(_PreviewRequest request) {
         rows.add(const ScriptCellResult(visible: false, display: ''));
         continue;
       }
-      final value = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
-      rows.add(ScriptCellResult.fromDisplay(value));
+      rows.add(ScriptColumnSpec._displayResult(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)])));
     } catch (e) {
       rows.add(ScriptCellResult(visible: true, display: '', error: e.toString()));
     }
@@ -937,9 +1020,10 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
       });
       return;
     }
+    // Validate against every record, not a sample: the full-set run (bounded by
+    // [_previewTimeout]) is the real guard that no committed script hangs the grid.
     final records = ref
         .read(charaDetailRecordStorageProvider)
-        .take(_previewSampleSize)
         .map((r) => ref.read(enrichedRecordProvider(r.id)))
         .toList();
     final result = await runScriptPreview(source, records);
@@ -1075,7 +1159,15 @@ class _PreviewPanel extends StatelessWidget {
             ),
           if (firstError != null)
             _message(theme, "$tr_script.preview.runtime_error".tr(), firstError, theme.colorScheme.error),
-          if (result.ok)
+          if (recordCount == 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                "$tr_script.preview.zero_records_warning".tr(),
+                style: TextStyle(color: theme.colorScheme.tertiary, fontWeight: FontWeight.bold),
+              ),
+            ),
+          if (result.ok && recordCount > 0)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text("$tr_script.preview.ok".tr(), style: TextStyle(color: theme.colorScheme.primary)),
@@ -1130,13 +1222,17 @@ class _PreviewGrid extends StatelessWidget {
     final theme = Theme.of(context);
     // Production hides filtered-out rows; mirror that. Error rows stay visible
     // (they render a ⚠ marker), matching the grid.
-    final shown = rows.where((r) => r.visible).toList();
-    if (shown.isEmpty) {
+    final visible = rows.where((r) => r.visible).toList();
+    if (visible.isEmpty) {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text("$tr_script.preview.no_rows".tr(), style: TextStyle(color: theme.disabledColor)),
       );
     }
+    // The check already ran against every record; the grid only renders a capped
+    // window so a large result set stays responsive in the dialog.
+    final truncated = visible.length > _previewDisplayLimit;
+    final shown = truncated ? visible.take(_previewDisplayLimit).toList() : visible;
 
     // A throwaway spec drives the production rendering path. plutoColumn/plutoCell
     // for a script column read no providers, so the RefBase is only a pass-through.
@@ -1147,7 +1243,7 @@ class _PreviewGrid extends StatelessWidget {
       for (final result in shown) TrinaRow(cells: {spec.id: spec.plutoCell(refBase, result)}),
     ];
 
-    return SizedBox(
+    final grid = SizedBox(
       height: 280,
       child: TrinaGrid(
         // Key on every rendered field: TrinaGrid caches its rows in the state
@@ -1177,6 +1273,22 @@ class _PreviewGrid extends StatelessWidget {
         ),
         onLoaded: (event) => event.stateManager.autoFitColumns(),
       ),
+    );
+    if (!truncated) return grid;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            "$tr_script.preview.showing_first".tr(
+              namedArgs: {"shown": "${shown.length}", "total": "${visible.length}"},
+            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+          ),
+        ),
+        grid,
+      ],
     );
   }
 }

@@ -92,4 +92,59 @@ void main() {
     expect(result.timedOut, isTrue);
     expect(result.ok, isFalse);
   }, timeout: const Timeout(Duration(seconds: 15)));
+
+  test('returning a facade object instead of a value or Cell is an error', () async {
+    // `r.scenario` is a Scenario object, not a value; this used to render a silent
+    // blank. It must now surface as an error so the save stays gated.
+    final result = await runScriptPreview(
+      'bool filter(CharaRecord r) => true;\n'
+      'dynamic display(CharaRecord r) => r.scenario;',
+      records,
+    );
+    expect(result.ok, isFalse);
+    expect(result.rows.every((r) => r.error != null), isTrue);
+  });
+
+  test('Cell display text is kept with an independent numeric sort key', () async {
+    final result = await runScriptPreview(
+      'bool filter(CharaRecord r) => true;\n'
+      'dynamic display(CharaRecord r) => Cell("fast", sort: r.status.speed);',
+      records,
+    );
+    expect(result.ok, isTrue);
+    expect(result.rows.first.display, 'fast');
+    expect(result.rows.first.sortValue, 1200);
+  });
+
+  test('a mapped list still joins (ValueList routes through the List path)', () async {
+    final withSkills = sampleRecord();
+    withSkills['skills'] = <Map<String, dynamic>>[
+      {'id': 1, 'level': 1, 'name': 'A', 'tags': <String>[]},
+      {'id': 2, 'level': 1, 'name': 'B', 'tags': <String>[]},
+    ];
+    final result = await runScriptPreview(
+      'bool filter(CharaRecord r) => true;\n'
+      'dynamic display(CharaRecord r) => r.skills.map((s) => s.name).join("/");',
+      [withSkills],
+    );
+    expect(result.ok, isTrue);
+    expect(result.rows.first.display, 'A/B');
+  });
+
+  group('ScriptCellResult normalization', () {
+    test('primitives and lists map to display/sort', () {
+      expect(ScriptCellResult.fromDisplay(42).sortValue, 42);
+      expect(ScriptCellResult.fromDisplay(42).display, '42');
+      expect(ScriptCellResult.fromDisplay(['a', 'b']).display, 'a, b');
+      expect(ScriptCellResult.fromDisplay(null).display, '');
+    });
+
+    test('a bare object (Map) is an error, a Cell map is not', () {
+      expect(ScriptCellResult.fromDisplay({'code': 7, 'name': 'A'}).error, isNotNull);
+      final cell = ScriptCellResult.fromCell({'display': 'x', 'sort': 5});
+      expect(cell.error, isNull);
+      expect(cell.display, 'x');
+      expect(cell.sortValue, 5);
+    });
+  });
 }
