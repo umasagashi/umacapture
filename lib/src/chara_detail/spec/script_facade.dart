@@ -30,6 +30,50 @@ import 'package:dart_eval/stdlib/core.dart';
 /// [FacadePlugin] populates it.
 const facadeUri = 'package:script/facade.dart';
 
+/// Per-category name→code tables (`category → {name: code}`), injected just
+/// before a script runs and read by [$Coded.codeOf] / `atLeast` / `atMost`.
+///
+/// A `$Coded` map carries only its own `{code, name}`, so it cannot resolve an
+/// arbitrary target name to a code on its own. The full tables are global to a
+/// grid build (derived from the same labels as the enrichment step), so rather
+/// than embed a heavy table into every record (and copy it across the preview
+/// isolate per row), the coded map carries a light `category` tag and the table
+/// lives here. Set from `ScriptColumnSpec.parse` (main isolate) and
+/// `_previewEntry` (preview isolate) before execution; both are synchronous, so
+/// a single library-level holder is safe. It is plain JSON data, so it crosses
+/// the isolate boundary verbatim.
+Map<String, Map<String, int>> scriptCodeTables = const {};
+
+/// A script-facing error whose [toString] is the bare message, so the ⚠ cell
+/// tooltip and the preview check show it without an `Exception:` prefix.
+class ScriptLookupError implements Exception {
+  ScriptLookupError(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// Resolves [name] to its code within the [self] coded map's category, throwing
+/// a [ScriptLookupError] when the field has no category, no table is loaded, or
+/// the name is unknown (a typo surfaces loudly instead of silently mismatching).
+int _codeOfName(Map self, String name) {
+  final category = self['category'];
+  if (category is! String) {
+    throw ScriptLookupError('this field has no comparable order (codeOf/atLeast/atMost unavailable)');
+  }
+  final table = scriptCodeTables[category];
+  if (table == null) {
+    throw ScriptLookupError('no lookup table for $category');
+  }
+  final code = table[name];
+  if (code == null) {
+    throw ScriptLookupError('unknown $category name: $name');
+  }
+  return code;
+}
+
 // --- Facade type references --------------------------------------------------
 
 // The root type is named `CharaRecord`, NOT `Record`: a bridge type named
@@ -467,6 +511,11 @@ class $Coded extends _MapInstance {
     BridgeClassType(codedType),
     constructors: const {},
     getters: {'name': _getter(_stringT), 'code': _getter(_intT)},
+    methods: {
+      'codeOf': _stringArgMethod(_intT),
+      'atLeast': _stringArgMethod(_boolT),
+      'atMost': _stringArgMethod(_boolT),
+    },
     wrap: true,
   );
 
@@ -480,6 +529,18 @@ class $Coded extends _MapInstance {
         return $String($value['name'] as String);
       case 'code':
         return $int($value['code'] as int);
+      case 'codeOf':
+        return $Function((rt, t, a) => $int(_codeOfName(t!.$value as Map, a[0]!.$value as String)));
+      case 'atLeast':
+        return $Function((rt, t, a) {
+          final self = t!.$value as Map;
+          return $bool((self['code'] as int) >= _codeOfName(self, a[0]!.$value as String));
+        });
+      case 'atMost':
+        return $Function((rt, t, a) {
+          final self = t!.$value as Map;
+          return $bool((self['code'] as int) <= _codeOfName(self, a[0]!.$value as String));
+        });
     }
     return _fallback(rt, id);
   }
@@ -1138,6 +1199,35 @@ $Value? whenFn(Runtime rt, $Value? target, List<$Value?> args) {
   return cond ? (args[1] ?? $null()) : $null();
 }
 
+/// `days(String date)` → whole days since the Unix epoch for the date's local
+/// civil day.
+///
+/// Accepts both `YYYY/MM/DD` (e.g. `trainedDate`) and ISO-8601 (e.g.
+/// `capturedDate`) by normalizing `/` to `-` before parsing. The result is the
+/// calendar day in local time (matching how the standard date columns display
+/// `capturedDate` via `toLocal()`), reduced to a day-granularity integer so the
+/// time-of-day is absorbed and the value is timezone-stable for date-only input.
+/// Throws on an unparseable string.
+$Value? daysFn(Runtime rt, $Value? target, List<$Value?> args) {
+  final source = args[0]?.$value as String?;
+  final parsed = source == null ? null : DateTime.tryParse(source.replaceAll('/', '-'));
+  if (parsed == null) {
+    throw ScriptLookupError('cannot parse date: $source');
+  }
+  final local = parsed.toLocal();
+  // UTC midnight of the civil date: its epoch millis are an exact day multiple.
+  return $int(DateTime.utc(local.year, local.month, local.day).millisecondsSinceEpoch ~/ Duration.millisecondsPerDay);
+}
+
+final _daysDecl = BridgeFunctionDeclaration(
+  facadeUri,
+  'days',
+  BridgeFunctionDef(
+    returns: const BridgeTypeAnnotation(_intT),
+    params: [BridgeParameter('date', const BridgeTypeAnnotation(_stringT), false)],
+  ),
+);
+
 final _whenDecl = BridgeFunctionDeclaration(
   facadeUri,
   'when',
@@ -1191,6 +1281,7 @@ class FacadePlugin implements EvalPlugin {
     registry.defineBridgeTopLevelFunction(_whenDecl);
     registry.defineBridgeTopLevelFunction(_heatDecl);
     registry.defineBridgeTopLevelFunction(_lerpColorDecl);
+    registry.defineBridgeTopLevelFunction(_daysDecl);
     for (final declaration in _classDeclarations) {
       registry.defineBridgeClass(declaration);
     }
@@ -1202,6 +1293,7 @@ class FacadePlugin implements EvalPlugin {
     runtime.registerBridgeFunc(facadeUri, 'when', whenFn);
     runtime.registerBridgeFunc(facadeUri, 'heat', heatFn);
     runtime.registerBridgeFunc(facadeUri, 'lerpColor', lerpColorFn);
+    runtime.registerBridgeFunc(facadeUri, 'days', daysFn);
   }
 
   static final List<BridgeClassDef> _classDeclarations = [

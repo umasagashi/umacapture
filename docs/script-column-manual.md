@@ -281,6 +281,39 @@ r.aptitudes.distance.long.code >= 5   // 長距離適性が C 以上
 
 > ラベルの正確な表記は、対応する標準列の表示に合わせてください（上の例は代表値です）。
 
+#### 名前で大小比較する（`codeOf` / `atLeast` / `atMost`）
+
+`.code` の数値を覚えなくても、**名前を指定して大小比較**できます。フィールドが自分のカテゴリを
+知っているので、カテゴリ名の指定は不要です。
+
+| 書き方 | 戻り | 説明 |
+|---|---|---|
+| `c.codeOf("B")` | int | このフィールドのカテゴリで「B」に対応する内部コード |
+| `c.atLeast("A")` | bool | `c.code >= c.codeOf("A")`（**A 以上**） |
+| `c.atMost("B")` | bool | `c.code <= c.codeOf("B")`（**B 以下**） |
+
+```dart
+// キャラランクが B 以下（評価値の小さい順）
+bool filter(CharaRecord r) {
+  return r.charaRank.atMost("B");
+}
+
+// 長距離適性が A 以上
+r.aptitudes.distance.long.atLeast("A")
+
+// 同じ意味（codeOf を直接使う書き方）
+r.charaRank.code <= r.charaRank.codeOf("B")
+```
+
+「以上／以下」は **`.code` の大小**を基準にします（適性なら `A`>`B`>…、キャラランクなら高ランクほど
+大きい）。`codeOf`/`atLeast`/`atMost` が使えるのは**順序・識別のあるコード化項目**です：
+`r.charaRank`、適性ランク、`r.trainee`、`r.races[].{title,ground,distance,strategy,weather}`、
+`r.metadata.{recordType,strategy}`、`r.factors[].subject`、`r.supportCards[].rank`。
+
+> **存在しない名前を渡すとエラー（⚠）**になります（例：`r.charaRank.atMost("X")` で `"X"` が無い）。
+> タイプミスはチェック時に弾かれるので、コード欄の下の「名前ルックアップ」で正しい表記をコピーして使ってください。
+> 順序の無い項目（`r.scenario` などは `$Coded` ではありません）には使えません。
+
 ### 5.11 継承の親（`family`）
 
 `r.family` は継承元（親 2 体）と、その親（祖父母）のツリーです。各人物は `$Coded`
@@ -584,6 +617,35 @@ background: lerpColor("blue", "red", 0.3)
 
 ---
 
+## 13.5 日付を数値にする（`days(...)`）
+
+`r.trainedDate`（育成日）と `r.capturedDate`（取得日時）は**文字列**です。`"2026/01/01"` のように
+**そのまま `<` `<=` などで比較**できます（文字列の辞書順がそのまま日付の前後になります）。
+
+```dart
+r.trainedDate <= "2026/01/01"     // 2026/1/1 以前に育成
+r.capturedDate >= "2025-12-01"    // 2025/12/1 以降に取得
+```
+
+**日数の差**（経過日数など）を計算したいときは、`days(日付文字列)` で**エポック日数（整数）**に変換します。
+`YYYY/MM/DD` と ISO 形式の両方を受け付けます。
+
+| 関数 | 戻り | 説明 |
+|---|---|---|
+| `days("2026/01/01")` | int | エポック（1970/1/1）からの日数 |
+
+```dart
+// 育成日から取得日までの日数
+dynamic display(CharaRecord r) {
+  final age = days(r.capturedDate) - days(r.trainedDate);
+  return Cell("$age 日", sort: age);
+}
+```
+
+> パースできない文字列を渡すとエラー（⚠）になります。
+
+---
+
 ## 14. 並べ替え（ソート）の仕組み
 
 列ヘッダのクリックで並べ替えできます。並べ替えのキーは次のように決まります。
@@ -765,6 +827,7 @@ Ratings       get(key) -> double?
 Memos         get(key) -> String?
 Metadata      recordType($Coded) strategy($Coded) isFriend(bool)
 $Coded        .name(ラベル) / .code(int、順序あり項目は大小比較可)
+              .codeOf("B") -> int / .atLeast("A") / .atMost("B") -> bool（名前で大小比較）
 ID と code    すべて umacapture 内部の値（ゲーム内 ID ではない）。順序に意味なし・将来も不変。
 
 一覧の操作
@@ -780,5 +843,7 @@ Cell        Cell(文字列, {sort:, color:, background:, icon:, iconColor:})
             arrow_upward arrow_downward （すべて枠線）
 カラーマップ heat(値,{min:,max:}) -> 色 ／ lerpColor(色A,色B,t) -> 色
 条件出し分け when(条件, 値) -> 条件が真なら値・偽なら既定（色/アイコン/sort の ? : null の代わり）
+日付         days(日付文字列) -> エポック日数(int)。日付は文字列のまま < <= 比較も可
+名前で比較   $Coded.codeOf("名前") / .atLeast("名前") / .atMost("名前")
 注意        Cell内で同じ数値を「比較」と「引数」に同時使用しない（比較は先に final 変数へ）
 ```

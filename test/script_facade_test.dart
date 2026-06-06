@@ -18,6 +18,8 @@ Map<String, dynamic> sampleRecord() => {
   'evaluationValue': 12345,
   'fans': 67890,
   'trainedDate': '2026/01/02',
+  'capturedDate': '2026-02-01T12:00:00.000Z',
+  'charaRank': {'code': 6, 'name': 'B', 'category': 'charaRank'},
   'ratings': {'main': 4.5},
   'status': {'speed': 1200, 'stamina': 900, 'power': 800, 'guts': 400, 'intelligence': 600},
   'aptitudes': {
@@ -226,6 +228,77 @@ void main() {
     expect(cell['display'], 'A');
     expect(cell['sort'], 7);
     expect((cell['background'] as String).startsWith('#'), isTrue);
+  });
+
+  group('codeOf / atLeast / atMost', () {
+    test('resolve a target name to its code within the field category', () {
+      scriptCodeTables = {
+        'charaRank': {'C': 5, 'B': 6, 'A': 7, 'S': 8},
+      };
+      bool boolOf(String expr) {
+        final run = compileScript('bool filter(CharaRecord r) => $expr;\ndynamic display(CharaRecord r) => 0;');
+        return run('filter') as bool;
+      }
+
+      // r.charaRank.code == 6 ("B" in the sample record).
+      expect(boolOf('r.charaRank.atMost("B")'), isTrue); // 6 <= 6
+      expect(boolOf('r.charaRank.atMost("C")'), isFalse); // 6 <= 5
+      expect(boolOf('r.charaRank.atLeast("B")'), isTrue); // 6 >= 6
+      expect(boolOf('r.charaRank.atLeast("A")'), isFalse); // 6 >= 7
+
+      final run = compileScript(
+        'bool filter(CharaRecord r) => true;\ndynamic display(CharaRecord r) => r.charaRank.codeOf("S");',
+      );
+      expect(run('display'), 8);
+    });
+
+    test('throw a ScriptLookupError on an unknown name', () {
+      scriptCodeTables = {
+        'charaRank': {'B': 6},
+      };
+      final run = compileScript(
+        'bool filter(CharaRecord r) => r.charaRank.atMost("ZZ");\ndynamic display(CharaRecord r) => 0;',
+      );
+      expect(
+        () => run('filter'),
+        throwsA(isA<ScriptLookupError>().having((e) => e.toString(), 'message', 'unknown charaRank name: ZZ')),
+      );
+    });
+
+    test('throw when the field has no category (no comparable order)', () {
+      scriptCodeTables = const {};
+      // The sample's aptitude coded maps carry no `category` tag.
+      final run = compileScript(
+        'bool filter(CharaRecord r) => r.aptitudes.distance.middle.atMost("A");\ndynamic display(CharaRecord r) => 0;',
+      );
+      expect(() => run('filter'), throwsA(isA<ScriptLookupError>()));
+    });
+  });
+
+  test('days() converts date strings to epoch-day integers', () {
+    final run = compileScript(
+      'bool filter(CharaRecord r) => true;\n'
+      'dynamic display(CharaRecord r) => days("2026/02/01") - days(r.trainedDate);',
+    );
+    // 2026-02-01 minus 2026-01-02 = 30 whole days (date-only, timezone-stable).
+    expect(run('display'), 30);
+  });
+
+  test('days() parses the ISO capturedDate without throwing', () {
+    final run = compileScript(
+      'bool filter(CharaRecord r) => true;\ndynamic display(CharaRecord r) => days(r.capturedDate);',
+    );
+    expect(run('display'), isA<int>());
+  });
+
+  test('days() throws with a clear message on an unparseable string', () {
+    final run = compileScript(
+      'bool filter(CharaRecord r) => true;\ndynamic display(CharaRecord r) => days("not a date");',
+    );
+    // A registered top-level bridge function's throw is wrapped in dart_eval's
+    // RuntimeException, whose toString embeds the original message; the
+    // production catch surfaces that same text. Assert on the message, not type.
+    expect(() => run('display'), throwsA(predicate((e) => e.toString().contains('cannot parse date: not a date'))));
   });
 
   // The `sep` param is typed `String?`, so a non-string literal is a compile

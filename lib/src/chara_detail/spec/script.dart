@@ -40,7 +40,14 @@ const scriptApiVersion = 1;
 
 // --- Enrichment: CharaDetailRecord -> plain nested Map ----------------------
 
-Map<String, dynamic> _coded(int code, String name) => {'code': code, 'name': name};
+/// A coded leaf (`{code, name}`). [category] tags the value with its lookup
+/// table id so [$Coded.codeOf] / `atLeast` / `atMost` can resolve a target name
+/// to a code; omit it for fields without a comparable/identity order.
+Map<String, dynamic> _coded(int code, String name, [String? category]) => {
+  'code': code,
+  'name': name,
+  'category': ?category,
+};
 
 String _label(LabelMap labels, String key, int index) {
   final list = labels[key];
@@ -68,7 +75,8 @@ class _Enricher {
     this.charaCardNames,
   );
 
-  Map<String, dynamic> _aptitudeRank(int level) => _coded(level + 1, _label(labels, LabelKeys.aptitude, level));
+  Map<String, dynamic> _aptitudeRank(int level) =>
+      _coded(level + 1, _label(labels, LabelKeys.aptitude, level), 'aptitude');
 
   /// Maps an evaluation value to its rank bucket, mirroring [CharaRankColumnSpec.parse].
   Map<String, dynamic> _charaRank(int evaluation) {
@@ -76,13 +84,13 @@ class _Enricher {
     // map it to the last rank index so the highest rank stays reachable.
     final index = charaRankBorder.indexWhere((border) => border > evaluation);
     final rank = index < 0 ? charaRankBorder.length : index;
-    return _coded(rank, _label(labels, LabelKeys.charaRank, rank));
+    return _coded(rank, _label(labels, LabelKeys.charaRank, rank), 'charaRank');
   }
 
   /// A character (trainee or inheritance ancestor) as a coded card index + name.
   /// `card` directly indexes [charaCardNames], matching [CharacterCardColumnSpec.plutoCell].
   Map<String, dynamic> _chara(int card) =>
-      _coded(card, card >= 0 && card < charaCardNames.length ? charaCardNames[card] : card.toString());
+      _coded(card, card >= 0 && card < charaCardNames.length ? charaCardNames[card] : card.toString(), 'trainee');
 
   Map<String, dynamic> _parent(Parent p) => {
     'self': _chara(p.self.card),
@@ -102,7 +110,7 @@ class _Enricher {
         : meters <= 2400
         ? (2, 'middle_range')
         : (3, 'long_range');
-    return _coded(code, "pages.chara_detail.columns.aptitude.$key.title".tr());
+    return _coded(code, "pages.chara_detail.columns.aptitude.$key.title".tr(), 'distance');
   }
 
   Map<String, dynamic> _aptitudes(AptitudeSet a) => {
@@ -138,7 +146,7 @@ class _Enricher {
           'star': f.star,
           'name': _label(labels, LabelKeys.factor, f.id),
           'tags': _factorTags(f.id),
-          'subject': _coded(entry.$1, "$tr_script.subject.${["self", "parent1", "parent2"][entry.$1]}".tr()),
+          'subject': _coded(entry.$1, "$tr_script.subject.${["self", "parent1", "parent2"][entry.$1]}".tr(), 'subject'),
         },
   ];
 
@@ -175,14 +183,14 @@ class _Enricher {
   List<Map<String, dynamic>> _races(List<Race> races) => [
     for (final e in races)
       {
-        'title': _coded(e.title, _label(labels, 'race_title.name', e.title)),
+        'title': _coded(e.title, _label(labels, 'race_title.name', e.title), 'race_title'),
         'place': e.place,
         'position': e.position,
         'won': e.won,
-        'ground': _coded(e.ground, _label(labels, 'race_place.ground', e.ground)),
+        'ground': _coded(e.ground, _label(labels, 'race_place.ground', e.ground), 'ground'),
         'distance': _distance(e.distance),
-        'strategy': _coded(e.strategy, _label(labels, LabelKeys.raceStrategy, e.strategy)),
-        'weather': _coded(e.weather, _label(labels, 'race_weather.name', e.weather)),
+        'strategy': _coded(e.strategy, _label(labels, LabelKeys.raceStrategy, e.strategy), 'raceStrategy'),
+        'weather': _coded(e.weather, _label(labels, 'race_weather.name', e.weather), 'weather'),
       },
   ];
 
@@ -190,7 +198,11 @@ class _Enricher {
     for (final c in cards)
       {
         'id': c.id,
-        'rank': _coded(c.rank, c.rank < _supportCardRanks.length ? _supportCardRanks[c.rank] : c.rank.toString()),
+        'rank': _coded(
+          c.rank,
+          c.rank < _supportCardRanks.length ? _supportCardRanks[c.rank] : c.rank.toString(),
+          'support_rank',
+        ),
         'level': c.level,
       },
   ];
@@ -198,8 +210,12 @@ class _Enricher {
   Map<String, dynamic> _metadata(CharaDetailRecord record) {
     final typeIndex = RecordType.values.indexOf(record.metadata.recordType ?? RecordType.standard);
     return {
-      'recordType': _coded(typeIndex, _label(labels, LabelKeys.recordType, typeIndex)),
-      'strategy': _coded(record.metadata.strategy, _label(labels, LabelKeys.raceStrategy, record.metadata.strategy)),
+      'recordType': _coded(typeIndex, _label(labels, LabelKeys.recordType, typeIndex), 'record_type'),
+      'strategy': _coded(
+        record.metadata.strategy,
+        _label(labels, LabelKeys.raceStrategy, record.metadata.strategy),
+        'raceStrategy',
+      ),
       'isFriend': record.isFriend,
     };
   }
@@ -509,6 +525,8 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       return [for (final _ in records) ScriptCellResult(visible: true, display: '', error: compiled.error)];
     }
     final runtime = compiled.runtime!;
+    // Make the name→code tables visible to codeOf/atLeast/atMost for this run.
+    scriptCodeTables = ref.read(scriptCodeTablesProvider);
     // Production has no hard per-call timeout: dart_eval exposes no instruction
     // hook, so a single runaway record cannot be interrupted here. The save-time
     // check runs the whole record set under [_previewTimeout], which is what
@@ -682,8 +700,9 @@ class _PreviewRequest {
   final SendPort port;
   final String source;
   final List<Map<String, dynamic>> records;
+  final Map<String, Map<String, int>> tables;
 
-  _PreviewRequest(this.port, this.source, this.records);
+  _PreviewRequest(this.port, this.source, this.records, this.tables);
 }
 
 class ScriptPreviewResult {
@@ -710,6 +729,8 @@ void _previewEntry(_PreviewRequest request) {
     return;
   }
   final runtime = compiled.runtime!;
+  // Mirror the production run: name→code tables for codeOf/atLeast/atMost.
+  scriptCodeTables = request.tables;
   final rows = <ScriptCellResult>[];
   final stopwatch = Stopwatch()..start();
   for (final map in request.records) {
@@ -729,9 +750,13 @@ void _previewEntry(_PreviewRequest request) {
   request.port.send(ScriptPreviewResult(rows: rows, microsPerRecord: micros));
 }
 
-Future<ScriptPreviewResult> runScriptPreview(String source, List<Map<String, dynamic>> records) async {
+Future<ScriptPreviewResult> runScriptPreview(
+  String source,
+  List<Map<String, dynamic>> records, [
+  Map<String, Map<String, int>> tables = const {},
+]) async {
   final receivePort = ReceivePort();
-  final isolate = await Isolate.spawn(_previewEntry, _PreviewRequest(receivePort.sendPort, source, records));
+  final isolate = await Isolate.spawn(_previewEntry, _PreviewRequest(receivePort.sendPort, source, records, tables));
   try {
     final result = await receivePort.first.timeout(_previewTimeout);
     return result as ScriptPreviewResult;
@@ -781,12 +806,20 @@ const _trCommonSelector = "pages.chara_detail.column_predicate.common.selector";
 
 /// One selectable lookup category: the script accessor [path] that yields these
 /// [names], plus a [hintKey] for the dimmed Japanese label shown beside it.
+///
+/// [category] / [codeByName] are set only for `$Coded`-backed accessors: they
+/// feed the runtime name→code tables ([scriptCodeTablesProvider]) used by
+/// `$Coded.codeOf` / `atLeast` / `atMost`, with [codeByName] keyed by the same
+/// display names listed here. Non-coded categories (skills, factors, scenario)
+/// leave [category] null.
 class _LookupCategory {
   final String path;
   final String hintKey;
   final List<String> names;
+  final String? category;
+  final Map<String, int> codeByName;
 
-  const _LookupCategory(this.path, this.hintKey, this.names);
+  const _LookupCategory(this.path, this.hintKey, this.names, {this.category, this.codeByName = const {}});
 }
 
 /// Drops blanks and removes duplicates while preserving first-seen order.
@@ -800,48 +833,80 @@ List<String> _distinctNonEmpty(Iterable<String> names) {
   return result;
 }
 
+/// Maps each non-blank label to its code (`index + offset`, first-seen wins),
+/// mirroring the enricher's code assignment for that category (e.g. aptitude
+/// uses `offset: 1` since its code is `level + 1`).
+Map<String, int> _codeByIndex(List<String> labels, {int offset = 0}) {
+  final map = <String, int>{};
+  for (final (index, raw) in labels.indexed) {
+    final name = raw.trim();
+    if (name.isNotEmpty) map.putIfAbsent(name, () => index + offset);
+  }
+  return map;
+}
+
 /// Every category of `.name` a script can read, paired with the accessor path
 /// that produces it. Each name list is derived with the SAME transform the
 /// enricher uses (see [_Enricher]), so a copied string equals the script's
 /// `.name` verbatim.
 List<_LookupCategory> _buildLookupCategories(LabelMap labels, List<String> charaNames) {
   List<String> label(String key) => labels[key] ?? const [];
+
+  // A `$Coded`-backed category: `names` for the picker, `codeByName` for the
+  // runtime tables. `source` order/offset must match the enricher's codes.
+  _LookupCategory coded(String path, String hintKey, String category, List<String> source, {int offset = 0}) {
+    return _LookupCategory(
+      path,
+      hintKey,
+      _distinctNonEmpty(source),
+      category: category,
+      codeByName: _codeByIndex(source, offset: offset),
+    );
+  }
+
+  final subjectNames = ['self', 'parent1', 'parent2'].map((k) => "$tr_script.subject.$k".tr()).toList();
+  final distanceNames = [
+    'short_range',
+    'mile_range',
+    'middle_range',
+    'long_range',
+  ].map((k) => "pages.chara_detail.columns.aptitude.$k.title".tr()).toList();
+
   return [
-    _LookupCategory('r.trainee.name', 'trainee', _distinctNonEmpty(charaNames)),
-    _LookupCategory('r.charaRank.name', 'chara_rank', _distinctNonEmpty(label(LabelKeys.charaRank))),
+    coded('r.trainee.name', 'trainee', 'trainee', charaNames),
+    coded('r.charaRank.name', 'chara_rank', 'charaRank', label(LabelKeys.charaRank)),
     _LookupCategory('r.skills[].name', 'skill', _distinctNonEmpty(label(LabelKeys.skill))),
     _LookupCategory('r.factors[].name', 'factor', _distinctNonEmpty(label(LabelKeys.factor))),
-    _LookupCategory(
-      'r.factors[].subject.name',
-      'subject',
-      _distinctNonEmpty(['self', 'parent1', 'parent2'].map((k) => "$tr_script.subject.$k".tr())),
-    ),
+    coded('r.factors[].subject.name', 'subject', 'subject', subjectNames),
     _LookupCategory(
       'r.scenario.name',
       'scenario',
       _distinctNonEmpty(label(LabelKeys.campaignScenario).map((e) => e.split('\n').first)),
     ),
-    _LookupCategory('r.aptitudes.*.name', 'aptitude', _distinctNonEmpty(label(LabelKeys.aptitude))),
-    _LookupCategory('r.races[].title.name', 'race_title', _distinctNonEmpty(label('race_title.name'))),
-    _LookupCategory('r.races[].ground.name', 'ground', _distinctNonEmpty(label('race_place.ground'))),
-    _LookupCategory(
-      'r.races[].distance.name',
-      'distance',
-      _distinctNonEmpty(
-        [
-          'short_range',
-          'mile_range',
-          'middle_range',
-          'long_range',
-        ].map((k) => "pages.chara_detail.columns.aptitude.$k.title".tr()),
-      ),
-    ),
-    _LookupCategory('r.races[].strategy.name', 'strategy', _distinctNonEmpty(label(LabelKeys.raceStrategy))),
-    _LookupCategory('r.races[].weather.name', 'weather', _distinctNonEmpty(label('race_weather.name'))),
-    _LookupCategory('r.metadata.recordType.name', 'record_type', _distinctNonEmpty(label(LabelKeys.recordType))),
-    _LookupCategory('r.supportCards[].rank.name', 'support_rank', _distinctNonEmpty(_supportCardRanks)),
+    // Aptitude codes are `level + 1` (see _Enricher._aptitudeRank).
+    coded('r.aptitudes.*.name', 'aptitude', 'aptitude', label(LabelKeys.aptitude), offset: 1),
+    coded('r.races[].title.name', 'race_title', 'race_title', label('race_title.name')),
+    coded('r.races[].ground.name', 'ground', 'ground', label('race_place.ground')),
+    coded('r.races[].distance.name', 'distance', 'distance', distanceNames),
+    coded('r.races[].strategy.name', 'strategy', 'raceStrategy', label(LabelKeys.raceStrategy)),
+    coded('r.races[].weather.name', 'weather', 'weather', label('race_weather.name')),
+    coded('r.metadata.recordType.name', 'record_type', 'record_type', label(LabelKeys.recordType)),
+    coded('r.supportCards[].rank.name', 'support_rank', 'support_rank', _supportCardRanks),
   ];
 }
+
+/// Per-category name→code tables for the script runtime, shared with the dialog
+/// name picker via [_buildLookupCategories] so the two never diverge. Injected
+/// into [scriptCodeTables] just before a script runs (see [ScriptColumnSpec.parse]
+/// and [_previewEntry]).
+final scriptCodeTablesProvider = Provider<Map<String, Map<String, int>>>((ref) {
+  final labels = ref.watch(labelMapProvider);
+  final charaNames = ref.watch(charaCardInfoProvider).map((e) => e.names.first).toList();
+  return {
+    for (final c in _buildLookupCategories(labels, charaNames))
+      if (c.category != null) c.category!: c.codeByName,
+  };
+});
 
 /// A reference helper inside the script dialog: pick a category (labeled by its
 /// script accessor path), filter by substring, and click a chip to copy the
@@ -1076,7 +1141,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
         .read(charaDetailRecordStorageProvider)
         .map((r) => ref.read(enrichedRecordProvider(r.id)))
         .toList();
-    final result = await runScriptPreview(source, records);
+    final result = await runScriptPreview(source, records, ref.read(scriptCodeTablesProvider));
     if (!mounted) return;
     _setSaveEnabled(result.ok);
     setState(() {
