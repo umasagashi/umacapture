@@ -3,7 +3,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/material.dart';
 
 /// Custom dart_mappable mappers.
-/// Used to serialize dart:ui / material types (Size / Offset / ThemeMode).
+/// Used to serialize dart:core / dart:ui / material types (RegExp / Size / Offset / ThemeMode).
 /// Replaces the old dart_json_mapper MappingConverter / flutterTypesAdapter.
 
 class SizeMapper extends SimpleMapper<Size> {
@@ -33,6 +33,20 @@ class OffsetMapper extends SimpleMapper<Offset> {
   @override
   dynamic encode(Offset self) {
     return {'dx': self.dx, 'dy': self.dy};
+  }
+}
+
+class RegExpMapper extends SimpleMapper<RegExp> {
+  const RegExpMapper();
+
+  @override
+  RegExp decode(dynamic value) {
+    return RegExp(value as String);
+  }
+
+  @override
+  dynamic encode(RegExp self) {
+    return self.pattern;
   }
 }
 

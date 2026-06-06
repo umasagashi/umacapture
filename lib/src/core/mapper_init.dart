@@ -36,8 +36,8 @@ void initializeMappers() {
   }
   _initialized = true;
 
-  // Custom mappers for dart:ui / material types.
-  MapperContainer.globals.useAll(const [SizeMapper(), OffsetMapper(), ThemeModeMapper()]);
+  // Custom mappers for dart:core / dart:ui / material types.
+  MapperContainer.globals.useAll(const [SizeMapper(), OffsetMapper(), ThemeModeMapper(), RegExpMapper()]);
 
   // Polymorphic roots (discriminator bases). ensureInitialized() cascades to field
   // types and to subclasses declared in the SAME library, but NOT to subclasses in
