@@ -30,18 +30,49 @@ class ColumnBuilderDialog extends ConsumerWidget {
       onPressed: () {
         final specs = ref.read(currentColumnSpecsLoaderProvider.notifier);
         for (final builder in targets) {
-          if (builder.type == ColumnBuilderType.normal) {
-            specs.add(builder.build(ref.base));
-          }
+          specs.add(builder.build(ref.base));
         }
         CardDialog.dismiss(ref.base);
       },
     );
   }
 
+  // Renders a truth table (header row first) as a compact bordered table, styled
+  // to sit on the tooltip's background.
+  Widget truthTableWidget(BuildContext context, List<List<String>> rows) {
+    final theme = Theme.of(context);
+    final color = theme.tooltipTheme.textStyle?.color ?? theme.colorScheme.onInverseSurface;
+    final cellStyle = (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
+      color: color,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final headerStyle = cellStyle.copyWith(fontWeight: FontWeight.bold);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        border: TableBorder.symmetric(inside: BorderSide(color: color.withValues(alpha: 0.4), width: 0.5)),
+        children: [
+          for (final (rowIndex, row) in rows.indexed)
+            TableRow(
+              children: [
+                for (final cell in row)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    child: Text(cell, style: rowIndex == 0 ? headerStyle : cellStyle, textAlign: TextAlign.center),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget builderChip(BuildContext context, WidgetRef ref, ColumnBuilder builder) {
     final theme = Theme.of(context);
-    return GestureDetector(
+    final truthTable = builder.truthTable;
+    Widget chip = GestureDetector(
       onLongPress: () {
         final spec = builder.build(ref.base);
         ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
@@ -51,12 +82,28 @@ class ColumnBuilderDialog extends ConsumerWidget {
       child: ActionChip(
         backgroundColor: builder.type == ColumnBuilderType.normal ? null : theme.chipTheme.backgroundColor,
         label: Text(builder.title),
+        // The plain tooltip is suppressed when a rich tooltip wraps the chip below.
+        tooltip: truthTable == null ? builder.tooltip : null,
         onPressed: () {
           ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(builder.build(ref.base));
           CardDialog.dismiss(ref.base);
         },
       ),
     );
+    if (truthTable != null) {
+      chip = Tooltip(
+        richMessage: TextSpan(
+          children: [
+            // Trailing newline forces the table onto its own line below the text;
+            // without it the WidgetSpan flows inline to the right of the text.
+            if (builder.tooltip != null) TextSpan(text: "${builder.tooltip}\n"),
+            WidgetSpan(child: truthTableWidget(context, truthTable)),
+          ],
+        ),
+        child: chip,
+      );
+    }
+    return chip;
   }
 
   Widget builderChipCategory(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
@@ -65,6 +112,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
     final normalBuilders = groups[ColumnBuilderType.normal] ?? [];
     final filterBuilders = groups[ColumnBuilderType.filter] ?? [];
     final addBuilders = groups[ColumnBuilderType.add] ?? [];
+    final addAllTargets = normalBuilders.where((e) => e.includeInAddAll).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -73,7 +121,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
           runSpacing: 16,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (normalBuilders.length >= 2) addAllChipWidget(context, ref, targets),
+            if (addAllTargets.length >= 2) addAllChipWidget(context, ref, addAllTargets),
             for (final builder in normalBuilders) builderChip(context, ref, builder),
           ],
         ),
