@@ -25,6 +25,7 @@ dependencies:
   csv: ^8.0.0
   dart_eval: ^0.8.5
   dart_mappable: 4.6.1
+  desktop_drop: ^0.7.1
   dio: ^5.9.2
   easy_localization: ^3.0.1
   equatable: ^2.0.5

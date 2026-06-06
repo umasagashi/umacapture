@@ -18,6 +18,7 @@ import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
+import '/src/gui/module_update_dialog.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
 
@@ -328,7 +329,7 @@ class AboutGroup extends ConsumerWidget {
           loading: () => "checking...",
           error: (e, _) => "ERROR: $e",
           data: (data) {
-            return data?.recognizerVersion.toLocal().toString() ?? "$tr_settings.version_check.unknown_version".tr();
+            return data?.recognizerVersion.toLocal().toString() ?? "$tr_settings.about.version.unknown_version".tr();
           },
         );
   }
@@ -379,6 +380,12 @@ class AboutGroup extends ConsumerWidget {
               storage.checkRecordVersion(includeCurrentVersion: true);
             },
           ),
+        ),
+        ListTile(
+          title: Text("$tr_settings.module_update.entry.title".tr()),
+          subtitle: Text("$tr_settings.module_update.entry.description".tr()),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.upload_file)),
+          onTap: () => ModuleManualUpdateDialog.show(ref.base),
         ),
       ],
     );

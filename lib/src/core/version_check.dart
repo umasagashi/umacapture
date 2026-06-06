@@ -13,6 +13,7 @@ import 'package:recase/recase.dart';
 import 'package:version/version.dart';
 
 import '/const.dart';
+import '/src/app/route.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
@@ -87,13 +88,30 @@ enum ModuleVersionCheckResultCode {
   latestVersionNotAvailable,
   noVersionAvailable,
   accessDenied,
+  manualUpdateSuccess,
+  manualUpdateFailure,
 }
+
+// Failure codes whose toast offers a tap-through to the settings page, where
+// the manual module update entry lives.
+const _moduleVersionCheckFailureCodes = {
+  ModuleVersionCheckResultCode.noVersionAvailable,
+  ModuleVersionCheckResultCode.latestVersionNotAvailable,
+  ModuleVersionCheckResultCode.accessDenied,
+};
 
 void sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
   // This function can be called before EasyLocalization is initialized.
   // For this reason, a delay is required for now.
+  final navigateOnTab = _moduleVersionCheckFailureCodes.contains(code) ? const SettingsRoute() : null;
   Future.delayed(const Duration(milliseconds: 300), () {
-    Toaster.show(ToastData(type: type, description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr()));
+    Toaster.show(
+      ToastData(
+        type: type,
+        description: "$tr_toast.module_version_check.${code.name.snakeCase}".tr(),
+        navigateOnTab: navigateOnTab,
+      ),
+    );
   });
 }
 
@@ -160,12 +178,54 @@ Future<void> _logNetworkException({
   );
 }
 
-Future<void> _extractArchive((FilePath, DirectoryPath) args) {
+Future<void> _extractArchive((FilePath, DirectoryPath) args) async {
   final stream = InputFileStream(args.$1.path);
-  final archive = ZipDecoder().decodeStream(stream);
-  extractArchiveToDisk(archive, args.$2.path);
-  return stream.close();
+  try {
+    final archive = ZipDecoder().decodeStream(stream);
+    // extractArchiveToDisk is async and reads each entry lazily from [stream];
+    // it must complete before the input stream is closed, otherwise only the
+    // first entry is written and the rest fail mid-read.
+    await extractArchiveToDisk(archive, args.$2.path);
+  } finally {
+    await stream.close();
+  }
 }
+
+/// Installs a manually provided modules zip and refreshes the module loaders.
+///
+/// The zip is extracted into the support directory exactly like the
+/// auto-updater does, so a server-distributed `modules.zip` (whose top-level
+/// directory is `modules/`) can be applied as-is. No validation is performed.
+/// Invalidating [moduleVersionLoader] rebuilds every loader that depends on it,
+/// so the freshly extracted module takes effect without an app restart.
+///
+/// Returns true on success.
+Future<bool> installModuleFromZip(WidgetRef ref, FilePath zipPath) async {
+  try {
+    final pathInfo = await ref.read(pathInfoLoader.future);
+    await compute(_extractArchive, (zipPath, pathInfo.supportDir));
+  } catch (exception, stackTrace) {
+    logger.e("Failed to install module from zip: path=${zipPath.path}", exception, stackTrace);
+    captureException(exception, stackTrace);
+    if (exception is FileSystemException && exception.osError?.errorCode == 5) {
+      sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
+    } else {
+      sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.manualUpdateFailure);
+    }
+    return false;
+  }
+  ref.invalidate(moduleVersionLoader);
+  sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.manualUpdateSuccess);
+  return true;
+}
+
+/// Whether the latest automatic module check failed to obtain or apply the
+/// recognition module. True when the module is unavailable entirely or when the
+/// latest could not be downloaded but an older local module is still in use;
+/// false on success and on intentional skips (debug, pin, app-version block).
+/// Consumers decide how to react (e.g. ModuleUpdaterGroup shows a manual-update
+/// banner). Distinct from the transient failure toast.
+final moduleUpdateFailedProvider = settableNotifierProvider<bool>(false);
 
 final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   final appVersion = await ref.watch(appVersionCheckLoader.future);
@@ -188,31 +248,45 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   }
   logger.i("Module version: local=${local?.recognizerVersion}, latest=${latest?.recognizerVersion}");
 
+  // Safe to write providers here: we are past the awaits above, so the
+  // synchronous build frame that the modify-during-build guard checks is done.
+  void setUpdateFailed(bool value) => ref.read(moduleUpdateFailedProvider.notifier).set(value);
+
   if (kDebugMode) {
     logger.w("Updating modules is disabled in debug mode.");
-    return local!.toModuleVersion();
+    // The update is disabled here, not attempted, so this is not a failure.
+    // Keep null-safe (the `!` crashed when no local module was present).
+    setUpdateFailed(false);
+    return local?.toModuleVersion();
   }
 
   if (local?.pinVersion == true) {
     logger.w("Updating modules is disabled by pin_version flag in local version_info.json.");
+    setUpdateFailed(false);
     return local!.toModuleVersion();
   }
 
   if (local == null && latest == null) {
+    setUpdateFailed(true);
     sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
     return null;
   }
   if (latest == null) {
+    setUpdateFailed(true);
     sendModuleVersionCheckToast(ToastType.warning, ModuleVersionCheckResultCode.latestVersionNotAvailable);
     return local!.toModuleVersion();
   }
   // No need to update. (Rollback is allowed)
   if (local?.recognizerVersion == latest.recognizerVersion) {
+    setUpdateFailed(false);
     return local!.toModuleVersion();
   }
 
   if (latest.applicationVersion.toVersion() > appVersion.local) {
     logger.i("Updating the module is disallowed because it does not meet the required app version.");
+    // Intentionally blocked, not failed: the proper fix is an app update
+    // (handled by its own banner), not a manual module install.
+    setUpdateFailed(false);
     return null;
   }
 
@@ -228,6 +302,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
       stackTrace: stackTrace,
       url: Const.moduleZipUrl,
     );
+    setUpdateFailed(true);
     if (exception is FileSystemException && exception.osError?.errorCode == 5) {
       sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
     } else {
@@ -240,6 +315,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
     return local?.toModuleVersion();
   }
 
+  setUpdateFailed(false);
   sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.updated);
   return latest.toModuleVersion();
 });
