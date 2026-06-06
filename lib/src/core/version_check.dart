@@ -100,6 +100,10 @@ const _moduleVersionCheckFailureCodes = {
   ModuleVersionCheckResultCode.accessDenied,
 };
 
+/// Whether [exception] is the Windows "access denied" file error (errorCode 5),
+/// which we surface with a dedicated permissions toast rather than a generic one.
+bool _isAccessDeniedError(Object exception) => exception is FileSystemException && exception.osError?.errorCode == 5;
+
 void sendModuleVersionCheckToast(ToastType type, ModuleVersionCheckResultCode code) {
   // This function can be called before EasyLocalization is initialized.
   // For this reason, a delay is required for now.
@@ -191,30 +195,32 @@ Future<void> _extractArchive((FilePath, DirectoryPath) args) async {
   }
 }
 
-/// Installs a manually provided modules zip and refreshes the module loaders.
+/// Installs a manually provided modules zip into the support directory.
 ///
 /// The zip is extracted into the support directory exactly like the
 /// auto-updater does, so a server-distributed `modules.zip` (whose top-level
 /// directory is `modules/`) can be applied as-is. No validation is performed.
-/// Invalidating [moduleVersionLoader] rebuilds every loader that depends on it,
-/// so the freshly extracted module takes effect without an app restart.
+///
+/// On success the caller must invalidate [moduleVersionLoader] (guarded by its
+/// own widget lifecycle) so the freshly extracted module takes effect without an
+/// app restart. This function never touches [ref] after the extraction await, so
+/// it is safe even if the originating widget is disposed mid-install.
 ///
 /// Returns true on success.
-Future<bool> installModuleFromZip(WidgetRef ref, FilePath zipPath) async {
+Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
   try {
     final pathInfo = await ref.read(pathInfoLoader.future);
     await compute(_extractArchive, (zipPath, pathInfo.supportDir));
   } catch (exception, stackTrace) {
     logger.e("Failed to install module from zip: path=${zipPath.path}", exception, stackTrace);
     captureException(exception, stackTrace);
-    if (exception is FileSystemException && exception.osError?.errorCode == 5) {
+    if (_isAccessDeniedError(exception)) {
       sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
     } else {
       sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.manualUpdateFailure);
     }
     return false;
   }
-  ref.invalidate(moduleVersionLoader);
   sendModuleVersionCheckToast(ToastType.success, ModuleVersionCheckResultCode.manualUpdateSuccess);
   return true;
 }
@@ -303,7 +309,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
       url: Const.moduleZipUrl,
     );
     setUpdateFailed(true);
-    if (exception is FileSystemException && exception.osError?.errorCode == 5) {
+    if (_isAccessDeniedError(exception)) {
       sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.accessDenied);
     } else {
       if (local == null) {
@@ -392,7 +398,7 @@ FutureOr<Version?> _checkLatestAppVersion(Version currentLocalVersion) async {
       stackTrace: stackTrace,
       url: Const.appVersionInfoUrl,
     );
-    if (exception is FileSystemException && exception.osError?.errorCode == 5) {
+    if (_isAccessDeniedError(exception)) {
       _sendAppVersionCheckToast(ToastType.error, AppVersionCheckResultCode.accessDenied);
     }
     return null;

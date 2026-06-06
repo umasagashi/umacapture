@@ -43,11 +43,14 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
       return;
     }
     setState(() => _installing = true);
-    final succeeded = await installModuleFromZip(ref, zipPath);
+    final succeeded = await installModuleFromZip(ref.base, zipPath);
     if (!mounted) {
       return;
     }
     if (succeeded) {
+      // Invalidate here (not inside installModuleFromZip) so the loader refresh
+      // is guarded by the mounted check above and never touches a disposed ref.
+      ref.invalidate(moduleVersionLoader);
       // Mirror the auto-update flow, which re-recognizes obsoleted records after
       // a module update (see CharaDetailRecordStorage._checkRecordVersion).
       // Fire-and-forget: regeneration runs in the background with its own
@@ -168,6 +171,14 @@ class _DownloadSource extends StatelessWidget {
     Toaster.show(ToastData.success(description: "$tr_module_update.dialog.copied".tr()));
   }
 
+  Future<void> _open() async {
+    try {
+      await launchUrl(Uri.parse(Const.moduleZipUrl));
+    } catch (exception, stackTrace) {
+      logger.w("Failed to open module url in browser.", exception, stackTrace);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -194,7 +205,7 @@ class _DownloadSource extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.open_in_browser),
             tooltip: "$tr_module_update.dialog.open_tooltip".tr(),
-            onPressed: () => launchUrl(Uri.parse(Const.moduleZipUrl)),
+            onPressed: _open,
           ),
         ],
       ),

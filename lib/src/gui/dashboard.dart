@@ -23,6 +23,10 @@ const tr_dashboard = "pages.dashboard";
 
 final _downloadProgressProvider = settableNotifierProvider<Progress?>(null);
 
+/// Title/background color for attention-grabbing updater cards on the dashboard
+/// (app update available, recognition module update needed).
+final _updaterCardTitleColor = Colors.amber.shade200;
+
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
     return createDiagnosticDio(operation: "load_news").get(Const.newsUrl).then((response) => response.toString());
@@ -102,7 +106,7 @@ class AppUpdaterGroup extends ConsumerWidget {
     final downloadProgress = ref.watch(_downloadProgressProvider);
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
-      titleColor: Colors.amber.shade200,
+      titleColor: _updaterCardTitleColor,
       padding: EdgeInsets.zero,
       children: [
         ListTile(
@@ -128,7 +132,7 @@ class ModuleUpdaterGroup extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ListCard(
       title: "$tr_dashboard.module_updater.title".tr(),
-      titleColor: Colors.amber.shade200,
+      titleColor: _updaterCardTitleColor,
       padding: EdgeInsets.zero,
       children: [
         ListTile(
