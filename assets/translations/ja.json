@@ -921,6 +921,65 @@
                 }
             }
         },
+        "addon": {
+            "title": "アドオン",
+            "card": {
+                "tasks": "タスク",
+                "running": "実行中",
+                "history": "実行履歴"
+            },
+            "task": {
+                "default_name": "新しいタスク",
+                "add": "タスクを追加",
+                "run": "今すぐ実行",
+                "empty": "タスクが登録されていません。右上のボタンから追加してください。"
+            },
+            "running": {
+                "cancel": "中止"
+            },
+            "history": {
+                "clear": "履歴を消去",
+                "empty": "実行履歴はありません。"
+            },
+            "trigger": {
+                "capture_started": "キャプチャ開始時",
+                "capture_stopped": "キャプチャ停止時",
+                "record_captured": "レコード取得時",
+                "record_exported": "エクスポート完了時",
+                "error": "エラー発生時",
+                "manual": "手動実行のみ"
+            },
+            "builtin": {
+                "show_toast": "通知を表示",
+                "show_toast_message": "アドオンイベント: {event}",
+                "copy_payload_to_clipboard": "データをクリップボードへコピー"
+            },
+            "dialog": {
+                "title_add": "タスクを追加",
+                "title_edit": "タスクを編集",
+                "close": "閉じる",
+                "name": "タスク名",
+                "trigger": "トリガ",
+                "action_kind": "アクション種別",
+                "kind_external": "外部プログラム",
+                "kind_builtin": "アプリ内蔵アクション",
+                "program": {
+                    "label": "プログラムのパス",
+                    "picker_title": "実行するプログラムを選択"
+                },
+                "arguments": {
+                    "label": "引数テンプレート",
+                    "helper": "{record_id} などのトークンがイベントデータに置換されます。"
+                },
+                "timeout": "タイムアウト（秒・空欄で無制限）",
+                "run_in_shell": "シェル経由で実行（.bat やシェル組込みコマンド用）",
+                "builtin": {
+                    "label": "内蔵アクション"
+                },
+                "save": "保存",
+                "delete": "削除"
+            }
+        },
         "settings": {
             "title": "設定",
             "style": {

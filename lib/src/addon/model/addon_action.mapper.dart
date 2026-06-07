@@ -1,0 +1,207 @@
+// coverage:ignore-file
+// GENERATED CODE - DO NOT MODIFY BY HAND
+// dart format off
+// ignore_for_file: type=lint
+// ignore_for_file: unused_element, unnecessary_cast, override_on_non_overriding_member
+// ignore_for_file: strict_raw_type, inference_failure_on_untyped_parameter
+
+part of 'addon_action.dart';
+
+class AddonActionMapper extends ClassMapperBase<AddonAction> {
+  AddonActionMapper._();
+
+  static AddonActionMapper? _instance;
+  static AddonActionMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = AddonActionMapper._());
+      ExternalProgramActionMapper.ensureInitialized();
+      BuiltinActionMapper.ensureInitialized();
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'AddonAction';
+
+  @override
+  final MappableFields<AddonAction> fields = const {};
+
+  static AddonAction _instantiate(DecodingData data) {
+    throw MapperException.missingSubclass(
+      'AddonAction',
+      'kind',
+      '${data.value['kind']}',
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static AddonAction fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<AddonAction>(map);
+  }
+
+  static AddonAction fromJson(String json) {
+    return ensureInitialized().decodeJson<AddonAction>(json);
+  }
+}
+
+mixin AddonActionMappable {
+  String toJson();
+  Map<String, dynamic> toMap();
+}
+
+class ExternalProgramActionMapper
+    extends SubClassMapperBase<ExternalProgramAction> {
+  ExternalProgramActionMapper._();
+
+  static ExternalProgramActionMapper? _instance;
+  static ExternalProgramActionMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = ExternalProgramActionMapper._());
+      AddonActionMapper.ensureInitialized().addSubMapper(_instance!);
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'ExternalProgramAction';
+
+  static String _$programPath(ExternalProgramAction v) => v.programPath;
+  static const Field<ExternalProgramAction, String> _f$programPath = Field(
+    'programPath',
+    _$programPath,
+  );
+  static String _$argumentTemplate(ExternalProgramAction v) =>
+      v.argumentTemplate;
+  static const Field<ExternalProgramAction, String> _f$argumentTemplate = Field(
+    'argumentTemplate',
+    _$argumentTemplate,
+    opt: true,
+    def: '',
+  );
+  static int? _$timeoutSeconds(ExternalProgramAction v) => v.timeoutSeconds;
+  static const Field<ExternalProgramAction, int> _f$timeoutSeconds = Field(
+    'timeoutSeconds',
+    _$timeoutSeconds,
+    opt: true,
+  );
+  static bool _$runInShell(ExternalProgramAction v) => v.runInShell;
+  static const Field<ExternalProgramAction, bool> _f$runInShell = Field(
+    'runInShell',
+    _$runInShell,
+    opt: true,
+    def: false,
+  );
+
+  @override
+  final MappableFields<ExternalProgramAction> fields = const {
+    #programPath: _f$programPath,
+    #argumentTemplate: _f$argumentTemplate,
+    #timeoutSeconds: _f$timeoutSeconds,
+    #runInShell: _f$runInShell,
+  };
+
+  @override
+  final String discriminatorKey = 'kind';
+  @override
+  final dynamic discriminatorValue = 'ExternalProgramAction';
+  @override
+  late final ClassMapperBase superMapper =
+      AddonActionMapper.ensureInitialized();
+
+  static ExternalProgramAction _instantiate(DecodingData data) {
+    return ExternalProgramAction(
+      programPath: data.dec(_f$programPath),
+      argumentTemplate: data.dec(_f$argumentTemplate),
+      timeoutSeconds: data.dec(_f$timeoutSeconds),
+      runInShell: data.dec(_f$runInShell),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static ExternalProgramAction fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<ExternalProgramAction>(map);
+  }
+
+  static ExternalProgramAction fromJson(String json) {
+    return ensureInitialized().decodeJson<ExternalProgramAction>(json);
+  }
+}
+
+mixin ExternalProgramActionMappable {
+  String toJson() {
+    return ExternalProgramActionMapper.ensureInitialized()
+        .encodeJson<ExternalProgramAction>(this as ExternalProgramAction);
+  }
+
+  Map<String, dynamic> toMap() {
+    return ExternalProgramActionMapper.ensureInitialized()
+        .encodeMap<ExternalProgramAction>(this as ExternalProgramAction);
+  }
+}
+
+class BuiltinActionMapper extends SubClassMapperBase<BuiltinAction> {
+  BuiltinActionMapper._();
+
+  static BuiltinActionMapper? _instance;
+  static BuiltinActionMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = BuiltinActionMapper._());
+      AddonActionMapper.ensureInitialized().addSubMapper(_instance!);
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'BuiltinAction';
+
+  static String _$actionKey(BuiltinAction v) => v.actionKey;
+  static const Field<BuiltinAction, String> _f$actionKey = Field(
+    'actionKey',
+    _$actionKey,
+  );
+
+  @override
+  final MappableFields<BuiltinAction> fields = const {#actionKey: _f$actionKey};
+
+  @override
+  final String discriminatorKey = 'kind';
+  @override
+  final dynamic discriminatorValue = 'BuiltinAction';
+  @override
+  late final ClassMapperBase superMapper =
+      AddonActionMapper.ensureInitialized();
+
+  static BuiltinAction _instantiate(DecodingData data) {
+    return BuiltinAction(actionKey: data.dec(_f$actionKey));
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static BuiltinAction fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<BuiltinAction>(map);
+  }
+
+  static BuiltinAction fromJson(String json) {
+    return ensureInitialized().decodeJson<BuiltinAction>(json);
+  }
+}
+
+mixin BuiltinActionMappable {
+  String toJson() {
+    return BuiltinActionMapper.ensureInitialized().encodeJson<BuiltinAction>(
+      this as BuiltinAction,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return BuiltinActionMapper.ensureInitialized().encodeMap<BuiltinAction>(
+      this as BuiltinAction,
+    );
+  }
+}
+

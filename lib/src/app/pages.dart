@@ -34,6 +34,12 @@ class Pages {
       unselectedIcon: const Icon(Icons.manage_search_outlined),
     ),
     PageLabel(
+      route: const AddonRoute(),
+      label: "pages.addon.title".tr(),
+      selectedIcon: const Icon(Icons.extension),
+      unselectedIcon: const Icon(Icons.extension_outlined),
+    ),
+    PageLabel(
       route: const SettingsRoute(),
       label: "pages.settings.title".tr(),
       selectedIcon: const Icon(Icons.settings),

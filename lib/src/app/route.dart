@@ -1,5 +1,6 @@
 import 'package:auto_route/auto_route.dart';
 
+import '/src/gui/addon.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/chara_detail/page.dart';
@@ -20,6 +21,7 @@ class AppRouter extends RootStackRouter {
         AutoRoute(page: DashboardRoute.page, initial: true),
         AutoRoute(page: CaptureRoute.page),
         AutoRoute(page: CharaDetailRoute.page),
+        AutoRoute(page: AddonRoute.page),
         AutoRoute(page: SettingsRoute.page),
       ],
     ),
