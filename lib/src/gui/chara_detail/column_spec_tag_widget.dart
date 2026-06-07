@@ -128,14 +128,11 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     child: _FlipMover(animate: _draggingId != null, child: child),
   );
 
-  // The interactive chip itself (badge + action chip), shared by leaf and logic
-  // columns. The badge shows how many records pass this column's condition,
-  // hidden when every record passes (i.e. the column filters nothing). When
-  // [highlight] is set (the dragged placeholder copy) the chip is tinted and
-  // bordered with the accent colour so it stands out while dragging.
-  Widget _actionChip(BuildContext context, ColumnSpec spec, {bool highlight = false}) {
+  // Wraps [child] in the pass-count badge shared by every chip: it shows how many
+  // records pass this column's condition, and stays hidden when every record
+  // passes (i.e. the column filters nothing).
+  Widget _countBadge(BuildContext context, ColumnSpec spec, Widget child) {
     final theme = Theme.of(context);
-    final broken = _brokenIds.contains(spec.id);
     final passed = _counts[spec.id];
     final count = passed == null || passed == _recordCount ? null : passed;
     return badges.Badge(
@@ -149,7 +146,21 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       ),
       ignorePointer: true,
       badgeContent: Text("$count", style: theme.textTheme.labelSmall, textAlign: TextAlign.center),
-      child: GestureDetector(
+      child: child,
+    );
+  }
+
+  // The interactive chip for a leaf column (badge + action chip). When
+  // [highlight] is set (the dragged placeholder copy) the chip is tinted and
+  // bordered with the accent colour so it stands out while dragging. Logic
+  // columns render their operator name with [_logicLabel] instead.
+  Widget _actionChip(BuildContext context, ColumnSpec spec, {bool highlight = false}) {
+    final theme = Theme.of(context);
+    final broken = _brokenIds.contains(spec.id);
+    return _countBadge(
+      context,
+      spec,
+      GestureDetector(
         onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
         child: ActionChip(
           avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
@@ -161,6 +172,47 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           onPressed: () {
             ColumnSpecDialog.show(ref.base, spec);
           },
+        ),
+      ),
+    );
+  }
+
+  // The logic column's operator name, rendered as plain text fused into the
+  // container's left edge — no chip decoration — instead of an action chip. It
+  // keeps the chip's behaviours: tap edits the notation, secondary-tap removes
+  // the column, the pass-count badge is shown, and a broken column is flagged
+  // with a warning icon and the error colour. When [highlight] is set (the
+  // dragged placeholder copy) the text takes the accent colour.
+  Widget _logicLabel(BuildContext context, ColumnSpec spec, {bool highlight = false}) {
+    final theme = Theme.of(context);
+    final broken = _brokenIds.contains(spec.id);
+    final color = highlight
+        ? theme.colorScheme.primary
+        : (broken ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant);
+    return _countBadge(
+      context,
+      spec,
+      Tooltip(
+        message: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => ColumnSpecDialog.show(ref.base, spec),
+            onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (broken) ...[Icon(Icons.warning_amber_rounded, size: 16, color: color), const SizedBox(width: 2)],
+                  DefaultTextStyle.merge(
+                    style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
+                    child: spec.label(),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -191,7 +243,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     if (!spec.acceptsChildren) {
       return _actionChip(context, spec);
     }
-    final header = _slot(_headerKeyFor(spec.id), _actionChip(context, spec));
+    final header = _slot(_headerKeyFor(spec.id), _logicLabel(context, spec));
     final inner = _buildSiblings(context, spec.children, parentId: spec.id);
     return _logicContainer(context, [header, ...inner]);
   }
@@ -204,7 +256,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       return _actionChip(context, spec, highlight: highlight);
     }
     return _logicContainer(context, [
-      _spaced(_actionChip(context, spec, highlight: highlight)),
+      _spaced(_logicLabel(context, spec, highlight: highlight)),
       for (final child in spec.children) _spaced(_staticContent(context, child, highlight: highlight)),
     ], highlight: highlight);
   }
