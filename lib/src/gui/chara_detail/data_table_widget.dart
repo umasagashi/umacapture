@@ -331,7 +331,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       children: const [
         _QuarantineBannerWidget(),
         ColumnSpecTagWidget(),
-        SizedBox(height: 8),
+        SizedBox(height: 4),
         _CharaDetailDataTablePreCheckLayer(),
       ],
     );

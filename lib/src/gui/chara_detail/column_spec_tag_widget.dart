@@ -19,7 +19,7 @@ const tr_chara_detail = "pages.chara_detail";
 // Horizontal gap between chips. Applied as trailing padding per chip rather than
 // via Wrap.spacing, so the collapsed dragged chip (rendered without it) leaves
 // no stray gap behind in the flow.
-const double _chipGap = 8;
+const double _chipGap = 4;
 
 // Deadband (in pixels) around a chip's centre within which the placeholder does
 // not switch sides, so it doesn't flicker when the pointer hovers right on the
@@ -165,13 +165,13 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   Widget _logicContainer(BuildContext context, List<Widget> inner, {bool highlight = false}) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
         border: Border.all(color: highlight ? theme.colorScheme.primary : theme.colorScheme.primaryContainer),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Wrap(runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
+      child: Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
     );
   }
 
@@ -462,7 +462,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     ];
 
     return Padding(
-      padding: const EdgeInsets.only(top: 8, bottom: 8),
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
       child: Stack(
         alignment: Alignment.bottomRight,
         children: [
@@ -474,7 +474,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               onWillAcceptWithDetails: (_) => _draggingId != null,
               onMove: (details) => _onMove(details.offset),
               builder: (context, candidateData, rejectedData) {
-                return Wrap(runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+                return Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
               },
             ),
           ),
