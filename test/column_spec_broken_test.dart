@@ -14,6 +14,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
+import 'package:umacapture/src/chara_detail/spec/logic.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
@@ -138,6 +139,26 @@ void main() {
     // The reordered legacy entry is still persisted as its original incomplete raw.
     final stored = storedSpecs().firstWhere((e) => (e as Map)['id'] == 'legacy') as Map;
     expect(stored['predicate'], isNot(contains('factorTags')));
+  });
+
+  test('nesting a broken column under a logic column preserves its raw', () async {
+    seed([LogicColumnSpec(id: 'and', title: 'AND', logic: LogicMode.and).toMap(), legacyFactorMap('legacy')]);
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    expect(container.read(currentColumnSpecBrokenIdsProvider), contains('legacy'));
+
+    // Drag the broken leaf into the AND column: it is now persisted via the
+    // parent's children, not as a top-level entry.
+    notifier.moveToSlot('legacy', 'and', 0);
+
+    // The nested legacy entry is still persisted as its original incomplete raw,
+    // not a healed full map that silently restores the dropped fields.
+    final stored = storedSpecs();
+    final and = stored.firstWhere((e) => (e as Map)['id'] == 'and') as Map;
+    final child = (and['children'] as List).single as Map;
+    expect(child['predicate'], isNot(contains('factorTags')));
   });
 
   test('script column on an old contract version loads broken and heals on re-save', () async {

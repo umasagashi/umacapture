@@ -601,8 +601,25 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     // Build the JSON array entry-by-entry (symmetric with build()'s manual
     // jsonDecode loop): broken entries are re-serialized from their original raw
     // map to preserve the incomplete data verbatim, everything else via toMap().
-    final encoded = specs.map((s) => _rawById[s.id] ?? s.toMap()).toList();
+    final encoded = specs.map(_encodeForStorage).toList();
     entry.push(jsonEncode(encoded));
+  }
+
+  // Encode a spec for storage, preserving any broken/raw map verbatim at every
+  // depth. A broken id re-emits its stored raw (whole subtree included); a healthy
+  // container re-emits itself but recurses into its children so a nested broken
+  // child keeps its raw map instead of being re-encoded (and silently healed) by
+  // the mapper. Without the recursion, dragging a broken column under a logic
+  // column would heal it on the next save.
+  Map<String, dynamic> _encodeForStorage(ColumnSpec spec) {
+    final raw = _rawById[spec.id];
+    if (raw != null) {
+      return raw;
+    }
+    if (spec.children.isEmpty) {
+      return spec.toMap();
+    }
+    return {...spec.toMap(), 'children': spec.children.map(_encodeForStorage).toList()};
   }
 }
 
