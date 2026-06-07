@@ -81,7 +81,7 @@ void main() {
   // Top-level ids of the live selection, for compact assertions.
   List<String> topIds(ProviderContainer c) => c.read(currentColumnSpecsProvider).map((e) => e.id).toList();
 
-  test('injectInto moves a column under a logic column; extract returns it to top level', () async {
+  test('moveToSlot nests a column under a logic column and back to top level', () async {
     final container = ProviderContainer.test();
     await container.read(currentColumnSpecsLoaderProvider.future);
     final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
@@ -90,8 +90,8 @@ void main() {
     notifier.add(makeSpec('a', 'A'));
     notifier.add(makeSpec('b', 'B'));
 
-    // Inject a into the AND column: a leaves the top level and nests under it.
-    notifier.injectInto(notifier.getById('and')!, notifier.getById('a')!);
+    // Nest a into the AND column: a leaves the top level and nests under it.
+    notifier.moveToSlot('a', 'and', 0);
     expect(topIds(container), ['and', 'b']);
     final and = notifier.getById('and')! as LogicColumnSpec;
     expect(and.children.map((e) => e.id).toList(), ['a']);
@@ -102,8 +102,8 @@ void main() {
     final restoredAnd = reopened.read(currentColumnSpecsProvider).first as LogicColumnSpec;
     expect(restoredAnd.children.single.id, 'a');
 
-    // Extract a back to the top level (appended at the end).
-    notifier.extract(notifier.getById('a')!);
+    // Move a back to the end of the top level (index is against the detached tree).
+    notifier.moveToSlot('a', null, 2);
     expect(topIds(container), ['and', 'b', 'a']);
     expect((notifier.getById('and')! as LogicColumnSpec).children, isEmpty);
   });
@@ -116,48 +116,13 @@ void main() {
     notifier.add(makeLogic('or', LogicMode.or));
     notifier.add(makeSpec('a', 'A'));
     notifier.add(makeSpec('b', 'B'));
-    notifier.injectInto(notifier.getById('or')!, notifier.getById('a')!);
-    notifier.injectInto(notifier.getById('or')!, notifier.getById('b')!);
+    notifier.moveToSlot('a', 'or', 0);
+    notifier.moveToSlot('b', 'or', 1);
     expect(topIds(container), ['or']);
 
     notifier.removeIfExists('or');
     // Children take the slot the logic column occupied.
     expect(topIds(container), ['a', 'b']);
-  });
-
-  test('NOT accepts only a single input', () async {
-    final container = ProviderContainer.test();
-    await container.read(currentColumnSpecsLoaderProvider.future);
-    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
-
-    notifier.add(makeLogic('not', LogicMode.not));
-    notifier.add(makeSpec('a', 'A'));
-    notifier.add(makeSpec('b', 'B'));
-
-    notifier.injectInto(notifier.getById('not')!, notifier.getById('a')!);
-    expect((notifier.getById('not')! as LogicColumnSpec).children.map((e) => e.id).toList(), ['a']);
-
-    // Second injection is rejected; b stays at the top level.
-    notifier.injectInto(notifier.getById('not')!, notifier.getById('b')!);
-    expect((notifier.getById('not')! as LogicColumnSpec).children.map((e) => e.id).toList(), ['a']);
-    expect(topIds(container), ['not', 'b']);
-  });
-
-  test('injecting an ancestor into its own descendant is rejected (cycle guard)', () async {
-    final container = ProviderContainer.test();
-    await container.read(currentColumnSpecsLoaderProvider.future);
-    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
-
-    notifier.add(makeLogic('outer', LogicMode.and));
-    notifier.add(makeLogic('inner', LogicMode.or));
-    notifier.injectInto(notifier.getById('outer')!, notifier.getById('inner')!);
-    expect(topIds(container), ['outer']);
-
-    // outer is an ancestor of inner; injecting outer into inner would form a cycle.
-    notifier.injectInto(notifier.getById('inner')!, notifier.getById('outer')!);
-    // Unchanged: outer still top-level, inner still its child.
-    expect(topIds(container), ['outer']);
-    expect((notifier.getById('outer')! as LogicColumnSpec).children.single.id, 'inner');
   });
 
   test('moveToSlot reorders within the top level', () async {
@@ -185,7 +150,7 @@ void main() {
     notifier.add(makeSpec('b', 'B'));
     notifier.add(makeSpec('c', 'C'));
     notifier.add(makeSpec('d', 'D'));
-    notifier.injectInto(notifier.getById('or')!, notifier.getById('b')!);
+    notifier.moveToSlot('b', 'or', 0);
 
     // Drop d into the OR column after b.
     notifier.moveToSlot('d', 'or', 1);
@@ -212,7 +177,7 @@ void main() {
 
     notifier.add(makeLogic('or', LogicMode.or));
     notifier.add(makeSpec('a', 'A'));
-    notifier.injectInto(notifier.getById('or')!, notifier.getById('a')!);
+    notifier.moveToSlot('a', 'or', 0);
     expect(topIds(container), ['or']);
 
     // Extracting is just a slot move to the end of the top-level list.
@@ -233,8 +198,8 @@ void main() {
     notifier.add(makeLogic('outer', LogicMode.and));
     notifier.add(makeLogic('inner', LogicMode.or));
     notifier.add(makeSpec('leaf', 'Leaf'));
-    notifier.injectInto(notifier.getById('inner')!, notifier.getById('leaf')!);
-    notifier.injectInto(notifier.getById('outer')!, notifier.getById('inner')!);
+    notifier.moveToSlot('leaf', 'inner', 0);
+    notifier.moveToSlot('inner', 'outer', 0);
 
     final reopened = ProviderContainer.test();
     await reopened.read(currentColumnSpecsLoaderProvider.future);

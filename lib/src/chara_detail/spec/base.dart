@@ -405,11 +405,6 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     return null;
   }
 
-  static bool _isDescendantOrSelf(ColumnSpec node, String id) {
-    if (node.id == id) return true;
-    return node.children.any((c) => _isDescendantOrSelf(c, id));
-  }
-
   // Removes [id] from anywhere in the tree, returning (newList, removedSpec).
   // removedSpec is null when [id] was not found (newList is then unchanged).
   static (List<ColumnSpec>, ColumnSpec?) _detach(List<ColumnSpec> list, String id) {
@@ -429,16 +424,6 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       }
     }
     return (result, removed);
-  }
-
-  // Inserts [child] at the end of [targetId]'s children, anywhere in the tree.
-  static List<ColumnSpec> _insertInto(List<ColumnSpec> list, String targetId, ColumnSpec child) {
-    return list.map((spec) {
-      if (spec.id == targetId) {
-        return spec.withChildren([...spec.children, child]);
-      }
-      return spec.withChildren(_insertInto(spec.children, targetId, child));
-    }).toList();
   }
 
   // Inserts [child] at [index] within [targetId]'s children (targetId == null
@@ -584,41 +569,6 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       return;
     }
     _commit(_insertAt(detached, parentId, index, removed));
-  }
-
-  // Injects [dragged] as a child of the [target] container column. Detaches
-  // [dragged] from its current position first. Rejected (with a toast) when the
-  // target is full (e.g. a NOT column already holding one input) or when the move
-  // would create a cycle (injecting an ancestor into its own descendant).
-  void injectInto(ColumnSpec target, ColumnSpec dragged) {
-    if (target.id == dragged.id || !target.acceptsChildren) {
-      return;
-    }
-    if (_isDescendantOrSelf(dragged, target.id)) {
-      Toaster.show(ToastData.warning(description: "pages.chara_detail.column_predicate.logic.error.cycle".tr()));
-      return;
-    }
-    if (!target.acceptsMoreChildren) {
-      Toaster.show(
-        ToastData.warning(description: "pages.chara_detail.column_predicate.logic.error.not_single_input".tr()),
-      );
-      return;
-    }
-    final (detached, removed) = _detach(_specs, dragged.id);
-    if (removed == null) {
-      return;
-    }
-    _commit(_insertInto(detached, target.id, removed));
-  }
-
-  // Detaches [spec] from its container and re-appends it at the top level,
-  // turning an injected column back into a normal one.
-  void extract(ColumnSpec spec) {
-    final (detached, removed) = _detach(_specs, spec.id);
-    if (removed == null) {
-      return;
-    }
-    _commit([...detached, removed]);
   }
 
   void replaceById(ColumnSpec spec) {
