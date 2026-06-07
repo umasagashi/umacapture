@@ -60,7 +60,7 @@ class LogicCellData implements CellData {
 /// builder ([_buildGrid] in loader.dart) walks the tree directly for efficiency;
 /// [parse]/[evaluate] here provide a correct stand-alone fallback.
 @MappableClass(discriminatorValue: 'LogicColumnSpec')
-class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable {
+class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, ContainerColumnSpec {
   final LogicMode logic;
 
   @override

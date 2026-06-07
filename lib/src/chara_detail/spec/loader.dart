@@ -441,9 +441,9 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   }
 
   // Resolve each spec's per-row condition, recursing through container columns.
-  // Leaf conditions come from evaluate(); container conditions combine their
-  // children (dispatched virtually, so any container kind works without a type
-  // test here).
+  // Leaf conditions come from evaluate(); a container combines its children's
+  // conditions, dispatched through the ContainerColumnSpec capability so any
+  // container kind works without enumerating concrete types here.
   final conditionsById = <String, List<bool>>{};
   List<bool> resolve(ColumnSpec spec) {
     final cached = conditionsById[spec.id];
@@ -451,7 +451,7 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
       return cached;
     }
     final List<bool> condition;
-    if (spec.acceptsChildren) {
+    if (spec is ContainerColumnSpec) {
       final childConditions = spec.children.map(resolve).toList();
       condition = spec.combineChildren(childConditions, recordList.length);
     } else {
@@ -469,11 +469,16 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   final columns = displaySpecs.map((spec) => spec.plutoColumn(ref)).toList();
 
   // A row is visible only if every TOP-LEVEL spec passes. Nested specs influence
-  // visibility solely through their parent container column.
-  final rowConditions = specList.map((spec) => conditionsById[spec.id]!).toList().transpose().map((e) => e.everyIn());
+  // visibility solely through their parent container column. Computed per record
+  // (not via transpose) so an empty specList yields one bool per record — all
+  // visible — instead of collapsing every record into a single phantom row.
+  final rowConditions = List<bool>.generate(
+    recordList.length,
+    (rowIndex) => specList.every((spec) => conditionsById[spec.id]![rowIndex]),
+  );
 
   TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
-    if (spec.acceptsChildren) {
+    if (spec is ContainerColumnSpec) {
       return spec.conditionCell(ref, conditionsById[spec.id]![rowIndex]);
     }
     return spec.plutoCell(ref, parsedById[spec.id]![rowIndex]);

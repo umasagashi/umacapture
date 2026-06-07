@@ -212,20 +212,6 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// fixed arity (e.g. a NOT logic column) return false once full.
   bool get acceptsMoreChildren => false;
 
-  /// Combines the resolved per-row conditions of this container's children into
-  /// this column's own per-row condition. Only container columns ([acceptsChildren])
-  /// override this; the grid builder dispatches here instead of type-testing.
-  List<bool> combineChildren(List<List<bool>> childConditions, int rowCount) {
-    throw UnsupportedError('$runtimeType is not a container column');
-  }
-
-  /// Builds the cell for a container column from its combined per-row condition.
-  /// Leaf columns render a parsed value via [plutoCell]; containers render a
-  /// pass/fail cell. Only container columns override this.
-  TrinaCell conditionCell(RefBase ref, bool passed) {
-    throw UnsupportedError('$runtimeType is not a container column');
-  }
-
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
   List<bool> evaluate(RefBase ref, List<T> values);
@@ -239,6 +225,20 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   Widget label();
 
   Widget selector(ChangeNotifier onDecided);
+}
+
+/// Capability of a column that nests other columns (a logic column) and derives
+/// its own per-row condition/cell from theirs. Kept off [ColumnSpec] so leaf
+/// columns cannot be asked to combine children at all; the grid builder reaches
+/// these via an `is ContainerColumnSpec` test rather than a runtime throw.
+mixin ContainerColumnSpec<T> on ColumnSpec<T> {
+  /// Combines the resolved per-row conditions of this container's children into
+  /// this column's own per-row condition.
+  List<bool> combineChildren(List<List<bool>> childConditions, int rowCount);
+
+  /// Builds the cell for this container from its combined per-row condition
+  /// (a pass/fail cell), in place of a leaf column's parsed-value [plutoCell].
+  TrinaCell conditionCell(RefBase ref, bool passed);
 }
 
 // Translation prefix for the "broken column" UI (chip tooltip, placeholder text).
@@ -458,7 +458,7 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   }
 
   bool contains(String id) {
-    return findInForest(_specs, id) != null;
+    return getById(id) != null;
   }
 
   void add(ColumnSpec spec) {
