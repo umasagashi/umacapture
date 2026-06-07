@@ -118,8 +118,10 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   // The interactive chip itself (badge + action chip), shared by leaf and logic
   // columns. The badge shows how many records pass this column's condition,
-  // hidden when every record passes (i.e. the column filters nothing).
-  Widget _actionChip(BuildContext context, ColumnSpec spec) {
+  // hidden when every record passes (i.e. the column filters nothing). When
+  // [highlight] is set (the dragged placeholder copy) the chip is tinted and
+  // bordered with the accent colour so it stands out while dragging.
+  Widget _actionChip(BuildContext context, ColumnSpec spec, {bool highlight = false}) {
     final theme = Theme.of(context);
     final broken = _brokenIds.contains(spec.id);
     final passed = _counts[spec.id];
@@ -141,7 +143,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
           label: spec.label(),
           tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
-          backgroundColor: broken ? theme.colorScheme.errorContainer : null,
+          backgroundColor: highlight
+              ? theme.colorScheme.secondaryContainer
+              : (broken ? theme.colorScheme.errorContainer : null),
           onPressed: () {
             ColumnSpecDialog.show(ref.base, spec);
           },
@@ -152,14 +156,16 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   // The bordered container shared by the live and placeholder renderings of a
   // logic column. [inner] is the laid-out, already-spaced header + children
-  // (+ placeholder). Uses padding-based gaps, so Wrap.spacing stays 0.
-  Widget _logicContainer(BuildContext context, List<Widget> inner) {
+  // (+ placeholder). Uses padding-based gaps, so Wrap.spacing stays 0. When
+  // [highlight] is set the border switches to the accent colour to match the
+  // dragged placeholder's emphasis.
+  Widget _logicContainer(BuildContext context, List<Widget> inner, {bool highlight = false}) {
     final theme = Theme.of(context);
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
-        border: Border.all(color: theme.colorScheme.primaryContainer),
+        border: Border.all(color: highlight ? theme.colorScheme.primary : theme.colorScheme.primaryContainer),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Wrap(runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
@@ -181,14 +187,14 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   // A non-interactive, key-free copy of a chip, used to render the placeholder
   // (and the dragged subtree it stands in for) without disturbing the keys or
   // drag targets of the live chips.
-  Widget _staticContent(BuildContext context, ColumnSpec spec) {
+  Widget _staticContent(BuildContext context, ColumnSpec spec, {bool highlight = false}) {
     if (!spec.acceptsChildren) {
-      return _actionChip(context, spec);
+      return _actionChip(context, spec, highlight: highlight);
     }
     return _logicContainer(context, [
-      _spaced(_actionChip(context, spec)),
-      for (final child in spec.children) _spaced(_staticContent(context, child)),
-    ]);
+      _spaced(_actionChip(context, spec, highlight: highlight)),
+      for (final child in spec.children) _spaced(_staticContent(context, child, highlight: highlight)),
+    ], highlight: highlight);
   }
 
   // Wraps [spec]'s content in a Draggable. The dragged chip collapses (empty
@@ -250,15 +256,38 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     }
   }
 
-  // Splices the placeholder here when [slot] is the current drop target.
+  // Splices the placeholder here when [slot] is the current drop target. The
+  // dragged copy is rendered at full opacity with an accent tint and a soft
+  // glow so it reads clearly as the chip being moved. The accent outline is
+  // drawn on the wrapper (a foreground decoration for leaves; logic containers
+  // already carry their own bordered box) so the chip's size never changes —
+  // matching the leaf's stadium / the container's rounded-rect shape.
   void _maybePlaceholder(BuildContext context, List<Widget> widgets, ReorderSlot slot) {
     if (slot != _currentSlot) {
       return;
     }
+    final theme = Theme.of(context);
+    final isContainer = _draggedSpec!.acceptsChildren;
+    final ShapeBorder shape = isContainer
+        ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
+        : const StadiumBorder();
     widgets.add(
       _slot(
         _placeholderKey,
-        IgnorePointer(child: Opacity(opacity: 0.7, child: _staticContent(context, _draggedSpec!))),
+        IgnorePointer(
+          child: Container(
+            decoration: ShapeDecoration(
+              shape: shape,
+              shadows: [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.45), blurRadius: 12)],
+            ),
+            foregroundDecoration: isContainer
+                ? null
+                : ShapeDecoration(
+                    shape: StadiumBorder(side: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
+                  ),
+            child: _staticContent(context, _draggedSpec!, highlight: true),
+          ),
+        ),
       ),
     );
   }
