@@ -354,5 +354,9 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     LogicColumnBuilder(title: "$tr_columns.logic.and.title".tr(), logic: LogicMode.and),
     LogicColumnBuilder(title: "$tr_columns.logic.or.title".tr(), logic: LogicMode.or),
     LogicColumnBuilder(title: "$tr_columns.logic.not.title".tr(), logic: LogicMode.not),
+    LogicColumnBuilder(title: "$tr_columns.logic.xor.title".tr(), logic: LogicMode.xor),
+    LogicColumnBuilder(title: "$tr_columns.logic.nand.title".tr(), logic: LogicMode.nand),
+    LogicColumnBuilder(title: "$tr_columns.logic.nor.title".tr(), logic: LogicMode.nor),
+    LogicColumnBuilder(title: "$tr_columns.logic.xnor.title".tr(), logic: LogicMode.xnor),
   ];
 });

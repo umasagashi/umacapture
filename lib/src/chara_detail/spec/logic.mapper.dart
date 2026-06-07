@@ -32,6 +32,14 @@ class LogicModeMapper extends EnumMapper<LogicMode> {
         return LogicMode.or;
       case r'not':
         return LogicMode.not;
+      case r'xor':
+        return LogicMode.xor;
+      case r'nand':
+        return LogicMode.nand;
+      case r'nor':
+        return LogicMode.nor;
+      case r'xnor':
+        return LogicMode.xnor;
       default:
         throw MapperException.unknownEnumValue(value);
     }
@@ -46,6 +54,14 @@ class LogicModeMapper extends EnumMapper<LogicMode> {
         return r'or';
       case LogicMode.not:
         return r'not';
+      case LogicMode.xor:
+        return r'xor';
+      case LogicMode.nand:
+        return r'nand';
+      case LogicMode.nor:
+        return r'nor';
+      case LogicMode.xnor:
+        return r'xnor';
     }
   }
 }

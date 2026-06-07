@@ -18,7 +18,7 @@ part 'logic.mapper.dart';
 const tr_logic = "pages.chara_detail.column_predicate.logic";
 
 @MappableEnum()
-enum LogicMode { and, or, not }
+enum LogicMode { and, or, not, xor, nand, nor, xnor }
 
 extension LogicModeExtension on LogicMode {
   /// Translation key suffix used for the localized mode name (e.g. "logic.mode.and").
@@ -36,6 +36,10 @@ extension LogicModeExtension on LogicMode {
     LogicMode.and => inputs.every((e) => e),
     LogicMode.or => inputs.any((e) => e),
     LogicMode.not => !inputs.any((e) => e),
+    LogicMode.xor => inputs.where((e) => e).length.isOdd,
+    LogicMode.nand => !inputs.every((e) => e),
+    LogicMode.nor => !inputs.any((e) => e),
+    LogicMode.xnor => inputs.where((e) => e).length.isEven,
   };
 }
 
@@ -216,7 +220,17 @@ class LogicColumnSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return _NotationSelector(specId: specId, onDecided: onDecided);
+    return Column(
+      children: [
+        _NotationSelector(specId: specId, onDecided: onDecided),
+        const SizedBox(height: 32),
+        FormGroup(
+          title: Text("$tr_logic.usage.label".tr()),
+          description: Text("$tr_logic.usage.description".tr()),
+          children: const [],
+        ),
+      ],
+    );
   }
 }
 
