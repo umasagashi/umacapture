@@ -1,4 +1,5 @@
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/spec_tree.dart';
 
 /// A legal drop position for a dragged column during a live reorder.
 ///
@@ -24,29 +25,6 @@ class ReorderSlot {
   String toString() => 'ReorderSlot($parentId, $index)';
 }
 
-/// Removes [id] from anywhere in the forest, returning `(newForest, removed)`.
-/// [removed] is null (and the forest unchanged) when [id] is absent. Mirrors
-/// `ColumnSpecSelection._detach`; kept local so this module stays Flutter-free
-/// and independently testable.
-(List<ColumnSpec>, ColumnSpec?) _detach(List<ColumnSpec> list, String id) {
-  final result = <ColumnSpec>[];
-  ColumnSpec? removed;
-  for (final spec in list) {
-    if (spec.id == id) {
-      removed = spec;
-      continue;
-    }
-    final (newChildren, childRemoved) = _detach(spec.children, id);
-    if (childRemoved != null) {
-      removed = childRemoved;
-      result.add(spec.withChildren(newChildren));
-    } else {
-      result.add(spec);
-    }
-  }
-  return (result, removed);
-}
-
 /// Ordered list of legal drop positions for [draggedId], in left-to-right
 /// display order.
 ///
@@ -61,7 +39,7 @@ class ReorderSlot {
 /// container that cannot take another child (a full NOT) contributes no inner
 /// slot; the position right before a container's header is never a slot.
 List<ReorderSlot> computeReorderSlots(List<ColumnSpec> specs, String draggedId) {
-  final (working, removed) = _detach(specs, draggedId);
+  final (working, removed) = detachFromForest(specs, draggedId);
   if (removed == null) {
     return const [];
   }

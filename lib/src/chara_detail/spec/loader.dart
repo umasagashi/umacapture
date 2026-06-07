@@ -9,7 +9,7 @@ import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/logic.dart';
+import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
@@ -426,23 +426,12 @@ class Grid {
   static Grid get empty => Grid([], [], {});
 }
 
-// Depth-first flatten of the spec forest into the order the data columns appear
-// in the table: a parent (logic column) is followed by its children.
-List<ColumnSpec> _flattenSpecs(List<ColumnSpec> specs) {
-  final result = <ColumnSpec>[];
-  for (final spec in specs) {
-    result.add(spec);
-    result.addAll(_flattenSpecs(spec.children));
-  }
-  return result;
-}
-
 Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
   // Every node in the tree contributes a data column (leaves show their value,
-  // logic columns show a pass/fail cell), so flatten the forest for display.
-  final displaySpecs = _flattenSpecs(specList);
+  // container columns show a pass/fail cell), so flatten the forest for display.
+  final displaySpecs = flattenForest(specList);
 
-  // Parse each non-logic spec exactly once. Logic columns have no value of their
+  // Parse each leaf spec exactly once. Container columns have no value of their
   // own; their cells come from the combined condition computed below.
   final parsedById = <String, List>{};
   for (final spec in displaySpecs) {
@@ -451,8 +440,10 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
     }
   }
 
-  // Resolve each spec's per-row condition, recursing through logic columns. Leaf
-  // conditions come from evaluate(); logic conditions combine their children.
+  // Resolve each spec's per-row condition, recursing through container columns.
+  // Leaf conditions come from evaluate(); container conditions combine their
+  // children (dispatched virtually, so any container kind works without a type
+  // test here).
   final conditionsById = <String, List<bool>>{};
   List<bool> resolve(ColumnSpec spec) {
     final cached = conditionsById[spec.id];
@@ -460,9 +451,9 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
       return cached;
     }
     final List<bool> condition;
-    if (spec is LogicColumnSpec) {
+    if (spec.acceptsChildren) {
       final childConditions = spec.children.map(resolve).toList();
-      condition = spec.combine(childConditions, recordList.length);
+      condition = spec.combineChildren(childConditions, recordList.length);
     } else {
       condition = spec.evaluate(ref, parsedById[spec.id]!);
     }
@@ -478,12 +469,12 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   final columns = displaySpecs.map((spec) => spec.plutoColumn(ref)).toList();
 
   // A row is visible only if every TOP-LEVEL spec passes. Nested specs influence
-  // visibility solely through their parent logic column.
+  // visibility solely through their parent container column.
   final rowConditions = specList.map((spec) => conditionsById[spec.id]!).toList().transpose().map((e) => e.everyIn());
 
   TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
-    if (spec is LogicColumnSpec) {
-      return spec.plutoCell(ref, conditionsById[spec.id]![rowIndex]);
+    if (spec.acceptsChildren) {
+      return spec.conditionCell(ref, conditionsById[spec.id]![rowIndex]);
     }
     return spec.plutoCell(ref, parsedById[spec.id]![rowIndex]);
   }

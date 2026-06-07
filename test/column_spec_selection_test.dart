@@ -50,8 +50,8 @@ void main() {
     notifier.add(b);
     expect(container.read(currentColumnSpecsProvider).map((e) => e.id).toList(), ['a', 'b']);
 
-    // Move a to after b.
-    notifier.moveTo(a, b);
+    // Move a to after b (detach a, reinsert at the top-level end).
+    notifier.moveToSlot('a', null, 1);
     expect(container.read(currentColumnSpecsProvider).map((e) => e.id).toList(), ['b', 'a']);
 
     notifier.removeIfExists('b');
@@ -209,5 +209,24 @@ void main() {
     expect(inner.logic, LogicMode.or);
     expect(inner.children.single, isA<RangedIntegerColumnSpec>());
     expect(inner.children.single.id, 'leaf');
+  });
+
+  test('moveToSlot into a full NOT is rejected (model-layer arity)', () async {
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    notifier.add(makeLogic('not', LogicMode.not));
+    notifier.add(makeSpec('a', 'A'));
+    notifier.add(makeSpec('b', 'B'));
+
+    // The first child fills the unary NOT.
+    notifier.moveToSlot('a', 'not', 0);
+    expect((notifier.getById('not')! as LogicColumnSpec).children.map((e) => e.id).toList(), ['a']);
+
+    // A second child into the full NOT is a no-op: b stays at the top level.
+    notifier.moveToSlot('b', 'not', 1);
+    expect((notifier.getById('not')! as LogicColumnSpec).children.map((e) => e.id).toList(), ['a']);
+    expect(topIds(container), ['not', 'b']);
   });
 }

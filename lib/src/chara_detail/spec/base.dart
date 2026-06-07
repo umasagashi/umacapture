@@ -10,6 +10,7 @@ import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
@@ -182,7 +183,10 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
 
   String get title;
 
-  ColumnSpecCellAction get cellAction;
+  /// Which preview tab a cell of this column opens, or null when the column has
+  /// no meaningful preview (container/placeholder columns). Leaf data columns
+  /// override this with the relevant [ColumnSpecCellAction].
+  ColumnSpecCellAction? get cellAction => null;
 
   /// Whether this spec was saved against an incompatible contract version and
   /// should be surfaced as broken until the user re-validates it.
@@ -207,6 +211,20 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// Whether this container still has room for another child. Containers with a
   /// fixed arity (e.g. a NOT logic column) return false once full.
   bool get acceptsMoreChildren => false;
+
+  /// Combines the resolved per-row conditions of this container's children into
+  /// this column's own per-row condition. Only container columns ([acceptsChildren])
+  /// override this; the grid builder dispatches here instead of type-testing.
+  List<bool> combineChildren(List<List<bool>> childConditions, int rowCount) {
+    throw UnsupportedError('$runtimeType is not a container column');
+  }
+
+  /// Builds the cell for a container column from its combined per-row condition.
+  /// Leaf columns render a parsed value via [plutoCell]; containers render a
+  /// pass/fail cell. Only container columns override this.
+  TrinaCell conditionCell(RefBase ref, bool passed) {
+    throw UnsupportedError('$runtimeType is not a container column');
+  }
 
   List<T> parse(RefBase ref, List<CharaDetailRecord> records);
 
@@ -280,9 +298,6 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
 
   @override
   String get type => (rawMap["type"] as String?) ?? runtimeType.toString();
-
-  @override
-  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   @override
   List<Null> parse(RefBase ref, List<CharaDetailRecord> records) {
@@ -365,9 +380,7 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       final map = d as Map<String, dynamic>;
       try {
         final spec = ColumnSpecMapper.fromMap(map);
-        if (spec.isObsolete || isSpecMapIncomplete(map, spec.toMap())) {
-          _brokenIds.add(spec.id);
-          _rawById[spec.id] = map;
+        if (_registerBroken(spec, map)) {
           broken = true;
         }
         specs.add(spec);
@@ -388,141 +401,59 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     return specs;
   }
 
+  // Registers every node in [spec]'s subtree whose own stored fields are
+  // incomplete (or which is obsolete), pairing each decoded spec with its raw
+  // map so a nested broken child is flagged at its OWN id rather than its
+  // container's. A healthy container is therefore kept out of [_rawById], letting
+  // _encodeForStorage re-emit its live children (so drag edits persist), while a
+  // genuinely broken leaf still keeps its raw map verbatim. Returns true when any
+  // node in the subtree was registered broken.
+  bool _registerBroken(ColumnSpec spec, Map<String, dynamic> rawMap) {
+    var anyBroken = false;
+    if (spec.isObsolete || _nodeFieldsIncomplete(rawMap, spec.toMap())) {
+      _brokenIds.add(spec.id);
+      _rawById[spec.id] = rawMap;
+      anyBroken = true;
+    }
+    final rawChildren = rawMap['children'];
+    if (rawChildren is List) {
+      for (final (i, child) in spec.children.indexed) {
+        if (i < rawChildren.length && rawChildren[i] is Map) {
+          if (_registerBroken(child, (rawChildren[i] as Map).cast<String, dynamic>())) {
+            anyBroken = true;
+          }
+        }
+      }
+    }
+    return anyBroken;
+  }
+
+  // Like [isSpecMapIncomplete] but ignores the 'children' key: nested children
+  // are validated by recursing on the decoded child specs (each flagged at its
+  // own id), not by deep-comparing the container's whole subtree map.
+  bool _nodeFieldsIncomplete(Map<String, dynamic> raw, Map<String, dynamic> full) {
+    for (final entry in full.entries) {
+      if (entry.key == 'children') continue;
+      if (!raw.containsKey(entry.key)) return true;
+      if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
+    }
+    return false;
+  }
+
   List<ColumnSpec> get _specs => state.requireValue;
 
-  // ---- Tree helpers ---------------------------------------------------------
-  // The selection is a forest: top-level specs may be logic columns whose
-  // children are themselves specs (recursively). These pure helpers operate on a
-  // list of roots and return freshly built lists so _commit never aliases the
-  // live AsyncData backing list (see _commit's contract).
-
-  static ColumnSpec? _findInList(List<ColumnSpec> list, String id) {
-    for (final spec in list) {
-      if (spec.id == id) return spec;
-      final found = _findInList(spec.children, id);
-      if (found != null) return found;
-    }
-    return null;
-  }
-
-  // Removes [id] from anywhere in the tree, returning (newList, removedSpec).
-  // removedSpec is null when [id] was not found (newList is then unchanged).
-  static (List<ColumnSpec>, ColumnSpec?) _detach(List<ColumnSpec> list, String id) {
-    final result = <ColumnSpec>[];
-    ColumnSpec? removed;
-    for (final spec in list) {
-      if (spec.id == id) {
-        removed = spec;
-        continue;
-      }
-      final (newChildren, childRemoved) = _detach(spec.children, id);
-      if (childRemoved != null) {
-        removed = childRemoved;
-        result.add(spec.withChildren(newChildren));
-      } else {
-        result.add(spec);
-      }
-    }
-    return (result, removed);
-  }
-
-  // Inserts [child] at [index] within [targetId]'s children (targetId == null
-  // inserts into the top-level list itself). [index] is clamped to the valid
-  // range. Returns a freshly built list; the unmatched branches are returned
-  // verbatim so only the affected sibling list is rebuilt.
-  static List<ColumnSpec> _insertAt(List<ColumnSpec> list, String? targetId, int index, ColumnSpec child) {
-    if (targetId == null) {
-      final result = [...list];
-      result.insert(index.clamp(0, result.length), child);
-      return result;
-    }
-    return list.map((spec) {
-      if (spec.id == targetId) {
-        final children = [...spec.children];
-        children.insert(index.clamp(0, children.length), child);
-        return spec.withChildren(children);
-      }
-      return spec.withChildren(_insertAt(spec.children, targetId, index, child));
-    }).toList();
-  }
-
-  // Removes [id] and lifts its children into the slot it occupied (logic columns
-  // dissolve back into normal columns). Returns null when [id] is not found.
-  static List<ColumnSpec>? _removeLifting(List<ColumnSpec> list, String id) {
-    var changed = false;
-    final result = <ColumnSpec>[];
-    for (final spec in list) {
-      if (spec.id == id) {
-        changed = true;
-        result.addAll(spec.children);
-        continue;
-      }
-      final newChildren = _removeLifting(spec.children, id);
-      if (newChildren != null) {
-        changed = true;
-        result.add(spec.withChildren(newChildren));
-      } else {
-        result.add(spec);
-      }
-    }
-    return changed ? result : null;
-  }
-
-  // Replaces the spec with the same id, anywhere in the tree. Returns null when
-  // no spec with that id exists.
-  static List<ColumnSpec>? _replaceInList(List<ColumnSpec> list, ColumnSpec replacement) {
-    var changed = false;
-    final result = <ColumnSpec>[];
-    for (final spec in list) {
-      if (spec.id == replacement.id) {
-        changed = true;
-        result.add(replacement);
-        continue;
-      }
-      final newChildren = _replaceInList(spec.children, replacement);
-      if (newChildren != null) {
-        changed = true;
-        result.add(spec.withChildren(newChildren));
-      } else {
-        result.add(spec);
-      }
-    }
-    return changed ? result : null;
-  }
-
-  // Reorders [objId] relative to [targetId] within whichever sibling list holds
-  // both. Returns null when they are not siblings anywhere in the tree.
-  static List<ColumnSpec>? _reorderSiblings(List<ColumnSpec> list, String objId, String targetId) {
-    final ids = list.map((e) => e.id).toList();
-    if (ids.contains(objId) && ids.contains(targetId)) {
-      final newList = [...list];
-      final obj = newList.firstWhere((e) => e.id == objId);
-      final moveRight = newList.indexWhere((e) => e.id == objId) < newList.indexWhere((e) => e.id == targetId);
-      newList.removeWhere((e) => e.id == objId);
-      final targetIndex = newList.indexWhere((e) => e.id == targetId);
-      newList.insert(targetIndex + (moveRight ? 1 : 0), obj);
-      return newList;
-    }
-    var changed = false;
-    final result = list.map((spec) {
-      final newChildren = _reorderSiblings(spec.children, objId, targetId);
-      if (newChildren != null) {
-        changed = true;
-        return spec.withChildren(newChildren);
-      }
-      return spec;
-    }).toList();
-    return changed ? result : null;
-  }
-
   // ---- Public API -----------------------------------------------------------
+  // The selection is a forest (top-level specs may be logic columns whose
+  // children are themselves specs). The pure tree algebra lives in spec_tree.dart
+  // and is shared with the reorder-slot geometry; the methods below wrap it with
+  // the broken-id bookkeeping and _commit's fresh-list contract.
 
   ColumnSpec? getById(String id) {
-    return _findInList(_specs, id);
+    return findInForest(_specs, id);
   }
 
   bool contains(String id) {
-    return _findInList(_specs, id) != null;
+    return findInForest(_specs, id) != null;
   }
 
   void add(ColumnSpec spec) {
@@ -540,19 +471,9 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   }
 
   void removeIfExists(String id) {
-    final result = _removeLifting(_specs, id);
+    final result = removeLifting(_specs, id);
     if (result != null) {
       _clearBroken(id);
-      _commit(result);
-    }
-  }
-
-  void moveTo(ColumnSpec obj, ColumnSpec target) {
-    if (obj.id == target.id) {
-      return;
-    }
-    final result = _reorderSiblings(_specs, obj.id, target.id);
-    if (result != null) {
       _commit(result);
     }
   }
@@ -564,15 +485,25 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // column and extraction to the top level. [index] is interpreted against the
   // tree *after* detachment, matching the slot model in reorder_slots.dart.
   void moveToSlot(String draggedId, String? parentId, int index) {
-    final (detached, removed) = _detach(_specs, draggedId);
+    final (detached, removed) = detachFromForest(_specs, draggedId);
     if (removed == null) {
       return;
     }
-    _commit(_insertAt(detached, parentId, index, removed));
+    // Reject illegal targets (a full NOT, or a non-container) so the model never
+    // builds a tree the UI's slot suppression would have forbidden. Evaluated
+    // against the detached tree, so reordering a container's sole child within it
+    // (the container is momentarily empty) still passes.
+    if (parentId != null) {
+      final parent = findInForest(detached, parentId);
+      if (parent == null || !parent.acceptsChildren || !parent.acceptsMoreChildren) {
+        return;
+      }
+    }
+    _commit(insertIntoForest(detached, parentId, index, removed));
   }
 
   void replaceById(ColumnSpec spec) {
-    final result = _replaceInList(_specs, spec) ?? [..._specs, spec];
+    final result = replaceInForest(_specs, spec) ?? [..._specs, spec];
     // The user has reviewed/updated this column via the settings dialog, so the
     // broken flag is cleared and the next _commit persists the healed spec.
     _clearBroken(spec.id);

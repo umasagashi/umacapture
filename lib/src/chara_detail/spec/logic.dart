@@ -26,6 +26,17 @@ extension LogicModeExtension on LogicMode {
 
   /// Whether this mode accepts more than one input column.
   bool get isMultiInput => this != LogicMode.not;
+
+  /// Applies the operator to one row's worth of input bits. The single source of
+  /// truth for the operator semantics, shared by filter-time combination
+  /// ([LogicColumnSpec.combine]) and the add-column truth table, so the displayed
+  /// table can never drift from what actually filters. NOT is unary once arity is
+  /// enforced; `!any` keeps it well-defined for any input count.
+  bool apply(List<bool> inputs) => switch (this) {
+    LogicMode.and => inputs.every((e) => e),
+    LogicMode.or => inputs.any((e) => e),
+    LogicMode.not => !inputs.any((e) => e),
+  };
 }
 
 class LogicCellData implements CellData {
@@ -64,9 +75,6 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable {
   LogicColumnSpec({required this.id, required this.title, required this.logic, this.children = const []});
 
   @override
-  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
-
-  @override
   bool get acceptsChildren => true;
 
   /// NOT accepts a single input; AND/OR accept any number.
@@ -92,17 +100,14 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable {
     if (childConditions.isEmpty) {
       return List<bool>.filled(rowCount, true);
     }
-    return childConditions.transpose().map((row) {
-      switch (logic) {
-        case LogicMode.and:
-          return row.everyIn();
-        case LogicMode.or:
-          return row.anyIn();
-        case LogicMode.not:
-          return !row.anyIn();
-      }
-    }).toList();
+    return childConditions.transpose().map(logic.apply).toList();
   }
+
+  @override
+  List<bool> combineChildren(List<List<bool>> childConditions, int rowCount) => combine(childConditions, rowCount);
+
+  @override
+  TrinaCell conditionCell(RefBase ref, bool passed) => plutoCell(ref, passed);
 
   @override
   List<bool> parse(RefBase ref, List<CharaDetailRecord> records) {
@@ -235,18 +240,13 @@ class LogicColumnBuilder extends ColumnBuilder {
   List<List<String>> get truthTable {
     final output = "$tr_logic.truth_table.output".tr();
     String bit(bool v) => v ? "1" : "0";
-    bool eval(List<bool> inputs) => switch (logic) {
-      LogicMode.and => inputs.every((e) => e),
-      LogicMode.or => inputs.any((e) => e),
-      LogicMode.not => !inputs.first,
-    };
     if (logic == LogicMode.not) {
       return [
         ["A", output],
         for (final a in [false, true])
           [
             bit(a),
-            bit(eval([a])),
+            bit(logic.apply([a])),
           ],
       ];
     }
@@ -257,7 +257,7 @@ class LogicColumnBuilder extends ColumnBuilder {
           [
             bit(a),
             bit(b),
-            bit(eval([a, b])),
+            bit(logic.apply([a, b])),
           ],
     ];
   }
