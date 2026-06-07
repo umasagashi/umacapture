@@ -159,7 +159,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                 onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
                   final record = event.row.getUserData<CharaDetailRecord>()!;
                   final spec = event.cell.column.getUserData<ColumnSpec>();
-                  showPopup(context, ref, event.offset, record, spec!.cellAction.tabIdx ?? 0);
+                  showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
                 },
                 onSelected: (TrinaGridOnSelectedEvent event) {
                   try {
@@ -331,7 +331,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       children: const [
         _QuarantineBannerWidget(),
         ColumnSpecTagWidget(),
-        SizedBox(height: 8),
+        SizedBox(height: 4),
         _CharaDetailDataTablePreCheckLayer(),
       ],
     );

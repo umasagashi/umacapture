@@ -9,6 +9,7 @@ import 'package:trina_grid/trina_grid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
@@ -415,36 +416,84 @@ final currentColumnSpecBrokenIdsProvider = Provider<Set<String>>((ref) {
 class Grid {
   final List<TrinaColumn> columns;
   final List<TrinaRow> rows;
-  final List<int> filteredCounts;
+
+  /// Per-column count of records passing that column's condition, keyed by spec id.
+  /// Includes nested (injected) columns, not just top-level ones.
+  final Map<String, int> filteredCounts;
 
   Grid(this.columns, this.rows, this.filteredCounts);
 
-  static Grid get empty => Grid([], [], []);
+  static Grid get empty => Grid([], [], {});
 }
 
 Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
-  final columnValues = specList.map((spec) => spec.parse(ref, recordList)).toList();
-  final columnConditions = zip2(specList, columnValues).map((e) => e.$1.evaluate(ref, e.$2)).toList();
+  // Every node in the tree contributes a data column (leaves show their value,
+  // container columns show a pass/fail cell), so flatten the forest for display.
+  final displaySpecs = flattenForest(specList);
 
-  final filteredCounts = columnConditions.map((e) => e.countTrue()).toList();
-  final columns = specList.map((spec) => spec.plutoColumn(ref)).toList();
+  // Parse each leaf spec exactly once. Container columns have no value of their
+  // own; their cells come from the combined condition computed below.
+  final parsedById = <String, List>{};
+  for (final spec in displaySpecs) {
+    if (!spec.acceptsChildren) {
+      parsedById[spec.id] = spec.parse(ref, recordList);
+    }
+  }
 
-  final rowValues = columnValues.transpose();
-  final rowConditions = columnConditions.transpose().map((e) => e.everyIn()).toList();
+  // Resolve each spec's per-row condition, recursing through container columns.
+  // Leaf conditions come from evaluate(); a container combines its children's
+  // conditions, dispatched through the ContainerColumnSpec capability so any
+  // container kind works without enumerating concrete types here.
+  final conditionsById = <String, List<bool>>{};
+  List<bool> resolve(ColumnSpec spec) {
+    final cached = conditionsById[spec.id];
+    if (cached != null) {
+      return cached;
+    }
+    final List<bool> condition;
+    if (spec is ContainerColumnSpec) {
+      final childConditions = spec.children.map(resolve).toList();
+      condition = spec.combineChildren(childConditions, recordList.length);
+    } else {
+      condition = spec.evaluate(ref, parsedById[spec.id]!);
+    }
+    conditionsById[spec.id] = condition;
+    return condition;
+  }
 
-  final plutoCells = zip2(rowValues, rowConditions)
-      .where((row) => row.$2)
-      .map((row) => zip2(specList, row.$1).map((c) => MapEntry(c.$1.id, c.$1.plutoCell(ref, c.$2))));
+  for (final spec in displaySpecs) {
+    resolve(spec);
+  }
 
-  final records = zip2(recordList, rowConditions).where((row) => row.$2).map((row) => row.$1);
+  final filteredCounts = {for (final spec in displaySpecs) spec.id: conditionsById[spec.id]!.countTrue()};
+  final columns = displaySpecs.map((spec) => spec.plutoColumn(ref)).toList();
 
-  final rows = zip2(plutoCells, records)
-      .map(
-        (row) => TrinaRow(
-          cells: Map.fromEntries(row.$1),
-          sortIdx: -DateTime.parse(row.$2.metadata.capturedDate).millisecondsSinceEpoch,
-        )..setUserData(row.$2),
-      )
+  // A row is visible only if every TOP-LEVEL spec passes. Nested specs influence
+  // visibility solely through their parent container column. Computed per record
+  // (not via transpose) so an empty specList yields one bool per record — all
+  // visible — instead of collapsing every record into a single phantom row.
+  final rowConditions = List<bool>.generate(
+    recordList.length,
+    (rowIndex) => specList.every((spec) => conditionsById[spec.id]![rowIndex]),
+  );
+
+  TrinaCell cellOf(ColumnSpec spec, int rowIndex) {
+    if (spec is ContainerColumnSpec) {
+      return spec.conditionCell(ref, conditionsById[spec.id]![rowIndex]);
+    }
+    return spec.plutoCell(ref, parsedById[spec.id]![rowIndex]);
+  }
+
+  final visibleIndices = rowConditions.indexed.where((e) => e.$2).map((e) => e.$1);
+
+  final rows = visibleIndices
+      .map((rowIndex) {
+        final record = recordList[rowIndex];
+        return TrinaRow(
+          cells: {for (final spec in displaySpecs) spec.id: cellOf(spec, rowIndex)},
+          sortIdx: -DateTime.parse(record.metadata.capturedDate).millisecondsSinceEpoch,
+        )..setUserData(record);
+      })
       .sortedBy<num>((e) => e.sortIdx)
       .toList();
 

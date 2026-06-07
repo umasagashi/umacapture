@@ -163,7 +163,8 @@
                 "campaign": "戦績",
                 "race": "出走履歴",
                 "metadata": "メタデータ",
-                "script": "スクリプト"
+                "script": "スクリプト",
+                "logic": "論理"
             },
             "column_predicate": {
                 "broken": {
@@ -576,6 +577,43 @@
                             "support_rank": "サポカランク"
                         }
                     }
+                },
+                "logic": {
+                    "usage": {
+                        "label": "情報",
+                        "description": "この論理カラムに入力を追加する手順:\n1. このダイアログを閉じます。\n2. テーブル上部から既存のカラムをドラッグします。\n3. この論理カラムの上にドロップして入力として追加します。"
+                    },
+                    "mode": {
+                        "and": "AND",
+                        "or": "OR",
+                        "not": "NOT",
+                        "xor": "XOR",
+                        "nand": "NAND",
+                        "nor": "NOR",
+                        "xnor": "XNOR"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "列名"
+                        }
+                    },
+                    "tooltip": {
+                        "empty": "入力なし（すべての行を通過）"
+                    },
+                    "builder": {
+                        "and": "すべての入力カラムの条件を満たす行だけを通します。",
+                        "or": "いずれかの入力カラムの条件を満たす行を通します。",
+                        "not": "入力カラム（1つ）の条件を満たさない行を通します。",
+                        "xor": "条件を満たす入力カラムの数が奇数の行を通します。",
+                        "nand": "AND の NOT。",
+                        "nor": "OR の NOT。",
+                        "xnor": "XOR の NOT。"
+                    },
+                    "truth_table": {
+                        "output": "出力"
+                    }
                 }
             },
             "columns": {
@@ -731,6 +769,29 @@
                 },
                 "script": {
                     "title": "スクリプト"
+                },
+                "logic": {
+                    "and": {
+                        "title": "AND"
+                    },
+                    "or": {
+                        "title": "OR"
+                    },
+                    "not": {
+                        "title": "NOT"
+                    },
+                    "xor": {
+                        "title": "XOR"
+                    },
+                    "nand": {
+                        "title": "NAND"
+                    },
+                    "nor": {
+                        "title": "NOR"
+                    },
+                    "xnor": {
+                        "title": "XNOR"
+                    }
                 }
             },
             "context_menu": {

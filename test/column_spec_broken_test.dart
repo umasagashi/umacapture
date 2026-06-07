@@ -14,6 +14,7 @@ import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
+import 'package:umacapture/src/chara_detail/spec/logic.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
@@ -120,7 +121,7 @@ void main() {
     expect(c3.read(currentColumnSpecBrokenIdsProvider), isEmpty);
   });
 
-  test('moveTo preserves broken status and original raw', () async {
+  test('moveToSlot preserves broken status and original raw', () async {
     seed([legacyFactorMap('legacy'), rangedIntegerMap('healthy')]);
     final container = ProviderContainer.test();
     await container.read(currentColumnSpecsLoaderProvider.future);
@@ -129,15 +130,66 @@ void main() {
     expect(container.read(currentColumnSpecBrokenIdsProvider), contains('legacy'));
     expect(container.read(currentColumnSpecBrokenIdsProvider), isNot(contains('healthy')));
 
-    final legacy = notifier.getById('legacy')!;
-    final healthy = notifier.getById('healthy')!;
-    notifier.moveTo(legacy, healthy);
+    // Move legacy to after healthy (detach legacy, reinsert at the top-level end).
+    notifier.moveToSlot('legacy', null, 1);
 
     expect(container.read(currentColumnSpecsProvider).map((e) => e.id).toList(), ['healthy', 'legacy']);
     expect(container.read(currentColumnSpecBrokenIdsProvider), contains('legacy'));
     // The reordered legacy entry is still persisted as its original incomplete raw.
     final stored = storedSpecs().firstWhere((e) => (e as Map)['id'] == 'legacy') as Map;
     expect(stored['predicate'], isNot(contains('factorTags')));
+  });
+
+  test('nesting a broken column under a logic column preserves its raw', () async {
+    seed([LogicColumnSpec(id: 'and', title: 'AND', logic: LogicMode.and).toMap(), legacyFactorMap('legacy')]);
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    expect(container.read(currentColumnSpecBrokenIdsProvider), contains('legacy'));
+
+    // Drag the broken leaf into the AND column: it is now persisted via the
+    // parent's children, not as a top-level entry.
+    notifier.moveToSlot('legacy', 'and', 0);
+
+    // The nested legacy entry is still persisted as its original incomplete raw,
+    // not a healed full map that silently restores the dropped fields.
+    final stored = storedSpecs();
+    final and = stored.firstWhere((e) => (e as Map)['id'] == 'and') as Map;
+    final child = (and['children'] as List).single as Map;
+    expect(child['predicate'], isNot(contains('factorTags')));
+  });
+
+  test('a broken child already nested in storage is flagged at its own id, not the container', () async {
+    // The logic column itself is complete; only its nested child is incomplete.
+    final and = <String, dynamic>{
+      'type': 'LogicColumnSpec',
+      'id': 'and',
+      'title': 'AND',
+      'logic': 'and',
+      'children': [legacyFactorMap('legacy'), rangedIntegerMap('healthy')],
+    };
+    seed([and]);
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    // The broken flag lands on the child, NOT on the healthy container.
+    final brokenIds = container.read(currentColumnSpecBrokenIdsProvider);
+    expect(brokenIds, contains('legacy'));
+    expect(brokenIds, isNot(contains('and')));
+    expect(brokenIds, isNot(contains('healthy')));
+
+    // Dragging the healthy sibling out of the container is a real structural edit
+    // that must persist — the healthy container is not pinned to its stored raw.
+    notifier.moveToSlot('healthy', null, 1);
+    final stored = storedSpecs();
+    final storedAnd = stored.firstWhere((e) => (e as Map)['id'] == 'and') as Map;
+    expect((storedAnd['children'] as List).map((e) => (e as Map)['id']).toList(), ['legacy']);
+    expect(stored.map((e) => (e as Map)['id']).toList(), ['and', 'healthy']);
+    // The nested broken child still keeps its incomplete raw, not a healed map.
+    final child = (storedAnd['children'] as List).single as Map;
+    expect(child['predicate'], isNot(contains('factorTags')));
   });
 
   test('script column on an old contract version loads broken and heals on re-save', () async {
