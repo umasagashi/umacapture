@@ -95,6 +95,10 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   final Map<String, GlobalKey> _outerKeys = {};
   final Map<String, GlobalKey> _headerKeys = {};
 
+  // Stable keys for the dashed empty slot an empty logic container shows, so its
+  // (id, 0) drop target can be measured during a drag.
+  final Map<String, GlobalKey> _emptySlotKeys = {};
+
   // Per-build snapshot of the data the chips need, so the recursive helpers
   // don't each re-read the providers.
   Map<String, int> _counts = const {};
@@ -104,6 +108,8 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   GlobalKey _outerKeyFor(String id) => _outerKeys.putIfAbsent(id, () => GlobalKey());
 
   GlobalKey _headerKeyFor(String id) => _headerKeys.putIfAbsent(id, () => GlobalKey());
+
+  GlobalKey _emptySlotKeyFor(String id) => _emptySlotKeys.putIfAbsent(id, () => GlobalKey());
 
   // Wraps a chip with the trailing gap that stands in for Wrap.spacing. Used
   // only for the placeholder's own static contents, which carry no keys.
@@ -244,8 +250,49 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       return _actionChip(context, spec);
     }
     final header = _slot(_headerKeyFor(spec.id), _logicLabel(context, spec));
-    final inner = _buildSiblings(context, spec.children, parentId: spec.id);
+    // A container counts as empty the moment its only child is the one being
+    // dragged out: the tree is left untouched until drop, so that child is still
+    // listed, but it renders collapsed and the dashed drop slot should already
+    // show — both to read as empty and so the child can be dropped back in. The
+    // dragged child keeps its own slot (same key) so its Draggable is never
+    // reparented mid-gesture.
+    final hasLiveChild = spec.children.any((c) => c.id != _draggingId);
+    final inner = hasLiveChild
+        ? _buildSiblings(context, spec.children, parentId: spec.id)
+        : [
+            for (final child in spec.children)
+              if (child.id == _draggingId) _slot(_outerKeyFor(child.id), _dragChip(context, child), gap: false),
+            _emptyDropSlot(context, spec),
+          ];
     return _logicContainer(context, [header, ...inner]);
+  }
+
+  // The single inner slot an empty logic container shows: a dashed, rounded
+  // placeholder box. The text-only header alone is too small to aim at, so this
+  // gives a comfortably sized drop target for the container's only inner
+  // position, (id, 0), and reads as "empty" even when not dragging. While a drag
+  // can legally land here it registers a hit target spanning the whole box, and
+  // once selected it shows the dragged chip's placeholder copy just like the
+  // sibling slots do.
+  Widget _emptyDropSlot(BuildContext context, ColumnSpec spec) {
+    final theme = Theme.of(context);
+    final slot = ReorderSlot(spec.id, 0);
+    final key = _emptySlotKeyFor(spec.id);
+    final active = _draggingId != null && _legalSlots.contains(slot);
+    if (active) {
+      _hitTargets.add(_HitTarget(key, slot, slot));
+    }
+    final selected = active && _currentSlot == slot;
+    return _slot(
+      key,
+      CustomPaint(
+        painter: _DashedRRectPainter(color: theme.colorScheme.primary),
+        child: selected
+            ? IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true))
+            : const SizedBox(width: 40, height: 32),
+      ),
+      gap: false,
+    );
   }
 
   // A non-interactive, key-free copy of a chip, used to render the placeholder
@@ -623,4 +670,38 @@ class _FlipMoverState extends State<_FlipMover> with SingleTickerProviderStateMi
     _fromOffset = (previous - newPosition) + _paintedOffset;
     _controller.forward(from: 0);
   }
+}
+
+// Strokes a rounded rectangle with a dashed outline. Used for the empty logic
+// container's drop slot; kept here so the feature needs no extra dependency.
+class _DashedRRectPainter extends CustomPainter {
+  _DashedRRectPainter({required this.color});
+
+  final Color color;
+
+  static const double _radius = 12;
+  static const double _dash = 4;
+  static const double _gap = 3;
+  static const double _strokeWidth = 1.5;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rrect = RRect.fromRectAndRadius(Offset.zero & size, const Radius.circular(_radius));
+    final outline = Path()..addRRect(rrect);
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _strokeWidth;
+    for (final metric in outline.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final end = (distance + _dash).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(distance, end), paint);
+        distance += _dash + _gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedRRectPainter old) => old.color != color;
 }
