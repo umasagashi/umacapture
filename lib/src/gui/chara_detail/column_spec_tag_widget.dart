@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/reorder_slots.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_builder_dialog.dart';
@@ -14,6 +15,29 @@ import '/src/gui/chara_detail/export_button.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
+// Horizontal gap between chips. Applied as trailing padding per chip rather than
+// via Wrap.spacing, so the collapsed dragged chip (rendered without it) leaves
+// no stray gap behind in the flow.
+const double _chipGap = 8;
+
+// Deadband (in pixels) around a chip's centre within which the placeholder does
+// not switch sides, so it doesn't flicker when the pointer hovers right on the
+// boundary.
+const double _slotSwitchMargin = 6;
+
+// A chip the pointer can hover to choose a drop slot. The pointer crossing the
+// chip's centre flips the target between [before] (its left half) and [after]
+// (its right half). For a logic column the header maps before-the-group / into
+// its front, while the box (only reachable over its padding) maps around the
+// whole group.
+class _HitTarget {
+  final GlobalKey key;
+  final ReorderSlot before;
+  final ReorderSlot after;
+
+  const _HitTarget(this.key, this.before, this.after);
+}
+
 class ColumnSpecTagWidget extends ConsumerStatefulWidget {
   const ColumnSpecTagWidget({super.key});
 
@@ -21,15 +45,85 @@ class ColumnSpecTagWidget extends ConsumerStatefulWidget {
   ConsumerState<ConsumerStatefulWidget> createState() => _ColumnSpecTagWidgetState();
 }
 
+// Renders the column chips as a live-reorderable forest. Dragging a chip does
+// not float it on the cursor and inserts no gaps: the dragged chip collapses in
+// place and a placeholder copy appears at the drop location, so the row always
+// looks like the normal run of chips with the order rearranging as the pointer
+// moves. The drop slot is chosen geometrically — the placeholder hops to the
+// nearest legal slot (see reorder_slots.dart) under the pointer — and the same
+// gesture moves a column between siblings, into a logic column and back out.
+// The tree is mutated once, on drop, via ColumnSpecSelection.moveToSlot.
+//
+// The dragged chip stays mounted at its own position in the tree for the whole
+// gesture (only collapsed) — it is never reparented, because a Draggable hosts
+// its drag avatar in an OverlayPortal and moving it across the tree mid-drag
+// crashes layout. The tree is left untouched until drop for the same reason.
 class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
-  // Id of the chip/container currently highlighted as a drop target.
-  String? hoveredId;
+  // Id of the chip currently being dragged, or null when idle.
+  String? _draggingId;
+
+  // The spec being dragged, kept so the placeholder can render its content while
+  // the live chip is collapsed.
+  ColumnSpec? _draggedSpec;
+
+  // Slot the placeholder currently occupies (where a drop would land).
+  ReorderSlot? _currentSlot;
+
+  // Legal drop slots for the active drag, computed over the tree with the
+  // dragged subtree removed. The single source of truth for reachable slots.
+  Set<ReorderSlot> _legalSlots = const {};
+
+  // Hoverable chips for the active drag, rebuilt every build and hit-tested in
+  // [_onMove] to pick the drop slot from the chip under (or nearest) the pointer.
+  List<_HitTarget> _hitTargets = [];
+
+  // Stable key on the placeholder, so [_onMove] can ignore hovers over it
+  // (it carries no slot of its own) instead of wandering to a neighbour.
+  final GlobalKey _placeholderKey = GlobalKey();
+
+  // Stable keys per spec id so chip rectangles can be measured during a drag.
+  // [_outerKeys] mark a chip (or a logic container's outer box) at its sibling
+  // level; [_headerKeys] mark a container's header chip (the left neighbour of
+  // its first inner slot).
+  final Map<String, GlobalKey> _outerKeys = {};
+  final Map<String, GlobalKey> _headerKeys = {};
+
+  // Per-build snapshot of the data the chips need, so the recursive helpers
+  // don't each re-read the providers.
+  Map<String, int> _counts = const {};
+  int _recordCount = 0;
+  Set<String> _brokenIds = const {};
+
+  GlobalKey _outerKeyFor(String id) => _outerKeys.putIfAbsent(id, () => GlobalKey());
+
+  GlobalKey _headerKeyFor(String id) => _headerKeys.putIfAbsent(id, () => GlobalKey());
+
+  // Wraps a chip with the trailing gap that stands in for Wrap.spacing. Used
+  // only for the placeholder's own static contents, which carry no keys.
+  Widget _spaced(Widget child) => Padding(
+    padding: const EdgeInsets.only(right: _chipGap),
+    child: child,
+  );
+
+  // A keyed, padded slot for a live (reorderable) chip. Keying every Wrap child
+  // keeps reconciliation from reparenting the dragged chip's Draggable — whose
+  // OverlayPortal drag avatar would otherwise crash layout — as the placeholder
+  // shuffles the siblings. The dragged chip reuses the same slot with no gap, so
+  // it collapses without leaving a stray space and without changing structure.
+  Widget _slot(Key key, Widget child, {bool gap = true}) => Padding(
+    key: key,
+    padding: EdgeInsets.only(right: gap ? _chipGap : 0),
+    child: child,
+  );
 
   // The interactive chip itself (badge + action chip), shared by leaf and logic
   // columns. The badge shows how many records pass this column's condition,
   // hidden when every record passes (i.e. the column filters nothing).
-  Widget _actionChip(BuildContext context, ColumnSpec spec, int? count, {required bool broken}) {
+  Widget _actionChip(BuildContext context, ColumnSpec spec) {
     final theme = Theme.of(context);
+    final broken = _brokenIds.contains(spec.id);
+    final passed = _counts[spec.id];
+    final count = passed == null || passed == _recordCount ? null : passed;
     return badges.Badge(
       showBadge: count != null,
       position: badges.BadgePosition.topEnd(top: -8, end: -8),
@@ -47,9 +141,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
           label: spec.label(),
           tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
-          backgroundColor: spec.id == hoveredId
-              ? theme.colorScheme.secondaryContainer
-              : (broken ? theme.colorScheme.errorContainer : null),
+          backgroundColor: broken ? theme.colorScheme.errorContainer : null,
           onPressed: () {
             ColumnSpecDialog.show(ref.base, spec);
           },
@@ -58,106 +150,226 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     );
   }
 
-  // A drop-only slot appended inside a logic container. Dropping a chip here
-  // injects it as a child input of [spec]; the cycle/full-arity checks (and their
-  // toasts) live in injectInto, so this only needs to filter out self-drops for
-  // the hover highlight.
-  Widget _addChildSlot(BuildContext context, ColumnSpec spec) {
+  // The bordered container shared by the live and placeholder renderings of a
+  // logic column. [inner] is the laid-out, already-spaced header + children
+  // (+ placeholder). Uses padding-based gaps, so Wrap.spacing stays 0.
+  Widget _logicContainer(BuildContext context, List<Widget> inner) {
     final theme = Theme.of(context);
-    return DragTarget<ColumnSpec>(
-      builder: (context, candidateData, rejectedData) {
-        final active = candidateData.isNotEmpty;
-        return Tooltip(
-          message: "$tr_chara_detail.column_predicate.logic.slot.tooltip".tr(),
-          child: Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: active ? theme.colorScheme.secondaryContainer : Colors.transparent,
-              border: Border.all(color: theme.colorScheme.primaryContainer),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(Icons.add, size: 18, color: theme.colorScheme.onSurfaceVariant),
-          ),
-        );
-      },
-      onWillAcceptWithDetails: (details) => details.data.id != spec.id,
-      onAcceptWithDetails: (details) {
-        ref.read(currentColumnSpecsLoaderProvider.notifier).injectInto(spec, details.data);
-      },
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        border: Border.all(color: theme.colorScheme.primaryContainer),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Wrap(runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
     );
   }
 
-  // Recursively builds a chip for [spec]. Leaf columns render a single draggable
-  // chip; logic columns render a bordered container holding their header chip and
-  // the nested child chips, growing one step larger per nesting level.
-  Widget _buildSpecChip(BuildContext context, ColumnSpec spec, Map<String, int> counts, int recordCount) {
-    final theme = Theme.of(context);
-    final brokenIds = ref.watch(currentColumnSpecBrokenIdsProvider);
-    final broken = brokenIds.contains(spec.id);
-    final passed = counts[spec.id];
-    final count = passed == null || passed == recordCount ? null : passed;
-
-    final Widget body;
-    if (spec.acceptsChildren) {
-      // Logic container: wraps its header chip, the nested children, and a trailing
-      // "+" slot. Only the slot injects; the container itself merely absorbs drops
-      // over its body so they don't bubble to the top-level extract target (i.e. a
-      // chip released on the body simply returns to its origin).
-      body = DragTarget<ColumnSpec>(
-        builder: (context, candidateData, rejectedData) {
-          return Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              border: Border.all(color: theme.colorScheme.primaryContainer),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            // Header chip, child chips and the add slot laid out horizontally,
-            // vertically centered, wrapping to a new line only when they overflow.
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                _actionChip(context, spec, count, broken: broken),
-                for (final child in spec.children) _buildSpecChip(context, child, counts, recordCount),
-                if (spec.acceptsMoreChildren) _addChildSlot(context, spec),
-              ],
-            ),
-          );
-        },
-        // Absorb any drop over the body (except onto itself) without acting on it,
-        // so it neither injects nor falls through to the top-level extract target.
-        onWillAcceptWithDetails: (details) => details.data.id != spec.id,
-        onAcceptWithDetails: (_) {},
-      );
-    } else {
-      // Leaf column: a drop target that reorders the dropped chip next to it.
-      body = DragTarget<ColumnSpec>(
-        builder: (context, candidateData, rejectedData) => _actionChip(context, spec, count, broken: broken),
-        onWillAcceptWithDetails: (details) {
-          if (details.data.id == spec.id) return false;
-          setState(() => hoveredId = spec.id);
-          return true;
-        },
-        onLeave: (_) => setState(() => hoveredId = null),
-        onAcceptWithDetails: (details) {
-          ref.read(currentColumnSpecsLoaderProvider.notifier).moveTo(details.data, spec);
-          setState(() => hoveredId = null);
-        },
-      );
+  // The visual body of a draggable chip (no Draggable wrapper). Logic columns
+  // recurse through [_buildSiblings] so their children participate in the same
+  // slot layout; leaf columns are a single action chip.
+  Widget _chipContent(BuildContext context, ColumnSpec spec) {
+    if (!spec.acceptsChildren) {
+      return _actionChip(context, spec);
     }
+    final header = _slot(_headerKeyFor(spec.id), _actionChip(context, spec));
+    final inner = _buildSiblings(context, spec.children, parentId: spec.id);
+    return _logicContainer(context, [header, ...inner]);
+  }
 
+  // A non-interactive, key-free copy of a chip, used to render the placeholder
+  // (and the dragged subtree it stands in for) without disturbing the keys or
+  // drag targets of the live chips.
+  Widget _staticContent(BuildContext context, ColumnSpec spec) {
+    if (!spec.acceptsChildren) {
+      return _actionChip(context, spec);
+    }
+    return _logicContainer(context, [
+      _spaced(_actionChip(context, spec)),
+      for (final child in spec.children) _spaced(_staticContent(context, child)),
+    ]);
+  }
+
+  // Wraps [spec]'s content in a Draggable. The dragged chip collapses (empty
+  // feedback and childWhenDragging) so nothing floats on the cursor and it takes
+  // no space, leaving the working tree the placeholder is numbered against. The
+  // chip stays mounted at its own tree position, so the active drag is never
+  // reparented mid-gesture.
+  Widget _dragChip(BuildContext context, ColumnSpec spec) {
     return Draggable<ColumnSpec>(
       data: spec,
-      feedback: Material(
-        color: Colors.transparent,
-        child: Opacity(opacity: 0.6, child: Chip(label: spec.label())),
-      ),
-      childWhenDragging: Opacity(opacity: 0.4, child: body),
-      child: body,
+      // Anchor the (invisible) feedback to the pointer so DragTargetDetails.offset
+      // is the true cursor position, not the cursor minus the grab offset within
+      // the chip — which would shift the swap boundary toward the chip's edge.
+      dragAnchorStrategy: pointerDragAnchorStrategy,
+      feedback: const SizedBox.shrink(),
+      childWhenDragging: const SizedBox.shrink(),
+      onDragStarted: () => _onDragStarted(spec),
+      onDragEnd: (_) => _onDragEnded(),
+      child: _chipContent(context, spec),
     );
+  }
+
+  // Lays out one sibling level: the chips of [children] with the placeholder
+  // spliced in at the current slot, and a hit target registered per chip so
+  // [_onMove] can pick a slot by which chip's centre the pointer has crossed.
+  // The dragged chip is rendered collapsed and gap-less in place — contributing
+  // neither a slot, an index, nor any spacing.
+  List<Widget> _buildSiblings(BuildContext context, List<ColumnSpec> children, {required String? parentId}) {
+    final widgets = <Widget>[];
+    var workingIndex = 0;
+    for (final child in children) {
+      final outerKey = _outerKeyFor(child.id);
+      if (child.id == _draggingId) {
+        widgets.add(_slot(outerKey, _dragChip(context, child), gap: false));
+        continue;
+      }
+      _maybePlaceholder(context, widgets, ReorderSlot(parentId, workingIndex));
+      _addHitTargets(child, parentId, workingIndex);
+      widgets.add(_slot(outerKey, _dragChip(context, child)));
+      workingIndex++;
+    }
+    _maybePlaceholder(context, widgets, ReorderSlot(parentId, workingIndex));
+    return widgets;
+  }
+
+  // Registers the chip's hoverable halves. A leaf swaps before/after itself; a
+  // logic column's header swaps before the group / into its front, and its box
+  // (only the deepest match wins, so this is reached over the padding) swaps
+  // around the whole group.
+  void _addHitTargets(ColumnSpec child, String? parentId, int index) {
+    final outerKey = _outerKeyFor(child.id);
+    final before = ReorderSlot(parentId, index);
+    final after = ReorderSlot(parentId, index + 1);
+    if (child.acceptsChildren) {
+      _hitTargets.add(_HitTarget(_headerKeyFor(child.id), before, ReorderSlot(child.id, 0)));
+      _hitTargets.add(_HitTarget(outerKey, before, after));
+    } else {
+      _hitTargets.add(_HitTarget(outerKey, before, after));
+    }
+  }
+
+  // Splices the placeholder here when [slot] is the current drop target.
+  void _maybePlaceholder(BuildContext context, List<Widget> widgets, ReorderSlot slot) {
+    if (slot != _currentSlot) {
+      return;
+    }
+    widgets.add(
+      _slot(
+        _placeholderKey,
+        IgnorePointer(child: Opacity(opacity: 0.7, child: _staticContent(context, _draggedSpec!))),
+      ),
+    );
+  }
+
+  Rect? _rectOf(GlobalKey? key) {
+    final box = key?.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) {
+      return null;
+    }
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  // While dragging, move the placeholder to the legal slot whose anchor is
+  // nearest the pointer, with hysteresis so a marginally closer rival doesn't
+  // cause flicker at a boundary.
+  void _onMove(Offset pointer) {
+    if (_draggingId == null) {
+      return;
+    }
+    // Hovering the placeholder itself carries no slot — leave it where it is.
+    final placeholder = _rectOf(_placeholderKey);
+    if (placeholder != null && placeholder.contains(pointer)) {
+      return;
+    }
+    // Prefer the deepest (smallest) chip under the pointer; otherwise fall back
+    // to the nearest one, so a hover in a gap still resolves.
+    _HitTarget? containing;
+    var containingArea = double.infinity;
+    _HitTarget? nearest;
+    var nearestDistance = double.infinity;
+    for (final target in _hitTargets) {
+      final rect = _rectOf(target.key);
+      if (rect == null) {
+        continue;
+      }
+      if (rect.contains(pointer)) {
+        final area = rect.width * rect.height;
+        if (area < containingArea) {
+          containingArea = area;
+          containing = target;
+        }
+      } else {
+        final distance = (rect.center - pointer).distanceSquared;
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearest = target;
+        }
+      }
+    }
+    final target = containing ?? nearest;
+    final rect = target == null ? null : _rectOf(target.key);
+    if (target == null || rect == null) {
+      return;
+    }
+    // Cross the chip's centre to flip sides; a deadband around the centre keeps
+    // the placeholder from flickering when the pointer hovers on the boundary.
+    final offset = pointer.dx - rect.center.dx;
+    if (offset.abs() < _slotSwitchMargin && (_currentSlot == target.before || _currentSlot == target.after)) {
+      return;
+    }
+    var slot = offset < 0 ? target.before : target.after;
+    if (!_legalSlots.contains(slot)) {
+      final other = offset < 0 ? target.after : target.before;
+      if (!_legalSlots.contains(other)) {
+        return;
+      }
+      slot = other;
+    }
+    if (slot != _currentSlot) {
+      setState(() => _currentSlot = slot);
+    }
+  }
+
+  void _onDragStarted(ColumnSpec spec) {
+    final specs = ref.read(currentColumnSpecsProvider);
+    setState(() {
+      _draggingId = spec.id;
+      _draggedSpec = spec;
+      _legalSlots = computeReorderSlots(specs, spec.id).toSet();
+      _currentSlot = _locate(specs, spec.id);
+    });
+  }
+
+  void _onDragEnded() {
+    final id = _draggingId;
+    final slot = _currentSlot;
+    setState(() {
+      _draggingId = null;
+      _draggedSpec = null;
+      _currentSlot = null;
+      _legalSlots = const {};
+      _hitTargets = [];
+    });
+    if (id != null && slot != null) {
+      ref.read(currentColumnSpecsLoaderProvider.notifier).moveToSlot(id, slot.parentId, slot.index);
+    }
+  }
+
+  // The slot a spec currently occupies, used as the initial placeholder
+  // position so the drag begins exactly where the chip was.
+  ReorderSlot? _locate(List<ColumnSpec> list, String id, [String? parentId]) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id == id) {
+        return ReorderSlot(parentId, i);
+      }
+      final nested = _locate(list[i].children, id, list[i].id);
+      if (nested != null) {
+        return nested;
+      }
+    }
+    return null;
   }
 
   Widget addButton(ThemeData theme) {
@@ -194,11 +406,26 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recordCount = ref.watch(charaDetailRecordStorageProvider).length;
+    _recordCount = ref.watch(charaDetailRecordStorageProvider).length;
     final specs = ref.watch(currentColumnSpecsProvider);
-    final counts = ref.watch(currentGridProvider).filteredCounts;
-    // The whole tag area is a drop target: releasing a (possibly nested) chip over
-    // empty space extracts it back to a top-level column.
+    _counts = ref.watch(currentGridProvider).filteredCounts;
+    _brokenIds = ref.watch(currentColumnSpecBrokenIdsProvider);
+    _hitTargets = [];
+
+    final children = <Widget>[
+      ..._buildSiblings(context, specs, parentId: null),
+      _slot(const ValueKey('add-button'), specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme)),
+      _slot(
+        const ValueKey('export-spacer'),
+        const Opacity(
+          // Spacing widget for export button.
+          opacity: 0,
+          child: Chip(padding: EdgeInsets.zero, label: SizedBox(width: 16)),
+        ),
+        gap: false,
+      ),
+    ];
+
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 8),
       child: Stack(
@@ -206,26 +433,13 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         children: [
           Align(
             alignment: Alignment.topLeft,
+            // One drop target spans the whole tag area; the live slot is picked
+            // geometrically in _onMove rather than per-chip, so no gaps appear.
             child: DragTarget<ColumnSpec>(
+              onWillAcceptWithDetails: (_) => _draggingId != null,
+              onMove: (details) => _onMove(details.offset),
               builder: (context, candidateData, rejectedData) {
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    for (final spec in specs) _buildSpecChip(context, spec, counts, recordCount),
-                    specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme),
-                    const Opacity(
-                      // Spacing widget for export button.
-                      opacity: 0,
-                      child: Chip(padding: EdgeInsets.zero, label: SizedBox(width: 16)),
-                    ),
-                  ],
-                );
-              },
-              onAcceptWithDetails: (details) {
-                ref.read(currentColumnSpecsLoaderProvider.notifier).extract(details.data);
-                setState(() => hoveredId = null);
+                return Wrap(runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: children);
               },
             ),
           ),

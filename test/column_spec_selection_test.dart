@@ -160,6 +160,71 @@ void main() {
     expect((notifier.getById('outer')! as LogicColumnSpec).children.single.id, 'inner');
   });
 
+  test('moveToSlot reorders within the top level', () async {
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    notifier.add(makeSpec('a', 'A'));
+    notifier.add(makeLogic('or', LogicMode.or));
+    notifier.add(makeSpec('c', 'C'));
+    notifier.add(makeSpec('d', 'D'));
+
+    // Move d to the top-level index 2 (computed against the tree without d).
+    notifier.moveToSlot('d', null, 2);
+    expect(topIds(container), ['a', 'or', 'd', 'c']);
+  });
+
+  test('moveToSlot injects a column under a logic column', () async {
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    notifier.add(makeSpec('a', 'A'));
+    notifier.add(makeLogic('or', LogicMode.or));
+    notifier.add(makeSpec('b', 'B'));
+    notifier.add(makeSpec('c', 'C'));
+    notifier.add(makeSpec('d', 'D'));
+    notifier.injectInto(notifier.getById('or')!, notifier.getById('b')!);
+
+    // Drop d into the OR column after b.
+    notifier.moveToSlot('d', 'or', 1);
+    expect(topIds(container), ['a', 'or', 'c']);
+    expect((notifier.getById('or')! as LogicColumnSpec).children.map((e) => e.id).toList(), ['b', 'd']);
+  });
+
+  test('moveToSlot of a missing id is a no-op', () async {
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    notifier.add(makeSpec('a', 'A'));
+    notifier.add(makeSpec('b', 'B'));
+
+    notifier.moveToSlot('missing', null, 0);
+    expect(topIds(container), ['a', 'b']);
+  });
+
+  test('moveToSlot extracts an injected child back to the top level and persists', () async {
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+    final notifier = container.read(currentColumnSpecsLoaderProvider.notifier);
+
+    notifier.add(makeLogic('or', LogicMode.or));
+    notifier.add(makeSpec('a', 'A'));
+    notifier.injectInto(notifier.getById('or')!, notifier.getById('a')!);
+    expect(topIds(container), ['or']);
+
+    // Extracting is just a slot move to the end of the top-level list.
+    notifier.moveToSlot('a', null, 1);
+    expect(topIds(container), ['or', 'a']);
+    expect((notifier.getById('or')! as LogicColumnSpec).children, isEmpty);
+
+    final reopened = ProviderContainer.test();
+    await reopened.read(currentColumnSpecsLoaderProvider.future);
+    expect(reopened.read(currentColumnSpecsProvider).map((e) => e.id).toList(), ['or', 'a']);
+  });
+
   test('nested logic columns round-trip through persistence', () async {
     final container = ProviderContainer.test();
     await container.read(currentColumnSpecsLoaderProvider.future);

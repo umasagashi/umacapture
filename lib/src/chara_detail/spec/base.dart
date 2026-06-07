@@ -441,6 +441,26 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     }).toList();
   }
 
+  // Inserts [child] at [index] within [targetId]'s children (targetId == null
+  // inserts into the top-level list itself). [index] is clamped to the valid
+  // range. Returns a freshly built list; the unmatched branches are returned
+  // verbatim so only the affected sibling list is rebuilt.
+  static List<ColumnSpec> _insertAt(List<ColumnSpec> list, String? targetId, int index, ColumnSpec child) {
+    if (targetId == null) {
+      final result = [...list];
+      result.insert(index.clamp(0, result.length), child);
+      return result;
+    }
+    return list.map((spec) {
+      if (spec.id == targetId) {
+        final children = [...spec.children];
+        children.insert(index.clamp(0, children.length), child);
+        return spec.withChildren(children);
+      }
+      return spec.withChildren(_insertAt(spec.children, targetId, index, child));
+    }).toList();
+  }
+
   // Removes [id] and lifts its children into the slot it occupied (logic columns
   // dissolve back into normal columns). Returns null when [id] is not found.
   static List<ColumnSpec>? _removeLifting(List<ColumnSpec> list, String id) {
@@ -550,6 +570,20 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     if (result != null) {
       _commit(result);
     }
+  }
+
+  // Detaches [draggedId] from anywhere in the tree, then reinserts it at [index]
+  // within [parentId]'s children ([parentId] == null reinserts at the top level).
+  // No-op when [draggedId] is not present. This is the single primitive behind
+  // the live drag reorder: it subsumes sibling reorder, injection into a logic
+  // column and extraction to the top level. [index] is interpreted against the
+  // tree *after* detachment, matching the slot model in reorder_slots.dart.
+  void moveToSlot(String draggedId, String? parentId, int index) {
+    final (detached, removed) = _detach(_specs, draggedId);
+    if (removed == null) {
+      return;
+    }
+    _commit(_insertAt(detached, parentId, index, removed));
   }
 
   // Injects [dragged] as a child of the [target] container column. Detaches
