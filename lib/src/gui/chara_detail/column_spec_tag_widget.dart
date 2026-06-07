@@ -26,6 +26,10 @@ const double _chipGap = 4;
 // boundary.
 const double _slotSwitchMargin = 6;
 
+// How long a chip takes to slide from its old slot to its new one while
+// reordering. Short enough to feel responsive, long enough to read as a slide.
+const Duration _reorderSlideDuration = Duration(milliseconds: 160);
+
 // A chip the pointer can hover to choose a drop slot. The pointer crossing the
 // chip's centre flips the target between [before] (its left half) and [after]
 // (its right half). For a logic column the header maps before-the-group / into
@@ -113,10 +117,15 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   // OverlayPortal drag avatar would otherwise crash layout — as the placeholder
   // shuffles the siblings. The dragged chip reuses the same slot with no gap, so
   // it collapses without leaving a stray space and without changing structure.
+  //
+  // The child is wrapped in a [_FlipMover] so that, while a drag is in progress,
+  // a chip whose slot changed slides from its old position to its new one
+  // instead of jumping. The key on this Padding keeps the mover's Element (and
+  // thus its remembered position) stable as the slot moves within the Wrap.
   Widget _slot(Key key, Widget child, {bool gap = true}) => Padding(
     key: key,
     padding: EdgeInsets.only(right: gap ? _chipGap : 0),
-    child: child,
+    child: _FlipMover(animate: _draggingId != null, child: child),
   );
 
   // The interactive chip itself (badge + action chip), shared by leaf and logic
@@ -482,5 +491,84 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         ],
       ),
     );
+  }
+}
+
+// Slides its child from its previous layout position to its current one using a
+// paint-only [Transform.translate], so reordering the chips animates instead of
+// jumping. This is a FLIP (First-Last-Invert-Play): each frame it measures where
+// the child landed, and if that moved it offsets the child back to where it was
+// and animates that offset to zero.
+//
+// The translate is paint-only, so layout (and therefore the slot rectangles the
+// drag hit-test measures via the parent's GlobalKey) is never disturbed — the
+// effect is purely cosmetic. When [animate] is false the mover snaps to the new
+// position, which keeps non-drag rebuilds (drop settle, add/remove via dialogs)
+// behaving exactly as before.
+class _FlipMover extends StatefulWidget {
+  const _FlipMover({required this.child, required this.animate});
+
+  final Widget child;
+  final bool animate;
+
+  @override
+  State<_FlipMover> createState() => _FlipMoverState();
+}
+
+class _FlipMoverState extends State<_FlipMover> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(vsync: this, duration: _reorderSlideDuration)
+    ..addListener(_tick);
+
+  // The child's settled layout position, measured after each frame. A move is
+  // detected by comparing the fresh measurement against this.
+  Offset? _lastPosition;
+
+  // The offset the slide started from; the painted offset is this lerped to zero
+  // by the controller, so [_paintedOffset] reads the current visual delta.
+  Offset _fromOffset = Offset.zero;
+
+  Offset get _paintedOffset => Offset.lerp(_fromOffset, Offset.zero, _controller.value) ?? Offset.zero;
+
+  void _tick() => setState(() {});
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _afterLayout());
+    return Transform.translate(offset: _paintedOffset, child: widget.child);
+  }
+
+  void _afterLayout() {
+    if (!mounted) {
+      return;
+    }
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) {
+      return;
+    }
+    // localToGlobal on the Transform's render object ignores its own paint
+    // transform, so this is the settled layout position regardless of any slide.
+    final newPosition = box.localToGlobal(Offset.zero);
+    final previous = _lastPosition;
+    _lastPosition = newPosition;
+    if (previous == null || previous == newPosition) {
+      return;
+    }
+    if (!widget.animate) {
+      // Snap: cancel any slide and sit at the new position.
+      _controller.stop();
+      _controller.value = 1;
+      _fromOffset = Offset.zero;
+      return;
+    }
+    // Re-target: carry the in-flight visual offset so an interrupted slide stays
+    // continuous, then animate the combined delta back to zero.
+    _fromOffset = (previous - newPosition) + _paintedOffset;
+    _controller.forward(from: 0);
   }
 }
