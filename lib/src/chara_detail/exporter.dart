@@ -81,7 +81,9 @@ class CsvExporter extends Exporter {
     final grid = ref.watch(currentGridProvider);
     final table = [
       grid.columns.map((e) => e.title).toList(),
-      ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()!.csv).toList()),
+      // A broken placeholder cell carries no Exportable userData; export it as an
+      // empty field rather than crashing the whole export on a null unwrap.
+      ...grid.rows.map((row) => row.cells.entries.map((e) => e.value.getUserData<Exportable>()?.csv ?? "").toList()),
     ];
     final content = const CsvEncoder().convert(table);
     return path.writeAsBytes(encode(content));

@@ -360,6 +360,11 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // silently healed.
   final Map<String, Map<String, dynamic>> _rawById = {};
 
+  // Storage key holding a container spec's nested children. Must match the
+  // dart_mappable field name serialized by container specs (see LogicColumnSpec's
+  // `children`); the encode/decode broken-preservation paths below depend on it.
+  static const _childrenKey = 'children';
+
   Set<String> get brokenIds => {..._brokenIds};
 
   void _clearBroken(String id) {
@@ -415,7 +420,7 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       _rawById[spec.id] = rawMap;
       anyBroken = true;
     }
-    final rawChildren = rawMap['children'];
+    final rawChildren = rawMap[_childrenKey];
     if (rawChildren is List) {
       for (final (i, child) in spec.children.indexed) {
         if (i < rawChildren.length && rawChildren[i] is Map) {
@@ -433,7 +438,7 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // own id), not by deep-comparing the container's whole subtree map.
   bool _nodeFieldsIncomplete(Map<String, dynamic> raw, Map<String, dynamic> full) {
     for (final entry in full.entries) {
-      if (entry.key == 'children') continue;
+      if (entry.key == _childrenKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }
@@ -536,21 +541,20 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     entry.push(jsonEncode(encoded));
   }
 
-  // Encode a spec for storage, preserving any broken/raw map verbatim at every
-  // depth. A broken id re-emits its stored raw (whole subtree included); a healthy
-  // container re-emits itself but recurses into its children so a nested broken
-  // child keeps its raw map instead of being re-encoded (and silently healed) by
-  // the mapper. Without the recursion, dragging a broken column under a logic
-  // column would heal it on the next save.
+  // Encode a spec for storage, preserving any broken/raw fields verbatim at every
+  // depth while still persisting live child edits. The node's OWN fields come from
+  // its stored raw map when broken (so the incomplete data is never healed by the
+  // mapper), otherwise from toMap(). A container then overrides its children with
+  // the live, recursively-encoded subtree, so a nested broken child keeps its raw
+  // map AND a child added/removed/reordered under a broken container still saves.
+  // A spec with no live children (a leaf, or a fully undecodable BrokenPlaceholder
+  // whose raw subtree must stay verbatim) returns its base map untouched.
   Map<String, dynamic> _encodeForStorage(ColumnSpec spec) {
-    final raw = _rawById[spec.id];
-    if (raw != null) {
-      return raw;
-    }
+    final base = _rawById[spec.id] ?? spec.toMap();
     if (spec.children.isEmpty) {
-      return spec.toMap();
+      return base;
     }
-    return {...spec.toMap(), 'children': spec.children.map(_encodeForStorage).toList()};
+    return {...base, _childrenKey: spec.children.map(_encodeForStorage).toList()};
   }
 }
 
