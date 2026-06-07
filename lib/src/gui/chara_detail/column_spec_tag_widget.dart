@@ -58,6 +58,36 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     );
   }
 
+  // A drop-only slot appended inside a logic container. Dropping a chip here
+  // injects it as a child input of [spec]; the cycle/full-arity checks (and their
+  // toasts) live in injectInto, so this only needs to filter out self-drops for
+  // the hover highlight.
+  Widget _addChildSlot(BuildContext context, ColumnSpec spec) {
+    final theme = Theme.of(context);
+    return DragTarget<ColumnSpec>(
+      builder: (context, candidateData, rejectedData) {
+        final active = candidateData.isNotEmpty;
+        return Tooltip(
+          message: "$tr_chara_detail.column_predicate.logic.slot.tooltip".tr(),
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: active ? theme.colorScheme.secondaryContainer : Colors.transparent,
+              border: Border.all(color: theme.colorScheme.primaryContainer),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(Icons.add, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          ),
+        );
+      },
+      onWillAcceptWithDetails: (details) => details.data.id != spec.id,
+      onAcceptWithDetails: (details) {
+        ref.read(currentColumnSpecsLoaderProvider.notifier).injectInto(spec, details.data);
+      },
+    );
+  }
+
   // Recursively builds a chip for [spec]. Leaf columns render a single draggable
   // chip; logic columns render a bordered container holding their header chip and
   // the nested child chips, growing one step larger per nesting level.
@@ -70,21 +100,21 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
     final Widget body;
     if (spec.acceptsChildren) {
-      // Logic container: a drop target for injection, wrapping its header chip and
-      // the nested children.
+      // Logic container: wraps its header chip, the nested children, and a trailing
+      // "+" slot. Only the slot injects; the container itself merely absorbs drops
+      // over its body so they don't bubble to the top-level extract target (i.e. a
+      // chip released on the body simply returns to its origin).
       body = DragTarget<ColumnSpec>(
         builder: (context, candidateData, rejectedData) {
           return Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: spec.id == hoveredId
-                  ? theme.colorScheme.secondaryContainer
-                  : theme.colorScheme.surfaceContainerHighest,
+              color: theme.colorScheme.surfaceContainerHighest,
               border: Border.all(color: theme.colorScheme.primaryContainer),
               borderRadius: BorderRadius.circular(12),
             ),
-            // Header chip and child chips laid out horizontally, vertically
-            // centered, wrapping to a new line only when they overflow.
+            // Header chip, child chips and the add slot laid out horizontally,
+            // vertically centered, wrapping to a new line only when they overflow.
             child: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -92,20 +122,15 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               children: [
                 _actionChip(context, spec, count, broken: broken),
                 for (final child in spec.children) _buildSpecChip(context, child, counts, recordCount),
+                if (spec.acceptsMoreChildren) _addChildSlot(context, spec),
               ],
             ),
           );
         },
-        onWillAcceptWithDetails: (details) {
-          if (details.data.id == spec.id) return false;
-          setState(() => hoveredId = spec.id);
-          return true;
-        },
-        onLeave: (_) => setState(() => hoveredId = null),
-        onAcceptWithDetails: (details) {
-          ref.read(currentColumnSpecsLoaderProvider.notifier).injectInto(spec, details.data);
-          setState(() => hoveredId = null);
-        },
+        // Absorb any drop over the body (except onto itself) without acting on it,
+        // so it neither injects nor falls through to the top-level extract target.
+        onWillAcceptWithDetails: (details) => details.data.id != spec.id,
+        onAcceptWithDetails: (_) {},
       );
     } else {
       // Leaf column: a drop target that reorders the dropped chip next to it.
