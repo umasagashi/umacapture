@@ -68,8 +68,13 @@ final triggerCatalog = <TriggerCatalogEntry>[
   ),
 ];
 
-/// The localization key for any [TriggerEvent], including `manual`.
+/// The localization key for any [TriggerEvent]'s short label, including `manual`.
 String triggerLabelKey(TriggerEvent event) {
   if (event == TriggerEvent.manual) return "$_trTrigger.manual";
   return triggerCatalog.firstWhere((e) => e.event == event).labelKey;
 }
+
+/// The localization key for any [TriggerEvent]'s long description, including
+/// `manual`. By convention the description key is the label key plus
+/// `_description`.
+String triggerDescriptionKey(TriggerEvent event) => "${triggerLabelKey(event)}_description";

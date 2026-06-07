@@ -37,9 +37,15 @@ class ExternalProgramRunner implements ActionRunner {
     }
 
     final args = expandArgumentTemplate(action.argumentTemplate, payload);
+    final workingDir = action.workingDirectory?.trim();
 
     progress.add(ExecutionProgress.indeterminate);
-    Process.start(action.programPath, args, runInShell: action.runInShell)
+    Process.start(
+          action.programPath,
+          args,
+          runInShell: action.runInShell,
+          workingDirectory: workingDir == null || workingDir.isEmpty ? null : workingDir,
+        )
         .then((started) {
           process = started;
           // Decode with the system encoding: JP Windows console tools emit CP932,
@@ -102,7 +108,7 @@ class ExternalProgramRunner implements ActionRunner {
 /// tokens expand to the empty string.
 List<String> expandArgumentTemplate(String template, PayloadMap payload) {
   final tokens = _tokenize(template);
-  return tokens.map((t) => _substitute(t, payload)).toList();
+  return tokens.map((t) => substitutePayload(t, payload)).toList();
 }
 
 List<String> _tokenize(String template) {
@@ -128,10 +134,4 @@ List<String> _tokenize(String template) {
   }
   if (hasContent) result.add(current.toString());
   return result;
-}
-
-final _tokenPattern = RegExp(r'\{(\w+)\}');
-
-String _substitute(String arg, PayloadMap payload) {
-  return arg.replaceAllMapped(_tokenPattern, (m) => payload[m.group(1)] ?? '');
 }

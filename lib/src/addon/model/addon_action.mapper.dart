@@ -93,6 +93,13 @@ class ExternalProgramActionMapper
     opt: true,
     def: false,
   );
+  static String? _$workingDirectory(ExternalProgramAction v) =>
+      v.workingDirectory;
+  static const Field<ExternalProgramAction, String> _f$workingDirectory = Field(
+    'workingDirectory',
+    _$workingDirectory,
+    opt: true,
+  );
 
   @override
   final MappableFields<ExternalProgramAction> fields = const {
@@ -100,6 +107,7 @@ class ExternalProgramActionMapper
     #argumentTemplate: _f$argumentTemplate,
     #timeoutSeconds: _f$timeoutSeconds,
     #runInShell: _f$runInShell,
+    #workingDirectory: _f$workingDirectory,
   };
 
   @override
@@ -116,6 +124,7 @@ class ExternalProgramActionMapper
       argumentTemplate: data.dec(_f$argumentTemplate),
       timeoutSeconds: data.dec(_f$timeoutSeconds),
       runInShell: data.dec(_f$runInShell),
+      workingDirectory: data.dec(_f$workingDirectory),
     );
   }
 
@@ -163,9 +172,18 @@ class BuiltinActionMapper extends SubClassMapperBase<BuiltinAction> {
     'actionKey',
     _$actionKey,
   );
+  static String? _$argument(BuiltinAction v) => v.argument;
+  static const Field<BuiltinAction, String> _f$argument = Field(
+    'argument',
+    _$argument,
+    opt: true,
+  );
 
   @override
-  final MappableFields<BuiltinAction> fields = const {#actionKey: _f$actionKey};
+  final MappableFields<BuiltinAction> fields = const {
+    #actionKey: _f$actionKey,
+    #argument: _f$argument,
+  };
 
   @override
   final String discriminatorKey = 'kind';
@@ -176,7 +194,10 @@ class BuiltinActionMapper extends SubClassMapperBase<BuiltinAction> {
       AddonActionMapper.ensureInitialized();
 
   static BuiltinAction _instantiate(DecodingData data) {
-    return BuiltinAction(actionKey: data.dec(_f$actionKey));
+    return BuiltinAction(
+      actionKey: data.dec(_f$actionKey),
+      argument: data.dec(_f$argument),
+    );
   }
 
   @override

@@ -8,6 +8,15 @@ part 'execution_models.mapper.dart';
 /// (e.g. `{"event": "record_captured", "record_id": "abc"}`).
 typedef PayloadMap = Map<String, String>;
 
+final _payloadTokenPattern = RegExp(r'\{(\w+)\}');
+
+/// Substitutes `{var}` tokens in [template] with values from [payload]. Unknown
+/// tokens expand to the empty string. Shared by the external-program argument
+/// expander and built-in actions that take a content template.
+String substitutePayload(String template, PayloadMap payload) {
+  return template.replaceAllMapped(_payloadTokenPattern, (m) => payload[m.group(1)] ?? '');
+}
+
 /// Terminal (or in-flight) state of a single addon execution.
 @MappableEnum()
 enum ExecutionStatus { running, success, failure, cancelled, timeout }

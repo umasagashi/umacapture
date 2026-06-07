@@ -28,7 +28,7 @@ class BuiltinRunner implements ActionRunner {
         );
       }
       try {
-        await descriptor.run(ref, payload);
+        await descriptor.run(ref, payload, action.argument);
         return ExecutionResult(status: ExecutionStatus.success, duration: stopwatch.elapsed);
       } catch (e, s) {
         logger.w("Builtin action '${action.actionKey}' failed: $e\n$s");

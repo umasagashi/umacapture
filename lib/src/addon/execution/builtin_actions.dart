@@ -1,4 +1,3 @@
-import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/services.dart';
 
 import '/src/addon/execution/execution_models.dart';
@@ -6,8 +5,9 @@ import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 
 /// A function performing a built-in action. Receives the long-lived dispatcher
-/// [RefBase] (for reaching providers) and the event [payload].
-typedef BuiltinFn = Future<void> Function(RefBase ref, PayloadMap payload);
+/// [RefBase] (for reaching providers), the event [payload], and the optional
+/// user-configured [argument] (already declared by the descriptor).
+typedef BuiltinFn = Future<void> Function(RefBase ref, PayloadMap payload, String? argument);
 
 /// Metadata + behavior for one entry in the built-in action registry.
 class BuiltinActionDescriptor {
@@ -17,9 +17,26 @@ class BuiltinActionDescriptor {
   /// Translation key for the human-readable label.
   final String labelKey;
 
+  /// Whether this action takes a free-form [BuiltinAction.argument]. When true,
+  /// the edit dialog shows a template field seeded with [defaultArgument].
+  final bool usesArgument;
+
+  /// Translation key for the argument field's label (only used when [usesArgument]).
+  final String? argumentLabelKey;
+
+  /// Default argument template for a freshly configured action.
+  final String defaultArgument;
+
   final BuiltinFn run;
 
-  const BuiltinActionDescriptor({required this.key, required this.labelKey, required this.run});
+  const BuiltinActionDescriptor({
+    required this.key,
+    required this.labelKey,
+    required this.run,
+    this.usesArgument = false,
+    this.argumentLabelKey,
+    this.defaultArgument = '',
+  });
 }
 
 const _trBuiltin = "pages.addon.builtin";
@@ -32,16 +49,22 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
   "show_toast": BuiltinActionDescriptor(
     key: "show_toast",
     labelKey: "$_trBuiltin.show_toast",
-    run: (ref, payload) async {
-      final event = payload["event"] ?? "";
-      Toaster.show(ToastData.info(description: "$_trBuiltin.show_toast_message".tr(namedArgs: {"event": event})));
+    usesArgument: true,
+    argumentLabelKey: "$_trBuiltin.show_toast_argument",
+    defaultArgument: "{event}",
+    run: (ref, payload, argument) async {
+      final text = substitutePayload(argument ?? "{event}", payload);
+      Toaster.show(ToastData.info(description: text));
     },
   ),
   "copy_payload_to_clipboard": BuiltinActionDescriptor(
     key: "copy_payload_to_clipboard",
     labelKey: "$_trBuiltin.copy_payload_to_clipboard",
-    run: (ref, payload) async {
-      final text = payload["record_id"] ?? payload["export_path"] ?? payload["event"] ?? "";
+    usesArgument: true,
+    argumentLabelKey: "$_trBuiltin.copy_payload_argument",
+    defaultArgument: "{record_id}",
+    run: (ref, payload, argument) async {
+      final text = substitutePayload(argument ?? "{record_id}", payload);
       await Clipboard.setData(ClipboardData(text: text));
     },
   ),

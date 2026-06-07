@@ -37,11 +37,16 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
   /// builtins (e.g. `echo`).
   final bool runInShell;
 
+  /// Working (current) directory for the launched process, or null/empty to
+  /// inherit the app's directory.
+  final String? workingDirectory;
+
   const ExternalProgramAction({
     required this.programPath,
     this.argumentTemplate = '',
     this.timeoutSeconds,
     this.runInShell = false,
+    this.workingDirectory,
   });
 
   @override
@@ -57,8 +62,13 @@ class BuiltinAction extends AddonAction with BuiltinActionMappable {
   /// Registry key identifying which built-in action to run.
   final String actionKey;
 
-  const BuiltinAction({required this.actionKey});
+  /// Optional free-form argument for actions that take one (e.g. the clipboard
+  /// action's content template). Tokens like `{record_id}` are substituted from
+  /// the event payload. Null for actions that take no argument.
+  final String? argument;
+
+  const BuiltinAction({required this.actionKey, this.argument});
 
   @override
-  String describe() => actionKey;
+  String describe() => argument == null || argument!.isEmpty ? actionKey : '$actionKey: $argument';
 }

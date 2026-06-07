@@ -943,16 +943,28 @@
             },
             "trigger": {
                 "capture_started": "キャプチャ開始時",
+                "capture_started_description": "画面キャプチャが開始されたとき（開始ボタン、または自動開始）に発火します。キャプチャ中に常駐させたい外部ツールの起動などに使えます。",
                 "capture_stopped": "キャプチャ停止時",
+                "capture_stopped_description": "画面キャプチャが停止したとき（停止ボタン、またはシーン終了）に発火します。キャプチャ中に起動したツールの後片付けなどに使えます。",
                 "record_captured": "レコード取得時",
+                "record_captured_description": "ネイティブ認識が完了し、新しい殿堂入りレコードが1件確定したときに発火します。ペイロードに record_id が入るため、取得したウマ娘ごとの外部連携に向いています。",
                 "record_exported": "エクスポート完了時",
+                "record_exported_description": "CSV / JSON / ZIP のエクスポートが完了したときに発火します。ペイロードに export_path（出力ファイルのパス）が入るため、書き出し後の自動処理に使えます。",
                 "error": "エラー発生時",
-                "manual": "手動実行のみ"
+                "error_description": "ネイティブまたはアプリ層でエラーが発生したときに発火します。エラー時に通知を出す、ログ収集ツールを起動するなどに使えます。",
+                "manual": "手動実行のみ",
+                "manual_description": "自動では発火しません。タスク一覧の実行ボタンを押したときだけ実行されます。動作確認や任意のタイミングでの実行に使えます。"
             },
             "builtin": {
                 "show_toast": "通知を表示",
-                "show_toast_message": "アドオンイベント: {event}",
-                "copy_payload_to_clipboard": "データをクリップボードへコピー"
+                "show_toast_argument": "通知メッセージ",
+                "copy_payload_to_clipboard": "クリップボードへコピー",
+                "copy_payload_argument": "コピーする内容"
+            },
+            "token": {
+                "event": "発火したイベントの識別子（例: record_captured）。すべてのトリガで利用できます。",
+                "record_id": "取得した殿堂入りレコードのID。「レコード取得時」トリガでのみ値が入ります。",
+                "export_path": "書き出されたファイルのパス。「エクスポート完了時」トリガでのみ値が入ります。"
             },
             "dialog": {
                 "title_add": "タスクを追加",
@@ -971,10 +983,16 @@
                     "label": "引数テンプレート",
                     "helper": "{record_id} などのトークンがイベントデータに置換されます。"
                 },
+                "working_dir": {
+                    "label": "カレントディレクトリ",
+                    "helper": "プログラムの作業ディレクトリ。空欄ならアプリと同じ場所で実行します。",
+                    "picker_title": "カレントディレクトリを選択"
+                },
                 "timeout": "タイムアウト（秒・空欄で無制限）",
                 "run_in_shell": "シェル経由で実行（.bat やシェル組込みコマンド用）",
                 "builtin": {
-                    "label": "内蔵アクション"
+                    "label": "内蔵アクション",
+                    "argument": "引数"
                 },
                 "save": "保存",
                 "delete": "削除"
