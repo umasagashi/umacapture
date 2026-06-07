@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/reorder_slots.dart';
+import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_builder_dialog.dart';
@@ -62,9 +63,11 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   // Id of the chip currently being dragged, or null when idle.
   String? _draggingId;
 
-  // The spec being dragged, kept so the placeholder can render its content while
-  // the live chip is collapsed.
-  ColumnSpec? _draggedSpec;
+  // The spec being dragged, derived from [_draggingId]. The tree is left untouched
+  // for the whole gesture, so a live lookup always finds the dragged spec; keeping
+  // it as a getter avoids a second field that must be kept in sync by hand.
+  ColumnSpec? get _draggedSpec =>
+      _draggingId == null ? null : findInForest(ref.read(currentColumnSpecsProvider), _draggingId!);
 
   // Slot the placeholder currently occupies (where a drop would land).
   ReorderSlot? _currentSlot;
@@ -313,10 +316,13 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       return;
     }
     // Prefer the deepest (smallest) chip under the pointer; otherwise fall back
-    // to the nearest one, so a hover in a gap still resolves.
+    // to the nearest one, so a hover in a gap still resolves. The winning rect is
+    // carried alongside the target so it never has to be measured a second time.
     _HitTarget? containing;
+    Rect? containingRect;
     var containingArea = double.infinity;
     _HitTarget? nearest;
+    Rect? nearestRect;
     var nearestDistance = double.infinity;
     for (final target in _hitTargets) {
       final rect = _rectOf(target.key);
@@ -328,17 +334,19 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         if (area < containingArea) {
           containingArea = area;
           containing = target;
+          containingRect = rect;
         }
       } else {
         final distance = (rect.center - pointer).distanceSquared;
         if (distance < nearestDistance) {
           nearestDistance = distance;
           nearest = target;
+          nearestRect = rect;
         }
       }
     }
     final target = containing ?? nearest;
-    final rect = target == null ? null : _rectOf(target.key);
+    final rect = containing != null ? containingRect : nearestRect;
     if (target == null || rect == null) {
       return;
     }
@@ -365,7 +373,6 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final specs = ref.read(currentColumnSpecsProvider);
     setState(() {
       _draggingId = spec.id;
-      _draggedSpec = spec;
       _legalSlots = computeReorderSlots(specs, spec.id).toSet();
       _currentSlot = _locate(specs, spec.id);
     });
@@ -376,7 +383,6 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final slot = _currentSlot;
     setState(() {
       _draggingId = null;
-      _draggedSpec = null;
       _currentSlot = null;
       _legalSlots = const {};
       _hitTargets = [];
