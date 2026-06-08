@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:dio/dio.dart';
 
 import '/src/addon/execution/action_runner.dart';
@@ -7,10 +5,6 @@ import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/addon_action.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
-
-/// Captured response body is truncated to this many characters to keep history
-/// entries and dialogs bounded.
-const _maxCaptureChars = 8192;
 
 /// Runs a [WebhookAction] by sending an HTTP request via the shared diagnostic
 /// [Dio] client, substituting payload tokens into the URL and body.
@@ -21,25 +15,19 @@ class WebhookRunner implements ActionRunner {
 
   @override
   ActionHandle start(RefBase ref, PayloadMap payload) {
-    final progress = StreamController<ExecutionProgress>.broadcast();
-    final completer = Completer<ExecutionResult>();
-    final stopwatch = Stopwatch()..start();
+    final exec = ActionExecution();
     final cancelToken = CancelToken();
     var cancelled = false;
-
-    void finish(ExecutionResult Function(Duration elapsed) build) {
-      if (completer.isCompleted) return;
-      stopwatch.stop();
-      if (!progress.isClosed) progress.close();
-      completer.complete(build(stopwatch.elapsed));
-    }
 
     // Percent-encode substituted values so spaces / & / # inside a token value
     // can't break the URL structure or inject extra query parameters.
     // encodeComponent (%20 for space) is valid in both path and query segments,
     // unlike encodeQueryComponent's '+', since a token may appear anywhere in the URL.
     final url = substitutePayload(action.url, payload, transform: Uri.encodeComponent);
-    final body = substitutePayload(action.bodyTemplate, payload);
+    // Escape substituted values for the body's content type so a token value
+    // containing a quote/newline (JSON) or '&'/'=' (form) cannot corrupt the body
+    // or inject extra fields. The literal template text is left untouched.
+    final body = substitutePayload(action.bodyTemplate, payload, transform: _bodyEscaper(action.contentType));
     final options = Options(
       method: action.method,
       contentType: _contentTypeHeader(action.contentType),
@@ -53,8 +41,11 @@ class WebhookRunner implements ActionRunner {
       options.receiveTimeout = Duration(seconds: timeout);
     }
 
-    progress.add(ExecutionProgress.indeterminate);
-    createDiagnosticDio(operation: "addon_webhook")
+    // A fresh client per fire (this runs once per matching event); close it once
+    // the request settles so its keep-alive HttpClient doesn't leak connections
+    // over a long session.
+    final dio = createDiagnosticDio(operation: "addon_webhook");
+    dio
         .request(
           url,
           data: _hasBody(action.method) && body.isNotEmpty ? body : null,
@@ -64,11 +55,11 @@ class WebhookRunner implements ActionRunner {
         .then((response) {
           final code = response.statusCode ?? 0;
           final ok = code >= 200 && code < 300;
-          finish(
+          exec.finish(
             (elapsed) => ExecutionResult(
               status: ok ? ExecutionStatus.success : ExecutionStatus.failure,
               exitCode: code,
-              stdout: _truncate(response.data?.toString() ?? ""),
+              stdout: truncateCapture(response.data?.toString() ?? ""),
               error: ok ? null : "HTTP $code",
               duration: elapsed,
             ),
@@ -77,23 +68,20 @@ class WebhookRunner implements ActionRunner {
         .catchError((Object e) {
           final isCancel = cancelled || (e is DioException && e.type == DioExceptionType.cancel);
           logger.w("Webhook request failed: url=$url, error=$e");
-          finish(
+          exec.finish(
             (elapsed) => ExecutionResult(
               status: isCancel ? ExecutionStatus.cancelled : ExecutionStatus.failure,
               error: e.toString(),
               duration: elapsed,
             ),
           );
-        });
+        })
+        .whenComplete(dio.close);
 
-    return ActionHandle(
-      progress: progress.stream,
-      result: completer.future,
-      cancel: () {
-        cancelled = true;
-        cancelToken.cancel();
-      },
-    );
+    return exec.handle(() {
+      cancelled = true;
+      cancelToken.cancel();
+    });
   }
 
   static bool _hasBody(String method) => method.toUpperCase() != "GET" && method.toUpperCase() != "HEAD";
@@ -106,5 +94,18 @@ class WebhookRunner implements ActionRunner {
     };
   }
 
-  static String _truncate(String s) => s.length > _maxCaptureChars ? s.substring(0, _maxCaptureChars) : s;
+  /// Per-content-type escaper applied to each substituted token value in the body.
+  /// Mirrors [_contentTypeHeader]'s arms (default is JSON) so the escaping always
+  /// matches the declared content type.
+  static String Function(String value)? _bodyEscaper(String contentType) {
+    return switch (contentType) {
+      // Each value is a single application/x-www-form-urlencoded field value.
+      "form" => Uri.encodeQueryComponent,
+      // Plain text is sent verbatim.
+      "text" => null,
+      // Escape as a JSON string fragment so quotes/backslashes/newlines in a
+      // value keep the body valid JSON.
+      _ => jsonStringFragment,
+    };
+  }
 }

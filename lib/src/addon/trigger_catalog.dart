@@ -35,8 +35,10 @@ const recordTokens = <String>[
 /// Tokens populated only by the export-completed trigger.
 const _exportTokens = <String>["export_path"];
 
-/// Tokens describing the upstream task in a `taskExecuted` chain.
-const _taskTokens = <String>["task_name", "task_id"];
+/// Tokens describing the upstream task in a `taskExecuted` chain. `task_status`
+/// is the upstream's terminal status (success/failure/cancelled/timeout), so a
+/// chained task can branch on the outcome.
+const _taskTokens = <String>["task_name", "task_id", "task_status"];
 
 /// The `{tokens}` that actually carry a value for [event], surfaced as tappable
 /// chips in the edit dialog so users only see tokens relevant to their trigger.

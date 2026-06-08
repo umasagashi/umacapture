@@ -22,7 +22,17 @@ class TaskDefinitionsNotifier extends Notifier<List<TaskDefinition>> {
     if (raw == null) {
       return const [];
     }
-    final data = jsonDecode(raw) as List<dynamic>;
+    final List<dynamic> data;
+    try {
+      data = jsonDecode(raw) as List<dynamic>;
+    } catch (e) {
+      // A corrupt top-level array (truncated/partial write) must not blow up the
+      // whole provider: AddonDispatcher reads this on every app event, so an
+      // uncaught throw here would break dispatch app-wide. Mirror
+      // AddonExecutionController._loadHistory and fall back to an empty list.
+      logger.w("Failed to decode addon task definitions: $e");
+      return const [];
+    }
     final tasks = <TaskDefinition>[];
     for (final d in data) {
       try {

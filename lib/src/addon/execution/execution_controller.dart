@@ -13,17 +13,30 @@ import '/src/preference/storage_box.dart';
 /// Maximum number of history entries kept (oldest trimmed on append).
 const _maxHistory = 100;
 
-/// Upper bound on how deep a `taskExecuted` chain may run, guarding against
-/// infinite loops when tasks trigger each other. Tracked in the payload under
-/// [_chainDepthKey].
+/// Absolute backstop on how deep a `taskExecuted` chain may run. The per-path
+/// visited set ([_chainVisitedKey]) already makes chains loop-proof; this only
+/// guards against a corrupt/oversized visited set. Tracked under [_chainDepthKey].
 const _maxChainDepth = 16;
 
-/// Upper bound on how many executions may run concurrently. Caps the total work
-/// a fan-out of mutually-chained `taskExecuted` tasks can spawn (the depth cap
-/// alone only bounds chain length, not breadth).
+/// Upper bound on how many executions may run concurrently.
 const _maxActiveExecutions = 16;
 
 const _chainDepthKey = "_chain_depth";
+
+const _chainVisitedKey = "_chain_visited";
+
+/// The set of task ids that have already run on the current chain path, parsed
+/// from the forwarded payload.
+///
+/// A candidate task is skipped once its id appears here, which makes chains
+/// loop-proof: each path visits a task at most once, so two `taskExecuted` tasks
+/// with an unset source (which otherwise match every chain event, including the
+/// ones they spawn) can no longer fan out without bound.
+Set<String> chainVisitedTaskIds(PayloadMap payload) {
+  final raw = payload[_chainVisitedKey];
+  if (raw == null || raw.isEmpty) return const {};
+  return raw.split(",").toSet();
+}
 
 // Fires the (forwarded) payload of a task each time one finishes, so tasks bound
 // to the `taskExecuted` trigger can run after it. A broadcast controller created
@@ -184,25 +197,32 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
         active: state.active.where((e) => e.executionId != executionId).toList(),
         history: _withEntry(entry),
       );
-      _fireTaskExecuted(task, payload);
+      _fireTaskExecuted(task, payload, result.status);
     });
   }
 
   /// Emits a [taskExecutedEventProvider] event so tasks chained to [task] can
-  /// run, forwarding [payload] (with the source task's id/name) and a depth
-  /// counter that caps runaway chains.
-  void _fireTaskExecuted(TaskDefinition task, PayloadMap payload) {
+  /// run, forwarding [payload] plus the source task's id/name/status, a depth
+  /// counter, and the running visited set that keeps chains loop-proof.
+  ///
+  /// Fires on every terminal [status] (not just success), so a chain can react to
+  /// a failed/cancelled upstream too; downstream tasks branch on the `task_status`
+  /// token rather than being silently skipped.
+  void _fireTaskExecuted(TaskDefinition task, PayloadMap payload, ExecutionStatus status) {
     final depth = int.tryParse(payload[_chainDepthKey] ?? "0") ?? 0;
     if (depth >= _maxChainDepth) {
       logger.w("Addon task chain reached max depth ($_maxChainDepth); not firing taskExecuted for '${task.name}'.");
       return;
     }
+    final visited = {...chainVisitedTaskIds(payload), task.id};
     _taskExecutedEventController.sink.add({
       ...payload,
       "event": "task_executed",
       "task_id": task.id,
       "task_name": task.name,
+      "task_status": status.name,
       _chainDepthKey: "${depth + 1}",
+      _chainVisitedKey: visited.join(","),
     });
   }
 

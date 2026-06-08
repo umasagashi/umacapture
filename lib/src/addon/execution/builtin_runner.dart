@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/builtin_actions.dart';
 import '/src/addon/execution/execution_models.dart';
@@ -14,34 +12,34 @@ class BuiltinRunner implements ActionRunner {
 
   @override
   ActionHandle start(RefBase ref, PayloadMap payload) {
-    final progress = StreamController<ExecutionProgress>.broadcast();
-    final stopwatch = Stopwatch()..start();
-    progress.add(ExecutionProgress.indeterminate);
+    final exec = ActionExecution();
 
-    Future<ExecutionResult> run() async {
+    Future<void> run() async {
       final descriptor = builtinActionRegistry[action.actionKey];
       if (descriptor == null) {
-        return ExecutionResult(
-          status: ExecutionStatus.failure,
-          error: "Unknown builtin action: ${action.actionKey}",
-          duration: stopwatch.elapsed,
+        exec.finish(
+          (elapsed) => ExecutionResult(
+            status: ExecutionStatus.failure,
+            error: "Unknown builtin action: ${action.actionKey}",
+            duration: elapsed,
+          ),
         );
+        return;
       }
       try {
         await descriptor.run(ref, payload, action.argument);
-        return ExecutionResult(status: ExecutionStatus.success, duration: stopwatch.elapsed);
+        exec.finish((elapsed) => ExecutionResult(status: ExecutionStatus.success, duration: elapsed));
       } catch (e, s) {
         logger.w("Builtin action '${action.actionKey}' failed: $e\n$s");
-        return ExecutionResult(status: ExecutionStatus.failure, error: e.toString(), duration: stopwatch.elapsed);
+        exec.finish(
+          (elapsed) => ExecutionResult(status: ExecutionStatus.failure, error: e.toString(), duration: elapsed),
+        );
       }
     }
 
-    final result = run().whenComplete(() {
-      stopwatch.stop();
-      if (!progress.isClosed) progress.close();
-    });
+    run();
 
     // Built-ins are not cancellable in the MVP (they are short, fire-and-forget).
-    return ActionHandle(progress: progress.stream, result: result, cancel: () {});
+    return exec.handle(() {});
   }
 }

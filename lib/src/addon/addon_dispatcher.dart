@@ -32,11 +32,13 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
   void _onEvent(TriggerEvent event, PayloadMap payload) {
     var tasks = ref.read(taskDefinitionsProvider).where((t) => t.enabled && t.trigger == event);
     if (event == TriggerEvent.taskExecuted) {
-      // Chain only from the matching source task (or any, when unset), and never
-      // re-trigger the task that just ran.
+      // Chain only from the matching source task (or any, when unset), never
+      // re-trigger the task that just ran, and skip any task already visited on
+      // this chain path so a loop / unbounded fan-out cannot occur.
       final sourceId = payload["task_id"];
+      final visited = chainVisitedTaskIds(payload);
       tasks = tasks.where((t) {
-        if (t.id == sourceId) return false;
+        if (t.id == sourceId || visited.contains(t.id)) return false;
         final wanted = t.sourceTaskId;
         return wanted == null || wanted.isEmpty || wanted == sourceId;
       });

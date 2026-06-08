@@ -9,7 +9,9 @@ import 'package:hive_ce_flutter/adapters.dart';
 import 'package:umacapture/src/addon/execution/execution_controller.dart';
 import 'package:umacapture/src/addon/execution/execution_models.dart';
 import 'package:umacapture/src/addon/execution/external_program_runner.dart';
+import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
+import 'package:umacapture/src/addon/task_definitions.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
 void main() {
@@ -26,6 +28,25 @@ void main() {
       // The URL structure (?, =) is preserved; only the value is encoded.
       final url = substitutePayload("https://h/n?name={card_name}", payload, transform: Uri.encodeComponent);
       expect(url, "https://h/n?name=Special%20Week");
+    });
+  });
+
+  group('jsonStringFragment', () {
+    test('escapes quotes/backslashes/newlines so a value keeps the body valid JSON', () {
+      final value = 'Special "Week"\n\\path';
+      final body = '{"name":"${jsonStringFragment(value)}"}';
+      expect(jsonDecode(body), {"name": value});
+    });
+  });
+
+  group('chainVisitedTaskIds', () {
+    test('parses an empty/absent visited list as the empty set', () {
+      expect(chainVisitedTaskIds(const {}), isEmpty);
+      expect(chainVisitedTaskIds(const {"_chain_visited": ""}), isEmpty);
+    });
+
+    test('parses a comma-separated visited list', () {
+      expect(chainVisitedTaskIds(const {"_chain_visited": "a,b,c"}), {"a", "b", "c"});
     });
   });
 
@@ -92,6 +113,56 @@ void main() {
       addTearDown(container.dispose);
 
       expect(container.read(addonExecutionControllerProvider).history, isEmpty);
+    });
+  });
+
+  group('TaskDefinitionsNotifier.build', () {
+    late Directory tempDir;
+
+    setUpAll(() async {
+      tempDir = Directory.systemTemp.createTempSync('umacapture_addon_tasks_test');
+      Hive.init(tempDir.path);
+      await Hive.openBox('addon');
+    });
+
+    tearDownAll(() async {
+      await Hive.close();
+      tempDir.deleteSync(recursive: true);
+    });
+
+    setUp(() => Hive.box('addon').clear());
+
+    TaskDefinition sampleTask(String id) => TaskDefinition(
+      id: id,
+      name: 'Task $id',
+      trigger: TriggerEvent.manual,
+      action: BuiltinAction(actionKey: 'show_toast', argument: '{event}'),
+    );
+
+    test('returns empty (does not throw) when the top-level JSON is corrupt', () {
+      // Regression: an unguarded jsonDecode here threw inside build(), and the
+      // dispatcher reads this provider on every app event — breaking dispatch
+      // app-wide on a single corrupt write.
+      Hive.box('addon').put('task_definitions', '{not a list');
+
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+
+      expect(container.read(taskDefinitionsProvider), isEmpty);
+    });
+
+    test('skips a single undecodable entry instead of discarding the whole list', () {
+      final raw = jsonEncode([
+        sampleTask('t1').toMap(),
+        {"broken": true},
+        sampleTask('t2').toMap(),
+      ]);
+      Hive.box('addon').put('task_definitions', raw);
+
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+
+      expect(container.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't2']);
     });
   });
 }

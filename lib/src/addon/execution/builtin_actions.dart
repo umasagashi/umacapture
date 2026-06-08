@@ -117,7 +117,13 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     defaultArgument: "trainee",
     run: (ref, payload, argument) async {
       final record = _requireRecord(ref, payload);
-      final ok = await ClipboardAlt.pasteImage(ref, _recordImagePath(ref, record, (argument ?? "trainee").trim()));
+      // silent: the execution-history entry already reports the outcome, so an
+      // automated/chained run shouldn't also pop a clipboard toast.
+      final ok = await ClipboardAlt.pasteImage(
+        ref,
+        _recordImagePath(ref, record, (argument ?? "trainee").trim()),
+        silent: true,
+      );
       if (!ok) throw StateError("Failed to copy image to clipboard.");
     },
   ),
@@ -142,7 +148,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       final path = kind == "record_json"
           ? storage.recordPathOf(record).filePath(recordJsonName)
           : _recordImagePath(ref, record, kind);
-      final ok = await ClipboardAlt.pasteFile(ref, path);
+      final ok = await ClipboardAlt.pasteFile(ref, path, silent: true);
       if (!ok) throw StateError("Failed to copy file to clipboard.");
     },
   ),

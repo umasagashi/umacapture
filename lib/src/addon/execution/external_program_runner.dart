@@ -6,10 +6,6 @@ import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/addon_action.dart';
 import '/src/core/utils.dart';
 
-/// Captured stdout/stderr is truncated to this many characters to keep history
-/// entries and dialogs bounded.
-const _maxCaptureChars = 8192;
-
 /// Runs an [ExternalProgramAction] via [Process.start], substituting payload
 /// variables into the argument template and capturing output.
 class ExternalProgramRunner implements ActionRunner {
@@ -19,27 +15,15 @@ class ExternalProgramRunner implements ActionRunner {
 
   @override
   ActionHandle start(RefBase ref, PayloadMap payload) {
-    final progress = StreamController<ExecutionProgress>.broadcast();
-    final completer = Completer<ExecutionResult>();
-    final stopwatch = Stopwatch()..start();
+    final exec = ActionExecution();
     Process? process;
     Timer? timeoutTimer;
     var cancelled = false;
     var timedOut = false;
 
-    void finish(ExecutionResult Function(Duration elapsed) build) {
-      if (completer.isCompleted) return;
-      timeoutTimer?.cancel();
-      stopwatch.stop();
-      final result = build(stopwatch.elapsed);
-      if (!progress.isClosed) progress.close();
-      completer.complete(result);
-    }
-
     final args = expandArgumentTemplate(action.argumentTemplate, payload);
     final workingDir = action.workingDirectory?.trim();
 
-    progress.add(ExecutionProgress.indeterminate);
     Process.start(
           action.programPath,
           args,
@@ -48,12 +32,17 @@ class ExternalProgramRunner implements ActionRunner {
         )
         .then((started) {
           process = started;
+          // A cancel issued while Process.start was still resolving could not kill
+          // a null process; honor it now that the process exists. Fall through so
+          // the exit handler still runs and completes the result (as cancelled).
+          if (cancelled) started.kill();
           // Decode with the system encoding: JP Windows console tools emit CP932,
-          // which utf8 would mangle.
+          // which utf8 would mangle. onError keeps an undecodable byte sequence
+          // from surfacing as an uncaught async error.
           final out = StringBuffer();
           final err = StringBuffer();
-          started.stdout.transform(systemEncoding.decoder).listen((s) => _append(out, s));
-          started.stderr.transform(systemEncoding.decoder).listen((s) => _append(err, s));
+          final outDone = _drain(started.stdout, out);
+          final errDone = _drain(started.stderr, err);
 
           final timeout = action.timeoutSeconds;
           if (timeout != null && timeout > 0) {
@@ -63,13 +52,17 @@ class ExternalProgramRunner implements ActionRunner {
             });
           }
 
-          started.exitCode.then((code) {
+          started.exitCode.then((code) async {
+            // Wait for stdout/stderr to fully flush before snapshotting: exitCode
+            // can complete before the pipes have delivered their last bytes.
+            await Future.wait([outDone, errDone]);
+            timeoutTimer?.cancel();
             final status = cancelled
                 ? ExecutionStatus.cancelled
                 : timedOut
                 ? ExecutionStatus.timeout
                 : (code == 0 ? ExecutionStatus.success : ExecutionStatus.failure);
-            finish(
+            exec.finish(
               (elapsed) => ExecutionResult(
                 status: status,
                 exitCode: code,
@@ -82,22 +75,36 @@ class ExternalProgramRunner implements ActionRunner {
         })
         .catchError((Object e, StackTrace s) {
           logger.w("Failed to launch external program: ${action.programPath}, error=$e");
-          finish((elapsed) => ExecutionResult(status: ExecutionStatus.failure, error: e.toString(), duration: elapsed));
+          timeoutTimer?.cancel();
+          exec.finish(
+            (elapsed) => ExecutionResult(status: ExecutionStatus.failure, error: e.toString(), duration: elapsed),
+          );
         });
 
-    return ActionHandle(
-      progress: progress.stream,
-      result: completer.future,
-      cancel: () {
-        cancelled = true;
-        process?.kill();
-      },
-    );
+    return exec.handle(() {
+      cancelled = true;
+      process?.kill();
+    });
+  }
+
+  /// Decodes [stream] into [buffer] (bounded to [maxCaptureChars]) and returns a
+  /// future that completes when the stream is exhausted or errors.
+  static Future<void> _drain(Stream<List<int>> stream, StringBuffer buffer) {
+    final done = Completer<void>();
+    stream
+        .transform(systemEncoding.decoder)
+        .listen(
+          (s) => _append(buffer, s),
+          onError: (Object e) => logger.w("Failed to decode external program output: $e"),
+          onDone: done.complete,
+          cancelOnError: false,
+        );
+    return done.future;
   }
 
   static void _append(StringBuffer buffer, String chunk) {
-    if (buffer.length >= _maxCaptureChars) return;
-    final remaining = _maxCaptureChars - buffer.length;
+    if (buffer.length >= maxCaptureChars) return;
+    final remaining = maxCaptureChars - buffer.length;
     buffer.write(chunk.length > remaining ? chunk.substring(0, remaining) : chunk);
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dart_mappable/dart_mappable.dart';
 
 import '/src/addon/model/task_definition.dart';
@@ -22,6 +24,23 @@ String substitutePayload(String template, PayloadMap payload, {String Function(S
     final value = payload[m.group(1)] ?? '';
     return transform == null ? value : transform(value);
   });
+}
+
+/// Captured stdout/stderr/response bodies are truncated to this many characters
+/// to keep history entries and dialogs bounded. Shared by every runner.
+const maxCaptureChars = 8192;
+
+/// Truncates [s] to [maxCaptureChars], used when a whole captured string is
+/// available at once (the streaming external-program path bounds its buffer
+/// incrementally instead).
+String truncateCapture(String s) => s.length > maxCaptureChars ? s.substring(0, maxCaptureChars) : s;
+
+/// Escapes [value] as the inner content of a JSON string (without the wrapping
+/// quotes), so a token value containing `"`, `\`, or a newline can be substituted
+/// into a JSON body template while keeping it valid JSON.
+String jsonStringFragment(String value) {
+  final encoded = jsonEncode(value);
+  return encoded.substring(1, encoded.length - 1);
 }
 
 /// Terminal (or in-flight) state of a single addon execution.
