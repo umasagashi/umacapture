@@ -53,6 +53,10 @@ lib/*.g.dart
 # Sandbox for developping
 /sandbox/
 
+# Runtime log written by the tracked addon test echo program (script is tracked,
+# its log output is not). The integration test writes to a temp file instead.
+/tool/addon_test/echo_log.txt
+
 # FVM
 .fvm/
 
