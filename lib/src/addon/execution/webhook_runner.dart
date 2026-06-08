@@ -36,17 +36,15 @@ class WebhookRunner implements ActionRunner {
       // failure result rather than a thrown DioException.
       validateStatus: (_) => true,
     );
-    final timeout = action.timeoutSeconds;
-    if (timeout != null && timeout > 0) {
-      final duration = Duration(seconds: timeout);
-      // connectTimeout is essential: send/receive timeouts do NOT bound the TCP
-      // connect phase, so a host that blackholes packets would otherwise hang the
-      // request forever, never finishing this execution and permanently consuming
-      // one of the bounded concurrent-execution slots.
-      options.connectTimeout = duration;
-      options.sendTimeout = duration;
-      options.receiveTimeout = duration;
-    }
+    // Always bound the request: an explicit timeout when set, otherwise the
+    // default. connectTimeout is essential: send/receive timeouts do NOT bound
+    // the TCP connect phase, so a host that blackholes packets would otherwise
+    // hang the request forever, never finishing this execution and permanently
+    // consuming one of the bounded concurrent-execution slots.
+    final duration = Duration(seconds: resolveWebhookTimeoutSeconds(action.timeoutSeconds));
+    options.connectTimeout = duration;
+    options.sendTimeout = duration;
+    options.receiveTimeout = duration;
 
     // A fresh client per fire (this runs once per matching event); close it once
     // the request settles so its keep-alive HttpClient doesn't leak connections
@@ -74,13 +72,12 @@ class WebhookRunner implements ActionRunner {
           );
         })
         .catchError((Object e) {
-          final isCancel = cancelled || (e is DioException && e.type == DioExceptionType.cancel);
           // Log the action's summary (method + host), not the substituted URL,
           // which may carry a webhook secret and record data.
           logger.w("Webhook request failed: target=${action.describe()}, error=$e");
           exec.finish(
             (elapsed) => ExecutionResult(
-              status: isCancel ? ExecutionStatus.cancelled : ExecutionStatus.failure,
+              status: webhookErrorStatus(e, cancelled: cancelled),
               error: e.toString(),
               duration: elapsed,
             ),
@@ -99,6 +96,32 @@ class WebhookRunner implements ActionRunner {
   /// The header and body escaper for [contentType], defaulting to JSON for an
   /// unknown value (matching the form shown in the edit dialog).
   static _ContentTypeSpec _specFor(String contentType) => _contentTypeSpecs[contentType] ?? _contentTypeSpecs["json"]!;
+}
+
+/// The timeout (seconds) actually enforced for [configured], applying
+/// [WebhookAction.defaultTimeoutSeconds] when it is null or non-positive. Always
+/// positive, so a webhook can never hang unbounded and hold an execution slot.
+int resolveWebhookTimeoutSeconds(int? configured) =>
+    (configured == null || configured <= 0) ? WebhookAction.defaultTimeoutSeconds : configured;
+
+/// Maps a failed webhook request to a terminal [ExecutionStatus].
+///
+/// A cancel (the [cancelled] flag, set by the handle's cancel hook, or a Dio
+/// [DioExceptionType.cancel]) is [ExecutionStatus.cancelled]; a connect/send/
+/// receive timeout is [ExecutionStatus.timeout] (distinct from a generic failure,
+/// matching the external-program runner); anything else is
+/// [ExecutionStatus.failure].
+ExecutionStatus webhookErrorStatus(Object error, {required bool cancelled}) {
+  if (cancelled || (error is DioException && error.type == DioExceptionType.cancel)) {
+    return ExecutionStatus.cancelled;
+  }
+  if (error is DioException &&
+      (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.sendTimeout ||
+          error.type == DioExceptionType.receiveTimeout)) {
+    return ExecutionStatus.timeout;
+  }
+  return ExecutionStatus.failure;
 }
 
 /// Pairs a content-type header with the escaper applied to each substituted token

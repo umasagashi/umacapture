@@ -143,13 +143,18 @@ class _HistoryCard extends ConsumerWidget {
     };
   }
 
-  Color _statusColor(ExecutionStatus status) {
+  Color _statusColor(ExecutionStatus status, ColorScheme scheme) {
+    // Pick a brightness-appropriate shade so the non-semantic colors keep enough
+    // contrast in both light and dark themes; reuse colorScheme roles where one
+    // fits, so the colors follow the app theme instead of being fixed literals.
+    final isDark = scheme.brightness == Brightness.dark;
+    Color shade(MaterialColor color) => isDark ? color.shade300 : color.shade700;
     return switch (status) {
-      ExecutionStatus.success => Colors.green,
-      ExecutionStatus.failure => Colors.red,
-      ExecutionStatus.cancelled => Colors.grey,
-      ExecutionStatus.timeout => Colors.orange,
-      ExecutionStatus.running => Colors.blue,
+      ExecutionStatus.success => shade(Colors.green),
+      ExecutionStatus.failure => scheme.error,
+      ExecutionStatus.cancelled => scheme.onSurfaceVariant,
+      ExecutionStatus.timeout => shade(Colors.orange),
+      ExecutionStatus.running => shade(Colors.blue),
     };
   }
 
@@ -176,7 +181,7 @@ class _HistoryCard extends ConsumerWidget {
         else
           for (final entry in history)
             ListTile(
-              leading: Icon(_statusIcon(entry.status), color: _statusColor(entry.status)),
+              leading: Icon(_statusIcon(entry.status), color: _statusColor(entry.status, theme.colorScheme)),
               title: Text(entry.taskName),
               subtitle: Text(
                 "${triggerLabelKey(entry.trigger).tr()} · "

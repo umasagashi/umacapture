@@ -22,6 +22,12 @@ abstract class AddonAction with AddonActionMappable {
 /// command-line arguments (e.g. `{record_id}` expands to the captured record id).
 @MappableClass(discriminatorValue: 'ExternalProgramAction')
 class ExternalProgramAction extends AddonAction with ExternalProgramActionMappable {
+  /// Default timeout (seconds) used when none is configured. The editor requires
+  /// a positive timeout for external programs (a process can hang indefinitely
+  /// and hold an execution slot), so this only backs legacy tasks saved before
+  /// that rule and seeds the editor field for a fresh action.
+  static const int defaultTimeoutSeconds = 30;
+
   /// Absolute path to the program to launch.
   final String programPath;
 
@@ -66,6 +72,12 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
 /// writing an external program.
 @MappableClass(discriminatorValue: 'WebhookAction')
 class WebhookAction extends AddonAction with WebhookActionMappable {
+  /// Default timeout (seconds) used when none is configured. The editor requires
+  /// a positive timeout, and this backs legacy tasks and seeds the editor field.
+  /// Without a bound, a blackholed host would hold an execution slot until the OS
+  /// gives up.
+  static const int defaultTimeoutSeconds = 30;
+
   /// Target URL. Tokens like `{record_id}` are substituted from the payload.
   final String url;
 
@@ -80,7 +92,7 @@ class WebhookAction extends AddonAction with WebhookActionMappable {
   /// (application/x-www-form-urlencoded), or `text` (text/plain).
   final String contentType;
 
-  /// Hard timeout in seconds, or null for the Dio default.
+  /// Hard timeout in seconds, or null to apply [defaultTimeoutSeconds].
   final int? timeoutSeconds;
 
   const WebhookAction({

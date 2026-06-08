@@ -6,6 +6,13 @@ import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/addon_action.dart';
 import '/src/core/utils.dart';
 
+/// The timeout (seconds) actually enforced for [configured], applying
+/// [ExternalProgramAction.defaultTimeoutSeconds] when it is null or non-positive.
+/// Always positive, so an external program can never run unbounded and hold an
+/// execution slot forever.
+int resolveExternalTimeoutSeconds(int? configured) =>
+    (configured == null || configured <= 0) ? ExternalProgramAction.defaultTimeoutSeconds : configured;
+
 /// Runs an [ExternalProgramAction] via [Process.start], substituting payload
 /// variables into the argument template and capturing output.
 class ExternalProgramRunner implements ActionRunner {
@@ -44,8 +51,11 @@ class ExternalProgramRunner implements ActionRunner {
           final outDone = _drain(started.stdout, out);
           final errDone = _drain(started.stderr, err);
 
-          final timeout = action.timeoutSeconds;
-          if (timeout != null && timeout > 0) {
+          // Always bound the run: an explicit timeout when set, otherwise the
+          // backstop for legacy tasks. A never-exiting process must not hold an
+          // execution slot indefinitely.
+          final timeout = resolveExternalTimeoutSeconds(action.timeoutSeconds);
+          if (timeout > 0) {
             timeoutTimer = Timer(Duration(seconds: timeout), () {
               timedOut = true;
               started.kill();

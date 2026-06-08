@@ -24,10 +24,14 @@ const _webhookMethods = <String>["POST", "GET", "PUT", "PATCH", "DELETE"];
 const _webhookContentTypes = <String>["json", "form", "text"];
 
 /// A translation key for why [raw] is an invalid timeout, or null if it is valid.
-/// Empty is valid (means "no timeout"); otherwise it must be a positive integer.
-String? _timeoutErrorKey(String raw) {
+///
+/// When [required] is false an empty value is valid (means "no timeout"). When
+/// [required] is true (external programs, whose process can hang indefinitely and
+/// hold an execution slot) an empty value is rejected. A non-empty value must
+/// always be a positive integer.
+String? _timeoutErrorKey(String raw, {bool required = false}) {
   final text = raw.trim();
-  if (text.isEmpty) return null;
+  if (text.isEmpty) return required ? "$tr_addon.dialog.timeout_required" : null;
   final seconds = int.tryParse(text);
   return (seconds == null || seconds <= 0) ? "$tr_addon.dialog.timeout_invalid" : null;
 }
@@ -52,10 +56,14 @@ class _ActionFields {
   final program = TextEditingController();
   final args = TextEditingController();
   final workingDir = TextEditingController();
-  final timeout = TextEditingController();
+  // Seeded with the default so a fresh external action is never empty (the field
+  // is required); an existing action overwrites it in seed().
+  final timeout = TextEditingController(text: "${ExternalProgramAction.defaultTimeoutSeconds}");
   final url = TextEditingController();
   final body = TextEditingController();
-  final webhookTimeout = TextEditingController();
+  // Seeded with the default so a fresh webhook action is never empty (the field
+  // is required); an existing action overwrites it in seed().
+  final webhookTimeout = TextEditingController(text: "${WebhookAction.defaultTimeoutSeconds}");
   final builtinArg = TextEditingController();
   bool runInShell = false;
   String builtinKey = builtinActionRegistry.keys.first;
@@ -69,12 +77,16 @@ class _ActionFields {
         program.text = a.programPath;
         args.text = a.argumentTemplate;
         workingDir.text = a.workingDirectory ?? "";
-        timeout.text = a.timeoutSeconds?.toString() ?? "";
+        // A legacy task may have no timeout; fall back to the default so the
+        // required field is pre-filled rather than blocking save on open.
+        timeout.text = a.timeoutSeconds?.toString() ?? "${ExternalProgramAction.defaultTimeoutSeconds}";
         runInShell = a.runInShell;
       case WebhookAction a:
         url.text = a.url;
         body.text = a.bodyTemplate;
-        webhookTimeout.text = a.timeoutSeconds?.toString() ?? "";
+        // A legacy task may have no timeout; fall back to the default so the
+        // required field is pre-filled rather than blocking save on open.
+        webhookTimeout.text = a.timeoutSeconds?.toString() ?? "${WebhookAction.defaultTimeoutSeconds}";
         webhookMethod = a.method;
         webhookContentType = a.contentType;
       case BuiltinAction a:
@@ -98,9 +110,11 @@ class _ActionFields {
 
   bool isValid(_ActionKind kind) {
     return switch (kind) {
-      _ActionKind.external => program.text.trim().isNotEmpty && _timeoutErrorKey(timeout.text) == null,
+      _ActionKind.external => program.text.trim().isNotEmpty && _timeoutErrorKey(timeout.text, required: true) == null,
       _ActionKind.webhook =>
-        url.text.trim().isNotEmpty && _urlErrorKey(url.text) == null && _timeoutErrorKey(webhookTimeout.text) == null,
+        url.text.trim().isNotEmpty &&
+            _urlErrorKey(url.text) == null &&
+            _timeoutErrorKey(webhookTimeout.text, required: true) == null,
       _ActionKind.builtin => true,
     };
   }
@@ -366,7 +380,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       keyboardType: TextInputType.number,
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.timeout".tr(),
-        errorText: _timeoutErrorKey(f.timeout.text)?.tr(),
+        errorText: _timeoutErrorKey(f.timeout.text, required: true)?.tr(),
       ),
       onChanged: (_) => onChanged(),
     ),
@@ -440,7 +454,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       keyboardType: TextInputType.number,
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.timeout".tr(),
-        errorText: _timeoutErrorKey(f.webhookTimeout.text)?.tr(),
+        errorText: _timeoutErrorKey(f.webhookTimeout.text, required: true)?.tr(),
       ),
       onChanged: (_) => onChanged(),
     ),

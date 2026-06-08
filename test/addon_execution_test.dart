@@ -3,12 +3,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce_flutter/adapters.dart';
 import 'package:umacapture/src/addon/execution/execution_controller.dart';
 import 'package:umacapture/src/addon/execution/execution_models.dart';
 import 'package:umacapture/src/addon/execution/external_program_runner.dart';
+import 'package:umacapture/src/addon/execution/webhook_runner.dart';
 import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
 import 'package:umacapture/src/addon/payload_enricher.dart';
@@ -117,6 +119,60 @@ void main() {
     test('honors double quotes and expands unknown tokens to an empty arg', () {
       final args = expandArgumentTemplate('--msg "a b" {missing}', const {});
       expect(args, ["--msg", "a b", ""]);
+    });
+  });
+
+  group('resolveExternalTimeoutSeconds', () {
+    test('keeps an explicitly configured timeout', () {
+      expect(resolveExternalTimeoutSeconds(30), 30);
+    });
+
+    test('applies the default when unset or non-positive so the slot is always bounded', () {
+      // The bug this guards: a null timeout used to mean "no timeout", letting a
+      // never-exiting process hold an execution slot forever. It now resolves to
+      // the positive default.
+      expect(resolveExternalTimeoutSeconds(null), ExternalProgramAction.defaultTimeoutSeconds);
+      expect(resolveExternalTimeoutSeconds(0), ExternalProgramAction.defaultTimeoutSeconds);
+      expect(ExternalProgramAction.defaultTimeoutSeconds, 30);
+    });
+  });
+
+  group('resolveWebhookTimeoutSeconds', () {
+    test('keeps an explicitly configured timeout', () {
+      expect(resolveWebhookTimeoutSeconds(10), 10);
+    });
+
+    test('applies the default when unset or non-positive so the slot is always bounded', () {
+      expect(resolveWebhookTimeoutSeconds(null), WebhookAction.defaultTimeoutSeconds);
+      expect(resolveWebhookTimeoutSeconds(0), WebhookAction.defaultTimeoutSeconds);
+      expect(WebhookAction.defaultTimeoutSeconds, 30);
+    });
+  });
+
+  group('webhookErrorStatus', () {
+    RequestOptions options() => RequestOptions(path: 'https://example.test/hook');
+    DioException ofType(DioExceptionType type) => DioException(requestOptions: options(), type: type);
+
+    test('maps connect/send/receive timeouts to the timeout status', () {
+      for (final type in [
+        DioExceptionType.connectionTimeout,
+        DioExceptionType.sendTimeout,
+        DioExceptionType.receiveTimeout,
+      ]) {
+        expect(webhookErrorStatus(ofType(type), cancelled: false), ExecutionStatus.timeout);
+      }
+    });
+
+    test('maps a Dio cancel and the cancelled flag to the cancelled status', () {
+      expect(webhookErrorStatus(ofType(DioExceptionType.cancel), cancelled: false), ExecutionStatus.cancelled);
+      // A user-driven cancel can surface as a non-cancel error type but with the
+      // flag set; it must still be classified as cancelled.
+      expect(webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: true), ExecutionStatus.cancelled);
+    });
+
+    test('maps other transport/HTTP errors to the failure status', () {
+      expect(webhookErrorStatus(ofType(DioExceptionType.connectionError), cancelled: false), ExecutionStatus.failure);
+      expect(webhookErrorStatus(Exception('boom'), cancelled: false), ExecutionStatus.failure);
     });
   });
 
