@@ -111,6 +111,30 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     _historyEntry.push(jsonEncode(history.map((e) => e.toMap()).toList()));
   }
 
+  /// Builds a [HistoryEntry] for [task], filling the task-derived fields so both
+  /// the limit-reached and normal-completion paths share one construction site.
+  HistoryEntry _buildHistoryEntry(
+    TaskDefinition task, {
+    required String executionId,
+    required ExecutionStatus status,
+    required DateTime startedAt,
+    required int durationMs,
+    int? exitCode,
+    String? error,
+  }) {
+    return HistoryEntry(
+      executionId: executionId,
+      taskId: task.id,
+      taskName: task.name,
+      trigger: task.trigger,
+      status: status,
+      startedAt: startedAt,
+      durationMs: durationMs,
+      exitCode: exitCode,
+      error: error,
+    );
+  }
+
   /// Prepends [entry], trims to [_maxHistory], persists, and returns the new list.
   List<HistoryEntry> _withEntry(HistoryEntry entry) {
     final history = [entry, ...state.history];
@@ -136,11 +160,9 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
       );
       state = state.copyWith(
         history: _withEntry(
-          HistoryEntry(
+          _buildHistoryEntry(
+            task,
             executionId: const Uuid().v4(),
-            taskId: task.id,
-            taskName: task.name,
-            trigger: task.trigger,
             status: ExecutionStatus.failure,
             startedAt: DateTime.now(),
             durationMs: 0,
@@ -177,11 +199,9 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     });
 
     handle.result.then((result) {
-      final entry = HistoryEntry(
+      final entry = _buildHistoryEntry(
+        task,
         executionId: executionId,
-        taskId: task.id,
-        taskName: task.name,
-        trigger: task.trigger,
         status: result.status,
         startedAt: startedAt,
         durationMs: result.duration.inMilliseconds,

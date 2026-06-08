@@ -125,10 +125,15 @@ class _ActionFields {
         );
       case _ActionKind.builtin:
         final descriptor = builtinActionRegistry[builtinKey];
-        return BuiltinAction(
-          actionKey: builtinKey,
-          argument: descriptor?.usesArgument == true ? builtinArg.text : null,
-        );
+        final options = descriptor?.argumentOptions;
+        // Normalize a stale/invalid option value (e.g. text carried over from a
+        // free-form builtin before switching to an options-based one) to the
+        // default, so the persisted argument always matches what the dropdown
+        // displays (which falls back to defaultArgument the same way).
+        final argument = (options != null && !options.any((o) => o.value == builtinArg.text))
+            ? descriptor!.defaultArgument
+            : builtinArg.text;
+        return BuiltinAction(actionKey: builtinKey, argument: descriptor?.usesArgument == true ? argument : null);
     }
   }
 }
@@ -345,7 +350,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       ),
     ),
     const SizedBox(height: 8),
-    _tokenChips(f.args, trigger),
+    _tokenChips(f.args, trigger, onChanged),
     const SizedBox(height: 16),
     TextField(
       controller: f.workingDir,
@@ -387,7 +392,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       onChanged: (_) => onChanged(),
     ),
     const SizedBox(height: 8),
-    _tokenChips(f.url, trigger),
+    _tokenChips(f.url, trigger, onChanged),
     const SizedBox(height: 16),
     Row(
       children: [
@@ -428,7 +433,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       ),
     ),
     const SizedBox(height: 8),
-    _tokenChips(f.body, trigger),
+    _tokenChips(f.body, trigger, onChanged),
     const SizedBox(height: 16),
     TextField(
       controller: f.webhookTimeout,
@@ -446,8 +451,14 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
   final descriptor = builtinActionRegistry[f.builtinKey];
   void onBuiltinChanged(String key) {
     final previousDefault = builtinActionRegistry[f.builtinKey]?.defaultArgument ?? "";
-    if (f.builtinArg.text.isEmpty || f.builtinArg.text == previousDefault) {
-      f.builtinArg.text = builtinActionRegistry[key]?.defaultArgument ?? "";
+    final next = builtinActionRegistry[key];
+    final options = next?.argumentOptions;
+    // Reset to the new default when the current text is empty, was the old
+    // default, or is not a valid option of an options-based target — so the
+    // stored text stays consistent with the dropdown's displayed selection.
+    final invalidForOptions = options != null && !options.any((o) => o.value == f.builtinArg.text);
+    if (f.builtinArg.text.isEmpty || f.builtinArg.text == previousDefault || invalidForOptions) {
+      f.builtinArg.text = next?.defaultArgument ?? "";
     }
     f.builtinKey = key;
     onChanged();
@@ -463,7 +474,7 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
     if (descriptor?.usesArgument == true) ...[
       const SizedBox(height: 16),
       if (descriptor!.argumentOptions != null)
-        _builtinArgumentDropdown(f, descriptor)
+        _builtinArgumentDropdown(f, descriptor, onChanged)
       else ...[
         TextField(
           controller: f.builtinArg,
@@ -472,27 +483,35 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
             helperText: (descriptor.argumentHelperKey ?? "$tr_addon.dialog.arguments.helper").tr(),
           ),
         ),
-        if (descriptor.argumentUsesTokens) ...[const SizedBox(height: 8), _tokenChips(f.builtinArg, trigger)],
+        if (descriptor.argumentUsesTokens) ...[
+          const SizedBox(height: 8),
+          _tokenChips(f.builtinArg, trigger, onChanged),
+        ],
       ],
     ],
   ];
 }
 
 /// A dropdown for a builtin whose argument is a fixed set of options.
-Widget _builtinArgumentDropdown(_ActionFields f, BuiltinActionDescriptor descriptor) {
+Widget _builtinArgumentDropdown(_ActionFields f, BuiltinActionDescriptor descriptor, VoidCallback onChanged) {
   final options = descriptor.argumentOptions!;
   final current = options.any((o) => o.value == f.builtinArg.text) ? f.builtinArg.text : descriptor.defaultArgument;
   return _SimpleDropdown(
     label: (descriptor.argumentLabelKey ?? "$tr_addon.dialog.builtin.argument").tr(),
     value: current,
     items: {for (final o in options) o.value: o.labelKey.tr()},
-    onChanged: (v) => f.builtinArg.text = v,
+    onChanged: (v) {
+      f.builtinArg.text = v;
+      onChanged();
+    },
   );
 }
 
 /// A row of tappable chips that append `{token}` to [controller]. Each chip's
 /// tooltip explains what the token expands to. The set reflects [trigger].
-Widget _tokenChips(TextEditingController controller, TriggerEvent trigger) {
+/// [onChanged] notifies the host so save-gating / validation re-evaluate, since
+/// a programmatic `controller.text` assignment does not fire `TextField.onChanged`.
+Widget _tokenChips(TextEditingController controller, TriggerEvent trigger, VoidCallback onChanged) {
   return Wrap(
     spacing: 8,
     children: [
@@ -504,6 +523,7 @@ Widget _tokenChips(TextEditingController controller, TriggerEvent trigger) {
             final text = controller.text;
             final sep = text.isEmpty || text.endsWith(" ") ? "" : " ";
             controller.text = "$text$sep{$token}";
+            onChanged();
           },
         ),
     ],

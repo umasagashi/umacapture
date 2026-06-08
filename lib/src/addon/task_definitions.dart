@@ -61,8 +61,9 @@ class TaskDefinitionsNotifier extends Notifier<List<TaskDefinition>> {
     _commit(next);
   }
 
-  /// A copy of [task] with its [TaskDefinition.sourceTaskId] cleared. (The
-  /// hand-written `copyWith` cannot null a field, so rebuild it explicitly.)
+  /// A copy of [task] with its [TaskDefinition.sourceTaskId] cleared. The
+  /// dart_mappable mixin generates no `copyWith` here (only `toMap`/`toJson`),
+  /// and the hand-written `copyWith` cannot null a field, so rebuild it explicitly.
   static TaskDefinition _withoutSource(TaskDefinition task) {
     return TaskDefinition(
       id: task.id,

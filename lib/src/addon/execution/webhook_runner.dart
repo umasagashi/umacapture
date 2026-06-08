@@ -27,10 +27,11 @@ class WebhookRunner implements ActionRunner {
     // Escape substituted values for the body's content type so a token value
     // containing a quote/newline (JSON) or '&'/'=' (form) cannot corrupt the body
     // or inject extra fields. The literal template text is left untouched.
-    final body = substitutePayload(action.bodyTemplate, payload, transform: _bodyEscaper(action.contentType));
+    final spec = _specFor(action.contentType);
+    final body = substitutePayload(action.bodyTemplate, payload, transform: spec.escaper);
     final options = Options(
       method: action.method,
-      contentType: _contentTypeHeader(action.contentType),
+      contentType: spec.header,
       // Treat any HTTP status as a completed response so non-2xx becomes a
       // failure result rather than a thrown DioException.
       validateStatus: (_) => true,
@@ -95,26 +96,30 @@ class WebhookRunner implements ActionRunner {
 
   static bool _hasBody(String method) => method.toUpperCase() != "GET" && method.toUpperCase() != "HEAD";
 
-  static String _contentTypeHeader(String contentType) {
-    return switch (contentType) {
-      "form" => "application/x-www-form-urlencoded",
-      "text" => "text/plain",
-      _ => "application/json",
-    };
-  }
-
-  /// Per-content-type escaper applied to each substituted token value in the body.
-  /// Mirrors [_contentTypeHeader]'s arms (default is JSON) so the escaping always
-  /// matches the declared content type.
-  static String Function(String value)? _bodyEscaper(String contentType) {
-    return switch (contentType) {
-      // Each value is a single application/x-www-form-urlencoded field value.
-      "form" => Uri.encodeQueryComponent,
-      // Plain text is sent verbatim.
-      "text" => null,
-      // Escape as a JSON string fragment so quotes/backslashes/newlines in a
-      // value keep the body valid JSON.
-      _ => jsonStringFragment,
-    };
-  }
+  /// The header and body escaper for [contentType], defaulting to JSON for an
+  /// unknown value (matching the form shown in the edit dialog).
+  static _ContentTypeSpec _specFor(String contentType) => _contentTypeSpecs[contentType] ?? _contentTypeSpecs["json"]!;
 }
+
+/// Pairs a content-type header with the escaper applied to each substituted token
+/// value in the body, so the two can never drift apart for a given content type.
+class _ContentTypeSpec {
+  final String header;
+
+  /// Escaper for each substituted value, or null to send values verbatim.
+  final String Function(String value)? escaper;
+
+  const _ContentTypeSpec(this.header, this.escaper);
+}
+
+/// Content-type registry keyed by [WebhookAction.contentType]. `json` is also the
+/// fallback for any unrecognized value (see [WebhookRunner._specFor]).
+const _contentTypeSpecs = <String, _ContentTypeSpec>{
+  // Each value is a single application/x-www-form-urlencoded field value.
+  "form": _ContentTypeSpec("application/x-www-form-urlencoded", Uri.encodeQueryComponent),
+  // Plain text is sent verbatim.
+  "text": _ContentTypeSpec("text/plain", null),
+  // Escape as a JSON string fragment so quotes/backslashes/newlines in a value
+  // keep the body valid JSON.
+  "json": _ContentTypeSpec("application/json", jsonStringFragment),
+};
