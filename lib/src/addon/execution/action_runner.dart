@@ -1,6 +1,7 @@
 import '/src/addon/execution/builtin_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/execution/external_program_runner.dart';
+import '/src/addon/execution/webhook_runner.dart';
 import '/src/addon/model/addon_action.dart';
 import '/src/core/utils.dart';
 
@@ -15,6 +16,7 @@ abstract class ActionRunner {
 ActionRunner runnerFor(AddonAction action) {
   return switch (action) {
     ExternalProgramAction a => ExternalProgramRunner(a),
+    WebhookAction a => WebhookRunner(a),
     BuiltinAction a => BuiltinRunner(a),
     _ => throw UnimplementedError("No runner for action: ${action.runtimeType}"),
   };

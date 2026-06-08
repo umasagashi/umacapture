@@ -9,7 +9,7 @@ part 'task_definition.mapper.dart';
 /// Limited to events that already have a Dart-side stream (see `trigger_catalog.dart`).
 /// `manual` is a sentinel meaning "no automatic trigger; run button only".
 @MappableEnum()
-enum TriggerEvent { captureStarted, captureStopped, recordCaptured, recordExported, error, manual }
+enum TriggerEvent { captureStarted, captureStopped, recordCaptured, recordExported, taskExecuted, manual }
 
 /// A user-registered addon task: an action bound to a trigger.
 @MappableClass(caseStyle: CaseStyle.snakeCase)
@@ -20,12 +20,18 @@ class TaskDefinition with TaskDefinitionMappable {
   final TriggerEvent trigger;
   final AddonAction action;
 
+  /// The id of the task whose execution triggers this one. Only meaningful for
+  /// the [TriggerEvent.taskExecuted] trigger; null means "any task" (chaining
+  /// from any completed task except this one).
+  final String? sourceTaskId;
+
   const TaskDefinition({
     required this.id,
     required this.name,
     this.enabled = true,
     required this.trigger,
     required this.action,
+    this.sourceTaskId,
   });
 
   TaskDefinition copyWith({String? name, bool? enabled, TriggerEvent? trigger, AddonAction? action}) {
@@ -35,6 +41,7 @@ class TaskDefinition with TaskDefinitionMappable {
       enabled: enabled ?? this.enabled,
       trigger: trigger ?? this.trigger,
       action: action ?? this.action,
+      sourceTaskId: sourceTaskId,
     );
   }
 }

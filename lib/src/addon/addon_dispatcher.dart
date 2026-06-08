@@ -28,10 +28,21 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
   }
 
   void _onEvent(TriggerEvent event, PayloadMap payload) {
-    final tasks = ref.read(taskDefinitionsProvider).where((t) => t.enabled && t.trigger == event);
-    if (tasks.isEmpty) return;
+    var tasks = ref.read(taskDefinitionsProvider).where((t) => t.enabled && t.trigger == event);
+    if (event == TriggerEvent.taskExecuted) {
+      // Chain only from the matching source task (or any, when unset), and never
+      // re-trigger the task that just ran.
+      final sourceId = payload["task_id"];
+      tasks = tasks.where((t) {
+        if (t.id == sourceId) return false;
+        final wanted = t.sourceTaskId;
+        return wanted == null || wanted.isEmpty || wanted == sourceId;
+      });
+    }
+    final matched = tasks.toList();
+    if (matched.isEmpty) return;
     final controller = ref.read(addonExecutionControllerProvider.notifier);
-    for (final task in tasks) {
+    for (final task in matched) {
       controller.run(task, payload);
     }
   }

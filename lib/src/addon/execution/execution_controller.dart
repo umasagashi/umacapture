@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,11 +7,30 @@ import 'package:uuid/uuid.dart';
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
+import '/src/addon/payload_enricher.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 
 /// Maximum number of history entries kept (oldest trimmed on append).
 const _maxHistory = 100;
+
+/// Upper bound on how deep a `taskExecuted` chain may run, guarding against
+/// infinite loops when tasks trigger each other. Tracked in the payload under
+/// [_chainDepthKey].
+const _maxChainDepth = 16;
+
+const _chainDepthKey = "_chain_depth";
+
+// Fires the (forwarded) payload of a task each time one finishes, so tasks bound
+// to the `taskExecuted` trigger can run after it. Recreated on re-listen for the
+// same reason as the capture event providers in platform_controller.dart.
+StreamController<PayloadMap> _taskExecutedEventController = StreamController();
+final taskExecutedEventProvider = StreamProvider<PayloadMap>((ref) {
+  if (_taskExecutedEventController.hasListener) {
+    _taskExecutedEventController = StreamController();
+  }
+  return _taskExecutedEventController.stream;
+});
 
 /// An in-flight execution. Holds the live cancel hook, so it exists only in
 /// memory (never persisted).
@@ -80,7 +100,8 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
 
   /// Runs [task] with [payload], registering an active execution and appending a
   /// history entry when it finishes.
-  void run(TaskDefinition task, PayloadMap payload) {
+  void run(TaskDefinition task, PayloadMap rawPayload) {
+    final payload = enrichPayload(ref.base, rawPayload);
     final executionId = const Uuid().v4();
     final startedAt = DateTime.now();
     final handle = runnerFor(task.action).start(ref.base, payload);
@@ -126,6 +147,25 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
         active: state.active.where((e) => e.executionId != executionId).toList(),
         history: trimmed,
       );
+      _fireTaskExecuted(task, payload);
+    });
+  }
+
+  /// Emits a [taskExecutedEventProvider] event so tasks chained to [task] can
+  /// run, forwarding [payload] (with the source task's id/name) and a depth
+  /// counter that caps runaway chains.
+  void _fireTaskExecuted(TaskDefinition task, PayloadMap payload) {
+    final depth = int.tryParse(payload[_chainDepthKey] ?? "0") ?? 0;
+    if (depth >= _maxChainDepth) {
+      logger.w("Addon task chain reached max depth ($_maxChainDepth); not firing taskExecuted for '${task.name}'.");
+      return;
+    }
+    _taskExecutedEventController.sink.add({
+      ...payload,
+      "event": "task_executed",
+      "task_id": task.id,
+      "task_name": task.name,
+      _chainDepthKey: "${depth + 1}",
     });
   }
 

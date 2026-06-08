@@ -950,8 +950,8 @@
                 "record_captured_description": "ネイティブ認識が完了し、新しい殿堂入りレコードが1件確定したときに発火します。ペイロードに record_id が入るため、取得したウマ娘ごとの外部連携に向いています。",
                 "record_exported": "エクスポート完了時",
                 "record_exported_description": "CSV / JSON / ZIP のエクスポートが完了したときに発火します。ペイロードに export_path（出力ファイルのパス）が入るため、書き出し後の自動処理に使えます。",
-                "error": "エラー発生時",
-                "error_description": "ネイティブまたはアプリ層でエラーが発生したときに発火します。エラー時に通知を出す、ログ収集ツールを起動するなどに使えます。",
+                "task_executed": "他のタスク実行時",
+                "task_executed_description": "別のタスクの実行が完了したときに発火します。下の「連鎖元のタスク」で指定したタスク（未指定なら任意のタスク）に続けて実行され、複数のアクションを順番につなげられます。元タスクのペイロード（record_id など）も引き継がれます。",
                 "manual": "手動実行のみ",
                 "manual_description": "自動では発火しません。タスク一覧の実行ボタンを押したときだけ実行されます。動作確認や任意のタイミングでの実行に使えます。"
             },
@@ -959,12 +959,48 @@
                 "show_toast": "通知を表示",
                 "show_toast_argument": "通知メッセージ",
                 "copy_payload_to_clipboard": "クリップボードへコピー",
-                "copy_payload_argument": "コピーする内容"
+                "copy_payload_argument": "コピーする内容",
+                "copy_image_to_clipboard": "画像をクリップボードへコピー",
+                "copy_image_argument": "コピーする画像",
+                "copy_file_to_clipboard": "ファイルをクリップボードへコピー",
+                "copy_file_argument": "コピーするファイル",
+                "play_sound": "サウンドを鳴らす",
+                "play_sound_argument": "サウンド種別",
+                "options": {
+                    "image_trainee": "アイコン",
+                    "image_skill": "スキル画面",
+                    "image_factor": "因子画面",
+                    "image_campaign": "育成情報画面",
+                    "file_trainee": "アイコン画像 (trainee.jpg)",
+                    "file_skill": "スキル画像 (skill.png)",
+                    "file_factor": "因子画像 (factor.png)",
+                    "file_campaign": "育成情報画像 (campaign.png)",
+                    "file_record": "レコードデータ (record.json)",
+                    "sound_attention_normal": "通知音（標準）",
+                    "sound_attention_weak": "通知音（弱）",
+                    "sound_error": "エラー音"
+                }
             },
             "token": {
                 "event": "発火したイベントの識別子（例: record_captured）。すべてのトリガで利用できます。",
                 "record_id": "取得した殿堂入りレコードのID。「レコード取得時」トリガでのみ値が入ります。",
-                "export_path": "書き出されたファイルのパス。「エクスポート完了時」トリガでのみ値が入ります。"
+                "export_path": "書き出されたファイルのパス。「エクスポート完了時」トリガでのみ値が入ります。",
+                "card_name": "取得したウマ娘（育成カード）の名前。「レコード取得時」トリガでのみ値が入ります。",
+                "rank": "評価値から算出した総合ランク（例: SS、UG）。「レコード取得時」トリガでのみ値が入ります。",
+                "evaluation_value": "取得したレコードの評価値（数値）。「レコード取得時」トリガでのみ値が入ります。",
+                "fans": "ファン数（数値）。「レコード取得時」トリガでのみ値が入ります。",
+                "speed": "スピードのステータス値。「レコード取得時」トリガでのみ値が入ります。",
+                "stamina": "スタミナのステータス値。「レコード取得時」トリガでのみ値が入ります。",
+                "power": "パワーのステータス値。「レコード取得時」トリガでのみ値が入ります。",
+                "guts": "根性のステータス値。「レコード取得時」トリガでのみ値が入ります。",
+                "intelligence": "賢さのステータス値。「レコード取得時」トリガでのみ値が入ります。",
+                "scenario": "育成シナリオ名。「レコード取得時」トリガでのみ値が入ります。",
+                "trained_date": "育成完了日（例: 2026/06/08）。「レコード取得時」トリガでのみ値が入ります。",
+                "trainer_id": "トレーナーID。「レコード取得時」トリガでのみ値が入ります。",
+                "record_dir": "レコードの保存フォルダのパス（画像などを含む）。「レコード取得時」トリガでのみ値が入ります。",
+                "trainee_icon_path": "育成ウマ娘のアイコン画像（trainee.jpg）のフルパス。「レコード取得時」トリガでのみ値が入ります。",
+                "task_name": "連鎖元のタスク名。「他のタスク実行時」トリガでのみ値が入ります。",
+                "task_id": "連鎖元のタスクのID。「他のタスク実行時」トリガでのみ値が入ります。"
             },
             "dialog": {
                 "title_add": "タスクを追加",
@@ -974,7 +1010,12 @@
                 "trigger": "トリガ",
                 "action_kind": "アクション種別",
                 "kind_external": "外部プログラム",
+                "kind_webhook": "Webhook（HTTP送信）",
                 "kind_builtin": "アプリ内蔵アクション",
+                "source_task": {
+                    "label": "連鎖元のタスク",
+                    "any": "（任意のタスク）"
+                },
                 "program": {
                     "label": "プログラムのパス",
                     "picker_title": "実行するプログラムを選択"
@@ -990,6 +1031,17 @@
                 },
                 "timeout": "タイムアウト（秒・空欄で無制限）",
                 "run_in_shell": "シェル経由で実行（.bat やシェル組込みコマンド用）",
+                "webhook": {
+                    "url": "URL",
+                    "url_helper": "送信先のURL。{record_id} などのトークンを埋め込めます。",
+                    "method": "メソッド",
+                    "content_type": "本文の形式",
+                    "content_type_json": "JSON",
+                    "content_type_form": "フォーム",
+                    "content_type_text": "テキスト",
+                    "body": "本文",
+                    "body_helper": "リクエスト本文。{card_name} などのトークンが置換されます。GET/HEAD では送信されません。"
+                },
                 "builtin": {
                     "label": "内蔵アクション",
                     "argument": "引数"

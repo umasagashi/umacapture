@@ -34,8 +34,8 @@ class TriggerEventMapper extends EnumMapper<TriggerEvent> {
         return TriggerEvent.recordCaptured;
       case r'recordExported':
         return TriggerEvent.recordExported;
-      case r'error':
-        return TriggerEvent.error;
+      case r'taskExecuted':
+        return TriggerEvent.taskExecuted;
       case r'manual':
         return TriggerEvent.manual;
       default:
@@ -54,8 +54,8 @@ class TriggerEventMapper extends EnumMapper<TriggerEvent> {
         return r'recordCaptured';
       case TriggerEvent.recordExported:
         return r'recordExported';
-      case TriggerEvent.error:
-        return r'error';
+      case TriggerEvent.taskExecuted:
+        return r'taskExecuted';
       case TriggerEvent.manual:
         return r'manual';
     }
@@ -106,6 +106,13 @@ class TaskDefinitionMapper extends ClassMapperBase<TaskDefinition> {
     'action',
     _$action,
   );
+  static String? _$sourceTaskId(TaskDefinition v) => v.sourceTaskId;
+  static const Field<TaskDefinition, String> _f$sourceTaskId = Field(
+    'sourceTaskId',
+    _$sourceTaskId,
+    key: r'source_task_id',
+    opt: true,
+  );
 
   @override
   final MappableFields<TaskDefinition> fields = const {
@@ -114,6 +121,7 @@ class TaskDefinitionMapper extends ClassMapperBase<TaskDefinition> {
     #enabled: _f$enabled,
     #trigger: _f$trigger,
     #action: _f$action,
+    #sourceTaskId: _f$sourceTaskId,
   };
 
   static TaskDefinition _instantiate(DecodingData data) {
@@ -123,6 +131,7 @@ class TaskDefinitionMapper extends ClassMapperBase<TaskDefinition> {
       enabled: data.dec(_f$enabled),
       trigger: data.dec(_f$trigger),
       action: data.dec(_f$action),
+      sourceTaskId: data.dec(_f$sourceTaskId),
     );
   }
 

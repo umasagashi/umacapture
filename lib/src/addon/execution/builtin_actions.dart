@@ -1,6 +1,11 @@
 import 'package:flutter/services.dart';
 
 import '/src/addon/execution/execution_models.dart';
+import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/storage.dart';
+import '/src/core/clipboard_alt.dart';
+import '/src/core/path_entity.dart';
+import '/src/core/sound_player.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 
@@ -8,6 +13,18 @@ import '/src/gui/toast.dart';
 /// [RefBase] (for reaching providers), the event [payload], and the optional
 /// user-configured [argument] (already declared by the descriptor).
 typedef BuiltinFn = Future<void> Function(RefBase ref, PayloadMap payload, String? argument);
+
+/// A selectable value for a built-in action argument, shown as a dropdown option
+/// in the edit dialog instead of a free-text field.
+class BuiltinArgumentOption {
+  /// The value persisted in [BuiltinAction.argument].
+  final String value;
+
+  /// Translation key for the option's human-readable label.
+  final String labelKey;
+
+  const BuiltinArgumentOption(this.value, this.labelKey);
+}
 
 /// Metadata + behavior for one entry in the built-in action registry.
 class BuiltinActionDescriptor {
@@ -24,6 +41,19 @@ class BuiltinActionDescriptor {
   /// Translation key for the argument field's label (only used when [usesArgument]).
   final String? argumentLabelKey;
 
+  /// Translation key for the argument field's helper text. Defaults to the shared
+  /// "tokens are substituted" hint; override for non-token arguments (e.g. a
+  /// fixed set of keywords).
+  final String? argumentHelperKey;
+
+  /// Whether the argument accepts payload `{tokens}`. When false the edit dialog
+  /// hides the token chips (the argument is a plain keyword, not a template).
+  final bool argumentUsesTokens;
+
+  /// When set, the argument is chosen from these fixed options via a dropdown
+  /// instead of typed into a text field. Implies a non-token keyword argument.
+  final List<BuiltinArgumentOption>? argumentOptions;
+
   /// Default argument template for a freshly configured action.
   final String defaultArgument;
 
@@ -35,6 +65,9 @@ class BuiltinActionDescriptor {
     required this.run,
     this.usesArgument = false,
     this.argumentLabelKey,
+    this.argumentHelperKey,
+    this.argumentUsesTokens = true,
+    this.argumentOptions,
     this.defaultArgument = '',
   });
 }
@@ -68,4 +101,91 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       await Clipboard.setData(ClipboardData(text: text));
     },
   ),
+  "copy_image_to_clipboard": BuiltinActionDescriptor(
+    key: "copy_image_to_clipboard",
+    labelKey: "$_trBuiltin.copy_image_to_clipboard",
+    usesArgument: true,
+    argumentLabelKey: "$_trBuiltin.copy_image_argument",
+    argumentUsesTokens: false,
+    argumentOptions: const [
+      BuiltinArgumentOption("trainee", "$_trBuiltin.options.image_trainee"),
+      BuiltinArgumentOption("skill", "$_trBuiltin.options.image_skill"),
+      BuiltinArgumentOption("factor", "$_trBuiltin.options.image_factor"),
+      BuiltinArgumentOption("campaign", "$_trBuiltin.options.image_campaign"),
+    ],
+    defaultArgument: "trainee",
+    run: (ref, payload, argument) async {
+      final record = _requireRecord(ref, payload);
+      ClipboardAlt.pasteImage(ref, _recordImagePath(ref, record, (argument ?? "trainee").trim()));
+    },
+  ),
+  "copy_file_to_clipboard": BuiltinActionDescriptor(
+    key: "copy_file_to_clipboard",
+    labelKey: "$_trBuiltin.copy_file_to_clipboard",
+    usesArgument: true,
+    argumentLabelKey: "$_trBuiltin.copy_file_argument",
+    argumentUsesTokens: false,
+    argumentOptions: const [
+      BuiltinArgumentOption("trainee", "$_trBuiltin.options.file_trainee"),
+      BuiltinArgumentOption("skill", "$_trBuiltin.options.file_skill"),
+      BuiltinArgumentOption("factor", "$_trBuiltin.options.file_factor"),
+      BuiltinArgumentOption("campaign", "$_trBuiltin.options.file_campaign"),
+      BuiltinArgumentOption("record_json", "$_trBuiltin.options.file_record"),
+    ],
+    defaultArgument: "trainee",
+    run: (ref, payload, argument) async {
+      final record = _requireRecord(ref, payload);
+      final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+      final kind = (argument ?? "trainee").trim();
+      final path = kind == "record_json"
+          ? storage.recordPathOf(record).filePath("record.json")
+          : _recordImagePath(ref, record, kind);
+      ClipboardAlt.pasteFile(ref, path);
+    },
+  ),
+  "play_sound": BuiltinActionDescriptor(
+    key: "play_sound",
+    labelKey: "$_trBuiltin.play_sound",
+    usesArgument: true,
+    argumentLabelKey: "$_trBuiltin.play_sound_argument",
+    argumentUsesTokens: false,
+    argumentOptions: const [
+      BuiltinArgumentOption("attention_normal", "$_trBuiltin.options.sound_attention_normal"),
+      BuiltinArgumentOption("attention_weak", "$_trBuiltin.options.sound_attention_weak"),
+      BuiltinArgumentOption("error", "$_trBuiltin.options.sound_error"),
+    ],
+    defaultArgument: "attention_normal",
+    run: (ref, payload, argument) async {
+      final type = switch ((argument ?? "attention_normal").trim()) {
+        "attention_weak" => SoundType.attentionWeak,
+        "error" => SoundType.error,
+        _ => SoundType.attentionNormal,
+      };
+      final effect = await ref.read(soundEffectProvider(type).future);
+      await effect.play();
+    },
+  ),
 };
+
+/// Resolves the record referenced by the payload, throwing when the trigger
+/// carries no `record_id` or the record is gone.
+CharaDetailRecord _requireRecord(RefBase ref, PayloadMap payload) {
+  final recordId = payload["record_id"];
+  if (recordId == null || recordId.isEmpty) {
+    throw StateError("This action requires a record_id (use the record-captured trigger).");
+  }
+  final record = ref.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: recordId);
+  if (record == null) throw StateError("Record not found: $recordId");
+  return record;
+}
+
+/// Maps an image-kind keyword to its file path within [record].
+FilePath _recordImagePath(RefBase ref, CharaDetailRecord record, String kind) {
+  final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+  return switch (kind) {
+    "skill" => storage.imagePathOf(record, CharaDetailRecordImageMode.skillPlain),
+    "factor" => storage.imagePathOf(record, CharaDetailRecordImageMode.factorPlain),
+    "campaign" => storage.imagePathOf(record, CharaDetailRecordImageMode.campaignPlain),
+    _ => storage.traineeIconPathOf(record),
+  };
+}

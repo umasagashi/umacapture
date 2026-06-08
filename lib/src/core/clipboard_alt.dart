@@ -54,4 +54,20 @@ class ClipboardAlt {
       }
     });
   }
+
+  /// Copies [path] to the clipboard as a file reference (pasteable into the file
+  /// explorer), regardless of the image paste-mode setting.
+  static void pasteFile(RefBase ref, FilePath path) {
+    if (!path.existsSync()) {
+      Toaster.show(ToastData.error(description: "$tr_toast.clipboard.file_not_found".tr()));
+      return;
+    }
+    Pasteboard.writeFiles([path.path]).then((result) {
+      if (result) {
+        Toaster.show(ToastData.success(description: "$tr_toast.clipboard.success".tr()));
+      } else {
+        Toaster.show(ToastData.error(description: "$tr_toast.clipboard.failed_result_code".tr()));
+      }
+    });
+  }
 }

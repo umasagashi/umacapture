@@ -14,7 +14,109 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_addon = "pages.addon";
 
-enum _ActionKind { external, builtin }
+/// The kinds of action a task can run.
+enum _ActionKind { external, webhook, builtin }
+
+/// HTTP methods offered for webhook actions.
+const _webhookMethods = <String>["POST", "GET", "PUT", "PATCH", "DELETE"];
+
+/// Body encodings offered for webhook actions.
+const _webhookContentTypes = <String>["json", "form", "text"];
+
+/// Mutable form state for a single action, holding every per-kind controller so
+/// switching kinds preserves typed values.
+class _ActionFields {
+  final program = TextEditingController();
+  final args = TextEditingController();
+  final workingDir = TextEditingController();
+  final timeout = TextEditingController();
+  final url = TextEditingController();
+  final body = TextEditingController();
+  final webhookTimeout = TextEditingController();
+  final builtinArg = TextEditingController();
+  bool runInShell = false;
+  String builtinKey = builtinActionRegistry.keys.first;
+  String webhookMethod = _webhookMethods.first;
+  String webhookContentType = _webhookContentTypes.first;
+
+  /// Seeds the fields from an existing [action] (a no-op for null).
+  void seed(AddonAction? action) {
+    switch (action) {
+      case ExternalProgramAction a:
+        program.text = a.programPath;
+        args.text = a.argumentTemplate;
+        workingDir.text = a.workingDirectory ?? "";
+        timeout.text = a.timeoutSeconds?.toString() ?? "";
+        runInShell = a.runInShell;
+      case WebhookAction a:
+        url.text = a.url;
+        body.text = a.bodyTemplate;
+        webhookTimeout.text = a.timeoutSeconds?.toString() ?? "";
+        webhookMethod = a.method;
+        webhookContentType = a.contentType;
+      case BuiltinAction a:
+        builtinKey = a.actionKey;
+        builtinArg.text = a.argument ?? builtinActionRegistry[a.actionKey]?.defaultArgument ?? "";
+      default:
+        builtinArg.text = builtinActionRegistry[builtinKey]?.defaultArgument ?? "";
+    }
+  }
+
+  void dispose() {
+    program.dispose();
+    args.dispose();
+    workingDir.dispose();
+    timeout.dispose();
+    url.dispose();
+    body.dispose();
+    webhookTimeout.dispose();
+    builtinArg.dispose();
+  }
+
+  bool isValid(_ActionKind kind) {
+    return switch (kind) {
+      _ActionKind.external => program.text.trim().isNotEmpty,
+      _ActionKind.webhook => url.text.trim().isNotEmpty,
+      _ActionKind.builtin => true,
+    };
+  }
+
+  AddonAction build(_ActionKind kind) {
+    switch (kind) {
+      case _ActionKind.external:
+        return ExternalProgramAction(
+          programPath: program.text.trim(),
+          argumentTemplate: args.text.trim(),
+          timeoutSeconds: int.tryParse(timeout.text.trim()),
+          runInShell: runInShell,
+          workingDirectory: workingDir.text.trim().isEmpty ? null : workingDir.text.trim(),
+        );
+      case _ActionKind.webhook:
+        return WebhookAction(
+          url: url.text.trim(),
+          method: webhookMethod,
+          bodyTemplate: body.text,
+          contentType: webhookContentType,
+          timeoutSeconds: int.tryParse(webhookTimeout.text.trim()),
+        );
+      case _ActionKind.builtin:
+        final descriptor = builtinActionRegistry[builtinKey];
+        return BuiltinAction(
+          actionKey: builtinKey,
+          argument: descriptor?.usesArgument == true ? builtinArg.text : null,
+        );
+    }
+  }
+}
+
+/// The [_ActionKind] of an existing [action].
+_ActionKind _kindOf(AddonAction action) {
+  return switch (action) {
+    WebhookAction() => _ActionKind.webhook,
+    BuiltinAction() => _ActionKind.builtin,
+    _ => _ActionKind.external,
+  };
+}
 
 /// Add/edit dialog for an addon task. Holds local form state and writes back
 /// through [taskDefinitionsProvider] on save.
@@ -36,15 +138,10 @@ class TaskEditDialog extends ConsumerStatefulWidget {
 
 class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
   late final TextEditingController _nameController;
-  late final TextEditingController _programController;
-  late final TextEditingController _argsController;
-  late final TextEditingController _workingDirController;
-  late final TextEditingController _timeoutController;
-  late final TextEditingController _builtinArgController;
+  final _fields = _ActionFields();
   late TriggerEvent _trigger;
   late _ActionKind _actionKind;
-  late bool _runInShell;
-  late String _builtinKey;
+  late String? _sourceTaskId;
 
   @override
   void initState() {
@@ -52,73 +149,32 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
     final action = widget.initial.action;
     _nameController = TextEditingController(text: widget.initial.name);
     _trigger = widget.initial.trigger;
-    _runInShell = action is ExternalProgramAction ? action.runInShell : false;
-    _programController = TextEditingController(text: action is ExternalProgramAction ? action.programPath : "");
-    _argsController = TextEditingController(text: action is ExternalProgramAction ? action.argumentTemplate : "");
-    _workingDirController = TextEditingController(
-      text: action is ExternalProgramAction ? (action.workingDirectory ?? "") : "",
-    );
-    _timeoutController = TextEditingController(
-      text: action is ExternalProgramAction && action.timeoutSeconds != null ? "${action.timeoutSeconds}" : "",
-    );
-    _actionKind = action is BuiltinAction ? _ActionKind.builtin : _ActionKind.external;
-    _builtinKey = action is BuiltinAction ? action.actionKey : builtinActionRegistry.keys.first;
-    final seededArg = action is BuiltinAction
-        ? (action.argument ?? builtinActionRegistry[_builtinKey]?.defaultArgument ?? "")
-        : (builtinActionRegistry[_builtinKey]?.defaultArgument ?? "");
-    _builtinArgController = TextEditingController(text: seededArg);
+    _actionKind = _kindOf(action);
+    _sourceTaskId = widget.initial.sourceTaskId;
+    _fields.seed(action);
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _programController.dispose();
-    _argsController.dispose();
-    _workingDirController.dispose();
-    _timeoutController.dispose();
-    _builtinArgController.dispose();
+    _fields.dispose();
     super.dispose();
-  }
-
-  /// Reseeds the builtin argument field with the newly selected action's default
-  /// when the user had not typed a custom value.
-  void _onBuiltinChanged(String key) {
-    setState(() {
-      final previousDefault = builtinActionRegistry[_builtinKey]?.defaultArgument ?? "";
-      if (_builtinArgController.text.isEmpty || _builtinArgController.text == previousDefault) {
-        _builtinArgController.text = builtinActionRegistry[key]?.defaultArgument ?? "";
-      }
-      _builtinKey = key;
-    });
   }
 
   bool get _canSave {
     if (_nameController.text.trim().isEmpty) return false;
-    if (_actionKind == _ActionKind.external && _programController.text.trim().isEmpty) return false;
-    return true;
-  }
-
-  AddonAction _buildAction() {
-    switch (_actionKind) {
-      case _ActionKind.external:
-        return ExternalProgramAction(
-          programPath: _programController.text.trim(),
-          argumentTemplate: _argsController.text.trim(),
-          timeoutSeconds: int.tryParse(_timeoutController.text.trim()),
-          runInShell: _runInShell,
-          workingDirectory: _workingDirController.text.trim().isEmpty ? null : _workingDirController.text.trim(),
-        );
-      case _ActionKind.builtin:
-        final descriptor = builtinActionRegistry[_builtinKey];
-        return BuiltinAction(
-          actionKey: _builtinKey,
-          argument: descriptor?.usesArgument == true ? _builtinArgController.text : null,
-        );
-    }
+    return _fields.isValid(_actionKind);
   }
 
   void _save() {
-    final task = widget.initial.copyWith(name: _nameController.text.trim(), trigger: _trigger, action: _buildAction());
+    final task = TaskDefinition(
+      id: widget.initial.id,
+      name: _nameController.text.trim(),
+      enabled: widget.initial.enabled,
+      trigger: _trigger,
+      action: _fields.build(_actionKind),
+      sourceTaskId: _trigger == TriggerEvent.taskExecuted ? _sourceTaskId : null,
+    );
     ref.read(taskDefinitionsProvider.notifier).addOrUpdate(task);
     CardDialog.dismiss(ref.base);
   }
@@ -126,21 +182,6 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
   void _delete() {
     ref.read(taskDefinitionsProvider.notifier).remove(widget.initial.id);
     CardDialog.dismiss(ref.base);
-  }
-
-  Future<void> _pickProgram() async {
-    final result = await FilePicker.pickFiles(dialogTitle: "$tr_addon.dialog.program.picker_title".tr());
-    final path = result?.files.singleOrNull?.path;
-    if (path != null) {
-      setState(() => _programController.text = path);
-    }
-  }
-
-  Future<void> _pickWorkingDir() async {
-    final dir = await FilePicker.getDirectoryPath(dialogTitle: "$tr_addon.dialog.working_dir.picker_title".tr());
-    if (dir != null) {
-      setState(() => _workingDirController.text = dir);
-    }
   }
 
   @override
@@ -165,10 +206,17 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
               style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Theme.of(context).hintColor),
             ),
           ),
+          if (_trigger == TriggerEvent.taskExecuted) ...[const SizedBox(height: 16), _sourceTaskDropdown()],
           const SizedBox(height: 16),
           _ActionKindDropdown(value: _actionKind, onChanged: (v) => setState(() => _actionKind = v)),
           const SizedBox(height: 8),
-          if (_actionKind == _ActionKind.external) ..._externalFields() else ..._builtinFields(),
+          ..._buildActionFields(
+            context: context,
+            fields: _fields,
+            kind: _actionKind,
+            trigger: _trigger,
+            onChanged: () => setState(() {}),
+          ),
         ],
       ),
       bottom: Row(
@@ -192,93 +240,269 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
     );
   }
 
-  List<Widget> _externalFields() {
-    return [
-      TextField(
-        controller: _programController,
-        decoration: InputDecoration(
-          labelText: "$tr_addon.dialog.program.label".tr(),
-          suffixIcon: IconButton(icon: const Icon(Icons.folder_open), onPressed: _pickProgram),
-        ),
-        onChanged: (_) => setState(() {}),
-      ),
-      const SizedBox(height: 16),
-      TextField(
-        controller: _argsController,
-        decoration: InputDecoration(
-          labelText: "$tr_addon.dialog.arguments.label".tr(),
-          helperText: "$tr_addon.dialog.arguments.helper".tr(),
-        ),
-      ),
-      const SizedBox(height: 8),
-      _tokenChips(_argsController),
-      const SizedBox(height: 16),
-      TextField(
-        controller: _workingDirController,
-        decoration: InputDecoration(
-          labelText: "$tr_addon.dialog.working_dir.label".tr(),
-          helperText: "$tr_addon.dialog.working_dir.helper".tr(),
-          suffixIcon: IconButton(icon: const Icon(Icons.folder_open), onPressed: _pickWorkingDir),
-        ),
-      ),
-      const SizedBox(height: 16),
-      TextField(
-        controller: _timeoutController,
-        keyboardType: TextInputType.number,
-        decoration: InputDecoration(labelText: "$tr_addon.dialog.timeout".tr()),
-      ),
-      SwitchListTile(
-        contentPadding: EdgeInsets.zero,
-        title: Text("$tr_addon.dialog.run_in_shell".tr()),
-        value: _runInShell,
-        onChanged: (v) => setState(() => _runInShell = v),
-      ),
-    ];
-  }
-
-  List<Widget> _builtinFields() {
-    final descriptor = builtinActionRegistry[_builtinKey];
-    return [
-      DropdownButtonFormField<String>(
-        initialValue: _builtinKey,
-        decoration: InputDecoration(labelText: "$tr_addon.dialog.builtin.label".tr()),
-        items: [
-          for (final d in builtinActionRegistry.values) DropdownMenuItem(value: d.key, child: Text(d.labelKey.tr())),
-        ],
-        onChanged: (v) => v == null ? null : _onBuiltinChanged(v),
-      ),
-      if (descriptor?.usesArgument == true) ...[
-        const SizedBox(height: 16),
-        TextField(
-          controller: _builtinArgController,
-          decoration: InputDecoration(
-            labelText: (descriptor!.argumentLabelKey ?? "$tr_addon.dialog.builtin.argument").tr(),
-            helperText: "$tr_addon.dialog.arguments.helper".tr(),
-          ),
-        ),
-        const SizedBox(height: 8),
-        _tokenChips(_builtinArgController),
+  /// Dropdown selecting which task's execution chains into this one. Lists every
+  /// other task plus an "any task" option (null).
+  Widget _sourceTaskDropdown() {
+    final others = ref.watch(taskDefinitionsProvider).where((t) => t.id != widget.initial.id).toList();
+    // Drop a stale selection (e.g. the source task was deleted) back to "any".
+    final value = others.any((t) => t.id == _sourceTaskId) ? _sourceTaskId : null;
+    return DropdownButtonFormField<String?>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: "$tr_addon.dialog.source_task.label".tr()),
+      items: [
+        DropdownMenuItem(value: null, child: Text("$tr_addon.dialog.source_task.any".tr())),
+        for (final t in others) DropdownMenuItem(value: t.id, child: Text(t.name)),
       ],
-    ];
+      onChanged: (v) => setState(() => _sourceTaskId = v),
+    );
+  }
+}
+
+/// Builds the per-kind input fields for [kind] over [fields]. [onChanged] is
+/// invoked whenever an input changes so the host can re-evaluate its save state.
+List<Widget> _buildActionFields({
+  required BuildContext context,
+  required _ActionFields fields,
+  required _ActionKind kind,
+  required TriggerEvent trigger,
+  required VoidCallback onChanged,
+}) {
+  return switch (kind) {
+    _ActionKind.external => _externalFields(fields, trigger, onChanged),
+    _ActionKind.webhook => _webhookFields(fields, trigger, onChanged),
+    _ActionKind.builtin => _builtinFields(fields, trigger, onChanged),
+  };
+}
+
+List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
+  Future<void> pickProgram() async {
+    final result = await FilePicker.pickFiles(dialogTitle: "$tr_addon.dialog.program.picker_title".tr());
+    final path = result?.files.singleOrNull?.path;
+    if (path != null) {
+      f.program.text = path;
+      onChanged();
+    }
   }
 
-  /// A row of tappable chips that append `{token}` to [controller]. Each chip's
-  /// tooltip explains what the token expands to.
-  Widget _tokenChips(TextEditingController controller) {
-    return Wrap(
-      spacing: 8,
+  Future<void> pickWorkingDir() async {
+    final dir = await FilePicker.getDirectoryPath(dialogTitle: "$tr_addon.dialog.working_dir.picker_title".tr());
+    if (dir != null) {
+      f.workingDir.text = dir;
+      onChanged();
+    }
+  }
+
+  return [
+    TextField(
+      controller: f.program,
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.program.label".tr(),
+        suffixIcon: IconButton(icon: const Icon(Icons.folder_open), onPressed: pickProgram),
+      ),
+      onChanged: (_) => onChanged(),
+    ),
+    const SizedBox(height: 16),
+    TextField(
+      controller: f.args,
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.arguments.label".tr(),
+        helperText: "$tr_addon.dialog.arguments.helper".tr(),
+      ),
+    ),
+    const SizedBox(height: 8),
+    _tokenChips(f.args, trigger),
+    const SizedBox(height: 16),
+    TextField(
+      controller: f.workingDir,
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.working_dir.label".tr(),
+        helperText: "$tr_addon.dialog.working_dir.helper".tr(),
+        suffixIcon: IconButton(icon: const Icon(Icons.folder_open), onPressed: pickWorkingDir),
+      ),
+    ),
+    const SizedBox(height: 16),
+    TextField(
+      controller: f.timeout,
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(labelText: "$tr_addon.dialog.timeout".tr()),
+    ),
+    _RunInShellSwitch(
+      value: f.runInShell,
+      onChanged: (v) {
+        f.runInShell = v;
+        onChanged();
+      },
+    ),
+  ];
+}
+
+List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
+  return [
+    TextField(
+      controller: f.url,
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.webhook.url".tr(),
+        helperText: "$tr_addon.dialog.webhook.url_helper".tr(),
+      ),
+      onChanged: (_) => onChanged(),
+    ),
+    const SizedBox(height: 8),
+    _tokenChips(f.url, trigger),
+    const SizedBox(height: 16),
+    Row(
       children: [
-        for (final token in addonTemplateVariables)
-          ActionChip(
-            label: Text("{$token}"),
-            tooltip: "$tr_addon.token.$token".tr(),
-            onPressed: () {
-              final text = controller.text;
-              final sep = text.isEmpty || text.endsWith(" ") ? "" : " ";
-              controller.text = "$text$sep{$token}";
+        Expanded(
+          child: _SimpleDropdown(
+            label: "$tr_addon.dialog.webhook.method".tr(),
+            value: f.webhookMethod,
+            items: {for (final m in _webhookMethods) m: m},
+            onChanged: (v) {
+              f.webhookMethod = v;
+              onChanged();
             },
           ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _SimpleDropdown(
+            label: "$tr_addon.dialog.webhook.content_type".tr(),
+            value: f.webhookContentType,
+            items: {for (final c in _webhookContentTypes) c: "$tr_addon.dialog.webhook.content_type_$c".tr()},
+            onChanged: (v) {
+              f.webhookContentType = v;
+              onChanged();
+            },
+          ),
+        ),
       ],
+    ),
+    const SizedBox(height: 16),
+    TextField(
+      controller: f.body,
+      minLines: 3,
+      maxLines: 8,
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.webhook.body".tr(),
+        helperText: "$tr_addon.dialog.webhook.body_helper".tr(),
+        alignLabelWithHint: true,
+      ),
+    ),
+    const SizedBox(height: 8),
+    _tokenChips(f.body, trigger),
+    const SizedBox(height: 16),
+    TextField(
+      controller: f.webhookTimeout,
+      keyboardType: TextInputType.number,
+      decoration: InputDecoration(labelText: "$tr_addon.dialog.timeout".tr()),
+    ),
+  ];
+}
+
+List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
+  final descriptor = builtinActionRegistry[f.builtinKey];
+  void onBuiltinChanged(String key) {
+    final previousDefault = builtinActionRegistry[f.builtinKey]?.defaultArgument ?? "";
+    if (f.builtinArg.text.isEmpty || f.builtinArg.text == previousDefault) {
+      f.builtinArg.text = builtinActionRegistry[key]?.defaultArgument ?? "";
+    }
+    f.builtinKey = key;
+    onChanged();
+  }
+
+  return [
+    _SimpleDropdown(
+      label: "$tr_addon.dialog.builtin.label".tr(),
+      value: f.builtinKey,
+      items: {for (final d in builtinActionRegistry.values) d.key: d.labelKey.tr()},
+      onChanged: onBuiltinChanged,
+    ),
+    if (descriptor?.usesArgument == true) ...[
+      const SizedBox(height: 16),
+      if (descriptor!.argumentOptions != null)
+        _builtinArgumentDropdown(f, descriptor)
+      else ...[
+        TextField(
+          controller: f.builtinArg,
+          decoration: InputDecoration(
+            labelText: (descriptor.argumentLabelKey ?? "$tr_addon.dialog.builtin.argument").tr(),
+            helperText: (descriptor.argumentHelperKey ?? "$tr_addon.dialog.arguments.helper").tr(),
+          ),
+        ),
+        if (descriptor.argumentUsesTokens) ...[const SizedBox(height: 8), _tokenChips(f.builtinArg, trigger)],
+      ],
+    ],
+  ];
+}
+
+/// A dropdown for a builtin whose argument is a fixed set of options.
+Widget _builtinArgumentDropdown(_ActionFields f, BuiltinActionDescriptor descriptor) {
+  final options = descriptor.argumentOptions!;
+  final current = options.any((o) => o.value == f.builtinArg.text) ? f.builtinArg.text : descriptor.defaultArgument;
+  return _SimpleDropdown(
+    label: (descriptor.argumentLabelKey ?? "$tr_addon.dialog.builtin.argument").tr(),
+    value: current,
+    items: {for (final o in options) o.value: o.labelKey.tr()},
+    onChanged: (v) => f.builtinArg.text = v,
+  );
+}
+
+/// A row of tappable chips that append `{token}` to [controller]. Each chip's
+/// tooltip explains what the token expands to. The set reflects [trigger].
+Widget _tokenChips(TextEditingController controller, TriggerEvent trigger) {
+  return Wrap(
+    spacing: 8,
+    children: [
+      for (final token in tokensForTrigger(trigger))
+        ActionChip(
+          label: Text("{$token}"),
+          tooltip: "$tr_addon.token.$token".tr(),
+          onPressed: () {
+            final text = controller.text;
+            final sep = text.isEmpty || text.endsWith(" ") ? "" : " ";
+            controller.text = "$text$sep{$token}";
+          },
+        ),
+    ],
+  );
+}
+
+/// A switch row that does not depend on the host's setState, used by the
+/// stateless field builders.
+class _RunInShellSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _RunInShellSwitch({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text("$tr_addon.dialog.run_in_shell".tr()),
+      value: value,
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// A labeled dropdown over a {value: label} map.
+class _SimpleDropdown extends StatelessWidget {
+  final String label;
+  final String value;
+  final Map<String, String> items;
+  final ValueChanged<String> onChanged;
+
+  const _SimpleDropdown({required this.label, required this.value, required this.items, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label),
+      items: [for (final e in items.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+      onChanged: (v) => v == null ? null : onChanged(v),
     );
   }
 }
@@ -342,8 +566,8 @@ class _ActionKindDropdown extends StatelessWidget {
       initialValue: value,
       decoration: InputDecoration(labelText: "$tr_addon.dialog.action_kind".tr()),
       items: [
-        DropdownMenuItem(value: _ActionKind.external, child: Text("$tr_addon.dialog.kind_external".tr())),
-        DropdownMenuItem(value: _ActionKind.builtin, child: Text("$tr_addon.dialog.kind_builtin".tr())),
+        for (final k in _ActionKind.values)
+          DropdownMenuItem(value: k, child: Text("$tr_addon.dialog.kind_${k.name}".tr())),
       ],
       onChanged: (v) => v == null ? null : onChanged(v),
     );

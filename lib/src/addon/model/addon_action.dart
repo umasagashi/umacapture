@@ -56,6 +56,43 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
   }
 }
 
+/// Sends an HTTP request to a webhook URL, substituting event data into the URL
+/// and body templates. Lets users wire Discord/Slack-style notifications without
+/// writing an external program.
+@MappableClass(discriminatorValue: 'WebhookAction')
+class WebhookAction extends AddonAction with WebhookActionMappable {
+  /// Target URL. Tokens like `{record_id}` are substituted from the payload.
+  final String url;
+
+  /// HTTP method, e.g. `POST` or `GET`.
+  final String method;
+
+  /// Request body template. Tokens are substituted from the payload. Ignored for
+  /// methods without a body (e.g. `GET`).
+  final String bodyTemplate;
+
+  /// How to send the body: `json` (application/json), `form`
+  /// (application/x-www-form-urlencoded), or `text` (text/plain).
+  final String contentType;
+
+  /// Hard timeout in seconds, or null for the Dio default.
+  final int? timeoutSeconds;
+
+  const WebhookAction({
+    required this.url,
+    this.method = 'POST',
+    this.bodyTemplate = '',
+    this.contentType = 'json',
+    this.timeoutSeconds,
+  });
+
+  @override
+  String describe() {
+    final host = Uri.tryParse(url)?.host ?? url;
+    return host.isEmpty ? method : '$method $host';
+  }
+}
+
 /// Runs a named built-in action from the in-app registry (see `builtin_actions.dart`).
 @MappableClass(discriminatorValue: 'BuiltinAction')
 class BuiltinAction extends AddonAction with BuiltinActionMappable {

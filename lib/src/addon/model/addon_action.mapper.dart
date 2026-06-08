@@ -15,6 +15,7 @@ class AddonActionMapper extends ClassMapperBase<AddonAction> {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = AddonActionMapper._());
       ExternalProgramActionMapper.ensureInitialized();
+      WebhookActionMapper.ensureInitialized();
       BuiltinActionMapper.ensureInitialized();
     }
     return _instance!;
@@ -149,6 +150,104 @@ mixin ExternalProgramActionMappable {
   Map<String, dynamic> toMap() {
     return ExternalProgramActionMapper.ensureInitialized()
         .encodeMap<ExternalProgramAction>(this as ExternalProgramAction);
+  }
+}
+
+class WebhookActionMapper extends SubClassMapperBase<WebhookAction> {
+  WebhookActionMapper._();
+
+  static WebhookActionMapper? _instance;
+  static WebhookActionMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = WebhookActionMapper._());
+      AddonActionMapper.ensureInitialized().addSubMapper(_instance!);
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'WebhookAction';
+
+  static String _$url(WebhookAction v) => v.url;
+  static const Field<WebhookAction, String> _f$url = Field('url', _$url);
+  static String _$method(WebhookAction v) => v.method;
+  static const Field<WebhookAction, String> _f$method = Field(
+    'method',
+    _$method,
+    opt: true,
+    def: 'POST',
+  );
+  static String _$bodyTemplate(WebhookAction v) => v.bodyTemplate;
+  static const Field<WebhookAction, String> _f$bodyTemplate = Field(
+    'bodyTemplate',
+    _$bodyTemplate,
+    opt: true,
+    def: '',
+  );
+  static String _$contentType(WebhookAction v) => v.contentType;
+  static const Field<WebhookAction, String> _f$contentType = Field(
+    'contentType',
+    _$contentType,
+    opt: true,
+    def: 'json',
+  );
+  static int? _$timeoutSeconds(WebhookAction v) => v.timeoutSeconds;
+  static const Field<WebhookAction, int> _f$timeoutSeconds = Field(
+    'timeoutSeconds',
+    _$timeoutSeconds,
+    opt: true,
+  );
+
+  @override
+  final MappableFields<WebhookAction> fields = const {
+    #url: _f$url,
+    #method: _f$method,
+    #bodyTemplate: _f$bodyTemplate,
+    #contentType: _f$contentType,
+    #timeoutSeconds: _f$timeoutSeconds,
+  };
+
+  @override
+  final String discriminatorKey = 'kind';
+  @override
+  final dynamic discriminatorValue = 'WebhookAction';
+  @override
+  late final ClassMapperBase superMapper =
+      AddonActionMapper.ensureInitialized();
+
+  static WebhookAction _instantiate(DecodingData data) {
+    return WebhookAction(
+      url: data.dec(_f$url),
+      method: data.dec(_f$method),
+      bodyTemplate: data.dec(_f$bodyTemplate),
+      contentType: data.dec(_f$contentType),
+      timeoutSeconds: data.dec(_f$timeoutSeconds),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static WebhookAction fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<WebhookAction>(map);
+  }
+
+  static WebhookAction fromJson(String json) {
+    return ensureInitialized().decodeJson<WebhookAction>(json);
+  }
+}
+
+mixin WebhookActionMappable {
+  String toJson() {
+    return WebhookActionMapper.ensureInitialized().encodeJson<WebhookAction>(
+      this as WebhookAction,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return WebhookActionMapper.ensureInitialized().encodeMap<WebhookAction>(
+      this as WebhookAction,
+    );
   }
 }
 
