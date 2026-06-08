@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:collection/collection.dart';
@@ -13,6 +14,36 @@ import '/src/core/app_logger.dart';
 export '/src/core/app_logger.dart' show logger, AppLogger, ProviderLogger;
 
 part 'utils.mapper.dart';
+
+/// Decodes a persisted JSON-array string into a list of [T], skipping any single
+/// entry that fails to decode so one corrupt row cannot blank the whole list. A
+/// corrupt or non-array top level falls back to an empty list. [label] names the
+/// data in log messages.
+///
+/// Shared by the addon notifiers (task definitions / execution history) which
+/// both persist a single JSON array and must survive a partial/corrupt write —
+/// see the data-loss note in `task_definitions.dart`.
+List<T> decodeJsonList<T>(String? raw, T Function(Map<String, dynamic> map) fromMap, {required String label}) {
+  if (raw == null) {
+    return const [];
+  }
+  final List<dynamic> data;
+  try {
+    data = jsonDecode(raw) as List<dynamic>;
+  } catch (e) {
+    logger.w("Failed to decode $label: $e");
+    return const [];
+  }
+  final result = <T>[];
+  for (final d in data) {
+    try {
+      result.add(fromMap((d as Map).cast<String, dynamic>()));
+    } catch (e) {
+      logger.w("Failed to deserialize a $label entry; skipping: error=$e, data=$d");
+    }
+  }
+  return result;
+}
 
 class NumberFormatter {
   static final number = NumberFormat("#,###", "en_US");

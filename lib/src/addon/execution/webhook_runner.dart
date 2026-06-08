@@ -37,14 +37,21 @@ class WebhookRunner implements ActionRunner {
     );
     final timeout = action.timeoutSeconds;
     if (timeout != null && timeout > 0) {
-      options.sendTimeout = Duration(seconds: timeout);
-      options.receiveTimeout = Duration(seconds: timeout);
+      final duration = Duration(seconds: timeout);
+      // connectTimeout is essential: send/receive timeouts do NOT bound the TCP
+      // connect phase, so a host that blackholes packets would otherwise hang the
+      // request forever, never finishing this execution and permanently consuming
+      // one of the bounded concurrent-execution slots.
+      options.connectTimeout = duration;
+      options.sendTimeout = duration;
+      options.receiveTimeout = duration;
     }
 
     // A fresh client per fire (this runs once per matching event); close it once
     // the request settles so its keep-alive HttpClient doesn't leak connections
-    // over a long session.
-    final dio = createDiagnosticDio(operation: "addon_webhook");
+    // over a long session. redactUrl keeps the substituted URL (which may carry a
+    // webhook secret in the path and record data in the query) out of the log.
+    final dio = createDiagnosticDio(operation: "addon_webhook", redactUrl: true);
     dio
         .request(
           url,
@@ -67,7 +74,9 @@ class WebhookRunner implements ActionRunner {
         })
         .catchError((Object e) {
           final isCancel = cancelled || (e is DioException && e.type == DioExceptionType.cancel);
-          logger.w("Webhook request failed: url=$url, error=$e");
+          // Log the action's summary (method + host), not the substituted URL,
+          // which may carry a webhook secret and record data.
+          logger.w("Webhook request failed: target=${action.describe()}, error=$e");
           exec.finish(
             (elapsed) => ExecutionResult(
               status: isCancel ? ExecutionStatus.cancelled : ExecutionStatus.failure,

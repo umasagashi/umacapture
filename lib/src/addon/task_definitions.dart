@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/model/task_definition.dart';
-import '/src/core/app_logger.dart';
+import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 
 /// Persisted list of user-registered addon tasks.
@@ -18,30 +18,11 @@ class TaskDefinitionsNotifier extends Notifier<List<TaskDefinition>> {
   @override
   List<TaskDefinition> build() {
     _entry = StorageBox(StorageBoxKey.addon).entry<String>("task_definitions");
-    final raw = _entry.pull();
-    if (raw == null) {
-      return const [];
-    }
-    final List<dynamic> data;
-    try {
-      data = jsonDecode(raw) as List<dynamic>;
-    } catch (e) {
-      // A corrupt top-level array (truncated/partial write) must not blow up the
-      // whole provider: AddonDispatcher reads this on every app event, so an
-      // uncaught throw here would break dispatch app-wide. Mirror
-      // AddonExecutionController._loadHistory and fall back to an empty list.
-      logger.w("Failed to decode addon task definitions: $e");
-      return const [];
-    }
-    final tasks = <TaskDefinition>[];
-    for (final d in data) {
-      try {
-        tasks.add(TaskDefinitionMapper.fromMap((d as Map).cast<String, dynamic>()));
-      } catch (e) {
-        logger.w("Failed to deserialize addon task; skipping: error=$e, data=$d");
-      }
-    }
-    return tasks;
+    // A corrupt top-level array (truncated/partial write) must not blow up the
+    // whole provider: AddonDispatcher reads this on every app event, so an
+    // uncaught throw here would break dispatch app-wide. decodeJsonList falls
+    // back to an empty list and skips individual undecodable entries.
+    return decodeJsonList(_entry.pull(), TaskDefinitionMapper.fromMap, label: "addon task definitions");
   }
 
   void _commit(List<TaskDefinition> next) {

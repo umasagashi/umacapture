@@ -229,7 +229,15 @@ Future<Map<String, dynamic>> probeTlsConnection(Uri uri) async {
   }
 }
 
-Dio createDiagnosticDio({String? operation}) {
+/// Creates a [Dio] with request/response/error diagnostics and certificate
+/// logging tied to [operation].
+///
+/// When [redactUrl] is true, only `scheme://host` is logged instead of the full
+/// URI. Use it for requests whose path/query carry secrets or user data — e.g.
+/// addon webhooks, where the URL may hold a Discord/Slack token in the path and
+/// record-derived values in the query — so they don't land in the diagnostic log.
+Dio createDiagnosticDio({String? operation, bool redactUrl = false}) {
+  String urlText(Uri uri) => redactUrl ? "${uri.scheme}://${uri.host}" : uri.toString();
   final dio = Dio();
   final adapter = dio.httpClientAdapter;
   if (!kIsWeb && adapter is IOHttpClientAdapter) {
@@ -257,7 +265,7 @@ Dio createDiagnosticDio({String? operation}) {
         logger.d(
           "Network request started. operation=$operation"
           ", method=${options.method}"
-          ", url=${options.uri}"
+          ", url=${urlText(options.uri)}"
           ", proxy=${_proxyConfigSummary(options.uri)}",
         );
         handler.next(options);
@@ -268,7 +276,7 @@ Dio createDiagnosticDio({String? operation}) {
         logger.d(
           "Network request completed. operation=$operation"
           ", method=${response.requestOptions.method}"
-          ", url=${response.requestOptions.uri}"
+          ", url=${urlText(response.requestOptions.uri)}"
           ", status=${response.statusCode}"
           ", elapsed_ms=$elapsed",
         );
@@ -280,7 +288,7 @@ Dio createDiagnosticDio({String? operation}) {
         logger.e(
           "Network request error. operation=$operation"
           ", method=${error.requestOptions.method}"
-          ", url=${error.requestOptions.uri}"
+          ", url=${urlText(error.requestOptions.uri)}"
           ", type=${error.type}"
           ", status=${error.response?.statusCode}"
           ", elapsed_ms=$elapsed"

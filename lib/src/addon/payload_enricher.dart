@@ -9,6 +9,12 @@ import '/src/core/utils.dart';
 /// File name of a record's serialized JSON within its directory.
 const recordJsonName = "record.json";
 
+/// Internal payload marker set once a payload has been enriched. Lets a
+/// `taskExecuted` chain hop — whose forwarded payload already carries the record
+/// tokens — skip re-resolving (and re-reading from disk) the same record on every
+/// hop. `_`-prefixed, so it is never substituted into action templates.
+const _enrichedMarker = "_enriched";
+
 /// Expands a trigger [base] payload with rich tokens derived from the captured
 /// record, so actions can reference `{card_name}`, `{rank}`, `{evaluation_value}`
 /// etc. instead of just `{record_id}`.
@@ -18,12 +24,15 @@ const recordJsonName = "record.json";
 /// loaded) leaves the corresponding tokens absent, which the substituter then
 /// expands to the empty string — consistent with the unknown-token rule.
 PayloadMap enrichPayload(RefBase ref, PayloadMap base) {
+  // Already enriched upstream (e.g. a chain hop forwarding a record's tokens);
+  // re-resolving would repeat the disk read of resolveRecordById for no gain.
+  if (base.containsKey(_enrichedMarker)) return base;
   final recordId = base["record_id"];
   if (recordId == null || recordId.isEmpty) return base;
   try {
     final record = resolveRecordById(ref, recordId);
     if (record == null) return base;
-    final enriched = {...base};
+    final enriched = {...base, _enrichedMarker: "1"};
     _addRecordTokens(ref, enriched, record);
     return enriched;
   } catch (e, s) {

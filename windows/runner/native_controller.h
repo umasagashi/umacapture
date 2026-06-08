@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <stdexcept>
 
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
@@ -53,8 +54,16 @@ public:
             app::NativeApi::instance().notifyScreenshotTaken(path, result);
         });
 
-        channel->addMethodCallHandler(
-            "copyToClipboardFromFile", [this](const auto &path) { copyToClipboardFromFile(path); });
+        channel->addMethodCallHandler("copyToClipboardFromFile", [this](const auto &path) {
+            // clip::set_image returns false (without throwing) when the OS clipboard
+            // copy fails, e.g. another process holds the clipboard. Throw so the
+            // method-channel handler reports a PlatformMethodError, which the Dart
+            // side (ClipboardAlt.pasteImage) turns into a real failure instead of a
+            // false success in the addon execution history.
+            if (!copyToClipboardFromFile(path)) {
+                throw std::runtime_error("Failed to copy image to clipboard.");
+            }
+        });
 
         app::NativeApi::instance().setNotifyCallback([this](const auto &message) { channel->notify(message); });
 

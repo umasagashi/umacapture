@@ -101,26 +101,10 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   }
 
   List<HistoryEntry> _loadHistory() {
-    final raw = _historyEntry.pull();
-    if (raw == null) return const [];
-    final List<dynamic> data;
-    try {
-      data = jsonDecode(raw) as List<dynamic>;
-    } catch (e) {
-      logger.w("Failed to decode addon execution history: $e");
-      return const [];
-    }
-    // Skip individual undecodable entries so one bad row cannot blank the whole
-    // history (mirrors TaskDefinitionsNotifier.build).
-    final entries = <HistoryEntry>[];
-    for (final d in data) {
-      try {
-        entries.add(HistoryEntryMapper.fromMap((d as Map).cast<String, dynamic>()));
-      } catch (e) {
-        logger.w("Failed to deserialize addon history entry; skipping: error=$e, data=$d");
-      }
-    }
-    return entries;
+    // Falls back to an empty list on a corrupt array and skips individual
+    // undecodable rows, so one bad entry cannot blank the whole history (shared
+    // with TaskDefinitionsNotifier.build via decodeJsonList).
+    return decodeJsonList(_historyEntry.pull(), HistoryEntryMapper.fromMap, label: "addon execution history");
   }
 
   void _persistHistory(List<HistoryEntry> history) {

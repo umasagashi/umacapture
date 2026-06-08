@@ -28,6 +28,48 @@ final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
 void main() {
   setUpAll(initializeMappers);
 
+  group('TaskDefinition serialization round-trip', () {
+    // Guards the data-loss landmine: a broken polymorphic round-trip (renamed
+    // discriminator/field, lost subclass registration) would make persisted tasks
+    // undecodable, and TaskDefinitionsNotifier.build silently drops undecodable
+    // rows. Each AddonAction subtype must survive toMap -> fromMap intact.
+    final actions = <AddonAction>[
+      ExternalProgramAction(
+        programPath: r'C:\tool.exe',
+        argumentTemplate: '--id {record_id}',
+        timeoutSeconds: 30,
+        runInShell: true,
+        workingDirectory: r'C:\work',
+      ),
+      WebhookAction(
+        url: 'https://example.test/hook',
+        method: 'POST',
+        bodyTemplate: '{"id":"{record_id}"}',
+        contentType: 'json',
+        timeoutSeconds: 10,
+      ),
+      BuiltinAction(actionKey: 'show_toast', argument: '{event}'),
+    ];
+
+    for (final action in actions) {
+      test('round-trips ${action.runtimeType} through a TaskDefinition', () {
+        final task = TaskDefinition(
+          id: 'id-1',
+          name: 'Task',
+          trigger: TriggerEvent.recordCaptured,
+          action: action,
+          sourceTaskId: 'src-1',
+        );
+        final restored = TaskDefinitionMapper.fromMap(task.toMap());
+        // Compare the serialized form (not object identity / generated ==): the
+        // map must survive the round-trip byte-for-byte, including the polymorphic
+        // action's `kind` discriminator and every subtype field.
+        expect(restored.toMap(), task.toMap());
+        expect(restored.action.runtimeType, action.runtimeType);
+      });
+    }
+  });
+
   group('substitutePayload', () {
     const payload = {"event": "record_captured", "card_name": "Special Week"};
 
@@ -39,6 +81,11 @@ void main() {
       // The URL structure (?, =) is preserved; only the value is encoded.
       final url = substitutePayload("https://h/n?name={card_name}", payload, transform: Uri.encodeComponent);
       expect(url, "https://h/n?name=Special%20Week");
+    });
+
+    test('never expands internal _-prefixed tokens (chain bookkeeping cannot leak)', () {
+      const internal = {"_chain_visited": "t1,t2", "_enriched": "1", "record_id": "r1"};
+      expect(substitutePayload("v={_chain_visited} e={_enriched} id={record_id}", internal), "v= e= id=r1");
     });
   });
 
@@ -175,6 +222,20 @@ void main() {
 
       expect(container.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't2']);
     });
+
+    test('skips a task whose action kind is unknown, keeping the others', () {
+      // A task persisted by a newer build with an action type this build does not
+      // know must not blank the whole list — only that one task is dropped.
+      final unknown = sampleTask('t2').toMap();
+      (unknown['action'] as Map)['kind'] = 'FutureUnknownAction';
+      final raw = jsonEncode([sampleTask('t1').toMap(), unknown, sampleTask('t3').toMap()]);
+      Hive.box('addon').put('task_definitions', raw);
+
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+
+      expect(container.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't3']);
+    });
   });
 
   group('enrichPayload', () {
@@ -273,6 +334,19 @@ void main() {
       expect(resolveRecordById(refOf(container), 'missing'), isNull);
       seedFixture(fixtureId);
       expect(resolveRecordById(refOf(container), fixtureId)?.id, fixtureRecord.id);
+    });
+
+    test('returns the payload unchanged when already enriched, skipping the record lookup', () {
+      // The record is resolvable on disk, so without the _enriched marker enrich
+      // would add record tokens; the marker must short-circuit so a chain hop does
+      // not repeat the disk read per hop.
+      seedFixture(fixtureId);
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
+      addTearDown(container.dispose);
+      const base = {'event': 'task_executed', 'record_id': fixtureId, '_enriched': '1'};
+      final result = enrichPayload(refOf(container), base);
+      expect(result, base);
+      expect(result.containsKey('evaluation_value'), isFalse);
     });
   });
 }
