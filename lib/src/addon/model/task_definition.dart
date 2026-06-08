@@ -34,14 +34,20 @@ class TaskDefinition with TaskDefinitionMappable {
     this.sourceTaskId,
   });
 
-  TaskDefinition copyWith({String? name, bool? enabled, TriggerEvent? trigger, AddonAction? action}) {
+  TaskDefinition copyWith({
+    String? name,
+    bool? enabled,
+    TriggerEvent? trigger,
+    AddonAction? action,
+    String? sourceTaskId,
+  }) {
     return TaskDefinition(
       id: id,
       name: name ?? this.name,
       enabled: enabled ?? this.enabled,
       trigger: trigger ?? this.trigger,
       action: action ?? this.action,
-      sourceTaskId: sourceTaskId,
+      sourceTaskId: sourceTaskId ?? this.sourceTaskId,
     );
   }
 }

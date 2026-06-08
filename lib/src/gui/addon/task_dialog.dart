@@ -249,7 +249,11 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
     return DropdownButtonFormField<String?>(
       initialValue: value,
       isExpanded: true,
-      decoration: InputDecoration(labelText: "$tr_addon.dialog.source_task.label".tr()),
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.source_task.label".tr(),
+        helperText: "$tr_addon.dialog.source_task.any_help".tr(),
+        helperMaxLines: 3,
+      ),
       items: [
         DropdownMenuItem(value: null, child: Text("$tr_addon.dialog.source_task.any".tr())),
         for (final t in others) DropdownMenuItem(value: t.id, child: Text(t.name)),
@@ -480,6 +484,7 @@ class _RunInShellSwitch extends StatelessWidget {
     return SwitchListTile(
       contentPadding: EdgeInsets.zero,
       title: Text("$tr_addon.dialog.run_in_shell".tr()),
+      subtitle: Text("$tr_addon.dialog.run_in_shell_help".tr()),
       value: value,
       onChanged: onChanged,
     );

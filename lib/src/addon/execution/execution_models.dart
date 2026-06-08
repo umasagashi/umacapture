@@ -13,8 +13,15 @@ final _payloadTokenPattern = RegExp(r'\{(\w+)\}');
 /// Substitutes `{var}` tokens in [template] with values from [payload]. Unknown
 /// tokens expand to the empty string. Shared by the external-program argument
 /// expander and built-in actions that take a content template.
-String substitutePayload(String template, PayloadMap payload) {
-  return template.replaceAllMapped(_payloadTokenPattern, (m) => payload[m.group(1)] ?? '');
+///
+/// When [transform] is given it is applied to each substituted value (not the
+/// literal template text) — e.g. [Uri.encodeQueryComponent] to safely inject
+/// values into a URL while keeping its structure intact.
+String substitutePayload(String template, PayloadMap payload, {String Function(String value)? transform}) {
+  return template.replaceAllMapped(_payloadTokenPattern, (m) {
+    final value = payload[m.group(1)] ?? '';
+    return transform == null ? value : transform(value);
+  });
 }
 
 /// Terminal (or in-flight) state of a single addon execution.

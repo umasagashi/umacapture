@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/addon/execution/execution_controller.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
+import '/src/addon/payload_enricher.dart';
 import '/src/addon/task_definitions.dart';
 import '/src/addon/trigger_catalog.dart';
+import '/src/core/utils.dart';
 
 /// Listens to every triggerable app event and runs the enabled addon tasks bound
 /// to it. Mirrors `NotificationLayer` (which fans out the same events to
@@ -41,9 +43,12 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
     }
     final matched = tasks.toList();
     if (matched.isEmpty) return;
+    // Enrich once per event so all matched tasks share the (possibly disk-backed)
+    // record lookup instead of repeating it per task.
+    final enriched = enrichPayload(ref.base, payload);
     final controller = ref.read(addonExecutionControllerProvider.notifier);
     for (final task in matched) {
-      controller.run(task, payload);
+      controller.run(task, enriched);
     }
   }
 }

@@ -27,47 +27,53 @@ final clipboardPasteImageModeProvider = ExclusiveItemsNotifierProvider<Clipboard
 });
 
 class ClipboardAlt {
-  static void pasteImage(RefBase ref, FilePath imagePath) {
+  /// Copies [imagePath] to the clipboard, showing a toast for the outcome.
+  ///
+  /// Returns whether the copy succeeded so callers that need to report a real
+  /// result (e.g. addon actions) can act on a failure instead of assuming success.
+  static Future<bool> pasteImage(RefBase ref, FilePath imagePath) async {
     if (!imagePath.existsSync()) {
       Toaster.show(ToastData.error(description: "$tr_toast.clipboard.file_not_found".tr()));
-      return;
+      return false;
     }
 
     final mode = ref.read(clipboardPasteImageModeProvider);
-    late final Future<bool> result;
+    final Future<bool> result;
     if (mode == ClipboardPasteImageMode.memory) {
       final controller = ref.read(platformControllerProvider);
       if (controller == null) {
         Toaster.show(ToastData.error(description: "$tr_toast.clipboard.unavailable".tr()));
-        return;
+        return false;
       }
       result = controller.copyToClipboardFromFile(imagePath).then((e) => true); // TODO: Should use actual result.
     } else {
       result = Pasteboard.writeFiles([imagePath.path]);
     }
 
-    result.then((result) {
-      if (result) {
-        Toaster.show(ToastData.success(description: "$tr_toast.clipboard.success".tr()));
-      } else {
-        Toaster.show(ToastData.error(description: "$tr_toast.clipboard.failed_result_code".tr()));
-      }
-    });
+    final ok = await result;
+    Toaster.show(
+      ok
+          ? ToastData.success(description: "$tr_toast.clipboard.success".tr())
+          : ToastData.error(description: "$tr_toast.clipboard.failed_result_code".tr()),
+    );
+    return ok;
   }
 
   /// Copies [path] to the clipboard as a file reference (pasteable into the file
   /// explorer), regardless of the image paste-mode setting.
-  static void pasteFile(RefBase ref, FilePath path) {
+  ///
+  /// Returns whether the copy succeeded (see [pasteImage]).
+  static Future<bool> pasteFile(RefBase ref, FilePath path) async {
     if (!path.existsSync()) {
       Toaster.show(ToastData.error(description: "$tr_toast.clipboard.file_not_found".tr()));
-      return;
+      return false;
     }
-    Pasteboard.writeFiles([path.path]).then((result) {
-      if (result) {
-        Toaster.show(ToastData.success(description: "$tr_toast.clipboard.success".tr()));
-      } else {
-        Toaster.show(ToastData.error(description: "$tr_toast.clipboard.failed_result_code".tr()));
-      }
-    });
+    final ok = await Pasteboard.writeFiles([path.path]);
+    Toaster.show(
+      ok
+          ? ToastData.success(description: "$tr_toast.clipboard.success".tr())
+          : ToastData.error(description: "$tr_toast.clipboard.failed_result_code".tr()),
+    );
+    return ok;
   }
 }

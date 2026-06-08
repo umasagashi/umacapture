@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
 import '/src/addon/execution/execution_models.dart';
+import '/src/addon/payload_enricher.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/clipboard_alt.dart';
@@ -116,7 +117,8 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     defaultArgument: "trainee",
     run: (ref, payload, argument) async {
       final record = _requireRecord(ref, payload);
-      ClipboardAlt.pasteImage(ref, _recordImagePath(ref, record, (argument ?? "trainee").trim()));
+      final ok = await ClipboardAlt.pasteImage(ref, _recordImagePath(ref, record, (argument ?? "trainee").trim()));
+      if (!ok) throw StateError("Failed to copy image to clipboard.");
     },
   ),
   "copy_file_to_clipboard": BuiltinActionDescriptor(
@@ -138,9 +140,10 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
       final kind = (argument ?? "trainee").trim();
       final path = kind == "record_json"
-          ? storage.recordPathOf(record).filePath("record.json")
+          ? storage.recordPathOf(record).filePath(recordJsonName)
           : _recordImagePath(ref, record, kind);
-      ClipboardAlt.pasteFile(ref, path);
+      final ok = await ClipboardAlt.pasteFile(ref, path);
+      if (!ok) throw StateError("Failed to copy file to clipboard.");
     },
   ),
   "play_sound": BuiltinActionDescriptor(
@@ -174,7 +177,9 @@ CharaDetailRecord _requireRecord(RefBase ref, PayloadMap payload) {
   if (recordId == null || recordId.isEmpty) {
     throw StateError("This action requires a record_id (use the record-captured trigger).");
   }
-  final record = ref.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: recordId);
+  // Reuse the enricher's resolver so a just-captured record is found on disk even
+  // when the storage notifier hasn't folded it in yet (the capture-event race).
+  final record = resolveRecordById(ref, recordId);
   if (record == null) throw StateError("Record not found: $recordId");
   return record;
 }

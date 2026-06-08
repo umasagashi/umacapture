@@ -34,7 +34,11 @@ class WebhookRunner implements ActionRunner {
       completer.complete(build(stopwatch.elapsed));
     }
 
-    final url = substitutePayload(action.url, payload);
+    // Percent-encode substituted values so spaces / & / # inside a token value
+    // can't break the URL structure or inject extra query parameters.
+    // encodeComponent (%20 for space) is valid in both path and query segments,
+    // unlike encodeQueryComponent's '+', since a token may appear anywhere in the URL.
+    final url = substitutePayload(action.url, payload, transform: Uri.encodeComponent);
     final body = substitutePayload(action.bodyTemplate, payload);
     final options = Options(
       method: action.method,

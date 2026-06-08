@@ -7,7 +7,6 @@ import 'package:uuid/uuid.dart';
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
-import '/src/addon/payload_enricher.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 
@@ -19,16 +18,20 @@ const _maxHistory = 100;
 /// [_chainDepthKey].
 const _maxChainDepth = 16;
 
+/// Upper bound on how many executions may run concurrently. Caps the total work
+/// a fan-out of mutually-chained `taskExecuted` tasks can spawn (the depth cap
+/// alone only bounds chain length, not breadth).
+const _maxActiveExecutions = 16;
+
 const _chainDepthKey = "_chain_depth";
 
 // Fires the (forwarded) payload of a task each time one finishes, so tasks bound
-// to the `taskExecuted` trigger can run after it. Recreated on re-listen for the
-// same reason as the capture event providers in platform_controller.dart.
-StreamController<PayloadMap> _taskExecutedEventController = StreamController();
+// to the `taskExecuted` trigger can run after it. A broadcast controller created
+// once: the dispatcher is always mounted, so events emitted with no listener are
+// simply dropped (no one is chained), and there is no re-subscription window in
+// which a fired event could be lost to a swapped controller.
+final _taskExecutedEventController = StreamController<PayloadMap>.broadcast();
 final taskExecutedEventProvider = StreamProvider<PayloadMap>((ref) {
-  if (_taskExecutedEventController.hasListener) {
-    _taskExecutedEventController = StreamController();
-  }
   return _taskExecutedEventController.stream;
 });
 
@@ -85,23 +88,60 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   List<HistoryEntry> _loadHistory() {
     final raw = _historyEntry.pull();
     if (raw == null) return const [];
+    final List<dynamic> data;
     try {
-      final data = jsonDecode(raw) as List<dynamic>;
-      return [for (final d in data) HistoryEntryMapper.fromMap((d as Map).cast<String, dynamic>())];
+      data = jsonDecode(raw) as List<dynamic>;
     } catch (e) {
-      logger.w("Failed to load addon execution history: $e");
+      logger.w("Failed to decode addon execution history: $e");
       return const [];
     }
+    // Skip individual undecodable entries so one bad row cannot blank the whole
+    // history (mirrors TaskDefinitionsNotifier.build).
+    final entries = <HistoryEntry>[];
+    for (final d in data) {
+      try {
+        entries.add(HistoryEntryMapper.fromMap((d as Map).cast<String, dynamic>()));
+      } catch (e) {
+        logger.w("Failed to deserialize addon history entry; skipping: error=$e, data=$d");
+      }
+    }
+    return entries;
   }
 
   void _persistHistory(List<HistoryEntry> history) {
     _historyEntry.push(jsonEncode(history.map((e) => e.toMap()).toList()));
   }
 
-  /// Runs [task] with [payload], registering an active execution and appending a
-  /// history entry when it finishes.
-  void run(TaskDefinition task, PayloadMap rawPayload) {
-    final payload = enrichPayload(ref.base, rawPayload);
+  /// Prepends [entry], trims to [_maxHistory], persists, and returns the new list.
+  List<HistoryEntry> _withEntry(HistoryEntry entry) {
+    final history = [entry, ...state.history];
+    final trimmed = history.length > _maxHistory ? history.sublist(0, _maxHistory) : history;
+    _persistHistory(trimmed);
+    return trimmed;
+  }
+
+  /// Runs [task] with an already-enriched [payload], registering an active
+  /// execution and appending a history entry when it finishes. Enrichment is done
+  /// once per event by the dispatcher, so all tasks bound to the same event share it.
+  void run(TaskDefinition task, PayloadMap payload) {
+    if (state.active.length >= _maxActiveExecutions) {
+      logger.w("Addon execution limit ($_maxActiveExecutions) reached; skipping '${task.name}'.");
+      state = state.copyWith(
+        history: _withEntry(
+          HistoryEntry(
+            executionId: const Uuid().v4(),
+            taskId: task.id,
+            taskName: task.name,
+            trigger: task.trigger,
+            status: ExecutionStatus.failure,
+            startedAt: DateTime.now(),
+            durationMs: 0,
+            error: "Execution limit reached ($_maxActiveExecutions concurrent).",
+          ),
+        ),
+      );
+      return;
+    }
     final executionId = const Uuid().v4();
     final startedAt = DateTime.now();
     final handle = runnerFor(task.action).start(ref.base, payload);
@@ -140,12 +180,9 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
         exitCode: result.exitCode,
         error: result.error ?? (result.stderr?.isNotEmpty == true ? result.stderr : null),
       );
-      final history = [entry, ...state.history];
-      final trimmed = history.length > _maxHistory ? history.sublist(0, _maxHistory) : history;
-      _persistHistory(trimmed);
       state = state.copyWith(
         active: state.active.where((e) => e.executionId != executionId).toList(),
-        history: trimmed,
+        history: _withEntry(entry),
       );
       _fireTaskExecuted(task, payload);
     });

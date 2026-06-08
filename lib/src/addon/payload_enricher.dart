@@ -6,6 +6,9 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
+/// File name of a record's serialized JSON within its directory.
+const recordJsonName = "record.json";
+
 /// Expands a trigger [base] payload with rich tokens derived from the captured
 /// record, so actions can reference `{card_name}`, `{rank}`, `{evaluation_value}`
 /// etc. instead of just `{record_id}`.
@@ -18,7 +21,7 @@ PayloadMap enrichPayload(RefBase ref, PayloadMap base) {
   final recordId = base["record_id"];
   if (recordId == null || recordId.isEmpty) return base;
   try {
-    final record = _resolveRecord(ref, recordId);
+    final record = resolveRecordById(ref, recordId);
     if (record == null) return base;
     final enriched = {...base};
     _addRecordTokens(ref, enriched, record);
@@ -30,19 +33,22 @@ PayloadMap enrichPayload(RefBase ref, PayloadMap base) {
 }
 
 /// Resolves the record by id, preferring the in-memory store but falling back to
-/// reading `record.json` from disk. The fallback covers the race where the
-/// dispatcher runs before the storage notifier has folded in a freshly captured
+/// reading `record.json` from disk. The fallback covers the race where a
+/// listener runs before the storage notifier has folded in a freshly captured
 /// record (both listen to the same capture event). It decodes directly rather
 /// than via [CharaDetailRecord.load] to avoid that method's quarantine side
-/// effect firing from a payload-enrichment path.
-CharaDetailRecord? _resolveRecord(RefBase ref, String recordId) {
+/// effect firing from an addon path.
+///
+/// Shared by [enrichPayload] and the built-in record actions so both resolve a
+/// just-captured record the same way.
+CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
   try {
     final fromMemory = ref.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: recordId);
     if (fromMemory != null) return fromMemory;
   } catch (_) {
     // Storage not ready yet; fall through to the on-disk copy.
   }
-  final file = (ref.read(pathInfoProvider).charaDetailActiveDir / recordId).filePath("record.json");
+  final file = (ref.read(pathInfoProvider).charaDetailActiveDir / recordId).filePath(recordJsonName);
   if (!file.existsSync()) return null;
   return CharaDetailRecordMapper.fromJson(file.readAsStringSync());
 }
@@ -62,7 +68,9 @@ void _addRecordTokens(RefBase ref, PayloadMap p, CharaDetailRecord r) {
   final activeDir = _safe(() => ref.read(pathInfoProvider).charaDetailActiveDir);
   if (activeDir != null) {
     p["record_dir"] = (activeDir / r.id).path;
-    p["trainee_icon_path"] = (activeDir / r.id).filePath("trainee.jpg").path;
+    // Reuse the record's own relative icon path so the "trainee.jpg" literal
+    // lives only on CharaDetailRecord.traineeIconPath.
+    p["trainee_icon_path"] = activeDir.filePath(r.traineeIconPath).path;
   }
 
   // Module-data-dependent tokens (labels / card names / rank). Each is
