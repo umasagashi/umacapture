@@ -23,6 +23,29 @@ const _webhookMethods = <String>["POST", "GET", "PUT", "PATCH", "DELETE"];
 /// Body encodings offered for webhook actions.
 const _webhookContentTypes = <String>["json", "form", "text"];
 
+/// A translation key for why [raw] is an invalid timeout, or null if it is valid.
+/// Empty is valid (means "no timeout"); otherwise it must be a positive integer.
+String? _timeoutErrorKey(String raw) {
+  final text = raw.trim();
+  if (text.isEmpty) return null;
+  final seconds = int.tryParse(text);
+  return (seconds == null || seconds <= 0) ? "$tr_addon.dialog.timeout_invalid" : null;
+}
+
+/// A translation key for why [raw] is an invalid webhook URL, or null if valid.
+/// Empty is treated as valid here (the save button is gated on non-empty
+/// separately) to avoid showing an error before the user has typed anything.
+String? _urlErrorKey(String raw) {
+  final text = raw.trim();
+  if (text.isEmpty) return null;
+  // Tokens like {record_id} aren't valid URI characters; replace them before
+  // checking so a templated URL still validates on its scheme and host.
+  final stripped = text.replaceAll(RegExp(r"\{[^}]*\}"), "x");
+  final uri = Uri.tryParse(stripped);
+  final valid = uri != null && uri.isAbsolute && (uri.scheme == "http" || uri.scheme == "https") && uri.host.isNotEmpty;
+  return valid ? null : "$tr_addon.dialog.webhook.url_invalid";
+}
+
 /// Mutable form state for a single action, holding every per-kind controller so
 /// switching kinds preserves typed values.
 class _ActionFields {
@@ -75,8 +98,9 @@ class _ActionFields {
 
   bool isValid(_ActionKind kind) {
     return switch (kind) {
-      _ActionKind.external => program.text.trim().isNotEmpty,
-      _ActionKind.webhook => url.text.trim().isNotEmpty,
+      _ActionKind.external => program.text.trim().isNotEmpty && _timeoutErrorKey(timeout.text) == null,
+      _ActionKind.webhook =>
+        url.text.trim().isNotEmpty && _urlErrorKey(url.text) == null && _timeoutErrorKey(webhookTimeout.text) == null,
       _ActionKind.builtin => true,
     };
   }
@@ -223,10 +247,16 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           if (!widget.isNew)
-            OutlinedButton.icon(
-              icon: const Icon(Icons.delete_forever),
-              label: Text("$tr_addon.dialog.delete".tr()),
-              onPressed: _delete,
+            Tooltip(
+              message: "$tr_addon.dialog.delete_confirm".tr(),
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.delete_forever),
+                label: Text("$tr_addon.dialog.delete".tr()),
+                // Require a long-press so a single misclick cannot discard a
+                // carefully configured task (mirrors DeleteRecordDialog).
+                onPressed: () {},
+                onLongPress: _delete,
+              ),
             )
           else
             const SizedBox.shrink(),
@@ -329,7 +359,11 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
     TextField(
       controller: f.timeout,
       keyboardType: TextInputType.number,
-      decoration: InputDecoration(labelText: "$tr_addon.dialog.timeout".tr()),
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.timeout".tr(),
+        errorText: _timeoutErrorKey(f.timeout.text)?.tr(),
+      ),
+      onChanged: (_) => onChanged(),
     ),
     _RunInShellSwitch(
       value: f.runInShell,
@@ -348,6 +382,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.webhook.url".tr(),
         helperText: "$tr_addon.dialog.webhook.url_helper".tr(),
+        errorText: _urlErrorKey(f.url.text)?.tr(),
       ),
       onChanged: (_) => onChanged(),
     ),
@@ -398,7 +433,11 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
     TextField(
       controller: f.webhookTimeout,
       keyboardType: TextInputType.number,
-      decoration: InputDecoration(labelText: "$tr_addon.dialog.timeout".tr()),
+      decoration: InputDecoration(
+        labelText: "$tr_addon.dialog.timeout".tr(),
+        errorText: _timeoutErrorKey(f.webhookTimeout.text)?.tr(),
+      ),
+      onChanged: (_) => onChanged(),
     ),
   ];
 }

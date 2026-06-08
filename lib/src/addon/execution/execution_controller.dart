@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
@@ -8,6 +9,7 @@ import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
 import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
 /// Maximum number of history entries kept (oldest trimmed on append).
@@ -139,6 +141,15 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   void run(TaskDefinition task, PayloadMap payload) {
     if (state.active.length >= _maxActiveExecutions) {
       logger.w("Addon execution limit ($_maxActiveExecutions) reached; skipping '${task.name}'.");
+      // The skip is also recorded in history below, but surface a toast so a user
+      // who hits the cap gets immediate feedback instead of a silent no-op.
+      Toaster.show(
+        ToastData.warning(
+          description: "pages.addon.running.limit_reached".tr(
+            namedArgs: {"count": "$_maxActiveExecutions", "name": task.name},
+          ),
+        ),
+      );
       state = state.copyWith(
         history: _withEntry(
           HistoryEntry(

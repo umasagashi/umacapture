@@ -935,7 +935,8 @@
                 "empty": "タスクが登録されていません。右上のボタンから追加してください。"
             },
             "running": {
-                "cancel": "中止"
+                "cancel": "中止",
+                "limit_reached": "同時実行数の上限（{count}）に達したため、タスク「{name}」をスキップしました。"
             },
             "history": {
                 "clear": "履歴を消去",
@@ -1032,11 +1033,13 @@
                     "picker_title": "カレントディレクトリを選択"
                 },
                 "timeout": "タイムアウト（秒・空欄で無制限）",
+                "timeout_invalid": "正の整数を入力してください（空欄で無制限）。",
                 "run_in_shell": "シェル経由で実行（.bat やシェル組込みコマンド用）",
                 "run_in_shell_help": "シェル経由ではトークンの値がエスケープされずに渡されます。信頼できるテンプレートのみで有効にしてください。",
                 "webhook": {
                     "url": "URL",
                     "url_helper": "送信先のURL。{record_id} などのトークンを埋め込めます。",
+                    "url_invalid": "http:// または https:// で始まる有効なURLを入力してください。",
                     "method": "メソッド",
                     "content_type": "本文の形式",
                     "content_type_json": "JSON",
@@ -1050,7 +1053,8 @@
                     "argument": "引数"
                 },
                 "save": "保存",
-                "delete": "削除"
+                "delete": "削除",
+                "delete_confirm": "長押しで削除します"
             }
         },
         "settings": {

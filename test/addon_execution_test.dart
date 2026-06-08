@@ -11,8 +11,19 @@ import 'package:umacapture/src/addon/execution/execution_models.dart';
 import 'package:umacapture/src/addon/execution/external_program_runner.dart';
 import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
+import 'package:umacapture/src/addon/payload_enricher.dart';
 import 'package:umacapture/src/addon/task_definitions.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/spec/base.dart';
+import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/utils.dart';
+
+/// Exposes a [RefBase] from a container so `enrichPayload`/`resolveRecordById`
+/// (which take a RefBase, not a ProviderContainer) can be called in tests.
+final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
 
 void main() {
   setUpAll(initializeMappers);
@@ -163,6 +174,105 @@ void main() {
       addTearDown(container.dispose);
 
       expect(container.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't2']);
+    });
+  });
+
+  group('enrichPayload', () {
+    // The fixture's metadata.record_id.self equals this id, so a record written
+    // under active/<id>/ resolves to a record whose own id matches the path.
+    const fixtureId = '9a1e0d66-0654-4416-aa11-5613e7a9f05e';
+    late String fixtureJson;
+    late CharaDetailRecord fixtureRecord;
+    late Directory tempDir;
+
+    setUpAll(() {
+      fixtureJson = File('test/fixtures/chara_detail_record.json').readAsStringSync();
+      fixtureRecord = CharaDetailRecordMapper.fromJson(fixtureJson);
+    });
+
+    setUp(() => tempDir = Directory.systemTemp.createTempSync('umacapture_enrich_test'));
+    tearDown(() => tempDir.deleteSync(recursive: true));
+
+    PathInfo pathInfo() {
+      final dir = DirectoryPath(tempDir.path);
+      return PathInfo(documentDir: dir, supportDir: dir, executableDir: dir, downloadDir: dir);
+    }
+
+    // Writes the fixture to the on-disk layout enrichPayload reads from.
+    void seedFixture(String recordId) {
+      final dir = Directory('${tempDir.path}/storage/chara_detail/active/$recordId')..createSync(recursive: true);
+      File('${dir.path}/record.json').writeAsStringSync(fixtureJson);
+    }
+
+    RefBase refOf(ProviderContainer container) => container.read(_refBaseProvider);
+
+    test('returns the base payload unchanged when record_id is absent', () {
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+      expect(enrichPayload(refOf(container), const {'event': 'manual'}), const {'event': 'manual'});
+    });
+
+    test('returns the base payload unchanged when the record cannot be found', () {
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
+      addTearDown(container.dispose);
+      const base = {'event': 'record_captured', 'record_id': 'missing'};
+      expect(enrichPayload(refOf(container), base), base);
+    });
+
+    test('populates record tokens from disk, omitting module tokens when modules are unloaded', () {
+      seedFixture(fixtureId);
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
+      addTearDown(container.dispose);
+      final result = enrichPayload(refOf(container), {'event': 'record_captured', 'record_id': fixtureId});
+
+      expect(result['evaluation_value'], '56463');
+      expect(result['fans'], '406241');
+      expect(result['speed'], '2168');
+      expect(result['stamina'], '1406');
+      expect(result['power'], '1740');
+      expect(result['guts'], '1008');
+      expect(result['intelligence'], '1394');
+      expect(result['trained_date'], '2026/04/13');
+      expect(result['trainer_id'], '0a1831eb-1482-472f-9c14-bfc3030ad8ff');
+
+      final info = container.read(pathInfoProvider);
+      expect(result['record_dir'], (info.charaDetailActiveDir / fixtureRecord.id).path);
+      expect(result['trainee_icon_path'], info.charaDetailActiveDir.filePath(fixtureRecord.traineeIconPath).path);
+
+      // Module-dependent tokens are best-effort: absent when modules aren't loaded.
+      expect(result.containsKey('card_name'), isFalse);
+      expect(result.containsKey('rank'), isFalse);
+      expect(result.containsKey('scenario'), isFalse);
+    });
+
+    test('populates module tokens when label/card/border providers are available', () {
+      seedFixture(fixtureId);
+      final container = ProviderContainer.test(
+        overrides: [
+          pathInfoProvider.overrideWithValue(pathInfo()),
+          labelMapProvider.overrideWithValue({
+            LabelKeys.campaignScenario: List.generate(13, (i) => 'scenario$i'),
+            LabelKeys.charaRank: ['rank0', 'rank1', 'rank2'],
+          }),
+          charaRankBorderProvider.overrideWithValue([10000, 50000, 100000]),
+          charaCardInfoProvider.overrideWithValue(List.generate(184, (i) => CharaCardInfo(i, 0, ['card$i']))),
+        ],
+      );
+      addTearDown(container.dispose);
+      final result = enrichPayload(refOf(container), {'event': 'record_captured', 'record_id': fixtureId});
+
+      expect(result['scenario'], 'scenario12');
+      // eval 56463 is below border[2] (100000), so the rank index is 2.
+      expect(result['rank'], 'rank2');
+      expect(result['card_name'], 'card183');
+    });
+
+    test('resolveRecordById returns null when missing and the record when present', () {
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
+      addTearDown(container.dispose);
+      expect(resolveRecordById(refOf(container), 'missing'), isNull);
+      seedFixture(fixtureId);
+      expect(resolveRecordById(refOf(container), fixtureId)?.id, fixtureRecord.id);
     });
   });
 }

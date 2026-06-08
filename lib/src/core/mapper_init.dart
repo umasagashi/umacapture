@@ -66,7 +66,7 @@ void initializeMappers() {
   CharaDetailRecordMapper.ensureInitialized();
 
   // Addon feature. AddonAction subclasses are co-located in addon_action.dart, so
-  // the cascade from AddonActionMapper covers ExternalProgramAction/BuiltinAction.
+  // the cascade from AddonActionMapper covers ExternalProgramAction/WebhookAction/BuiltinAction.
   TaskDefinitionMapper.ensureInitialized();
   AddonActionMapper.ensureInitialized();
   HistoryEntryMapper.ensureInitialized();

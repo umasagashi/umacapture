@@ -68,7 +68,28 @@ class TaskDefinitionsNotifier extends Notifier<List<TaskDefinition>> {
   }
 
   void remove(String id) {
-    _commit(state.where((t) => t.id != id).toList());
+    final next = <TaskDefinition>[];
+    for (final t in state) {
+      if (t.id == id) continue;
+      // A task chained to the removed one keeps a sourceTaskId that now matches
+      // no task, so the dispatcher could never fire it again. Reset that dangling
+      // reference back to "any source" (what the edit dialog already shows for a
+      // stale selection) instead of silently breaking the chain.
+      next.add(t.sourceTaskId == id ? _withoutSource(t) : t);
+    }
+    _commit(next);
+  }
+
+  /// A copy of [task] with its [TaskDefinition.sourceTaskId] cleared. (The
+  /// hand-written `copyWith` cannot null a field, so rebuild it explicitly.)
+  static TaskDefinition _withoutSource(TaskDefinition task) {
+    return TaskDefinition(
+      id: task.id,
+      name: task.name,
+      enabled: task.enabled,
+      trigger: task.trigger,
+      action: task.action,
+    );
   }
 
   void setEnabled(String id, bool enabled) {

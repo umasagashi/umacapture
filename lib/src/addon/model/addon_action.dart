@@ -35,6 +35,11 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
 
   /// Whether to run through the system shell. Required for `.bat` files and shell
   /// builtins (e.g. `echo`).
+  ///
+  /// WARNING: with the shell enabled, substituted token values are handed to the
+  /// shell **unescaped**, so a value containing metacharacters (`&`, `|`, `%VAR%`,
+  /// …) is interpreted by the shell. Only enable it for trusted templates. See
+  /// `expandArgumentTemplate` in `external_program_runner.dart` for details.
   final bool runInShell;
 
   /// Working (current) directory for the launched process, or null/empty to
