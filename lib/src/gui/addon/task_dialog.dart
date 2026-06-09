@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/execution/builtin_actions.dart';
+import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/addon_action.dart';
 import '/src/addon/model/task_definition.dart';
 import '/src/addon/task_definitions.dart';
@@ -45,8 +46,10 @@ String? _urlErrorKey(String raw) {
   final text = raw.trim();
   if (text.isEmpty) return null;
   // Placeholders like {record_id} aren't valid URI characters; replace them before
-  // checking so a templated URL still validates on its scheme and host.
-  final stripped = text.replaceAll(RegExp(r"\{[^}]*\}"), "x");
+  // checking so a templated URL still validates on its scheme and host. Reuse the
+  // runtime substituter (with a fixed stand-in for every value) so validation and
+  // expansion share one placeholder grammar and can't disagree on what is a token.
+  final stripped = substitutePayload(text, const {}, transform: (_) => "x");
   final uri = Uri.tryParse(stripped);
   final valid = uri != null && uri.isAbsolute && (uri.scheme == "http" || uri.scheme == "https") && uri.host.isNotEmpty;
   return valid ? null : "$tr_addon.dialog.webhook.url_invalid";
@@ -110,14 +113,14 @@ class _ActionFields {
     builtinArg.dispose();
   }
 
-  bool isValid(_ActionKind kind) {
+  bool isValid(_ActionKind kind, TriggerEvent trigger) {
     return switch (kind) {
       _ActionKind.external => program.text.trim().isNotEmpty && _timeoutErrorKey(timeout.text, required: true) == null,
       _ActionKind.webhook =>
         url.text.trim().isNotEmpty &&
             _urlErrorKey(url.text) == null &&
             _timeoutErrorKey(webhookTimeout.text, required: true) == null,
-      _ActionKind.builtin => true,
+      _ActionKind.builtin => !_builtinNeedsUnavailableRecord(builtinKey, trigger),
     };
   }
 
@@ -152,6 +155,14 @@ class _ActionFields {
         return BuiltinAction(actionKey: builtinKey, argument: descriptor?.usesArgument == true ? argument : null);
     }
   }
+}
+
+/// Whether [builtinKey]'s action requires a `record_id` that [trigger] never
+/// supplies, so the pairing would fail on every run. Shared by the save gate and
+/// the inline warning so the two cannot disagree.
+bool _builtinNeedsUnavailableRecord(String builtinKey, TriggerEvent trigger) {
+  final descriptor = builtinActionRegistry[builtinKey];
+  return descriptor?.requiresRecord == true && !placeholdersForTrigger(trigger).contains("record_id");
 }
 
 /// The [_ActionKind] of an existing [action].
@@ -208,7 +219,7 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
 
   bool get _canSave {
     if (_nameController.text.trim().isEmpty) return false;
-    return _fields.isValid(_actionKind);
+    return _fields.isValid(_actionKind, _trigger);
   }
 
   void _save() {
@@ -487,6 +498,7 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       items: {for (final d in builtinActionRegistry.values) d.key: d.labelKey.tr()},
       onChanged: onBuiltinChanged,
     ),
+    if (_builtinNeedsUnavailableRecord(f.builtinKey, trigger)) _BuiltinRecordWarning(),
     if (descriptor?.usesArgument == true) ...[
       const SizedBox(height: 16),
       if (descriptor!.argumentOptions != null)
@@ -545,7 +557,9 @@ class _PlaceholderDropdown extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final placeholders = placeholdersForTrigger(trigger);
+    // No persistent selection: every closed-field state renders the same hint
+    // (when untouched, and via the collapsed builder once picked), so the big
+    // multi-line item never shows in the collapsed field.
     final hintLabel = Align(
       alignment: Alignment.centerLeft,
       child: Text(
@@ -553,38 +567,14 @@ class _PlaceholderDropdown extends StatelessWidget {
         style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
       ),
     );
-    return DropdownButtonFormField<String>(
-      // No persistent selection: every closed-field state renders the same
-      // hint (when untouched, and via selectedItemBuilder once picked), so the
-      // big multi-line item never shows in the collapsed field.
-      initialValue: null,
-      isExpanded: true,
-      // Allow each menu item to grow to fit its multi-line description.
-      itemHeight: null,
-      decoration: InputDecoration(labelText: "$tr_addon.dialog.copy_placeholder".tr()),
+    return _DescribedDropdown<String>(
+      label: "$tr_addon.dialog.copy_placeholder".tr(),
+      value: null,
+      items: placeholdersForTrigger(trigger),
+      titleOf: (placeholder) => "{$placeholder}",
+      descriptionOf: (placeholder) => "$tr_addon.placeholder.$placeholder".tr(),
+      collapsedBuilder: (_) => hintLabel,
       hint: hintLabel,
-      selectedItemBuilder: (context) => [for (final _ in placeholders) hintLabel],
-      items: [
-        for (final placeholder in placeholders)
-          DropdownMenuItem(
-            value: placeholder,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("{$placeholder}", style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 2),
-                  Text(
-                    "$tr_addon.placeholder.$placeholder".tr(),
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
       onChanged: (v) => v == null ? null : _copy(v),
     );
   }
@@ -605,6 +595,98 @@ class _RunInShellSwitch extends StatelessWidget {
       title: Text("$tr_addon.dialog.run_in_shell".tr()),
       subtitle: Text("$tr_addon.dialog.run_in_shell_help".tr()),
       value: value,
+      onChanged: onChanged,
+    );
+  }
+}
+
+/// Inline warning shown when a record-requiring builtin is paired with a trigger
+/// that never supplies a `record_id`, explaining why save is blocked.
+class _BuiltinRecordWarning extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 12, right: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber, size: 18, color: theme.colorScheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "$tr_addon.dialog.builtin.requires_record".tr(),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A dropdown whose closed field shows a compact label while the open menu shows
+/// a title plus a multi-line description for each option. Backs both the trigger
+/// picker (persistent selection, closed field shows the chosen label) and the
+/// placeholder picker (no persistent selection, closed field always shows a hint).
+class _DescribedDropdown<T> extends StatelessWidget {
+  final String label;
+
+  /// The selected value, or null for a dropdown that keeps no persistent
+  /// selection (the closed field then renders [collapsedBuilder] / [hint]).
+  final T? value;
+  final List<T> items;
+  final String Function(T item) titleOf;
+  final String Function(T item) descriptionOf;
+
+  /// Renders the closed-field representation of [item] (shown via
+  /// `selectedItemBuilder`), e.g. just the short label, or a fixed hint.
+  final Widget Function(T item) collapsedBuilder;
+  final Widget? hint;
+  final ValueChanged<T?> onChanged;
+
+  const _DescribedDropdown({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.titleOf,
+    required this.descriptionOf,
+    required this.collapsedBuilder,
+    required this.onChanged,
+    this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DropdownButtonFormField<T>(
+      initialValue: value,
+      isExpanded: true,
+      // Allow each menu item to grow to fit its multi-line description.
+      itemHeight: null,
+      decoration: InputDecoration(labelText: label),
+      hint: hint,
+      // The closed field shows the compact form; the open menu (below) shows the
+      // long description for each option so it is visible while choosing.
+      selectedItemBuilder: (context) => [for (final item in items) collapsedBuilder(item)],
+      items: [
+        for (final item in items)
+          DropdownMenuItem(
+            value: item,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(titleOf(item), style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(descriptionOf(item), style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
+                ],
+              ),
+            ),
+          ),
+      ],
       onChanged: onChanged,
     );
   }
@@ -639,40 +721,13 @@ class _TriggerDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return DropdownButtonFormField<TriggerEvent>(
-      initialValue: value,
-      isExpanded: true,
-      // Allow each menu item to grow to fit its multi-line description.
-      itemHeight: null,
-      decoration: InputDecoration(labelText: "$tr_addon.dialog.trigger".tr()),
-      // The closed field shows only the short label; the open menu (below) shows
-      // the long description for each option so it is visible while choosing.
-      selectedItemBuilder: (context) => [
-        for (final event in TriggerEvent.values)
-          Align(alignment: Alignment.centerLeft, child: Text(triggerLabelKey(event).tr())),
-      ],
-      items: [
-        for (final event in TriggerEvent.values)
-          DropdownMenuItem(
-            value: event,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(triggerLabelKey(event).tr(), style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 2),
-                  Text(
-                    triggerDescriptionKey(event).tr(),
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
+    return _DescribedDropdown<TriggerEvent>(
+      label: "$tr_addon.dialog.trigger".tr(),
+      value: value,
+      items: TriggerEvent.values,
+      titleOf: (event) => triggerLabelKey(event).tr(),
+      descriptionOf: (event) => triggerDescriptionKey(event).tr(),
+      collapsedBuilder: (event) => Align(alignment: Alignment.centerLeft, child: Text(triggerLabelKey(event).tr())),
       onChanged: (v) => v == null ? null : onChanged(v),
     );
   }

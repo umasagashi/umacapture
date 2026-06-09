@@ -13,6 +13,12 @@ import '/src/core/utils.dart';
 int resolveExternalTimeoutSeconds(int? configured) =>
     (configured == null || configured <= 0) ? ExternalProgramAction.defaultTimeoutSeconds : configured;
 
+/// Grace period to wait for stdout/stderr to flush after the process has exited
+/// before finishing the execution anyway. A detached grandchild that inherited
+/// the pipe keeps it open past the direct process's exit, so an unbounded wait
+/// would hang [ExternalProgramRunner.start] forever and leak an execution slot.
+const _drainGrace = Duration(seconds: 5);
+
 /// Runs an [ExternalProgramAction] via [Process.start], substituting payload
 /// variables into the argument template and capturing output.
 class ExternalProgramRunner implements ActionRunner {
@@ -64,8 +70,12 @@ class ExternalProgramRunner implements ActionRunner {
 
           started.exitCode.then((code) async {
             // Wait for stdout/stderr to fully flush before snapshotting: exitCode
-            // can complete before the pipes have delivered their last bytes.
-            await Future.wait([outDone, errDone]);
+            // can complete before the pipes have delivered their last bytes. Bound
+            // the wait: a detached grandchild that inherited the pipe keeps it open
+            // after the direct process exits, which would otherwise hang here
+            // forever and permanently hold an execution slot. After the grace
+            // period, snapshot whatever has been captured so far and finish.
+            await Future.wait([outDone, errDone]).timeout(_drainGrace, onTimeout: () => const <void>[]);
             timeoutTimer?.cancel();
             final status = cancelled
                 ? ExecutionStatus.cancelled

@@ -17,14 +17,13 @@ import '/src/preference/storage_box.dart';
 const _maxHistory = 100;
 
 /// Absolute backstop on how deep a `taskExecuted` chain may run. The per-path
-/// visited set ([_chainVisitedKey]) already makes chains loop-proof; this only
-/// guards against a corrupt/oversized visited set. Tracked under [_chainDepthKey].
+/// visited set ([_chainVisitedKey]) already makes chains loop-proof — each path
+/// visits a task at most once — so its size is the chain depth; this caps that
+/// length as a guard against a corrupt/oversized visited set.
 const _maxChainDepth = 16;
 
 /// Upper bound on how many executions may run concurrently.
 const _maxActiveExecutions = 16;
-
-const _chainDepthKey = "_chain_depth";
 
 const _chainVisitedKey = "_chain_visited";
 
@@ -228,8 +227,9 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   /// a failed/cancelled upstream too; downstream tasks branch on the `task_status`
   /// placeholder rather than being silently skipped.
   void _fireTaskExecuted(TaskDefinition task, PayloadMap payload, ExecutionStatus status) {
-    final depth = int.tryParse(payload[_chainDepthKey] ?? "0") ?? 0;
-    if (depth >= _maxChainDepth) {
+    // The visited set's size is the number of hops taken so far, so it doubles as
+    // the chain depth — no separate counter needed.
+    if (chainVisitedTaskIds(payload).length >= _maxChainDepth) {
       logger.w("Addon task chain reached max depth ($_maxChainDepth); not firing taskExecuted for '${task.name}'.");
       return;
     }
@@ -240,7 +240,6 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
       "task_id": task.id,
       "task_name": task.name,
       "task_status": status.name,
-      _chainDepthKey: "${depth + 1}",
       _chainVisitedKey: visited.join(","),
     });
   }

@@ -39,6 +39,12 @@ class BuiltinActionDescriptor {
   /// the edit dialog shows a template field seeded with [defaultArgument].
   final bool usesArgument;
 
+  /// Whether the action requires the payload to carry a `record_id`. When true,
+  /// the edit dialog rejects pairing it with a trigger that never supplies one
+  /// (so the user gets immediate feedback instead of a recurring runtime failure),
+  /// and [_requireRecord] enforces it at run time.
+  final bool requiresRecord;
+
   /// Translation key for the argument field's label (only used when [usesArgument]).
   final String? argumentLabelKey;
 
@@ -67,6 +73,7 @@ class BuiltinActionDescriptor {
     required this.labelKey,
     required this.run,
     this.usesArgument = false,
+    this.requiresRecord = false,
     this.argumentLabelKey,
     this.argumentHelperKey,
     this.argumentUsesPlaceholders = true,
@@ -76,6 +83,25 @@ class BuiltinActionDescriptor {
 }
 
 const _trBuiltin = "pages.addon.builtin";
+
+/// Maps an image-kind keyword to the record file it resolves to, shared by the
+/// `copy_image` / `copy_file` argument dropdowns and [_recordImagePath] so the
+/// keyword set is defined once. Adding a kind here surfaces it in both dropdowns
+/// and the path resolver at the same time, so an option can never reference a
+/// keyword the resolver does not handle (which would silently copy the wrong
+/// image via the fallback).
+final _recordImageKinds = <String, FilePath Function(CharaDetailRecordStorage, CharaDetailRecord)>{
+  "trainee": (storage, record) => storage.traineeIconPathOf(record),
+  "skill": (storage, record) => storage.imagePathOf(record, CharaDetailRecordImageMode.skillPlain),
+  "factor": (storage, record) => storage.imagePathOf(record, CharaDetailRecordImageMode.factorPlain),
+  "campaign": (storage, record) => storage.imagePathOf(record, CharaDetailRecordImageMode.campaignPlain),
+};
+
+/// The argument options for an image-kind builtin, labeled under [labelPrefix]
+/// (e.g. `image` or `file`), derived from [_recordImageKinds].
+List<BuiltinArgumentOption> _imageKindOptions(String labelPrefix) => [
+  for (final kind in _recordImageKinds.keys) BuiltinArgumentOption(kind, "$_trBuiltin.options.${labelPrefix}_$kind"),
+];
 
 /// Registry of built-in actions, keyed by [BuiltinActionDescriptor.key].
 ///
@@ -108,14 +134,10 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     key: "copy_image_to_clipboard",
     labelKey: "$_trBuiltin.copy_image_to_clipboard",
     usesArgument: true,
+    requiresRecord: true,
     argumentLabelKey: "$_trBuiltin.copy_image_argument",
     argumentUsesPlaceholders: false,
-    argumentOptions: const [
-      BuiltinArgumentOption("trainee", "$_trBuiltin.options.image_trainee"),
-      BuiltinArgumentOption("skill", "$_trBuiltin.options.image_skill"),
-      BuiltinArgumentOption("factor", "$_trBuiltin.options.image_factor"),
-      BuiltinArgumentOption("campaign", "$_trBuiltin.options.image_campaign"),
-    ],
+    argumentOptions: _imageKindOptions("image"),
     defaultArgument: "trainee",
     run: (ref, payload, argument) async {
       final record = _requireRecord(ref, payload);
@@ -133,13 +155,11 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     key: "copy_file_to_clipboard",
     labelKey: "$_trBuiltin.copy_file_to_clipboard",
     usesArgument: true,
+    requiresRecord: true,
     argumentLabelKey: "$_trBuiltin.copy_file_argument",
     argumentUsesPlaceholders: false,
-    argumentOptions: const [
-      BuiltinArgumentOption("trainee", "$_trBuiltin.options.file_trainee"),
-      BuiltinArgumentOption("skill", "$_trBuiltin.options.file_skill"),
-      BuiltinArgumentOption("factor", "$_trBuiltin.options.file_factor"),
-      BuiltinArgumentOption("campaign", "$_trBuiltin.options.file_campaign"),
+    argumentOptions: [
+      ..._imageKindOptions("file"),
       BuiltinArgumentOption("record_json", "$_trBuiltin.options.file_record"),
     ],
     defaultArgument: "trainee",
@@ -192,13 +212,10 @@ CharaDetailRecord _requireRecord(RefBase ref, PayloadMap payload) {
   return record;
 }
 
-/// Maps an image-kind keyword to its file path within [record].
+/// Maps an image-kind keyword to its file path within [record], falling back to
+/// the trainee icon for an unknown keyword (matches the dropdown's default).
 FilePath _recordImagePath(RefBase ref, CharaDetailRecord record, String kind) {
   final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-  return switch (kind) {
-    "skill" => storage.imagePathOf(record, CharaDetailRecordImageMode.skillPlain),
-    "factor" => storage.imagePathOf(record, CharaDetailRecordImageMode.factorPlain),
-    "campaign" => storage.imagePathOf(record, CharaDetailRecordImageMode.campaignPlain),
-    _ => storage.traineeIconPathOf(record),
-  };
+  final resolver = _recordImageKinds[kind] ?? _recordImageKinds["trainee"]!;
+  return resolver(storage, record);
 }

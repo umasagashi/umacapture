@@ -9,12 +9,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce_flutter/adapters.dart';
 import 'package:umacapture/src/addon/execution/execution_controller.dart';
 import 'package:umacapture/src/addon/execution/execution_models.dart';
+import 'package:umacapture/src/addon/execution/builtin_actions.dart';
 import 'package:umacapture/src/addon/execution/external_program_runner.dart';
 import 'package:umacapture/src/addon/execution/webhook_runner.dart';
 import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
 import 'package:umacapture/src/addon/payload_enricher.dart';
 import 'package:umacapture/src/addon/task_definitions.dart';
+import 'package:umacapture/src/addon/trigger_catalog.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
@@ -317,6 +319,54 @@ void main() {
     });
   });
 
+  group('builtin action / trigger compatibility', () {
+    // Guards the dialog's save gate: a record-dependent builtin paired with a
+    // trigger that never supplies a record_id would fail on every run. The dialog
+    // blocks that pairing using these two facts, so both must stay in sync.
+    test('record-dependent builtins are flagged requiresRecord', () {
+      expect(builtinActionRegistry['copy_image_to_clipboard']!.requiresRecord, isTrue);
+      expect(builtinActionRegistry['copy_file_to_clipboard']!.requiresRecord, isTrue);
+      expect(builtinActionRegistry['show_toast']!.requiresRecord, isFalse);
+      expect(builtinActionRegistry['play_sound']!.requiresRecord, isFalse);
+    });
+
+    test('only record-bearing triggers expose record_id', () {
+      expect(placeholdersForTrigger(TriggerEvent.recordCaptured), contains('record_id'));
+      // A chain hop may forward a record_id, so taskExecuted exposes it too.
+      expect(placeholdersForTrigger(TriggerEvent.taskExecuted), contains('record_id'));
+      expect(placeholdersForTrigger(TriggerEvent.manual), isNot(contains('record_id')));
+      expect(placeholdersForTrigger(TriggerEvent.captureStarted), isNot(contains('record_id')));
+      expect(placeholdersForTrigger(TriggerEvent.recordExported), isNot(contains('record_id')));
+    });
+
+    test('every catalogued placeholder has a ja.json translation, and vice-versa', () {
+      // The dropdown lists placeholders from trigger_catalog and renders each via
+      // a `pages.addon.placeholder.<key>` translation. Nothing links the two
+      // lists, so a drift shows the user a raw key or hides a real placeholder.
+      // This guards that they stay byte-identical.
+      final ja = jsonDecode(File('assets/translations/ja.json').readAsStringSync()) as Map<String, dynamic>;
+      final translated = (((ja['pages'] as Map)['addon'] as Map)['placeholder'] as Map).keys.cast<String>().toSet();
+      final catalogued = {for (final trigger in TriggerEvent.values) ...placeholdersForTrigger(trigger)};
+      expect(catalogued.difference(translated), isEmpty, reason: 'placeholders missing a ja.json translation');
+      expect(
+        translated.difference(catalogued),
+        isEmpty,
+        reason: 'stale placeholder translations with no catalog entry',
+      );
+    });
+
+    test('image-kind argument options are derived from one shared keyword set', () {
+      // copy_image and copy_file share the image kinds; copy_file additionally
+      // offers record_json. Deriving both from one table keeps the dropdown
+      // options and the path resolver from drifting (a stale option would
+      // silently copy the wrong image).
+      final imageKeys = builtinActionRegistry['copy_image_to_clipboard']!.argumentOptions!.map((o) => o.value);
+      final fileKeys = builtinActionRegistry['copy_file_to_clipboard']!.argumentOptions!.map((o) => o.value);
+      expect(imageKeys, ['trainee', 'skill', 'factor', 'campaign']);
+      expect(fileKeys, ['trainee', 'skill', 'factor', 'campaign', 'record_json']);
+    });
+  });
+
   group('enrichPayload', () {
     // The fixture's metadata.record_id.self equals this id, so a record written
     // under active/<id>/ resolves to a record whose own id matches the path.
@@ -431,6 +481,13 @@ void main() {
       // eval 56463 is below border[2] (100000), so the rank index is 2.
       expect(result['rank'], 'rank2');
       expect(result['card_name'], 'card183');
+
+      // Every user-facing key the enricher sets must be a catalogued placeholder
+      // (so it shows in the dropdown); the `_`-prefixed bookkeeping keys are
+      // internal and intentionally excluded. Guards enricher/catalog drift.
+      final catalogued = {for (final trigger in TriggerEvent.values) ...placeholdersForTrigger(trigger)};
+      final userKeys = result.keys.where((k) => !k.startsWith('_'));
+      expect(catalogued, containsAll(userKeys));
     });
 
     test('resolveRecordById returns null when missing and the record when present', () {
