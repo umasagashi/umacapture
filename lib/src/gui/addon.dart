@@ -190,11 +190,15 @@ class _HistoryCard extends ConsumerWidget {
                 "${entry.exitCode == null ? '' : ' · exit ${entry.exitCode}'}",
                 style: theme.textTheme.bodySmall,
               ),
-              onTap: entry.error == null ? null : () => _showDetail(context, ref, entry),
+              trailing: _hasDetail(entry) ? const Icon(Icons.chevron_right) : null,
+              onTap: _hasDetail(entry) ? () => _showDetail(context, ref, entry) : null,
             ),
       ],
     );
   }
+
+  /// Whether [entry] has any captured detail (error or output) worth opening.
+  bool _hasDetail(HistoryEntry entry) => (entry.error?.isNotEmpty == true) || (entry.output?.isNotEmpty == true);
 
   void _showDetail(BuildContext context, WidgetRef ref, HistoryEntry entry) {
     CardDialog.show(
@@ -202,7 +206,45 @@ class _HistoryCard extends ConsumerWidget {
       (_) => CardDialog(
         dialogTitle: entry.taskName,
         closeButtonTooltip: "$tr_addon.dialog.close".tr(),
-        content: SelectableText(entry.error ?? ""),
+        content: _HistoryDetail(entry: entry),
+      ),
+    );
+  }
+}
+
+/// Stacked error and output sections for a history entry's detail dialog.
+///
+/// Both can run up to the capture cap; the body scrolls and stays selectable.
+class _HistoryDetail extends StatelessWidget {
+  const _HistoryDetail({required this.entry});
+
+  final HistoryEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final error = entry.error;
+    final output = entry.output;
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 360),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (error?.isNotEmpty == true) ...[
+              Text("$tr_addon.dialog.error".tr(), style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SelectableText(error!),
+            ],
+            if (error?.isNotEmpty == true && output?.isNotEmpty == true) const SizedBox(height: 16),
+            if (output?.isNotEmpty == true) ...[
+              Text("$tr_addon.dialog.output".tr(), style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              SelectableText(output!),
+            ],
+          ],
+        ),
       ),
     );
   }

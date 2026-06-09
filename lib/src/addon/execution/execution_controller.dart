@@ -121,6 +121,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     required int durationMs,
     int? exitCode,
     String? error,
+    String? output,
   }) {
     return HistoryEntry(
       executionId: executionId,
@@ -132,6 +133,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
       durationMs: durationMs,
       exitCode: exitCode,
       error: error,
+      output: output,
     );
   }
 
@@ -207,6 +209,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
         durationMs: result.duration.inMilliseconds,
         exitCode: result.exitCode,
         error: result.error ?? (result.stderr?.isNotEmpty == true ? result.stderr : null),
+        output: result.stdout?.isNotEmpty == true ? result.stdout : null,
       );
       state = state.copyWith(
         active: state.active.where((e) => e.executionId != executionId).toList(),

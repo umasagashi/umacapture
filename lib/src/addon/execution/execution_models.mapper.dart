@@ -134,6 +134,12 @@ class HistoryEntryMapper extends ClassMapperBase<HistoryEntry> {
     _$error,
     opt: true,
   );
+  static String? _$output(HistoryEntry v) => v.output;
+  static const Field<HistoryEntry, String> _f$output = Field(
+    'output',
+    _$output,
+    opt: true,
+  );
 
   @override
   final MappableFields<HistoryEntry> fields = const {
@@ -146,6 +152,7 @@ class HistoryEntryMapper extends ClassMapperBase<HistoryEntry> {
     #durationMs: _f$durationMs,
     #exitCode: _f$exitCode,
     #error: _f$error,
+    #output: _f$output,
   };
 
   static HistoryEntry _instantiate(DecodingData data) {
@@ -159,6 +166,7 @@ class HistoryEntryMapper extends ClassMapperBase<HistoryEntry> {
       durationMs: data.dec(_f$durationMs),
       exitCode: data.dec(_f$exitCode),
       error: data.dec(_f$error),
+      output: data.dec(_f$output),
     );
   }
 

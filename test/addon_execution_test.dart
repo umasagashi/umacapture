@@ -228,6 +228,29 @@ void main() {
 
       expect(container.read(addonExecutionControllerProvider).history, isEmpty);
     });
+
+    test('round-trips the output field through toMap/fromMap', () {
+      final entry = HistoryEntry(
+        executionId: 'e1',
+        taskId: 't1',
+        taskName: 'Task 1',
+        trigger: TriggerEvent.manual,
+        status: ExecutionStatus.success,
+        startedAt: DateTime.utc(2024, 1, 1),
+        durationMs: 5,
+        exitCode: 0,
+        output: 'captured stdout',
+      );
+      final decoded = HistoryEntryMapper.fromMap(entry.toMap());
+      expect(decoded.output, 'captured stdout');
+    });
+
+    test('decodes legacy entries without an output key to null', () {
+      // Drop the key to mimic data persisted before `output` existed.
+      final legacy = sampleEntry('e1').toMap()..remove('output');
+      final decoded = HistoryEntryMapper.fromMap(legacy);
+      expect(decoded.output, isNull);
+    });
   });
 
   group('TaskDefinitionsNotifier.build', () {

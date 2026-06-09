@@ -1008,6 +1008,8 @@
                 "title_add": "タスクを追加",
                 "title_edit": "タスクを編集",
                 "close": "閉じる",
+                "output": "出力",
+                "error": "エラー",
                 "name": "タスク名",
                 "trigger": "トリガ",
                 "action_kind": "アクション種別",

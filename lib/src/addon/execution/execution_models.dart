@@ -107,6 +107,10 @@ class HistoryEntry with HistoryEntryMappable {
   final int? exitCode;
   final String? error;
 
+  /// Captured stdout (external program) or response body (webhook), truncated to
+  /// [maxCaptureChars]. Nullable so legacy entries without this key decode fine.
+  final String? output;
+
   const HistoryEntry({
     required this.executionId,
     required this.taskId,
@@ -117,5 +121,6 @@ class HistoryEntry with HistoryEntryMappable {
     required this.durationMs,
     this.exitCode,
     this.error,
+    this.output,
   });
 }
