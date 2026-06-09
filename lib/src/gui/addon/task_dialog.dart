@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/execution/builtin_actions.dart';
@@ -10,6 +11,7 @@ import '/src/addon/task_definitions.dart';
 import '/src/addon/trigger_catalog.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
+import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_addon = "pages.addon";
@@ -364,7 +366,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       ),
     ),
     const SizedBox(height: 8),
-    _tokenChips(f.args, trigger, onChanged),
+    _TokenDropdown(trigger: trigger),
     const SizedBox(height: 16),
     TextField(
       controller: f.workingDir,
@@ -406,7 +408,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       onChanged: (_) => onChanged(),
     ),
     const SizedBox(height: 8),
-    _tokenChips(f.url, trigger, onChanged),
+    _TokenDropdown(trigger: trigger),
     const SizedBox(height: 16),
     Row(
       children: [
@@ -447,7 +449,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       ),
     ),
     const SizedBox(height: 8),
-    _tokenChips(f.body, trigger, onChanged),
+    _TokenDropdown(trigger: trigger),
     const SizedBox(height: 16),
     TextField(
       controller: f.webhookTimeout,
@@ -497,10 +499,7 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
             helperText: (descriptor.argumentHelperKey ?? "$tr_addon.dialog.arguments.helper").tr(),
           ),
         ),
-        if (descriptor.argumentUsesTokens) ...[
-          const SizedBox(height: 8),
-          _tokenChips(f.builtinArg, trigger, onChanged),
-        ],
+        if (descriptor.argumentUsesTokens) ...[const SizedBox(height: 8), _TokenDropdown(trigger: trigger)],
       ],
     ],
   ];
@@ -521,27 +520,71 @@ Widget _builtinArgumentDropdown(_ActionFields f, BuiltinActionDescriptor descrip
   );
 }
 
-/// A row of tappable chips that append `{token}` to [controller]. Each chip's
-/// tooltip explains what the token expands to. The set reflects [trigger].
-/// [onChanged] notifies the host so save-gating / validation re-evaluate, since
-/// a programmatic `controller.text` assignment does not fire `TextField.onChanged`.
-Widget _tokenChips(TextEditingController controller, TriggerEvent trigger, VoidCallback onChanged) {
-  return Wrap(
-    spacing: 8,
-    children: [
-      for (final token in tokensForTrigger(trigger))
-        ActionChip(
-          label: Text("{$token}"),
-          tooltip: "$tr_addon.token.$token".tr(),
-          onPressed: () {
-            final text = controller.text;
-            final sep = text.isEmpty || text.endsWith(" ") ? "" : " ";
-            controller.text = "$text$sep{$token}";
-            onChanged();
-          },
-        ),
-    ],
-  );
+/// A dropdown that copies `{token}` to the clipboard when an item is picked.
+/// Mirrors [_TriggerDropdown]'s layout — each item shows the token plus a
+/// multi-line description of what it expands to. The set reflects [trigger].
+///
+/// It holds no persistent selection: picking an item copies the token and the
+/// closed field always shows the placeholder, so any token can be copied
+/// repeatedly. The user pastes it into the field themselves, so this widget
+/// never touches the form state.
+class _TokenDropdown extends StatelessWidget {
+  final TriggerEvent trigger;
+
+  const _TokenDropdown({required this.trigger});
+
+  void _copy(String token) {
+    final literal = "{$token}";
+    Clipboard.setData(ClipboardData(text: literal));
+    Toaster.show(ToastData.success(description: "$tr_addon.dialog.copied_token".tr(namedArgs: {"token": literal})));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final tokens = tokensForTrigger(trigger);
+    final placeholder = Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        "$tr_addon.dialog.copy_token_hint".tr(),
+        style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+      ),
+    );
+    return DropdownButtonFormField<String>(
+      // No persistent selection: every closed-field state renders the same
+      // placeholder (hint when untouched, selectedItemBuilder once picked), so
+      // the big multi-line item never shows in the collapsed field.
+      initialValue: null,
+      isExpanded: true,
+      // Allow each menu item to grow to fit its multi-line description.
+      itemHeight: null,
+      decoration: InputDecoration(labelText: "$tr_addon.dialog.copy_token".tr()),
+      hint: placeholder,
+      selectedItemBuilder: (context) => [for (final _ in tokens) placeholder],
+      items: [
+        for (final token in tokens)
+          DropdownMenuItem(
+            value: token,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("{$token}", style: theme.textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    "$tr_addon.token.$token".tr(),
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+      onChanged: (v) => v == null ? null : _copy(v),
+    );
+  }
 }
 
 /// A switch row that does not depend on the host's setState, used by the

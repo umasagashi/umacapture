@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
+import '/src/addon/payload_enricher.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
@@ -244,8 +245,9 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     });
   }
 
-  /// Runs [task] on demand (manual trigger).
-  void runManual(TaskDefinition task) => run(task, const {"event": "manual"});
+  /// Runs [task] on demand (manual trigger). Enriched like the event triggers so
+  /// the install-constant module-data path tokens are available here too.
+  void runManual(TaskDefinition task) => run(task, enrichPayload(ref.base, const {"event": "manual"}));
 
   void cancel(String executionId) {
     for (final e in state.active) {

@@ -15,30 +15,42 @@ const recordJsonName = "record.json";
 /// hop. `_`-prefixed, so it is never substituted into action templates.
 const _enrichedMarker = "_enriched";
 
-/// Expands a trigger [base] payload with rich tokens derived from the captured
-/// record, so actions can reference `{card_name}`, `{rank}`, `{evaluation_value}`
-/// etc. instead of just `{record_id}`.
+/// Expands a trigger [base] payload with rich tokens so actions can reference
+/// `{card_name}`, `{rank}`, `{record_json_path}`, `{modules_dir}` etc. instead of
+/// just `{record_id}`.
 ///
-/// A no-op when [base] carries no `record_id` (e.g. capture/export/manual
-/// triggers). Best-effort: any failure (record not found, module data not yet
-/// loaded) leaves the corresponding tokens absent, which the substituter then
-/// expands to the empty string — consistent with the unknown-token rule.
+/// Module-data path tokens are install-constant and added for every trigger.
+/// Record tokens are added only when [base] carries a `record_id` (the
+/// record-captured trigger, or a chain hop forwarding it). Best-effort: any
+/// failure (record not found, module data not yet loaded) leaves the
+/// corresponding tokens absent, which the substituter then expands to the empty
+/// string — consistent with the unknown-token rule.
 PayloadMap enrichPayload(RefBase ref, PayloadMap base) {
   // Already enriched upstream (e.g. a chain hop forwarding a record's tokens);
   // re-resolving would repeat the disk read of resolveRecordById for no gain.
   if (base.containsKey(_enrichedMarker)) return base;
+  final enriched = {...base};
+  // Install-constant paths to the downloaded master data (labels.json, *_info.json).
+  // Added regardless of trigger so an action can decode a record's numeric IDs
+  // into names, or read any other module file via {modules_dir}.
+  _addModuleTokens(ref, enriched);
   final recordId = base["record_id"];
-  if (recordId == null || recordId.isEmpty) return base;
-  try {
-    final record = resolveRecordById(ref, recordId);
-    if (record == null) return base;
-    final enriched = {...base, _enrichedMarker: "1"};
-    _addRecordTokens(ref, enriched, record);
-    return enriched;
-  } catch (e, s) {
-    logger.w("Failed to enrich addon payload for record $recordId: $e\n$s");
-    return base;
+  if (recordId != null && recordId.isNotEmpty) {
+    try {
+      final record = resolveRecordById(ref, recordId);
+      if (record != null) {
+        _addRecordTokens(ref, enriched, record);
+        // Mark only once the (possibly disk-backed) record lookup has succeeded,
+        // so a chain hop forwarding these tokens skips repeating it. A not-yet-
+        // resolvable record stays unmarked so a later hop can still retry; the
+        // idempotent module tokens are simply re-derived on that hop.
+        enriched[_enrichedMarker] = "1";
+      }
+    } catch (e, s) {
+      logger.w("Failed to enrich addon payload for record $recordId: $e\n$s");
+    }
   }
+  return enriched;
 }
 
 /// Resolves the record by id, preferring the in-memory store but falling back to
@@ -76,10 +88,17 @@ void _addRecordTokens(RefBase ref, PayloadMap p, CharaDetailRecord r) {
 
   final activeDir = _safe(() => ref.read(pathInfoProvider).charaDetailActiveDir);
   if (activeDir != null) {
-    p["record_dir"] = (activeDir / r.id).path;
+    final recordDir = activeDir / r.id;
+    p["record_dir"] = recordDir.path;
+    p["record_json_path"] = recordDir.filePath(recordJsonName).path;
     // Reuse the record's own relative icon path so the "trainee.jpg" literal
     // lives only on CharaDetailRecord.traineeIconPath.
     p["trainee_icon_path"] = activeDir.filePath(r.traineeIconPath).path;
+    // Reuse CharaDetailRecordImageMode.fileName so the capture-image filenames
+    // are not duplicated here.
+    p["skill_image_path"] = recordDir.filePath(CharaDetailRecordImageMode.skillPlain.fileName).path;
+    p["factor_image_path"] = recordDir.filePath(CharaDetailRecordImageMode.factorPlain.fileName).path;
+    p["campaign_image_path"] = recordDir.filePath(CharaDetailRecordImageMode.campaignPlain.fileName).path;
   }
 
   // Module-data-dependent tokens (labels / card names / rank). Each is
@@ -103,6 +122,21 @@ void _addRecordTokens(RefBase ref, PayloadMap p, CharaDetailRecord r) {
   if (cards != null && r.trainee.card >= 0 && r.trainee.card < cards.length) {
     p["card_name"] = cards[r.trainee.card].names.first;
   }
+}
+
+/// Adds the install-constant module-data path tokens. Just the directory plus
+/// the most useful decode tables — any other module file is reachable through
+/// `{modules_dir}`. The paths are derived from [pathInfoProvider] alone, so they
+/// resolve even before the module JSON is loaded (the file may simply not exist
+/// yet).
+void _addModuleTokens(RefBase ref, PayloadMap p) {
+  final modulesDir = _safe(() => ref.read(pathInfoProvider).modulesDir);
+  if (modulesDir == null) return;
+  p["modules_dir"] = modulesDir.path;
+  p["labels_path"] = modulesDir.filePath("labels.json").path;
+  p["skill_info_path"] = modulesDir.filePath("skill_info.json").path;
+  p["factor_info_path"] = modulesDir.filePath("factor_info.json").path;
+  p["card_info_path"] = modulesDir.filePath("character_card_info.json").path;
 }
 
 /// Runs [f], returning null instead of throwing — used to treat a not-yet-loaded

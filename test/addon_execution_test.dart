@@ -346,20 +346,38 @@ void main() {
 
     RefBase refOf(ProviderContainer container) => container.read(_refBaseProvider);
 
-    test('returns the base payload unchanged when record_id is absent', () {
-      final container = ProviderContainer.test();
-      addTearDown(container.dispose);
-      expect(enrichPayload(refOf(container), const {'event': 'manual'}), const {'event': 'manual'});
-    });
-
-    test('returns the base payload unchanged when the record cannot be found', () {
+    test('adds module-data path tokens for any trigger, even without a record_id', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
-      const base = {'event': 'record_captured', 'record_id': 'missing'};
-      expect(enrichPayload(refOf(container), base), base);
+      final result = enrichPayload(refOf(container), const {'event': 'manual'});
+      final info = container.read(pathInfoProvider);
+
+      expect(result['event'], 'manual');
+      expect(result['modules_dir'], info.modulesDir.path);
+      expect(result['labels_path'], info.modulesDir.filePath('labels.json').path);
+      expect(result['skill_info_path'], info.modulesDir.filePath('skill_info.json').path);
+      expect(result['factor_info_path'], info.modulesDir.filePath('factor_info.json').path);
+      expect(result['card_info_path'], info.modulesDir.filePath('character_card_info.json').path);
+
+      // No record_id → no record tokens, and unmarked so a later hop can retry.
+      expect(result.containsKey('record_dir'), isFalse);
+      expect(result.containsKey('_enriched'), isFalse);
     });
 
-    test('populates record tokens from disk, omitting module tokens when modules are unloaded', () {
+    test('adds module tokens but no record tokens when the record cannot be found', () {
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
+      addTearDown(container.dispose);
+      final result = enrichPayload(refOf(container), const {'event': 'record_captured', 'record_id': 'missing'});
+      final info = container.read(pathInfoProvider);
+
+      expect(result['modules_dir'], info.modulesDir.path);
+      // Record not found → record tokens absent and unmarked so a later hop retries.
+      expect(result.containsKey('evaluation_value'), isFalse);
+      expect(result.containsKey('record_dir'), isFalse);
+      expect(result.containsKey('_enriched'), isFalse);
+    });
+
+    test('populates record tokens (incl. paths) from disk, omitting module-data tokens when unloaded', () {
       seedFixture(fixtureId);
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
@@ -376,10 +394,18 @@ void main() {
       expect(result['trainer_id'], '0a1831eb-1482-472f-9c14-bfc3030ad8ff');
 
       final info = container.read(pathInfoProvider);
-      expect(result['record_dir'], (info.charaDetailActiveDir / fixtureRecord.id).path);
+      final recordDir = info.charaDetailActiveDir / fixtureRecord.id;
+      expect(result['record_dir'], recordDir.path);
+      expect(result['record_json_path'], recordDir.filePath('record.json').path);
       expect(result['trainee_icon_path'], info.charaDetailActiveDir.filePath(fixtureRecord.traineeIconPath).path);
+      expect(result['skill_image_path'], recordDir.filePath('skill.png').path);
+      expect(result['factor_image_path'], recordDir.filePath('factor.png').path);
+      expect(result['campaign_image_path'], recordDir.filePath('campaign.png').path);
 
-      // Module-dependent tokens are best-effort: absent when modules aren't loaded.
+      // Module-data path tokens are install-constant, so present even here.
+      expect(result['modules_dir'], info.modulesDir.path);
+
+      // Module-DATA-dependent tokens are best-effort: absent when modules aren't loaded.
       expect(result.containsKey('card_name'), isFalse);
       expect(result.containsKey('rank'), isFalse);
       expect(result.containsKey('scenario'), isFalse);

@@ -9,8 +9,18 @@ import '/src/gui/chara_detail/export_button.dart';
 
 const _trTrigger = "pages.addon.trigger";
 
-/// Tokens available for every trigger.
-const _commonTokens = <String>["event"];
+/// Tokens available for every trigger. Besides `event`, these are the
+/// install-constant paths to the downloaded master data, populated by
+/// [enrichPayload] for any trigger so an action can decode a record's numeric
+/// IDs into names (or read any other module file via `{modules_dir}`).
+const _commonTokens = <String>[
+  "event",
+  "modules_dir",
+  "labels_path",
+  "skill_info_path",
+  "factor_info_path",
+  "card_info_path",
+];
 
 /// Tokens carrying a captured record's data, populated by [enrichPayload] when
 /// the trigger provides a `record_id` (i.e. the record-captured trigger).
@@ -29,7 +39,11 @@ const recordTokens = <String>[
   "trained_date",
   "trainer_id",
   "record_dir",
+  "record_json_path",
   "trainee_icon_path",
+  "skill_image_path",
+  "factor_image_path",
+  "campaign_image_path",
 ];
 
 /// Tokens populated only by the export-completed trigger.

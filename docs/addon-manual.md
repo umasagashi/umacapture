@@ -125,16 +125,25 @@
 データは**トークン**という名前付きの値で、アクションの文字列の中に `{トークン名}` と書くと、
 実行時に実際の値へ置き換わります。
 
-使えるトークンは 3 つです（外部プログラムの引数欄・内蔵アクションの内容欄で、
-**チップをタップして挿入**でき、チップにマウスを乗せると意味が tooltip で出ます）。
+トークンは各入力欄（外部プログラムの引数欄・Webhook の URL／本文欄・内蔵アクションの内容欄）の
+下にある**「トークンを挿入」ドロップダウン**から選んで挿入できます。各項目にはトークン名と説明が
+表示され、選んだトリガに応じて一覧が切り替わります。
 
 | トークン | 意味 | 値が入るトリガ |
 | --- | --- | --- |
 | `{event}` | 発火したイベントの識別子（例: `record_captured`） | すべて |
+| `{modules_dir}` | マスタデータ（`labels.json` などの ID→名称変換表）が入ったフォルダのパス | すべて |
+| `{labels_path}` | 脚質・適性・シナリオ・ランク等の表示名を収めた `labels.json` のフルパス | すべて |
+| `{skill_info_path}` | スキル ID→名称などの `skill_info.json` のフルパス | すべて |
+| `{factor_info_path}` | 因子 ID→名称などの `factor_info.json` のフルパス | すべて |
+| `{card_info_path}` | 育成カード ID→名称などの `character_card_info.json` のフルパス | すべて |
 | `{record_id}` | 取得した殿堂入りレコードの ID | レコード取得時のみ |
 | `{export_path}` | 書き出されたファイルのパス | エクスポート完了時のみ |
 | `{task_name}` `{task_id}` | 連鎖元のタスク名 / ID | 他のタスク実行時のみ |
 | `{task_status}` | 連鎖元タスクの実行結果（`success` / `failure` / `cancelled` / `timeout`） | 他のタスク実行時のみ |
+
+> `{record_json_path}`（後述）はレコードの数値 ID を多く含みます。`{modules_dir}` 配下の各変換表を
+> 併せて渡せば、外部プログラム側でスキル名・因子名・キャラ名などへ解決できます。
 
 さらに**「レコード取得時」トリガ**では、取得したレコードの内容が以下のトークンとして使えます
 （チップは選択中のトリガに応じて切り替わります。「他のタスク実行時」では元タスクから引き継いだトークンも出ます）。
@@ -150,7 +159,11 @@
 | `{trained_date}` | 育成完了日（例: `2026/06/08`） |
 | `{trainer_id}` | トレーナー ID |
 | `{record_dir}` | レコードの保存フォルダのパス |
-| `{trainee_icon_path}` | 育成ウマ娘のアイコン画像のフルパス |
+| `{record_json_path}` | レコード本体 `record.json` のフルパス（各種 ID・ステータスを含む） |
+| `{trainee_icon_path}` | 育成ウマ娘のアイコン画像（`trainee.jpg`）のフルパス |
+| `{skill_image_path}` | スキル画面のキャプチャ画像（`skill.png`）のフルパス |
+| `{factor_image_path}` | 因子画面のキャプチャ画像（`factor.png`）のフルパス |
+| `{campaign_image_path}` | 育成成績画面のキャプチャ画像（`campaign.png`）のフルパス |
 
 > レコード系トークンは、認識直後にレコードが見つからない場合でも `record.json` を直接読んで補完します。
 > モジュール（ラベルデータ）が未読込のときは `{rank}` `{card_name}` `{scenario}` だけ空になることがあります。
@@ -160,6 +173,7 @@
 - **そのトリガで値が入らないトークンは、空文字に置き換わります。**
   例: 「キャプチャ開始時」トリガで `{record_id}` を使っても空になります。
 - **手動実行**では `{event}` が `manual` になり、`{record_id}` / `{export_path}` は空です。
+  ただし `{modules_dir}` などのモジュール系トークンは手動実行でも値が入ります。
 - 定義していないトークン（例: `{foo}`）も空文字になります。
 
 ---
@@ -376,10 +390,11 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 | トークン | 値が入るトリガ |
 | --- | --- |
 | `{event}` | すべて（手動は `manual`） |
+| `{modules_dir}` `{labels_path}` `{skill_info_path}` `{factor_info_path}` `{card_info_path}` | すべて（マスタデータのパス） |
 | `{record_id}` | レコード取得時 |
 | `{export_path}` | エクスポート完了時 |
 | `{task_name}` `{task_id}` `{task_status}` | 他のタスク実行時 |
-| `{card_name}` `{rank}` `{evaluation_value}` `{fans}` `{speed}` `{stamina}` `{power}` `{guts}` `{intelligence}` `{scenario}` `{trained_date}` `{trainer_id}` `{record_dir}` `{trainee_icon_path}` | レコード取得時（他のタスク実行時にも引き継がれる場合あり） |
+| `{card_name}` `{rank}` `{evaluation_value}` `{fans}` `{speed}` `{stamina}` `{power}` `{guts}` `{intelligence}` `{scenario}` `{trained_date}` `{trainer_id}` `{record_dir}` `{record_json_path}` `{trainee_icon_path}` `{skill_image_path}` `{factor_image_path}` `{campaign_image_path}` | レコード取得時（他のタスク実行時にも引き継がれる場合あり） |
 
 **アクション（外部プログラム）**: パス（必須） / 引数テンプレート / カレントディレクトリ / タイムアウト（必須・既定 30 秒） / シェル経由で実行
 - 引数はスペース区切り。空白を含む値は `"{token}"` で囲む。終了コード 0 が成功。
