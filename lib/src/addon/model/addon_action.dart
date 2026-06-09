@@ -31,9 +31,9 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
   /// Absolute path to the program to launch.
   final String programPath;
 
-  /// Argument template. Tokens like `{record_id}` are substituted from the event
-  /// payload after the template is split into individual arguments, so a value
-  /// containing spaces stays a single argument.
+  /// Argument template. Placeholders like `{record_id}` are substituted from the
+  /// event payload after the template is split into individual arguments, so a
+  /// value containing spaces stays a single argument.
   final String argumentTemplate;
 
   /// Hard timeout in seconds, or null for no timeout.
@@ -42,8 +42,8 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
   /// Whether to run through the system shell. Required for `.bat` files and shell
   /// builtins (e.g. `echo`).
   ///
-  /// WARNING: with the shell enabled, substituted token values are handed to the
-  /// shell **unescaped**, so a value containing metacharacters (`&`, `|`, `%VAR%`,
+  /// WARNING: with the shell enabled, substituted placeholder values are handed to
+  /// the shell **unescaped**, so a value containing metacharacters (`&`, `|`, `%VAR%`,
   /// …) is interpreted by the shell. Only enable it for trusted templates. See
   /// `expandArgumentTemplate` in `external_program_runner.dart` for details.
   final bool runInShell;
@@ -78,14 +78,14 @@ class WebhookAction extends AddonAction with WebhookActionMappable {
   /// gives up.
   static const int defaultTimeoutSeconds = 30;
 
-  /// Target URL. Tokens like `{record_id}` are substituted from the payload.
+  /// Target URL. Placeholders like `{record_id}` are substituted from the payload.
   final String url;
 
   /// HTTP method, e.g. `POST` or `GET`.
   final String method;
 
-  /// Request body template. Tokens are substituted from the payload. Ignored for
-  /// methods without a body (e.g. `GET`).
+  /// Request body template. Placeholders are substituted from the payload. Ignored
+  /// for methods without a body (e.g. `GET`).
   final String bodyTemplate;
 
   /// How to send the body: `json` (application/json), `form`
@@ -117,8 +117,8 @@ class BuiltinAction extends AddonAction with BuiltinActionMappable {
   final String actionKey;
 
   /// Optional free-form argument for actions that take one (e.g. the clipboard
-  /// action's content template). Tokens like `{record_id}` are substituted from
-  /// the event payload. Null for actions that take no argument.
+  /// action's content template). Placeholders like `{record_id}` are substituted
+  /// from the event payload. Null for actions that take no argument.
   final String? argument;
 
   const BuiltinAction({required this.actionKey, this.argument});

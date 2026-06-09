@@ -10,11 +10,12 @@ part 'execution_models.mapper.dart';
 /// (e.g. `{"event": "record_captured", "record_id": "abc"}`).
 typedef PayloadMap = Map<String, String>;
 
-final _payloadTokenPattern = RegExp(r'\{(\w+)\}');
+final _payloadPlaceholderPattern = RegExp(r'\{(\w+)\}');
 
-/// Substitutes `{var}` tokens in [template] with values from [payload]. Unknown
-/// tokens expand to the empty string. Shared by the external-program argument
-/// expander and built-in actions that take a content template.
+/// Substitutes `{var}` placeholders in [template] with values from [payload].
+/// Unknown placeholders expand to the empty string. Shared by the
+/// external-program argument expander and built-in actions that take a content
+/// template.
 ///
 /// When [transform] is given it is applied to each substituted value (not the
 /// literal template text) — e.g. [Uri.encodeQueryComponent] to safely inject
@@ -22,10 +23,10 @@ final _payloadTokenPattern = RegExp(r'\{(\w+)\}');
 ///
 /// Keys starting with `_` are an internal namespace (chain bookkeeping such as
 /// `_chain_visited`, the `_enriched` marker) and are NEVER substituted — a
-/// `{_chain_visited}` token expands to empty so internal control state cannot
-/// leak into command args, URLs, or webhook bodies.
+/// `{_chain_visited}` placeholder expands to empty so internal control state
+/// cannot leak into command args, URLs, or webhook bodies.
 String substitutePayload(String template, PayloadMap payload, {String Function(String value)? transform}) {
-  return template.replaceAllMapped(_payloadTokenPattern, (m) {
+  return template.replaceAllMapped(_payloadPlaceholderPattern, (m) {
     final key = m.group(1)!;
     final value = key.startsWith('_') ? '' : (payload[key] ?? '');
     return transform == null ? value : transform(value);
@@ -42,8 +43,8 @@ const maxCaptureChars = 8192;
 String truncateCapture(String s) => s.length > maxCaptureChars ? s.substring(0, maxCaptureChars) : s;
 
 /// Escapes [value] as the inner content of a JSON string (without the wrapping
-/// quotes), so a token value containing `"`, `\`, or a newline can be substituted
-/// into a JSON body template while keeping it valid JSON.
+/// quotes), so a placeholder value containing `"`, `\`, or a newline can be
+/// substituted into a JSON body template while keeping it valid JSON.
 String jsonStringFragment(String value) {
   final encoded = jsonEncode(value);
   return encoded.substring(1, encoded.length - 1);

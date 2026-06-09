@@ -982,7 +982,7 @@
                     "sound_error": "エラー音"
                 }
             },
-            "token": {
+            "placeholder": {
                 "event": "発火したイベントの識別子（例: record_captured）。すべてのトリガで利用できます。",
                 "modules_dir": "マスタデータ（labels.json などのID→名称変換表）が入ったフォルダのパス。すべてのトリガで利用できます。",
                 "labels_path": "脚質・適性・シナリオ・ランク等の表示名を収めた labels.json のフルパス。すべてのトリガで利用できます。",
@@ -1022,9 +1022,9 @@
                 "name": "タスク名",
                 "trigger": "トリガ",
                 "action_kind": "アクション種別",
-                "copy_token": "トークンをコピー",
-                "copy_token_hint": "選択するとクリップボードに {トークン} がコピーされます",
-                "copied_token": "{token} をコピーしました",
+                "copy_placeholder": "プレースホルダーを選択",
+                "copy_placeholder_hint": "クリップボードに選択した {プレースホルダー} をコピーします",
+                "copied_placeholder": "{placeholder} をコピーしました",
                 "kind_external": "外部プログラム",
                 "kind_webhook": "Webhook（HTTP送信）",
                 "kind_builtin": "アプリ内蔵アクション",
@@ -1039,7 +1039,7 @@
                 },
                 "arguments": {
                     "label": "引数テンプレート",
-                    "helper": "{record_id} などのトークンがイベントデータに置換されます。"
+                    "helper": "{record_id} などのプレースホルダーを使えます。"
                 },
                 "working_dir": {
                     "label": "カレントディレクトリ",
@@ -1050,10 +1050,10 @@
                 "timeout_invalid": "正の整数を入力してください。",
                 "timeout_required": "タイムアウト（秒）を入力してください。",
                 "run_in_shell": "シェル経由で実行（.bat やシェル組込みコマンド用）",
-                "run_in_shell_help": "シェル経由ではトークンの値がエスケープされずに渡されます。信頼できるテンプレートのみで有効にしてください。",
+                "run_in_shell_help": "シェル経由ではプレースホルダーの値がエスケープされずに渡されます。信頼できるテンプレートのみで有効にしてください。",
                 "webhook": {
                     "url": "URL",
-                    "url_helper": "送信先のURL。{record_id} などのトークンを埋め込めます。",
+                    "url_helper": "送信先のURL。{record_id} などのプレースホルダーを埋め込めます。",
                     "url_invalid": "http:// または https:// で始まる有効なURLを入力してください。",
                     "method": "メソッド",
                     "content_type": "本文の形式",
@@ -1061,7 +1061,7 @@
                     "content_type_form": "フォーム",
                     "content_type_text": "テキスト",
                     "body": "本文",
-                    "body_helper": "リクエスト本文。{card_name} などのトークンが置換されます。GET/HEAD では送信されません。"
+                    "body_helper": "リクエスト本文。{card_name} などのプレースホルダーが置換されます。GET/HEAD では送信されません。"
                 },
                 "builtin": {
                     "label": "内蔵アクション",

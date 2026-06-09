@@ -226,7 +226,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   ///
   /// Fires on every terminal [status] (not just success), so a chain can react to
   /// a failed/cancelled upstream too; downstream tasks branch on the `task_status`
-  /// token rather than being silently skipped.
+  /// placeholder rather than being silently skipped.
   void _fireTaskExecuted(TaskDefinition task, PayloadMap payload, ExecutionStatus status) {
     final depth = int.tryParse(payload[_chainDepthKey] ?? "0") ?? 0;
     if (depth >= _maxChainDepth) {
@@ -246,7 +246,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   }
 
   /// Runs [task] on demand (manual trigger). Enriched like the event triggers so
-  /// the install-constant module-data path tokens are available here too.
+  /// the install-constant module-data path placeholders are available here too.
   void runManual(TaskDefinition task) => run(task, enrichPayload(ref.base, const {"event": "manual"}));
 
   void cancel(String executionId) {

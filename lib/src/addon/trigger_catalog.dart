@@ -9,11 +9,11 @@ import '/src/gui/chara_detail/export_button.dart';
 
 const _trTrigger = "pages.addon.trigger";
 
-/// Tokens available for every trigger. Besides `event`, these are the
+/// Placeholders available for every trigger. Besides `event`, these are the
 /// install-constant paths to the downloaded master data, populated by
 /// [enrichPayload] for any trigger so an action can decode a record's numeric
 /// IDs into names (or read any other module file via `{modules_dir}`).
-const _commonTokens = <String>[
+const _commonPlaceholders = <String>[
   "event",
   "modules_dir",
   "labels_path",
@@ -22,9 +22,9 @@ const _commonTokens = <String>[
   "card_info_path",
 ];
 
-/// Tokens carrying a captured record's data, populated by [enrichPayload] when
-/// the trigger provides a `record_id` (i.e. the record-captured trigger).
-const recordTokens = <String>[
+/// Placeholders carrying a captured record's data, populated by [enrichPayload]
+/// when the trigger provides a `record_id` (i.e. the record-captured trigger).
+const recordPlaceholders = <String>[
   "record_id",
   "card_name",
   "rank",
@@ -46,24 +46,29 @@ const recordTokens = <String>[
   "campaign_image_path",
 ];
 
-/// Tokens populated only by the export-completed trigger.
-const _exportTokens = <String>["export_path"];
+/// Placeholders populated only by the export-completed trigger.
+const _exportPlaceholders = <String>["export_path"];
 
-/// Tokens describing the upstream task in a `taskExecuted` chain. `task_status`
-/// is the upstream's terminal status (success/failure/cancelled/timeout), so a
-/// chained task can branch on the outcome.
-const _taskTokens = <String>["task_name", "task_id", "task_status"];
+/// Placeholders describing the upstream task in a `taskExecuted` chain.
+/// `task_status` is the upstream's terminal status (success/failure/cancelled/
+/// timeout), so a chained task can branch on the outcome.
+const _taskPlaceholders = <String>["task_name", "task_id", "task_status"];
 
-/// The `{tokens}` that actually carry a value for [event], surfaced as tappable
-/// chips in the edit dialog so users only see tokens relevant to their trigger.
-List<String> tokensForTrigger(TriggerEvent event) {
+/// The `{placeholders}` that actually carry a value for [event], surfaced in the
+/// edit dialog so users only see placeholders relevant to their trigger.
+List<String> placeholdersForTrigger(TriggerEvent event) {
   return switch (event) {
-    TriggerEvent.recordCaptured => [..._commonTokens, ...recordTokens],
-    TriggerEvent.recordExported => [..._commonTokens, ..._exportTokens],
+    TriggerEvent.recordCaptured => [..._commonPlaceholders, ...recordPlaceholders],
+    TriggerEvent.recordExported => [..._commonPlaceholders, ..._exportPlaceholders],
     // A chained task inherits the upstream task's payload, so any of these may
     // be present depending on what triggered the source task.
-    TriggerEvent.taskExecuted => [..._commonTokens, ..._taskTokens, ...recordTokens, ..._exportTokens],
-    _ => _commonTokens,
+    TriggerEvent.taskExecuted => [
+      ..._commonPlaceholders,
+      ..._taskPlaceholders,
+      ...recordPlaceholders,
+      ..._exportPlaceholders,
+    ],
+    _ => _commonPlaceholders,
   };
 }
 

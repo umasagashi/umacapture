@@ -11,39 +11,40 @@ const recordJsonName = "record.json";
 
 /// Internal payload marker set once a payload has been enriched. Lets a
 /// `taskExecuted` chain hop — whose forwarded payload already carries the record
-/// tokens — skip re-resolving (and re-reading from disk) the same record on every
-/// hop. `_`-prefixed, so it is never substituted into action templates.
+/// placeholders — skip re-resolving (and re-reading from disk) the same record on
+/// every hop. `_`-prefixed, so it is never substituted into action templates.
 const _enrichedMarker = "_enriched";
 
-/// Expands a trigger [base] payload with rich tokens so actions can reference
-/// `{card_name}`, `{rank}`, `{record_json_path}`, `{modules_dir}` etc. instead of
-/// just `{record_id}`.
+/// Expands a trigger [base] payload with rich placeholders so actions can
+/// reference `{card_name}`, `{rank}`, `{record_json_path}`, `{modules_dir}` etc.
+/// instead of just `{record_id}`.
 ///
-/// Module-data path tokens are install-constant and added for every trigger.
-/// Record tokens are added only when [base] carries a `record_id` (the
-/// record-captured trigger, or a chain hop forwarding it). Best-effort: any
+/// Module-data path placeholders are install-constant and added for every
+/// trigger. Record placeholders are added only when [base] carries a `record_id`
+/// (the record-captured trigger, or a chain hop forwarding it). Best-effort: any
 /// failure (record not found, module data not yet loaded) leaves the
-/// corresponding tokens absent, which the substituter then expands to the empty
-/// string — consistent with the unknown-token rule.
+/// corresponding placeholders absent, which the substituter then expands to the
+/// empty string — consistent with the unknown-placeholder rule.
 PayloadMap enrichPayload(RefBase ref, PayloadMap base) {
-  // Already enriched upstream (e.g. a chain hop forwarding a record's tokens);
-  // re-resolving would repeat the disk read of resolveRecordById for no gain.
+  // Already enriched upstream (e.g. a chain hop forwarding a record's
+  // placeholders); re-resolving would repeat the disk read of resolveRecordById
+  // for no gain.
   if (base.containsKey(_enrichedMarker)) return base;
   final enriched = {...base};
   // Install-constant paths to the downloaded master data (labels.json, *_info.json).
   // Added regardless of trigger so an action can decode a record's numeric IDs
   // into names, or read any other module file via {modules_dir}.
-  _addModuleTokens(ref, enriched);
+  _addModulePlaceholders(ref, enriched);
   final recordId = base["record_id"];
   if (recordId != null && recordId.isNotEmpty) {
     try {
       final record = resolveRecordById(ref, recordId);
       if (record != null) {
-        _addRecordTokens(ref, enriched, record);
+        _addRecordPlaceholders(ref, enriched, record);
         // Mark only once the (possibly disk-backed) record lookup has succeeded,
-        // so a chain hop forwarding these tokens skips repeating it. A not-yet-
-        // resolvable record stays unmarked so a later hop can still retry; the
-        // idempotent module tokens are simply re-derived on that hop.
+        // so a chain hop forwarding these placeholders skips repeating it. A
+        // not-yet-resolvable record stays unmarked so a later hop can still
+        // retry; the idempotent module placeholders are simply re-derived then.
         enriched[_enrichedMarker] = "1";
       }
     } catch (e, s) {
@@ -74,8 +75,8 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
   return CharaDetailRecordMapper.fromJson(file.readAsStringSync());
 }
 
-void _addRecordTokens(RefBase ref, PayloadMap p, CharaDetailRecord r) {
-  // Tokens that need no downloaded module data.
+void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {
+  // Placeholders that need no downloaded module data.
   p["evaluation_value"] = "${r.evaluationValue}";
   p["fans"] = "${r.fans}";
   p["speed"] = "${r.status.speed}";
@@ -101,8 +102,8 @@ void _addRecordTokens(RefBase ref, PayloadMap p, CharaDetailRecord r) {
     p["campaign_image_path"] = recordDir.filePath(CharaDetailRecordImageMode.campaignPlain.fileName).path;
   }
 
-  // Module-data-dependent tokens (labels / card names / rank). Each is
-  // best-effort so a missing module simply omits that token.
+  // Module-data-dependent placeholders (labels / card names / rank). Each is
+  // best-effort so a missing module simply omits that placeholder.
   final labels = _safe(() => ref.read(labelMapProvider));
   if (labels != null) {
     final scenarios = labels[LabelKeys.campaignScenario];
@@ -124,12 +125,12 @@ void _addRecordTokens(RefBase ref, PayloadMap p, CharaDetailRecord r) {
   }
 }
 
-/// Adds the install-constant module-data path tokens. Just the directory plus
-/// the most useful decode tables — any other module file is reachable through
-/// `{modules_dir}`. The paths are derived from [pathInfoProvider] alone, so they
-/// resolve even before the module JSON is loaded (the file may simply not exist
-/// yet).
-void _addModuleTokens(RefBase ref, PayloadMap p) {
+/// Adds the install-constant module-data path placeholders. Just the directory
+/// plus the most useful decode tables — any other module file is reachable
+/// through `{modules_dir}`. The paths are derived from [pathInfoProvider] alone,
+/// so they resolve even before the module JSON is loaded (the file may simply
+/// not exist yet).
+void _addModulePlaceholders(RefBase ref, PayloadMap p) {
   final modulesDir = _safe(() => ref.read(pathInfoProvider).modulesDir);
   if (modulesDir == null) return;
   p["modules_dir"] = modulesDir.path;
@@ -140,7 +141,7 @@ void _addModuleTokens(RefBase ref, PayloadMap p) {
 }
 
 /// Runs [f], returning null instead of throwing — used to treat a not-yet-loaded
-/// sync provider (which throws on `.value!`) as "token unavailable".
+/// sync provider (which throws on `.value!`) as "placeholder unavailable".
 T? _safe<T>(T Function() f) {
   try {
     return f();

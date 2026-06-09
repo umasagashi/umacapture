@@ -75,7 +75,7 @@ void main() {
   group('substitutePayload', () {
     const payload = {"event": "record_captured", "card_name": "Special Week"};
 
-    test('substitutes known tokens and expands unknown ones to empty', () {
+    test('substitutes known placeholders and expands unknown ones to empty', () {
       expect(substitutePayload("e={event} x={missing}", payload), "e=record_captured x=");
     });
 
@@ -85,7 +85,7 @@ void main() {
       expect(url, "https://h/n?name=Special%20Week");
     });
 
-    test('never expands internal _-prefixed tokens (chain bookkeeping cannot leak)', () {
+    test('never expands internal _-prefixed placeholders (chain bookkeeping cannot leak)', () {
       const internal = {"_chain_visited": "t1,t2", "_enriched": "1", "record_id": "r1"};
       expect(substitutePayload("v={_chain_visited} e={_enriched} id={record_id}", internal), "v= e= id=r1");
     });
@@ -111,12 +111,12 @@ void main() {
   });
 
   group('expandArgumentTemplate', () {
-    test('keeps a token value containing spaces as a single argument', () {
+    test('keeps a placeholder value containing spaces as a single argument', () {
       final args = expandArgumentTemplate("--name {card_name}", const {"card_name": "Special Week"});
       expect(args, ["--name", "Special Week"]);
     });
 
-    test('honors double quotes and expands unknown tokens to an empty arg', () {
+    test('honors double quotes and expands unknown placeholders to an empty arg', () {
       final args = expandArgumentTemplate('--msg "a b" {missing}', const {});
       expect(args, ["--msg", "a b", ""]);
     });
@@ -346,7 +346,7 @@ void main() {
 
     RefBase refOf(ProviderContainer container) => container.read(_refBaseProvider);
 
-    test('adds module-data path tokens for any trigger, even without a record_id', () {
+    test('adds module-data path placeholders for any trigger, even without a record_id', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
       final result = enrichPayload(refOf(container), const {'event': 'manual'});
@@ -359,25 +359,25 @@ void main() {
       expect(result['factor_info_path'], info.modulesDir.filePath('factor_info.json').path);
       expect(result['card_info_path'], info.modulesDir.filePath('character_card_info.json').path);
 
-      // No record_id → no record tokens, and unmarked so a later hop can retry.
+      // No record_id → no record placeholders, and unmarked so a later hop can retry.
       expect(result.containsKey('record_dir'), isFalse);
       expect(result.containsKey('_enriched'), isFalse);
     });
 
-    test('adds module tokens but no record tokens when the record cannot be found', () {
+    test('adds module placeholders but no record placeholders when the record cannot be found', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
       final result = enrichPayload(refOf(container), const {'event': 'record_captured', 'record_id': 'missing'});
       final info = container.read(pathInfoProvider);
 
       expect(result['modules_dir'], info.modulesDir.path);
-      // Record not found → record tokens absent and unmarked so a later hop retries.
+      // Record not found → record placeholders absent and unmarked so a later hop retries.
       expect(result.containsKey('evaluation_value'), isFalse);
       expect(result.containsKey('record_dir'), isFalse);
       expect(result.containsKey('_enriched'), isFalse);
     });
 
-    test('populates record tokens (incl. paths) from disk, omitting module-data tokens when unloaded', () {
+    test('populates record placeholders (incl. paths) from disk, omitting module-data placeholders when unloaded', () {
       seedFixture(fixtureId);
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
@@ -402,16 +402,16 @@ void main() {
       expect(result['factor_image_path'], recordDir.filePath('factor.png').path);
       expect(result['campaign_image_path'], recordDir.filePath('campaign.png').path);
 
-      // Module-data path tokens are install-constant, so present even here.
+      // Module-data path placeholders are install-constant, so present even here.
       expect(result['modules_dir'], info.modulesDir.path);
 
-      // Module-DATA-dependent tokens are best-effort: absent when modules aren't loaded.
+      // Module-DATA-dependent placeholders are best-effort: absent when modules aren't loaded.
       expect(result.containsKey('card_name'), isFalse);
       expect(result.containsKey('rank'), isFalse);
       expect(result.containsKey('scenario'), isFalse);
     });
 
-    test('populates module tokens when label/card/border providers are available', () {
+    test('populates module placeholders when label/card/border providers are available', () {
       seedFixture(fixtureId);
       final container = ProviderContainer.test(
         overrides: [
@@ -443,7 +443,7 @@ void main() {
 
     test('returns the payload unchanged when already enriched, skipping the record lookup', () {
       // The record is resolvable on disk, so without the _enriched marker enrich
-      // would add record tokens; the marker must short-circuit so a chain hop does
+      // would add record placeholders; the marker must short-circuit so a chain hop does
       // not repeat the disk read per hop.
       seedFixture(fixtureId);
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);

@@ -4,8 +4,8 @@
 // desktop) and drives the production AddonExecutionController to run an
 // ExternalProgramAction end-to-end against the test echo program under
 // tool/addon_test/. This exercises the real Process.start path, argument
-// token substitution, exit-code mapping, and history persistence — the parts a
-// pure unit test cannot cover.
+// placeholder substitution, exit-code mapping, and history persistence — the
+// parts a pure unit test cannot cover.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test integration_test/addon_external_program_test.dart -d windows
 //

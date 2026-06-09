@@ -43,16 +43,18 @@ class BuiltinActionDescriptor {
   final String? argumentLabelKey;
 
   /// Translation key for the argument field's helper text. Defaults to the shared
-  /// "tokens are substituted" hint; override for non-token arguments (e.g. a
-  /// fixed set of keywords).
+  /// "placeholders are substituted" hint; override for arguments that take no
+  /// placeholders (e.g. a fixed set of keywords).
   final String? argumentHelperKey;
 
-  /// Whether the argument accepts payload `{tokens}`. When false the edit dialog
-  /// hides the token chips (the argument is a plain keyword, not a template).
-  final bool argumentUsesTokens;
+  /// Whether the argument accepts payload `{placeholders}`. When false the edit
+  /// dialog hides the placeholder dropdown (the argument is a plain keyword, not
+  /// a template).
+  final bool argumentUsesPlaceholders;
 
   /// When set, the argument is chosen from these fixed options via a dropdown
-  /// instead of typed into a text field. Implies a non-token keyword argument.
+  /// instead of typed into a text field. Implies a keyword argument that takes
+  /// no placeholders.
   final List<BuiltinArgumentOption>? argumentOptions;
 
   /// Default argument template for a freshly configured action.
@@ -67,7 +69,7 @@ class BuiltinActionDescriptor {
     this.usesArgument = false,
     this.argumentLabelKey,
     this.argumentHelperKey,
-    this.argumentUsesTokens = true,
+    this.argumentUsesPlaceholders = true,
     this.argumentOptions,
     this.defaultArgument = '',
   });
@@ -107,7 +109,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     labelKey: "$_trBuiltin.copy_image_to_clipboard",
     usesArgument: true,
     argumentLabelKey: "$_trBuiltin.copy_image_argument",
-    argumentUsesTokens: false,
+    argumentUsesPlaceholders: false,
     argumentOptions: const [
       BuiltinArgumentOption("trainee", "$_trBuiltin.options.image_trainee"),
       BuiltinArgumentOption("skill", "$_trBuiltin.options.image_skill"),
@@ -132,7 +134,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     labelKey: "$_trBuiltin.copy_file_to_clipboard",
     usesArgument: true,
     argumentLabelKey: "$_trBuiltin.copy_file_argument",
-    argumentUsesTokens: false,
+    argumentUsesPlaceholders: false,
     argumentOptions: const [
       BuiltinArgumentOption("trainee", "$_trBuiltin.options.file_trainee"),
       BuiltinArgumentOption("skill", "$_trBuiltin.options.file_skill"),
@@ -157,7 +159,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     labelKey: "$_trBuiltin.play_sound",
     usesArgument: true,
     argumentLabelKey: "$_trBuiltin.play_sound_argument",
-    argumentUsesTokens: false,
+    argumentUsesPlaceholders: false,
     argumentOptions: const [
       BuiltinArgumentOption("attention_normal", "$_trBuiltin.options.sound_attention_normal"),
       BuiltinArgumentOption("attention_weak", "$_trBuiltin.options.sound_attention_weak"),

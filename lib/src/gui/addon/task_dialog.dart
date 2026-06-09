@@ -44,7 +44,7 @@ String? _timeoutErrorKey(String raw, {bool required = false}) {
 String? _urlErrorKey(String raw) {
   final text = raw.trim();
   if (text.isEmpty) return null;
-  // Tokens like {record_id} aren't valid URI characters; replace them before
+  // Placeholders like {record_id} aren't valid URI characters; replace them before
   // checking so a templated URL still validates on its scheme and host.
   final stripped = text.replaceAll(RegExp(r"\{[^}]*\}"), "x");
   final uri = Uri.tryParse(stripped);
@@ -366,7 +366,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       ),
     ),
     const SizedBox(height: 8),
-    _TokenDropdown(trigger: trigger),
+    _PlaceholderDropdown(trigger: trigger),
     const SizedBox(height: 16),
     TextField(
       controller: f.workingDir,
@@ -408,7 +408,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       onChanged: (_) => onChanged(),
     ),
     const SizedBox(height: 8),
-    _TokenDropdown(trigger: trigger),
+    _PlaceholderDropdown(trigger: trigger),
     const SizedBox(height: 16),
     Row(
       children: [
@@ -449,7 +449,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       ),
     ),
     const SizedBox(height: 8),
-    _TokenDropdown(trigger: trigger),
+    _PlaceholderDropdown(trigger: trigger),
     const SizedBox(height: 16),
     TextField(
       controller: f.webhookTimeout,
@@ -499,7 +499,7 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
             helperText: (descriptor.argumentHelperKey ?? "$tr_addon.dialog.arguments.helper").tr(),
           ),
         ),
-        if (descriptor.argumentUsesTokens) ...[const SizedBox(height: 8), _TokenDropdown(trigger: trigger)],
+        if (descriptor.argumentUsesPlaceholders) ...[const SizedBox(height: 8), _PlaceholderDropdown(trigger: trigger)],
       ],
     ],
   ];
@@ -520,61 +520,64 @@ Widget _builtinArgumentDropdown(_ActionFields f, BuiltinActionDescriptor descrip
   );
 }
 
-/// A dropdown that copies `{token}` to the clipboard when an item is picked.
-/// Mirrors [_TriggerDropdown]'s layout — each item shows the token plus a
-/// multi-line description of what it expands to. The set reflects [trigger].
+/// A dropdown that copies `{placeholder}` to the clipboard when an item is
+/// picked. Mirrors [_TriggerDropdown]'s layout — each item shows the placeholder
+/// plus a multi-line description of what it expands to. The set reflects
+/// [trigger].
 ///
-/// It holds no persistent selection: picking an item copies the token and the
-/// closed field always shows the placeholder, so any token can be copied
+/// It holds no persistent selection: picking an item copies the placeholder and
+/// the closed field always shows the hint, so any placeholder can be copied
 /// repeatedly. The user pastes it into the field themselves, so this widget
 /// never touches the form state.
-class _TokenDropdown extends StatelessWidget {
+class _PlaceholderDropdown extends StatelessWidget {
   final TriggerEvent trigger;
 
-  const _TokenDropdown({required this.trigger});
+  const _PlaceholderDropdown({required this.trigger});
 
-  void _copy(String token) {
-    final literal = "{$token}";
+  void _copy(String placeholder) {
+    final literal = "{$placeholder}";
     Clipboard.setData(ClipboardData(text: literal));
-    Toaster.show(ToastData.success(description: "$tr_addon.dialog.copied_token".tr(namedArgs: {"token": literal})));
+    Toaster.show(
+      ToastData.success(description: "$tr_addon.dialog.copied_placeholder".tr(namedArgs: {"placeholder": literal})),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final tokens = tokensForTrigger(trigger);
-    final placeholder = Align(
+    final placeholders = placeholdersForTrigger(trigger);
+    final hintLabel = Align(
       alignment: Alignment.centerLeft,
       child: Text(
-        "$tr_addon.dialog.copy_token_hint".tr(),
+        "$tr_addon.dialog.copy_placeholder_hint".tr(),
         style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
       ),
     );
     return DropdownButtonFormField<String>(
       // No persistent selection: every closed-field state renders the same
-      // placeholder (hint when untouched, selectedItemBuilder once picked), so
-      // the big multi-line item never shows in the collapsed field.
+      // hint (when untouched, and via selectedItemBuilder once picked), so the
+      // big multi-line item never shows in the collapsed field.
       initialValue: null,
       isExpanded: true,
       // Allow each menu item to grow to fit its multi-line description.
       itemHeight: null,
-      decoration: InputDecoration(labelText: "$tr_addon.dialog.copy_token".tr()),
-      hint: placeholder,
-      selectedItemBuilder: (context) => [for (final _ in tokens) placeholder],
+      decoration: InputDecoration(labelText: "$tr_addon.dialog.copy_placeholder".tr()),
+      hint: hintLabel,
+      selectedItemBuilder: (context) => [for (final _ in placeholders) hintLabel],
       items: [
-        for (final token in tokens)
+        for (final placeholder in placeholders)
           DropdownMenuItem(
-            value: token,
+            value: placeholder,
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("{$token}", style: theme.textTheme.titleSmall),
+                  Text("{$placeholder}", style: theme.textTheme.titleSmall),
                   const SizedBox(height: 2),
                   Text(
-                    "$tr_addon.token.$token".tr(),
+                    "$tr_addon.placeholder.$placeholder".tr(),
                     style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor),
                   ),
                 ],

@@ -120,15 +120,16 @@ class ExternalProgramRunner implements ActionRunner {
 }
 
 /// Splits [template] into individual arguments (honoring double quotes), then
-/// substitutes `{var}` tokens from [payload] within each argument. Substituting
-/// after the split keeps a value containing spaces as a single argument. Unknown
-/// tokens expand to the empty string.
+/// substitutes `{var}` placeholders from [payload] within each argument.
+/// Substituting after the split keeps a value containing spaces as a single
+/// argument. Unknown placeholders expand to the empty string.
 ///
 /// This is safe for the default argv path ([ExternalProgramAction.runInShell]
-/// false): each argument is passed to the OS verbatim, so token values cannot
-/// break out of their argument. With `runInShell: true` the arguments are handed
-/// to the system shell, which interprets metacharacters (`&`, `|`, `%VAR%`, …) in
-/// substituted token values **unescaped** — only enable it for trusted templates.
+/// false): each argument is passed to the OS verbatim, so placeholder values
+/// cannot break out of their argument. With `runInShell: true` the arguments are
+/// handed to the system shell, which interprets metacharacters (`&`, `|`,
+/// `%VAR%`, …) in substituted placeholder values **unescaped** — only enable it
+/// for trusted templates.
 List<String> expandArgumentTemplate(String template, PayloadMap payload) {
   final tokens = _tokenize(template);
   return tokens.map((t) => substitutePayload(t, payload)).toList();

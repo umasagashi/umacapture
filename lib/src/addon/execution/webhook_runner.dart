@@ -7,7 +7,7 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 
 /// Runs a [WebhookAction] by sending an HTTP request via the shared diagnostic
-/// [Dio] client, substituting payload tokens into the URL and body.
+/// [Dio] client, substituting payload placeholders into the URL and body.
 class WebhookRunner implements ActionRunner {
   final WebhookAction action;
 
@@ -19,12 +19,12 @@ class WebhookRunner implements ActionRunner {
     final cancelToken = CancelToken();
     var cancelled = false;
 
-    // Percent-encode substituted values so spaces / & / # inside a token value
-    // can't break the URL structure or inject extra query parameters.
+    // Percent-encode substituted values so spaces / & / # inside a placeholder
+    // value can't break the URL structure or inject extra query parameters.
     // encodeComponent (%20 for space) is valid in both path and query segments,
-    // unlike encodeQueryComponent's '+', since a token may appear anywhere in the URL.
+    // unlike encodeQueryComponent's '+', since a placeholder may appear anywhere in the URL.
     final url = substitutePayload(action.url, payload, transform: Uri.encodeComponent);
-    // Escape substituted values for the body's content type so a token value
+    // Escape substituted values for the body's content type so a placeholder value
     // containing a quote/newline (JSON) or '&'/'=' (form) cannot corrupt the body
     // or inject extra fields. The literal template text is left untouched.
     final spec = _specFor(action.contentType);
@@ -124,8 +124,9 @@ ExecutionStatus webhookErrorStatus(Object error, {required bool cancelled}) {
   return ExecutionStatus.failure;
 }
 
-/// Pairs a content-type header with the escaper applied to each substituted token
-/// value in the body, so the two can never drift apart for a given content type.
+/// Pairs a content-type header with the escaper applied to each substituted
+/// placeholder value in the body, so the two can never drift apart for a given
+/// content type.
 class _ContentTypeSpec {
   final String header;
 
