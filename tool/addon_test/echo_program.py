@@ -81,14 +81,20 @@ def main() -> int:
     opts = _parse_flags(argv)
 
     now = datetime.datetime.now().isoformat(timespec="seconds")
+    banner = "#" * 60
     lines = [
-        "=" * 60,
-        f"[echo_program] invoked at {now}",
-        f"  cwd : {os.getcwd()}",
-        f"  argc: {len(argv)}",
+        banner,
+        "# EXTERNAL PROGRAM OUTPUT - tool/addon_test/echo_program.py",
+        "# Everything in this block is printed by THIS program itself;",
+        "# the app does not add any prefix, label, or timestamp of its own.",
+        banner,
+        f"invoked at  : {now}",
+        f"working dir : {os.getcwd()}",
+        f"arg count   : {len(argv)}",
     ]
     for idx, arg in enumerate(argv):
-        lines.append(f"  arg[{idx}]: {arg!r}")
+        lines.append(f"  argv[{idx}] = {arg!r}")
+    lines.append(banner)
     block = "\n".join(lines)
 
     print(block, flush=True)
@@ -96,24 +102,24 @@ def main() -> int:
         with open(opts["logfile"], "a", encoding="utf-8") as fp:
             fp.write(block + "\n")
     except OSError as exc:
-        print(f"[echo_program] failed to write log: {exc}", file=sys.stderr, flush=True)
+        print(f"[external program] failed to write log: {exc}", file=sys.stderr, flush=True)
 
     if opts["stderr"] is not None:
-        print(f"[echo_program] stderr: {opts['stderr']}", file=sys.stderr, flush=True)
+        print(f"[external program stderr] {opts['stderr']}", file=sys.stderr, flush=True)
 
     if opts["bulk"] > 0:
         # Emit a marker-delimited blob so the 8192-char capture limit is easy to
-        # spot in the history dialog (the tail marker should be missing).
-        print("BULK_START", flush=True)
+        # spot in the history dialog (the tail marker is dropped when truncated).
+        print(f"--- begin bulk payload from external program ({opts['bulk']} chars) ---", flush=True)
         print("x" * opts["bulk"], flush=True)
-        print("BULK_END", flush=True)
+        print("--- end bulk payload (missing above means the app truncated it) ---", flush=True)
 
     if opts["sleep"] > 0:
-        print(f"[echo_program] sleeping {opts['sleep']}s ...", flush=True)
+        print(f"[external program] sleeping {opts['sleep']}s ...", flush=True)
         import time
 
         time.sleep(opts["sleep"])
-        print("[echo_program] woke up", flush=True)
+        print("[external program] woke up", flush=True)
 
     return opts["exit"]
 

@@ -222,30 +222,45 @@ class _HistoryDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final error = entry.error;
     final output = entry.output;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 360),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (error?.isNotEmpty == true) ...[
-              Text("$tr_addon.dialog.error".tr(), style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
-              SelectableText(error!),
-            ],
-            if (error?.isNotEmpty == true && output?.isNotEmpty == true) const SizedBox(height: 16),
-            if (output?.isNotEmpty == true) ...[
-              Text("$tr_addon.dialog.output".tr(), style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
-              SelectableText(output!),
-            ],
-          ],
+    // The host CardDialog already wraps content in a scroll view that fills the
+    // dialog, so this lays the sections out top-down without its own scroller.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (error?.isNotEmpty == true) _OutputSection(titleKey: "$tr_addon.dialog.error", body: error!),
+        if (error?.isNotEmpty == true && output?.isNotEmpty == true) const SizedBox(height: 16),
+        if (output?.isNotEmpty == true) _OutputSection(titleKey: "$tr_addon.dialog.output", body: output!),
+      ],
+    );
+  }
+}
+
+/// A titled block of captured program text rendered on a muted theme surface so
+/// the output stands apart from the dialog body. The body stays selectable.
+class _OutputSection extends StatelessWidget {
+  const _OutputSection({required this.titleKey, required this.body});
+
+  final String titleKey;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(titleKey.tr(), style: theme.textTheme.titleSmall),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: theme.colorScheme.surfaceContainer, borderRadius: BorderRadius.circular(8)),
+          child: SelectableText(body),
         ),
-      ),
+      ],
     );
   }
 }
