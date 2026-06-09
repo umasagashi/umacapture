@@ -575,7 +575,7 @@ packages:
     source: hosted
     version: "4.5.2"
   flutter_driver:
-    dependency: transitive
+    dependency: "direct dev"
     description: flutter
     source: sdk
     version: "0.0.0"

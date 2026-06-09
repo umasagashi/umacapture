@@ -70,6 +70,8 @@ dev_dependencies:
     sdk: flutter
   integration_test:
     sdk: flutter
+  flutter_driver:
+    sdk: flutter
 
   auto_route_generator: 10.2.5
   build_runner: ^2.2.0
