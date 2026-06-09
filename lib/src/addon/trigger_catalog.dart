@@ -15,13 +15,15 @@ const _trTrigger = "pages.addon.trigger";
 /// ID→name tables) via `{modules_dir}`.
 const _commonPlaceholders = <String>["event", "modules_dir"];
 
-/// Placeholders carrying a captured record's file/directory paths and id,
-/// populated by [enrichPayload] when the trigger provides a `record_id` (i.e.
-/// the record-captured trigger).
+/// Placeholders carrying a captured record's file/directory paths, id, and the
+/// `record.json` contents, populated by [enrichPayload] when the trigger
+/// provides a `record_id` (i.e. the record-captured trigger). `record_json_path`
+/// is the path to the file; `record_json` is its decoded contents.
 const recordPlaceholders = <String>[
   "record_id",
   "record_dir",
   "record_json_path",
+  "record_json",
   "trainee_icon_path",
   "skill_image_path",
   "factor_image_path",

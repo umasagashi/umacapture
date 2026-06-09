@@ -149,6 +149,7 @@
 | --- | --- |
 | `{record_dir}` | レコードの保存フォルダのパス |
 | `{record_json_path}` | レコード本体 `record.json` のフルパス（各種 ID・ステータスを含む） |
+| `{record_json}` | レコード本体 `record.json` の中身そのもの（JSON 文字列・各種 ID・ステータスを含む） |
 | `{trainee_icon_path}` | 育成ウマ娘のアイコン画像（`trainee.jpg`）のフルパス |
 | `{skill_image_path}` | スキル画面のキャプチャ画像（`skill.png`）のフルパス |
 | `{factor_image_path}` | 因子画面のキャプチャ画像（`factor.png`）のフルパス |
@@ -383,7 +384,7 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 | `{record_id}` | レコード取得時 |
 | `{export_path}` | エクスポート完了時 |
 | `{task_name}` `{task_id}` `{task_status}` | 他のタスク実行時 |
-| `{record_dir}` `{record_json_path}` `{trainee_icon_path}` `{skill_image_path}` `{factor_image_path}` `{campaign_image_path}` | レコード取得時（他のタスク実行時にも引き継がれる場合あり） |
+| `{record_dir}` `{record_json_path}` `{record_json}` `{trainee_icon_path}` `{skill_image_path}` `{factor_image_path}` `{campaign_image_path}` | レコード取得時（他のタスク実行時にも引き継がれる場合あり） |
 
 **アクション（外部プログラム）**: パス（必須） / 引数テンプレート / カレントディレクトリ / タイムアウト（必須・既定 30 秒） / シェル経由で実行
 - 引数はスペース区切り。空白を含む値は `"{record_id}"` のようにダブルクォートで囲む。終了コード 0 が成功。

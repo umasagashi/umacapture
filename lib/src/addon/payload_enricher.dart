@@ -78,7 +78,14 @@ void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {
   if (activeDir != null) {
     final recordDir = activeDir / r.id;
     p["record_dir"] = recordDir.path;
-    p["record_json_path"] = recordDir.filePath(recordJsonName).path;
+    final jsonFile = recordDir.filePath(recordJsonName);
+    p["record_json_path"] = jsonFile.path;
+    // The decoded record.json contents, so a template can send the record body
+    // directly (e.g. a webhook) instead of just its path. Best-effort: if the
+    // file isn't on disk yet (a just-captured record resolved from memory before
+    // it is flushed), leave the placeholder absent so it expands to empty.
+    final json = _safe(() => jsonFile.readAsStringSync());
+    if (json != null) p["record_json"] = json;
     // Reuse the record's own relative icon path so the "trainee.jpg" literal
     // lives only on CharaDetailRecord.traineeIconPath.
     p["trainee_icon_path"] = activeDir.filePath(r.traineeIconPath).path;

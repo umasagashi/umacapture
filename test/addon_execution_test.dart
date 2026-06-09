@@ -430,6 +430,7 @@ void main() {
       final recordDir = info.charaDetailActiveDir / fixtureRecord.id;
       expect(result['record_dir'], recordDir.path);
       expect(result['record_json_path'], recordDir.filePath('record.json').path);
+      expect(result['record_json'], recordDir.filePath('record.json').readAsStringSync());
       expect(result['trainee_icon_path'], info.charaDetailActiveDir.filePath(fixtureRecord.traineeIconPath).path);
       expect(result['skill_image_path'], recordDir.filePath('skill.png').path);
       expect(result['factor_image_path'], recordDir.filePath('factor.png').path);
