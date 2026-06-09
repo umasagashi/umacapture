@@ -111,8 +111,8 @@ void main() {
       };
 
       await WebhookRunner(
-        WebhookAction(url: url('/post'), method: 'POST', contentType: 'json', bodyTemplate: '{"v":"{card_name}"}'),
-      ).start(ref, const {'card_name': 'Special "Week"'}).result;
+        WebhookAction(url: url('/post'), method: 'POST', contentType: 'json', bodyTemplate: '{"v":"{record_id}"}'),
+      ).start(ref, const {'record_id': 'Special "Week"'}).result;
 
       expect(receivedContentType, 'application/json');
       // The quote inside the value is escaped, so the body stays valid JSON and

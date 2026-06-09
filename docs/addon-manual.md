@@ -134,10 +134,6 @@
 | --- | --- | --- |
 | `{event}` | 発火したイベントの識別子（例: `record_captured`） | すべて |
 | `{modules_dir}` | マスタデータ（`labels.json` などの ID→名称変換表）が入ったフォルダのパス | すべて |
-| `{labels_path}` | 脚質・適性・シナリオ・ランク等の表示名を収めた `labels.json` のフルパス | すべて |
-| `{skill_info_path}` | スキル ID→名称などの `skill_info.json` のフルパス | すべて |
-| `{factor_info_path}` | 因子 ID→名称などの `factor_info.json` のフルパス | すべて |
-| `{card_info_path}` | 育成カード ID→名称などの `character_card_info.json` のフルパス | すべて |
 | `{record_id}` | 取得した殿堂入りレコードの ID | レコード取得時のみ |
 | `{export_path}` | 書き出されたファイルのパス | エクスポート完了時のみ |
 | `{task_name}` `{task_id}` | 連鎖元のタスク名 / ID | 他のタスク実行時のみ |
@@ -151,14 +147,6 @@
 
 | プレースホルダー | 意味 |
 | --- | --- |
-| `{card_name}` | 取得したウマ娘（育成カード）の名前 |
-| `{rank}` | 評価値から算出した総合ランク（例: `SS`） |
-| `{evaluation_value}` | 評価値（数値） |
-| `{fans}` | ファン数（数値） |
-| `{speed}` `{stamina}` `{power}` `{guts}` `{intelligence}` | 各ステータス値 |
-| `{scenario}` | 育成シナリオ名 |
-| `{trained_date}` | 育成完了日（例: `2026/06/08`） |
-| `{trainer_id}` | トレーナー ID |
 | `{record_dir}` | レコードの保存フォルダのパス |
 | `{record_json_path}` | レコード本体 `record.json` のフルパス（各種 ID・ステータスを含む） |
 | `{trainee_icon_path}` | 育成ウマ娘のアイコン画像（`trainee.jpg`）のフルパス |
@@ -167,7 +155,8 @@
 | `{campaign_image_path}` | 育成成績画面のキャプチャ画像（`campaign.png`）のフルパス |
 
 > レコード系プレースホルダーは、認識直後にレコードが見つからない場合でも `record.json` を直接読んで補完します。
-> モジュール（ラベルデータ）が未読込のときは `{rank}` `{card_name}` `{scenario}` だけ空になることがあります。
+> `record.json` には評価値・ステータス・各種 ID が含まれるので、`{modules_dir}` 配下の変換表と併せれば
+> 外部プログラム側でキャラ名・ランク・シナリオ名などへ解決できます。
 
 置換のルール:
 
@@ -235,13 +224,13 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 
 - 本文に埋め込んだ**プレースホルダーの値は本文の形式に合わせて自動でエスケープ**されます。`JSON` なら引用符・
   改行などを含む値でも JSON が壊れず、`フォーム` なら `&` / `=` を含む値が別フィールドとして混入しません
-  （`テキスト` はそのまま送信）。`{"content": "{card_name}"}` のように、テンプレートの構造はそのまま、
+  （`テキスト` はそのまま送信）。`{"id": "{record_id}"}` のように、テンプレートの構造はそのまま、
   値だけが安全に挿入されます。
 - **HTTP ステータス 2xx を成功**、それ以外を失敗として扱い、履歴にステータスコードが残ります。
 - レスポンス本文は履歴の詳細で確認できます（長すぎる場合は打ち切られます）。
 - タイムアウト・中止が起きた場合は、それぞれ「タイムアウト」「中止」として記録されます。
 
-> 例（Discord）: メソッド `POST`、本文の形式 `JSON`、本文 `{"content": "取得: {card_name}（{rank}）"}`。
+> 例（Discord）: メソッド `POST`、本文の形式 `JSON`、本文 `{"content": "新しいレコードを取得しました（{record_id}）"}`。
 
 ---
 
@@ -265,7 +254,7 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 例:
 
 - 「クリップボードへコピー」の内容欄に `{record_id}` → 取得したレコードの ID がコピーされます。
-- 「通知を表示」の内容欄に `{card_name} {rank}` → キャラ名とランク入りの通知が出ます。
+- 「通知を表示」の内容欄に `レコードを取得: {record_id}` → ID 入りの通知が出ます。
 - 「画像をクリップボードへコピー」で「スキル画面」を選ぶ → スキル画面の画像がコピーされます。
 
 ---
@@ -338,14 +327,14 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 - アクション: Webhook
   - URL: Discord の Incoming Webhook URL
   - メソッド `POST`、本文の形式 `JSON`
-  - 本文: `{"content": "取得: {card_name}（{rank}） 評価{evaluation_value}"}`
+  - 本文: `{"content": "新しいレコードを取得しました（{record_id}）"}`
 
 ### 取得直後にアイコンをコピーしてから通知（タスク連鎖）
 
 2 つのタスクを作ってつなげます。
 
 1. タスク A: トリガ **レコード取得時** / アクション「画像をクリップボードへコピー」で「アイコン」を選択
-2. タスク B: トリガ **他のタスク実行時** / 連鎖元のタスク **= A** / アクション「通知を表示」、内容 `{card_name} をコピーしました`
+2. タスク B: トリガ **他のタスク実行時** / 連鎖元のタスク **= A** / アクション「通知を表示」、内容 `アイコンをコピーしました`
 
 ### 動作確認用の手動タスク
 
@@ -376,8 +365,6 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 - **スケジュール（定期実行）は未対応**: 一定間隔・指定時刻での発火は今後の予定です。
 - **スクリプトアクション（dart_eval）は未対応**: 将来、アクション種別として
   ユーザー定義スクリプトを追加できるよう設計してあります。
-- レコード系プレースホルダー（`{rank}` `{card_name}` `{scenario}`）は、モジュール（ラベルデータ）が
-  未読込のときは空になることがあります。
 
 ---
 
@@ -392,11 +379,11 @@ Discord や Slack の Incoming Webhook への通知などに使えます。
 | プレースホルダー | 値が入るトリガ |
 | --- | --- |
 | `{event}` | すべて（手動は `manual`） |
-| `{modules_dir}` `{labels_path}` `{skill_info_path}` `{factor_info_path}` `{card_info_path}` | すべて（マスタデータのパス） |
+| `{modules_dir}` | すべて（マスタデータのフォルダ） |
 | `{record_id}` | レコード取得時 |
 | `{export_path}` | エクスポート完了時 |
 | `{task_name}` `{task_id}` `{task_status}` | 他のタスク実行時 |
-| `{card_name}` `{rank}` `{evaluation_value}` `{fans}` `{speed}` `{stamina}` `{power}` `{guts}` `{intelligence}` `{scenario}` `{trained_date}` `{trainer_id}` `{record_dir}` `{record_json_path}` `{trainee_icon_path}` `{skill_image_path}` `{factor_image_path}` `{campaign_image_path}` | レコード取得時（他のタスク実行時にも引き継がれる場合あり） |
+| `{record_dir}` `{record_json_path}` `{trainee_icon_path}` `{skill_image_path}` `{factor_image_path}` `{campaign_image_path}` | レコード取得時（他のタスク実行時にも引き継がれる場合あり） |
 
 **アクション（外部プログラム）**: パス（必須） / 引数テンプレート / カレントディレクトリ / タイムアウト（必須・既定 30 秒） / シェル経由で実行
 - 引数はスペース区切り。空白を含む値は `"{record_id}"` のようにダブルクォートで囲む。終了コード 0 が成功。

@@ -18,8 +18,6 @@ import 'package:umacapture/src/addon/payload_enricher.dart';
 import 'package:umacapture/src/addon/task_definitions.dart';
 import 'package:umacapture/src/addon/trigger_catalog.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
-import 'package:umacapture/src/chara_detail/spec/base.dart';
-import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
@@ -75,7 +73,7 @@ void main() {
   });
 
   group('substitutePayload', () {
-    const payload = {"event": "record_captured", "card_name": "Special Week"};
+    const payload = {"event": "record_captured", "record_dir": "C:/recs/Special Week"};
 
     test('substitutes known placeholders and expands unknown ones to empty', () {
       expect(substitutePayload("e={event} x={missing}", payload), "e=record_captured x=");
@@ -83,8 +81,8 @@ void main() {
 
     test('transform encodes substituted values, not the literal template', () {
       // The URL structure (?, =) is preserved; only the value is encoded.
-      final url = substitutePayload("https://h/n?name={card_name}", payload, transform: Uri.encodeComponent);
-      expect(url, "https://h/n?name=Special%20Week");
+      final url = substitutePayload("https://h/n?dir={record_dir}", payload, transform: Uri.encodeComponent);
+      expect(url, "https://h/n?dir=C%3A%2Frecs%2FSpecial%20Week");
     });
 
     test('never expands internal _-prefixed placeholders (chain bookkeeping cannot leak)', () {
@@ -114,8 +112,8 @@ void main() {
 
   group('expandArgumentTemplate', () {
     test('keeps a placeholder value containing spaces as a single argument', () {
-      final args = expandArgumentTemplate("--name {card_name}", const {"card_name": "Special Week"});
-      expect(args, ["--name", "Special Week"]);
+      final args = expandArgumentTemplate("--dir {record_dir}", const {"record_dir": "C:/recs/Special Week"});
+      expect(args, ["--dir", "C:/recs/Special Week"]);
     });
 
     test('honors double quotes and expands unknown placeholders to an empty arg', () {
@@ -396,7 +394,7 @@ void main() {
 
     RefBase refOf(ProviderContainer container) => container.read(_refBaseProvider);
 
-    test('adds module-data path placeholders for any trigger, even without a record_id', () {
+    test('adds the modules_dir placeholder for any trigger, even without a record_id', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
       final result = enrichPayload(refOf(container), const {'event': 'manual'});
@@ -404,10 +402,6 @@ void main() {
 
       expect(result['event'], 'manual');
       expect(result['modules_dir'], info.modulesDir.path);
-      expect(result['labels_path'], info.modulesDir.filePath('labels.json').path);
-      expect(result['skill_info_path'], info.modulesDir.filePath('skill_info.json').path);
-      expect(result['factor_info_path'], info.modulesDir.filePath('factor_info.json').path);
-      expect(result['card_info_path'], info.modulesDir.filePath('character_card_info.json').path);
 
       // No record_id → no record placeholders, and unmarked so a later hop can retry.
       expect(result.containsKey('record_dir'), isFalse);
@@ -422,26 +416,15 @@ void main() {
 
       expect(result['modules_dir'], info.modulesDir.path);
       // Record not found → record placeholders absent and unmarked so a later hop retries.
-      expect(result.containsKey('evaluation_value'), isFalse);
       expect(result.containsKey('record_dir'), isFalse);
       expect(result.containsKey('_enriched'), isFalse);
     });
 
-    test('populates record placeholders (incl. paths) from disk, omitting module-data placeholders when unloaded', () {
+    test('populates the record file/directory path placeholders from disk', () {
       seedFixture(fixtureId);
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
       final result = enrichPayload(refOf(container), {'event': 'record_captured', 'record_id': fixtureId});
-
-      expect(result['evaluation_value'], '56463');
-      expect(result['fans'], '406241');
-      expect(result['speed'], '2168');
-      expect(result['stamina'], '1406');
-      expect(result['power'], '1740');
-      expect(result['guts'], '1008');
-      expect(result['intelligence'], '1394');
-      expect(result['trained_date'], '2026/04/13');
-      expect(result['trainer_id'], '0a1831eb-1482-472f-9c14-bfc3030ad8ff');
 
       final info = container.read(pathInfoProvider);
       final recordDir = info.charaDetailActiveDir / fixtureRecord.id;
@@ -452,35 +435,15 @@ void main() {
       expect(result['factor_image_path'], recordDir.filePath('factor.png').path);
       expect(result['campaign_image_path'], recordDir.filePath('campaign.png').path);
 
-      // Module-data path placeholders are install-constant, so present even here.
+      // The modules_dir placeholder is install-constant, so present even here.
       expect(result['modules_dir'], info.modulesDir.path);
-
-      // Module-DATA-dependent placeholders are best-effort: absent when modules aren't loaded.
-      expect(result.containsKey('card_name'), isFalse);
-      expect(result.containsKey('rank'), isFalse);
-      expect(result.containsKey('scenario'), isFalse);
     });
 
-    test('populates module placeholders when label/card/border providers are available', () {
+    test('every user-facing key the enricher sets is a catalogued placeholder', () {
       seedFixture(fixtureId);
-      final container = ProviderContainer.test(
-        overrides: [
-          pathInfoProvider.overrideWithValue(pathInfo()),
-          labelMapProvider.overrideWithValue({
-            LabelKeys.campaignScenario: List.generate(13, (i) => 'scenario$i'),
-            LabelKeys.charaRank: ['rank0', 'rank1', 'rank2'],
-          }),
-          charaRankBorderProvider.overrideWithValue([10000, 50000, 100000]),
-          charaCardInfoProvider.overrideWithValue(List.generate(184, (i) => CharaCardInfo(i, 0, ['card$i']))),
-        ],
-      );
+      final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);
       addTearDown(container.dispose);
       final result = enrichPayload(refOf(container), {'event': 'record_captured', 'record_id': fixtureId});
-
-      expect(result['scenario'], 'scenario12');
-      // eval 56463 is below border[2] (100000), so the rank index is 2.
-      expect(result['rank'], 'rank2');
-      expect(result['card_name'], 'card183');
 
       // Every user-facing key the enricher sets must be a catalogued placeholder
       // (so it shows in the dropdown); the `_`-prefixed bookkeeping keys are
@@ -508,7 +471,7 @@ void main() {
       const base = {'event': 'task_executed', 'record_id': fixtureId, '_enriched': '1'};
       final result = enrichPayload(refOf(container), base);
       expect(result, base);
-      expect(result.containsKey('evaluation_value'), isFalse);
+      expect(result.containsKey('record_dir'), isFalse);
     });
   });
 }

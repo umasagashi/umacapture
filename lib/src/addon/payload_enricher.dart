@@ -1,7 +1,5 @@
 import '/src/addon/execution/execution_models.dart';
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
@@ -16,10 +14,10 @@ const recordJsonName = "record.json";
 const _enrichedMarker = "_enriched";
 
 /// Expands a trigger [base] payload with rich placeholders so actions can
-/// reference `{card_name}`, `{rank}`, `{record_json_path}`, `{modules_dir}` etc.
-/// instead of just `{record_id}`.
+/// reference `{record_json_path}`, `{record_dir}`, `{modules_dir}` etc. instead
+/// of just `{record_id}`.
 ///
-/// Module-data path placeholders are install-constant and added for every
+/// The `{modules_dir}` placeholder is install-constant and added for every
 /// trigger. Record placeholders are added only when [base] carries a `record_id`
 /// (the record-captured trigger, or a chain hop forwarding it). Best-effort: any
 /// failure (record not found, module data not yet loaded) leaves the
@@ -76,17 +74,6 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
 }
 
 void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {
-  // Placeholders that need no downloaded module data.
-  p["evaluation_value"] = "${r.evaluationValue}";
-  p["fans"] = "${r.fans}";
-  p["speed"] = "${r.status.speed}";
-  p["stamina"] = "${r.status.stamina}";
-  p["power"] = "${r.status.power}";
-  p["guts"] = "${r.status.guts}";
-  p["intelligence"] = "${r.status.intelligence}";
-  p["trained_date"] = r.trainedDate;
-  p["trainer_id"] = r.metadata.trainerId;
-
   final activeDir = _safe(() => ref.read(pathInfoProvider).charaDetailActiveDir);
   if (activeDir != null) {
     final recordDir = activeDir / r.id;
@@ -101,43 +88,17 @@ void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {
     p["factor_image_path"] = recordDir.filePath(CharaDetailRecordImageMode.factorPlain.fileName).path;
     p["campaign_image_path"] = recordDir.filePath(CharaDetailRecordImageMode.campaignPlain.fileName).path;
   }
-
-  // Module-data-dependent placeholders (labels / card names / rank). Each is
-  // best-effort so a missing module simply omits that placeholder.
-  final labels = _safe(() => ref.read(labelMapProvider));
-  if (labels != null) {
-    final scenarios = labels[LabelKeys.campaignScenario];
-    if (scenarios != null && r.scenario.id >= 0 && r.scenario.id < scenarios.length) {
-      p["scenario"] = scenarios[r.scenario.id];
-    }
-    final rankLabels = labels[LabelKeys.charaRank];
-    final border = _safe(() => ref.read(charaRankBorderProvider));
-    if (rankLabels != null && border != null) {
-      final found = border.indexWhere((b) => b > r.evaluationValue);
-      final rankIndex = found < 0 ? border.length : found;
-      if (rankIndex >= 0 && rankIndex < rankLabels.length) p["rank"] = rankLabels[rankIndex];
-    }
-  }
-
-  final cards = _safe(() => ref.read(charaCardInfoProvider));
-  if (cards != null && r.trainee.card >= 0 && r.trainee.card < cards.length) {
-    p["card_name"] = cards[r.trainee.card].names.first;
-  }
 }
 
-/// Adds the install-constant module-data path placeholders. Just the directory
-/// plus the most useful decode tables — any other module file is reachable
-/// through `{modules_dir}`. The paths are derived from [pathInfoProvider] alone,
-/// so they resolve even before the module JSON is loaded (the file may simply
-/// not exist yet).
+/// Adds the install-constant `{modules_dir}` placeholder: the directory holding
+/// the downloaded master data (the ID→name decode tables). Any module file is
+/// reachable through it. The path is derived from [pathInfoProvider] alone, so
+/// it resolves even before the module JSON is loaded (the file may simply not
+/// exist yet).
 void _addModulePlaceholders(RefBase ref, PayloadMap p) {
   final modulesDir = _safe(() => ref.read(pathInfoProvider).modulesDir);
   if (modulesDir == null) return;
   p["modules_dir"] = modulesDir.path;
-  p["labels_path"] = modulesDir.filePath("labels.json").path;
-  p["skill_info_path"] = modulesDir.filePath("skill_info.json").path;
-  p["factor_info_path"] = modulesDir.filePath("factor_info.json").path;
-  p["card_info_path"] = modulesDir.filePath("character_card_info.json").path;
 }
 
 /// Runs [f], returning null instead of throwing — used to treat a not-yet-loaded

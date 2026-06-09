@@ -9,35 +9,17 @@ import '/src/gui/chara_detail/export_button.dart';
 
 const _trTrigger = "pages.addon.trigger";
 
-/// Placeholders available for every trigger. Besides `event`, these are the
-/// install-constant paths to the downloaded master data, populated by
-/// [enrichPayload] for any trigger so an action can decode a record's numeric
-/// IDs into names (or read any other module file via `{modules_dir}`).
-const _commonPlaceholders = <String>[
-  "event",
-  "modules_dir",
-  "labels_path",
-  "skill_info_path",
-  "factor_info_path",
-  "card_info_path",
-];
+/// Placeholders available for every trigger. Besides `event`, this is the
+/// install-constant directory of the downloaded master data, populated by
+/// [enrichPayload] for any trigger so an action can read any module file (the
+/// ID→name tables) via `{modules_dir}`.
+const _commonPlaceholders = <String>["event", "modules_dir"];
 
-/// Placeholders carrying a captured record's data, populated by [enrichPayload]
-/// when the trigger provides a `record_id` (i.e. the record-captured trigger).
+/// Placeholders carrying a captured record's file/directory paths and id,
+/// populated by [enrichPayload] when the trigger provides a `record_id` (i.e.
+/// the record-captured trigger).
 const recordPlaceholders = <String>[
   "record_id",
-  "card_name",
-  "rank",
-  "evaluation_value",
-  "fans",
-  "speed",
-  "stamina",
-  "power",
-  "guts",
-  "intelligence",
-  "scenario",
-  "trained_date",
-  "trainer_id",
   "record_dir",
   "record_json_path",
   "trainee_icon_path",
