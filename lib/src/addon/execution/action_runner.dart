@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '/src/addon/execution/builtin_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/execution/external_program_runner.dart';
@@ -54,3 +56,12 @@ ActionRunner runnerFor(AddonAction action) {
     _ => throw UnimplementedError("No runner for action: ${action.runtimeType}"),
   };
 }
+
+/// Builds the [ActionRunner] for an action. Defaults to [runnerFor]; exists as a
+/// seam so tests can inject a controllable fake runner without launching real
+/// processes/HTTP requests.
+typedef ActionRunnerFactory = ActionRunner Function(AddonAction action);
+
+/// The factory [AddonExecutionController] uses to build runners. Override in tests
+/// to substitute a fake; production reads the default [runnerFor].
+final actionRunnerFactoryProvider = Provider<ActionRunnerFactory>((ref) => runnerFor);

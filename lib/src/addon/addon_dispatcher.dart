@@ -30,20 +30,7 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
   }
 
   void _onEvent(TriggerEvent event, PayloadMap payload) {
-    var tasks = ref.read(taskDefinitionsProvider).where((t) => t.enabled && t.trigger == event);
-    if (event == TriggerEvent.taskExecuted) {
-      // Chain only from the matching source task (or any, when unset), never
-      // re-trigger the task that just ran, and skip any task already visited on
-      // this chain path so a loop / unbounded fan-out cannot occur.
-      final sourceId = payload["task_id"];
-      final visited = chainVisitedTaskIds(payload);
-      tasks = tasks.where((t) {
-        if (t.id == sourceId || visited.contains(t.id)) return false;
-        final wanted = t.sourceTaskId;
-        return wanted == null || wanted.isEmpty || wanted == sourceId;
-      });
-    }
-    final matched = tasks.toList();
+    final matched = filterTasksForEvent(event, payload, ref.read(taskDefinitionsProvider));
     if (matched.isEmpty) return;
     // Enrich once per event so all matched tasks share the (possibly disk-backed)
     // record lookup instead of repeating it per task.
@@ -53,4 +40,25 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
       controller.run(task, enriched);
     }
   }
+}
+
+/// The enabled tasks in [allTasks] that should run for [event] with [payload].
+///
+/// A pure function (no provider reads or side effects) so the matching and
+/// chain-safety rules can be unit-tested directly. For a `taskExecuted` event it
+/// chains only from the matching source task (or any, when the binding's source
+/// is unset), never re-triggers the task that just ran, and skips any task
+/// already visited on this chain path so a loop / unbounded fan-out cannot occur.
+List<TaskDefinition> filterTasksForEvent(TriggerEvent event, PayloadMap payload, List<TaskDefinition> allTasks) {
+  var tasks = allTasks.where((t) => t.enabled && t.trigger == event);
+  if (event == TriggerEvent.taskExecuted) {
+    final sourceId = payload["task_id"];
+    final visited = chainVisitedTaskIds(payload);
+    tasks = tasks.where((t) {
+      if (t.id == sourceId || visited.contains(t.id)) return false;
+      final wanted = t.sourceTaskId;
+      return wanted == null || wanted.isEmpty || wanted == sourceId;
+    });
+  }
+  return tasks.toList();
 }

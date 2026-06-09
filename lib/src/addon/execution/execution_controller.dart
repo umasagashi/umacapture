@@ -41,12 +41,16 @@ Set<String> chainVisitedTaskIds(PayloadMap payload) {
 }
 
 // Fires the (forwarded) payload of a task each time one finishes, so tasks bound
-// to the `taskExecuted` trigger can run after it. A broadcast controller created
-// once: the dispatcher is always mounted, so events emitted with no listener are
-// simply dropped (no one is chained), and there is no re-subscription window in
-// which a fired event could be lost to a swapped controller.
-final _taskExecutedEventController = StreamController<PayloadMap>.broadcast();
+// to the `taskExecuted` trigger can run after it. A broadcast controller that is
+// recreated when a new listener subscribes while one is already attached (the
+// pattern shared with platform_controller's event providers): this resets the
+// stream between hot-restarts / test cases so a stale controller cannot replay
+// events into a fresh subscriber.
+var _taskExecutedEventController = StreamController<PayloadMap>.broadcast();
 final taskExecutedEventProvider = StreamProvider<PayloadMap>((ref) {
+  if (_taskExecutedEventController.hasListener) {
+    _taskExecutedEventController = StreamController<PayloadMap>.broadcast();
+  }
   return _taskExecutedEventController.stream;
 });
 
@@ -176,7 +180,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     }
     final executionId = const Uuid().v4();
     final startedAt = DateTime.now();
-    final handle = runnerFor(task.action).start(ref.base, payload);
+    final handle = ref.read(actionRunnerFactoryProvider)(task.action).start(ref.base, payload);
 
     state = state.copyWith(
       active: [
