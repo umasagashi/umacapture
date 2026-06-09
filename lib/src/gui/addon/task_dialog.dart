@@ -32,7 +32,8 @@ const _webhookContentTypes = <String>["json", "form", "text"];
 /// [required] is true (external programs, whose process can hang indefinitely and
 /// hold an execution slot) an empty value is rejected. A non-empty value must
 /// always be a positive integer.
-String? _timeoutErrorKey(String raw, {bool required = false}) {
+@visibleForTesting
+String? timeoutErrorKey(String raw, {bool required = false}) {
   final text = raw.trim();
   if (text.isEmpty) return required ? "$tr_addon.dialog.timeout_required" : null;
   final seconds = int.tryParse(text);
@@ -42,7 +43,8 @@ String? _timeoutErrorKey(String raw, {bool required = false}) {
 /// A translation key for why [raw] is an invalid webhook URL, or null if valid.
 /// Empty is treated as valid here (the save button is gated on non-empty
 /// separately) to avoid showing an error before the user has typed anything.
-String? _urlErrorKey(String raw) {
+@visibleForTesting
+String? urlErrorKey(String raw) {
   final text = raw.trim();
   if (text.isEmpty) return null;
   // Placeholders like {record_id} aren't valid URI characters; replace them before
@@ -115,12 +117,12 @@ class _ActionFields {
 
   bool isValid(_ActionKind kind, TriggerEvent trigger) {
     return switch (kind) {
-      _ActionKind.external => program.text.trim().isNotEmpty && _timeoutErrorKey(timeout.text, required: true) == null,
+      _ActionKind.external => program.text.trim().isNotEmpty && timeoutErrorKey(timeout.text, required: true) == null,
       _ActionKind.webhook =>
         url.text.trim().isNotEmpty &&
-            _urlErrorKey(url.text) == null &&
-            _timeoutErrorKey(webhookTimeout.text, required: true) == null,
-      _ActionKind.builtin => !_builtinNeedsUnavailableRecord(builtinKey, trigger),
+            urlErrorKey(url.text) == null &&
+            timeoutErrorKey(webhookTimeout.text, required: true) == null,
+      _ActionKind.builtin => !builtinNeedsUnavailableRecord(builtinKey, trigger),
     };
   }
 
@@ -160,7 +162,8 @@ class _ActionFields {
 /// Whether [builtinKey]'s action requires a `record_id` that [trigger] never
 /// supplies, so the pairing would fail on every run. Shared by the save gate and
 /// the inline warning so the two cannot disagree.
-bool _builtinNeedsUnavailableRecord(String builtinKey, TriggerEvent trigger) {
+@visibleForTesting
+bool builtinNeedsUnavailableRecord(String builtinKey, TriggerEvent trigger) {
   final descriptor = builtinActionRegistry[builtinKey];
   return descriptor?.requiresRecord == true && !placeholdersForTrigger(trigger).contains("record_id");
 }
@@ -393,7 +396,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       keyboardType: TextInputType.number,
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.timeout".tr(),
-        errorText: _timeoutErrorKey(f.timeout.text, required: true)?.tr(),
+        errorText: timeoutErrorKey(f.timeout.text, required: true)?.tr(),
       ),
       onChanged: (_) => onChanged(),
     ),
@@ -414,7 +417,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.webhook.url".tr(),
         helperText: "$tr_addon.dialog.webhook.url_helper".tr(),
-        errorText: _urlErrorKey(f.url.text)?.tr(),
+        errorText: urlErrorKey(f.url.text)?.tr(),
       ),
       onChanged: (_) => onChanged(),
     ),
@@ -467,7 +470,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       keyboardType: TextInputType.number,
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.timeout".tr(),
-        errorText: _timeoutErrorKey(f.webhookTimeout.text, required: true)?.tr(),
+        errorText: timeoutErrorKey(f.webhookTimeout.text, required: true)?.tr(),
       ),
       onChanged: (_) => onChanged(),
     ),
@@ -498,7 +501,7 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       items: {for (final d in builtinActionRegistry.values) d.key: d.labelKey.tr()},
       onChanged: onBuiltinChanged,
     ),
-    if (_builtinNeedsUnavailableRecord(f.builtinKey, trigger)) _BuiltinRecordWarning(),
+    if (builtinNeedsUnavailableRecord(f.builtinKey, trigger)) _BuiltinRecordWarning(),
     if (descriptor?.usesArgument == true) ...[
       const SizedBox(height: 16),
       if (descriptor!.argumentOptions != null)
