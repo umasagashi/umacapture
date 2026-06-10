@@ -9,7 +9,11 @@
         },
         "file_deletion_error": "ファイルの削除が許可されていません。エクスプローラーで削除してください。",
         "record_quarantined": "読み込めない記録を {count} 件 隔離フォルダへ退避しました。（クリックでフォルダを開く）",
-        "record_quarantine_error": "読み込めない記録 {count} 件の退避に失敗しました。"
+        "record_quarantine_error": "読み込めない記録 {count} 件の退避に失敗しました。",
+        "inheritance": {
+            "resolved": "親子関係を {count} 件解決しました。",
+            "ambiguous": "親候補が複数一致したため {count} 件はリンクしませんでした。"
+        }
     },
     "pages": {
         "dashboard": {
@@ -755,6 +759,15 @@
                         "friend_inheritance": "フレンド継承"
                     }
                 },
+                "inheritance": {
+                    "title": "継承",
+                    "values": {
+                        "unregistered": "未登録",
+                        "registered": "登録済み",
+                        "parent1_unregistered": "左親未登録",
+                        "parent2_unregistered": "右親未登録"
+                    }
+                },
                 "race_strategy": {
                     "title": "作戦"
                 },
@@ -1137,6 +1150,10 @@
                 "regenerate": {
                     "title": "キャプチャ済みウマ娘の再認識",
                     "description": "現在の認識モジュールバージョン以降の認識をやり直します。保守対象外のキャプチャバージョンのウマ娘は対象外になります。"
+                },
+                "resolve_inheritance": {
+                    "title": "親子関係の再解決",
+                    "description": "キャプチャ済みレコード全体を走査し、因子とカードの一致から親子リンクを貼り直します。"
                 }
             },
             "module_update": {

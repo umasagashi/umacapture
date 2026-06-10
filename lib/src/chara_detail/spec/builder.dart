@@ -284,6 +284,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: RecordTypeParser(),
     ),
     SimpleLabelColumnBuilder(
+      title: "$tr_columns.inheritance.title".tr(),
+      category: ColumnCategory.metadata,
+      labelKey: LabelKeys.inheritanceStatus,
+      parser: InheritanceStatusParser(),
+    ),
+    SimpleLabelColumnBuilder(
       title: "$tr_columns.race_strategy.title".tr(),
       category: ColumnCategory.metadata,
       labelKey: LabelKeys.raceStrategy,

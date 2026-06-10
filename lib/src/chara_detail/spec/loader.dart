@@ -58,12 +58,18 @@ final labelMapLoader = FutureProvider<LabelMap>((ref) async {
     // translations rather than the downloaded module. This keeps a newly added
     // RecordType (e.g. friend) labeled without waiting for a module update, and
     // avoids a range error when the module label list lags behind the enum.
-    return {...map, LabelKeys.recordType: _recordTypeLabels()};
+    return {...map, LabelKeys.recordType: _recordTypeLabels(), LabelKeys.inheritanceStatus: _inheritanceStatusLabels()};
   });
 });
 
 List<String> _recordTypeLabels() {
   return RecordType.values.map((type) => "$tr_columns.record_type.values.${type.translationKey}".tr()).toList();
+}
+
+// Order must match InheritanceStatusParser's indices (0..3).
+List<String> _inheritanceStatusLabels() {
+  const keys = ["unregistered", "registered", "parent1_unregistered", "parent2_unregistered"];
+  return keys.map((key) => "$tr_columns.inheritance.values.$key".tr()).toList();
 }
 
 final labelMapProvider = Provider<LabelMap>((ref) {

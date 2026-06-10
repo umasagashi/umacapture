@@ -382,6 +382,15 @@ class AboutGroup extends ConsumerWidget {
           ),
         ),
         ListTile(
+          isThreeLine: true,
+          title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
+          subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.account_tree)),
+          onTap: () {
+            ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
+          },
+        ),
+        ListTile(
           title: Text("$tr_settings.module_update.entry.title".tr()),
           subtitle: Text("$tr_settings.module_update.entry.description".tr()),
           trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.upload_file)),

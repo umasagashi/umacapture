@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/inheritance.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
@@ -152,17 +154,74 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
       return;
     }
-    _updateRecordInfo(record);
+
+    // Link this record to existing parents/children by matching factors and
+    // card, then persist any record.json (this record and/or existing children)
+    // whose parent ids changed.
+    final resolution = InheritanceResolver.resolveForNewRecord(record, records);
+    final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
+    final childUpdates = {for (final e in resolution.changed.where((e) => e.id != record.id)) e.id: e};
+    for (final updated in resolution.changed) {
+      _persist(updated);
+    }
+    _updateRecordInfo(resolvedRecord);
 
     // `records` already folds in any pending batch updates, so publishing it
     // and clearing the buffer keeps the next replaceBy re-snapshotting cleanly.
     _pendingRecords = null;
-    state = AsyncData([...records, record]);
+    state = AsyncData([for (final e in records) childUpdates[e.id] ?? e, resolvedRecord]);
+
+    _surfaceInheritance(resolution);
 
     final autoCopy = ref.read(autoCopyClipboardStateProvider);
     if (autoCopy != CharaDetailRecordImageMode.none) {
-      copyToClipboard(record, autoCopy);
+      copyToClipboard(resolvedRecord, autoCopy);
     }
+  }
+
+  /// Re-resolves parent/child links across every stored record (manual action).
+  ///
+  /// Unlike the per-capture resolution, this is authoritative: it both sets and
+  /// clears links so the whole storage reflects the current matches. Records
+  /// whose links change are rewritten to disk and republished.
+  void resolveAllInheritance() {
+    final resolution = InheritanceResolver.resolveAll(_records);
+    for (final updated in resolution.changed) {
+      _persist(updated);
+      replaceBy(updated, id: updated.id);
+    }
+    forceRebuild();
+    _surfaceInheritance(resolution, alwaysReport: true);
+  }
+
+  /// Reports the outcome of an inheritance resolution via toasts.
+  ///
+  /// A success toast is shown when links were written; with [alwaysReport] it is
+  /// shown even for zero changes (so the manual action confirms it ran). A
+  /// warning toast is shown whenever some slots were left unlinked as ambiguous.
+  void _surfaceInheritance(InheritanceResolution resolution, {bool alwaysReport = false}) {
+    if (resolution.changed.isNotEmpty || alwaysReport) {
+      Toaster.show(
+        ToastData.success(
+          description: "app.inheritance.resolved".tr(namedArgs: {"count": "${resolution.changed.length}"}),
+        ),
+      );
+    }
+    if (resolution.ambiguities.isNotEmpty) {
+      Toaster.show(
+        ToastData.warning(
+          description: "app.inheritance.ambiguous".tr(namedArgs: {"count": "${resolution.ambiguities.length}"}),
+        ),
+      );
+    }
+  }
+
+  /// Writes [record] back to its `record.json`, matching the on-disk format
+  /// (4-space indent) that the native recognizer and the exporter produce.
+  void _persist(CharaDetailRecord record) {
+    recordPathOf(
+      record,
+    ).filePath("record.json").writeAsStringSync(const JsonEncoder.withIndent('    ').convert(record.toMap()));
   }
 
   void addFromFile(String id) {
