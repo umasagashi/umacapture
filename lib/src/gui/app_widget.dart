@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '/src/addon/addon_dispatcher.dart';
 import '/src/app/pages.dart';
 import '/src/app/route.dart';
 import '/src/core/notification_controller.dart';
@@ -132,13 +133,21 @@ class _ResponsiveScaffold extends StatelessWidget {
                   ),
                 ),
           drawer: wide ? null : const _Drawer(),
-          body: NotificationLayer.asSibling(
-            child: Row(
-              children: [
-                if (wide) _Sidebar(),
-                Expanded(child: child),
-              ],
-            ),
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              NotificationLayer.asSibling(
+                child: Row(
+                  children: [
+                    if (wide) _Sidebar(),
+                    Expanded(child: child),
+                  ],
+                ),
+              ),
+              // Invisible sibling that runs addon tasks on app events. Mounted
+              // here so it lives for the whole session, like NotificationLayer.
+              const AddonDispatcher(),
+            ],
           ),
         );
       },

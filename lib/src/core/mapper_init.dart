@@ -1,5 +1,8 @@
 import 'package:dart_mappable/dart_mappable.dart';
 
+import '/src/addon/execution/execution_models.dart';
+import '/src/addon/model/addon_action.dart';
+import '/src/addon/model/task_definition.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -61,6 +64,12 @@ void initializeMappers() {
   LogicColumnSpecMapper.ensureInitialized();
   ParserMapper.ensureInitialized();
   CharaDetailRecordMapper.ensureInitialized();
+
+  // Addon feature. AddonAction subclasses are co-located in addon_action.dart, so
+  // the cascade from AddonActionMapper covers ExternalProgramAction/WebhookAction/BuiltinAction.
+  TaskDefinitionMapper.ensureInitialized();
+  AddonActionMapper.ensureInitialized();
+  HistoryEntryMapper.ensureInitialized();
 
   // Types that are (de)serialized on their own.
   SkillInfoMapper.ensureInitialized();

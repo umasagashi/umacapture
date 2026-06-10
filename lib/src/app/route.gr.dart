@@ -11,6 +11,22 @@
 part of 'route.dart';
 
 /// generated route for
+/// [AddonPage]
+class AddonRoute extends PageRouteInfo<void> {
+  const AddonRoute({List<PageRouteInfo>? children})
+    : super(AddonRoute.name, initialChildren: children);
+
+  static const String name = 'AddonRoute';
+
+  static PageInfo page = PageInfo(
+    name,
+    builder: (data) {
+      return const AddonPage();
+    },
+  );
+}
+
+/// generated route for
 /// [AppWidget]
 class AppWidgetRoute extends PageRouteInfo<void> {
   const AppWidgetRoute({List<PageRouteInfo>? children})

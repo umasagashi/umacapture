@@ -234,7 +234,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
   void copyToClipboard(CharaDetailRecord record, CharaDetailRecordImageMode image) {
     assert(image != CharaDetailRecordImageMode.none);
     final imagePath = imagePathOf(record, image);
-    ClipboardAlt.pasteImage(ref.base, imagePath);
+    // Fire-and-forget: pasteImage reports its own outcome via a toast. unawaited
+    // makes the intent explicit so a future async failure isn't silently dropped.
+    unawaited(ClipboardAlt.pasteImage(ref.base, imagePath));
   }
 
   List<CharaDetailRecord> get records => _records;

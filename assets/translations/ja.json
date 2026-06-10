@@ -921,6 +921,145 @@
                 }
             }
         },
+        "addon": {
+            "title": "アドオン",
+            "card": {
+                "tasks": "タスク",
+                "running": "実行中",
+                "history": "実行履歴"
+            },
+            "task": {
+                "default_name": "新しいタスク",
+                "add": "タスクを追加",
+                "run": "今すぐ実行",
+                "empty": "タスクが登録されていません。右上のボタンから追加してください。",
+                "load_broken": "読み込めないタスクがありました。一覧には表示されませんが、データは保持され、保存しても失われません。",
+                "chained_disabled": "削除したタスクに連鎖していたタスクを無効化しました。連鎖元を選び直してください。"
+            },
+            "running": {
+                "cancel": "中止",
+                "limit_reached": "同時実行数の上限（{count}）に達したため、タスク「{name}」をスキップしました。"
+            },
+            "history": {
+                "clear": "履歴を消去",
+                "empty": "実行履歴はありません。"
+            },
+            "trigger": {
+                "capture_started": "キャプチャ開始時",
+                "capture_started_description": "画面キャプチャが開始されたとき（開始ボタン、または自動開始）に発火します。キャプチャ中に常駐させたい外部ツールの起動などに使えます。",
+                "capture_stopped": "キャプチャ停止時",
+                "capture_stopped_description": "画面キャプチャが停止したとき（停止ボタン、またはシーン終了）に発火します。キャプチャ中に起動したツールの後片付けなどに使えます。",
+                "record_captured": "レコード取得時",
+                "record_captured_description": "ネイティブ認識が完了し、新しい殿堂入りレコードが1件確定したときに発火します。ペイロードに record_id が入るため、取得したウマ娘ごとの外部連携に向いています。",
+                "record_exported": "エクスポート完了時",
+                "record_exported_description": "CSV / JSON / ZIP のエクスポートが完了したときに発火します。ペイロードに export_path（出力ファイルのパス）が入るため、書き出し後の自動処理に使えます。",
+                "task_executed": "他のタスク実行時",
+                "task_executed_description": "別のタスクの実行が完了したときに発火します。下の「連鎖元のタスク」で指定したタスクに続けて実行され、複数のアクションを順番につなげられます。連鎖元の指定は必須です。元タスクのペイロード（record_id など）も引き継がれます。",
+                "manual": "手動実行のみ",
+                "manual_description": "自動では発火しません。タスク一覧の実行ボタンを押したときだけ実行されます。動作確認や任意のタイミングでの実行に使えます。手動実行では、レコードが1件以上あれば最新のレコードが record_id などのプレースホルダーに使われます。"
+            },
+            "builtin": {
+                "show_toast": "通知を表示",
+                "show_toast_argument": "通知メッセージ",
+                "copy_payload_to_clipboard": "クリップボードへコピー",
+                "copy_payload_argument": "コピーする内容",
+                "copy_image_to_clipboard": "画像をクリップボードへコピー",
+                "copy_image_argument": "コピーする画像",
+                "copy_file_to_clipboard": "ファイルをクリップボードへコピー",
+                "copy_file_argument": "コピーするファイル",
+                "play_sound": "サウンドを鳴らす",
+                "play_sound_argument": "サウンド種別",
+                "options": {
+                    "image_trainee": "アイコン",
+                    "image_skill": "スキル画面",
+                    "image_factor": "因子画面",
+                    "image_campaign": "育成情報画面",
+                    "file_trainee": "アイコン画像 (trainee.jpg)",
+                    "file_skill": "スキル画像 (skill.png)",
+                    "file_factor": "因子画像 (factor.png)",
+                    "file_campaign": "育成情報画像 (campaign.png)",
+                    "file_record": "レコードデータ (record.json)",
+                    "sound_attention_normal": "通知音（標準）",
+                    "sound_attention_weak": "通知音（弱）",
+                    "sound_error": "エラー音"
+                }
+            },
+            "placeholder": {
+                "event": "発火したイベントの識別子（例: record_captured）。すべてのトリガで利用できます。",
+                "modules_dir": "マスタデータ（labels.json などのID→名称変換表）が入ったフォルダのパス。すべてのトリガで利用できます。",
+                "record_id": "キャプチャしたレコードのID。「レコード取得時」トリガでのみ値が入ります。",
+                "export_path": "エクスポートの出力先ファイルのパス。「エクスポート完了時」トリガでのみ値が入ります。",
+                "record_dir": "レコードの保存フォルダのパス（画像などを含む）。「レコード取得時」トリガでのみ値が入ります。",
+                "record_json_path": "レコード本体 record.json のフルパス（各種ID・ステータスを含む）。「レコード取得時」トリガでのみ値が入ります。",
+                "record_json": "レコード本体 record.json の中身そのもの（JSON 文字列・各種ID・ステータスを含む）。「レコード取得時」トリガでのみ値が入ります。Webhook の JSON 本文ではエスケープされず、JSON 値としてそのまま埋め込まれます（引用符で囲まないでください）。",
+                "trainee_icon_path": "育成ウマ娘のアイコン画像（trainee.jpg）のフルパス。「レコード取得時」トリガでのみ値が入ります。",
+                "skill_image_path": "スキル画面のキャプチャ画像（skill.png）のフルパス。「レコード取得時」トリガでのみ値が入ります。",
+                "factor_image_path": "因子画面のキャプチャ画像（factor.png）のフルパス。「レコード取得時」トリガでのみ値が入ります。",
+                "campaign_image_path": "育成成績画面のキャプチャ画像（campaign.png）のフルパス。「レコード取得時」トリガでのみ値が入ります。",
+                "task_name": "連鎖元のタスク名。「他のタスク実行時」トリガでのみ値が入ります。",
+                "task_id": "連鎖元のタスクのID。「他のタスク実行時」トリガでのみ値が入ります。",
+                "task_status": "連鎖元タスクの実行結果（success / failure / cancelled / timeout）。「他のタスク実行時」トリガでのみ値が入ります。"
+            },
+            "dialog": {
+                "title_add": "タスクを追加",
+                "title_edit": "タスクを編集",
+                "close": "閉じる",
+                "output": "出力",
+                "error": "エラー",
+                "name": "タスク名",
+                "trigger": "トリガ",
+                "action_kind": "アクション種別",
+                "copy_placeholder": "プレースホルダーを選択",
+                "copy_placeholder_hint": "クリップボードに選択した {プレースホルダー} をコピーします",
+                "copied_placeholder": "{placeholder} をコピーしました",
+                "kind_external": "外部プログラム",
+                "kind_webhook": "Webhook（HTTP送信）",
+                "kind_builtin": "アプリ内蔵アクション",
+                "source_task": {
+                    "label": "連鎖元のタスク",
+                    "help": "指定したタスクの実行が完了すると、このタスクが続けて実行されます。",
+                    "required": "連鎖元のタスクを選択してください。未選択のままでは実行されません。"
+                },
+                "program": {
+                    "label": "プログラムのパス",
+                    "picker_title": "実行するプログラムを選択"
+                },
+                "arguments": {
+                    "label": "引数テンプレート",
+                    "helper": "{record_id} などのプレースホルダーを使えます。"
+                },
+                "working_dir": {
+                    "label": "カレントディレクトリ",
+                    "helper": "プログラムの作業ディレクトリ。空欄ならアプリと同じ場所で実行します。",
+                    "picker_title": "カレントディレクトリを選択"
+                },
+                "timeout": "タイムアウト（秒・必須）",
+                "timeout_invalid": "正の整数を入力してください。",
+                "timeout_required": "タイムアウト（秒）を入力してください。",
+                "run_in_shell": "シェル経由で実行（.bat やシェル組込みコマンド用）",
+                "run_in_shell_help": "シェル経由ではプレースホルダーの値がエスケープされずに渡されます。信頼できるテンプレートのみで有効にしてください。",
+                "webhook": {
+                    "url": "URL",
+                    "url_helper": "送信先のURL。{record_id} などのプレースホルダーを埋め込めます。",
+                    "url_invalid": "http:// または https:// で始まる有効なURLを入力してください。",
+                    "method": "メソッド",
+                    "content_type": "本文の形式",
+                    "content_type_json": "JSON",
+                    "content_type_form": "フォーム",
+                    "content_type_text": "テキスト",
+                    "body": "本文",
+                    "body_helper": "リクエスト本文。{record_id} などのプレースホルダーが置換されます。GET/HEAD では送信されません。"
+                },
+                "builtin": {
+                    "label": "内蔵アクション",
+                    "argument": "引数",
+                    "requires_record": "このアクションはレコード情報が必要です。「レコード取得時」トリガ（または、そのトリガから連鎖した「他のタスク実行時」）を選択してください。"
+                },
+                "save": "保存",
+                "delete": "削除",
+                "delete_confirm": "長押しで削除します"
+            }
+        },
         "settings": {
             "title": "設定",
             "style": {

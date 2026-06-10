@@ -5,7 +5,7 @@ import 'package:recase/recase.dart';
 
 import '/src/preference/hive_adapter.dart';
 
-enum StorageBoxKey { settings, windowState, trainerId, columnSpec, versionCheck }
+enum StorageBoxKey { settings, windowState, trainerId, columnSpec, versionCheck, addon }
 
 extension _BoxKeyExtension on StorageBoxKey {
   static Iterable<String> get names {
@@ -34,15 +34,26 @@ class StorageBox {
     return StorageEntry<T>(box: this, key: key);
   }
 
-  static Future<void> ensureOpened({bool reset = false}) async {
-    final packageInfo = await PackageInfo.fromPlatform();
-    final subDir = join(packageInfo.appName, "settings");
+  /// Opens every box, initializing Hive under the app's settings directory.
+  ///
+  /// [directory] overrides the storage location with an absolute path — used by
+  /// tests (e.g. the integration test) to keep Hive away from the real settings
+  /// directory, so test runs cannot clear or pollute the user's persisted data.
+  static Future<void> ensureOpened({bool reset = false, String? directory}) async {
+    final String location;
+    if (directory != null) {
+      location = directory;
+      Hive.init(directory);
+    } else {
+      final packageInfo = await PackageInfo.fromPlatform();
+      location = join(packageInfo.appName, "settings");
+      await Hive.initFlutter(location);
+    }
     if (reset) {
       for (final name in _BoxKeyExtension.names) {
-        await Hive.deleteBoxFromDisk(name, path: subDir);
+        await Hive.deleteBoxFromDisk(name, path: location);
       }
     }
-    await Hive.initFlutter(subDir);
     registerHiveAdapters();
     for (final name in _BoxKeyExtension.names) {
       await Hive.openBox(name);
