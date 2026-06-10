@@ -121,6 +121,32 @@ void main() {
       expect(jsonDecode(receivedBody!), {'v': 'Special "Week"'});
     });
 
+    test('a JSON POST embeds {record_json} raw as a JSON value while escaping other keys', () async {
+      String? receivedBody;
+      handler = (request) async {
+        receivedBody = await utf8.decodeStream(request);
+        request.response.statusCode = 200;
+        await request.response.close();
+      };
+
+      const recordJson = '{"a":"x \\"y\\"","n":1}';
+      await WebhookRunner(
+        WebhookAction(
+          url: url('/post'),
+          method: 'POST',
+          contentType: 'json',
+          bodyTemplate: '{"record": {record_json}, "v":"{record_id}"}',
+        ),
+      ).start(ref, const {'record_json': recordJson, 'record_id': 'Special "Week"'}).result;
+
+      // The record document arrives as a nested JSON object (not a double-encoded
+      // string), and the ordinary placeholder is still escaped.
+      expect(jsonDecode(receivedBody!), {
+        'record': {'a': 'x "y"', 'n': 1},
+        'v': 'Special "Week"',
+      });
+    });
+
     test('a GET sends no request body even when a body template is set', () async {
       String? receivedBody;
       handler = (request) async {

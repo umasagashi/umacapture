@@ -23,12 +23,19 @@ class WebhookRunner implements ActionRunner {
     // value can't break the URL structure or inject extra query parameters.
     // encodeComponent (%20 for space) is valid in both path and query segments,
     // unlike encodeQueryComponent's '+', since a placeholder may appear anywhere in the URL.
-    final url = substitutePayload(action.url, payload, transform: Uri.encodeComponent);
+    final url = substitutePayload(action.url, payload, transform: (_, value) => Uri.encodeComponent(value));
     // Escape substituted values for the body's content type so a placeholder value
     // containing a quote/newline (JSON) or '&'/'=' (form) cannot corrupt the body
-    // or inject extra fields. The literal template text is left untouched.
+    // or inject extra fields. The literal template text is left untouched, and
+    // keys in the spec's rawKeys set bypass the escaper (record_json embeds as a
+    // JSON value, not a string fragment).
     final spec = _specFor(action.contentType);
-    final body = substitutePayload(action.bodyTemplate, payload, transform: spec.escaper);
+    final escaper = spec.escaper;
+    final body = substitutePayload(
+      action.bodyTemplate,
+      payload,
+      transform: escaper == null ? null : (key, value) => spec.rawKeys.contains(key) ? value : escaper(value),
+    );
     final options = Options(
       method: action.method,
       contentType: spec.header,
@@ -133,7 +140,10 @@ class _ContentTypeSpec {
   /// Escaper for each substituted value, or null to send values verbatim.
   final String Function(String value)? escaper;
 
-  const _ContentTypeSpec(this.header, this.escaper);
+  /// Placeholder keys whose values bypass [escaper] and are inserted raw.
+  final Set<String> rawKeys;
+
+  const _ContentTypeSpec(this.header, this.escaper, {this.rawKeys = const {}});
 }
 
 /// Content-type registry keyed by [WebhookAction.contentType]. `json` is also the
@@ -144,6 +154,8 @@ const _contentTypeSpecs = <String, _ContentTypeSpec>{
   // Plain text is sent verbatim.
   "text": _ContentTypeSpec("text/plain", null),
   // Escape as a JSON string fragment so quotes/backslashes/newlines in a value
-  // keep the body valid JSON.
-  "json": _ContentTypeSpec("application/json", jsonStringFragment),
+  // keep the body valid JSON. record_json is the documented exception: it is an
+  // entire JSON document, so escaping would make it impossible to embed as a
+  // JSON value — it is inserted raw (used unquoted, e.g. {"record": {record_json}}).
+  "json": _ContentTypeSpec("application/json", jsonStringFragment, rawKeys: {"record_json"}),
 };

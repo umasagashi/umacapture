@@ -18,18 +18,23 @@ final _payloadPlaceholderPattern = RegExp(r'\{(\w+)\}');
 /// template.
 ///
 /// When [transform] is given it is applied to each substituted value (not the
-/// literal template text) — e.g. [Uri.encodeQueryComponent] to safely inject
-/// values into a URL while keeping its structure intact.
+/// literal template text) — e.g. percent-encoding to safely inject values into
+/// a URL while keeping its structure intact. It receives the placeholder key so
+/// a caller can exempt specific keys (the webhook JSON path inserts
+/// `record_json` raw, as a JSON value rather than a string fragment).
+///
+/// Substitution is a single pass ([String.replaceAllMapped] never rescans a
+/// replacement), so brace sequences inside a substituted value are left as-is.
 ///
 /// Keys starting with `_` are an internal namespace (chain bookkeeping such as
 /// `_chain_visited`, the `_enriched` marker) and are NEVER substituted — a
 /// `{_chain_visited}` placeholder expands to empty so internal control state
 /// cannot leak into command args, URLs, or webhook bodies.
-String substitutePayload(String template, PayloadMap payload, {String Function(String value)? transform}) {
+String substitutePayload(String template, PayloadMap payload, {String Function(String key, String value)? transform}) {
   return template.replaceAllMapped(_payloadPlaceholderPattern, (m) {
     final key = m.group(1)!;
     final value = key.startsWith('_') ? '' : (payload[key] ?? '');
-    return transform == null ? value : transform(value);
+    return transform == null ? value : transform(key, value);
   });
 }
 

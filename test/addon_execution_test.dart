@@ -81,8 +81,26 @@ void main() {
 
     test('transform encodes substituted values, not the literal template', () {
       // The URL structure (?, =) is preserved; only the value is encoded.
-      final url = substitutePayload("https://h/n?dir={record_dir}", payload, transform: Uri.encodeComponent);
+      final url = substitutePayload(
+        "https://h/n?dir={record_dir}",
+        payload,
+        transform: (_, value) => Uri.encodeComponent(value),
+      );
       expect(url, "https://h/n?dir=C%3A%2Frecs%2FSpecial%20Week");
+    });
+
+    test('transform receives the placeholder key so callers can exempt specific keys', () {
+      final result = substitutePayload(
+        "a={event} b={record_dir}",
+        payload,
+        transform: (key, value) => key == "event" ? value : "<$key>",
+      );
+      expect(result, "a=record_captured b=<record_dir>");
+    });
+
+    test('substitution is single-pass: a placeholder pattern inside a value is not re-expanded', () {
+      const tricky = {"record_json": 'contains a literal {event} token', "event": "real"};
+      expect(substitutePayload("v={record_json}", tricky), 'v=contains a literal {event} token');
     });
 
     test('never expands internal _-prefixed placeholders (chain bookkeeping cannot leak)', () {

@@ -60,7 +60,7 @@ String? urlErrorKey(String raw) {
   // checking so a templated URL still validates on its scheme and host. Reuse the
   // runtime substituter (with a fixed stand-in for every value) so validation and
   // expansion share one placeholder grammar and can't disagree on what is a token.
-  final stripped = substitutePayload(text, const {}, transform: (_) => "x");
+  final stripped = substitutePayload(text, const {}, transform: (_, _) => "x");
   final uri = Uri.tryParse(stripped);
   final valid = uri != null && uri.isAbsolute && (uri.scheme == "http" || uri.scheme == "https") && uri.host.isNotEmpty;
   return valid ? null : "$tr_addon.dialog.webhook.url_invalid";
