@@ -15,6 +15,7 @@ import 'package:umacapture/src/addon/execution/webhook_runner.dart';
 import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
 import 'package:umacapture/src/core/utils.dart';
+import 'package:umacapture/src/gui/addon.dart' show formatHistoryTimestamp;
 import 'package:umacapture/src/gui/addon/task_dialog.dart';
 
 /// Exposes a [RefBase] so the runners (which take one) can be called in tests.
@@ -199,6 +200,37 @@ void main() {
     });
   });
 
+  group('CaptureBuffer', () {
+    test('decodes a multi-byte character split across chunks intact', () {
+      // Per-chunk decoding would turn each half into garbage; the buffer must
+      // defer decoding until snapshot so the split character survives. utf8 is
+      // injected so the test does not depend on the machine code page.
+      final bytes = utf8.encode('日');
+      final buffer = CaptureBuffer(utf8)
+        ..add(bytes.sublist(0, 1))
+        ..add(bytes.sublist(1));
+      expect(buffer.snapshot(), '日');
+    });
+
+    test('caps the buffered bytes and truncates the decoded snapshot', () {
+      final buffer = CaptureBuffer(utf8);
+      // Feed far more than the cap in moderate chunks.
+      for (var i = 0; i < 10; i++) {
+        buffer.add(List.filled(maxCaptureChars, 0x61));
+      }
+      final snapshot = buffer.snapshot();
+      expect(snapshot.length, maxCaptureChars);
+      expect(snapshot, startsWith('aaa'));
+    });
+
+    test('snapshot is repeatable and reflects later additions', () {
+      final buffer = CaptureBuffer(utf8)..add(utf8.encode('one'));
+      expect(buffer.snapshot(), 'one');
+      buffer.add(utf8.encode(' two'));
+      expect(buffer.snapshot(), 'one two');
+    });
+  });
+
   group('task_dialog validation helpers', () {
     test('timeoutErrorKey enforces a positive integer, required-aware', () {
       expect(timeoutErrorKey('', required: true), '$tr_addon.dialog.timeout_required');
@@ -221,6 +253,22 @@ void main() {
       expect(builtinNeedsUnavailableRecord('copy_image_to_clipboard', TriggerEvent.manual), isTrue);
       expect(builtinNeedsUnavailableRecord('copy_image_to_clipboard', TriggerEvent.recordCaptured), isFalse);
       expect(builtinNeedsUnavailableRecord('show_toast', TriggerEvent.manual), isFalse);
+    });
+
+    test('clampToOptions keeps a known value and falls back to the first option', () {
+      expect(clampToOptions('GET', ['POST', 'GET']), 'GET');
+      // A value persisted by another app version must not crash the dropdown.
+      expect(clampToOptions('connect', ['POST', 'GET']), 'POST');
+    });
+  });
+
+  group('formatHistoryTimestamp', () {
+    test('renders in local time without sub-second noise', () {
+      final utc = DateTime.utc(2026, 6, 1, 12, 0, 0, 123);
+      // Persisted entries decode as UTC; the display must match what a fresh
+      // local-time entry would show.
+      expect(formatHistoryTimestamp(utc), utc.toLocal().toString().split('.').first);
+      expect(formatHistoryTimestamp(utc), isNot(contains('.')));
     });
   });
 }

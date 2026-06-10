@@ -185,7 +185,7 @@ class _HistoryCard extends ConsumerWidget {
               title: Text(entry.taskName),
               subtitle: Text(
                 "${triggerLabelKey(entry.trigger).tr()} · "
-                "${entry.startedAt.toString().split('.').first} · "
+                "${formatHistoryTimestamp(entry.startedAt)} · "
                 "${(entry.durationMs / 1000).toStringAsFixed(1)}s"
                 "${entry.exitCode == null ? '' : ' · exit ${entry.exitCode}'}",
                 style: theme.textTheme.bodySmall,
@@ -211,6 +211,14 @@ class _HistoryCard extends ConsumerWidget {
     );
   }
 }
+
+/// Renders a history timestamp in local time without sub-second noise.
+///
+/// Persisted entries decode as UTC (dart_mappable round-trips DateTime through
+/// UTC ISO-8601) while fresh in-session entries are local, so normalizing with
+/// `toLocal()` keeps the two consistent across an app restart.
+@visibleForTesting
+String formatHistoryTimestamp(DateTime startedAt) => startedAt.toLocal().toString().split('.').first;
 
 /// Stacked error and output sections for a history entry's detail dialog.
 ///

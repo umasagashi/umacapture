@@ -4,6 +4,7 @@
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/addon_tasks_test.dart
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce_flutter/adapters.dart';
 import 'package:umacapture/src/addon/addon_dispatcher.dart';
 import 'package:umacapture/src/addon/execution/action_runner.dart';
+import 'package:umacapture/src/addon/execution/builtin_actions.dart';
 import 'package:umacapture/src/addon/execution/builtin_runner.dart';
 import 'package:umacapture/src/addon/execution/execution_controller.dart';
 import 'package:umacapture/src/addon/execution/execution_models.dart';
@@ -19,6 +21,8 @@ import 'package:umacapture/src/addon/execution/webhook_runner.dart';
 import 'package:umacapture/src/addon/model/addon_action.dart';
 import 'package:umacapture/src/addon/model/task_definition.dart';
 import 'package:umacapture/src/addon/task_definitions.dart';
+import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/utils.dart';
 
@@ -32,9 +36,11 @@ class _FakeRunner implements ActionRunner {
   final _progress = StreamController<ExecutionProgress>.broadcast();
   final _result = Completer<ExecutionResult>();
   bool cancelled = false;
+  PayloadMap? lastPayload;
 
   @override
   ActionHandle start(RefBase ref, PayloadMap payload) {
+    lastPayload = payload;
     return ActionHandle(progress: _progress.stream, result: _result.future, cancel: () => cancelled = true);
   }
 
@@ -70,6 +76,29 @@ TaskDefinition _task(
     action: const BuiltinAction(actionKey: 'show_toast', argument: '{event}'),
     sourceTaskId: sourceTaskId,
   );
+}
+
+/// A record-storage notifier preloaded with fixed records, bypassing the real
+/// build's path/disk wiring, for runManual's latest-record selection tests.
+class _FakeRecordStorage extends CharaDetailRecordStorage {
+  _FakeRecordStorage(this.preloaded);
+
+  final List<CharaDetailRecord> preloaded;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => preloaded;
+}
+
+/// A copy of the fixture record with its id and captured date replaced, so a
+/// test can hold multiple distinct records.
+CharaDetailRecord _recordVariant(String id, String capturedDate) {
+  final map = (jsonDecode(File('test/fixtures/chara_detail_record.json').readAsStringSync()) as Map)
+      .cast<String, dynamic>();
+  final metadata = (map['metadata'] as Map).cast<String, dynamic>();
+  (metadata['record_id'] as Map)['self'] = id;
+  metadata['captured_date'] = capturedDate;
+  map['metadata'] = metadata;
+  return CharaDetailRecordMapper.fromMap(map);
 }
 
 void main() {
@@ -229,6 +258,43 @@ void main() {
       final result = await handle.result;
       expect(result.status, ExecutionStatus.success);
     });
+
+    BuiltinActionDescriptor neverCompleting(String key) =>
+        BuiltinActionDescriptor(key: key, labelKey: key, run: (ref, payload, argument) => Completer<void>().future);
+
+    test('a builtin that never completes is bounded by the timeout', () async {
+      builtinActionRegistry['stuck_timeout'] = neverCompleting('stuck_timeout');
+      addTearDown(() => builtinActionRegistry.remove('stuck_timeout'));
+      final timedContainer = ProviderContainer.test(
+        overrides: [builtinTimeoutProvider.overrideWithValue(const Duration(milliseconds: 50))],
+      );
+      addTearDown(timedContainer.dispose);
+
+      final handle = const BuiltinRunner(
+        BuiltinAction(actionKey: 'stuck_timeout'),
+      ).start(timedContainer.read(_refBaseProvider), const {});
+      final result = await handle.result;
+      expect(result.status, ExecutionStatus.timeout);
+    });
+
+    test('cancel releases the slot as cancelled, and a late completion is a no-op', () async {
+      final completer = Completer<void>();
+      builtinActionRegistry['stuck_cancel'] = BuiltinActionDescriptor(
+        key: 'stuck_cancel',
+        labelKey: 'stuck_cancel',
+        run: (ref, payload, argument) => completer.future,
+      );
+      addTearDown(() => builtinActionRegistry.remove('stuck_cancel'));
+
+      final handle = const BuiltinRunner(BuiltinAction(actionKey: 'stuck_cancel')).start(ref, const {});
+      handle.cancel();
+      expect((await handle.result).status, ExecutionStatus.cancelled);
+
+      // The underlying builtin finishing later must not change the result.
+      completer.complete();
+      await Future<void>.delayed(Duration.zero);
+      expect((await handle.result).status, ExecutionStatus.cancelled);
+    });
   });
 
   group('filterTasksForEvent', () {
@@ -305,7 +371,9 @@ void main() {
     setUp(() => Hive.box('addon').clear());
 
     /// A container whose runner factory hands out (and records) fake runners.
-    ({ProviderContainer container, List<_FakeRunner> runners}) harness() {
+    /// When [records] is given, the record storage is overridden with a fake
+    /// notifier preloaded with them (for runManual's latest-record selection).
+    ({ProviderContainer container, List<_FakeRunner> runners}) harness({List<CharaDetailRecord>? records}) {
       final runners = <_FakeRunner>[];
       final container = ProviderContainer.test(
         overrides: [
@@ -314,6 +382,7 @@ void main() {
             runners.add(runner);
             return runner;
           }),
+          if (records != null) charaDetailRecordStorageLoaderProvider.overrideWith(() => _FakeRecordStorage(records)),
         ],
       );
       addTearDown(container.dispose);
@@ -431,6 +500,56 @@ void main() {
       await _settle();
 
       expect(events, isEmpty);
+    });
+
+    test('a run skipped at the concurrency cap still fires a failure taskExecuted event', () async {
+      final h = harness();
+      final controller = h.container.read(addonExecutionControllerProvider.notifier);
+
+      final events = <PayloadMap>[];
+      h.container.listen(taskExecutedEventProvider, (_, next) => next.whenData(events.add));
+
+      for (var i = 0; i < 16; i++) {
+        controller.run(_task('a'), const {'event': 'manual'});
+      }
+      controller.run(_task('skipped'), const {'event': 'manual'});
+      await _settle();
+
+      // The skip is a terminal failure, so a chain alerting on failure observes
+      // it like any other completion.
+      expect(events, hasLength(1));
+      expect(events.single['task_id'], 'skipped');
+      expect(events.single['task_status'], 'failure');
+    });
+
+    test('runManual records the manual trigger and carries no record when none exist', () async {
+      final h = harness(records: const []);
+      await h.container.read(charaDetailRecordStorageLoaderProvider.future);
+      final controller = h.container.read(addonExecutionControllerProvider.notifier);
+
+      controller.runManual(_task('a', trigger: TriggerEvent.recordCaptured));
+      h.runners.single.complete(ExecutionStatus.success);
+      await _settle();
+
+      // The history attributes the run to the manual ▶ button, not the task's
+      // configured trigger.
+      final state = h.container.read(addonExecutionControllerProvider);
+      expect(state.history.single.trigger, TriggerEvent.manual);
+      expect(h.runners.single.lastPayload?['event'], 'manual');
+      expect(h.runners.single.lastPayload?.containsKey('record_id'), isFalse);
+    });
+
+    test('runManual supplies the latest record by captured date', () async {
+      final older = _recordVariant('rec-old', '2026-01-01T10:00:00+0900');
+      final newest = _recordVariant('rec-new', '2026-06-01T10:00:00+0900');
+      // Insertion order is deliberately not capture order: startup load order is
+      // filesystem-dependent, so the pick must go by captured date.
+      final h = harness(records: [newest, older]);
+      await h.container.read(charaDetailRecordStorageLoaderProvider.future);
+      final controller = h.container.read(addonExecutionControllerProvider.notifier);
+
+      controller.runManual(_task('a'));
+      expect(h.runners.single.lastPayload?['record_id'], 'rec-new');
     });
   });
 }

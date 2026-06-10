@@ -17,13 +17,23 @@ part 'utils.mapper.dart';
 
 /// Decodes a persisted JSON-array string into a list of [T], skipping any single
 /// entry that fails to decode so one corrupt row cannot blank the whole list. A
-/// corrupt or non-array top level falls back to an empty list. [label] names the
-/// data in log messages.
+/// corrupt or non-array top level falls back to an empty list (with nothing to
+/// hand to [onBroken] — no rows exist at that point). [label] names the data in
+/// log messages.
+///
+/// [onBroken] receives each entry that failed to decode, as the raw decoded JSON
+/// value (an `Object?`, not a map — a non-map row is itself a failure mode), so
+/// a caller can preserve it verbatim instead of losing it on the next save.
 ///
 /// Shared by the addon notifiers (task definitions / execution history) which
 /// both persist a single JSON array and must survive a partial/corrupt write —
 /// see the data-loss note in `task_definitions.dart`.
-List<T> decodeJsonList<T>(String? raw, T Function(Map<String, dynamic> map) fromMap, {required String label}) {
+List<T> decodeJsonList<T>(
+  String? raw,
+  T Function(Map<String, dynamic> map) fromMap, {
+  required String label,
+  void Function(Object? raw)? onBroken,
+}) {
   if (raw == null) {
     return const [];
   }
@@ -40,6 +50,7 @@ List<T> decodeJsonList<T>(String? raw, T Function(Map<String, dynamic> map) from
       result.add(fromMap((d as Map).cast<String, dynamic>()));
     } catch (e) {
       logger.w("Failed to deserialize a $label entry; skipping: error=$e, data=$d");
+      onBroken?.call(d);
     }
   }
   return result;

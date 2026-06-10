@@ -11,25 +11,44 @@ import '/src/preference/storage_box.dart';
 /// Persisted list of user-registered addon tasks.
 ///
 /// Mirrors the column-spec persistence pattern (see `spec/base.dart`): the list
-/// is stored as a single JSON array string in Hive and re-decoded on build. A
-/// single undecodable entry is logged and skipped so it cannot blank the whole
-/// list.
+/// is stored as a single JSON array string in Hive and re-decoded on build. An
+/// undecodable entry is kept out of the live list but re-serialized verbatim by
+/// [_commit], so a schema change or partial corruption can never permanently
+/// erase a user-authored task.
 class TaskDefinitionsNotifier extends Notifier<List<TaskDefinition>> {
   late StorageEntry<String> _entry;
+
+  /// Raw rows from storage that failed to decode, preserved verbatim across
+  /// saves until a build that can decode them again (the analogue of
+  /// `ColumnSpecSelection`'s broken-spec maps).
+  final List<Object?> _brokenRows = [];
 
   @override
   List<TaskDefinition> build() {
     _entry = StorageBox(StorageBoxKey.addon).entry<String>("task_definitions");
+    _brokenRows.clear();
     // A corrupt top-level array (truncated/partial write) must not blow up the
     // whole provider: AddonDispatcher reads this on every app event, so an
     // uncaught throw here would break dispatch app-wide. decodeJsonList falls
-    // back to an empty list and skips individual undecodable entries.
-    return decodeJsonList(_entry.pull(), TaskDefinitionMapper.fromMap, label: "addon task definitions");
+    // back to an empty list; individual undecodable entries are collected so
+    // _commit can re-persist them instead of silently dropping them.
+    final tasks = decodeJsonList(
+      _entry.pull(),
+      TaskDefinitionMapper.fromMap,
+      label: "addon task definitions",
+      onBroken: _brokenRows.add,
+    );
+    if (_brokenRows.isNotEmpty) {
+      Toaster.show(ToastData.warning(description: "pages.addon.task.load_broken".tr()));
+    }
+    return tasks;
   }
 
   void _commit(List<TaskDefinition> next) {
     state = next;
-    _entry.push(jsonEncode(next.map((e) => e.toMap()).toList()));
+    // Broken rows ride along at the tail (their original position is not
+    // preserved) so they survive every save until they decode again.
+    _entry.push(jsonEncode([...next.map((e) => e.toMap()), ..._brokenRows]));
   }
 
   TaskDefinition? getById(String id) {

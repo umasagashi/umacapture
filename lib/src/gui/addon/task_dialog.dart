@@ -26,6 +26,15 @@ const _webhookMethods = <String>["POST", "GET", "PUT", "PATCH", "DELETE"];
 /// Body encodings offered for webhook actions.
 const _webhookContentTypes = <String>["json", "form", "text"];
 
+/// [value] if it is one of [options], otherwise the first option.
+///
+/// A persisted value can fall outside the current option list (saved by a
+/// different app version, or storage edited externally); feeding it unchecked
+/// into a `DropdownButtonFormField` violates its "value must appear in items"
+/// contract and red-screens the edit dialog, so seeds clamp through this first.
+@visibleForTesting
+String clampToOptions(String value, List<String> options) => options.contains(value) ? value : options.first;
+
 /// A translation key for why [raw] is an invalid timeout, or null if it is valid.
 ///
 /// When [required] is false an empty value is valid (means "no timeout"). When
@@ -94,11 +103,13 @@ class _ActionFields {
         // A legacy task may have no timeout; fall back to the default so the
         // required field is pre-filled rather than blocking save on open.
         webhookTimeout.text = a.timeoutSeconds?.toString() ?? "${WebhookAction.defaultTimeoutSeconds}";
-        webhookMethod = a.method;
-        webhookContentType = a.contentType;
+        webhookMethod = clampToOptions(a.method, _webhookMethods);
+        webhookContentType = clampToOptions(a.contentType, _webhookContentTypes);
       case BuiltinAction a:
-        builtinKey = a.actionKey;
-        builtinArg.text = a.argument ?? builtinActionRegistry[a.actionKey]?.defaultArgument ?? "";
+        // An unknown key (BuiltinRunner tolerates one at run time) would trip
+        // the key dropdown's assert, so fall back to the first registry entry.
+        builtinKey = builtinActionRegistry.containsKey(a.actionKey) ? a.actionKey : builtinActionRegistry.keys.first;
+        builtinArg.text = a.argument ?? builtinActionRegistry[builtinKey]?.defaultArgument ?? "";
       default:
         builtinArg.text = builtinActionRegistry[builtinKey]?.defaultArgument ?? "";
     }
@@ -580,6 +591,11 @@ class _PlaceholderDropdown extends StatelessWidget {
       ),
     );
     return _DescribedDropdown<String>(
+      // Recreate the field when the trigger changes: the FormField retains the
+      // last picked value internally (initialValue stays null, so didUpdateWidget
+      // never resets it), and a shrunken item list would otherwise trip
+      // DropdownButton's "value must appear in items" assert.
+      key: ValueKey(trigger),
       label: "$tr_addon.dialog.copy_placeholder".tr(),
       value: null,
       items: placeholdersForTrigger(trigger),
@@ -658,6 +674,7 @@ class _DescribedDropdown<T> extends StatelessWidget {
   final ValueChanged<T?> onChanged;
 
   const _DescribedDropdown({
+    super.key,
     required this.label,
     required this.value,
     required this.items,

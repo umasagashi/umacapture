@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
@@ -18,6 +20,65 @@ int resolveExternalTimeoutSeconds(int? configured) =>
 /// the pipe keeps it open past the direct process's exit, so an unbounded wait
 /// would hang [ExternalProgramRunner.start] forever and leak an execution slot.
 const _drainGrace = Duration(seconds: 5);
+
+/// Upper bound on raw bytes buffered per output stream before decoding. Four
+/// bytes per char guarantees at least [maxCaptureChars] decoded characters even
+/// for multi-byte encodings while keeping memory bounded.
+const _maxCaptureBytes = 4 * maxCaptureChars;
+
+/// Accumulates raw output bytes and decodes them in one shot at snapshot time.
+/// Public so tests can pin the chunk-boundary behavior with an injected
+/// [encoding] independent of the machine code page.
+///
+/// Decoding per pipe chunk would corrupt multi-byte characters split across a
+/// chunk boundary: on Windows, [systemEncoding]'s decoder sink converts each
+/// chunk independently (no cross-chunk state), so a CP932 lead byte at a chunk
+/// edge becomes mojibake. Buffering the bytes and decoding once avoids that;
+/// only a character cut by the byte cap itself can decode as garbage.
+class CaptureBuffer {
+  CaptureBuffer([this.encoding = systemEncoding]);
+
+  final Encoding encoding;
+  final _bytes = BytesBuilder(copy: false);
+
+  void add(List<int> chunk) {
+    if (_bytes.length >= _maxCaptureBytes) return;
+    final remaining = _maxCaptureBytes - _bytes.length;
+    _bytes.add(chunk.length > remaining ? chunk.sublist(0, remaining) : chunk);
+  }
+
+  /// Decodes everything buffered so far, truncated to [maxCaptureChars].
+  /// Repeatable: the buffered bytes are kept, so an early (drain-grace) snapshot
+  /// simply reflects what has arrived by then.
+  String snapshot() {
+    try {
+      return truncateCapture(encoding.decode(_bytes.toBytes()));
+    } catch (e) {
+      logger.w("Failed to decode external program output: $e");
+      return "";
+    }
+  }
+}
+
+/// Forcefully terminates [process] and, on Windows, its whole child tree.
+///
+/// [Process.kill] only terminates the direct child: with
+/// [ExternalProgramAction.runInShell] (or a launcher such as a `.bat` wrapper)
+/// that kills cmd.exe while the actual program keeps running, despite the
+/// timeout/cancel promising forced termination. `taskkill /T` removes the whole
+/// tree; [Process.kill] remains the fallback (non-Windows, taskkill unavailable,
+/// or the process already gone).
+Future<void> _killProcessTree(Process process) async {
+  if (Platform.isWindows) {
+    try {
+      final result = await Process.run("taskkill", ["/pid", "${process.pid}", "/T", "/F"]);
+      if (result.exitCode == 0) return;
+    } catch (e) {
+      logger.w("taskkill failed; falling back to Process.kill: $e");
+    }
+  }
+  process.kill();
+}
 
 /// Runs an [ExternalProgramAction] via [Process.start], substituting payload
 /// variables into the argument template and capturing output.
@@ -48,12 +109,12 @@ class ExternalProgramRunner implements ActionRunner {
           // A cancel issued while Process.start was still resolving could not kill
           // a null process; honor it now that the process exists. Fall through so
           // the exit handler still runs and completes the result (as cancelled).
-          if (cancelled) started.kill();
-          // Decode with the system encoding: JP Windows console tools emit CP932,
-          // which utf8 would mangle. onError keeps an undecodable byte sequence
-          // from surfacing as an uncaught async error.
-          final out = StringBuffer();
-          final err = StringBuffer();
+          if (cancelled) unawaited(_killProcessTree(started));
+          // Buffer raw bytes and decode once at snapshot time (system encoding:
+          // JP Windows console tools emit CP932, which utf8 would mangle) — see
+          // CaptureBuffer for why per-chunk decoding is wrong.
+          final out = CaptureBuffer();
+          final err = CaptureBuffer();
           final outDone = _drain(started.stdout, out);
           final errDone = _drain(started.stderr, err);
 
@@ -64,11 +125,14 @@ class ExternalProgramRunner implements ActionRunner {
           if (timeout > 0) {
             timeoutTimer = Timer(Duration(seconds: timeout), () {
               timedOut = true;
-              started.kill();
+              unawaited(_killProcessTree(started));
             });
           }
 
           started.exitCode.then((code) async {
+            // The process has exited: a timer firing from here on (e.g. during
+            // the drain wait below) must not flip the run to a timeout.
+            timeoutTimer?.cancel();
             // Wait for stdout/stderr to fully flush before snapshotting: exitCode
             // can complete before the pipes have delivered their last bytes. Bound
             // the wait: a detached grandchild that inherited the pipe keeps it open
@@ -76,7 +140,6 @@ class ExternalProgramRunner implements ActionRunner {
             // forever and permanently hold an execution slot. After the grace
             // period, snapshot whatever has been captured so far and finish.
             await Future.wait([outDone, errDone]).timeout(_drainGrace, onTimeout: () => const <void>[]);
-            timeoutTimer?.cancel();
             final status = cancelled
                 ? ExecutionStatus.cancelled
                 : timedOut
@@ -86,8 +149,8 @@ class ExternalProgramRunner implements ActionRunner {
               (elapsed) => ExecutionResult(
                 status: status,
                 exitCode: code,
-                stdout: out.toString(),
-                stderr: err.toString(),
+                stdout: out.snapshot(),
+                stderr: err.snapshot(),
                 duration: elapsed,
               ),
             );
@@ -103,29 +166,22 @@ class ExternalProgramRunner implements ActionRunner {
 
     return exec.handle(() {
       cancelled = true;
-      process?.kill();
+      final p = process;
+      if (p != null) unawaited(_killProcessTree(p));
     });
   }
 
-  /// Decodes [stream] into [buffer] (bounded to [maxCaptureChars]) and returns a
-  /// future that completes when the stream is exhausted or errors.
-  static Future<void> _drain(Stream<List<int>> stream, StringBuffer buffer) {
+  /// Feeds [stream]'s raw bytes into [capture] and returns a future that
+  /// completes when the stream is exhausted or errors.
+  static Future<void> _drain(Stream<List<int>> stream, CaptureBuffer capture) {
     final done = Completer<void>();
-    stream
-        .transform(systemEncoding.decoder)
-        .listen(
-          (s) => _append(buffer, s),
-          onError: (Object e) => logger.w("Failed to decode external program output: $e"),
-          onDone: done.complete,
-          cancelOnError: false,
-        );
+    stream.listen(
+      capture.add,
+      onError: (Object e) => logger.w("Failed to read external program output: $e"),
+      onDone: done.complete,
+      cancelOnError: false,
+    );
     return done.future;
-  }
-
-  static void _append(StringBuffer buffer, String chunk) {
-    if (buffer.length >= maxCaptureChars) return;
-    final remaining = maxCaptureChars - buffer.length;
-    buffer.write(chunk.length > remaining ? chunk.substring(0, remaining) : chunk);
   }
 }
 

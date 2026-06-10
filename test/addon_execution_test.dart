@@ -288,23 +288,33 @@ void main() {
       expect(container.read(taskDefinitionsProvider), isEmpty);
     });
 
-    test('skips a single undecodable entry instead of discarding the whole list', () {
-      final raw = jsonEncode([
-        sampleTask('t1').toMap(),
-        {"broken": true},
-        sampleTask('t2').toMap(),
-      ]);
+    test('keeps an undecodable entry out of the list but preserves it across saves', () {
+      final broken = {"broken": true};
+      final raw = jsonEncode([sampleTask('t1').toMap(), broken, sampleTask('t2').toMap()]);
       Hive.box('addon').put('task_definitions', raw);
 
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
 
       expect(container.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't2']);
+
+      // A save (here: toggling a task) must re-persist the broken row verbatim
+      // instead of erasing it — the column-spec "never silently healed" rule.
+      container.read(taskDefinitionsProvider.notifier).setEnabled('t1', false);
+      final persisted = jsonDecode(Hive.box('addon').get('task_definitions') as String) as List<dynamic>;
+      // contains(Map) would use identity ==; equals() compares structurally.
+      expect(persisted, contains(equals(broken)));
+
+      // A fresh provider still decodes the healthy rows.
+      final reread = ProviderContainer.test();
+      addTearDown(reread.dispose);
+      expect(reread.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't2']);
     });
 
-    test('skips a task whose action kind is unknown, keeping the others', () {
+    test('preserves a task whose action kind is unknown, keeping the others live', () {
       // A task persisted by a newer build with an action type this build does not
-      // know must not blank the whole list — only that one task is dropped.
+      // know must not blank the whole list — and must survive a save so a
+      // downgrade cannot permanently destroy it.
       final unknown = sampleTask('t2').toMap();
       (unknown['action'] as Map)['kind'] = 'FutureUnknownAction';
       final raw = jsonEncode([sampleTask('t1').toMap(), unknown, sampleTask('t3').toMap()]);
@@ -314,6 +324,11 @@ void main() {
       addTearDown(container.dispose);
 
       expect(container.read(taskDefinitionsProvider).map((t) => t.id), ['t1', 't3']);
+
+      container.read(taskDefinitionsProvider.notifier).setEnabled('t3', false);
+      final persisted = jsonDecode(Hive.box('addon').get('task_definitions') as String) as List<dynamic>;
+      // contains(Map) would use identity ==; equals() compares structurally.
+      expect(persisted, contains(equals(unknown)));
     });
   });
 

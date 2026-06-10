@@ -203,7 +203,10 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
 CharaDetailRecord _requireRecord(RefBase ref, PayloadMap payload) {
   final recordId = payload["record_id"];
   if (recordId == null || recordId.isEmpty) {
-    throw StateError("This action requires a record_id (use the record-captured trigger).");
+    throw StateError(
+      "No record_id in the payload: this action needs a record "
+      "(record-captured trigger, a chain from it, or a manual run with at least one captured record).",
+    );
   }
   // Reuse the enricher's resolver so a just-captured record is found on disk even
   // when the storage notifier hasn't folded it in yet (the capture-event race).

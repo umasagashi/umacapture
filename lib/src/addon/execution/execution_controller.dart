@@ -9,6 +9,7 @@ import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
 import '/src/addon/payload_enricher.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
@@ -30,10 +31,9 @@ const _chainVisitedKey = "_chain_visited";
 /// The set of task ids that have already run on the current chain path, parsed
 /// from the forwarded payload.
 ///
-/// A candidate task is skipped once its id appears here, which makes chains
-/// loop-proof: each path visits a task at most once, so two `taskExecuted` tasks
-/// with an unset source (which otherwise match every chain event, including the
-/// ones they spawn) can no longer fan out without bound.
+/// A candidate task is skipped once its id appears here, which makes explicit
+/// chains loop-proof: each path visits a task at most once, so tasks whose
+/// source bindings form a cycle (A after B, B after A) cannot retrigger forever.
 Set<String> chainVisitedTaskIds(PayloadMap payload) {
   final raw = payload[_chainVisitedKey];
   if (raw == null || raw.isEmpty) return const {};
@@ -117,12 +117,15 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
 
   /// Builds a [HistoryEntry] for [task], filling the task-derived fields so both
   /// the limit-reached and normal-completion paths share one construction site.
+  /// [triggerOverride] records how the run was actually started when that
+  /// differs from the task's configured trigger (a manual ▶ run).
   HistoryEntry _buildHistoryEntry(
     TaskDefinition task, {
     required String executionId,
     required ExecutionStatus status,
     required DateTime startedAt,
     required int durationMs,
+    TriggerEvent? triggerOverride,
     int? exitCode,
     String? error,
     String? output,
@@ -131,7 +134,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
       executionId: executionId,
       taskId: task.id,
       taskName: task.name,
-      trigger: task.trigger,
+      trigger: triggerOverride ?? task.trigger,
       status: status,
       startedAt: startedAt,
       durationMs: durationMs,
@@ -152,7 +155,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   /// Runs [task] with an already-enriched [payload], registering an active
   /// execution and appending a history entry when it finishes. Enrichment is done
   /// once per event by the dispatcher, so all tasks bound to the same event share it.
-  void run(TaskDefinition task, PayloadMap payload) {
+  void run(TaskDefinition task, PayloadMap payload, {TriggerEvent? triggerOverride}) {
     if (state.active.length >= _maxActiveExecutions) {
       logger.w("Addon execution limit ($_maxActiveExecutions) reached; skipping '${task.name}'.");
       // The skip is also recorded in history below, but surface a toast so a user
@@ -172,10 +175,15 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
             status: ExecutionStatus.failure,
             startedAt: DateTime.now(),
             durationMs: 0,
+            triggerOverride: triggerOverride,
             error: "Execution limit reached ($_maxActiveExecutions concurrent).",
           ),
         ),
       );
+      // This skip is a terminal failure like any other, and _fireTaskExecuted's
+      // contract is to fire on every terminal status — a chain configured to
+      // alert on {task_status} == failure must observe it too.
+      _fireTaskExecuted(task, payload, ExecutionStatus.failure);
       return;
     }
     final executionId = const Uuid().v4();
@@ -211,6 +219,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
         status: result.status,
         startedAt: startedAt,
         durationMs: result.duration.inMilliseconds,
+        triggerOverride: triggerOverride,
         exitCode: result.exitCode,
         error: result.error ?? (result.stderr?.isNotEmpty == true ? result.stderr : null),
         output: result.stdout?.isNotEmpty == true ? result.stdout : null,
@@ -224,8 +233,8 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
   }
 
   /// Emits a [taskExecutedEventProvider] event so tasks chained to [task] can
-  /// run, forwarding [payload] plus the source task's id/name/status, a depth
-  /// counter, and the running visited set that keeps chains loop-proof.
+  /// run, forwarding [payload] plus the source task's id/name/status and the
+  /// running visited set that keeps chains loop-proof.
   ///
   /// Fires on every terminal [status] (not just success), so a chain can react to
   /// a failed/cancelled upstream too; downstream tasks branch on the `task_status`
@@ -250,7 +259,22 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
 
   /// Runs [task] on demand (manual trigger). Enriched like the event triggers so
   /// the install-constant module-data path placeholders are available here too.
-  void runManual(TaskDefinition task) => run(task, enrichPayload(ref.base, const {"event": "manual"}));
+  /// When at least one record exists, the most recently captured one supplies
+  /// `record_id` (and thereby the record placeholders), so record-dependent
+  /// tasks can be exercised from the run button.
+  void runManual(TaskDefinition task) {
+    final payload = {"event": "manual"};
+    final records = ref.read(charaDetailRecordStorageLoaderProvider).value;
+    if (records != null && records.isNotEmpty) {
+      // Startup load order is filesystem-dependent, so pick the latest by
+      // captured date instead of taking the list tail.
+      final latest = records.reduce(
+        (a, b) => a.metadata.capturedDate.toDateTime().isAfter(b.metadata.capturedDate.toDateTime()) ? a : b,
+      );
+      payload["record_id"] = latest.id;
+    }
+    run(task, enrichPayload(ref.base, payload), triggerOverride: TriggerEvent.manual);
+  }
 
   void cancel(String executionId) {
     for (final e in state.active) {
