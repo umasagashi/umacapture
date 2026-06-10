@@ -16,6 +16,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_ce_flutter/adapters.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:umacapture/src/addon/execution/execution_controller.dart';
 import 'package:umacapture/src/addon/execution/execution_models.dart';
@@ -32,11 +33,20 @@ void main() {
 
   // The essential boot steps from main(), minus the Sentry zone wrapper (which
   // would trip the integration binding's zone check) and the window-show flow.
+  // Hive is pointed at a throwaway temp directory so the test can never read,
+  // clear, or pollute the real settings (task definitions, execution history).
+  late Directory hiveDir;
   setUpAll(() async {
     initializeMappers();
-    await StorageBox.ensureOpened(reset: false);
+    hiveDir = Directory.systemTemp.createTempSync('umacapture_it_hive');
+    await StorageBox.ensureOpened(directory: hiveDir.path);
     await setupLocalization();
     await windowManager.ensureInitialized();
+  });
+
+  tearDownAll(() async {
+    await Hive.close();
+    hiveDir.deleteSync(recursive: true);
   });
 
   testWidgets('external program task runs successfully end-to-end', (tester) async {
@@ -63,9 +73,9 @@ void main() {
     final container = ProviderScope.containerOf(tester.element(find.byType(ApplicationWidget)), listen: false);
 
     final controller = container.read(addonExecutionControllerProvider.notifier);
-    // History is persisted in Hive across runs, so a prior run's entry for this
-    // task id would be matched immediately — before this run's process finishes —
-    // and the test would read a stale result. Start from a clean history.
+    // The temp Hive dir starts empty, but clear defensively: a stale entry for
+    // this task id would be matched immediately — before this run's process
+    // finishes — and the test would read a stale result.
     controller.clearHistory();
     await tester.pump();
 
