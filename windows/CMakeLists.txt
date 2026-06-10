@@ -30,6 +30,12 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# Silence the STL1011 hard error that newer MSVC toolsets (>= 14.51) raise when a
+# dependency (e.g. the C++/WinRT headers pulled in by audioplayers_windows) still
+# includes the deprecated <experimental/coroutine>. Applied globally so it reaches
+# the plugin targets added via flutter/generated_plugins.cmake below.
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 function(APPLY_STANDARD_SETTINGS TARGET)
     target_compile_features(${TARGET} PUBLIC cxx_std_17)
