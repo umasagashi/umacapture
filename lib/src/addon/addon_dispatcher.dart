@@ -46,9 +46,10 @@ class _AddonDispatcherState extends ConsumerState<AddonDispatcher> {
 ///
 /// A pure function (no provider reads or side effects) so the matching and
 /// chain-safety rules can be unit-tested directly. For a `taskExecuted` event it
-/// chains only from the matching source task (or any, when the binding's source
-/// is unset), never re-triggers the task that just ran, and skips any task
-/// already visited on this chain path so a loop / unbounded fan-out cannot occur.
+/// chains only from the explicitly configured source task — a task with no
+/// source never fires (there is no "any task" mode, which would fan out
+/// combinatorially). It also never re-triggers the task that just ran and skips
+/// any task already visited on this chain path, so a loop cannot occur.
 List<TaskDefinition> filterTasksForEvent(TriggerEvent event, PayloadMap payload, List<TaskDefinition> allTasks) {
   var tasks = allTasks.where((t) => t.enabled && t.trigger == event);
   if (event == TriggerEvent.taskExecuted) {
@@ -57,7 +58,10 @@ List<TaskDefinition> filterTasksForEvent(TriggerEvent event, PayloadMap payload,
     tasks = tasks.where((t) {
       if (t.id == sourceId || visited.contains(t.id)) return false;
       final wanted = t.sourceTaskId;
-      return wanted == null || wanted.isEmpty || wanted == sourceId;
+      // An unset source never matches: it cannot mean "any task" (removed), and
+      // sourceId itself can be null/absent, so equality alone is not enough.
+      if (wanted == null || wanted.isEmpty) return false;
+      return wanted == sourceId;
     });
   }
   return tasks.toList();

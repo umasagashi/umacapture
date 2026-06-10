@@ -21,8 +21,9 @@ class TaskDefinition with TaskDefinitionMappable {
   final AddonAction action;
 
   /// The id of the task whose execution triggers this one. Only meaningful for
-  /// the [TriggerEvent.taskExecuted] trigger; null means "any task" (chaining
-  /// from any completed task except this one).
+  /// the [TriggerEvent.taskExecuted] trigger, where it is required: null means
+  /// "not configured", and such a task never fires (the dispatcher matches an
+  /// explicit source only; there is no "any task" mode).
   final String? sourceTaskId;
 
   const TaskDefinition({

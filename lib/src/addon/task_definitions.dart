@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/addon/model/task_definition.dart';
 import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
 /// Persisted list of user-registered addon tasks.
@@ -50,28 +52,32 @@ class TaskDefinitionsNotifier extends Notifier<List<TaskDefinition>> {
 
   void remove(String id) {
     final next = <TaskDefinition>[];
+    var disabledDependent = false;
     for (final t in state) {
       if (t.id == id) continue;
-      // A task chained to the removed one keeps a sourceTaskId that now matches
-      // no task, so the dispatcher could never fire it again. Reset that dangling
-      // reference back to "any source" (what the edit dialog already shows for a
-      // stale selection) instead of silently breaking the chain.
-      next.add(t.sourceTaskId == id ? _withoutSource(t) : t);
+      // A task chained to the removed one would keep a sourceTaskId that matches
+      // no task, so it could never fire again while still looking configured.
+      // Disable it and clear the source: the off switch makes the state visible
+      // in the list, and the edit dialog (where the source is required) prompts
+      // for a new one before the task can be re-enabled meaningfully.
+      if (t.sourceTaskId == id) {
+        next.add(_disabledWithoutSource(t));
+        disabledDependent = true;
+      } else {
+        next.add(t);
+      }
     }
     _commit(next);
+    if (disabledDependent) {
+      Toaster.show(ToastData.info(description: "pages.addon.task.chained_disabled".tr()));
+    }
   }
 
-  /// A copy of [task] with its [TaskDefinition.sourceTaskId] cleared. The
-  /// dart_mappable mixin generates no `copyWith` here (only `toMap`/`toJson`),
+  /// A disabled copy of [task] with its [TaskDefinition.sourceTaskId] cleared.
+  /// The dart_mappable mixin generates no `copyWith` here (only `toMap`/`toJson`),
   /// and the hand-written `copyWith` cannot null a field, so rebuild it explicitly.
-  static TaskDefinition _withoutSource(TaskDefinition task) {
-    return TaskDefinition(
-      id: task.id,
-      name: task.name,
-      enabled: task.enabled,
-      trigger: task.trigger,
-      action: task.action,
-    );
+  static TaskDefinition _disabledWithoutSource(TaskDefinition task) {
+    return TaskDefinition(id: task.id, name: task.name, enabled: false, trigger: task.trigger, action: task.action);
   }
 
   void setEnabled(String id, bool enabled) {

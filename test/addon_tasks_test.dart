@@ -132,7 +132,7 @@ void main() {
       expect(reread.read(taskDefinitionsProvider).single.enabled, isFalse);
     });
 
-    test('remove clears a dangling sourceTaskId on chained tasks, preserving other fields', () {
+    test('remove disables chained tasks and clears their dangling sourceTaskId', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
       final notifier = notifierOf(container);
@@ -145,14 +145,18 @@ void main() {
 
       // The source task is gone.
       expect(notifier.getById('src'), isNull);
-      // The task that chained from it keeps its identity but loses the now-dangling
-      // source reference (reset to "any"), instead of pointing at a deleted task.
+      // The task that chained from it keeps its identity but is disabled with the
+      // dangling source cleared: a sourceless taskExecuted task never fires, so
+      // leaving it enabled would only look configured while doing nothing.
       final chained = notifier.getById('chained')!;
       expect(chained.sourceTaskId, isNull);
+      expect(chained.enabled, isFalse);
       expect(chained.name, 'Task chained');
       expect(chained.trigger, TriggerEvent.taskExecuted);
       // A task whose source is a different (still-present-or-not) id is untouched.
-      expect(notifier.getById('other')?.sourceTaskId, 'someone-else');
+      final other = notifier.getById('other')!;
+      expect(other.sourceTaskId, 'someone-else');
+      expect(other.enabled, isTrue);
     });
   });
 
@@ -241,7 +245,7 @@ void main() {
     group('taskExecuted chaining', () {
       List<TaskDefinition> chainTasks() => [
         _task('self', trigger: TriggerEvent.taskExecuted),
-        _task('any', trigger: TriggerEvent.taskExecuted),
+        _task('no-source', trigger: TriggerEvent.taskExecuted),
         _task('from-self', trigger: TriggerEvent.taskExecuted, sourceTaskId: 'self'),
         _task('from-other', trigger: TriggerEvent.taskExecuted, sourceTaskId: 'other'),
       ];
@@ -251,19 +255,35 @@ void main() {
           'event': 'task_executed',
           'task_id': 'self',
         }, chainTasks());
-        // 'self' excludes itself; 'any' (unbound) and 'from-self' (bound to 'self')
-        // match; 'from-other' (bound to a different id) does not.
-        expect(matched.map((t) => t.id), ['any', 'from-self']);
+        // 'self' excludes itself; 'from-self' (bound to 'self') matches;
+        // 'no-source' (unset, there is no "any task" mode) and 'from-other'
+        // (bound to a different id) do not.
+        expect(matched.map((t) => t.id), ['from-self']);
       });
 
       test('skips tasks already visited on the chain path', () {
         final matched = filterTasksForEvent(TriggerEvent.taskExecuted, const {
           'event': 'task_executed',
           'task_id': 'self',
-          '_chain_visited': 'any',
+          '_chain_visited': 'from-self',
         }, chainTasks());
-        // 'any' is already visited, so only 'from-self' survives.
-        expect(matched.map((t) => t.id), ['from-self']);
+        // 'from-self' is already visited, so nothing survives.
+        expect(matched.map((t) => t.id), isEmpty);
+      });
+
+      test('an unset or empty source never matches, even without a task_id', () {
+        final tasks = [
+          _task('no-source', trigger: TriggerEvent.taskExecuted),
+          _task('empty-source', trigger: TriggerEvent.taskExecuted, sourceTaskId: ''),
+        ];
+        // A persisted task may carry a null/empty source (the dialog no longer
+        // produces one); it must not fire — in particular an absent task_id
+        // (null) must not equal an unset source.
+        expect(filterTasksForEvent(TriggerEvent.taskExecuted, const {'event': 'task_executed'}, tasks), isEmpty);
+        expect(
+          filterTasksForEvent(TriggerEvent.taskExecuted, const {'event': 'task_executed', 'task_id': 'someone'}, tasks),
+          isEmpty,
+        );
       });
     });
   });

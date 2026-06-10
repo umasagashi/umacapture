@@ -222,7 +222,16 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
 
   bool get _canSave {
     if (_nameController.text.trim().isEmpty) return false;
+    if (_trigger == TriggerEvent.taskExecuted && !_hasValidSourceTask) return false;
     return _fields.isValid(_actionKind, _trigger);
+  }
+
+  /// Whether the selected chain source refers to an existing other task. A
+  /// `taskExecuted` task without one never fires, so saving it is blocked.
+  bool get _hasValidSourceTask {
+    final id = _sourceTaskId;
+    if (id == null || id.isEmpty) return false;
+    return ref.read(taskDefinitionsProvider).any((t) => t.id == id && t.id != widget.initial.id);
   }
 
   void _save() {
@@ -305,24 +314,24 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
     );
   }
 
-  /// Dropdown selecting which task's execution chains into this one. Lists every
-  /// other task plus an "any task" option (null).
+  /// Dropdown selecting which task's execution chains into this one. The source
+  /// is required: an unselected (or stale) value blocks save with an error,
+  /// because a `taskExecuted` task without a source never fires.
   Widget _sourceTaskDropdown() {
     final others = ref.watch(taskDefinitionsProvider).where((t) => t.id != widget.initial.id).toList();
-    // Drop a stale selection (e.g. the source task was deleted) back to "any".
+    // A stale selection (e.g. the source task was deleted) renders unselected so
+    // the required-error prompts the user to pick a new source.
     final value = others.any((t) => t.id == _sourceTaskId) ? _sourceTaskId : null;
-    return DropdownButtonFormField<String?>(
+    return DropdownButtonFormField<String>(
       initialValue: value,
       isExpanded: true,
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.source_task.label".tr(),
-        helperText: "$tr_addon.dialog.source_task.any_help".tr(),
+        helperText: "$tr_addon.dialog.source_task.help".tr(),
         helperMaxLines: 3,
+        errorText: value == null ? "$tr_addon.dialog.source_task.required".tr() : null,
       ),
-      items: [
-        DropdownMenuItem(value: null, child: Text("$tr_addon.dialog.source_task.any".tr())),
-        for (final t in others) DropdownMenuItem(value: t.id, child: Text(t.name)),
-      ],
+      items: [for (final t in others) DropdownMenuItem(value: t.id, child: Text(t.name))],
       onChanged: (v) => setState(() => _sourceTaskId = v),
     );
   }
