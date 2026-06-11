@@ -122,6 +122,70 @@ class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch>
   }
 }
 
+/// The free-text "description" (説明) note shared by every column's notation (表示)
+/// group.
+///
+/// Reads from / writes to the dialog's cloned spec via [specCloneProvider] and the
+/// generic [ColumnSpec.withDescription], so it works for any column type without a
+/// per-spec accessor — the same pattern as [ColumnVisibilitySwitch]. The note is
+/// committed to the clone on [onDecided] (the dialog's OK button); copyWith
+/// preserves the other edited fields regardless of listener order. An empty note is
+/// stored as null so it round-trips to "no note". The field keeps a comfortable
+/// [_minWidth] even when empty, then grows with longer input.
+class ColumnDescriptionField extends ConsumerStatefulWidget {
+  final String specId;
+  final ChangeNotifier onDecided;
+
+  const ColumnDescriptionField({super.key, required this.specId, required this.onDecided});
+
+  static const double _minWidth = 280;
+
+  @override
+  ConsumerState<ColumnDescriptionField> createState() => _ColumnDescriptionFieldState();
+}
+
+class _ColumnDescriptionFieldState extends ConsumerState<ColumnDescriptionField> {
+  late String description;
+  late final VoidCallback _commitDescription;
+
+  @override
+  void initState() {
+    super.initState();
+    description = ref.read(specCloneProvider(widget.specId)).description ?? "";
+    _commitDescription = () {
+      final trimmed = description.trim();
+      ref
+          .read(specCloneProvider(widget.specId).notifier)
+          .update((spec) => spec.withDescription(trimmed.isEmpty ? null : trimmed));
+    };
+    widget.onDecided.addListener(_commitDescription);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitDescription);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FormLine(
+      title: Text("$tr_chara_detail.column_predicate.common.notation.tooltip_field.label".tr()),
+      children: [
+        Tooltip(
+          message: "$tr_chara_detail.column_predicate.common.notation.tooltip_field.tooltip".tr(),
+          child: DenseTextField(
+            initialText: description,
+            allowEmpty: true,
+            minWidth: ColumnDescriptionField._minWidth,
+            onChanged: (value) => description = value,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class ColumnSpecDialog extends ConsumerWidget {
   final String specId;
   final PlainChangeNotifier onDecided;

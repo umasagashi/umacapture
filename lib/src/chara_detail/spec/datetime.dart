@@ -20,6 +20,10 @@ part 'datetime.mapper.dart';
 // ignore: constant_identifier_names
 const tr_datetime = "pages.chara_detail.column_predicate.datetime";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableClass()
 class IsInRangeDateTimePredicate with IsInRangeDateTimePredicateMappable {
   final DateTime? min;
@@ -48,7 +52,7 @@ class DateTimeCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'DateTimeColumnSpec')
+@MappableClass(discriminatorValue: 'DateTimeColumnSpec', ignoreNull: true)
 class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMappable {
   final Parser parser;
   final IsInRangeDateTimePredicate predicate;
@@ -63,6 +67,9 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   final bool hidden;
 
   @override
+  final String? description;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openCampaignPreview;
 
   DateTimeColumnSpec({
@@ -71,10 +78,14 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
     required this.parser,
     required this.predicate,
     this.hidden = false,
+    this.description,
   });
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   DateTimeColumnSpec copyWith({
     String? id,
@@ -82,6 +93,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
     Parser? parser,
     IsInRangeDateTimePredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return DateTimeColumnSpec(
       id: id ?? this.id,
@@ -89,6 +101,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -265,6 +278,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

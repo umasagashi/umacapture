@@ -18,6 +18,10 @@ part 'logic.mapper.dart';
 // ignore: constant_identifier_names
 const tr_logic = "pages.chara_detail.column_predicate.logic";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableEnum()
 enum LogicMode { and, or, not, xor, nand, nor, xnor }
 
@@ -64,7 +68,7 @@ class LogicCellData implements CellData {
 /// itself be a child of another logic column, forming an arbitrary tree. The grid
 /// builder ([_buildGrid] in loader.dart) walks the tree directly for efficiency;
 /// [parse]/[evaluate] here provide a correct stand-alone fallback.
-@MappableClass(discriminatorValue: 'LogicColumnSpec')
+@MappableClass(discriminatorValue: 'LogicColumnSpec', ignoreNull: true)
 class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, ContainerColumnSpec {
   final LogicMode logic;
 
@@ -80,12 +84,16 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   final bool hidden;
 
+  @override
+  final String? description;
+
   LogicColumnSpec({
     required this.id,
     required this.title,
     required this.logic,
     this.children = const [],
     this.hidden = false,
+    this.description,
   });
 
   @override
@@ -101,13 +109,24 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   LogicColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
-  LogicColumnSpec copyWith({String? id, String? title, LogicMode? logic, List<ColumnSpec>? children, bool? hidden}) {
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  LogicColumnSpec copyWith({
+    String? id,
+    String? title,
+    LogicMode? logic,
+    List<ColumnSpec>? children,
+    bool? hidden,
+    Object? description = _unset,
+  }) {
     return LogicColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       logic: logic ?? this.logic,
       children: children ?? this.children,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -236,6 +255,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

@@ -1,6 +1,7 @@
 import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -198,17 +199,28 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     return spec.hidden ? Opacity(opacity: 0.6, child: child) : child;
   }
 
-  // The chip's tooltip: the spec's own tooltip (or the broken notice), with a
-  // "hidden" marker appended below a horizontal rule when the column is hidden
-  // from the grid, so hovering a faded chip explains why it shows no column.
+  // The chip's tooltip. For a healthy column it composes the user's note
+  // ([ColumnSpec.description], prepended above a horizontal rule) with the spec's
+  // own filter tooltip — the single place every column's note is surfaced, so the
+  // specs no longer embed it themselves. When both are empty (only a script column
+  // with no note can be) a localized "no description" fallback is shown. A broken
+  // column keeps the broken notice instead. A "hidden" marker is appended below a
+  // rule when the column is hidden from the grid, so hovering a faded chip explains
+  // why it shows no column.
   String _tooltipFor(ColumnSpec spec) {
-    final base = _brokenIds.contains(spec.id)
-        ? "$tr_chara_detail.column_predicate.broken.tooltip".tr()
-        : spec.tooltip(ref.base);
-    if (!spec.hidden) {
-      return base;
+    final String text;
+    if (_brokenIds.contains(spec.id)) {
+      text = "$tr_chara_detail.column_predicate.broken.tooltip".tr();
+    } else {
+      final base = spec.tooltip(ref.base);
+      final desc = spec.description?.trim() ?? "";
+      final composed = desc.isEmpty ? base : (base.isEmpty ? desc : "$desc\n──────────\n$base");
+      text = composed.isEmpty ? "$tr_chara_detail.column_predicate.common.notation.tooltip_field.empty".tr() : composed;
     }
-    return "$base\n──────────\n${"$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr()}";
+    if (!spec.hidden) {
+      return text;
+    }
+    return "$text\n──────────\n${"$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr()}";
   }
 
   // The logic column's operator name, rendered as plain text fused into the
@@ -272,7 +284,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         border: Border.all(color: highlight ? theme.colorScheme.primary : theme.colorScheme.primaryContainer),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
+      child: _ReorderWrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
     );
   }
 
@@ -441,20 +453,24 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
         : const StadiumBorder();
     widgets.add(
-      _slot(
-        _placeholderKey,
-        IgnorePointer(
-          child: Container(
-            decoration: ShapeDecoration(
-              shape: shape,
-              shadows: [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.45), blurRadius: 12)],
+      // Paint the placeholder last within its wrap, so the dragged chip stays in
+      // front of the siblings it slides across instead of being covered by them.
+      _PaintOnTop(
+        child: _slot(
+          _placeholderKey,
+          IgnorePointer(
+            child: Container(
+              decoration: ShapeDecoration(
+                shape: shape,
+                shadows: [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.45), blurRadius: 12)],
+              ),
+              foregroundDecoration: isContainer
+                  ? null
+                  : ShapeDecoration(
+                      shape: StadiumBorder(side: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
+                    ),
+              child: _staticContent(context, _draggedSpec!, highlight: true),
             ),
-            foregroundDecoration: isContainer
-                ? null
-                : ShapeDecoration(
-                    shape: StadiumBorder(side: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
-                  ),
-            child: _staticContent(context, _draggedSpec!, highlight: true),
           ),
         ),
       ),
@@ -628,7 +644,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           onWillAcceptWithDetails: (_) => _draggingId != null,
           onMove: (details) => _onMove(details.offset),
           builder: (context, candidateData, rejectedData) {
-            return Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+            return _ReorderWrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
           },
         ),
       ),
@@ -637,10 +653,16 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 }
 
 // Slides its child from its previous layout position to its current one using a
-// paint-only [Transform.translate], so reordering the chips animates instead of
-// jumping. This is a FLIP (First-Last-Invert-Play): each frame it measures where
-// the child landed, and if that moved it offsets the child back to where it was
-// and animates that offset to zero.
+// paint-only translate, so reordering the chips animates instead of jumping.
+// This is a FLIP (First-Last-Invert-Play): each paint it measures where the
+// child landed, and if that moved it offsets the child back to where it was and
+// animates that offset to zero.
+//
+// The measure-and-invert happens synchronously inside the render object's
+// [paint] (not in a post-frame callback), so the inverse offset is already
+// applied on the very frame the layout changed. Measuring after the frame would
+// paint one frame at the settled (destination) position before the offset took
+// effect, which read as a one-frame flash to the end state.
 //
 // The translate is paint-only, so layout (and therefore the slot rectangles the
 // drag hit-test measures via the parent's GlobalKey) is never disturbed — the
@@ -658,20 +680,7 @@ class _FlipMover extends StatefulWidget {
 }
 
 class _FlipMoverState extends State<_FlipMover> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(vsync: this, duration: _reorderSlideDuration)
-    ..addListener(_tick);
-
-  // The child's settled layout position, measured after each frame. A move is
-  // detected by comparing the fresh measurement against this.
-  Offset? _lastPosition;
-
-  // The offset the slide started from; the painted offset is this lerped to zero
-  // by the controller, so [_paintedOffset] reads the current visual delta.
-  Offset _fromOffset = Offset.zero;
-
-  Offset get _paintedOffset => Offset.lerp(_fromOffset, Offset.zero, _controller.value) ?? Offset.zero;
-
-  void _tick() => setState(() {});
+  late final AnimationController _controller = AnimationController(vsync: this, duration: _reorderSlideDuration);
 
   @override
   void dispose() {
@@ -681,38 +690,188 @@ class _FlipMoverState extends State<_FlipMover> with SingleTickerProviderStateMi
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _afterLayout());
-    return Transform.translate(offset: _paintedOffset, child: widget.child);
+    return _FlipMoverLayout(controller: _controller, animate: widget.animate, child: widget.child);
+  }
+}
+
+// Hosts the [_RenderFlipMover] that performs the synchronous FLIP. The state
+// above owns the controller (and its ticker); this just wires it to the render
+// object and forwards [animate] changes.
+class _FlipMoverLayout extends SingleChildRenderObjectWidget {
+  const _FlipMoverLayout({required this.controller, required this.animate, required super.child});
+
+  final AnimationController controller;
+  final bool animate;
+
+  @override
+  _RenderFlipMover createRenderObject(BuildContext context) =>
+      _RenderFlipMover(controller: controller, animate: animate);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderFlipMover renderObject) {
+    renderObject.animate = animate;
+  }
+}
+
+class _RenderFlipMover extends RenderProxyBox {
+  // ignore: prefer_initializing_formals
+  _RenderFlipMover({required this.controller, required bool animate}) : _animate = animate;
+
+  final AnimationController controller;
+
+  bool _animate;
+
+  set animate(bool value) => _animate = value;
+
+  // The child's settled layout position, measured each paint. A move is detected
+  // by comparing the fresh measurement against this.
+  Offset? _lastPosition;
+
+  // The offset the slide started from; the painted offset is this lerped to zero
+  // by the controller, so [_paintedOffset] reads the current visual delta.
+  Offset _fromOffset = Offset.zero;
+
+  // True while inside [paint]. Mutating the controller there notifies listeners
+  // synchronously, so the tick handler must not call markNeedsPaint mid-paint.
+  bool _painting = false;
+
+  Offset get _paintedOffset => Offset.lerp(_fromOffset, Offset.zero, controller.value) ?? Offset.zero;
+
+  void _onTick() {
+    if (!_painting) {
+      markNeedsPaint();
+    }
   }
 
-  void _afterLayout() {
-    if (!mounted) {
-      return;
-    }
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) {
-      return;
-    }
-    // localToGlobal on the Transform's render object ignores its own paint
-    // transform, so this is the settled layout position regardless of any slide.
-    final newPosition = box.localToGlobal(Offset.zero);
-    final previous = _lastPosition;
-    _lastPosition = newPosition;
-    if (previous == null || previous == newPosition) {
-      return;
-    }
-    if (!widget.animate) {
-      // Snap: cancel any slide and sit at the new position.
-      _controller.stop();
-      _controller.value = 1;
-      _fromOffset = Offset.zero;
-      return;
-    }
-    // Re-target: carry the in-flight visual offset so an interrupted slide stays
-    // continuous, then animate the combined delta back to zero.
-    _fromOffset = (previous - newPosition) + _paintedOffset;
-    _controller.forward(from: 0);
+  @override
+  void detach() {
+    controller.removeListener(_onTick);
+    super.detach();
   }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    controller.addListener(_onTick);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child != null) {
+      // localToGlobal walks the layout transforms only; the paint-only shift
+      // applied below is not part of them, so this is the settled position
+      // regardless of any in-flight slide.
+      final newPosition = localToGlobal(Offset.zero);
+      final previous = _lastPosition;
+      _lastPosition = newPosition;
+      if (previous != null && previous != newPosition) {
+        _painting = true;
+        if (!_animate) {
+          // Snap: cancel any slide and sit at the new position. The value setter
+          // also stops the controller.
+          controller.value = 1;
+          _fromOffset = Offset.zero;
+        } else {
+          // Re-target: carry the in-flight visual offset so an interrupted slide
+          // stays continuous, then animate the combined delta back to zero.
+          _fromOffset = (previous - newPosition) + _paintedOffset;
+          controller.forward(from: 0);
+        }
+        _painting = false;
+      }
+    }
+    super.paint(context, offset + _paintedOffset);
+  }
+}
+
+// A [Wrap] that paints one flagged child last (on top of its siblings) while
+// laying everything out exactly as a plain [Wrap] would. Used so the dragged
+// chip's placeholder, which slides across its neighbours during a reorder, stays
+// in front of them (with its glow) instead of being covered as they cross.
+class _ReorderWrap extends Wrap {
+  const _ReorderWrap({super.runSpacing, super.crossAxisAlignment, super.children});
+
+  @override
+  _RenderReorderWrap createRenderObject(BuildContext context) {
+    return _RenderReorderWrap(
+      direction: direction,
+      alignment: alignment,
+      spacing: spacing,
+      runAlignment: runAlignment,
+      runSpacing: runSpacing,
+      crossAxisAlignment: crossAxisAlignment,
+      textDirection: textDirection ?? Directionality.maybeOf(context),
+      verticalDirection: verticalDirection,
+      clipBehavior: clipBehavior,
+    );
+  }
+}
+
+// Carries the per-child "paint me last" flag on top of the standard wrap layout
+// data.
+class _ReorderWrapParentData extends WrapParentData {
+  bool paintLast = false;
+}
+
+class _RenderReorderWrap extends RenderWrap {
+  _RenderReorderWrap({
+    super.direction,
+    super.alignment,
+    super.spacing,
+    super.runAlignment,
+    super.runSpacing,
+    super.crossAxisAlignment,
+    super.textDirection,
+    super.verticalDirection,
+    super.clipBehavior,
+  });
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _ReorderWrapParentData) {
+      child.parentData = _ReorderWrapParentData();
+    }
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    // The wraps here use the default clipBehavior (Clip.none), so this mirrors
+    // defaultPaint: paint every non-flagged child in order, then the flagged one
+    // last so it lands on top. If a clipping clipBehavior is ever needed, this
+    // must grow a clip branch like RenderWrap.paint.
+    RenderBox? top;
+    var child = firstChild;
+    while (child != null) {
+      final childParentData = child.parentData! as _ReorderWrapParentData;
+      if (childParentData.paintLast) {
+        top = child;
+      } else {
+        context.paintChild(child, childParentData.offset + offset);
+      }
+      child = childParentData.nextSibling;
+    }
+    if (top != null) {
+      final topParentData = top.parentData! as _ReorderWrapParentData;
+      context.paintChild(top, topParentData.offset + offset);
+    }
+  }
+}
+
+// Marks its child to be painted last (in front) by an enclosing [_ReorderWrap].
+class _PaintOnTop extends ParentDataWidget<WrapParentData> {
+  const _PaintOnTop({required super.child});
+
+  @override
+  void applyParentData(RenderObject renderObject) {
+    final parentData = renderObject.parentData! as _ReorderWrapParentData;
+    if (!parentData.paintLast) {
+      parentData.paintLast = true;
+      renderObject.parent?.markNeedsPaint();
+    }
+  }
+
+  @override
+  Type get debugTypicalAncestorWidgetClass => _ReorderWrap;
 }
 
 // Strokes a rounded rectangle with a dashed outline. Used for the empty logic

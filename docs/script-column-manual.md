@@ -597,7 +597,7 @@ icon: "double_circle", iconColor: "green"
 
 | 関数 | 戻り | 説明 |
 |---|---|---|
-| `heat(値, {min: 最小, max: 最大})` | String | `min`〜`max` を 低い=赤 … 高い=緑 に対応付け |
+| `heat(値, {min: 最小, max: 最大})` | String | `min`〜`max` を matplotlib の `jet` カラーマップ（低い=青系 … シアン・緑・黄 … 高い=赤系）に対応付け |
 | `lerpColor(色A, 色B, t)` | String | 色 A と色 B を `t`（0.0〜1.0）で混ぜる |
 
 ```dart

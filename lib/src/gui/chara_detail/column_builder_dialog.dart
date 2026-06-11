@@ -15,6 +15,29 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
+/// A leading info icon followed by dimmed guidance text, used for the dialog's
+/// top tip and each category's usage note so they share one look.
+class _HintLine extends StatelessWidget {
+  final String text;
+
+  const _HintLine(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Symbols.info_rounded, size: 18, color: theme.hintColor),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(text, style: theme.textTheme.bodySmall?.copyWith(color: theme.hintColor)),
+        ),
+      ],
+    );
+  }
+}
+
 class ColumnBuilderDialog extends ConsumerWidget {
   const ColumnBuilderDialog({super.key});
 
@@ -172,9 +195,18 @@ class ColumnBuilderDialog extends ConsumerWidget {
     );
   }
 
+  /// The per-category guidance shown below the category header, or null when the
+  /// category needs no extra explanation. Only categories whose usage is not
+  /// obvious from the chips alone (e.g. logic columns are populated by dragging
+  /// existing columns onto them after creation) provide one.
+  String? categoryDescription(ColumnCategory cat) {
+    final key = "$tr_chara_detail.column_spec.dialog.category_description.${cat.name.snakeCase}";
+    final text = key.tr();
+    return text == key ? null : text;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final buildersMap = ref.watch(columnBuilderProvider).groupListsBy((b) => b.category);
     return CardDialog(
       dialogTitle: "$tr_chara_detail.column_spec.dialog.title".tr(),
@@ -184,15 +216,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
         children: [
           Padding(
             padding: const EdgeInsets.all(8),
-            child: Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                border: Border.all(color: theme.colorScheme.primaryContainer),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              padding: const EdgeInsets.all(8),
-              child: Text("$tr_chara_detail.column_spec.dialog.description".tr()),
-            ),
+            child: _HintLine("$tr_chara_detail.column_spec.dialog.description".tr()),
           ),
           for (final cat in ColumnCategory.values) ...[
             Row(
@@ -201,6 +225,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 const Expanded(child: Divider(indent: 8)),
               ],
             ),
+            if (categoryDescription(cat) case final description?)
+              Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: _HintLine(description)),
             Padding(
               padding: const EdgeInsets.all(16),
               child: builderChipCategory(context, ref, buildersMap[cat] ?? []),

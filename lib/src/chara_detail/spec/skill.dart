@@ -22,6 +22,10 @@ part 'skill.mapper.dart';
 // ignore: constant_identifier_names
 const tr_skill = "pages.chara_detail.column_predicate.skill";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableEnum()
 enum SkillSetLogicMode { anyOf, allOf, sumOf }
 
@@ -110,7 +114,7 @@ class SkillCellData implements CellData {
 @MappableEnum()
 enum SkillDialogElements { selection, selectionTags, mode, notationMax }
 
-@MappableClass(discriminatorValue: 'SkillColumnSpec')
+@MappableClass(discriminatorValue: 'SkillColumnSpec', ignoreNull: true)
 class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappable {
   final Parser parser;
   final String labelKey = LabelKeys.skill;
@@ -130,6 +134,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   final bool hidden;
 
   @override
+  final String? description;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   SkillColumnSpec({
@@ -141,10 +148,14 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
     this.hidden = false,
+    this.description,
   });
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   SkillColumnSpec copyWith({
     String? id,
@@ -155,6 +166,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     bool? showAvailableOnly,
     Set<SkillDialogElements>? hiddenElements,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return SkillColumnSpec(
       id: id ?? this.id,
@@ -165,6 +177,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -466,6 +479,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
         if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationMaxWidget(ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

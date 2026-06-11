@@ -203,6 +203,14 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// specs saved before this field existed therefore decode as shown.
   bool get hidden;
 
+  /// User-provided free-text note shown on the column chip's tooltip (above the
+  /// filter condition). Null/empty means "no note". Defaults to null so specs that
+  /// do not store one — and legacy specs saved before the field existed — decode
+  /// as having none. Every editable concrete spec overrides this with a stored
+  /// field and implements [withDescription]; the central tooltip composition reads
+  /// it generically here.
+  String? get description => null;
+
   /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
   /// editable spec must override this via copyWith. Unlike [withChildren] (which
   /// leaf columns legitimately no-op on), the base throws rather than silently
@@ -211,6 +219,14 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// fail silently with no compile error. The undecodable placeholder, which is
   /// never editable, overrides this back to a no-op.
   ColumnSpec withHidden(bool hidden) => throw UnsupportedError('Concrete specs must override withHidden');
+
+  /// Returns a copy of this spec with its [description] replaced (null clears it).
+  /// Like [withHidden], every editable concrete spec must override this via
+  /// copyWith; the base throws rather than silently no-op'ing so a spec that
+  /// forgets to override fails loudly instead of dropping the user's note. The
+  /// undecodable placeholder, which is never editable, overrides this to a no-op.
+  ColumnSpec withDescription(String? description) =>
+      throw UnsupportedError('Concrete specs must override withDescription');
 
   /// Child specs nested under this column. Only container columns (logic columns)
   /// have children; leaf columns return an empty list. Used by the tree-aware
@@ -332,6 +348,18 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   @override
   ColumnSpec withHidden(bool hidden) => this;
 
+  // Read the note straight from the preserved raw map so the central tooltip can
+  // still surface it for a broken column; a non-String value degrades to null.
+  @override
+  String? get description {
+    final value = rawMap["description"];
+    return value is String ? value : null;
+  }
+
+  // Inert for the same reason as [withHidden]: a broken column is never edited.
+  @override
+  ColumnSpec withDescription(String? description) => this;
+
   @override
   List<Null> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<Null>.filled(records.length, null);
@@ -402,6 +430,11 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // incompleteness check so legacy specs (saved before the field existed) are
   // not flagged broken merely for lacking it. Must match the dart_mappable
   // field name emitted by concrete specs.
+  //
+  // Note the per-spec `description` note needs no equivalent here: every spec
+  // carrying it is annotated `ignoreNull: true`, so a null description is omitted
+  // from the encoded map entirely (a legacy spec lacking the key and a freshly
+  // encoded null-description spec therefore produce the same shape).
   static const _hiddenKey = 'hidden';
 
   Set<String> get brokenIds => {..._brokenIds};

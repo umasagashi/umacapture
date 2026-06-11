@@ -118,6 +118,12 @@ class DateTimeColumnSpecMapper extends SubClassMapperBase<DateTimeColumnSpec> {
     opt: true,
     def: false,
   );
+  static String? _$description(DateTimeColumnSpec v) => v.description;
+  static const Field<DateTimeColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<DateTimeColumnSpec> fields = const {
@@ -126,7 +132,10 @@ class DateTimeColumnSpecMapper extends SubClassMapperBase<DateTimeColumnSpec> {
     #parser: _f$parser,
     #predicate: _f$predicate,
     #hidden: _f$hidden,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -147,6 +156,7 @@ class DateTimeColumnSpecMapper extends SubClassMapperBase<DateTimeColumnSpec> {
       parser: data.dec(_f$parser),
       predicate: data.dec(_f$predicate),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

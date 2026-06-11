@@ -119,9 +119,23 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text("$tr_module_update.dialog.description".tr()),
+            _Step(number: 1, text: "$tr_module_update.dialog.step_1".tr()),
             const SizedBox(height: 12),
-            const Align(alignment: Alignment.centerLeft, child: _DownloadSource()),
+            _LabeledField(label: "$tr_module_update.dialog.current_version_label".tr(), child: const _CurrentVersion()),
+            const SizedBox(height: 12),
+            _LabeledField(
+              label: "$tr_module_update.dialog.latest_version_label".tr(),
+              child: _UrlBox(url: Const.moduleVersionInfoUrl),
+            ),
+            const SizedBox(height: 24),
+            _Step(number: 2, text: "$tr_module_update.dialog.step_2".tr()),
+            const SizedBox(height: 12),
+            _LabeledField(
+              label: "$tr_module_update.dialog.module_label".tr(),
+              child: _UrlBox(url: Const.moduleZipUrl),
+            ),
+            const SizedBox(height: 24),
+            _Step(number: 3, text: "$tr_module_update.dialog.step_3".tr()),
             const SizedBox(height: 12),
             const _WarningCard(),
             const SizedBox(height: 16),
@@ -164,19 +178,116 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
   }
 }
 
-class _DownloadSource extends StatelessWidget {
-  const _DownloadSource();
+/// One step of the manual-update procedure: a "Step N" pill beside its
+/// instruction [text]. The matching section (version boxes, download link, drop
+/// zone) follows directly below each step.
+class _Step extends StatelessWidget {
+  final int number;
+  final String text;
+
+  const _Step({required this.number, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(color: theme.colorScheme.primary, borderRadius: BorderRadius.circular(12)),
+          child: Text(
+            "$tr_module_update.dialog.step_label".tr(namedArgs: {"number": "$number"}),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onPrimary,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(text, style: theme.textTheme.bodyMedium),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A left-aligned [label] above its [child], so the field's caption sits outside
+/// the value/link box. Used for the current/latest version and module rows.
+class _LabeledField extends StatelessWidget {
+  final String label;
+  final Widget child;
+
+  const _LabeledField({required this.label, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 4),
+          child: Text(label, style: theme.textTheme.labelLarge),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+/// Shows the currently installed recognition module version so the user can
+/// compare it against the latest at the distribution source before updating.
+/// The dialog also opens when the latest version could not be fetched, so it
+/// leads with verification rather than assuming an update is needed.
+class _CurrentVersion extends ConsumerWidget {
+  const _CurrentVersion();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final version = ref
+        .watch(moduleVersionLoader)
+        .when(
+          loading: () => "$tr_module_update.dialog.version_checking".tr(),
+          error: (_, _) => "$tr_module_update.dialog.version_unknown".tr(),
+          data: (data) =>
+              data?.recognizerVersion.toLocal().toString() ?? "$tr_module_update.dialog.version_unknown".tr(),
+        );
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: SelectableText(version, style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold)),
+    );
+  }
+}
+
+/// A bordered box showing a [url] with copy-to-clipboard and open-in-browser
+/// actions. Shared by the latest-version link and the module download link so
+/// both read identically.
+class _UrlBox extends StatelessWidget {
+  final String url;
+
+  const _UrlBox({required this.url});
 
   void _copy() {
-    Pasteboard.writeText(Const.moduleZipUrl);
+    Pasteboard.writeText(url);
     Toaster.show(ToastData.success(description: "$tr_module_update.dialog.copied".tr()));
   }
 
   Future<void> _open() async {
     try {
-      await launchUrl(Uri.parse(Const.moduleZipUrl));
+      await launchUrl(Uri.parse(url));
     } catch (exception, stackTrace) {
-      logger.w("Failed to open module url in browser.", exception, stackTrace);
+      logger.w("Failed to open url in browser.", exception, stackTrace);
     }
   }
 
@@ -193,10 +304,7 @@ class _DownloadSource extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SelectableText(
-            Const.moduleZipUrl,
-            style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.primary),
-          ),
+          SelectableText(url, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.primary)),
           const SizedBox(width: 8),
           IconButton(
             icon: const Icon(Symbols.content_copy_rounded),

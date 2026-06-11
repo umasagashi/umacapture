@@ -320,6 +320,12 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     opt: true,
     def: false,
   );
+  static String? _$description(SkillColumnSpec v) => v.description;
+  static const Field<SkillColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
   static String _$labelKey(SkillColumnSpec v) => v.labelKey;
   static const Field<SkillColumnSpec, String> _f$labelKey = Field(
     'labelKey',
@@ -337,8 +343,11 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
     #hidden: _f$hidden,
+    #description: _f$description,
     #labelKey: _f$labelKey,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -362,6 +371,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

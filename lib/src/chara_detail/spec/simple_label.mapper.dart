@@ -113,6 +113,12 @@ class SimpleLabelColumnSpecMapper
     opt: true,
     def: false,
   );
+  static String? _$description(SimpleLabelColumnSpec v) => v.description;
+  static const Field<SimpleLabelColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<SimpleLabelColumnSpec> fields = const {
@@ -123,7 +129,10 @@ class SimpleLabelColumnSpecMapper
     #predicate: _f$predicate,
     #cellAction: _f$cellAction,
     #hidden: _f$hidden,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -146,6 +155,7 @@ class SimpleLabelColumnSpecMapper
       predicate: data.dec(_f$predicate),
       cellAction: data.dec(_f$cellAction),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

@@ -1162,15 +1162,65 @@ String _argbToHex(int argb) {
   return a == 0xFF ? '#${_hex2(r)}${_hex2(g)}${_hex2(b)}' : '#${_hex2(a)}${_hex2(r)}${_hex2(g)}${_hex2(b)}';
 }
 
-/// `heat(num value, {num min, num max})` → hex string (low = red, high = green).
+/// Evaluates one channel of a piecewise-linear colormap at [t] (0..1).
+///
+/// [stops] is an ascending list of `[position, value]` control points whose
+/// values are in 0..1; the returned byte is `round(255 * value)`. Positions of
+/// [t] outside the first/last stop clamp to that stop's value.
+int _jetChannel(double t, List<List<double>> stops) {
+  if (t <= stops.first[0]) return (255 * stops.first[1]).round().clamp(0, 255);
+  if (t >= stops.last[0]) return (255 * stops.last[1]).round().clamp(0, 255);
+  for (var i = 1; i < stops.length; i++) {
+    final s1 = stops[i][0];
+    if (t <= s1) {
+      final s0 = stops[i - 1][0];
+      final v0 = stops[i - 1][1];
+      final v1 = stops[i][1];
+      final v = v0 + (v1 - v0) * (t - s0) / (s1 - s0);
+      return (255 * v).round().clamp(0, 255);
+    }
+  }
+  return (255 * stops.last[1]).round().clamp(0, 255);
+}
+
+// Canonical matplotlib `jet` segment data: ascending `[position, value]` control
+// points for each channel (values 0..1). At t=0 only blue is lit (dark blue);
+// at t=1 only red is half-lit (dark red).
+const List<List<double>> _jetRed = [
+  [0.00, 0.0],
+  [0.35, 0.0],
+  [0.66, 1.0],
+  [0.89, 1.0],
+  [1.00, 0.5],
+];
+const List<List<double>> _jetGreen = [
+  [0.000, 0.0],
+  [0.125, 0.0],
+  [0.375, 1.0],
+  [0.640, 1.0],
+  [0.910, 0.0],
+  [1.000, 0.0],
+];
+const List<List<double>> _jetBlue = [
+  [0.00, 0.5],
+  [0.11, 1.0],
+  [0.34, 1.0],
+  [0.65, 0.0],
+  [1.00, 0.0],
+];
+
+/// `heat(num value, {num min, num max})` → hex string following matplotlib's
+/// `jet` colormap (low = dark blue … through cyan, green, yellow, red … high =
+/// dark red).
 $Value? heatFn(Runtime rt, $Value? target, List<$Value?> args) {
   final value = (args[0]?.$value as num).toDouble();
   final min = (args[1]?.$value as num?)?.toDouble() ?? 0.0;
   final max = (args[2]?.$value as num?)?.toDouble() ?? 1.0;
   final t = max == min ? 0.0 : ((value - min) / (max - min)).clamp(0.0, 1.0);
-  final r = (255 * (1 - t)).round();
-  final g = (255 * t).round();
-  return $String('#${_hex2(r)}${_hex2(g)}00');
+  final r = _jetChannel(t, _jetRed);
+  final g = _jetChannel(t, _jetGreen);
+  final b = _jetChannel(t, _jetBlue);
+  return $String('#${_hex2(r)}${_hex2(g)}${_hex2(b)}');
 }
 
 /// `lerpColor(String a, String b, num t)` → hex string (channel-wise blend).

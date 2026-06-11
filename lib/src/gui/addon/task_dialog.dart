@@ -272,6 +272,7 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
       content: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (widget.isNew) ...[const ExperimentalBanner(), const SizedBox(height: 16)],
           TextField(
             controller: _nameController,
             decoration: InputDecoration(labelText: "$tr_addon.dialog.name".tr()),

@@ -147,7 +147,7 @@
                 }
             },
             "export": {
-                "button_tooltip": "エクスポート",
+                "button_tooltip": "殿堂入りウマ娘をまとめてエクスポートします。",
                 "dialog_title": "保存先を指定してください。",
                 "disabled_tooltip": "エクスポート中です。",
                 "csv": {
@@ -173,7 +173,10 @@
                     "close_button": {
                         "tooltip": "追加せずにキャンセル"
                     },
-                    "description": "Tips: 長押しするとカスタマイズ画面に移動します。",
+                    "description": "長押しするとカスタマイズ画面に移動します。",
+                    "category_description": {
+                        "logic": "論理関数の入力は、列を追加した後にテーブル上で既存の列をこの列へドラッグ&ドロップして指定します。"
+                    },
                     "add_all_button": {
                         "label": "全部",
                         "tooltip": "このグループの全項目をまとめて追加します（フィルタ除く）"
@@ -255,7 +258,12 @@
                             "label": "テーブルに表示",
                             "tooltip": "オフにするとテーブルで列を非表示にします。非表示にしてもフィルタは常に有効です。"
                         },
-                        "hidden_marker": "非表示"
+                        "hidden_marker": "非表示",
+                        "tooltip_field": {
+                            "label": "説明",
+                            "tooltip": "列チップにマウスを乗せたときに表示される説明文です。",
+                            "empty": "説明がありません"
+                        }
                     }
                 },
                 "ranged_label": {
@@ -512,9 +520,6 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
-                        },
-                        "tooltip_field": {
-                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -551,9 +556,6 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
-                        },
-                        "tooltip_field": {
-                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -570,13 +572,7 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "タイトル"
-                        },
-                        "tooltip_field": {
-                            "label": "説明"
                         }
-                    },
-                    "tooltip": {
-                        "empty": "説明がありません"
                     },
                     "code": {
                         "label": "コード",
@@ -1230,7 +1226,15 @@
                 "dialog": {
                     "title": "認識モジュールの手動更新",
                     "close_button": "閉じる",
-                    "description": "配布元から認識モジュール（modules.zip）をダウンロードし、下のエリアにドラッグ＆ドロップするか、ファイルを選択して適用してください。",
+                    "step_label": "ステップ{number}",
+                    "step_1": "最新のバージョンを確認します。公開されている最新バージョンが現在のバージョンよりも新しい場合のみ、更新が必要です。",
+                    "step_2": "認識モジュール（modules.zip）をブラウザ等でダウンロードします。",
+                    "step_3": "ダウンロードしたファイルを下のエリアにドラッグ＆ドロップするか、ファイルを選択して適用します。",
+                    "current_version_label": "現在のバージョン",
+                    "latest_version_label": "最新のバージョン（ recognizer_version の横の文字列が最新バージョンです）",
+                    "module_label": "認識モジュール",
+                    "version_checking": "確認中...",
+                    "version_unknown": "不明（取得できませんでした）",
                     "copy_tooltip": "URL をクリップボードにコピー",
                     "open_tooltip": "ブラウザで開く",
                     "copied": "URL をコピーしました。",
@@ -1300,6 +1304,7 @@
         "report_screen": "報告を送信しました。"
     },
     "common": {
-        "under_construction": "開発中"
+        "under_construction": "開発中",
+        "experimental_warning": "この機能は実験的です。保存した内容は今後のバージョンアップで利用できなくなる可能性があります。"
     }
 }

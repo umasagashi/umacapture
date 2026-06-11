@@ -21,6 +21,10 @@ const tr_family_registration = "pages.chara_detail.column_predicate.family_regis
 // ignore: constant_identifier_names
 const tr_columns_family = "pages.chara_detail.columns.family_registration";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 /// Ancestor slots in display order: left parent, its two grandparents, then the
 /// right side. Enum names double as translation keys under
 /// `columns.family_registration.slots`.
@@ -122,7 +126,7 @@ class FamilyRegistrationCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'FamilyRegistrationColumnSpec')
+@MappableClass(discriminatorValue: 'FamilyRegistrationColumnSpec', ignoreNull: true)
 class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
     with FamilyRegistrationColumnSpecMappable {
   FamilyRegistrationPredicate predicate;
@@ -137,24 +141,38 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   final bool hidden;
 
   @override
+  final String? description;
+
+  @override
   ColumnSpecCellAction? get cellAction => ColumnSpecCellAction.openFactorPreview;
 
-  FamilyRegistrationColumnSpec({required this.id, required this.title, required this.predicate, this.hidden = false});
+  FamilyRegistrationColumnSpec({
+    required this.id,
+    required this.title,
+    required this.predicate,
+    this.hidden = false,
+    this.description,
+  });
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   FamilyRegistrationColumnSpec copyWith({
     String? id,
     String? title,
     FamilyRegistrationPredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return FamilyRegistrationColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -419,6 +437,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

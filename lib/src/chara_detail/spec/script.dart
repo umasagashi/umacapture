@@ -496,6 +496,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   /// tooltip" (the chip then shows a localized "no description" fallback).
   /// Omitted from the serialized map (via the class-level `ignoreNull`) so
   /// pre-existing specs are never flagged as broken by [isSpecMapIncomplete].
+  @override
   final String? description;
 
   // Render-phase scratch state: whether every visible row carried a numeric sort
@@ -521,6 +522,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   ScriptColumnSpec copyWith({
     String? id,
@@ -652,8 +656,11 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   }
 
   @override
-  String tooltip(RefBase ref) =>
-      (description?.trim().isEmpty ?? true) ? "$tr_script.tooltip.empty".tr() : description!.trim();
+  // A script column has no filter condition of its own; its chip tooltip is just
+  // the user note ([description]), which the central tooltip composition prepends
+  // (and which falls back to a localized "no description" when empty). Returning
+  // empty here lets that single code path handle both cases.
+  String tooltip(RefBase ref) => "";
 
   @override
   Widget label() => Text(title);
@@ -694,7 +701,9 @@ class _ScriptCell extends StatelessWidget {
     final background = _resolveColor(result.background);
     if (background == null) return row;
     return Container(
-      color: background,
+      // Background swatches are painted at a fixed 50% opacity so the cell text
+      // and the striped row underneath stay legible regardless of the chosen color.
+      color: background.withValues(alpha: 0.5),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       alignment: Alignment.centerLeft,
       child: row,
@@ -1111,7 +1120,6 @@ class ScriptColumnSelector extends ConsumerStatefulWidget {
 
 class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
   late String title;
-  late String description;
   late final DartHighlightController _codeController;
 
   // The last source whose preview succeeded. Only this is committed on OK, so a
@@ -1131,7 +1139,6 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
-    description = spec.description ?? "";
     _codeController = DartHighlightController(text: spec.source);
     _validatedSource = spec.source;
     _lastText = spec.source;
@@ -1146,12 +1153,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
       _clonedSpecProvider.update(
         ref,
         widget.specId,
-        (spec) => spec.copyWith(
-          title: title,
-          source: _validatedSource,
-          apiVersion: scriptApiVersion,
-          description: description.trim().isEmpty ? null : description.trim(),
-        ),
+        (spec) => spec.copyWith(title: title, source: _validatedSource, apiVersion: scriptApiVersion),
       );
     });
   }
@@ -1210,6 +1212,8 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: ExperimentalBanner()),
+        const SizedBox(height: 16),
         FormGroup(
           title: Text("$tr_script.notation.label".tr()),
           description: Text("$tr_script.notation.description".tr()),
@@ -1219,12 +1223,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
               children: [DenseTextField(initialText: title, onChanged: (value) => title = value)],
             ),
             ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
-            FormLine(
-              title: Text("$tr_script.notation.tooltip_field.label".tr()),
-              children: [
-                DenseTextField(initialText: description, allowEmpty: true, onChanged: (value) => description = value),
-              ],
-            ),
+            ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
           ],
         ),
         const SizedBox(height: 32),
@@ -1490,7 +1489,7 @@ class ScriptColumnBuilder extends ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       source:
-          "bool filter(CharaRecord r) {\n  return true;\n}\n\ndynamic display(CharaRecord r) {\n  return r.status.speed;\n}\n",
+          "bool filter(CharaRecord r) {\n  return true;\n}\n\ndynamic display(CharaRecord r) {\n  return \"-\";\n}\n",
     );
   }
 }

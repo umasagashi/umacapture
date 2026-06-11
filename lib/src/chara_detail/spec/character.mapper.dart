@@ -104,6 +104,12 @@ class CharacterCardColumnSpecMapper
     opt: true,
     def: false,
   );
+  static String? _$description(CharacterCardColumnSpec v) => v.description;
+  static const Field<CharacterCardColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<CharacterCardColumnSpec> fields = const {
@@ -112,7 +118,10 @@ class CharacterCardColumnSpecMapper
     #parser: _f$parser,
     #predicate: _f$predicate,
     #hidden: _f$hidden,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -133,6 +142,7 @@ class CharacterCardColumnSpecMapper
       parser: data.dec(_f$parser),
       predicate: data.dec(_f$predicate),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 
