@@ -1296,6 +1296,7 @@
         "report_screen": "報告を送信しました。"
     },
     "common": {
-        "under_construction": "開発中"
+        "under_construction": "開発中",
+        "experimental_warning": "この機能は実験的です。今後のバージョンアップで、保存した設定の互換性が失われるなど破壊的な仕様変更が行われる可能性があります。"
     }
 }

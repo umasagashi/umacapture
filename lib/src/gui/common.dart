@@ -373,6 +373,42 @@ class CardDialog extends ConsumerWidget {
   }
 }
 
+/// A prominent banner marking a feature as experimental, warning that a future
+/// update may change it in backward-incompatible ways. Shown at the top of the
+/// dialogs that author such features (e.g. script columns, addon tasks).
+class ExperimentalBanner extends StatelessWidget {
+  const ExperimentalBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.tertiaryContainer,
+        border: Border.all(color: theme.colorScheme.tertiary),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Symbols.science_rounded, size: 20, color: theme.colorScheme.onTertiaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "common.experimental_warning".tr(),
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onTertiaryContainer,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 void showFeedbackDialog(BuildContext context) {
   BetterFeedback.of(context).show(captureFeedback());
 }

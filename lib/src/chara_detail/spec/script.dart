@@ -1210,6 +1210,8 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
   Widget build(BuildContext context) {
     return Column(
       children: [
+        const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: ExperimentalBanner()),
+        const SizedBox(height: 16),
         FormGroup(
           title: Text("$tr_script.notation.label".tr()),
           description: Text("$tr_script.notation.description".tr()),
