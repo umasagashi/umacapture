@@ -42,8 +42,11 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
 
   Future<void> start(List<CharaDetailRecord> records) async {
     final platformController = await ref.read(platformControllerLoader.future);
+    if (platformController == null) {
+      return;
+    }
     for (final record in records) {
-      platformController!.updateRecord(record.id);
+      platformController.updateRecord(record.id);
     }
     logger.d("Start regenerating ${records.length} chara detail records.");
     state = Progress(total: records.length);
