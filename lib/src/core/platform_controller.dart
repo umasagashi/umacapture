@@ -186,12 +186,14 @@ final charaDetailCaptureStateProvider = NotifierProvider<CharaDetailCaptureState
 final trainerIdProvider = Provider<String>((ref) {
   final entry = StorageBox(StorageBoxKey.trainerId).entry<String>("trainer_id");
   var id = entry.pull();
+  // Logs are included in bug reports, so we should not casually print the trainer ID.
   if (id == null) {
     id = const Uuid().v4();
     entry.push(id);
-    logger.i("Trainer ID generated: $id");
+    if (kDebugMode) {
+      logger.i("Trainer ID generated: $id");
+    }
   } else {
-    // Logs are included in bug reports, so we should not casually print the trainer ID.
     if (kDebugMode) {
       logger.i("Trainer ID loaded: $id");
     }
