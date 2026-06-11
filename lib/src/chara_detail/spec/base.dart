@@ -203,10 +203,14 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// specs saved before this field existed therefore decode as shown.
   bool get hidden;
 
-  /// Returns a copy of this spec with its [hidden] flag replaced. Mirrors
-  /// [withChildren]: the base fallback returns the spec unchanged (e.g. the
-  /// undecodable placeholder), and every concrete spec overrides it via copyWith.
-  ColumnSpec withHidden(bool hidden) => this;
+  /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
+  /// editable spec must override this via copyWith. Unlike [withChildren] (which
+  /// leaf columns legitimately no-op on), the base throws rather than silently
+  /// returning [this]: the toggle has exactly one caller (the visibility switch in
+  /// the column dialog), so a subclass that forgets to override would otherwise
+  /// fail silently with no compile error. The undecodable placeholder, which is
+  /// never editable, overrides this back to a no-op.
+  ColumnSpec withHidden(bool hidden) => throw UnsupportedError('Concrete specs must override withHidden');
 
   /// Child specs nested under this column. Only container columns (logic columns)
   /// have children; leaf columns return an empty list. Used by the tree-aware
@@ -316,6 +320,12 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   // so a broken column keeps whatever hidden flag it was saved with.
   @override
   bool get hidden => (rawMap["hidden"] as bool?) ?? false;
+
+  // A broken placeholder is not editable (its selector is a plain message with no
+  // visibility switch), so the toggle is intentionally inert here rather than
+  // throwing like the base. The raw map's hidden flag is preserved verbatim.
+  @override
+  ColumnSpec withHidden(bool hidden) => this;
 
   @override
   List<Null> parse(RefBase ref, List<CharaDetailRecord> records) {

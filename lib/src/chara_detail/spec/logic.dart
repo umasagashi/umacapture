@@ -114,6 +114,13 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   /// into a single per-row condition according to [logic]. With no children the
   /// column folds to the operator's identity (empty OR/XOR/NAND = false,
   /// empty AND/NOR/XNOR/NOT = true).
+  ///
+  /// By design, an empty OR/XOR/NAND column therefore evaluates to false and
+  /// rejects every row — set-operation correctness (the identity of the empty
+  /// fold) is deliberately preferred over the old "empty column passes all" UX.
+  /// This is not a bug: the column's (hidden) chip still shows a pass-count
+  /// badge of 0, so an empty filter that blanks the grid is diagnosable from the
+  /// customization area.
   List<bool> combine(List<List<bool>> childConditions, int rowCount) {
     if (childConditions.isEmpty) {
       // Kept in lockstep with [LogicMode.apply] so an empty column filters
@@ -301,6 +308,9 @@ class LogicColumnBuilder extends ColumnBuilder {
     // Logic columns are filters first; a freshly added one starts hidden so it
     // acts as an invisible filter by default. Existing (legacy) logic columns
     // lack the field and decode as shown, so they are never retroactively hidden.
+    // Being hidden, a still-empty column shows no table column — its effect (e.g.
+    // an empty OR folding to false and rejecting all rows, see combine()) is read
+    // from the chip's pass-count badge rather than the grid. This is intended.
     return LogicColumnSpec(id: const Uuid().v4(), title: title, logic: logic, hidden: true);
   }
 }
