@@ -373,19 +373,15 @@ inline auto get_data(Container& c) -> typename Container::value_type* {
   return c.data();
 }
 
-#if defined(_SECURE_SCL) && _SECURE_SCL
-// Make a checked iterator to avoid MSVC warnings.
-template <typename T> using checked_ptr = stdext::checked_array_iterator<T*>;
-template <typename T>
-constexpr auto make_checked(T* p, size_t size) -> checked_ptr<T> {
-  return {p, size};
-}
-#else
+// Local patch: stdext::checked_array_iterator was removed from the MSVC STL
+// (toolset >= 14.51), so the _SECURE_SCL branch that used it no longer
+// compiles in debug builds. Upstream fmt dropped the workaround entirely (it
+// only silenced checked-iterator warnings on old toolsets); do the same and
+// always use plain pointers.
 template <typename T> using checked_ptr = T*;
 template <typename T> constexpr auto make_checked(T* p, size_t) -> T* {
   return p;
 }
-#endif
 
 // Attempts to reserve space for n extra characters in the output range.
 // Returns a pointer to the reserved range or a reference to it.

@@ -304,7 +304,10 @@ class RecordQuarantined extends RecordLoadResult {
   const RecordQuarantined(this.destination);
 }
 
-@MappableClass(caseStyle: CaseStyle.snakeCase)
+// ignoreNull keeps persisted record.json byte-compatible with the native writer,
+// which omits empty optionals. Without it, toMap() emits "foreign_aptitude": null
+// / "uaf_wins": null, which the native recognizer cannot read back on re-recognize.
+@MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   final Metadata metadata;
 

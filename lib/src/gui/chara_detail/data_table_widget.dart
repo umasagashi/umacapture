@@ -126,63 +126,90 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         children: [
           LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
-              return TrinaGrid(
-                // Since TrinaGrid have internal states, it won't rebuilt without changing the key each time.
-                key: ValueKey(const Uuid().v4()),
-                columns: grid.columns,
-                rows: grid.rows,
-                mode: TrinaGridMode.select,
-                configuration: TrinaGridConfiguration(
-                  enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
-                  scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
-                  style: TrinaGridStyleConfig(
-                    enableCellBorderVertical: false,
-                    gridBackgroundColor: theme.colorScheme.surface,
-                    rowColor: theme.colorScheme.surface,
-                    evenRowColor: theme.colorScheme.blueTintedSurface,
-                    activatedColor: theme.focusColor,
-                    gridBorderColor: theme.colorScheme.outline,
-                    borderColor: theme.focusColor,
-                    activatedBorderColor: theme.focusColor,
-                    inactivatedBorderColor: theme.focusColor,
-                    columnTextStyle: theme.textTheme.titleSmall!,
-                    cellTextStyle: theme.textTheme.bodyMedium!,
-                  ),
-                ),
-                onLoaded: (TrinaGridOnLoadedEvent event) {
-                  stateManager = event.stateManager;
-                  event.stateManager.autoFitColumns();
-                  if (sortColumn != null) {
-                    event.stateManager.sortColumnByField(sortColumn!, sortOrder);
-                  }
-                },
-                onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
-                  final record = event.row.getUserData<CharaDetailRecord>()!;
-                  final spec = event.cell.column.getUserData<ColumnSpec>();
-                  showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
-                },
-                onSelected: (TrinaGridOnSelectedEvent event) {
-                  try {
-                    final data = event.cell?.getUserData<CellData>();
-                    if (!(data?.onSelected?.call(event) ?? false)) {
-                      final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-                      final records = stateManager.getSortedRecords().map((e) => storage.recordPathOf(e)).toList();
-                      CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
+              // Back the grid with a solid surface so gridBackgroundColor can be
+              // transparent. That transparency is what keeps the selected row's
+              // current cell highlighted when the grid loses focus: TrinaGrid
+              // repaints the unfocused current cell with gridBackgroundColor
+              // (trina_base_cell.dart), which would otherwise punch a hole in the
+              // row highlight. Transparent lets the row color show through instead.
+              return ColoredBox(
+                color: theme.colorScheme.surface,
+                child: TrinaGrid(
+                  // Since TrinaGrid have internal states, it won't rebuilt without changing the key each time.
+                  key: ValueKey(const Uuid().v4()),
+                  columns: grid.columns,
+                  rows: grid.rows,
+                  mode: TrinaGridMode.select,
+                  // Paint the selected row ourselves so the highlight stays
+                  // visible even when the grid loses focus (e.g. the app is
+                  // deactivated). TrinaGrid's built-in activatedColor is gated on
+                  // hasFocus, so it disappears otherwise. Setting rowColorCallback
+                  // overrides the default striping, so reproduce it for other rows.
+                  rowColorCallback: (rowContext) {
+                    if (rowContext.stateManager.currentRowIdx == rowContext.rowIdx) {
+                      return theme.colorScheme.primaryContainer;
                     }
-                  } catch (error, stackTrace) {
-                    logger.e("Failed to handle cell selected. row=${event.row}, cell=${event.cell}", error, stackTrace);
-                    captureException(error, stackTrace);
-                  }
-                },
-                onSorted: (TrinaGridOnSortedEvent event) {
-                  if (event.column.sort == TrinaColumnSort.none) {
-                    sortColumn = null;
-                    sortOrder = TrinaColumnSort.none;
-                  } else {
-                    sortColumn = event.column.field;
-                    sortOrder = event.column.sort;
-                  }
-                },
+                    return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
+                  },
+                  configuration: TrinaGridConfiguration(
+                    enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
+                    scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
+                    style: TrinaGridStyleConfig(
+                      enableCellBorderVertical: false,
+                      gridBackgroundColor: Colors.transparent,
+                      // Not the per-row striping (rowColorCallback overrides that),
+                      // but the body background painted behind/around the rows,
+                      // e.g. the empty space right of the last column. Without it
+                      // this falls back to TrinaGrid's default Colors.white.
+                      rowColor: theme.colorScheme.surface,
+                      activatedColor: theme.colorScheme.primaryContainer,
+                      gridBorderColor: theme.colorScheme.outline,
+                      borderColor: theme.focusColor,
+                      activatedBorderColor: theme.focusColor,
+                      inactivatedBorderColor: theme.focusColor,
+                      columnTextStyle: theme.textTheme.titleSmall!,
+                      cellTextStyle: theme.textTheme.bodyMedium!,
+                    ),
+                  ),
+                  onLoaded: (TrinaGridOnLoadedEvent event) {
+                    stateManager = event.stateManager;
+                    event.stateManager.autoFitColumns();
+                    if (sortColumn != null) {
+                      event.stateManager.sortColumnByField(sortColumn!, sortOrder);
+                    }
+                  },
+                  onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
+                    final record = event.row.getUserData<CharaDetailRecord>()!;
+                    final spec = event.cell.column.getUserData<ColumnSpec>();
+                    showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
+                  },
+                  onSelected: (TrinaGridOnSelectedEvent event) {
+                    try {
+                      final data = event.cell?.getUserData<CellData>();
+                      if (!(data?.onSelected?.call(event) ?? false)) {
+                        final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+                        final records = stateManager.getSortedRecords().map((e) => storage.recordPathOf(e)).toList();
+                        CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
+                      }
+                    } catch (error, stackTrace) {
+                      logger.e(
+                        "Failed to handle cell selected. row=${event.row}, cell=${event.cell}",
+                        error,
+                        stackTrace,
+                      );
+                      captureException(error, stackTrace);
+                    }
+                  },
+                  onSorted: (TrinaGridOnSortedEvent event) {
+                    if (event.column.sort == TrinaColumnSort.none) {
+                      sortColumn = null;
+                      sortOrder = TrinaColumnSort.none;
+                    } else {
+                      sortColumn = event.column.field;
+                      sortOrder = event.column.sort;
+                    }
+                  },
+                ),
               );
             },
           ),

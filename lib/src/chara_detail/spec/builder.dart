@@ -6,6 +6,7 @@ import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
+import '/src/chara_detail/spec/family_registration.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
@@ -282,6 +283,10 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.metadata,
       labelKey: LabelKeys.recordType,
       parser: RecordTypeParser(),
+    ),
+    FamilyRegistrationColumnBuilder(
+      title: "$tr_columns.family_registration.title".tr(),
+      category: ColumnCategory.metadata,
     ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.race_strategy.title".tr(),

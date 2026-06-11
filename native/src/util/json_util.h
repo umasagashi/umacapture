@@ -85,11 +85,13 @@ void optional_to_json(Json &json, const std::string &key, const std::optional<T>
 template<typename T>
 std::optional<T> optional_from_json_impl(const Json &json, const std::string &key) {
     const auto &it = json.find(key);
-    if (it != json.end()) {
+    // Treat an explicit null the same as a missing key: writers omit empty
+    // optionals, but a record.json round-tripped through a serializer that
+    // emits "key": null (e.g. the Dart side) must still decode.
+    if (it != json.end() && !it->is_null()) {
         return it->get<T>();
-    } else {
-        return std::nullopt;
     }
+    return std::nullopt;
 }
 
 template<typename T>

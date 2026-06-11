@@ -1323,6 +1323,8 @@ class CharaDetailRecordMapper extends ClassMapperBase<CharaDetailRecord> {
     #trainedDate: _f$trainedDate,
     #races: _f$races,
   };
+  @override
+  final bool ignoreNull = true;
 
   static CharaDetailRecord _instantiate(DecodingData data) {
     return CharaDetailRecord(
