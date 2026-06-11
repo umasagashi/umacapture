@@ -94,8 +94,16 @@ class ListTilePageRootWidget extends ConsumerStatefulWidget {
 }
 
 class _ListTilePageRootWidgetState extends ConsumerState<ListTilePageRootWidget> with AutomaticKeepAliveClientMixin {
+  final _scrollController = ScrollController();
+
   @override
   bool get wantKeepAlive => true;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -103,7 +111,7 @@ class _ListTilePageRootWidgetState extends ConsumerState<ListTilePageRootWidget>
     return Scaffold(
       body: ListView(
         padding: widget.margin,
-        controller: ScrollController(),
+        controller: _scrollController,
         children: widget.gap == null
             ? widget.children
             : widget.children.insertSeparator(SizedBox(height: widget.gap)).toList(),
