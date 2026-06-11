@@ -1417,7 +1417,7 @@ class _PreviewGrid extends StatelessWidget {
             enableCellBorderVertical: false,
             gridBackgroundColor: theme.colorScheme.surface,
             rowColor: theme.colorScheme.surface,
-            evenRowColor: theme.colorScheme.blueTintedSurface,
+            evenRowColor: theme.colorScheme.stripedRowColor,
             gridBorderColor: theme.colorScheme.outline,
             columnTextStyle: theme.textTheme.titleSmall!,
             cellTextStyle: theme.textTheme.bodyMedium!,
