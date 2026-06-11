@@ -282,59 +282,72 @@ class PlatformController {
   }
 
   void _handleMessage(String message) {
-    final data = jsonDecode(message) as Map;
-    final dataType = data['type'].toString();
-    final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
-    switch (dataType) {
-      case 'onError':
-        _errorEventController.sink.add(_soundEventSequence++);
-        captureState.fail(data['message']);
-        break;
-      case 'onCaptureStarted':
-        _captureTriggeredEventController.sink.add(true);
-        captureState.reset();
-        break;
-      case 'onCaptureStopped':
-        _captureTriggeredEventController.sink.add(false);
-        captureState.reset();
-        _ref.read(capturingFrameSizeProvider.notifier).set(null);
-        _ref.read(capturingFrameRateProvider.notifier).set(null);
-        break;
-      case 'onScrollReady':
-        _scrollReadyEventController.sink.add(_soundEventSequence++);
-        break;
-      case 'onScrollUpdated':
-        captureState.progress(data['index'], data['progress']);
-        break;
-      case 'onPageReady':
-        _pageReadyEventController.sink.add(_soundEventSequence++);
-        captureState.progress(data['index'], 1);
-        break;
-      case 'onCharaDetailStarted':
-        captureState.started(RecordType.values[data['record_type'] as int]);
-        break;
-      case 'onCharaDetailFinished':
-        if (data['success']) {
-          _charaDetailRecordCapturedEventController.sink.add(data['id']);
-          captureState.success(data['id']);
-        }
-        break;
-      case 'onCharaDetailUpdated':
-        _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
-        break;
-      case 'onFrameRateReported':
-        _ref.read(capturingFrameRateProvider.notifier).set(data['fps'].toDouble());
-        break;
-      case 'onScreenshotTaken':
-        logger.i("path=${data['path']}, result='${data['result']}'");
-        _ref.read(latestScreenshotProvider.notifier).set(ScreenshotResult(FilePath(data['path']), data['result']));
-        break;
-      case 'onFrameSizeReported':
-        final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
-        _ref.read(capturingFrameSizeProvider.notifier).set(size);
-        break;
-      default:
-        throw UnimplementedError(dataType);
+    // Native payloads are untyped and cross the platform channel, where neither
+    // the field set nor the Dart runtime types are guaranteed. Wrap the whole
+    // dispatch so a malformed message is logged and dropped instead of throwing
+    // out of the method-channel callback (where the error would be hard to trace
+    // and the event silently lost anyway).
+    try {
+      final data = jsonDecode(message) as Map;
+      final dataType = data['type'].toString();
+      final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
+      switch (dataType) {
+        case 'onError':
+          _errorEventController.sink.add(_soundEventSequence++);
+          captureState.fail(data['message']);
+          break;
+        case 'onCaptureStarted':
+          _captureTriggeredEventController.sink.add(true);
+          captureState.reset();
+          break;
+        case 'onCaptureStopped':
+          _captureTriggeredEventController.sink.add(false);
+          captureState.reset();
+          _ref.read(capturingFrameSizeProvider.notifier).set(null);
+          _ref.read(capturingFrameRateProvider.notifier).set(null);
+          break;
+        case 'onScrollReady':
+          _scrollReadyEventController.sink.add(_soundEventSequence++);
+          break;
+        case 'onScrollUpdated':
+          captureState.progress(data['index'], data['progress']);
+          break;
+        case 'onPageReady':
+          _pageReadyEventController.sink.add(_soundEventSequence++);
+          captureState.progress(data['index'], 1);
+          break;
+        case 'onCharaDetailStarted':
+          final recordType = data['record_type'] as int;
+          if (recordType < 0 || recordType >= RecordType.values.length) {
+            throw RangeError.value(recordType, 'record_type');
+          }
+          captureState.started(RecordType.values[recordType]);
+          break;
+        case 'onCharaDetailFinished':
+          if (data['success'] == true) {
+            _charaDetailRecordCapturedEventController.sink.add(data['id']);
+            captureState.success(data['id']);
+          }
+          break;
+        case 'onCharaDetailUpdated':
+          _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
+          break;
+        case 'onFrameRateReported':
+          _ref.read(capturingFrameRateProvider.notifier).set(data['fps'].toDouble());
+          break;
+        case 'onScreenshotTaken':
+          logger.i("path=${data['path']}, result='${data['result']}'");
+          _ref.read(latestScreenshotProvider.notifier).set(ScreenshotResult(FilePath(data['path']), data['result']));
+          break;
+        case 'onFrameSizeReported':
+          final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
+          _ref.read(capturingFrameSizeProvider.notifier).set(size);
+          break;
+        default:
+          throw UnimplementedError(dataType);
+      }
+    } catch (e, st) {
+      logger.w("Failed to handle native message: $message", e, st);
     }
   }
 
