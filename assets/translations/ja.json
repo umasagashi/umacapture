@@ -173,7 +173,10 @@
                     "close_button": {
                         "tooltip": "追加せずにキャンセル"
                     },
-                    "description": "Tips: 長押しするとカスタマイズ画面に移動します。",
+                    "description": "長押しするとカスタマイズ画面に移動します。",
+                    "category_description": {
+                        "logic": "論理関数の入力は、列を追加した後にテーブル上で既存の列をこの列へドラッグ&ドロップして指定します。"
+                    },
                     "add_all_button": {
                         "label": "全部",
                         "tooltip": "このグループの全項目をまとめて追加します（フィルタ除く）"
