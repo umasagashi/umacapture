@@ -111,6 +111,13 @@ class DateTimeColumnSpecMapper extends SubClassMapperBase<DateTimeColumnSpec> {
       v.predicate;
   static const Field<DateTimeColumnSpec, IsInRangeDateTimePredicate>
   _f$predicate = Field('predicate', _$predicate);
+  static bool _$hidden(DateTimeColumnSpec v) => v.hidden;
+  static const Field<DateTimeColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<DateTimeColumnSpec> fields = const {
@@ -118,6 +125,7 @@ class DateTimeColumnSpecMapper extends SubClassMapperBase<DateTimeColumnSpec> {
     #title: _f$title,
     #parser: _f$parser,
     #predicate: _f$predicate,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -138,6 +146,7 @@ class DateTimeColumnSpecMapper extends SubClassMapperBase<DateTimeColumnSpec> {
       title: data.dec(_f$title),
       parser: data.dec(_f$parser),
       predicate: data.dec(_f$predicate),
+      hidden: data.dec(_f$hidden),
     );
   }
 

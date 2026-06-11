@@ -61,13 +61,20 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   @override
   final ColumnSpecCellAction cellAction;
 
+  @override
+  final bool hidden;
+
   RangedIntegerColumnSpec({
     required this.id,
     required this.title,
     required this.parser,
     required this.predicate,
     ColumnSpecCellAction? cellAction,
+    this.hidden = false,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   RangedIntegerColumnSpec copyWith({
     String? id,
@@ -76,6 +83,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
     int? valueMin,
     int? valueMax,
     IsInRangeIntegerPredicate? predicate,
+    bool? hidden,
   }) {
     return RangedIntegerColumnSpec(
       id: id ?? this.id,
@@ -83,6 +91,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       cellAction: cellAction,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -221,6 +230,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

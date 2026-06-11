@@ -34,6 +34,7 @@ Map<String, dynamic> completeFactorMap() => <String, dynamic>{
   'showAllWhenQueryIsEmpty': true,
   'showAvailableOnly': true,
   'hiddenElements': <String>[],
+  'hidden': false,
 };
 
 void main() {

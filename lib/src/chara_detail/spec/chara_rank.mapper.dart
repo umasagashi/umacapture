@@ -46,6 +46,13 @@ class CharaRankColumnSpecMapper
       v.predicate;
   static const Field<CharaRankColumnSpec, IsInRangeIntegerPredicate>
   _f$predicate = Field('predicate', _$predicate);
+  static bool _$hidden(CharaRankColumnSpec v) => v.hidden;
+  static const Field<CharaRankColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
   static ColumnSpecCellAction _$cellAction(CharaRankColumnSpec v) =>
       v.cellAction;
   static const Field<CharaRankColumnSpec, ColumnSpecCellAction> _f$cellAction =
@@ -58,6 +65,7 @@ class CharaRankColumnSpecMapper
     #parser: _f$parser,
     #labelKey: _f$labelKey,
     #predicate: _f$predicate,
+    #hidden: _f$hidden,
     #cellAction: _f$cellAction,
   };
 
@@ -76,6 +84,7 @@ class CharaRankColumnSpecMapper
       parser: data.dec(_f$parser),
       labelKey: data.dec(_f$labelKey),
       predicate: data.dec(_f$predicate),
+      hidden: data.dec(_f$hidden),
     );
   }
 

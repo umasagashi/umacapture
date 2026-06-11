@@ -76,7 +76,16 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   final String title;
 
-  LogicColumnSpec({required this.id, required this.title, required this.logic, this.children = const []});
+  @override
+  final bool hidden;
+
+  LogicColumnSpec({
+    required this.id,
+    required this.title,
+    required this.logic,
+    this.children = const [],
+    this.hidden = false,
+  });
 
   @override
   bool get acceptsChildren => true;
@@ -88,12 +97,16 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   LogicColumnSpec withChildren(List<ColumnSpec> children) => copyWith(children: children);
 
-  LogicColumnSpec copyWith({String? id, String? title, LogicMode? logic, List<ColumnSpec>? children}) {
+  @override
+  LogicColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  LogicColumnSpec copyWith({String? id, String? title, LogicMode? logic, List<ColumnSpec>? children, bool? hidden}) {
     return LogicColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       logic: logic ?? this.logic,
       children: children ?? this.children,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -207,6 +220,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }
@@ -281,6 +295,9 @@ class LogicColumnBuilder extends ColumnBuilder {
 
   @override
   LogicColumnSpec build(RefBase ref) {
-    return LogicColumnSpec(id: const Uuid().v4(), title: title, logic: logic);
+    // Logic columns are filters first; a freshly added one starts hidden so it
+    // acts as an invisible filter by default. Existing (legacy) logic columns
+    // lack the field and decode as shown, so they are never retroactively hidden.
+    return LogicColumnSpec(id: const Uuid().v4(), title: title, logic: logic, hidden: true);
   }
 }

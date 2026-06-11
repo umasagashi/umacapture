@@ -106,6 +106,13 @@ class SimpleLabelColumnSpecMapper
       v.cellAction;
   static const Field<SimpleLabelColumnSpec, ColumnSpecCellAction>
   _f$cellAction = Field('cellAction', _$cellAction, opt: true);
+  static bool _$hidden(SimpleLabelColumnSpec v) => v.hidden;
+  static const Field<SimpleLabelColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<SimpleLabelColumnSpec> fields = const {
@@ -115,6 +122,7 @@ class SimpleLabelColumnSpecMapper
     #labelKey: _f$labelKey,
     #predicate: _f$predicate,
     #cellAction: _f$cellAction,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -137,6 +145,7 @@ class SimpleLabelColumnSpecMapper
       labelKey: data.dec(_f$labelKey),
       predicate: data.dec(_f$predicate),
       cellAction: data.dec(_f$cellAction),
+      hidden: data.dec(_f$hidden),
     );
   }
 

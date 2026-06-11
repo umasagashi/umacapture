@@ -254,6 +254,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   final String title;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   FactorColumnSpec({
@@ -264,7 +267,11 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.showAllWhenQueryIsEmpty = true,
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
+    this.hidden = false,
   });
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   FactorColumnSpec copyWith({
     String? id,
@@ -274,6 +281,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     bool? showAllWhenQueryIsEmpty,
     bool? showAvailableOnly,
     Set<FactorDialogElements>? hiddenElements,
+    bool? hidden,
   }) {
     return FactorColumnSpec(
       id: id ?? this.id,
@@ -283,6 +291,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -729,7 +738,12 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     return FormGroup(
       title: Text("$tr_factor.notation.label".tr()),
       description: Text("$tr_factor.notation.description".tr()),
-      children: [notationChoiceWidget(context, ref), notationMaxWidget(ref), notationTitleWidget(ref)],
+      children: [
+        notationChoiceWidget(context, ref),
+        notationMaxWidget(ref),
+        notationTitleWidget(ref),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+      ],
     );
   }
 }

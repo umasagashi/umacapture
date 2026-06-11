@@ -117,6 +117,13 @@ class RangedIntegerColumnSpecMapper
       v.cellAction;
   static const Field<RangedIntegerColumnSpec, ColumnSpecCellAction>
   _f$cellAction = Field('cellAction', _$cellAction, opt: true);
+  static bool _$hidden(RangedIntegerColumnSpec v) => v.hidden;
+  static const Field<RangedIntegerColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<RangedIntegerColumnSpec> fields = const {
@@ -125,6 +132,7 @@ class RangedIntegerColumnSpecMapper
     #parser: _f$parser,
     #predicate: _f$predicate,
     #cellAction: _f$cellAction,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -146,6 +154,7 @@ class RangedIntegerColumnSpecMapper
       parser: data.dec(_f$parser),
       predicate: data.dec(_f$predicate),
       cellAction: data.dec(_f$cellAction),
+      hidden: data.dec(_f$hidden),
     );
   }
 

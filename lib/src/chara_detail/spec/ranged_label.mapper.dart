@@ -51,6 +51,13 @@ class RangedLabelColumnSpecMapper
       v.cellAction;
   static const Field<RangedLabelColumnSpec, ColumnSpecCellAction>
   _f$cellAction = Field('cellAction', _$cellAction, opt: true);
+  static bool _$hidden(RangedLabelColumnSpec v) => v.hidden;
+  static const Field<RangedLabelColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<RangedLabelColumnSpec> fields = const {
@@ -60,6 +67,7 @@ class RangedLabelColumnSpecMapper
     #labelKey: _f$labelKey,
     #predicate: _f$predicate,
     #cellAction: _f$cellAction,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -82,6 +90,7 @@ class RangedLabelColumnSpecMapper
       labelKey: data.dec(_f$labelKey),
       predicate: data.dec(_f$predicate),
       cellAction: data.dec(_f$cellAction),
+      hidden: data.dec(_f$hidden),
     );
   }
 

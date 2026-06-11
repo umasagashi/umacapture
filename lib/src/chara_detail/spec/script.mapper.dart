@@ -47,6 +47,13 @@ class ScriptColumnSpecMapper extends SubClassMapperBase<ScriptColumnSpec> {
     _$description,
     opt: true,
   );
+  static bool _$hidden(ScriptColumnSpec v) => v.hidden;
+  static const Field<ScriptColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<ScriptColumnSpec> fields = const {
@@ -55,6 +62,7 @@ class ScriptColumnSpecMapper extends SubClassMapperBase<ScriptColumnSpec> {
     #source: _f$source,
     #apiVersion: _f$apiVersion,
     #description: _f$description,
+    #hidden: _f$hidden,
   };
   @override
   final bool ignoreNull = true;
@@ -78,6 +86,7 @@ class ScriptColumnSpecMapper extends SubClassMapperBase<ScriptColumnSpec> {
       source: data.dec(_f$source),
       apiVersion: data.dec(_f$apiVersion),
       description: data.dec(_f$description),
+      hidden: data.dec(_f$hidden),
     );
   }
 

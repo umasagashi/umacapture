@@ -466,7 +466,12 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   }
 
   final filteredCounts = {for (final spec in displaySpecs) spec.id: conditionsById[spec.id]!.countTrue()};
-  final columns = displaySpecs.map((spec) => spec.plutoColumn(ref)).toList();
+
+  // Hidden columns are evaluated above (so they still filter rows and feed the
+  // pass-count badge) but contribute no visible column or cell. Everything below
+  // that builds the rendered grid works from [visibleSpecs] instead.
+  final visibleSpecs = displaySpecs.where((spec) => !spec.hidden).toList();
+  final columns = visibleSpecs.map((spec) => spec.plutoColumn(ref)).toList();
 
   // A row is visible only if every TOP-LEVEL spec passes. Nested specs influence
   // visibility solely through their parent container column. Computed per record
@@ -490,7 +495,7 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
       .map((rowIndex) {
         final record = recordList[rowIndex];
         return TrinaRow(
-          cells: {for (final spec in displaySpecs) spec.id: cellOf(spec, rowIndex)},
+          cells: {for (final spec in visibleSpecs) spec.id: cellOf(spec, rowIndex)},
           sortIdx: -DateTime.parse(record.metadata.capturedDate).millisecondsSinceEpoch,
         )..setUserData(record);
       })

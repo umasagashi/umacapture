@@ -58,16 +58,35 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   final String title;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
-  CharacterCardColumnSpec({required this.id, required this.title, required this.parser, required this.predicate});
+  CharacterCardColumnSpec({
+    required this.id,
+    required this.title,
+    required this.parser,
+    required this.predicate,
+    this.hidden = false,
+  });
 
-  CharacterCardColumnSpec copyWith({String? id, String? title, Parser? parser, CharacterCardPredicate? predicate}) {
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  CharacterCardColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    CharacterCardPredicate? predicate,
+    bool? hidden,
+  }) {
     return CharacterCardColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -377,6 +396,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

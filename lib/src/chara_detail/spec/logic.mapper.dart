@@ -105,6 +105,13 @@ class LogicColumnSpecMapper extends SubClassMapperBase<LogicColumnSpec> {
   static List<ColumnSpec<dynamic>> _$children(LogicColumnSpec v) => v.children;
   static const Field<LogicColumnSpec, List<ColumnSpec<dynamic>>> _f$children =
       Field('children', _$children, opt: true, def: const []);
+  static bool _$hidden(LogicColumnSpec v) => v.hidden;
+  static const Field<LogicColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<LogicColumnSpec> fields = const {
@@ -112,6 +119,7 @@ class LogicColumnSpecMapper extends SubClassMapperBase<LogicColumnSpec> {
     #title: _f$title,
     #logic: _f$logic,
     #children: _f$children,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -132,6 +140,7 @@ class LogicColumnSpecMapper extends SubClassMapperBase<LogicColumnSpec> {
       title: data.dec(_f$title),
       logic: data.dec(_f$logic),
       children: data.dec(_f$children),
+      hidden: data.dec(_f$hidden),
     );
   }
 

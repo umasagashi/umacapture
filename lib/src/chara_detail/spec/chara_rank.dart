@@ -19,6 +19,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     required super.parser,
     required super.labelKey,
     required super.predicate,
+    super.hidden,
   });
 
   @override
@@ -42,6 +43,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     Parser? parser,
     String? labelKey,
     IsInRangeIntegerPredicate? predicate,
+    bool? hidden,
   }) {
     return CharaRankColumnSpec(
       id: id ?? this.id,
@@ -49,6 +51,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
       parser: parser ?? this.parser,
       labelKey: labelKey ?? this.labelKey,
       predicate: predicate ?? this.predicate,
+      hidden: hidden ?? this.hidden,
     );
   }
 }

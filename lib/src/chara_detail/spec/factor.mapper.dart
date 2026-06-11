@@ -542,6 +542,13 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     opt: true,
     def: const {},
   );
+  static bool _$hidden(FactorColumnSpec v) => v.hidden;
+  static const Field<FactorColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
   static String _$labelKey(FactorColumnSpec v) => v.labelKey;
   static const Field<FactorColumnSpec, String> _f$labelKey = Field(
     'labelKey',
@@ -558,6 +565,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     #showAllWhenQueryIsEmpty: _f$showAllWhenQueryIsEmpty,
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
+    #hidden: _f$hidden,
     #labelKey: _f$labelKey,
   };
 
@@ -582,6 +590,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
       showAllWhenQueryIsEmpty: data.dec(_f$showAllWhenQueryIsEmpty),
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
+      hidden: data.dec(_f$hidden),
     );
   }
 

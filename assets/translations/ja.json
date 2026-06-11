@@ -249,6 +249,13 @@
                             "same_as_min": "無制限",
                             "same_as_max": "無制限"
                         }
+                    },
+                    "notation": {
+                        "show": {
+                            "label": "テーブルに表示",
+                            "tooltip": "オフにすると列は隠れますが、フィルタとしては有効です"
+                        },
+                        "hidden_marker": "非表示"
                     }
                 },
                 "ranged_label": {

@@ -197,6 +197,17 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// specs that carry a versioned contract (e.g. the script column) override it.
   bool get isObsolete => false;
 
+  /// Whether this column is hidden from the grid. A hidden column contributes no
+  /// visible column, yet still participates in row filtering and the pass-count
+  /// badge — so it acts as an invisible filter. Defaults to false (shown); legacy
+  /// specs saved before this field existed therefore decode as shown.
+  bool get hidden;
+
+  /// Returns a copy of this spec with its [hidden] flag replaced. Mirrors
+  /// [withChildren]: the base fallback returns the spec unchanged (e.g. the
+  /// undecodable placeholder), and every concrete spec overrides it via copyWith.
+  ColumnSpec withHidden(bool hidden) => this;
+
   /// Child specs nested under this column. Only container columns (logic columns)
   /// have children; leaf columns return an empty list. Used by the tree-aware
   /// selection operations and the recursive chip UI.
@@ -301,6 +312,11 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   @override
   String get type => (rawMap["type"] as String?) ?? runtimeType.toString();
 
+  // Read straight from the preserved raw map (and round-trips through toMap),
+  // so a broken column keeps whatever hidden flag it was saved with.
+  @override
+  bool get hidden => (rawMap["hidden"] as bool?) ?? false;
+
   @override
   List<Null> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<Null>.filled(records.length, null);
@@ -366,6 +382,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // dart_mappable field name serialized by container specs (see LogicColumnSpec's
   // `children`); the encode/decode broken-preservation paths below depend on it.
   static const _childrenKey = 'children';
+
+  // Serialized field name of the per-spec hidden flag. Excluded from the
+  // incompleteness check so legacy specs (saved before the field existed) are
+  // not flagged broken merely for lacking it. Must match the dart_mappable
+  // field name emitted by concrete specs.
+  static const _hiddenKey = 'hidden';
 
   Set<String> get brokenIds => {..._brokenIds};
 
@@ -446,6 +468,11 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   bool _nodeFieldsIncomplete(Map<String, dynamic> raw, Map<String, dynamic> full) {
     for (final entry in full.entries) {
       if (entry.key == _childrenKey) continue;
+      // 'hidden' was added after specs already existed on disk; a missing key
+      // decodes to the default (false), so its absence must not flag a spec as
+      // broken. Excluded here (like _childrenKey) rather than in the generic
+      // isSpecMapIncomplete, since this is the only spec-level entry point.
+      if (entry.key == _hiddenKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }

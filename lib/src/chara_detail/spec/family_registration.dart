@@ -134,15 +134,27 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   final String title;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction? get cellAction => ColumnSpecCellAction.openFactorPreview;
 
-  FamilyRegistrationColumnSpec({required this.id, required this.title, required this.predicate});
+  FamilyRegistrationColumnSpec({required this.id, required this.title, required this.predicate, this.hidden = false});
 
-  FamilyRegistrationColumnSpec copyWith({String? id, String? title, FamilyRegistrationPredicate? predicate}) {
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  FamilyRegistrationColumnSpec copyWith({
+    String? id,
+    String? title,
+    FamilyRegistrationPredicate? predicate,
+    bool? hidden,
+  }) {
     return FamilyRegistrationColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       predicate: predicate ?? this.predicate,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -406,6 +418,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

@@ -162,24 +162,48 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   Widget _actionChip(BuildContext context, ColumnSpec spec, {bool highlight = false}) {
     final theme = Theme.of(context);
     final broken = _brokenIds.contains(spec.id);
-    return _countBadge(
-      context,
+    return _dimIfHidden(
       spec,
-      GestureDetector(
-        onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
-        child: ActionChip(
-          avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
-          label: spec.label(),
-          tooltip: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
-          backgroundColor: highlight
-              ? theme.colorScheme.secondaryContainer
-              : (broken ? theme.colorScheme.errorContainer : null),
-          onPressed: () {
-            ColumnSpecDialog.show(ref.base, spec);
-          },
+      _countBadge(
+        context,
+        spec,
+        GestureDetector(
+          onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
+          child: ActionChip(
+            avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
+            label: spec.label(),
+            tooltip: _tooltipFor(spec),
+            backgroundColor: highlight
+                ? theme.colorScheme.secondaryContainer
+                : (broken ? theme.colorScheme.errorContainer : null),
+            onPressed: () {
+              ColumnSpecDialog.show(ref.base, spec);
+            },
+          ),
         ),
       ),
     );
+  }
+
+  // Fades a chip when its column is hidden from the grid, so the customization
+  // area shows at a glance which columns won't appear in the table (logic columns
+  // start hidden). Applied per node, not around a container's subtree, so a hidden
+  // logic header doesn't also dim its visible children.
+  Widget _dimIfHidden(ColumnSpec spec, Widget child) {
+    return spec.hidden ? Opacity(opacity: 0.6, child: child) : child;
+  }
+
+  // The chip's tooltip: the spec's own tooltip (or the broken notice), with a
+  // "hidden" marker appended below a horizontal rule when the column is hidden
+  // from the grid, so hovering a faded chip explains why it shows no column.
+  String _tooltipFor(ColumnSpec spec) {
+    final base = _brokenIds.contains(spec.id)
+        ? "$tr_chara_detail.column_predicate.broken.tooltip".tr()
+        : spec.tooltip(ref.base);
+    if (!spec.hidden) {
+      return base;
+    }
+    return "$base\n──────────\n${"$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr()}";
   }
 
   // The logic column's operator name, rendered as plain text fused into the
@@ -194,27 +218,33 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final color = highlight
         ? theme.colorScheme.primary
         : (broken ? theme.colorScheme.error : theme.colorScheme.onSurfaceVariant);
-    return _countBadge(
-      context,
+    return _dimIfHidden(
       spec,
-      Tooltip(
-        message: broken ? "$tr_chara_detail.column_predicate.broken.tooltip".tr() : spec.tooltip(ref.base),
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: () => ColumnSpecDialog.show(ref.base, spec),
-            onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (broken) ...[Icon(Icons.warning_amber_rounded, size: 16, color: color), const SizedBox(width: 2)],
-                  DefaultTextStyle.merge(
-                    style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
-                    child: spec.label(),
-                  ),
-                ],
+      _countBadge(
+        context,
+        spec,
+        Tooltip(
+          message: _tooltipFor(spec),
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => ColumnSpecDialog.show(ref.base, spec),
+              onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (broken) ...[
+                      Icon(Icons.warning_amber_rounded, size: 16, color: color),
+                      const SizedBox(width: 2),
+                    ],
+                    DefaultTextStyle.merge(
+                      style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
+                      child: spec.label(),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
