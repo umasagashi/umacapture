@@ -177,4 +177,19 @@ void main() {
     expect(loaded, isA<RecordLoaded>());
     expect((loaded as RecordLoaded).record.metadata.recordId.parent1, 'p');
   });
+
+  // The native recognizer reads a persisted record.json back on re-recognition
+  // and throws on an explicit "key": null (it only tolerates a missing key), so
+  // toMap() must omit, not null-emit, empty optionals. Guards CharaDetailRecord's
+  // ignoreNull annotation against a regression that would crash the native side.
+  test('toMap omits null optionals instead of emitting explicit null', () {
+    final record = makeRecord(id: 'r', card: 10);
+    expect(record.foreignAptitude, isNull);
+    expect(record.uafWins, isNull);
+
+    final map = record.toMap();
+
+    expect(map.containsKey('foreign_aptitude'), isFalse);
+    expect(map.containsKey('uaf_wins'), isFalse);
+  });
 }
