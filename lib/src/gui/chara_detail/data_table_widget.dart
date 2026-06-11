@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 import 'package:trina_grid/trina_grid.dart';
@@ -297,7 +298,7 @@ class _QuarantineBannerWidget extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
-              Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer),
+              Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -308,14 +309,14 @@ class _QuarantineBannerWidget extends ConsumerWidget {
               const SizedBox(width: 8),
               TextButton.icon(
                 onPressed: () => ref.invalidate(charaDetailQuarantineCountProvider),
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Symbols.refresh_rounded),
                 label: Text("$tr_chara_detail.quarantine_banner.refresh".tr()),
                 style: buttonStyle,
               ),
               const SizedBox(width: 8),
               TextButton.icon(
                 onPressed: () => quarantineDir.launch(),
-                icon: const Icon(Icons.folder_open),
+                icon: const Icon(Symbols.folder_open_rounded),
                 label: Text("$tr_chara_detail.quarantine_banner.open".tr()),
                 style: buttonStyle,
               ),

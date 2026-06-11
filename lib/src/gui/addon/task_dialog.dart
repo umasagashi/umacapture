@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -305,7 +306,7 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
             Tooltip(
               message: "$tr_addon.dialog.delete_confirm".tr(),
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.delete_forever),
+                icon: const Icon(Symbols.delete_forever_rounded),
                 label: Text("$tr_addon.dialog.delete".tr()),
                 // Require a long-press so a single misclick cannot discard a
                 // carefully configured task (mirrors DeleteRecordDialog).
@@ -316,7 +317,7 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
           else
             const SizedBox.shrink(),
           FilledButton.icon(
-            icon: const Icon(Icons.check_circle),
+            icon: const Icon(Symbols.check_circle_rounded),
             label: Text("$tr_addon.dialog.save".tr()),
             onPressed: _canSave ? _save : null,
           ),
@@ -387,7 +388,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       controller: f.program,
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.program.label".tr(),
-        suffixIcon: IconButton(icon: const Icon(Icons.folder_open), onPressed: pickProgram),
+        suffixIcon: IconButton(icon: const Icon(Symbols.folder_open_rounded), onPressed: pickProgram),
       ),
       onChanged: (_) => onChanged(),
     ),
@@ -407,7 +408,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
       decoration: InputDecoration(
         labelText: "$tr_addon.dialog.working_dir.label".tr(),
         helperText: "$tr_addon.dialog.working_dir.helper".tr(),
-        suffixIcon: IconButton(icon: const Icon(Icons.folder_open), onPressed: pickWorkingDir),
+        suffixIcon: IconButton(icon: const Icon(Symbols.folder_open_rounded), onPressed: pickWorkingDir),
       ),
     ),
     const SizedBox(height: 16),
@@ -639,7 +640,7 @@ class _BuiltinRecordWarning extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber, size: 18, color: theme.colorScheme.error),
+          Icon(Symbols.warning_rounded, size: 18, color: theme.colorScheme.error),
           const SizedBox(width: 8),
           Expanded(
             child: Text(

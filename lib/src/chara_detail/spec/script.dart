@@ -7,6 +7,7 @@ import 'package:dart_eval/dart_eval_bridge.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -464,15 +465,15 @@ Color? _resolveColor(String? source) {
 const _iconWidthReserve = 'MM';
 
 const Map<String, IconData> _iconMap = {
-  'cross': Icons.close, // ×
-  'circle': Icons.circle_outlined, // ○
-  'double_circle': Icons.radio_button_checked, // ◎
-  'check': Icons.check, // ✓
-  'star': Icons.star_border, // ☆ (outline)
-  'favorite': Icons.favorite_border, // ♡ (outline)
-  'flag': Icons.flag_outlined, // ⚑ (outline)
-  'arrow_upward': Icons.arrow_upward, // ↑
-  'arrow_downward': Icons.arrow_downward, // ↓
+  'cross': Symbols.close_rounded, // ×
+  'circle': Symbols.circle_rounded, // ○
+  'double_circle': Symbols.radio_button_checked_rounded, // ◎
+  'check': Symbols.check_rounded, // ✓
+  'star': Symbols.star_rounded, // ☆ (outline)
+  'favorite': Symbols.favorite_rounded, // ♡ (outline)
+  'flag': Symbols.flag_rounded, // ⚑ (outline)
+  'arrow_upward': Symbols.arrow_upward_rounded, // ↑
+  'arrow_downward': Symbols.arrow_downward_rounded, // ↓
 };
 
 // --- Spec -------------------------------------------------------------------
@@ -671,7 +672,7 @@ class _ScriptCell extends StatelessWidget {
     if (result.error != null) {
       return Tooltip(
         message: result.error!,
-        child: const Icon(Icons.error_outline, size: 18, color: Colors.orange),
+        child: const Icon(Symbols.error_rounded, size: 18, color: Colors.orange),
       );
     }
     final iconData = result.icon == null ? null : _iconMap[result.icon!];
@@ -822,7 +823,7 @@ class _CopyButton extends StatelessWidget {
     return Tooltip(
       message: "$tr_script.copy.tooltip".tr(),
       child: IconButton(
-        icon: Icon(Icons.copy, size: 18, color: color),
+        icon: Icon(Symbols.content_copy_rounded, size: 18, color: color),
         visualDensity: VisualDensity.compact,
         onPressed: () => _copyToClipboard(text()),
       ),
@@ -1067,7 +1068,7 @@ class _NameLookupState extends ConsumerState<_NameLookup> {
                     ),
                   if (needCollapse)
                     ActionChip(
-                      avatar: const Icon(Icons.expand_more),
+                      avatar: const Icon(Symbols.expand_more_rounded),
                       label: Text("$_trCommonSelector.expand_button".tr()),
                       side: BorderSide.none,
                       backgroundColor: theme.colorScheme.primaryContainer,
@@ -1264,7 +1265,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
                   onPressed: _running ? null : _evaluate,
                   icon: _running
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.play_arrow),
+                      : const Icon(Symbols.play_arrow_rounded),
                   label: Text("$tr_script.preview.button".tr()),
                 ),
               ),

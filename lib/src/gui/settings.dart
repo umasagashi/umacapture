@@ -3,6 +3,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pasteboard/pasteboard.dart';
 import 'package:recase/recase.dart';
@@ -132,15 +133,15 @@ class _BrightnessWidget extends ConsumerWidget {
   static final _iconMap = <ThemeMode, Widget>{
     ThemeMode.light: Tooltip(
       message: "$tr_settings.style.brightness.choice.light".tr(),
-      child: const Icon(Icons.wb_sunny),
+      child: const Icon(Symbols.wb_sunny_rounded),
     ),
     ThemeMode.dark: Tooltip(
       message: "$tr_settings.style.brightness.choice.dark".tr(),
-      child: const Icon(Icons.brightness_3),
+      child: const Icon(Symbols.brightness_3_rounded),
     ),
     ThemeMode.system: Tooltip(
       message: "$tr_settings.style.brightness.choice.system".tr(),
-      child: const Icon(Icons.brightness_auto),
+      child: const Icon(Symbols.brightness_auto_rounded),
     ),
   };
 
@@ -365,7 +366,7 @@ class AboutGroup extends ConsumerWidget {
           subtitle: Text(versionString(ref)),
           trailing: const Align(
             widthFactor: 1,
-            child: Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.paste)),
+            child: Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.content_paste_rounded)),
           ),
           onTap: () => Pasteboard.writeText(versionString(ref)),
         ),
@@ -374,7 +375,7 @@ class AboutGroup extends ConsumerWidget {
           child: ListTile(
             title: Text("$tr_settings.about.regenerate.title".tr()),
             subtitle: Text("$tr_settings.about.regenerate.description".tr()),
-            trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.refresh)),
+            trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
             onTap: () {
               final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
               storage.checkRecordVersion(includeCurrentVersion: true);
@@ -382,10 +383,9 @@ class AboutGroup extends ConsumerWidget {
           ),
         ),
         ListTile(
-          isThreeLine: true,
           title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
           subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
-          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.account_tree)),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
           onTap: () {
             ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
           },
@@ -393,7 +393,7 @@ class AboutGroup extends ConsumerWidget {
         ListTile(
           title: Text("$tr_settings.module_update.entry.title".tr()),
           subtitle: Text("$tr_settings.module_update.entry.description".tr()),
-          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Icons.upload_file)),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.download_rounded)),
           onTap: () => ModuleManualUpdateDialog.show(ref.base),
         ),
       ],

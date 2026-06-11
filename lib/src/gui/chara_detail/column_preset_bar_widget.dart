@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
@@ -65,7 +66,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
               ),
               const SizedBox(width: 4),
               _PresetActionButton(
-                icon: Icons.add,
+                icon: Symbols.add_rounded,
                 tooltip: "$tr_preset.create.tooltip".tr(),
                 onPressed: () => _PresetNameDialog.show(
                   ref.base,
@@ -75,7 +76,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                 ),
               ),
               _PresetActionButton(
-                icon: Icons.copy,
+                icon: Symbols.content_copy_rounded,
                 tooltip: "$tr_preset.duplicate.tooltip".tr(),
                 onPressed: selected == null
                     ? null
@@ -88,7 +89,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                       ),
               ),
               _PresetActionButton(
-                icon: Icons.edit,
+                icon: Symbols.edit_rounded,
                 tooltip: "$tr_preset.rename.tooltip".tr(),
                 onPressed: selected == null
                     ? null
@@ -101,7 +102,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                       ),
               ),
               _PresetActionButton(
-                icon: Icons.delete_outline,
+                icon: Symbols.delete_rounded,
                 tooltip: canDelete ? "$tr_preset.delete.tooltip".tr() : "$tr_preset.delete.disabled_tooltip".tr(),
                 onPressed: (!canDelete || selected == null) ? null : () => _PresetDeleteDialog.show(ref.base, selected),
               ),
@@ -222,7 +223,7 @@ class _PresetNameDialogState extends ConsumerState<_PresetNameDialog> {
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             OutlinedButton.icon(
-              icon: const Icon(Icons.cancel),
+              icon: const Icon(Symbols.cancel_rounded),
               label: Text("$tr_preset.dialog.cancel_button".tr()),
               onPressed: () => CardDialog.dismiss(ref.base),
             ),
@@ -234,7 +235,7 @@ class _PresetNameDialogState extends ConsumerState<_PresetNameDialog> {
               valueListenable: _controller,
               builder: (context, value, _) {
                 return FilledButton.icon(
-                  icon: const Icon(Icons.check_circle),
+                  icon: const Icon(Symbols.check_circle_rounded),
                   label: Text("$tr_preset.dialog.ok_button".tr()),
                   onPressed: value.text.trim().isEmpty ? null : _submit,
                 );
@@ -278,7 +279,7 @@ class _PresetDeleteDialog extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             OutlinedButton.icon(
-              icon: const Icon(Icons.cancel),
+              icon: const Icon(Symbols.cancel_rounded),
               label: Text("$tr_preset.dialog.cancel_button".tr()),
               onPressed: () => CardDialog.dismiss(ref.base),
             ),
@@ -288,7 +289,7 @@ class _PresetDeleteDialog extends ConsumerWidget {
                 backgroundColor: theme.colorScheme.error,
                 foregroundColor: theme.colorScheme.onError,
               ),
-              icon: const Icon(Icons.delete),
+              icon: const Icon(Symbols.delete_rounded),
               label: Text("$tr_preset.dialog.delete_button".tr()),
               onPressed: () {
                 ref.read(columnPresetIndexProvider.notifier).delete(target.key);

@@ -1,6 +1,7 @@
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
@@ -254,7 +255,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                   });
                 },
                 itemBuilder: (BuildContext context, int index) {
-                  return const Icon(Icons.star, color: Colors.amber);
+                  return const Icon(Symbols.star_rate_rounded, color: Colors.amber, weight: 400, fill: 1);
                 },
               ),
               const SizedBox(height: 8),
@@ -268,7 +269,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
             Tooltip(
               message: "$tr_rating.dialog.ok_button.tooltip".tr(),
               child: FilledButton.icon(
-                icon: const Icon(Icons.check_circle),
+                icon: const Icon(Symbols.check_circle_rounded),
                 label: Text("$tr_rating.dialog.ok_button.label".tr()),
                 onPressed: () {
                   widget.onRatingUpdate(rating);
@@ -350,7 +351,7 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
               }
             },
             itemBuilder: (BuildContext context, int index) {
-              return const Icon(Icons.star, color: Colors.amber);
+              return const Icon(Symbols.star_rate_rounded, color: Colors.amber, weight: 400, fill: 1);
             },
           ),
         ),

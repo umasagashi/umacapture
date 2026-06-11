@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
@@ -263,7 +264,7 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               splashRadius: 16,
-              icon: const Icon(Icons.keyboard_arrow_left),
+              icon: const Icon(Symbols.keyboard_arrow_left_rounded),
               onPressed: () {
                 setState(() {
                   targetMonth = DateTimeExtension.later(targetMonth.lastMonth(), widget.start);
@@ -278,7 +279,7 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               splashRadius: 16,
-              icon: const Icon(Icons.keyboard_arrow_right),
+              icon: const Icon(Symbols.keyboard_arrow_right_rounded),
               onPressed: () {
                 setState(() {
                   targetMonth = DateTimeExtension.earlier(targetMonth.nextMonth(), widget.end);

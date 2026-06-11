@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/storage.dart';
@@ -53,7 +54,7 @@ class RegenerateRecordDialog extends ConsumerWidget {
             Tooltip(
               message: "$tr_regenerate_record.dialog.cancel_button.tooltip".tr(),
               child: OutlinedButton.icon(
-                icon: const Icon(Icons.cancel),
+                icon: const Icon(Symbols.cancel_rounded),
                 label: Text("$tr_regenerate_record.dialog.cancel_button.label".tr()),
                 onPressed: () {
                   CardDialog.dismiss(ref.base);
@@ -68,7 +69,7 @@ class RegenerateRecordDialog extends ConsumerWidget {
                   backgroundColor: theme.colorScheme.error,
                   foregroundColor: theme.colorScheme.onError,
                 ),
-                icon: const Icon(Icons.refresh),
+                icon: const Icon(Symbols.refresh_rounded),
                 label: Text("$tr_regenerate_record.dialog.ok_button.label".tr()),
                 onPressed: () {},
                 onLongPress: () {

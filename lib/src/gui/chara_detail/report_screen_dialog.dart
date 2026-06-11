@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/sentry_util.dart';
@@ -45,7 +46,7 @@ class ReportScreenDialog extends ConsumerWidget {
           Tooltip(
             message: "$tr_report_screen.dialog.close_button.tooltip".tr(),
             child: FilledButton.icon(
-              icon: const Icon(Icons.check_circle),
+              icon: const Icon(Symbols.check_circle_rounded),
               label: Text("$tr_report_screen.dialog.close_button.label".tr()),
               onPressed: () {
                 CardDialog.dismiss(ref.base);
@@ -72,7 +73,7 @@ class ReportScreenDialog extends ConsumerWidget {
           Tooltip(
             message: "$tr_report_screen.dialog.close_button.tooltip".tr(),
             child: FilledButton.icon(
-              icon: const Icon(Icons.check_circle),
+              icon: const Icon(Symbols.check_circle_rounded),
               label: Text("$tr_report_screen.dialog.close_button.label".tr()),
               onPressed: () {
                 CardDialog.dismiss(ref.base);
@@ -126,7 +127,7 @@ class ReportScreenDialog extends ConsumerWidget {
           Tooltip(
             message: "$tr_report_screen.dialog.cancel_button.tooltip".tr(),
             child: OutlinedButton.icon(
-              icon: const Icon(Icons.cancel),
+              icon: const Icon(Symbols.cancel_rounded),
               label: Text("$tr_report_screen.dialog.cancel_button.label".tr()),
               onPressed: () {
                 data?.path.deleteSync(emptyOk: true);
@@ -140,7 +141,7 @@ class ReportScreenDialog extends ConsumerWidget {
             child: Tooltip(
               message: "$tr_report_screen.dialog.ok_button.tooltip".tr(),
               child: FilledButton.icon(
-                icon: const Icon(Icons.check_circle),
+                icon: const Icon(Symbols.check_circle_rounded),
                 label: Text("$tr_report_screen.dialog.ok_button.label".tr()),
                 onPressed: () {
                   captureScreen(controller.text, data!.path);

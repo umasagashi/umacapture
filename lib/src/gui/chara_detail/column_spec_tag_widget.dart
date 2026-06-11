@@ -1,6 +1,7 @@
 import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
@@ -170,7 +171,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         GestureDetector(
           onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
           child: ActionChip(
-            avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
+            avatar: broken ? Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer) : null,
             label: spec.label(),
             tooltip: _tooltipFor(spec),
             backgroundColor: highlight
@@ -235,10 +236,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (broken) ...[
-                      Icon(Icons.warning_amber_rounded, size: 16, color: color),
-                      const SizedBox(width: 2),
-                    ],
+                    if (broken) ...[Icon(Symbols.warning_rounded, size: 16, color: color), const SizedBox(width: 2)],
                     DefaultTextStyle.merge(
                       style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
                       child: spec.label(),
@@ -546,7 +544,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   Widget addButton(ThemeData theme) {
     return ActionChip(
-      avatar: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+      avatar: Icon(Symbols.add_rounded, color: theme.colorScheme.onPrimary),
       label: const Text(""),
       tooltip: "$tr_chara_detail.add_column_button.tooltip".tr(),
       backgroundColor: theme.colorScheme.primary,
@@ -561,7 +559,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   Widget addButtonWithLabel(ThemeData theme) {
     return ActionChip(
-      avatar: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+      avatar: Icon(Symbols.add_rounded, color: theme.colorScheme.onPrimary),
       label: Text(
         "$tr_chara_detail.add_column_button.label".tr(),
         style: theme.textTheme.labelLarge!.copyWith(color: theme.colorScheme.onPrimary),

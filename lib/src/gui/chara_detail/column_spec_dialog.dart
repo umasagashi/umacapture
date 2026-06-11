@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
@@ -151,7 +152,7 @@ class ColumnSpecDialog extends ConsumerWidget {
           Tooltip(
             message: "$tr_chara_detail.column_predicate.dialog.delete_button.tooltip".tr(),
             child: OutlinedButton.icon(
-              icon: const Icon(Icons.delete_forever),
+              icon: const Icon(Symbols.delete_forever_rounded),
               label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
               onPressed: () {
                 ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
@@ -164,7 +165,7 @@ class ColumnSpecDialog extends ConsumerWidget {
                 ? "$tr_chara_detail.column_predicate.dialog.ok_button.tooltip".tr()
                 : "$tr_chara_detail.column_predicate.dialog.ok_button.disabled_tooltip".tr(),
             child: FilledButton.icon(
-              icon: const Icon(Icons.check_circle),
+              icon: const Icon(Symbols.check_circle_rounded),
               label: Text("$tr_chara_detail.column_predicate.dialog.ok_button.label".tr()),
               onPressed: !saveEnabled
                   ? null

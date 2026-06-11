@@ -1,6 +1,7 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/percent_indicator.dart';
 import 'package:uuid/uuid.dart';
@@ -48,7 +49,7 @@ class _TaskListCard extends ConsumerWidget {
       title: "$tr_addon.card.tasks".tr(),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       trailing: IconButton(
-        icon: const Icon(Icons.add),
+        icon: const Icon(Symbols.add_rounded),
         tooltip: "$tr_addon.task.add".tr(),
         onPressed: () => TaskEditDialog.show(ref.base, _newTask(), isNew: true),
       ),
@@ -86,7 +87,7 @@ class _TaskRow extends ConsumerWidget {
         overflow: TextOverflow.ellipsis,
       ),
       trailing: IconButton(
-        icon: const Icon(Icons.play_arrow),
+        icon: const Icon(Symbols.play_arrow_rounded),
         tooltip: "$tr_addon.task.run".tr(),
         onPressed: isRunning ? null : () => ref.read(addonExecutionControllerProvider.notifier).runManual(task),
       ),
@@ -120,7 +121,7 @@ class _RunningTasksCard extends ConsumerWidget {
             title: Text(exec.taskName),
             subtitle: exec.progress.message == null ? null : Text(exec.progress.message!),
             trailing: IconButton(
-              icon: const Icon(Icons.stop_circle_outlined),
+              icon: const Icon(Symbols.stop_circle_rounded),
               tooltip: "$tr_addon.running.cancel".tr(),
               onPressed: () => ref.read(addonExecutionControllerProvider.notifier).cancel(exec.executionId),
             ),
@@ -135,11 +136,11 @@ class _HistoryCard extends ConsumerWidget {
 
   IconData _statusIcon(ExecutionStatus status) {
     return switch (status) {
-      ExecutionStatus.success => Icons.check_circle,
-      ExecutionStatus.failure => Icons.error,
-      ExecutionStatus.cancelled => Icons.cancel,
-      ExecutionStatus.timeout => Icons.timer_off,
-      ExecutionStatus.running => Icons.hourglass_empty,
+      ExecutionStatus.success => Symbols.check_circle_rounded,
+      ExecutionStatus.failure => Symbols.error_rounded,
+      ExecutionStatus.cancelled => Symbols.cancel_rounded,
+      ExecutionStatus.timeout => Symbols.timer_off_rounded,
+      ExecutionStatus.running => Symbols.hourglass_empty_rounded,
     };
   }
 
@@ -168,7 +169,7 @@ class _HistoryCard extends ConsumerWidget {
       trailing: history.isEmpty
           ? null
           : IconButton(
-              icon: const Icon(Icons.delete_sweep),
+              icon: const Icon(Symbols.delete_sweep_rounded),
               tooltip: "$tr_addon.history.clear".tr(),
               onPressed: () => ref.read(addonExecutionControllerProvider.notifier).clearHistory(),
             ),
@@ -190,7 +191,7 @@ class _HistoryCard extends ConsumerWidget {
                 "${entry.exitCode == null ? '' : ' · exit ${entry.exitCode}'}",
                 style: theme.textTheme.bodySmall,
               ),
-              trailing: _hasDetail(entry) ? const Icon(Icons.chevron_right) : null,
+              trailing: _hasDetail(entry) ? const Icon(Symbols.chevron_right_rounded) : null,
               onTap: _hasDetail(entry) ? () => _showDetail(context, ref, entry) : null,
             ),
       ],

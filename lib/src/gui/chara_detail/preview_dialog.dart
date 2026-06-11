@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
@@ -323,7 +324,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
             Tooltip(
               message: "$tr_preview.dialog.visualize_prediction.$overlay.tooltip".tr(),
               child: OutlinedButton.icon(
-                icon: Icon(overlay ? Icons.subtitles_off_outlined : Icons.subtitles_outlined),
+                icon: Icon(overlay ? Symbols.subtitles_off_rounded : Symbols.subtitles_rounded),
                 label: Text("$tr_preview.dialog.visualize_prediction.$overlay.label".tr()),
                 onPressed: () {
                   setState(() {
@@ -337,7 +338,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
               Tooltip(
                 message: "$tr_preview.dialog.report_button.tooltip".tr(),
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.report_outlined),
+                  icon: const Icon(Symbols.report_rounded),
                   label: Text("$tr_preview.dialog.report_button.label".tr()),
                   onPressed: () {
                     CardDialog.dismiss(ref.base);
@@ -352,7 +353,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
               child: Tooltip(
                 message: "$tr_preview.dialog.up_button.tooltip".tr(),
                 child: OutlinedButton(
-                  child: const Icon(Icons.arrow_upward),
+                  child: const Icon(Symbols.arrow_upward_rounded),
                   onPressed: () {
                     setState(() {
                       currentIdx = Math.clamp(0, currentIdx - 1, widget.recordDirs.length - 1);
@@ -367,7 +368,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
               child: Tooltip(
                 message: "$tr_preview.dialog.down_button.tooltip".tr(),
                 child: OutlinedButton(
-                  child: const Icon(Icons.arrow_downward),
+                  child: const Icon(Symbols.arrow_downward_rounded),
                   onPressed: () {
                     setState(() {
                       currentIdx = Math.clamp(0, currentIdx + 1, widget.recordDirs.length - 1);
@@ -380,7 +381,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
             Tooltip(
               message: "$tr_preview.dialog.close_button.tooltip".tr(),
               child: FilledButton.icon(
-                icon: const Icon(Icons.close),
+                icon: const Icon(Symbols.close_rounded),
                 label: Text("$tr_preview.dialog.close_button.label".tr()),
                 onPressed: () {
                   CardDialog.dismiss(ref.base);
