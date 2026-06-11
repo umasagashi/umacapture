@@ -166,8 +166,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
 
     // `records` already folds in any pending batch updates, so publishing it
     // and clearing the buffer keeps the next replaceBy re-snapshotting cleanly.
+    // Drop any existing entry with the same id so re-adding a record (same id)
+    // replaces it instead of appending a duplicate.
     _pendingRecords = null;
-    state = AsyncData([for (final e in records) childUpdates[e.id] ?? e, resolvedRecord]);
+    state = AsyncData([
+      for (final e in records)
+        if (e.id != resolvedRecord.id) childUpdates[e.id] ?? e,
+      resolvedRecord,
+    ]);
 
     _surfaceInheritance(resolution);
 
