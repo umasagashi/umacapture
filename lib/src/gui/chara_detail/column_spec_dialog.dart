@@ -186,22 +186,33 @@ class _ColumnDescriptionFieldState extends ConsumerState<ColumnDescriptionField>
   }
 }
 
-class ColumnSpecDialog extends ConsumerWidget {
-  final String specId;
-  final PlainChangeNotifier onDecided;
-  final Widget child;
+class ColumnSpecDialog extends ConsumerStatefulWidget {
+  final ColumnSpec spec;
 
-  const ColumnSpecDialog({super.key, required this.specId, required this.onDecided, required this.child});
+  const ColumnSpecDialog({super.key, required this.spec});
 
   static void show(RefBase ref, ColumnSpec spec) {
-    CardDialog.show(ref, (_) {
-      final notifier = PlainChangeNotifier();
-      return ColumnSpecDialog(specId: spec.id, onDecided: notifier, child: spec.selector(notifier));
-    });
+    CardDialog.show(ref, (_) => ColumnSpecDialog(spec: spec));
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ColumnSpecDialog> createState() => _ColumnSpecDialogState();
+}
+
+class _ColumnSpecDialogState extends ConsumerState<ColumnSpecDialog> {
+  // Owned by the State so the editor fields' "commit on OK" listeners outlive rebuilds and the notifier is
+  // disposed when the dialog closes, instead of leaking a fresh one per build.
+  final PlainChangeNotifier _onDecided = PlainChangeNotifier();
+
+  @override
+  void dispose() {
+    _onDecided.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final specId = widget.spec.id;
     // Ensure that the cloned spec will not be disposed while the dialog is still open.
     ref.watch(specCloneProvider(specId));
     final saveEnabled = ref.watch(columnSpecSaveEnabledProvider(specId));
@@ -209,7 +220,7 @@ class ColumnSpecDialog extends ConsumerWidget {
     return CardDialog(
       dialogTitle: "$tr_chara_detail.column_predicate.dialog.title".tr(),
       closeButtonTooltip: "$tr_chara_detail.column_predicate.dialog.close_button.tooltip".tr(),
-      content: child,
+      content: widget.spec.selector(_onDecided),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -234,7 +245,7 @@ class ColumnSpecDialog extends ConsumerWidget {
               onPressed: !saveEnabled
                   ? null
                   : () {
-                      onDecided.notifyListeners();
+                      _onDecided.notifyListeners();
                       final spec = ref.read(specCloneProvider(specId));
                       ref.read(currentColumnSpecsLoaderProvider.notifier).replaceById(spec);
                       CardDialog.dismiss(ref.base);

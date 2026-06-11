@@ -300,7 +300,7 @@ class Disabled extends StatelessWidget {
   }
 }
 
-class CardDialog extends ConsumerWidget {
+class CardDialog extends ConsumerStatefulWidget {
   static void show(RefBase ref, WidgetBuilder builder) {
     ref.read(dialogBuilderProvider.notifier).show(builder);
   }
@@ -325,9 +325,21 @@ class CardDialog extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CardDialog> createState() => _CardDialogState();
+}
+
+class _CardDialogState extends ConsumerState<CardDialog> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final controller = ScrollController();
     return Card(
       margin: EdgeInsets.zero,
       child: Column(
@@ -335,11 +347,14 @@ class CardDialog extends ConsumerWidget {
           ListTile(
             tileColor: theme.colorScheme.primary,
             shape: Border(bottom: BorderSide(color: theme.dividerColor)),
-            title: Text(dialogTitle, style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary)),
-            trailing: closeButtonTooltip == null
+            title: Text(
+              widget.dialogTitle,
+              style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary),
+            ),
+            trailing: widget.closeButtonTooltip == null
                 ? null
                 : Tooltip(
-                    message: closeButtonTooltip,
+                    message: widget.closeButtonTooltip,
                     child: IconButton(
                       icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onPrimary),
                       splashRadius: 24,
@@ -349,23 +364,27 @@ class CardDialog extends ConsumerWidget {
                     ),
                   ),
           ),
-          if (usePageView)
+          if (widget.usePageView)
             Expanded(
               child: Scrollbar(
                 thumbVisibility: true,
                 trackVisibility: true,
-                controller: controller,
-                child: SingleChildScrollView(controller: controller, padding: const EdgeInsets.all(8), child: content),
+                controller: _controller,
+                child: SingleChildScrollView(
+                  controller: _controller,
+                  padding: const EdgeInsets.all(8),
+                  child: widget.content,
+                ),
               ),
             ),
-          if (!usePageView) content,
-          if (bottom != null)
+          if (!widget.usePageView) widget.content,
+          if (widget.bottom != null)
             Container(
               decoration: BoxDecoration(
                 border: Border(top: BorderSide(color: theme.dividerColor)),
               ),
               padding: const EdgeInsets.all(8),
-              child: bottom,
+              child: widget.bottom,
             ),
         ],
       ),

@@ -12,11 +12,26 @@ import '/src/gui/toast.dart';
 // ignore: constant_identifier_names
 const tr_report_screen = "pages.chara_detail.report_screen";
 
-class ReportScreenDialog extends ConsumerWidget {
+class ReportScreenDialog extends ConsumerStatefulWidget {
   const ReportScreenDialog({super.key});
 
   static void show(RefBase ref) {
     CardDialog.show(ref, (_) => const ReportScreenDialog());
+  }
+
+  @override
+  ConsumerState<ReportScreenDialog> createState() => _ReportScreenDialogState();
+}
+
+class _ReportScreenDialogState extends ConsumerState<ReportScreenDialog> {
+  final TextEditingController _noteController = TextEditingController();
+  // Cached so a rebuild does not re-issue the rate-limit request (and reset the spinner).
+  late final Future<SentryRateLimit?> _rateLimitFuture = SentryRateLimit.download();
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
   }
 
   Widget loading() {
@@ -31,7 +46,7 @@ class ReportScreenDialog extends ConsumerWidget {
     );
   }
 
-  Widget unavailable(BuildContext context, WidgetRef ref) {
+  Widget unavailable(BuildContext context) {
     return CardDialog(
       dialogTitle: "$tr_report_screen.dialog.title".tr(),
       closeButtonTooltip: "$tr_report_screen.dialog.close_button.tooltip".tr(),
@@ -58,7 +73,7 @@ class ReportScreenDialog extends ConsumerWidget {
     );
   }
 
-  Widget limitReached(BuildContext context, WidgetRef ref) {
+  Widget limitReached(BuildContext context) {
     return CardDialog(
       dialogTitle: "$tr_report_screen.dialog.title".tr(),
       closeButtonTooltip: "$tr_report_screen.dialog.close_button.tooltip".tr(),
@@ -85,7 +100,7 @@ class ReportScreenDialog extends ConsumerWidget {
     );
   }
 
-  Widget screenshot(BuildContext context, WidgetRef ref) {
+  Widget screenshot(BuildContext context) {
     final data = ref.watch(latestScreenshotProvider);
     if (data == null) {
       return const CircularProgressIndicator();
@@ -96,8 +111,7 @@ class ReportScreenDialog extends ConsumerWidget {
     return Center(child: Image.memory(data.path.readAsBytesSync()));
   }
 
-  Widget ready(BuildContext context, WidgetRef ref, {required int count, required int limit}) {
-    final controller = TextEditingController();
+  Widget ready(BuildContext context, {required int count, required int limit}) {
     final data = ref.watch(latestScreenshotProvider);
     return CardDialog(
       dialogTitle: "$tr_report_screen.dialog.title".tr(),
@@ -109,11 +123,11 @@ class ReportScreenDialog extends ConsumerWidget {
           children: [
             Text("$tr_report_screen.dialog.description".tr()),
             const SizedBox(height: 16),
-            screenshot(context, ref),
+            screenshot(context),
             const SizedBox(height: 16),
             Text("$tr_report_screen.dialog.note".tr()),
             const SizedBox(height: 4),
-            TextFormField(controller: controller),
+            TextFormField(controller: _noteController),
             if (limit - count <= 10) ...[
               const SizedBox(height: 16),
               Text("${"$tr_report_screen.dialog.available_count".tr()} (${limit - count} / $limit)"),
@@ -144,7 +158,7 @@ class ReportScreenDialog extends ConsumerWidget {
                 icon: const Icon(Symbols.check_circle_rounded),
                 label: Text("$tr_report_screen.dialog.ok_button.label".tr()),
                 onPressed: () {
-                  captureScreen(controller.text, data!.path);
+                  captureScreen(_noteController.text, data!.path);
                   CardDialog.dismiss(ref.base);
                 },
               ),
@@ -156,30 +170,29 @@ class ReportScreenDialog extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return FutureBuilder(
-      future: SentryRateLimit.download(),
-      builder: (BuildContext context, AsyncSnapshot<dynamic> snapshot) {
-        try {
-          if (!snapshot.hasData) {
-            return loading();
-          }
-          final rateLimit = snapshot.data as SentryRateLimit;
-          final count = getSentryReportCount();
-          logger.i("Rate Limit: available=${rateLimit.available}, limit=${rateLimit.rateLimitPerMonth}, count=$count");
-          if (!rateLimit.available) {
-            return unavailable(context, ref);
-          }
-          if (count >= rateLimit.rateLimitPerMonth) {
-            return limitReached(context, ref);
-          }
-          return ready(context, ref, count: count, limit: rateLimit.rateLimitPerMonth);
-        } catch (exception, stackTrace) {
-          logger.e("Failed to retrieve rate limit config", exception, stackTrace);
+  Widget build(BuildContext context) {
+    return FutureBuilder<SentryRateLimit?>(
+      future: _rateLimitFuture,
+      builder: (BuildContext context, AsyncSnapshot<SentryRateLimit?> snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return loading();
+        }
+        final rateLimit = snapshot.data;
+        if (rateLimit == null) {
+          logger.e("Failed to retrieve rate limit config", snapshot.error, snapshot.stackTrace);
           CardDialog.dismiss(ref.base);
           Toaster.show(ToastData.error(description: "$tr_report_screen.dialog.loading_error".tr()));
           return Container();
         }
+        final count = getSentryReportCount();
+        logger.i("Rate Limit: available=${rateLimit.available}, limit=${rateLimit.rateLimitPerMonth}, count=$count");
+        if (!rateLimit.available) {
+          return unavailable(context);
+        }
+        if (count >= rateLimit.rateLimitPerMonth) {
+          return limitReached(context);
+        }
+        return ready(context, count: count, limit: rateLimit.rateLimitPerMonth);
       },
     );
   }

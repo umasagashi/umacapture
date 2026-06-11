@@ -141,11 +141,11 @@ class ImageSizeContainer {
   }
 }
 
-class ImageViewer extends ConsumerWidget {
+class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
   final bool overlay;
-  final TransformationController transformationController;
+  final double initialScale;
   final double maxScale;
   final PredictionContainer? prediction;
 
@@ -154,7 +154,7 @@ class ImageViewer extends ConsumerWidget {
     required this.recordDir,
     required this.imageSize,
     required this.overlay,
-    required this.transformationController,
+    required this.initialScale,
     required this.maxScale,
     required this.prediction,
   });
@@ -176,18 +176,42 @@ class ImageViewer extends ConsumerWidget {
       recordDir: recordDir,
       imageSize: imageSize,
       overlay: overlay,
-      transformationController: TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0)),
+      initialScale: scale,
       maxScale: scale * 3,
       prediction: prediction,
     );
   }
 
-  Widget predictionTabOverlay(
-    WidgetRef ref,
-    FilePath imagePath,
-    ImageSizeInfo sizeInfo,
-    List<PredictionData>? predictions,
-  ) {
+  @override
+  ConsumerState<ImageViewer> createState() => _ImageViewerState();
+}
+
+class _ImageViewerState extends ConsumerState<ImageViewer> {
+  late TransformationController _transformationController = _buildController();
+
+  TransformationController _buildController() {
+    final scale = widget.initialScale;
+    return TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0));
+  }
+
+  @override
+  void didUpdateWidget(ImageViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The fit-to-viewport transform is derived from initialScale (viewport width / image width). Re-fit with a
+    // fresh controller only when that changes (a window resize or navigating to a differently-sized record).
+    if (widget.initialScale != oldWidget.initialScale) {
+      _transformationController.dispose();
+      _transformationController = _buildController();
+    }
+  }
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  Widget predictionTabOverlay(FilePath imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(color: Colors.black, backgroundColor: Colors.white.withValues(alpha: 0.5), fontSize: 9);
     return Stack(
@@ -227,14 +251,14 @@ class ImageViewer extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return InteractiveViewer(
       minScale: 0.25,
-      maxScale: maxScale,
+      maxScale: widget.maxScale,
       panEnabled: true,
       scaleEnabled: true,
       constrained: false,
-      transformationController: transformationController,
+      transformationController: _transformationController,
       child: Container(
         decoration: const BoxDecoration(
           image: DecorationImage(
@@ -249,22 +273,21 @@ class ImageViewer extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             predictionTabOverlay(
-              ref,
-              recordDir.filePath("skill.png"),
-              imageSize.skill,
-              !overlay ? null : [...(prediction?.statusHeader ?? []), ...(prediction?.skillTab ?? [])],
+              widget.recordDir.filePath("skill.png"),
+              widget.imageSize.skill,
+              !widget.overlay
+                  ? null
+                  : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
             ),
             predictionTabOverlay(
-              ref,
-              recordDir.filePath("factor.png"),
-              imageSize.factor,
-              !overlay ? null : prediction?.factorTab,
+              widget.recordDir.filePath("factor.png"),
+              widget.imageSize.factor,
+              !widget.overlay ? null : widget.prediction?.factorTab,
             ),
             predictionTabOverlay(
-              ref,
-              recordDir.filePath("campaign.png"),
-              imageSize.campaign,
-              !overlay ? null : prediction?.campaignTab,
+              widget.recordDir.filePath("campaign.png"),
+              widget.imageSize.campaign,
+              !widget.overlay ? null : widget.prediction?.campaignTab,
             ),
           ],
         ),

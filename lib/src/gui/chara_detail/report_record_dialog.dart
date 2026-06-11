@@ -13,14 +13,29 @@ import '/src/gui/toast.dart';
 // ignore: constant_identifier_names
 const tr_report_record = "pages.chara_detail.report_record";
 
-class ReportRecordDialog extends ConsumerWidget {
+class ReportRecordDialog extends ConsumerStatefulWidget {
   final DirectoryPath directory;
-  final List<FilePath> files;
 
-  ReportRecordDialog({super.key, required this.directory}) : files = getCharaDetailRecordFiles(directory);
+  const ReportRecordDialog({super.key, required this.directory});
 
   static void show(RefBase ref, DirectoryPath directory) {
     CardDialog.show(ref, (_) => ReportRecordDialog(directory: directory));
+  }
+
+  @override
+  ConsumerState<ReportRecordDialog> createState() => _ReportRecordDialogState();
+}
+
+class _ReportRecordDialogState extends ConsumerState<ReportRecordDialog> {
+  late final List<FilePath> _files = getCharaDetailRecordFiles(widget.directory);
+  final TextEditingController _noteController = TextEditingController();
+  // Cached so a rebuild does not re-issue the rate-limit request (and reset the spinner).
+  late final Future<SentryRateLimit?> _rateLimitFuture = SentryRateLimit.download();
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
   }
 
   Widget loading() {
@@ -35,7 +50,7 @@ class ReportRecordDialog extends ConsumerWidget {
     );
   }
 
-  Widget unavailable(BuildContext context, WidgetRef ref) {
+  Widget unavailable(BuildContext context) {
     return CardDialog(
       dialogTitle: "$tr_report_record.dialog.title".tr(),
       closeButtonTooltip: "$tr_report_record.dialog.close_button.tooltip".tr(),
@@ -62,7 +77,7 @@ class ReportRecordDialog extends ConsumerWidget {
     );
   }
 
-  Widget limitReached(BuildContext context, WidgetRef ref) {
+  Widget limitReached(BuildContext context) {
     return CardDialog(
       dialogTitle: "$tr_report_record.dialog.title".tr(),
       closeButtonTooltip: "$tr_report_record.dialog.close_button.tooltip".tr(),
@@ -89,9 +104,8 @@ class ReportRecordDialog extends ConsumerWidget {
     );
   }
 
-  Widget ready(BuildContext context, WidgetRef ref, {required int count, required int limit}) {
+  Widget ready(BuildContext context, {required int count, required int limit}) {
     final theme = Theme.of(context);
-    final controller = TextEditingController();
     return CardDialog(
       dialogTitle: "$tr_report_record.dialog.title".tr(),
       closeButtonTooltip: "$tr_report_record.dialog.close_button.tooltip".tr(),
@@ -110,14 +124,14 @@ class ReportRecordDialog extends ConsumerWidget {
                       color: theme.colorScheme.primary,
                       decoration: TextDecoration.underline,
                     ),
-                    recognizer: TapGestureRecognizer()..onTap = () => directory.launch(),
+                    recognizer: TapGestureRecognizer()..onTap = () => widget.directory.launch(),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             TextFormField(
-              initialValue: files.map((e) => e.path).join("\n"),
+              initialValue: _files.map((e) => e.path).join("\n"),
               decoration: const InputDecoration(
                 hintText: "File not found.",
                 filled: false,
@@ -130,7 +144,7 @@ class ReportRecordDialog extends ConsumerWidget {
             const SizedBox(height: 16),
             Text("$tr_report_record.dialog.note".tr()),
             const SizedBox(height: 4),
-            TextFormField(controller: controller),
+            TextFormField(controller: _noteController),
             if (limit - count <= 10) ...[
               const SizedBox(height: 16),
               Text("${"$tr_report_record.dialog.available_count".tr()} (${limit - count} / $limit)"),
@@ -158,7 +172,7 @@ class ReportRecordDialog extends ConsumerWidget {
               icon: const Icon(Symbols.check_circle_rounded),
               label: Text("$tr_report_record.dialog.ok_button.label".tr()),
               onPressed: () {
-                captureCharaDetailRecord(controller.text, directory);
+                captureCharaDetailRecord(_noteController.text, widget.directory);
                 CardDialog.dismiss(ref.base);
               },
             ),
@@ -169,30 +183,29 @@ class ReportRecordDialog extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return FutureBuilder(
-      future: SentryRateLimit.download(),
-      builder: (BuildContext context, AsyncSnapshot<dynamic> snapshot) {
-        try {
-          if (!snapshot.hasData) {
-            return loading();
-          }
-          final rateLimit = snapshot.data as SentryRateLimit;
-          final count = getSentryReportCount();
-          logger.i("Rate Limit: available=${rateLimit.available}, limit=${rateLimit.rateLimitPerMonth}, count=$count");
-          if (!rateLimit.available) {
-            return unavailable(context, ref);
-          }
-          if (count >= rateLimit.rateLimitPerMonth) {
-            return limitReached(context, ref);
-          }
-          return ready(context, ref, count: count, limit: rateLimit.rateLimitPerMonth);
-        } catch (exception, stackTrace) {
-          logger.e("Failed to retrieve rate limit config", exception, stackTrace);
+  Widget build(BuildContext context) {
+    return FutureBuilder<SentryRateLimit?>(
+      future: _rateLimitFuture,
+      builder: (BuildContext context, AsyncSnapshot<SentryRateLimit?> snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return loading();
+        }
+        final rateLimit = snapshot.data;
+        if (rateLimit == null) {
+          logger.e("Failed to retrieve rate limit config", snapshot.error, snapshot.stackTrace);
           CardDialog.dismiss(ref.base);
           Toaster.show(ToastData.error(description: "$tr_report_record.dialog.loading_error".tr()));
           return Container();
         }
+        final count = getSentryReportCount();
+        logger.i("Rate Limit: available=${rateLimit.available}, limit=${rateLimit.rateLimitPerMonth}, count=$count");
+        if (!rateLimit.available) {
+          return unavailable(context);
+        }
+        if (count >= rateLimit.rateLimitPerMonth) {
+          return limitReached(context);
+        }
+        return ready(context, count: count, limit: rateLimit.rateLimitPerMonth);
       },
     );
   }

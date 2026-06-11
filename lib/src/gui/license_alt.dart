@@ -164,6 +164,16 @@ class _PackagesViewState extends State<_PackagesView> {
       .fold<_LicenseData>(_LicenseData(), (_LicenseData prev, LicenseEntry license) => prev..addLicense(license))
       .then((_LicenseData licenseData) => licenseData..sortPackages());
 
+  // Owned by the State so the packages ListView has its own ScrollPosition (the "more than one ScrollPosition"
+  // fix) without allocating and leaking a fresh controller on every build.
+  final ScrollController _packagesScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _packagesScrollController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<_LicenseData>(
@@ -227,7 +237,7 @@ class _PackagesViewState extends State<_PackagesView> {
     final bool drawSelection,
   ) {
     return ListView(
-      controller: ScrollController(),
+      controller: _packagesScrollController,
       children: <Widget>[
         widget.about,
         ...data.packages.asMap().entries.map<Widget>((MapEntry<int, String> entry) {

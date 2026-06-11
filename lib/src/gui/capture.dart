@@ -96,8 +96,15 @@ class _TwoStateButton extends ConsumerStatefulWidget {
 
 class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
   bool _isInTransition;
+  Timer? _transitionTimer;
 
   _TwoStateButtonState() : _isInTransition = false;
+
+  @override
+  void dispose() {
+    _transitionTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +133,12 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
     return () {
       callback();
       setState(() => _isInTransition = true);
-      Timer(const Duration(milliseconds: 500), () => setState(() => _isInTransition = false));
+      _transitionTimer?.cancel();
+      _transitionTimer = Timer(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() => _isInTransition = false);
+        }
+      });
     };
   }
 }
