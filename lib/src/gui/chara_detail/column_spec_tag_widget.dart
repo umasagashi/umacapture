@@ -325,7 +325,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               child: IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true)),
             )
           : _emptySlotBox(context, spec),
-      gap: false,
+      // Same trailing gap as a populated child slot, so an empty container's inner
+      // right margin matches a non-empty one (and doesn't shrink the moment its
+      // only child is picked up).
     );
   }
 
@@ -357,9 +359,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     }
     return _logicContainer(context, [
       _spaced(_logicLabel(context, spec, highlight: highlight)),
-      // No trailing gap: matches the live empty slot ([_emptyDropSlot] uses
-      // gap: false) so a dragged empty container's placeholder is the same width.
-      if (spec.children.isEmpty) _emptySlotBox(context, spec),
+      // Trailing gap matches the live empty slot ([_emptyDropSlot]) so a dragged
+      // empty container's placeholder is the same width as the container at rest.
+      if (spec.children.isEmpty) _spaced(_emptySlotBox(context, spec)),
       for (final child in spec.children) _spaced(_staticContent(context, child, highlight: highlight)),
     ], highlight: highlight);
   }
