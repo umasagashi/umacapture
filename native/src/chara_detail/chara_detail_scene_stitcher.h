@@ -5,6 +5,9 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic ppop
 
+#include <stdexcept>
+#include <vector>
+
 #include "util/event_util.h"
 
 namespace uma::chara_detail {
@@ -14,8 +17,21 @@ namespace stitcher_impl {
 class ScrollAreaStitcher {
 public:
     [[nodiscard]] cv::Mat stitch(const std::filesystem::path &input_dir) const {
-        const auto &images = stds::transformed<std::vector<cv::Mat>>(
-            imagePaths(input_dir), [](const auto &path) { return cv::imread(path.string(), -1); });
+        const auto paths = imagePaths(input_dir);
+        // vconcat over an empty list, or one containing an empty/mismatched Mat (an imread failure on a corrupt
+        // or partially-written scrape), throws deep inside OpenCV. Validate up front so the failure is legible.
+        if (paths.empty()) {
+            throw std::runtime_error("ScrollAreaStitcher::stitch: no scroll-area images in " + input_dir.string());
+        }
+        std::vector<cv::Mat> images;
+        images.reserve(paths.size());
+        for (const auto &path : paths) {
+            cv::Mat image = cv::imread(path.string(), -1);
+            if (image.empty()) {
+                throw std::runtime_error("ScrollAreaStitcher::stitch: failed to read image: " + path.string());
+            }
+            images.push_back(image);
+        }
         cv::Mat stitched;
         cv::vconcat(images, stitched);
         return stitched;

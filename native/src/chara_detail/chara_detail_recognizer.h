@@ -167,7 +167,9 @@ inline auto predict(
     const double max_length,
     const bool reversed = false) {
     const auto &frame_anchor = frame.anchor();
-    const auto scan_start_pixels = frame_anchor.mapToFrame(scan_start_left).y();
+    // The scan point can map at or past the frame edge (e.g. a scan_top near the bottom); clamp the start so the
+    // first isIn() does not index out of bounds in release, where bgrAt only asserts.
+    const auto scan_start_pixels = std::clamp(frame_anchor.mapToFrame(scan_start_left).y(), 0, frame.height() - 1);
     const auto scan_length_pixels = frame_anchor.scaleToPixels(max_length);
 
     const int direction = reversed ? -1 : 1;
@@ -446,6 +448,10 @@ public:
             common_config.loose_bg_color,  // May start from slightly above the scroll area.
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
+        if (!card_top) {
+            log_warning("Failed to find top of support card area.");
+            return;
+        }
 
         const auto top_offset = Point<double>{0, card_top.value()};
         const auto &anchor = frame.anchor();
@@ -503,11 +509,19 @@ public:
             common_config.strict_bg_color,
             {frame.anchor().absolute(config.scan_point).x(), scan_top, ScreenStart},
             1.0);
+        if (!top) {
+            log_warning("Failed to find top of family tree.");
+            return;
+        }
         const auto bottom = searchVertical(
             frame,
             config.frame_color,
             {frame.anchor().absolute(config.scan_point).x(), top.value() + config.vertical_gap, ScreenStart},
             1.0);
+        if (!bottom) {
+            log_warning("Failed to find bottom of family tree.");
+            return;
+        }
         const auto top_offset = Point<double>{0, top.value()};
         const auto frame_height = bottom.value() - top.value();
         if (frame_height > config.legacy_frame_height) {
@@ -598,7 +612,12 @@ public:
         const double bg_scan_left = anchor.absolute(config.bg_scan_point).x();
 
         // Find the bottom of the area to be scanned.
-        const double area_bottom = findNext(frame, {bg_scan_left, scan_top}).value();
+        const auto area_bottom_opt = findNext(frame, {bg_scan_left, scan_top});
+        if (!area_bottom_opt) {
+            log_warning("Failed to find bottom of campaign record area.");
+            return;
+        }
+        const double area_bottom = area_bottom_opt.value();
 
         const auto &field_tops =
             findAll(frame, {scan_left, scan_top}, config.vertical_gap, area_bottom - config.vertical_gap);
@@ -631,6 +650,10 @@ public:
             }
         }
 
+        if (field_tops.empty()) {
+            log_warning("No campaign record fields found.");
+            return;
+        }
         scan_top = field_tops.back() + config.vertical_delta;
     }
 
@@ -719,10 +742,18 @@ public:
             const auto approx_bottom =
                 findNextGap(frame, approx_scan_offset + Point<double>{0.0, block_top.value()}, area_bottom);
             assert_(approx_bottom.has_value());
+            if (!approx_bottom) {
+                log_warning("Failed to find approximate bottom of race block.");
+                break;
+            }
 
             // Then, determine the exact bottom coordinate of the block.
             // By starting the search from the approx bottom, elements within the block will no longer interfere.
             const auto block_bottom = findLast(frame, exact_scan_offset + Point<double>{0.0, approx_bottom.value()});
+            if (!block_bottom) {
+                log_warning("Failed to find bottom of race block.");
+                break;
+            }
 
             // Finally, we can recognize the block.
             const auto block_rect =

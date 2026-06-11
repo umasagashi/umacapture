@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <stdexcept>
 #include <utility>
 
 #pragma clang diagnostic push
@@ -60,6 +61,10 @@ Range<BGR> asBGRRange(const Range<Color> &color_range) {
 
 std::vector<double> linspace(double start, double end, int num) {
     assert_(num >= 2);
+    // Backstop for release builds where assert_ is a no-op: num < 2 divides by zero and writes items[-1].
+    if (num < 2) {
+        throw std::invalid_argument("linspace: num must be >= 2");
+    }
     const auto delta = (end - start) / (num - 1);
     std::vector<double> items(num);
     for (int i = 0; i < num - 1; i++) {
@@ -225,6 +230,14 @@ public:
         info_path.replace_extension(".json");
         const auto frame_info = json_util::read(info_path);
         const auto image = cv::imread(path.string(), -1);
+        // cv::imread returns an empty Mat on a missing or corrupt file; the Frame ctor only asserts (a no-op in
+        // release), so surface the I/O failure explicitly instead of constructing a Frame over an empty Mat.
+        if (image.empty()) {
+            throw std::runtime_error("Frame::open: failed to read image: " + path.string());
+        }
+        if (image.type() != CV_8UC3) {
+            throw std::runtime_error("Frame::open: image must be CV_8UC3: " + path.string());
+        }
         return {image, 1, FrameAnchor::fixed(image.size(), frame_info["intersection"].get<Rect<int>>())};
     }
 
@@ -252,7 +265,9 @@ public:
         const Range<BGR> &bgr_range = asBGRRange(color_range);
         const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
 
-        return stds::any_of(linspace(0., 1., (int) mapped_line.length()), [&](const auto &ratio) {
+        // Sample at least the two endpoints; see isAllIn for the rationale (linspace is undefined below 2).
+        const int samples = std::max(2, (int) mapped_line.length());
+        return stds::any_of(linspace(0., 1., samples), [&](const auto &ratio) {
             const auto &p = mapped_line.pointAt(ratio).round();
             return bgr_range.contains(bgrAt(p.x(), p.y()));
         });
@@ -276,8 +291,10 @@ public:
         const Range<BGR> &bgr_range = asBGRRange(color_range);
         const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
 
+        // Sample at least the two endpoints; see isAllIn for the rationale (linspace is undefined below 2).
+        const int samples = std::max(2, (int) mapped_line.length());
         std::optional<double> length = std::nullopt;
-        for (const auto &ratio : linspace(0., 1., (int) mapped_line.length())) {
+        for (const auto &ratio : linspace(0., 1., samples)) {
             const auto &p = mapped_line.pointAt(ratio).round();
             if (bgr_range.contains(bgrAt(p.x(), p.y()))) {
                 length = ratio;
@@ -289,7 +306,11 @@ public:
     }
 
     [[nodiscard]] uint64 pixelDifference(const Frame &other, const Rect<double> &rect, int ignore_threshold) const {
-        assert_(this->size() == other.size());
+        // Both frames are indexed over the same rect; a size mismatch (e.g. a capture resolution change between
+        // frames) would read out of bounds on the smaller image in release, where the assert is compiled out.
+        if (this->size() != other.size()) {
+            throw std::invalid_argument("pixelDifference: frame sizes do not match");
+        }
         const auto &mapped_rect = rect.empty() ? this->rect() : anchor_.mapToFrame(rect);
         uint64 total = 0;
         for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
