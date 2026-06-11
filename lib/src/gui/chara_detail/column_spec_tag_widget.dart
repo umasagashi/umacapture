@@ -11,7 +11,6 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_builder_dialog.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
-import '/src/gui/chara_detail/export_button.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
@@ -558,36 +557,21 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final children = <Widget>[
       ..._buildSiblings(context, specs, parentId: null),
       _slot(const ValueKey('add-button'), specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme)),
-      _slot(
-        const ValueKey('export-spacer'),
-        const Opacity(
-          // Spacing widget for export button.
-          opacity: 0,
-          child: Chip(padding: EdgeInsets.zero, label: SizedBox(width: 16)),
-        ),
-        gap: false,
-      ),
     ];
 
     return Padding(
       padding: const EdgeInsets.only(top: 4, bottom: 4),
-      child: Stack(
-        alignment: Alignment.bottomRight,
-        children: [
-          Align(
-            alignment: Alignment.topLeft,
-            // One drop target spans the whole tag area; the live slot is picked
-            // geometrically in _onMove rather than per-chip, so no gaps appear.
-            child: DragTarget<ColumnSpec>(
-              onWillAcceptWithDetails: (_) => _draggingId != null,
-              onMove: (details) => _onMove(details.offset),
-              builder: (context, candidateData, rejectedData) {
-                return Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
-              },
-            ),
-          ),
-          const CharaDetailExportButton(),
-        ],
+      child: Align(
+        alignment: Alignment.topLeft,
+        // One drop target spans the whole tag area; the live slot is picked
+        // geometrically in _onMove rather than per-chip, so no gaps appear.
+        child: DragTarget<ColumnSpec>(
+          onWillAcceptWithDetails: (_) => _draggingId != null,
+          onMove: (details) => _onMove(details.offset),
+          builder: (context, candidateData, rejectedData) {
+            return Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+          },
+        ),
       ),
     );
   }

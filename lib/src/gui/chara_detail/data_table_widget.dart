@@ -13,6 +13,7 @@ import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/gui/chara_detail/column_preset_bar_widget.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
 import '/src/gui/chara_detail/delete_record_dialog.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
@@ -357,6 +358,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     return Column(
       children: const [
         _QuarantineBannerWidget(),
+        ColumnPresetBarWidget(),
         ColumnSpecTagWidget(),
         SizedBox(height: 4),
         _CharaDetailDataTablePreCheckLayer(),

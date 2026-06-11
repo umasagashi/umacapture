@@ -7,9 +7,11 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
+import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
@@ -374,7 +376,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
 
   @override
   List<ColumnSpec> build() {
-    entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
+    // Bind to the selected preset's spec entry. Watching the key makes preset
+    // switching re-run build() against the new entry, swapping the columns the
+    // grid shows. The broken-id bookkeeping below is per-entry and reset here,
+    // so it always reflects the preset currently loaded.
+    final entryKey = ref.watch(selectedColumnSpecEntryKeyProvider);
+    entry = StorageBox(StorageBoxKey.columnSpec).entry<String>(entryKey);
     _brokenIds.clear();
     _rawById.clear();
     final raw = entry.pull();
@@ -557,6 +564,134 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     return {...base, _childrenKey: spec.children.map(_encodeForStorage).toList()};
   }
 }
+
+// Storage entry holding the column preset index (the ordered preset list plus
+// the selected key). A plain JSON string in the same box as the specs, so no
+// Hive type adapter is needed.
+const _presetIndexKey = "preset_index";
+
+// Legacy single-configuration entry key. Read once during migration into the
+// first preset, then never again (kept on disk as a safety net).
+const _legacyColumnSpecsKey = "current_column_specs";
+
+// Fixed key for the preset created by migrating the legacy single configuration.
+// Deterministic (rather than a uuid) so the migrated specs always land at a
+// predictable entry; user-created presets use uuids and never collide with it.
+const _migratedPresetKey = "default";
+
+// Holds the column preset index and persists it. Selecting/creating/renaming/
+// deleting a preset goes through here; ColumnSpecSelection watches the derived
+// selected-key provider, so the grid follows the selection automatically.
+class ColumnPresetIndexNotifier extends Notifier<ColumnPresetIndex> {
+  late StorageBox _box;
+  late StorageEntry<String> _entry;
+
+  @override
+  ColumnPresetIndex build() {
+    _box = StorageBox(StorageBoxKey.columnSpec);
+    _entry = _box.entry<String>(_presetIndexKey);
+    return _migrateAndLoad();
+  }
+
+  // Load the persisted index, migrating the legacy single configuration on first
+  // run. Idempotent: once the index entry exists the legacy branch is skipped.
+  ColumnPresetIndex _migrateAndLoad() {
+    final raw = _entry.pull();
+    if (raw != null) {
+      return ColumnPresetIndexMapper.fromJson(raw);
+    }
+    // Copy (never move) the legacy specs verbatim so a crash mid-migration can
+    // never lose them, and so broken specs are preserved for re-flagging.
+    final legacy = _box.entry<String>(_legacyColumnSpecsKey).pull();
+    if (legacy != null) {
+      _box.entry<String>(ColumnPresetIndex.specEntryKey(_migratedPresetKey)).push(legacy);
+    }
+    final index = ColumnPresetIndex(
+      presets: [ColumnPresetEntry(key: _migratedPresetKey, title: "pages.chara_detail.preset.default_title".tr())],
+      selectedKey: _migratedPresetKey,
+    );
+    _entry.push(index.toJson());
+    return index;
+  }
+
+  void _persist() {
+    _entry.push(state.toJson());
+  }
+
+  /// Applies the preset identified by [key]. No-op when already selected or
+  /// when [key] is not present.
+  void select(String key) {
+    if (key == state.selectedKey || state.presets.every((e) => e.key != key)) {
+      return;
+    }
+    state = state.copyWith(selectedKey: key);
+    _persist();
+  }
+
+  /// Creates a new empty preset titled [title] and selects it. Its spec entry is
+  /// created lazily on the first column edit (ColumnSpecSelection._commit).
+  String create(String title) {
+    final key = const Uuid().v4();
+    state = state.copyWith(
+      presets: [
+        ...state.presets,
+        ColumnPresetEntry(key: key, title: title),
+      ],
+      selectedKey: key,
+    );
+    _persist();
+    return key;
+  }
+
+  /// Duplicates [sourceKey]'s columns into a new preset titled [title] and
+  /// selects it. The specs are copied verbatim, so broken specs carry over.
+  String duplicate(String sourceKey, String title) {
+    final key = const Uuid().v4();
+    final raw = _box.entry<String>(ColumnPresetIndex.specEntryKey(sourceKey)).pull();
+    if (raw != null) {
+      _box.entry<String>(ColumnPresetIndex.specEntryKey(key)).push(raw);
+    }
+    state = state.copyWith(
+      presets: [
+        ...state.presets,
+        ColumnPresetEntry(key: key, title: title),
+      ],
+      selectedKey: key,
+    );
+    _persist();
+    return key;
+  }
+
+  /// Renames the preset identified by [key].
+  void rename(String key, String title) {
+    state = state.copyWith(presets: [for (final p in state.presets) p.key == key ? p.copyWith(title: title) : p]);
+    _persist();
+  }
+
+  /// Deletes the preset identified by [key]. The last preset cannot be deleted.
+  /// Deleting the selected preset falls back to the first remaining one.
+  void delete(String key) {
+    if (state.presets.length <= 1) {
+      return;
+    }
+    final remaining = state.presets.where((e) => e.key != key).toList();
+    final selectedKey = key == state.selectedKey ? remaining.first.key : state.selectedKey;
+    state = state.copyWith(presets: remaining, selectedKey: selectedKey);
+    _persist();
+    _box.entry<String>(ColumnPresetIndex.specEntryKey(key)).delete();
+  }
+}
+
+final columnPresetIndexProvider = NotifierProvider<ColumnPresetIndexNotifier, ColumnPresetIndex>(
+  ColumnPresetIndexNotifier.new,
+);
+
+// The selected preset's spec-entry key. ColumnSpecSelection.build watches this,
+// so selecting a preset rebuilds the selection (and therefore the grid).
+final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
+  final index = ref.watch(columnPresetIndexProvider);
+  return ColumnPresetIndex.specEntryKey(index.selectedKey);
+});
 
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   void autoFitColumnPrecise(BuildContext context, TrinaColumn column) {

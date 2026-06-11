@@ -64,12 +64,17 @@ Map<String, dynamic> staleScriptMap(String id) => <String, dynamic>{
   'apiVersion': scriptApiVersion - 1,
 };
 
+// Seed the legacy single-configuration entry. On first read ColumnPresetIndex
+// migrates it into the default preset (entry "specs_default"), so the specs
+// surface through the providers exactly as before.
 void seed(List<Map<String, dynamic>> maps) {
   Hive.box('column_spec').put('current_column_specs', jsonEncode(maps));
 }
 
+// Reads the live specs from the migrated default preset's entry, where all
+// mutations are persisted after migration.
 List<dynamic> storedSpecs() {
-  return jsonDecode(Hive.box('column_spec').get('current_column_specs') as String) as List<dynamic>;
+  return jsonDecode(Hive.box('column_spec').get('specs_default') as String) as List<dynamic>;
 }
 
 void main() {
