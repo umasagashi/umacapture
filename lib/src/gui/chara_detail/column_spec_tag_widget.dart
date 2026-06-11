@@ -1,6 +1,7 @@
 import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -648,10 +649,16 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 }
 
 // Slides its child from its previous layout position to its current one using a
-// paint-only [Transform.translate], so reordering the chips animates instead of
-// jumping. This is a FLIP (First-Last-Invert-Play): each frame it measures where
-// the child landed, and if that moved it offsets the child back to where it was
-// and animates that offset to zero.
+// paint-only translate, so reordering the chips animates instead of jumping.
+// This is a FLIP (First-Last-Invert-Play): each paint it measures where the
+// child landed, and if that moved it offsets the child back to where it was and
+// animates that offset to zero.
+//
+// The measure-and-invert happens synchronously inside the render object's
+// [paint] (not in a post-frame callback), so the inverse offset is already
+// applied on the very frame the layout changed. Measuring after the frame would
+// paint one frame at the settled (destination) position before the offset took
+// effect, which read as a one-frame flash to the end state.
 //
 // The translate is paint-only, so layout (and therefore the slot rectangles the
 // drag hit-test measures via the parent's GlobalKey) is never disturbed — the
@@ -669,20 +676,7 @@ class _FlipMover extends StatefulWidget {
 }
 
 class _FlipMoverState extends State<_FlipMover> with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(vsync: this, duration: _reorderSlideDuration)
-    ..addListener(_tick);
-
-  // The child's settled layout position, measured after each frame. A move is
-  // detected by comparing the fresh measurement against this.
-  Offset? _lastPosition;
-
-  // The offset the slide started from; the painted offset is this lerped to zero
-  // by the controller, so [_paintedOffset] reads the current visual delta.
-  Offset _fromOffset = Offset.zero;
-
-  Offset get _paintedOffset => Offset.lerp(_fromOffset, Offset.zero, _controller.value) ?? Offset.zero;
-
-  void _tick() => setState(() {});
+  late final AnimationController _controller = AnimationController(vsync: this, duration: _reorderSlideDuration);
 
   @override
   void dispose() {
@@ -692,37 +686,97 @@ class _FlipMoverState extends State<_FlipMover> with SingleTickerProviderStateMi
 
   @override
   Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _afterLayout());
-    return Transform.translate(offset: _paintedOffset, child: widget.child);
+    return _FlipMoverLayout(controller: _controller, animate: widget.animate, child: widget.child);
+  }
+}
+
+// Hosts the [_RenderFlipMover] that performs the synchronous FLIP. The state
+// above owns the controller (and its ticker); this just wires it to the render
+// object and forwards [animate] changes.
+class _FlipMoverLayout extends SingleChildRenderObjectWidget {
+  const _FlipMoverLayout({required this.controller, required this.animate, required super.child});
+
+  final AnimationController controller;
+  final bool animate;
+
+  @override
+  _RenderFlipMover createRenderObject(BuildContext context) =>
+      _RenderFlipMover(controller: controller, animate: animate);
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderFlipMover renderObject) {
+    renderObject.animate = animate;
+  }
+}
+
+class _RenderFlipMover extends RenderProxyBox {
+  // ignore: prefer_initializing_formals
+  _RenderFlipMover({required this.controller, required bool animate}) : _animate = animate;
+
+  final AnimationController controller;
+
+  bool _animate;
+
+  set animate(bool value) => _animate = value;
+
+  // The child's settled layout position, measured each paint. A move is detected
+  // by comparing the fresh measurement against this.
+  Offset? _lastPosition;
+
+  // The offset the slide started from; the painted offset is this lerped to zero
+  // by the controller, so [_paintedOffset] reads the current visual delta.
+  Offset _fromOffset = Offset.zero;
+
+  // True while inside [paint]. Mutating the controller there notifies listeners
+  // synchronously, so the tick handler must not call markNeedsPaint mid-paint.
+  bool _painting = false;
+
+  Offset get _paintedOffset => Offset.lerp(_fromOffset, Offset.zero, controller.value) ?? Offset.zero;
+
+  void _onTick() {
+    if (!_painting) {
+      markNeedsPaint();
+    }
   }
 
-  void _afterLayout() {
-    if (!mounted) {
-      return;
+  @override
+  void detach() {
+    controller.removeListener(_onTick);
+    super.detach();
+  }
+
+  @override
+  void attach(PipelineOwner owner) {
+    super.attach(owner);
+    controller.addListener(_onTick);
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    if (child != null) {
+      // localToGlobal walks the layout transforms only; the paint-only shift
+      // applied below is not part of them, so this is the settled position
+      // regardless of any in-flight slide.
+      final newPosition = localToGlobal(Offset.zero);
+      final previous = _lastPosition;
+      _lastPosition = newPosition;
+      if (previous != null && previous != newPosition) {
+        _painting = true;
+        if (!_animate) {
+          // Snap: cancel any slide and sit at the new position. The value setter
+          // also stops the controller.
+          controller.value = 1;
+          _fromOffset = Offset.zero;
+        } else {
+          // Re-target: carry the in-flight visual offset so an interrupted slide
+          // stays continuous, then animate the combined delta back to zero.
+          _fromOffset = (previous - newPosition) + _paintedOffset;
+          controller.forward(from: 0);
+        }
+        _painting = false;
+      }
     }
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) {
-      return;
-    }
-    // localToGlobal on the Transform's render object ignores its own paint
-    // transform, so this is the settled layout position regardless of any slide.
-    final newPosition = box.localToGlobal(Offset.zero);
-    final previous = _lastPosition;
-    _lastPosition = newPosition;
-    if (previous == null || previous == newPosition) {
-      return;
-    }
-    if (!widget.animate) {
-      // Snap: cancel any slide and sit at the new position.
-      _controller.stop();
-      _controller.value = 1;
-      _fromOffset = Offset.zero;
-      return;
-    }
-    // Re-target: carry the in-flight visual offset so an interrupted slide stays
-    // continuous, then animate the combined delta back to zero.
-    _fromOffset = (previous - newPosition) + _paintedOffset;
-    _controller.forward(from: 0);
+    super.paint(context, offset + _paintedOffset);
   }
 }
 
