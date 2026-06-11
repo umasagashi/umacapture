@@ -701,7 +701,9 @@ class _ScriptCell extends StatelessWidget {
     final background = _resolveColor(result.background);
     if (background == null) return row;
     return Container(
-      color: background,
+      // Background swatches are painted at a fixed 50% opacity so the cell text
+      // and the striped row underneath stay legible regardless of the chosen color.
+      color: background.withValues(alpha: 0.5),
       padding: const EdgeInsets.symmetric(horizontal: 4),
       alignment: Alignment.centerLeft,
       child: row,
