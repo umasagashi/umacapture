@@ -21,6 +21,10 @@ const tr_chara_detail = "pages.chara_detail";
 // no stray gap behind in the flow.
 const double _chipGap = 4;
 
+// Approximate height of an ActionChip in this view. The plain-text logic-operator
+// label and the empty-slot box are sized to it so they line up with sibling chips.
+const double _chipHeight = 32;
+
 // Deadband (in pixels) around a chip's centre within which the placeholder does
 // not switch sides, so it doesn't flicker when the pointer hovers right on the
 // boundary.
@@ -231,17 +235,20 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             child: GestureDetector(
               onTap: () => ColumnSpecDialog.show(ref.base, spec),
               onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (broken) ...[Icon(Symbols.warning_rounded, size: 16, color: color), const SizedBox(width: 2)],
-                    DefaultTextStyle.merge(
-                      style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
-                      child: spec.label(),
-                    ),
-                  ],
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: _chipHeight),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (broken) ...[Icon(Symbols.warning_rounded, size: 16, color: color), const SizedBox(width: 2)],
+                      DefaultTextStyle.merge(
+                        style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
+                        child: spec.label(),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -317,7 +324,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
               painter: _DashedRRectPainter(color: theme.colorScheme.primary),
               child: IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true)),
             )
-          : _emptySlotBox(context),
+          : _emptySlotBox(context, spec),
       gap: false,
     );
   }
@@ -326,14 +333,17 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   // box with the `place_item` glyph. Shared by [_emptyDropSlot] and by
   // [_staticContent] so a dragged empty container's placeholder keeps this look
   // instead of collapsing to a bare label.
-  Widget _emptySlotBox(BuildContext context) {
+  Widget _emptySlotBox(BuildContext context, ColumnSpec spec) {
     final theme = Theme.of(context);
-    return CustomPaint(
-      painter: _DashedRRectPainter(color: theme.colorScheme.primary),
-      child: SizedBox(
-        width: 40,
-        height: 32,
-        child: Center(child: Icon(Symbols.place_item_rounded, size: 18, color: theme.colorScheme.primary)),
+    return Tooltip(
+      message: _tooltipFor(spec),
+      child: CustomPaint(
+        painter: _DashedRRectPainter(color: theme.colorScheme.primary),
+        child: SizedBox(
+          width: 40,
+          height: _chipHeight,
+          child: Center(child: Icon(Symbols.place_item_rounded, size: 18, color: theme.colorScheme.primary)),
+        ),
       ),
     );
   }
@@ -349,7 +359,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       _spaced(_logicLabel(context, spec, highlight: highlight)),
       // No trailing gap: matches the live empty slot ([_emptyDropSlot] uses
       // gap: false) so a dragged empty container's placeholder is the same width.
-      if (spec.children.isEmpty) _emptySlotBox(context),
+      if (spec.children.isEmpty) _emptySlotBox(context, spec),
       for (final child in spec.children) _spaced(_staticContent(context, child, highlight: highlight)),
     ], highlight: highlight);
   }
