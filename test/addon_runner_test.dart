@@ -45,7 +45,7 @@ void main() {
 
     String url(String path) => 'http://127.0.0.1:$port$path';
 
-    test('a 2xx response is a success carrying the status code and body', () async {
+    test('a 2xx response is a success carrying the status code, and the body is not persisted', () async {
       handler = (request) async {
         request.response.statusCode = 200;
         request.response.write('pong');
@@ -56,7 +56,9 @@ void main() {
 
       expect(result.status, ExecutionStatus.success);
       expect(result.exitCode, 200);
-      expect(result.stdout, contains('pong'));
+      // The response body is intentionally not captured into the result/history,
+      // so a secret or record data echoed back cannot leak to disk.
+      expect(result.stdout, isNull);
     });
 
     test('a non-2xx response is a failure (validateStatus keeps it from throwing)', () async {
@@ -145,6 +147,30 @@ void main() {
         'record': {'a': 'x "y"', 'n': 1},
         'v': 'Special "Week"',
       });
+    });
+
+    test('an invalid {record_json} is escaped instead of inserted raw, keeping the body valid JSON', () async {
+      String? receivedBody;
+      handler = (request) async {
+        receivedBody = await utf8.decodeStream(request);
+        request.response.statusCode = 200;
+        await request.response.close();
+      };
+
+      // A corrupt/hand-edited record.json that is not well-formed JSON.
+      const brokenJson = '{"a": not json';
+      await WebhookRunner(
+        WebhookAction(
+          url: url('/post'),
+          method: 'POST',
+          contentType: 'json',
+          bodyTemplate: '{"record": "{record_json}"}',
+        ),
+      ).start(ref, const {'record_json': brokenJson}).result;
+
+      // The broken value is escaped as a JSON string fragment, so the body stays
+      // valid JSON and round-trips back to the original text.
+      expect(jsonDecode(receivedBody!), {'record': brokenJson});
     });
 
     test('a GET sends no request body even when a body template is set', () async {

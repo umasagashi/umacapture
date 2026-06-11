@@ -113,8 +113,9 @@ class HistoryEntry with HistoryEntryMappable {
   final int? exitCode;
   final String? error;
 
-  /// Captured stdout (external program) or response body (webhook), truncated to
-  /// [maxCaptureChars]. Nullable so legacy entries without this key decode fine.
+  /// Captured stdout of an external program, truncated to [maxCaptureChars].
+  /// Webhook response bodies are intentionally not captured (they may carry
+  /// secrets). Nullable so legacy entries without this key decode fine.
   final String? output;
 
   const HistoryEntry({
