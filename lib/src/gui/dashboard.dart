@@ -29,7 +29,8 @@ final _updaterCardTitleColor = Colors.amber.shade200;
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
-    return createDiagnosticDio(operation: "load_news").get(Const.newsUrl).then((response) => response.toString());
+    final response = await createDiagnosticDio(operation: "load_news").get(Const.newsUrl);
+    return response.toString();
   } catch (error, stackTrace) {
     logger.e("Failed to load news.", error, stackTrace);
     captureException(error, stackTrace);
@@ -44,8 +45,8 @@ class AppUpdaterGroup extends ConsumerWidget {
 
   void downloadAndOpen(WidgetRef ref) {
     ref.read(_downloadProgressProvider.notifier).set(Progress(count: 0, total: 100));
-    ref.watch(isInstallerModeLoader.future).then((isInstallerMode) {
-      final pathInfo = ref.watch(pathInfoProvider);
+    ref.read(isInstallerModeLoader.future).then((isInstallerMode) {
+      final pathInfo = ref.read(pathInfoProvider);
       final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
       final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
       logger.d(downloadUrl);
