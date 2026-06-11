@@ -708,7 +708,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
 
     EdgeInsets cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
 
-    resizeColumn(column, maxWidth - column.width + (cellPadding.left + cellPadding.right) + 8);
+    // Grow-only: never shrink below the current width. autoFitColumns() runs the
+    // built-in autoFitColumn first to size the column for its title, so this
+    // precise cell-based pass must only widen it further when the body needs more
+    // room, otherwise it would clip a title that is wider than the cells.
+    final preciseTarget = maxWidth + (cellPadding.left + cellPadding.right) + 8;
+    resizeColumn(column, [0.0, preciseTarget - column.width].max);
   }
 
   void autoFitColumns() {
@@ -719,6 +724,10 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     for (final col in columns) {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
+      // Built-in autoFitColumn sizes the column to max(title, cell) so the header
+      // title is never clipped. autoFitColumnPrecise then widens it further if the
+      // cells' true rendered width needs more room (grow-only, see above).
+      autoFitColumn(context, col);
       autoFitColumnPrecise(context, col);
       if (maxWidth != null && col.width > maxWidth!) {
         resizeColumn(col, -(col.width / 2 - 24));
