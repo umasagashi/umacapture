@@ -13,6 +13,7 @@ import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/gui/chara_detail/column_preset_bar_widget.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
 import '/src/gui/chara_detail/delete_record_dialog.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
@@ -259,7 +260,12 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
     if (ref.watch(charaDetailRecordStorageProvider).isEmpty) {
       return Expanded(child: ErrorMessageWidget(message: "$tr_chara_detail.no_record_message".tr()));
     }
-    if (ref.watch(currentColumnSpecsProvider).isEmpty) {
+    // Guard on visible columns, not raw spec count: hidden specs still filter rows
+    // but render no column, so a preset whose specs are all hidden (e.g. only logic
+    // filters, which default to hidden) would otherwise fall through to a grid with
+    // zero columns and paint blank. grid.columns is exactly the visible set, so this
+    // matches the empty-grid check in _CharaDetailDataTableWidget below.
+    if (ref.watch(currentGridProvider).columns.isEmpty) {
       return Expanded(child: ErrorMessageWidget(message: "$tr_chara_detail.no_column_message".tr()));
     }
     return const _CharaDetailDataTableWidget();
@@ -357,6 +363,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     return Column(
       children: const [
         _QuarantineBannerWidget(),
+        ColumnPresetBarWidget(),
         ColumnSpecTagWidget(),
         SizedBox(height: 4),
         _CharaDetailDataTablePreCheckLayer(),

@@ -102,6 +102,13 @@ class MemoColumnSpecMapper extends SubClassMapperBase<MemoColumnSpec> {
     _$description,
     opt: true,
   );
+  static bool _$hidden(MemoColumnSpec v) => v.hidden;
+  static const Field<MemoColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<MemoColumnSpec> fields = const {
@@ -111,6 +118,7 @@ class MemoColumnSpecMapper extends SubClassMapperBase<MemoColumnSpec> {
     #predicate: _f$predicate,
     #storageKey: _f$storageKey,
     #description: _f$description,
+    #hidden: _f$hidden,
   };
   @override
   final bool ignoreNull = true;
@@ -135,6 +143,7 @@ class MemoColumnSpecMapper extends SubClassMapperBase<MemoColumnSpec> {
       predicate: data.dec(_f$predicate),
       storageKey: data.dec(_f$storageKey),
       description: data.dec(_f$description),
+      hidden: data.dec(_f$hidden),
     );
   }
 

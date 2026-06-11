@@ -103,12 +103,20 @@ class FamilyRegistrationColumnSpecMapper
   ) => v.predicate;
   static const Field<FamilyRegistrationColumnSpec, FamilyRegistrationPredicate>
   _f$predicate = Field('predicate', _$predicate);
+  static bool _$hidden(FamilyRegistrationColumnSpec v) => v.hidden;
+  static const Field<FamilyRegistrationColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<FamilyRegistrationColumnSpec> fields = const {
     #id: _f$id,
     #title: _f$title,
     #predicate: _f$predicate,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -128,6 +136,7 @@ class FamilyRegistrationColumnSpecMapper
       id: data.dec(_f$id),
       title: data.dec(_f$title),
       predicate: data.dec(_f$predicate),
+      hidden: data.dec(_f$hidden),
     );
   }
 

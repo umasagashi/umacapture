@@ -116,6 +116,36 @@
                 "building_grid": "殿堂入り管理画面の表の生成に失敗したため、リセットしました。",
                 "loading_spec": "殿堂入り管理画面の列の読み込みに失敗しました。内容を確認してください。"
             },
+            "preset": {
+                "default_title": "デフォルト",
+                "selector_tooltip": "適用する列プリセットを選択します。",
+                "create": {
+                    "tooltip": "新しい空のプリセットを作成します。",
+                    "dialog_title": "プリセットを作成",
+                    "name_label": "プリセット名",
+                    "default_name": "新規プリセット"
+                },
+                "duplicate": {
+                    "tooltip": "現在のプリセットを複製します。",
+                    "dialog_title": "プリセットを複製",
+                    "copy_suffix": " のコピー"
+                },
+                "rename": {
+                    "tooltip": "現在のプリセットの名前を変更します。",
+                    "dialog_title": "プリセット名を変更"
+                },
+                "delete": {
+                    "tooltip": "現在のプリセットを削除します。",
+                    "disabled_tooltip": "最後のプリセットは削除できません。",
+                    "dialog_title": "プリセットを削除",
+                    "confirm_message": "プリセット「{title}」を削除します。よろしいですか？"
+                },
+                "dialog": {
+                    "ok_button": "OK",
+                    "cancel_button": "キャンセル",
+                    "delete_button": "削除"
+                }
+            },
             "export": {
                 "button_tooltip": "エクスポート",
                 "dialog_title": "保存先を指定してください。",
@@ -219,6 +249,13 @@
                             "same_as_min": "無制限",
                             "same_as_max": "無制限"
                         }
+                    },
+                    "notation": {
+                        "show": {
+                            "label": "テーブルに表示",
+                            "tooltip": "オフにするとテーブルで列を非表示にします。非表示にしてもフィルタは常に有効です。"
+                        },
+                        "hidden_marker": "非表示"
                     }
                 },
                 "ranged_label": {
@@ -621,7 +658,7 @@
                         }
                     },
                     "tooltip": {
-                        "empty": "入力なし（すべての行を通過）"
+                        "empty": "入力なし（カラムをドラッグして入力を追加できます）"
                     },
                     "builder": {
                         "and": "すべての入力カラムの条件を満たす行だけを通します。",

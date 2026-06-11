@@ -76,7 +76,16 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   final String title;
 
-  LogicColumnSpec({required this.id, required this.title, required this.logic, this.children = const []});
+  @override
+  final bool hidden;
+
+  LogicColumnSpec({
+    required this.id,
+    required this.title,
+    required this.logic,
+    this.children = const [],
+    this.hidden = false,
+  });
 
   @override
   bool get acceptsChildren => true;
@@ -88,21 +97,35 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   LogicColumnSpec withChildren(List<ColumnSpec> children) => copyWith(children: children);
 
-  LogicColumnSpec copyWith({String? id, String? title, LogicMode? logic, List<ColumnSpec>? children}) {
+  @override
+  LogicColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  LogicColumnSpec copyWith({String? id, String? title, LogicMode? logic, List<ColumnSpec>? children, bool? hidden}) {
     return LogicColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       logic: logic ?? this.logic,
       children: children ?? this.children,
+      hidden: hidden ?? this.hidden,
     );
   }
 
   /// Combine per-child condition lists ([childConditions], each one bool per row)
   /// into a single per-row condition according to [logic]. With no children the
-  /// column is inert and passes every row.
+  /// column folds to the operator's identity (empty OR/XOR/NAND = false,
+  /// empty AND/NOR/XNOR/NOT = true).
+  ///
+  /// By design, an empty OR/XOR/NAND column therefore evaluates to false and
+  /// rejects every row — set-operation correctness (the identity of the empty
+  /// fold) is deliberately preferred over the old "empty column passes all" UX.
+  /// This is not a bug: the column's (hidden) chip still shows a pass-count
+  /// badge of 0, so an empty filter that blanks the grid is diagnosable from the
+  /// customization area.
   List<bool> combine(List<List<bool>> childConditions, int rowCount) {
     if (childConditions.isEmpty) {
-      return List<bool>.filled(rowCount, true);
+      // Kept in lockstep with [LogicMode.apply] so an empty column filters
+      // consistently with how a populated one would for the same operator.
+      return List<bool>.filled(rowCount, logic.apply(const <bool>[]));
     }
     return childConditions.transpose().map(logic.apply).toList();
   }
@@ -207,6 +230,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }
@@ -281,6 +305,12 @@ class LogicColumnBuilder extends ColumnBuilder {
 
   @override
   LogicColumnSpec build(RefBase ref) {
-    return LogicColumnSpec(id: const Uuid().v4(), title: title, logic: logic);
+    // Logic columns are filters first; a freshly added one starts hidden so it
+    // acts as an invisible filter by default. Existing (legacy) logic columns
+    // lack the field and decode as shown, so they are never retroactively hidden.
+    // Being hidden, a still-empty column shows no table column — its effect (e.g.
+    // an empty OR folding to false and rejecting all rows, see combine()) is read
+    // from the chip's pass-count badge rather than the grid. This is intended.
+    return LogicColumnSpec(id: const Uuid().v4(), title: title, logic: logic, hidden: true);
   }
 }

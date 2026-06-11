@@ -6,6 +6,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -65,6 +66,58 @@ class SpecProviderAccessor<T extends ColumnSpec> {
 
   void update(WidgetRef ref, String specId, T Function(T) apply) {
     ref.read(specCloneProvider(specId).notifier).update((spec) => apply(spec as T));
+  }
+}
+
+/// The "show in table" toggle shared by every column's notation (表示) group.
+///
+/// Reads from / writes to the dialog's cloned spec via [specCloneProvider] and
+/// the generic [ColumnSpec.withHidden], so it works for any column type without
+/// a per-spec accessor. Like the title field, the change is committed to the
+/// clone on [onDecided] (the dialog's OK button); copyWith preserves the other
+/// edited fields regardless of listener order. Turning the switch off hides the
+/// column from the grid while it keeps filtering rows.
+class ColumnVisibilitySwitch extends ConsumerStatefulWidget {
+  final String specId;
+  final ChangeNotifier onDecided;
+
+  const ColumnVisibilitySwitch({super.key, required this.specId, required this.onDecided});
+
+  @override
+  ConsumerState<ColumnVisibilitySwitch> createState() => _ColumnVisibilitySwitchState();
+}
+
+class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch> {
+  late bool hidden;
+  late final VoidCallback _commitHidden;
+
+  @override
+  void initState() {
+    super.initState();
+    hidden = ref.read(specCloneProvider(widget.specId)).hidden;
+    _commitHidden = () {
+      ref.read(specCloneProvider(widget.specId).notifier).update((spec) => spec.withHidden(hidden));
+    };
+    widget.onDecided.addListener(_commitHidden);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitHidden);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FormLine(
+      title: Text("$tr_chara_detail.column_predicate.common.notation.show.label".tr()),
+      children: [
+        Tooltip(
+          message: "$tr_chara_detail.column_predicate.common.notation.show.tooltip".tr(),
+          child: Switch(value: !hidden, onChanged: (value) => setState(() => hidden = !value)),
+        ),
+      ],
+    );
   }
 }
 

@@ -118,6 +118,13 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
     _$description,
     opt: true,
   );
+  static bool _$hidden(RatingColumnSpec v) => v.hidden;
+  static const Field<RatingColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
   static Range<double> _$range(RatingColumnSpec v) => v.range;
   static const Field<RatingColumnSpec, Range<double>> _f$range = Field(
     'range',
@@ -133,6 +140,7 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
     #predicate: _f$predicate,
     #storageKey: _f$storageKey,
     #description: _f$description,
+    #hidden: _f$hidden,
     #range: _f$range,
   };
   @override
@@ -158,6 +166,7 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
       predicate: data.dec(_f$predicate),
       storageKey: data.dec(_f$storageKey),
       description: data.dec(_f$description),
+      hidden: data.dec(_f$hidden),
     );
   }
 

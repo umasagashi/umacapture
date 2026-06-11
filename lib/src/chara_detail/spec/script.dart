@@ -506,13 +506,20 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   bool _numericSort = false;
   bool _hasIcon = false;
 
+  @override
+  final bool hidden;
+
   ScriptColumnSpec({
     required this.id,
     required this.title,
     required this.source,
     this.apiVersion = scriptApiVersion,
     this.description,
+    this.hidden = false,
   });
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   ScriptColumnSpec copyWith({
     String? id,
@@ -520,6 +527,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     String? source,
     int? apiVersion,
     Object? description = _unset,
+    bool? hidden,
   }) {
     return ScriptColumnSpec(
       id: id ?? this.id,
@@ -527,6 +535,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       source: source ?? this.source,
       apiVersion: apiVersion ?? this.apiVersion,
       description: identical(description, _unset) ? this.description : description as String?,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -1194,6 +1203,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
               title: Text("$tr_script.notation.title.label".tr()),
               children: [DenseTextField(initialText: title, onChanged: (value) => title = value)],
             ),
+            ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
             FormLine(
               title: Text("$tr_script.notation.tooltip_field.label".tr()),
               children: [

@@ -79,6 +79,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   final String? description;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   final range = Range<double>(min: 0.0, max: 5.0);
@@ -90,7 +93,11 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     required this.predicate,
     required this.storageKey,
     this.description,
+    this.hidden = false,
   });
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   RatingColumnSpec copyWith({
     String? id,
@@ -99,6 +106,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     IsInRangeRatingPredicate? predicate,
     String? storageKey,
     Object? description = _unset,
+    bool? hidden,
   }) {
     return RatingColumnSpec(
       id: id ?? this.id,
@@ -107,6 +115,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
       predicate: predicate ?? this.predicate,
       storageKey: storageKey ?? this.storageKey,
       description: identical(description, _unset) ? this.description : description as String?,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -459,6 +468,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         FormLine(
           title: Text("$tr_rating.notation.tooltip_field.label".tr()),
           children: [

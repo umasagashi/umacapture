@@ -7,9 +7,11 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
+import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
 import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
@@ -195,6 +197,21 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// specs that carry a versioned contract (e.g. the script column) override it.
   bool get isObsolete => false;
 
+  /// Whether this column is hidden from the grid. A hidden column contributes no
+  /// visible column, yet still participates in row filtering and the pass-count
+  /// badge — so it acts as an invisible filter. Defaults to false (shown); legacy
+  /// specs saved before this field existed therefore decode as shown.
+  bool get hidden;
+
+  /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
+  /// editable spec must override this via copyWith. Unlike [withChildren] (which
+  /// leaf columns legitimately no-op on), the base throws rather than silently
+  /// returning [this]: the toggle has exactly one caller (the visibility switch in
+  /// the column dialog), so a subclass that forgets to override would otherwise
+  /// fail silently with no compile error. The undecodable placeholder, which is
+  /// never editable, overrides this back to a no-op.
+  ColumnSpec withHidden(bool hidden) => throw UnsupportedError('Concrete specs must override withHidden');
+
   /// Child specs nested under this column. Only container columns (logic columns)
   /// have children; leaf columns return an empty list. Used by the tree-aware
   /// selection operations and the recursive chip UI.
@@ -299,6 +316,22 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   @override
   String get type => (rawMap["type"] as String?) ?? runtimeType.toString();
 
+  // Read straight from the preserved raw map (and round-trips through toMap),
+  // so a broken column keeps whatever hidden flag it was saved with. A broken
+  // map may hold anything, so a non-bool 'hidden' degrades to false rather than
+  // throwing a CastError that would collapse the whole grid via _buildGrid.
+  @override
+  bool get hidden {
+    final value = rawMap["hidden"];
+    return value is bool && value;
+  }
+
+  // A broken placeholder is not editable (its selector is a plain message with no
+  // visibility switch), so the toggle is intentionally inert here rather than
+  // throwing like the base. The raw map's hidden flag is preserved verbatim.
+  @override
+  ColumnSpec withHidden(bool hidden) => this;
+
   @override
   List<Null> parse(RefBase ref, List<CharaDetailRecord> records) {
     return List<Null>.filled(records.length, null);
@@ -365,6 +398,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // `children`); the encode/decode broken-preservation paths below depend on it.
   static const _childrenKey = 'children';
 
+  // Serialized field name of the per-spec hidden flag. Excluded from the
+  // incompleteness check so legacy specs (saved before the field existed) are
+  // not flagged broken merely for lacking it. Must match the dart_mappable
+  // field name emitted by concrete specs.
+  static const _hiddenKey = 'hidden';
+
   Set<String> get brokenIds => {..._brokenIds};
 
   void _clearBroken(String id) {
@@ -374,7 +413,12 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
 
   @override
   List<ColumnSpec> build() {
-    entry = StorageBox(StorageBoxKey.columnSpec).entry<String>("current_column_specs");
+    // Bind to the selected preset's spec entry. Watching the key makes preset
+    // switching re-run build() against the new entry, swapping the columns the
+    // grid shows. The broken-id bookkeeping below is per-entry and reset here,
+    // so it always reflects the preset currently loaded.
+    final entryKey = ref.watch(selectedColumnSpecEntryKeyProvider);
+    entry = StorageBox(StorageBoxKey.columnSpec).entry<String>(entryKey);
     _brokenIds.clear();
     _rawById.clear();
     final raw = entry.pull();
@@ -439,6 +483,11 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   bool _nodeFieldsIncomplete(Map<String, dynamic> raw, Map<String, dynamic> full) {
     for (final entry in full.entries) {
       if (entry.key == _childrenKey) continue;
+      // 'hidden' was added after specs already existed on disk; a missing key
+      // decodes to the default (false), so its absence must not flag a spec as
+      // broken. Excluded here (like _childrenKey) rather than in the generic
+      // isSpecMapIncomplete, since this is the only spec-level entry point.
+      if (entry.key == _hiddenKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }
@@ -558,22 +607,173 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   }
 }
 
+// Storage entry holding the column preset index (the ordered preset list plus
+// the selected key). A plain JSON string in the same box as the specs, so no
+// Hive type adapter is needed.
+const _presetIndexKey = "preset_index";
+
+// Legacy single-configuration entry key. Read once during migration into the
+// first preset, then never again (kept on disk as a safety net).
+const _legacyColumnSpecsKey = "current_column_specs";
+
+// Fixed key for the preset created by migrating the legacy single configuration.
+// Deterministic (rather than a uuid) so the migrated specs always land at a
+// predictable entry; user-created presets use uuids and never collide with it.
+const _migratedPresetKey = "default";
+
+// Holds the column preset index and persists it. Selecting/creating/renaming/
+// deleting a preset goes through here; ColumnSpecSelection watches the derived
+// selected-key provider, so the grid follows the selection automatically.
+class ColumnPresetIndexNotifier extends Notifier<ColumnPresetIndex> {
+  late StorageBox _box;
+  late StorageEntry<String> _entry;
+
+  @override
+  ColumnPresetIndex build() {
+    _box = StorageBox(StorageBoxKey.columnSpec);
+    _entry = _box.entry<String>(_presetIndexKey);
+    return _migrateAndLoad();
+  }
+
+  // Load the persisted index, migrating the legacy single configuration on first
+  // run. Idempotent: once the index entry exists the legacy branch is skipped.
+  ColumnPresetIndex _migrateAndLoad() {
+    final raw = _entry.pull();
+    if (raw != null) {
+      return ColumnPresetIndexMapper.fromJson(raw);
+    }
+    // Copy (never move) the legacy specs verbatim so a crash mid-migration can
+    // never lose them, and so broken specs are preserved for re-flagging.
+    final legacy = _box.entry<String>(_legacyColumnSpecsKey).pull();
+    if (legacy != null) {
+      _box.entry<String>(ColumnPresetIndex.specEntryKey(_migratedPresetKey)).push(legacy);
+    }
+    final index = ColumnPresetIndex(
+      presets: [ColumnPresetEntry(key: _migratedPresetKey, title: "pages.chara_detail.preset.default_title".tr())],
+      selectedKey: _migratedPresetKey,
+    );
+    _entry.push(index.toJson());
+    return index;
+  }
+
+  void _persist() {
+    _entry.push(state.toJson());
+  }
+
+  /// Applies the preset identified by [key]. No-op when already selected or
+  /// when [key] is not present.
+  void select(String key) {
+    if (key == state.selectedKey || state.presets.every((e) => e.key != key)) {
+      return;
+    }
+    state = state.copyWith(selectedKey: key);
+    _persist();
+  }
+
+  /// Creates a new empty preset titled [title] and selects it. Its spec entry is
+  /// created lazily on the first column edit (ColumnSpecSelection._commit).
+  String create(String title) {
+    final key = const Uuid().v4();
+    state = state.copyWith(
+      presets: [
+        ...state.presets,
+        ColumnPresetEntry(key: key, title: title),
+      ],
+      selectedKey: key,
+    );
+    _persist();
+    return key;
+  }
+
+  /// Duplicates [sourceKey]'s columns into a new preset titled [title] and
+  /// selects it. The specs are copied verbatim, so broken specs carry over.
+  String duplicate(String sourceKey, String title) {
+    final key = const Uuid().v4();
+    final raw = _box.entry<String>(ColumnPresetIndex.specEntryKey(sourceKey)).pull();
+    if (raw != null) {
+      _box.entry<String>(ColumnPresetIndex.specEntryKey(key)).push(raw);
+    }
+    state = state.copyWith(
+      presets: [
+        ...state.presets,
+        ColumnPresetEntry(key: key, title: title),
+      ],
+      selectedKey: key,
+    );
+    _persist();
+    return key;
+  }
+
+  /// Renames the preset identified by [key].
+  void rename(String key, String title) {
+    state = state.copyWith(presets: [for (final p in state.presets) p.key == key ? p.copyWith(title: title) : p]);
+    _persist();
+  }
+
+  /// Deletes the preset identified by [key]. The last preset cannot be deleted.
+  /// Deleting the selected preset falls back to the first remaining one.
+  void delete(String key) {
+    if (state.presets.length <= 1) {
+      return;
+    }
+    final remaining = state.presets.where((e) => e.key != key).toList();
+    final selectedKey = key == state.selectedKey ? remaining.first.key : state.selectedKey;
+    state = state.copyWith(presets: remaining, selectedKey: selectedKey);
+    _persist();
+    _box.entry<String>(ColumnPresetIndex.specEntryKey(key)).delete();
+  }
+}
+
+final columnPresetIndexProvider = NotifierProvider<ColumnPresetIndexNotifier, ColumnPresetIndex>(
+  ColumnPresetIndexNotifier.new,
+);
+
+// The selected preset's spec-entry key. ColumnSpecSelection.build watches this,
+// so selecting a preset rebuilds the selection (and therefore the grid).
+final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
+  final index = ref.watch(columnPresetIndexProvider);
+  return ColumnPresetIndex.specEntryKey(index.selectedKey);
+});
+
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
+  double _visualTextWidth(BuildContext context, String text, TextStyle style) {
+    if (text.isEmpty) {
+      return 0;
+    }
+    final textPainter = TextPainter(
+      text: TextSpan(style: style, text: text),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    return textPainter.width;
+  }
+
+  // Single-pass auto-fit: size the column to max(title, widest cell). Replaces the
+  // built-in autoFitColumn (which measures the title precisely but estimates cells
+  // by character count) plus a separate cell pass, so the rows are scanned once.
+  // The title is measured the same way the built-in does (columnTextStyle + title
+  // padding), while cells are measured by true rendered width over distinct values.
   void autoFitColumnPrecise(BuildContext context, TrinaColumn column) {
     if (refRows.isEmpty) {
       return;
     }
     final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
-    final maxWidth = values.toSet().map((value) {
-      TextSpan textSpan = TextSpan(style: DefaultTextStyle.of(context).style, text: value);
-      TextPainter textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr);
-      textPainter.layout();
-      return textPainter.width;
-    }).max;
+    final cellWidth = values
+        .toSet()
+        .map((value) => _visualTextWidth(context, value, DefaultTextStyle.of(context).style))
+        .max;
 
-    EdgeInsets cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
+    final cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
+    final titlePadding = column.titlePadding ?? configuration.style.defaultColumnTitlePadding;
+    final titleWidth = _visualTextWidth(context, column.title, configuration.style.columnTextStyle);
 
-    resizeColumn(column, maxWidth - column.width + (cellPadding.left + cellPadding.right) + 8);
+    final cellTarget = cellWidth + cellPadding.horizontal + 8;
+    // Mirrors the built-in's title term. The checkbox-column width (enableRowChecked)
+    // is intentionally omitted since this grid has no checkbox columns; if one were
+    // added the title could under-fit slightly, but a roomy title never clips.
+    final titleTarget =
+        titleWidth + titlePadding.horizontal + (column.isShowRightIcon ? configuration.style.iconSize : 0) + 8;
+
+    resizeColumn(column, [cellTarget, titleTarget].max - column.width);
   }
 
   void autoFitColumns() {
@@ -584,6 +784,8 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     for (final col in columns) {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
+      // autoFitColumnPrecise sizes the column to max(title, widest cell) in one
+      // row scan, so the header title is never clipped and the cell width is exact.
       autoFitColumnPrecise(context, col);
       if (maxWidth != null && col.width > maxWidth!) {
         resizeColumn(col, -(col.width / 2 - 24));

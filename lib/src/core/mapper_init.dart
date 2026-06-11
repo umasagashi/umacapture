@@ -15,6 +15,7 @@ import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
@@ -80,6 +81,8 @@ void initializeMappers() {
   TagMapper.ensureInitialized();
   RatingDataMapper.ensureInitialized();
   MemoDataMapper.ensureInitialized();
+  ColumnPresetIndexMapper.ensureInitialized();
+  ColumnPresetEntryMapper.ensureInitialized();
   ModuleVersionRawDataMapper.ensureInitialized();
   SentryRateLimitMapper.ensureInitialized();
   JsonExportDataMapper.ensureInitialized();

@@ -97,6 +97,13 @@ class CharacterCardColumnSpecMapper
       v.predicate;
   static const Field<CharacterCardColumnSpec, CharacterCardPredicate>
   _f$predicate = Field('predicate', _$predicate);
+  static bool _$hidden(CharacterCardColumnSpec v) => v.hidden;
+  static const Field<CharacterCardColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
 
   @override
   final MappableFields<CharacterCardColumnSpec> fields = const {
@@ -104,6 +111,7 @@ class CharacterCardColumnSpecMapper
     #title: _f$title,
     #parser: _f$parser,
     #predicate: _f$predicate,
+    #hidden: _f$hidden,
   };
 
   @override
@@ -124,6 +132,7 @@ class CharacterCardColumnSpecMapper
       title: data.dec(_f$title),
       parser: data.dec(_f$parser),
       predicate: data.dec(_f$predicate),
+      hidden: data.dec(_f$hidden),
     );
   }
 

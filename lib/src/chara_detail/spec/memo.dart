@@ -73,6 +73,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   final String? description;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   MemoColumnSpec({
@@ -82,7 +85,11 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     required this.predicate,
     required this.storageKey,
     this.description,
+    this.hidden = false,
   });
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   MemoColumnSpec copyWith({
     String? id,
@@ -91,6 +98,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     RegExpPredicate? predicate,
     String? storageKey,
     Object? description = _unset,
+    bool? hidden,
   }) {
     return MemoColumnSpec(
       id: id ?? this.id,
@@ -99,6 +107,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
       predicate: predicate ?? this.predicate,
       storageKey: storageKey ?? this.storageKey,
       description: identical(description, _unset) ? this.description : description as String?,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -366,6 +375,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         FormLine(
           title: Text("$tr_memo.notation.tooltip_field.label".tr()),
           children: [

@@ -313,6 +313,13 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     opt: true,
     def: const {},
   );
+  static bool _$hidden(SkillColumnSpec v) => v.hidden;
+  static const Field<SkillColumnSpec, bool> _f$hidden = Field(
+    'hidden',
+    _$hidden,
+    opt: true,
+    def: false,
+  );
   static String _$labelKey(SkillColumnSpec v) => v.labelKey;
   static const Field<SkillColumnSpec, String> _f$labelKey = Field(
     'labelKey',
@@ -329,6 +336,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     #showAllWhenQueryIsEmpty: _f$showAllWhenQueryIsEmpty,
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
+    #hidden: _f$hidden,
     #labelKey: _f$labelKey,
   };
 
@@ -353,6 +361,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
       showAllWhenQueryIsEmpty: data.dec(_f$showAllWhenQueryIsEmpty),
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
+      hidden: data.dec(_f$hidden),
     );
   }
 

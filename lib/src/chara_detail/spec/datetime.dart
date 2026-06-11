@@ -60,16 +60,35 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   final String title;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openCampaignPreview;
 
-  DateTimeColumnSpec({required this.id, required this.title, required this.parser, required this.predicate});
+  DateTimeColumnSpec({
+    required this.id,
+    required this.title,
+    required this.parser,
+    required this.predicate,
+    this.hidden = false,
+  });
 
-  DateTimeColumnSpec copyWith({String? id, String? title, Parser? parser, IsInRangeDateTimePredicate? predicate}) {
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  DateTimeColumnSpec copyWith({
+    String? id,
+    String? title,
+    Parser? parser,
+    IsInRangeDateTimePredicate? predicate,
+    bool? hidden,
+  }) {
     return DateTimeColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -245,6 +264,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

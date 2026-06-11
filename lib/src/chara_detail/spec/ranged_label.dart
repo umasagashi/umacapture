@@ -48,6 +48,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   final ColumnSpecCellAction cellAction;
 
+  @override
+  final bool hidden;
+
   RangedLabelColumnSpec({
     required this.id,
     required this.title,
@@ -55,7 +58,11 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     required this.labelKey,
     required this.predicate,
     ColumnSpecCellAction? cellAction,
+    this.hidden = false,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   RangedLabelColumnSpec copyWith({
     String? id,
@@ -63,6 +70,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     Parser? parser,
     String? labelKey,
     IsInRangeIntegerPredicate? predicate,
+    bool? hidden,
   }) {
     return RangedLabelColumnSpec(
       id: id ?? this.id,
@@ -70,6 +78,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       parser: parser ?? this.parser,
       labelKey: labelKey ?? this.labelKey,
       predicate: predicate ?? this.predicate,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -210,6 +219,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
             ),
           ],
         ),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

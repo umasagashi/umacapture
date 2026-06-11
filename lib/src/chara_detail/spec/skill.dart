@@ -127,6 +127,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   final String title;
 
   @override
+  final bool hidden;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   SkillColumnSpec({
@@ -137,7 +140,11 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     this.showAllWhenQueryIsEmpty = true,
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
+    this.hidden = false,
   });
+
+  @override
+  ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
 
   SkillColumnSpec copyWith({
     String? id,
@@ -147,6 +154,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     bool? showAllWhenQueryIsEmpty,
     bool? showAvailableOnly,
     Set<SkillDialogElements>? hiddenElements,
+    bool? hidden,
   }) {
     return SkillColumnSpec(
       id: id ?? this.id,
@@ -156,6 +164,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
+      hidden: hidden ?? this.hidden,
     );
   }
 
@@ -456,6 +465,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       children: [
         if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationMaxWidget(ref),
         notationTitleWidget(ref),
+        ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }
