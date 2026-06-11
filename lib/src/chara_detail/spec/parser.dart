@@ -169,23 +169,6 @@ class RecordTypeParser extends Parser<int> with RecordTypeParserMappable {
   }
 }
 
-/// Maps a record's parent-link registration state to a discrete label index.
-///
-/// `parent1` is the left parent and `parent2` the right. The indices match the
-/// `inheritance` label order: unregistered / registered / left-missing / right-missing.
-@MappableClass(discriminatorValue: 'InheritanceStatusParser')
-class InheritanceStatusParser extends Parser<int> with InheritanceStatusParserMappable {
-  @override
-  int parse(CharaDetailRecord record) {
-    final left = record.metadata.recordId.parent1;
-    final right = record.metadata.recordId.parent2;
-    if (left == null && right == null) return 0;
-    if (left != null && right != null) return 1;
-    if (left == null) return 2;
-    return 3;
-  }
-}
-
 @MappableClass(discriminatorValue: 'CampaignScenarioParser')
 class CampaignScenarioParser extends Parser<int> with CampaignScenarioParserMappable {
   @override

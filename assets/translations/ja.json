@@ -434,6 +434,23 @@
                         }
                     }
                 },
+                "family_registration": {
+                    "selection": {
+                        "label": "選択",
+                        "description": "選択した登録数（登録済みの親・祖父母の数）に該当するウマ娘がテーブルに表示されます。"
+                    },
+                    "tooltip": {
+                        "accept": "含む",
+                        "reject": "含まない"
+                    },
+                    "notation": {
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名"
+                        }
+                    }
+                },
                 "rating": {
                     "cell": {
                         "description": "クリックして評価"
@@ -759,13 +776,24 @@
                         "friend_inheritance": "フレンド継承"
                     }
                 },
-                "inheritance": {
-                    "title": "継承",
-                    "values": {
-                        "unregistered": "未登録",
-                        "registered": "登録済み",
-                        "parent1_unregistered": "左親未登録",
-                        "parent2_unregistered": "右親未登録"
+                "family_registration": {
+                    "title": "家系登録状況",
+                    "slots": {
+                        "parent1": "左親",
+                        "grandparent11": "左左祖",
+                        "grandparent12": "左右祖",
+                        "parent2": "右親",
+                        "grandparent21": "右左祖",
+                        "grandparent22": "右右祖"
+                    },
+                    "cell": {
+                        "count_format": "{}/{}",
+                        "slots_prefix": "（",
+                        "slots_suffix": "）",
+                        "slot_separator": "、"
+                    },
+                    "jump": {
+                        "not_found": "対象のレコードはフィルタ条件により非表示になっています。"
                     }
                 },
                 "race_strategy": {

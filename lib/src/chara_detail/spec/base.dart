@@ -54,8 +54,6 @@ class LabelKeys {
   static String get campaignScenario => "scenario.name";
 
   static String get recordType => "record_type.name";
-
-  static String get inheritanceStatus => "inheritance.name";
 }
 
 enum ColumnBuilderType { normal, filter, add }

@@ -39,7 +39,6 @@ class ParserMapper extends ClassMapperBase<Parser> {
       CapturedDateParserMapper.ensureInitialized();
       RaceWinningCountParserMapper.ensureInitialized();
       RecordTypeParserMapper.ensureInitialized();
-      InheritanceStatusParserMapper.ensureInitialized();
       CampaignScenarioParserMapper.ensureInitialized();
       TraineeIdParserMapper.ensureInitialized();
       RaceStrategyParserMapper.ensureInitialized();
@@ -1569,67 +1568,6 @@ mixin RecordTypeParserMappable {
   Map<String, dynamic> toMap() {
     return RecordTypeParserMapper.ensureInitialized()
         .encodeMap<RecordTypeParser>(this as RecordTypeParser);
-  }
-}
-
-class InheritanceStatusParserMapper
-    extends SubClassMapperBase<InheritanceStatusParser> {
-  InheritanceStatusParserMapper._();
-
-  static InheritanceStatusParserMapper? _instance;
-  static InheritanceStatusParserMapper ensureInitialized() {
-    if (_instance == null) {
-      MapperContainer.globals.use(
-        _instance = InheritanceStatusParserMapper._(),
-      );
-      ParserMapper.ensureInitialized().addSubMapper(_instance!);
-    }
-    return _instance!;
-  }
-
-  @override
-  final String id = 'InheritanceStatusParser';
-
-  @override
-  final MappableFields<InheritanceStatusParser> fields = const {};
-
-  @override
-  final String discriminatorKey = 'type';
-  @override
-  final dynamic discriminatorValue = 'InheritanceStatusParser';
-  @override
-  late final ClassMapperBase superMapper = ParserMapper.ensureInitialized();
-
-  @override
-  DecodingContext inherit(DecodingContext context) {
-    return context.inherit(args: () => []);
-  }
-
-  static InheritanceStatusParser _instantiate(DecodingData data) {
-    return InheritanceStatusParser();
-  }
-
-  @override
-  final Function instantiate = _instantiate;
-
-  static InheritanceStatusParser fromMap(Map<String, dynamic> map) {
-    return ensureInitialized().decodeMap<InheritanceStatusParser>(map);
-  }
-
-  static InheritanceStatusParser fromJson(String json) {
-    return ensureInitialized().decodeJson<InheritanceStatusParser>(json);
-  }
-}
-
-mixin InheritanceStatusParserMappable {
-  String toJson() {
-    return InheritanceStatusParserMapper.ensureInitialized()
-        .encodeJson<InheritanceStatusParser>(this as InheritanceStatusParser);
-  }
-
-  Map<String, dynamic> toMap() {
-    return InheritanceStatusParserMapper.ensureInitialized()
-        .encodeMap<InheritanceStatusParser>(this as InheritanceStatusParser);
   }
 }
 

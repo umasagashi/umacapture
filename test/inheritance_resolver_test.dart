@@ -9,7 +9,6 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/inheritance.dart';
-import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
@@ -156,21 +155,6 @@ void main() {
       final updated = result.changed.single;
       expect(updated.id, 'c');
       expect(updated.metadata.recordId.parent1, isNull);
-    });
-  });
-
-  group('InheritanceStatusParser', () {
-    final parser = InheritanceStatusParser();
-
-    test('maps parent registration state to label indices (parent1 = left)', () {
-      // Both null -> 未登録 (0).
-      expect(parser.parse(makeRecord(id: 'a', card: 1)), 0);
-      // Both set -> 登録済み (1).
-      expect(parser.parse(makeRecord(id: 'b', card: 1, parent1Id: 'l', parent2Id: 'r')), 1);
-      // Left (parent1) missing -> 左親未登録 (2).
-      expect(parser.parse(makeRecord(id: 'c', card: 1, parent2Id: 'r')), 2);
-      // Right (parent2) missing -> 右親未登録 (3).
-      expect(parser.parse(makeRecord(id: 'd', card: 1, parent1Id: 'l')), 3);
     });
   });
 

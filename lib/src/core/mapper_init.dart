@@ -10,6 +10,7 @@ import '/src/chara_detail/spec/chara_rank.dart';
 import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/datetime.dart';
 import '/src/chara_detail/spec/factor.dart';
+import '/src/chara_detail/spec/family_registration.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
@@ -54,6 +55,7 @@ void initializeMappers() {
   RangedLabelColumnSpecMapper.ensureInitialized();
   CharaRankColumnSpecMapper.ensureInitialized();
   SimpleLabelColumnSpecMapper.ensureInitialized();
+  FamilyRegistrationColumnSpecMapper.ensureInitialized();
   SkillColumnSpecMapper.ensureInitialized();
   FactorColumnSpecMapper.ensureInitialized();
   CharacterCardColumnSpecMapper.ensureInitialized();
