@@ -317,9 +317,14 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   String get type => (rawMap["type"] as String?) ?? runtimeType.toString();
 
   // Read straight from the preserved raw map (and round-trips through toMap),
-  // so a broken column keeps whatever hidden flag it was saved with.
+  // so a broken column keeps whatever hidden flag it was saved with. A broken
+  // map may hold anything, so a non-bool 'hidden' degrades to false rather than
+  // throwing a CastError that would collapse the whole grid via _buildGrid.
   @override
-  bool get hidden => (rawMap["hidden"] as bool?) ?? false;
+  bool get hidden {
+    final value = rawMap["hidden"];
+    return value is bool && value;
+  }
 
   // A broken placeholder is not editable (its selector is a plain message with no
   // visibility switch), so the toggle is intentionally inert here rather than
@@ -731,26 +736,44 @@ final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
 });
 
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
+  double _visualTextWidth(BuildContext context, String text, TextStyle style) {
+    if (text.isEmpty) {
+      return 0;
+    }
+    final textPainter = TextPainter(
+      text: TextSpan(style: style, text: text),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    return textPainter.width;
+  }
+
+  // Single-pass auto-fit: size the column to max(title, widest cell). Replaces the
+  // built-in autoFitColumn (which measures the title precisely but estimates cells
+  // by character count) plus a separate cell pass, so the rows are scanned once.
+  // The title is measured the same way the built-in does (columnTextStyle + title
+  // padding), while cells are measured by true rendered width over distinct values.
   void autoFitColumnPrecise(BuildContext context, TrinaColumn column) {
     if (refRows.isEmpty) {
       return;
     }
     final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
-    final maxWidth = values.toSet().map((value) {
-      TextSpan textSpan = TextSpan(style: DefaultTextStyle.of(context).style, text: value);
-      TextPainter textPainter = TextPainter(text: textSpan, textDirection: ui.TextDirection.ltr);
-      textPainter.layout();
-      return textPainter.width;
-    }).max;
+    final cellWidth = values
+        .toSet()
+        .map((value) => _visualTextWidth(context, value, DefaultTextStyle.of(context).style))
+        .max;
 
-    EdgeInsets cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
+    final cellPadding = column.cellPadding ?? configuration.style.defaultCellPadding;
+    final titlePadding = column.titlePadding ?? configuration.style.defaultColumnTitlePadding;
+    final titleWidth = _visualTextWidth(context, column.title, configuration.style.columnTextStyle);
 
-    // Grow-only: never shrink below the current width. autoFitColumns() runs the
-    // built-in autoFitColumn first to size the column for its title, so this
-    // precise cell-based pass must only widen it further when the body needs more
-    // room, otherwise it would clip a title that is wider than the cells.
-    final preciseTarget = maxWidth + (cellPadding.left + cellPadding.right) + 8;
-    resizeColumn(column, [0.0, preciseTarget - column.width].max);
+    final cellTarget = cellWidth + cellPadding.horizontal + 8;
+    // Mirrors the built-in's title term. The checkbox-column width (enableRowChecked)
+    // is intentionally omitted since this grid has no checkbox columns; if one were
+    // added the title could under-fit slightly, but a roomy title never clips.
+    final titleTarget =
+        titleWidth + titlePadding.horizontal + (column.isShowRightIcon ? configuration.style.iconSize : 0) + 8;
+
+    resizeColumn(column, [cellTarget, titleTarget].max - column.width);
   }
 
   void autoFitColumns() {
@@ -761,10 +784,8 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     for (final col in columns) {
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
-      // Built-in autoFitColumn sizes the column to max(title, cell) so the header
-      // title is never clipped. autoFitColumnPrecise then widens it further if the
-      // cells' true rendered width needs more room (grow-only, see above).
-      autoFitColumn(context, col);
+      // autoFitColumnPrecise sizes the column to max(title, widest cell) in one
+      // row scan, so the header title is never clipped and the cell width is exact.
       autoFitColumnPrecise(context, col);
       if (maxWidth != null && col.width > maxWidth!) {
         resizeColumn(col, -(col.width / 2 - 24));

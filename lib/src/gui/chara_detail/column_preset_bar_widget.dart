@@ -44,7 +44,10 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                 message: "$tr_preset.selector_tooltip".tr(),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
-                    value: index.selectedKey,
+                    // Guard like the sibling action buttons (which use `selected`):
+                    // if selectedKey ever fails to resolve to a present preset,
+                    // render unselected instead of asserting "exactly one item".
+                    value: selected?.key,
                     isDense: true,
                     borderRadius: BorderRadius.circular(8),
                     style: theme.textTheme.labelLarge,

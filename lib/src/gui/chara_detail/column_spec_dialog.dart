@@ -89,14 +89,22 @@ class ColumnVisibilitySwitch extends ConsumerStatefulWidget {
 
 class _ColumnVisibilitySwitchState extends ConsumerState<ColumnVisibilitySwitch> {
   late bool hidden;
+  late final VoidCallback _commitHidden;
 
   @override
   void initState() {
     super.initState();
     hidden = ref.read(specCloneProvider(widget.specId)).hidden;
-    widget.onDecided.addListener(() {
+    _commitHidden = () {
       ref.read(specCloneProvider(widget.specId).notifier).update((spec) => spec.withHidden(hidden));
-    });
+    };
+    widget.onDecided.addListener(_commitHidden);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitHidden);
+    super.dispose();
   }
 
   @override
