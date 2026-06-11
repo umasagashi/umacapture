@@ -48,7 +48,7 @@ void setupWindowManager() async {
 
       // The application sometimes starts with a blank white screen.
       // This is probably due to the order of flutter build and windows paint, so force rebuild here.
-      Future.delayed(const Duration(milliseconds: 16), () => applicationWidgetRebuildEventController.sink.add(null));
+      Future.delayed(const Duration(milliseconds: 16), () => applicationWidgetRebuildEvent.add(null));
     },
   );
 }

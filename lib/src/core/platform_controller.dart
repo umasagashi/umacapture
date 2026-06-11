@@ -42,45 +42,20 @@ final capturingFrameRateProvider = settableNotifierProvider<double?>(null);
 // (e.g. retrying a capture quickly, or opening/closing the same tab repeatedly).
 int _soundEventSequence = 0;
 
-StreamController<int> _errorEventController = StreamController();
-final errorEventProvider = StreamProvider<int>((ref) {
-  if (_errorEventController.hasListener) {
-    _errorEventController = StreamController();
-  }
-  return _errorEventController.stream;
-});
+final _errorEvent = EventStreamProvider<int>();
+final errorEventProvider = _errorEvent.provider;
 
-StreamController<bool> _captureTriggeredEventController = StreamController();
-final captureTriggeredEventProvider = StreamProvider<bool>((ref) {
-  if (_captureTriggeredEventController.hasListener) {
-    _captureTriggeredEventController = StreamController();
-  }
-  return _captureTriggeredEventController.stream;
-});
+final _captureTriggeredEvent = EventStreamProvider<bool>();
+final captureTriggeredEventProvider = _captureTriggeredEvent.provider;
 
-StreamController<int> _scrollReadyEventController = StreamController();
-final scrollReadyEventProvider = StreamProvider<int>((ref) {
-  if (_scrollReadyEventController.hasListener) {
-    _scrollReadyEventController = StreamController();
-  }
-  return _scrollReadyEventController.stream;
-});
+final _scrollReadyEvent = EventStreamProvider<int>();
+final scrollReadyEventProvider = _scrollReadyEvent.provider;
 
-StreamController<int> _pageReadyEventController = StreamController();
-final pageReadyEventProvider = StreamProvider<int>((ref) {
-  if (_pageReadyEventController.hasListener) {
-    _pageReadyEventController = StreamController();
-  }
-  return _pageReadyEventController.stream;
-});
+final _pageReadyEvent = EventStreamProvider<int>();
+final pageReadyEventProvider = _pageReadyEvent.provider;
 
-StreamController<String> _charaDetailRecordCapturedEventController = StreamController();
-final charaDetailRecordCapturedEventProvider = StreamProvider<String>((ref) {
-  if (_charaDetailRecordCapturedEventController.hasListener) {
-    _charaDetailRecordCapturedEventController = StreamController();
-  }
-  return _charaDetailRecordCapturedEventController.stream;
-});
+final _charaDetailRecordCapturedEvent = EventStreamProvider<String>();
+final charaDetailRecordCapturedEventProvider = _charaDetailRecordCapturedEvent.provider;
 
 class CharaDetailLink {
   String id;
@@ -293,27 +268,27 @@ class PlatformController {
       final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
       switch (dataType) {
         case 'onError':
-          _errorEventController.sink.add(_soundEventSequence++);
+          _errorEvent.add(_soundEventSequence++);
           captureState.fail(data['message']);
           break;
         case 'onCaptureStarted':
-          _captureTriggeredEventController.sink.add(true);
+          _captureTriggeredEvent.add(true);
           captureState.reset();
           break;
         case 'onCaptureStopped':
-          _captureTriggeredEventController.sink.add(false);
+          _captureTriggeredEvent.add(false);
           captureState.reset();
           _ref.read(capturingFrameSizeProvider.notifier).set(null);
           _ref.read(capturingFrameRateProvider.notifier).set(null);
           break;
         case 'onScrollReady':
-          _scrollReadyEventController.sink.add(_soundEventSequence++);
+          _scrollReadyEvent.add(_soundEventSequence++);
           break;
         case 'onScrollUpdated':
           captureState.progress(data['index'], data['progress']);
           break;
         case 'onPageReady':
-          _pageReadyEventController.sink.add(_soundEventSequence++);
+          _pageReadyEvent.add(_soundEventSequence++);
           captureState.progress(data['index'], 1);
           break;
         case 'onCharaDetailStarted':
@@ -325,7 +300,7 @@ class PlatformController {
           break;
         case 'onCharaDetailFinished':
           if (data['success'] == true) {
-            _charaDetailRecordCapturedEventController.sink.add(data['id']);
+            _charaDetailRecordCapturedEvent.add(data['id']);
             captureState.success(data['id']);
           }
           break;

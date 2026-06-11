@@ -26,13 +26,8 @@ part 'storage.mapper.dart';
 // repeated duplicate detections. See _soundEventSequence in platform_controller.dart.
 int _duplicatedCharaEventSequence = 0;
 
-StreamController<int> _duplicatedCharaEventController = StreamController();
-final duplicatedCharaEventProvider = StreamProvider<int>((ref) {
-  if (_duplicatedCharaEventController.hasListener) {
-    _duplicatedCharaEventController = StreamController();
-  }
-  return _duplicatedCharaEventController.stream;
-});
+final _duplicatedCharaEvent = EventStreamProvider<int>();
+final duplicatedCharaEventProvider = _duplicatedCharaEvent.provider;
 
 final charaCardIconMapProvider = settableNotifierProvider<Map<int, FilePath>>({});
 
@@ -153,7 +148,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     final duplicated = records.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
-      _duplicatedCharaEventController.sink.add(_duplicatedCharaEventSequence++);
+      _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
       ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
       return;
     }

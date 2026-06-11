@@ -3,17 +3,12 @@ import 'dart:async';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
-StreamController<ToastData> _plainToastEventController = StreamController();
-final plainToastEventProvider = StreamProvider<ToastData>((ref) {
-  if (_plainToastEventController.hasListener) {
-    _plainToastEventController = StreamController();
-  }
-  return _plainToastEventController.stream;
-});
+final _plainToastEvent = EventStreamProvider<ToastData>();
+final plainToastEventProvider = _plainToastEvent.provider;
 
 enum ToastType { success, info, warning, error }
 
@@ -42,7 +37,7 @@ class ToastData {
 class Toaster {
   static void show(ToastData data) {
     assert(data.description != null || data.label != null);
-    _plainToastEventController.sink.add(data);
+    _plainToastEvent.add(data);
   }
 
   final double narrowWidth;
