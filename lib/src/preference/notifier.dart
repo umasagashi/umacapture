@@ -14,11 +14,9 @@ class ExclusiveItemsNotifier<T> extends Notifier<T> {
 
   StorageEntry<T>? _entry;
 
-  ExclusiveItemsNotifier({required Iterable<T> values, required T defaultValue, String? entryKey})
+  ExclusiveItemsNotifier({required Iterable<T> values, required this._defaultValue, this._entryKey})
     : values = List.unmodifiable(values),
-      indices = List.unmodifiable(List.generate(values.length, (i) => i)),
-      _defaultValue = defaultValue,
-      _entryKey = entryKey;
+      indices = List.unmodifiable(List.generate(values.length, (i) => i));
 
   @override
   T build() {
@@ -59,7 +57,7 @@ class BooleanNotifier extends Notifier<bool> {
 
   StorageEntry<bool>? _entry;
 
-  BooleanNotifier({required bool defaultValue, String? entryKey}) : _defaultValue = defaultValue, _entryKey = entryKey;
+  BooleanNotifier({required this._defaultValue, this._entryKey});
 
   @override
   bool build() {
