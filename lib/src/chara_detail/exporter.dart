@@ -4,6 +4,7 @@ import 'package:archive/archive_io.dart';
 import 'package:charset/charset.dart';
 import 'package:csv/csv.dart';
 import 'package:dart_mappable/dart_mappable.dart';
+import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,6 +18,8 @@ import '/src/core/callback.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 
 part 'exporter.mapper.dart';
 
@@ -45,11 +48,18 @@ abstract class Exporter {
       FilePicker.getDirectoryPath(dialogTitle: dialogTitle, initialDirectory: initialDirectory?.path).then((directory) {
         if (directory != null) {
           final path = DirectoryPath(directory).filePath(defaultFileName);
-          ref.read(exportingStateProvider.notifier).set(true);
-          _export(path).then((_) {
-            ref.read(exportingStateProvider.notifier).set(false);
-            onSuccess?.call(path);
-          });
+          final notifier = ref.read(exportingStateProvider.notifier);
+          notifier.set(true);
+          // Reset the exporting flag in whenComplete so a failure (disk full,
+          // locked file, encode error) cannot leave the UI stuck showing the
+          // spinner forever; surface the error instead of swallowing it.
+          _export(path)
+              .then((_) => onSuccess?.call(path))
+              .catchError((Object e, StackTrace st) {
+                logger.e("Failed to export records", e, st);
+                Toaster.show(ToastData.error(description: "toast.record_export_failure".tr()));
+              })
+              .whenComplete(() => notifier.set(false));
         }
       });
     });
