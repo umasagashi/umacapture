@@ -8,7 +8,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #include <opencv2/opencv.hpp>
-#pragma clang diagnostic ppop
+#pragma clang diagnostic pop
 
 #include <minimal_uuid4/minimal_uuid4.h>
 
