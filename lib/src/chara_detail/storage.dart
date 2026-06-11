@@ -48,7 +48,14 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   }
 
   Future<void> updated(String id) async {
-    await ref.read(charaDetailRecordStorageLoaderProvider.notifier).reload(id);
+    // Always increment, even if the reload fails: completion is gated on the
+    // count reaching the total, so a single failed reload would otherwise leave
+    // the progress stuck forever and never reset to Progress.none.
+    try {
+      await ref.read(charaDetailRecordStorageLoaderProvider.notifier).reload(id);
+    } catch (e, s) {
+      logger.w("Failed to reload regenerated record $id: $e\n$s");
+    }
     state = state.increment();
     if (state.isCompleted) {
       Future.delayed(const Duration(milliseconds: 200), () {
