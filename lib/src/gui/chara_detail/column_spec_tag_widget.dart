@@ -284,7 +284,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         border: Border.all(color: highlight ? theme.colorScheme.primary : theme.colorScheme.primaryContainer),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
+      child: _ReorderWrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: inner),
     );
   }
 
@@ -453,20 +453,24 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))
         : const StadiumBorder();
     widgets.add(
-      _slot(
-        _placeholderKey,
-        IgnorePointer(
-          child: Container(
-            decoration: ShapeDecoration(
-              shape: shape,
-              shadows: [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.45), blurRadius: 12)],
+      // Paint the placeholder last within its wrap, so the dragged chip stays in
+      // front of the siblings it slides across instead of being covered by them.
+      _PaintOnTop(
+        child: _slot(
+          _placeholderKey,
+          IgnorePointer(
+            child: Container(
+              decoration: ShapeDecoration(
+                shape: shape,
+                shadows: [BoxShadow(color: theme.colorScheme.primary.withValues(alpha: 0.45), blurRadius: 12)],
+              ),
+              foregroundDecoration: isContainer
+                  ? null
+                  : ShapeDecoration(
+                      shape: StadiumBorder(side: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
+                    ),
+              child: _staticContent(context, _draggedSpec!, highlight: true),
             ),
-            foregroundDecoration: isContainer
-                ? null
-                : ShapeDecoration(
-                    shape: StadiumBorder(side: BorderSide(color: theme.colorScheme.primary, width: 1.5)),
-                  ),
-            child: _staticContent(context, _draggedSpec!, highlight: true),
           ),
         ),
       ),
@@ -640,7 +644,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
           onWillAcceptWithDetails: (_) => _draggingId != null,
           onMove: (details) => _onMove(details.offset),
           builder: (context, candidateData, rejectedData) {
-            return Wrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+            return _ReorderWrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
           },
         ),
       ),
@@ -778,6 +782,96 @@ class _RenderFlipMover extends RenderProxyBox {
     }
     super.paint(context, offset + _paintedOffset);
   }
+}
+
+// A [Wrap] that paints one flagged child last (on top of its siblings) while
+// laying everything out exactly as a plain [Wrap] would. Used so the dragged
+// chip's placeholder, which slides across its neighbours during a reorder, stays
+// in front of them (with its glow) instead of being covered as they cross.
+class _ReorderWrap extends Wrap {
+  const _ReorderWrap({super.runSpacing, super.crossAxisAlignment, super.children});
+
+  @override
+  _RenderReorderWrap createRenderObject(BuildContext context) {
+    return _RenderReorderWrap(
+      direction: direction,
+      alignment: alignment,
+      spacing: spacing,
+      runAlignment: runAlignment,
+      runSpacing: runSpacing,
+      crossAxisAlignment: crossAxisAlignment,
+      textDirection: textDirection ?? Directionality.maybeOf(context),
+      verticalDirection: verticalDirection,
+      clipBehavior: clipBehavior,
+    );
+  }
+}
+
+// Carries the per-child "paint me last" flag on top of the standard wrap layout
+// data.
+class _ReorderWrapParentData extends WrapParentData {
+  bool paintLast = false;
+}
+
+class _RenderReorderWrap extends RenderWrap {
+  _RenderReorderWrap({
+    super.direction,
+    super.alignment,
+    super.spacing,
+    super.runAlignment,
+    super.runSpacing,
+    super.crossAxisAlignment,
+    super.textDirection,
+    super.verticalDirection,
+    super.clipBehavior,
+  });
+
+  @override
+  void setupParentData(RenderBox child) {
+    if (child.parentData is! _ReorderWrapParentData) {
+      child.parentData = _ReorderWrapParentData();
+    }
+  }
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    // The wraps here use the default clipBehavior (Clip.none), so this mirrors
+    // defaultPaint: paint every non-flagged child in order, then the flagged one
+    // last so it lands on top. If a clipping clipBehavior is ever needed, this
+    // must grow a clip branch like RenderWrap.paint.
+    RenderBox? top;
+    var child = firstChild;
+    while (child != null) {
+      final childParentData = child.parentData! as _ReorderWrapParentData;
+      if (childParentData.paintLast) {
+        top = child;
+      } else {
+        context.paintChild(child, childParentData.offset + offset);
+      }
+      child = childParentData.nextSibling;
+    }
+    if (top != null) {
+      final topParentData = top.parentData! as _ReorderWrapParentData;
+      context.paintChild(top, topParentData.offset + offset);
+    }
+  }
+}
+
+// Marks its child to be painted last (in front) by an enclosing [_ReorderWrap].
+class _PaintOnTop extends ParentDataWidget<WrapParentData> {
+  const _PaintOnTop({required super.child});
+
+  @override
+  void applyParentData(RenderObject renderObject) {
+    final parentData = renderObject.parentData! as _ReorderWrapParentData;
+    if (!parentData.paintLast) {
+      parentData.paintLast = true;
+      renderObject.parent?.markNeedsPaint();
+    }
+  }
+
+  @override
+  Type get debugTypicalAncestorWidgetClass => _ReorderWrap;
 }
 
 // Strokes a rounded rectangle with a dashed outline. Used for the empty logic
