@@ -632,7 +632,8 @@
                             "strategy": "脚質",
                             "weather": "天候",
                             "record_type": "レコード種別",
-                            "support_rank": "サポカランク"
+                            "support_rank": "サポカランク",
+                            "icon": "アイコン"
                         }
                     }
                 },

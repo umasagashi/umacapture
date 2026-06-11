@@ -467,7 +467,7 @@ const _iconWidthReserve = 'MM';
 const Map<String, IconData> _iconMap = {
   'cross': Symbols.close_rounded, // ×
   'circle': Symbols.circle_rounded, // ○
-  'double_circle': Symbols.radio_button_checked_rounded, // ◎
+  'double_circle': Symbols.circle_circle_rounded, // ◎
   'check': Symbols.check_rounded, // ✓
   'star': Symbols.star_rounded, // ☆ (outline)
   'favorite': Symbols.favorite_rounded, // ♡ (outline)
@@ -853,7 +853,18 @@ class _LookupCategory {
   final String? category;
   final Map<String, int> codeByName;
 
-  const _LookupCategory(this.path, this.hintKey, this.names, {this.category, this.codeByName = const {}});
+  /// When true, [names] are [_iconMap] keys: the picker renders each chip with
+  /// its glyph as the avatar so the user can match a Cell `icon` key to its look.
+  final bool showIcon;
+
+  const _LookupCategory(
+    this.path,
+    this.hintKey,
+    this.names, {
+    this.category,
+    this.codeByName = const {},
+    this.showIcon = false,
+  });
 }
 
 /// Drops blanks and removes duplicates while preserving first-seen order.
@@ -926,6 +937,8 @@ List<_LookupCategory> _buildLookupCategories(LabelMap labels, List<String> chara
     coded('r.races[].weather.name', 'weather', 'weather', label('race_weather.name')),
     coded('r.metadata.recordType.name', 'record_type', 'record_type', label(LabelKeys.recordType)),
     coded('r.supportCards[].rank.name', 'support_rank', 'support_rank', _supportCardRanks),
+    // Not an accessor: the keys a Cell's `icon` field accepts (see [_iconMap]).
+    _LookupCategory('icon', 'icon', _iconMap.keys.toList(), showIcon: true),
   ];
 }
 
@@ -1062,6 +1075,7 @@ class _NameLookupState extends ConsumerState<_NameLookup> {
                   if (matched.isEmpty) Text("$_trCommonSelector.not_found_message".tr()),
                   for (final name in reduced)
                     ActionChip(
+                      avatar: category.showIcon ? Icon(_iconMap[name], size: 18) : null,
                       label: Text(name),
                       backgroundColor: theme.colorScheme.surfaceContainerLow,
                       onPressed: () => _copyName(name),
