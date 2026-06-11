@@ -91,8 +91,6 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
     String? id,
     String? title,
     Parser? parser,
-    int? valueMin,
-    int? valueMax,
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
