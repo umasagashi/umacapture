@@ -124,6 +124,12 @@ class RangedIntegerColumnSpecMapper
     opt: true,
     def: false,
   );
+  static String? _$description(RangedIntegerColumnSpec v) => v.description;
+  static const Field<RangedIntegerColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<RangedIntegerColumnSpec> fields = const {
@@ -133,7 +139,10 @@ class RangedIntegerColumnSpecMapper
     #predicate: _f$predicate,
     #cellAction: _f$cellAction,
     #hidden: _f$hidden,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -155,6 +164,7 @@ class RangedIntegerColumnSpecMapper
       predicate: data.dec(_f$predicate),
       cellAction: data.dec(_f$cellAction),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

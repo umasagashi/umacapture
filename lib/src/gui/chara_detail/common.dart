@@ -79,6 +79,12 @@ class DenseTextField extends ConsumerStatefulWidget {
   final bool allowEmpty;
   final String? hintText;
 
+  /// Minimum width the field keeps even when empty or holding short text. Null
+  /// leaves the field sized purely to its content (the default `IntrinsicWidth`
+  /// behaviour); a value gives free-text fields a comfortable starting width that
+  /// still grows with longer input.
+  final double? minWidth;
+
   const DenseTextField({
     super.key,
     this.initialText,
@@ -87,6 +93,7 @@ class DenseTextField extends ConsumerStatefulWidget {
     this.debounce,
     this.allowEmpty = false,
     this.hintText,
+    this.minWidth,
   }) : assert((initialText == null) != (controller == null));
 
   @override
@@ -114,7 +121,7 @@ class DenseTextFieldState extends ConsumerState<DenseTextField> {
 
   @override
   Widget build(BuildContext context) {
-    return IntrinsicWidth(
+    Widget field = IntrinsicWidth(
       child: TextFormField(
         controller: controller,
         decoration: InputDecoration(
@@ -136,6 +143,13 @@ class DenseTextFieldState extends ConsumerState<DenseTextField> {
         },
       ),
     );
+    if (widget.minWidth != null) {
+      field = ConstrainedBox(
+        constraints: BoxConstraints(minWidth: widget.minWidth!),
+        child: field,
+      );
+    }
+    return field;
   }
 }
 

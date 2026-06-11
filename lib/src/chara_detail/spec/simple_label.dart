@@ -19,6 +19,10 @@ part 'simple_label.mapper.dart';
 // ignore: constant_identifier_names
 const tr_simple_label = "pages.chara_detail.column_predicate.simple_label";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableClass()
 class SimpleLabelPredicate with SimpleLabelPredicateMappable {
   final Set<int> rejects;
@@ -44,7 +48,7 @@ class SimpleLabelCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'SimpleLabelColumnSpec')
+@MappableClass(discriminatorValue: 'SimpleLabelColumnSpec', ignoreNull: true)
 class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMappable {
   final Parser parser;
   final String labelKey;
@@ -62,6 +66,9 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   @override
   final bool hidden;
 
+  @override
+  final String? description;
+
   SimpleLabelColumnSpec({
     required this.id,
     required this.title,
@@ -70,10 +77,14 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
     required this.predicate,
     ColumnSpecCellAction? cellAction,
     this.hidden = false,
+    this.description,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   SimpleLabelColumnSpec copyWith({
     String? id,
@@ -82,6 +93,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
     String? labelKey,
     SimpleLabelPredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return SimpleLabelColumnSpec(
       id: id ?? this.id,
@@ -90,6 +102,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
       labelKey: labelKey ?? this.labelKey,
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -245,6 +258,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

@@ -112,6 +112,12 @@ class LogicColumnSpecMapper extends SubClassMapperBase<LogicColumnSpec> {
     opt: true,
     def: false,
   );
+  static String? _$description(LogicColumnSpec v) => v.description;
+  static const Field<LogicColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<LogicColumnSpec> fields = const {
@@ -120,7 +126,10 @@ class LogicColumnSpecMapper extends SubClassMapperBase<LogicColumnSpec> {
     #logic: _f$logic,
     #children: _f$children,
     #hidden: _f$hidden,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -141,6 +150,7 @@ class LogicColumnSpecMapper extends SubClassMapperBase<LogicColumnSpec> {
       logic: data.dec(_f$logic),
       children: data.dec(_f$children),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

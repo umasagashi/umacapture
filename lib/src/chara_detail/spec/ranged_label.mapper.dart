@@ -58,6 +58,12 @@ class RangedLabelColumnSpecMapper
     opt: true,
     def: false,
   );
+  static String? _$description(RangedLabelColumnSpec v) => v.description;
+  static const Field<RangedLabelColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
 
   @override
   final MappableFields<RangedLabelColumnSpec> fields = const {
@@ -68,7 +74,10 @@ class RangedLabelColumnSpecMapper
     #predicate: _f$predicate,
     #cellAction: _f$cellAction,
     #hidden: _f$hidden,
+    #description: _f$description,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -91,6 +100,7 @@ class RangedLabelColumnSpecMapper
       predicate: data.dec(_f$predicate),
       cellAction: data.dec(_f$cellAction),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

@@ -255,7 +255,12 @@
                             "label": "テーブルに表示",
                             "tooltip": "オフにするとテーブルで列を非表示にします。非表示にしてもフィルタは常に有効です。"
                         },
-                        "hidden_marker": "非表示"
+                        "hidden_marker": "非表示",
+                        "tooltip_field": {
+                            "label": "説明",
+                            "tooltip": "列チップにマウスを乗せたときに表示される説明文です。",
+                            "empty": "説明がありません"
+                        }
                     }
                 },
                 "ranged_label": {
@@ -512,9 +517,6 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
-                        },
-                        "tooltip_field": {
-                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -551,9 +553,6 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "表示名"
-                        },
-                        "tooltip_field": {
-                            "label": "ツールチップ"
                         }
                     },
                     "storage": {
@@ -570,13 +569,7 @@
                         "description": "列の表示方法を指定します。",
                         "title": {
                             "label": "タイトル"
-                        },
-                        "tooltip_field": {
-                            "label": "説明"
                         }
-                    },
-                    "tooltip": {
-                        "empty": "説明がありません"
                     },
                     "code": {
                         "label": "コード",

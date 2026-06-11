@@ -53,6 +53,12 @@ class CharaRankColumnSpecMapper
     opt: true,
     def: false,
   );
+  static String? _$description(CharaRankColumnSpec v) => v.description;
+  static const Field<CharaRankColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
   static ColumnSpecCellAction _$cellAction(CharaRankColumnSpec v) =>
       v.cellAction;
   static const Field<CharaRankColumnSpec, ColumnSpecCellAction> _f$cellAction =
@@ -66,8 +72,11 @@ class CharaRankColumnSpecMapper
     #labelKey: _f$labelKey,
     #predicate: _f$predicate,
     #hidden: _f$hidden,
+    #description: _f$description,
     #cellAction: _f$cellAction,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -85,6 +94,7 @@ class CharaRankColumnSpecMapper
       labelKey: data.dec(_f$labelKey),
       predicate: data.dec(_f$predicate),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

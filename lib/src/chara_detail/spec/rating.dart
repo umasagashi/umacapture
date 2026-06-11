@@ -77,6 +77,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   /// condition. Null/empty means "no tooltip"; omitted from the serialized map
   /// (via the class-level `ignoreNull`) so pre-existing specs are never flagged
   /// as broken by [isSpecMapIncomplete].
+  @override
   final String? description;
 
   @override
@@ -99,6 +100,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   RatingColumnSpec copyWith({
     String? id,
@@ -161,11 +165,11 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   String tooltip(RefBase ref) {
-    final filter = (predicate.min == null && predicate.max == null)
+    // The user note ([description]) is prepended centrally by the chip's tooltip
+    // composition, so this returns only the filter condition.
+    return (predicate.min == null && predicate.max == null)
         ? "Any"
         : "Range: [${predicate.min ?? "Any"}, ${predicate.max ?? "Any"}]";
-    final desc = description?.trim() ?? "";
-    return desc.isEmpty ? filter : "$desc\n──────────\n$filter";
   }
 
   @override
@@ -426,17 +430,15 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
-  late String description;
 
   @override
   void initState() {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
-    description = spec.description ?? "";
     widget.onDecided.addListener(() {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
-        return spec.copyWith(title: title, description: description.trim().isEmpty ? null : description.trim());
+        return spec.copyWith(title: title);
       });
 
       final ratingController = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
@@ -470,18 +472,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
-        FormLine(
-          title: Text("$tr_rating.notation.tooltip_field.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: description,
-              allowEmpty: true,
-              onChanged: (value) {
-                description = value;
-              },
-            ),
-          ],
-        ),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

@@ -71,6 +71,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   /// condition. Null/empty means "no tooltip"; omitted from the serialized map
   /// (via the class-level `ignoreNull`) so pre-existing specs are never flagged
   /// as broken by [isSpecMapIncomplete].
+  @override
   final String? description;
 
   @override
@@ -91,6 +92,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   MemoColumnSpec copyWith({
     String? id,
@@ -162,9 +166,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   String tooltip(RefBase ref) {
-    final filter = (predicate.pattern?.pattern.isEmpty ?? true) ? "Any" : 'Pattern: "${predicate.pattern?.pattern}"';
-    final desc = description?.trim() ?? "";
-    return desc.isEmpty ? filter : "$desc\n──────────\n$filter";
+    // The user note ([description]) is prepended centrally by the chip's tooltip
+    // composition, so this returns only the filter condition.
+    return (predicate.pattern?.pattern.isEmpty ?? true) ? "Any" : 'Pattern: "${predicate.pattern?.pattern}"';
   }
 
   @override
@@ -324,17 +328,15 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
-  late String description;
 
   @override
   void initState() {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
-    description = spec.description ?? "";
     widget.onDecided.addListener(() {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
-        return spec.copyWith(title: title, description: description.trim().isEmpty ? null : description.trim());
+        return spec.copyWith(title: title);
       });
 
       final memoController = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
@@ -377,18 +379,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
-        FormLine(
-          title: Text("$tr_memo.notation.tooltip_field.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: description,
-              allowEmpty: true,
-              onChanged: (value) {
-                description = value;
-              },
-            ),
-          ],
-        ),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

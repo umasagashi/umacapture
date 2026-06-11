@@ -22,6 +22,10 @@ part 'character.mapper.dart';
 // ignore: constant_identifier_names
 const tr_character = "pages.chara_detail.column_predicate.character";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableClass()
 class CharacterCardPredicate with CharacterCardPredicateMappable {
   final Set<int> rejects;
@@ -47,7 +51,7 @@ class CharacterCardCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'CharacterCardColumnSpec')
+@MappableClass(discriminatorValue: 'CharacterCardColumnSpec', ignoreNull: true)
 class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSpecMappable {
   final Parser parser;
   final CharacterCardPredicate predicate;
@@ -62,6 +66,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   final bool hidden;
 
   @override
+  final String? description;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   CharacterCardColumnSpec({
@@ -70,10 +77,14 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
     required this.parser,
     required this.predicate,
     this.hidden = false,
+    this.description,
   });
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   CharacterCardColumnSpec copyWith({
     String? id,
@@ -81,6 +92,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
     Parser? parser,
     CharacterCardPredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return CharacterCardColumnSpec(
       id: id ?? this.id,
@@ -88,6 +100,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       parser: parser ?? this.parser,
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -398,6 +411,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

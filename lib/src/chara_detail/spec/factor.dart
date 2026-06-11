@@ -23,6 +23,10 @@ part 'factor.mapper.dart';
 // ignore: constant_identifier_names
 const tr_factor = "pages.chara_detail.column_predicate.factor";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableEnum()
 enum FactorSetLogicMode { anyOf, allOf, mixed }
 
@@ -237,7 +241,7 @@ class FactorCellData implements CellData {
 @MappableEnum()
 enum FactorDialogElements { selectionTags, modeLogic }
 
-@MappableClass(discriminatorValue: 'FactorColumnSpec')
+@MappableClass(discriminatorValue: 'FactorColumnSpec', ignoreNull: true)
 class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable {
   final Parser parser;
   final String labelKey = LabelKeys.factor;
@@ -257,6 +261,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   final bool hidden;
 
   @override
+  final String? description;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   FactorColumnSpec({
@@ -268,10 +275,14 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
     this.hidden = false,
+    this.description,
   });
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   FactorColumnSpec copyWith({
     String? id,
@@ -282,6 +293,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     bool? showAvailableOnly,
     Set<FactorDialogElements>? hiddenElements,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return FactorColumnSpec(
       id: id ?? this.id,
@@ -292,6 +304,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -743,6 +756,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
         notationMaxWidget(ref),
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

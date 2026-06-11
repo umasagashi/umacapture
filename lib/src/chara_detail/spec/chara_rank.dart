@@ -11,7 +11,11 @@ import '/src/core/utils.dart';
 
 part 'chara_rank.mapper.dart';
 
-@MappableClass(discriminatorValue: 'CharaRankColumnSpec')
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
+@MappableClass(discriminatorValue: 'CharaRankColumnSpec', ignoreNull: true)
 class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpecMappable {
   CharaRankColumnSpec({
     required super.id,
@@ -20,6 +24,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     required super.labelKey,
     required super.predicate,
     super.hidden,
+    super.description,
   });
 
   @override
@@ -44,6 +49,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     String? labelKey,
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return CharaRankColumnSpec(
       id: id ?? this.id,
@@ -52,6 +58,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
       labelKey: labelKey ?? this.labelKey,
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 }

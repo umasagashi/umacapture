@@ -19,6 +19,10 @@ part 'ranged_integer.mapper.dart';
 // ignore: constant_identifier_names
 const tr_ranged_integer = "pages.chara_detail.column_predicate.ranged_integer";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 @MappableClass()
 class IsInRangeIntegerPredicate with IsInRangeIntegerPredicateMappable {
   final int? min;
@@ -47,7 +51,7 @@ class RangedIntegerCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'RangedIntegerColumnSpec')
+@MappableClass(discriminatorValue: 'RangedIntegerColumnSpec', ignoreNull: true)
 class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSpecMappable {
   final Parser parser;
   final IsInRangeIntegerPredicate predicate;
@@ -64,6 +68,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   @override
   final bool hidden;
 
+  @override
+  final String? description;
+
   RangedIntegerColumnSpec({
     required this.id,
     required this.title,
@@ -71,10 +78,14 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
     required this.predicate,
     ColumnSpecCellAction? cellAction,
     this.hidden = false,
+    this.description,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   RangedIntegerColumnSpec copyWith({
     String? id,
@@ -84,6 +95,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
     int? valueMax,
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return RangedIntegerColumnSpec(
       id: id ?? this.id,
@@ -92,6 +104,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
       predicate: predicate ?? this.predicate,
       cellAction: cellAction,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -231,6 +244,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }

@@ -198,17 +198,28 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     return spec.hidden ? Opacity(opacity: 0.6, child: child) : child;
   }
 
-  // The chip's tooltip: the spec's own tooltip (or the broken notice), with a
-  // "hidden" marker appended below a horizontal rule when the column is hidden
-  // from the grid, so hovering a faded chip explains why it shows no column.
+  // The chip's tooltip. For a healthy column it composes the user's note
+  // ([ColumnSpec.description], prepended above a horizontal rule) with the spec's
+  // own filter tooltip — the single place every column's note is surfaced, so the
+  // specs no longer embed it themselves. When both are empty (only a script column
+  // with no note can be) a localized "no description" fallback is shown. A broken
+  // column keeps the broken notice instead. A "hidden" marker is appended below a
+  // rule when the column is hidden from the grid, so hovering a faded chip explains
+  // why it shows no column.
   String _tooltipFor(ColumnSpec spec) {
-    final base = _brokenIds.contains(spec.id)
-        ? "$tr_chara_detail.column_predicate.broken.tooltip".tr()
-        : spec.tooltip(ref.base);
-    if (!spec.hidden) {
-      return base;
+    final String text;
+    if (_brokenIds.contains(spec.id)) {
+      text = "$tr_chara_detail.column_predicate.broken.tooltip".tr();
+    } else {
+      final base = spec.tooltip(ref.base);
+      final desc = spec.description?.trim() ?? "";
+      final composed = desc.isEmpty ? base : (base.isEmpty ? desc : "$desc\n──────────\n$base");
+      text = composed.isEmpty ? "$tr_chara_detail.column_predicate.common.notation.tooltip_field.empty".tr() : composed;
     }
-    return "$base\n──────────\n${"$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr()}";
+    if (!spec.hidden) {
+      return text;
+    }
+    return "$text\n──────────\n${"$tr_chara_detail.column_predicate.common.notation.hidden_marker".tr()}";
   }
 
   // The logic column's operator name, rendered as plain text fused into the

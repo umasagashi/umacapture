@@ -549,6 +549,12 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     opt: true,
     def: false,
   );
+  static String? _$description(FactorColumnSpec v) => v.description;
+  static const Field<FactorColumnSpec, String> _f$description = Field(
+    'description',
+    _$description,
+    opt: true,
+  );
   static String _$labelKey(FactorColumnSpec v) => v.labelKey;
   static const Field<FactorColumnSpec, String> _f$labelKey = Field(
     'labelKey',
@@ -566,8 +572,11 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
     #hidden: _f$hidden,
+    #description: _f$description,
     #labelKey: _f$labelKey,
   };
+  @override
+  final bool ignoreNull = true;
 
   @override
   final String discriminatorKey = 'type';
@@ -591,6 +600,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
       hidden: data.dec(_f$hidden),
+      description: data.dec(_f$description),
     );
   }
 

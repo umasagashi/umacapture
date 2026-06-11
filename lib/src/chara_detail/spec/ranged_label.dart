@@ -21,6 +21,10 @@ part 'ranged_label.mapper.dart';
 // ignore: constant_identifier_names
 const tr_ranged_label = "pages.chara_detail.column_predicate.ranged_label";
 
+// Sentinel marking "argument not provided" in copyWith, so a description can be
+// explicitly cleared back to null (which `?? this` would never allow).
+const _unset = Object();
+
 class RangedLabelCellData implements CellData {
   final String label;
 
@@ -33,7 +37,7 @@ class RangedLabelCellData implements CellData {
   Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
 }
 
-@MappableClass(discriminatorValue: 'RangedLabelColumnSpec')
+@MappableClass(discriminatorValue: 'RangedLabelColumnSpec', ignoreNull: true)
 class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMappable {
   final Parser parser;
   final String labelKey;
@@ -51,6 +55,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   final bool hidden;
 
+  @override
+  final String? description;
+
   RangedLabelColumnSpec({
     required this.id,
     required this.title,
@@ -59,10 +66,14 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     required this.predicate,
     ColumnSpecCellAction? cellAction,
     this.hidden = false,
+    this.description,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
+
+  @override
+  ColumnSpec withDescription(String? description) => copyWith(description: description);
 
   RangedLabelColumnSpec copyWith({
     String? id,
@@ -71,6 +82,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     String? labelKey,
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
+    Object? description = _unset,
   }) {
     return RangedLabelColumnSpec(
       id: id ?? this.id,
@@ -79,6 +91,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       labelKey: labelKey ?? this.labelKey,
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
+      description: identical(description, _unset) ? this.description : description as String?,
     );
   }
 
@@ -220,6 +233,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           ],
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
+        ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
       ],
     );
   }
