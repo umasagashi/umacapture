@@ -112,10 +112,13 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
 
   /// Combine per-child condition lists ([childConditions], each one bool per row)
   /// into a single per-row condition according to [logic]. With no children the
-  /// column is inert and passes every row.
+  /// column folds to the operator's identity (empty OR/XOR/NAND = false,
+  /// empty AND/NOR/XNOR/NOT = true).
   List<bool> combine(List<List<bool>> childConditions, int rowCount) {
     if (childConditions.isEmpty) {
-      return List<bool>.filled(rowCount, true);
+      // Kept in lockstep with [LogicMode.apply] so an empty column filters
+      // consistently with how a populated one would for the same operator.
+      return List<bool>.filled(rowCount, logic.apply(const <bool>[]));
     }
     return childConditions.transpose().map(logic.apply).toList();
   }
