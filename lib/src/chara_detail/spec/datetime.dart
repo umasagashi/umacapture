@@ -174,7 +174,10 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     final records = ref.read(charaDetailRecordStorageProvider);
-    range = spec.parse(ref.base, records).range();
+    // range() throws on an empty list, so fall back to "today" when there are no
+    // records yet (mirrors the empty-records guard in the ranged-int/label selectors).
+    final today = DateTime.now();
+    range = records.isEmpty ? Range<DateTime>(min: today, max: today) : spec.parse(ref.base, records).range();
     _focusedDay = range.max;
   }
 
