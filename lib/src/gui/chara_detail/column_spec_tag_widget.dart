@@ -312,13 +312,29 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final selected = active && _currentSlot == slot;
     return _slot(
       key,
-      CustomPaint(
-        painter: _DashedRRectPainter(color: theme.colorScheme.primary),
-        child: selected
-            ? IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true))
-            : const SizedBox(width: 40, height: 32),
-      ),
+      selected
+          ? CustomPaint(
+              painter: _DashedRRectPainter(color: theme.colorScheme.primary),
+              child: IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true)),
+            )
+          : _emptySlotBox(context),
       gap: false,
+    );
+  }
+
+  // The resting look of an empty logic container's inner slot: a dashed, rounded
+  // box with the `place_item` glyph. Shared by [_emptyDropSlot] and by
+  // [_staticContent] so a dragged empty container's placeholder keeps this look
+  // instead of collapsing to a bare label.
+  Widget _emptySlotBox(BuildContext context) {
+    final theme = Theme.of(context);
+    return CustomPaint(
+      painter: _DashedRRectPainter(color: theme.colorScheme.primary),
+      child: SizedBox(
+        width: 40,
+        height: 32,
+        child: Center(child: Icon(Symbols.place_item_rounded, size: 18, color: theme.colorScheme.primary)),
+      ),
     );
   }
 
@@ -331,6 +347,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     }
     return _logicContainer(context, [
       _spaced(_logicLabel(context, spec, highlight: highlight)),
+      // No trailing gap: matches the live empty slot ([_emptyDropSlot] uses
+      // gap: false) so a dragged empty container's placeholder is the same width.
+      if (spec.children.isEmpty) _emptySlotBox(context),
       for (final child in spec.children) _spaced(_staticContent(context, child, highlight: highlight)),
     ], highlight: highlight);
   }
