@@ -1485,7 +1485,7 @@ class ScriptColumnBuilder extends ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       source:
-          "bool filter(CharaRecord r) {\n  return true;\n}\n\ndynamic display(CharaRecord r) {\n  return r.status.speed;\n}\n",
+          "bool filter(CharaRecord r) {\n  return true;\n}\n\ndynamic display(CharaRecord r) {\n  return \"-\";\n}\n",
     );
   }
 }
