@@ -1,6 +1,7 @@
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
@@ -244,7 +245,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
             Tooltip(
               message: "$tr_memo.dialog.ok_button.tooltip".tr(),
               child: FilledButton.icon(
-                icon: const Icon(Icons.check_circle),
+                icon: const Icon(Symbols.check_circle_rounded),
                 label: Text("$tr_memo.dialog.ok_button.label".tr()),
                 onPressed: () {
                   memoStorage.update(recordId: record.id, memo: controller.text);

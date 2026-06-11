@@ -2,6 +2,7 @@ import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
@@ -273,7 +274,7 @@ class _CharacterCardSelectorState extends ConsumerState<_CharacterCardSelector> 
         children: [
           ActionChip(
             padding: padding,
-            avatar: const Icon(Icons.select_all, size: 20),
+            avatar: const Icon(Symbols.select_all_rounded, size: 20),
             label: Text("$tr_common.selector.control.select_all.label".tr()),
             tooltip: "$tr_common.selector.control.select_all.tooltip".tr(),
             side: BorderSide.none,
@@ -291,7 +292,7 @@ class _CharacterCardSelectorState extends ConsumerState<_CharacterCardSelector> 
           ),
           ActionChip(
             padding: padding,
-            avatar: const Icon(Icons.deselect, size: 20),
+            avatar: const Icon(Symbols.deselect_rounded, size: 20),
             label: Text("$tr_common.selector.control.deselect_all.label".tr()),
             tooltip: "$tr_common.selector.control.deselect_all.tooltip".tr(),
             side: BorderSide.none,

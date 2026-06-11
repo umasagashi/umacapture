@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
@@ -77,7 +78,7 @@ class _Sidebar extends ConsumerWidget {
           right: 0,
           child: TextButton(
             style: ButtonStyle(shape: WidgetStateProperty.all(const RoundedRectangleBorder())),
-            child: Icon(isExtended ? Icons.chevron_left : Icons.chevron_right),
+            child: Icon(isExtended ? Symbols.chevron_left_rounded : Symbols.chevron_right_rounded),
             onPressed: () => ref.read(sidebarExtendedStateProvider.notifier).toggle(),
           ),
         ),
@@ -289,6 +290,17 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         labelLarge: modifyFontWeight(base.textTheme.labelLarge, offset),
         labelMedium: modifyFontWeight(base.textTheme.labelMedium, offset),
         labelSmall: modifyFontWeight(base.textTheme.labelSmall, offset),
+      ),
+      iconTheme: base.iconTheme.copyWith(weight: 600),
+      // NavigationRail replaces (does not merge) the ambient IconTheme for its
+      // destinations, so the global iconTheme weight above never reaches the
+      // sidebar icons. Re-apply the weight on the rail's own icon themes while
+      // preserving the size/color FlexColorScheme set.
+      navigationRailTheme: base.navigationRailTheme.copyWith(
+        selectedIconTheme: (base.navigationRailTheme.selectedIconTheme ?? const IconThemeData()).copyWith(weight: 600),
+        unselectedIconTheme: (base.navigationRailTheme.unselectedIconTheme ?? const IconThemeData()).copyWith(
+          weight: 600,
+        ),
       ),
     );
   }

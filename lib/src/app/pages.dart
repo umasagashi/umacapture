@@ -1,6 +1,7 @@
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/app/route.dart';
 
@@ -18,32 +19,32 @@ class Pages {
     PageLabel(
       route: const DashboardRoute(),
       label: "pages.dashboard.title".tr(),
-      selectedIcon: const Icon(Icons.dashboard),
-      unselectedIcon: const Icon(Icons.dashboard_outlined),
+      selectedIcon: const Icon(Symbols.dashboard_rounded, fill: 1),
+      unselectedIcon: const Icon(Symbols.dashboard_rounded),
     ),
     PageLabel(
       route: const CaptureRoute(),
       label: "pages.capture.title".tr(),
-      selectedIcon: const Icon(Icons.videocam),
-      unselectedIcon: const Icon(Icons.videocam_outlined),
+      selectedIcon: const Icon(Symbols.videocam_rounded, fill: 1),
+      unselectedIcon: const Icon(Symbols.videocam_rounded),
     ),
     PageLabel(
       route: const CharaDetailRoute(),
       label: "pages.chara_detail.title".tr(),
-      selectedIcon: const Icon(Icons.manage_search),
-      unselectedIcon: const Icon(Icons.manage_search_outlined),
+      selectedIcon: const Icon(Symbols.database_search_rounded, fill: 1),
+      unselectedIcon: const Icon(Symbols.database_search_rounded),
     ),
     PageLabel(
       route: const AddonRoute(),
       label: "pages.addon.title".tr(),
-      selectedIcon: const Icon(Icons.extension),
-      unselectedIcon: const Icon(Icons.extension_outlined),
+      selectedIcon: const Icon(Symbols.extension_rounded, fill: 1),
+      unselectedIcon: const Icon(Symbols.extension_rounded),
     ),
     PageLabel(
       route: const SettingsRoute(),
       label: "pages.settings.title".tr(),
-      selectedIcon: const Icon(Icons.settings),
-      unselectedIcon: const Icon(Icons.settings_outlined),
+      selectedIcon: const Icon(Symbols.settings_rounded, fill: 1),
+      unselectedIcon: const Icon(Symbols.settings_rounded),
     ),
   ];
 

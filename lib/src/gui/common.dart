@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback_sentry/feedback_sentry.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/sentry_util.dart';
@@ -340,7 +341,7 @@ class CardDialog extends ConsumerWidget {
                 : Tooltip(
                     message: closeButtonTooltip,
                     child: IconButton(
-                      icon: Icon(Icons.close, color: theme.colorScheme.onPrimary),
+                      icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onPrimary),
                       splashRadius: 24,
                       onPressed: () {
                         CardDialog.dismiss(ref.base);

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/utils.dart';
@@ -52,10 +53,10 @@ class Toaster {
     ToastType.error: const Duration(seconds: 15),
   };
   final Map<ToastType, IconData> iconMap = {
-    ToastType.success: Icons.check_circle,
-    ToastType.info: Icons.info,
-    ToastType.warning: Icons.warning,
-    ToastType.error: Icons.dangerous,
+    ToastType.success: Symbols.check_circle_rounded,
+    ToastType.info: Symbols.info_rounded,
+    ToastType.warning: Symbols.warning_rounded,
+    ToastType.error: Symbols.dangerous_rounded,
   };
   final Map<ToastType, Color> colorMap = {
     ToastType.success: Colors.green.shade500,

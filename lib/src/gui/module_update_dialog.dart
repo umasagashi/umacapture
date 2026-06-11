@@ -3,6 +3,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:pasteboard/pasteboard.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -139,7 +140,7 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
               child: Tooltip(
                 message: "$tr_module_update.dialog.pick_button.tooltip".tr(),
                 child: FilledButton.icon(
-                  icon: const Icon(Icons.folder_open),
+                  icon: const Icon(Symbols.folder_open_rounded),
                   label: Text("$tr_module_update.dialog.pick_button.label".tr()),
                   onPressed: _installing ? null : _pickFile,
                 ),
@@ -198,12 +199,12 @@ class _DownloadSource extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.content_copy),
+            icon: const Icon(Symbols.content_copy_rounded),
             tooltip: "$tr_module_update.dialog.copy_tooltip".tr(),
             onPressed: _copy,
           ),
           IconButton(
-            icon: const Icon(Icons.open_in_browser),
+            icon: const Icon(Symbols.open_in_browser_rounded),
             tooltip: "$tr_module_update.dialog.open_tooltip".tr(),
             onPressed: _open,
           ),
@@ -229,7 +230,7 @@ class _WarningCard extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber, color: theme.colorScheme.onErrorContainer),
+          Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -283,7 +284,7 @@ class _DropZone extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.file_upload_outlined, size: 36, color: theme.colorScheme.primary),
+            Icon(Symbols.file_upload_rounded, size: 36, color: theme.colorScheme.primary),
             const SizedBox(height: 8),
             Text(
               "$tr_module_update.dialog.drop_zone".tr(),

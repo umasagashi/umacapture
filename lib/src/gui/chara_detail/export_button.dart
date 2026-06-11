@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/exporter.dart';
@@ -51,7 +52,7 @@ class CharaDetailExportButton extends ConsumerWidget {
             child: PopupMenuButton<int>(
               enabled: ref.watch(charaDetailRecordStorageProvider).isNotEmpty,
               padding: EdgeInsets.zero,
-              icon: const Icon(Icons.download),
+              icon: const Icon(Symbols.download_rounded),
               tooltip: "$tr_chara_detail.export.button_tooltip".tr(),
               splashRadius: 24,
               position: PopupMenuPosition.under,

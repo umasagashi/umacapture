@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -100,7 +101,7 @@ class _WindowCaptionAltState extends ConsumerState<WindowCaptionAlt> with Window
           ),
           if (isFeedbackAvailable(ref))
             WindowCaptionButtonAlt(
-              icon: Icon(Icons.feedback_outlined, size: 20, color: theme.colorScheme.onSurface),
+              icon: Icon(Symbols.feedback_rounded, size: 20, color: theme.colorScheme.onSurface),
               tooltip: "app.feedback.tooltip".tr(),
               onPressed: () {
                 showFeedbackDialog(context);

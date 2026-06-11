@@ -1,6 +1,7 @@
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
@@ -164,7 +165,11 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
       readOnly: true,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<LogicCellData>()!;
-        return Icon(data.passed ? Icons.check : Icons.close, color: data.passed ? Colors.green : Colors.red, size: 18);
+        return Icon(
+          data.passed ? Symbols.check_rounded : Symbols.close_rounded,
+          color: data.passed ? Colors.green : Colors.red,
+          size: 18,
+        );
       },
     )..setUserData(this);
   }

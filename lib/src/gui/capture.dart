@@ -4,6 +4,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
 import '/src/app/route.dart';
@@ -340,9 +341,9 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
     _Requirement.insufficient: Colors.red.shade500,
   };
   final iconMap = {
-    _Requirement.good: Icons.check,
-    _Requirement.unsure: Icons.warning_amber,
-    _Requirement.insufficient: Icons.block,
+    _Requirement.good: Symbols.check_rounded,
+    _Requirement.unsure: Symbols.warning_rounded,
+    _Requirement.insufficient: Symbols.block_rounded,
   };
 
   Widget chip({

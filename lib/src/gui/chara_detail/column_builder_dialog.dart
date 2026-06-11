@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
 
@@ -23,7 +24,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
 
   Widget addAllChipWidget(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
     return ActionChip(
-      avatar: const Icon(Icons.auto_awesome_motion_outlined, size: 16),
+      avatar: const Icon(Symbols.auto_awesome_motion_rounded, size: 16),
       labelPadding: const EdgeInsets.only(right: 8),
       label: Text("$tr_chara_detail.column_spec.dialog.add_all_button.label".tr()),
       tooltip: "$tr_chara_detail.column_spec.dialog.add_all_button.tooltip".tr(),

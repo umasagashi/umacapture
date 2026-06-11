@@ -1,6 +1,7 @@
 import 'package:badges/badges.dart' as badges;
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
@@ -19,6 +20,10 @@ const tr_chara_detail = "pages.chara_detail";
 // via Wrap.spacing, so the collapsed dragged chip (rendered without it) leaves
 // no stray gap behind in the flow.
 const double _chipGap = 4;
+
+// Approximate height of an ActionChip in this view. The plain-text logic-operator
+// label and the empty-slot box are sized to it so they line up with sibling chips.
+const double _chipHeight = 32;
 
 // Deadband (in pixels) around a chip's centre within which the placeholder does
 // not switch sides, so it doesn't flicker when the pointer hovers right on the
@@ -170,7 +175,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
         GestureDetector(
           onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
           child: ActionChip(
-            avatar: broken ? Icon(Icons.warning_amber_rounded, color: theme.colorScheme.onErrorContainer) : null,
+            avatar: broken ? Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer) : null,
             label: spec.label(),
             tooltip: _tooltipFor(spec),
             backgroundColor: highlight
@@ -230,20 +235,20 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             child: GestureDetector(
               onTap: () => ColumnSpecDialog.show(ref.base, spec),
               onSecondaryTap: () => ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(spec.id),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (broken) ...[
-                      Icon(Icons.warning_amber_rounded, size: 16, color: color),
-                      const SizedBox(width: 2),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: _chipHeight),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (broken) ...[Icon(Symbols.warning_rounded, size: 16, color: color), const SizedBox(width: 2)],
+                      DefaultTextStyle.merge(
+                        style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
+                        child: spec.label(),
+                      ),
                     ],
-                    DefaultTextStyle.merge(
-                      style: theme.textTheme.labelLarge!.copyWith(color: color, fontWeight: FontWeight.w600),
-                      child: spec.label(),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -314,13 +319,34 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     final selected = active && _currentSlot == slot;
     return _slot(
       key,
-      CustomPaint(
+      selected
+          ? CustomPaint(
+              painter: _DashedRRectPainter(color: theme.colorScheme.primary),
+              child: IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true)),
+            )
+          : _emptySlotBox(context, spec),
+      // Same trailing gap as a populated child slot, so an empty container's inner
+      // right margin matches a non-empty one (and doesn't shrink the moment its
+      // only child is picked up).
+    );
+  }
+
+  // The resting look of an empty logic container's inner slot: a dashed, rounded
+  // box with the `place_item` glyph. Shared by [_emptyDropSlot] and by
+  // [_staticContent] so a dragged empty container's placeholder keeps this look
+  // instead of collapsing to a bare label.
+  Widget _emptySlotBox(BuildContext context, ColumnSpec spec) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: _tooltipFor(spec),
+      child: CustomPaint(
         painter: _DashedRRectPainter(color: theme.colorScheme.primary),
-        child: selected
-            ? IgnorePointer(child: _staticContent(context, _draggedSpec!, highlight: true))
-            : const SizedBox(width: 40, height: 32),
+        child: SizedBox(
+          width: 40,
+          height: _chipHeight,
+          child: Center(child: Icon(Symbols.place_item_rounded, size: 18, color: theme.colorScheme.primary)),
+        ),
       ),
-      gap: false,
     );
   }
 
@@ -333,6 +359,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     }
     return _logicContainer(context, [
       _spaced(_logicLabel(context, spec, highlight: highlight)),
+      // Trailing gap matches the live empty slot ([_emptyDropSlot]) so a dragged
+      // empty container's placeholder is the same width as the container at rest.
+      if (spec.children.isEmpty) _spaced(_emptySlotBox(context, spec)),
       for (final child in spec.children) _spaced(_staticContent(context, child, highlight: highlight)),
     ], highlight: highlight);
   }
@@ -546,7 +575,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   Widget addButton(ThemeData theme) {
     return ActionChip(
-      avatar: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+      avatar: Icon(Symbols.add_rounded, color: theme.colorScheme.onPrimary),
       label: const Text(""),
       tooltip: "$tr_chara_detail.add_column_button.tooltip".tr(),
       backgroundColor: theme.colorScheme.primary,
@@ -561,7 +590,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
 
   Widget addButtonWithLabel(ThemeData theme) {
     return ActionChip(
-      avatar: Icon(Icons.add, color: theme.colorScheme.onPrimary),
+      avatar: Icon(Symbols.add_rounded, color: theme.colorScheme.onPrimary),
       label: Text(
         "$tr_chara_detail.add_column_button.label".tr(),
         style: theme.textTheme.labelLarge!.copyWith(color: theme.colorScheme.onPrimary),

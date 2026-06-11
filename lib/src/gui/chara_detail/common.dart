@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 // riverpod 3 moved ProviderListenable out of the default export surface.
 import 'package:flutter_riverpod/misc.dart';
@@ -282,7 +283,7 @@ class _SelectorExpandButton extends ConsumerWidget {
         padding: const EdgeInsets.only(top: 8),
         child: ActionChip(
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-          avatar: const Icon(Icons.expand_more),
+          avatar: const Icon(Symbols.expand_more_rounded),
           label: Text("$tr_common.selector.expand_button".tr()),
           side: BorderSide.none,
           backgroundColor: theme.colorScheme.primaryContainer,
@@ -343,7 +344,7 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
         children: [
           ActionChip(
             padding: padding,
-            avatar: const Icon(Icons.select_all, size: 20),
+            avatar: const Icon(Symbols.select_all_rounded, size: 20),
             label: Text("$tr_common.selector.control.select_all.label".tr()),
             tooltip: "$tr_common.selector.control.select_all.tooltip".tr(),
             side: BorderSide.none,
@@ -355,7 +356,7 @@ class _SelectorWidgetState extends ConsumerState<SelectorWidget> {
           ),
           ActionChip(
             padding: padding,
-            avatar: const Icon(Icons.deselect, size: 20),
+            avatar: const Icon(Symbols.deselect_rounded, size: 20),
             label: Text("$tr_common.selector.control.deselect_all.label".tr()),
             tooltip: "$tr_common.selector.control.deselect_all.tooltip".tr(),
             side: BorderSide.none,
