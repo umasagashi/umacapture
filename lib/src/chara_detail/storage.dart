@@ -284,7 +284,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     // the grid only rebuilds once forceRebuild() publishes the buffer.
     final records = _pendingRecords ??= [...state.requireValue];
     final index = records.indexWhere((e) => e.id == id);
-    assert(index != -1);
+    if (index == -1) {
+      // The record was removed (e.g. deleted) during the async reload; skip.
+      return;
+    }
     records[index] = record;
   }
 
