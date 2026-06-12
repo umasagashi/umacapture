@@ -496,7 +496,7 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
         final record = recordList[rowIndex];
         return TrinaRow(
           cells: {for (final spec in visibleSpecs) spec.id: cellOf(spec, rowIndex)},
-          sortIdx: -DateTime.parse(record.metadata.capturedDate).millisecondsSinceEpoch,
+          sortIdx: -record.metadata.capturedDate.toDateTime().millisecondsSinceEpoch,
         )..setUserData(record);
       })
       .sortedBy<num>((e) => e.sortIdx)
