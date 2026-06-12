@@ -413,10 +413,13 @@ class CountSRankStatisticWidget extends ConsumerWidget {
       bottom: Text("$tr_statistics.count_s_rank.bottom".tr()),
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
-        return Padding(
-          padding: const EdgeInsets.only(top: 36, bottom: 4),
-          child: CountSRankChartData(records).build(theme),
-        );
+        final chart = CountSRankChartData(records);
+        // Guard against an empty/all-active-less record set: `build` derives
+        // `maxY` from `counts.max`, which is 0 here and yields a degenerate axis.
+        if (chart.parse().sum == 0) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
+        return Padding(padding: const EdgeInsets.only(top: 36, bottom: 4), child: chart.build(theme));
       },
     );
   }
