@@ -440,7 +440,10 @@ class CountStrategyChartData {
   List<int> parse() {
     List<int> d = [0, 0, 0, 0];
     for (final record in records.where((e) => e.metadata.stage == RecordStage.active)) {
-      d[record.metadata.strategy]++;
+      final strategy = record.metadata.strategy;
+      if (strategy >= 0 && strategy < d.length) {
+        d[strategy]++;
+      }
     }
     return d;
   }
@@ -487,11 +490,13 @@ class CountStrategyStatisticWidget extends ConsumerWidget {
       bottom: Text("$tr_statistics.count_strategy.bottom".tr()),
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
-        if (records.isEmpty) {
-          return Text("-", style: theme.textTheme.headlineLarge);
-        }
         final labels = ref.watch(labelMapProvider)[LabelKeys.raceStrategy]!;
         final chart = CountStrategyChartData(records, labels);
+        // Guard against a non-empty record set that yields no active records:
+        // `chart.build` would otherwise divide by a zero total and crash on NaN.round().
+        if (chart.counts.sum == 0) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
         return Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
