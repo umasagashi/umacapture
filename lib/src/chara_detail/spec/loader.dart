@@ -248,9 +248,18 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
   }
   return directoryPath
       .listSync()
-      .map(
-        (e) => RatingStorageData(key: e.stem, title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title),
-      )
+      .map((e) {
+        try {
+          return RatingStorageData(
+            key: e.stem,
+            title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
+          );
+        } catch (error, stackTrace) {
+          logger.w("Skipping unreadable rating file: path=${e.asFilePath}", error, stackTrace);
+          return null;
+        }
+      })
+      .whereType<RatingStorageData>()
       .toList();
 }
 
@@ -372,7 +381,15 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   }
   return directoryPath
       .listSync()
-      .map((e) => MemoStorageData(key: e.stem, title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title))
+      .map((e) {
+        try {
+          return MemoStorageData(key: e.stem, title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title);
+        } catch (error, stackTrace) {
+          logger.w("Skipping unreadable memo file: path=${e.asFilePath}", error, stackTrace);
+          return null;
+        }
+      })
+      .whereType<MemoStorageData>()
       .toList();
 }
 
