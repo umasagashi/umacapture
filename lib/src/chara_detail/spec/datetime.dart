@@ -32,7 +32,19 @@ class IsInRangeDateTimePredicate with IsInRangeDateTimePredicateMappable {
   IsInRangeDateTimePredicate({this.min, this.max});
 
   bool apply(DateTime value) {
-    return value.isInRange(min ?? value, max ?? value);
+    // Compare on calendar day, not the full timestamp. The bounds come from the
+    // calendar at midnight, while a record's captured value carries a time of
+    // day, so a plain `value <= max` would drop same-day records past midnight.
+    final date = DateTime(value.year, value.month, value.day);
+    final lower = min;
+    final upper = max;
+    if (lower != null && date.isBefore(DateTime(lower.year, lower.month, lower.day))) {
+      return false;
+    }
+    if (upper != null && date.isAfter(DateTime(upper.year, upper.month, upper.day))) {
+      return false;
+    }
+    return true;
   }
 
   IsInRangeDateTimePredicate copyWith({DateTime? min, DateTime? max}) {
