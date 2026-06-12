@@ -285,11 +285,22 @@ class PlatformController {
           _scrollReadyEvent.add(_soundEventSequence++);
           break;
         case 'onScrollUpdated':
-          captureState.progress(data['index'], data['progress']);
+          {
+            final index = data['index'] as int?;
+            final progress = (data['progress'] as num?)?.toDouble();
+            if (index != null && progress != null) {
+              captureState.progress(index, progress);
+            }
+          }
           break;
         case 'onPageReady':
-          _pageReadyEvent.add(_soundEventSequence++);
-          captureState.progress(data['index'], 1);
+          {
+            _pageReadyEvent.add(_soundEventSequence++);
+            final index = data['index'] as int?;
+            if (index != null) {
+              captureState.progress(index, 1);
+            }
+          }
           break;
         case 'onCharaDetailStarted':
           final recordType = data['record_type'] as int;
@@ -308,15 +319,25 @@ class PlatformController {
           _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
           break;
         case 'onFrameRateReported':
-          _ref.read(capturingFrameRateProvider.notifier).set(data['fps'].toDouble());
+          {
+            final fps = (data['fps'] as num?)?.toDouble();
+            if (fps != null) {
+              _ref.read(capturingFrameRateProvider.notifier).set(fps);
+            }
+          }
           break;
         case 'onScreenshotTaken':
           logger.i("path=${data['path']}, result='${data['result']}'");
           _ref.read(latestScreenshotProvider.notifier).set(ScreenshotResult(FilePath(data['path']), data['result']));
           break;
         case 'onFrameSizeReported':
-          final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
-          _ref.read(capturingFrameSizeProvider.notifier).set(size);
+          {
+            final width = (data['size']?['width'] as num?)?.toDouble();
+            final height = (data['size']?['height'] as num?)?.toDouble();
+            if (width != null && height != null) {
+              _ref.read(capturingFrameSizeProvider.notifier).set(Size(width, height));
+            }
+          }
           break;
         default:
           throw UnimplementedError(dataType);
