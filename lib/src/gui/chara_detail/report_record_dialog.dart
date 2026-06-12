@@ -193,8 +193,11 @@ class _ReportRecordDialogState extends ConsumerState<ReportRecordDialog> {
         final rateLimit = snapshot.data;
         if (rateLimit == null) {
           logger.e("Failed to retrieve rate limit config", snapshot.error, snapshot.stackTrace);
-          CardDialog.dismiss(ref.base);
-          Toaster.show(ToastData.error(description: "$tr_report_record.dialog.loading_error".tr()));
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            CardDialog.dismiss(ref.base);
+            Toaster.show(ToastData.error(description: "$tr_report_record.dialog.loading_error".tr()));
+          });
           return Container();
         }
         final count = getSentryReportCount();
