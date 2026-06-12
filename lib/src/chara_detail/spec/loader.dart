@@ -210,13 +210,15 @@ class CharaDetailRecordRatingController extends Notifier<RatingData> {
     return path.existsSync() ? RatingDataMapper.fromJson(path.readAsStringSync()) : RatingData.empty;
   }
 
+  // Mutates the live map in place to avoid rebuilding the data grid on every
+  // rating change. [save] snapshots the map before handing it to the writer
+  // isolate, so this in-place edit cannot race the serialization.
   void updateWithoutNotify(String recordId, double rating) {
     state.data[recordId] = rating;
   }
 
   void update(String recordId, double rating) {
-    state.data[recordId] = rating;
-    state = state.copyWith();
+    state = state.copyWith(data: {...state.data, recordId: rating});
   }
 
   void updateTitle(String title) {
@@ -224,7 +226,7 @@ class CharaDetailRecordRatingController extends Notifier<RatingData> {
   }
 
   void save() {
-    _RatingDataWriter(path, state).run();
+    _RatingDataWriter(path, state.copyWith(data: {...state.data})).run();
   }
 }
 
@@ -246,9 +248,18 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
   }
   return directoryPath
       .listSync()
-      .map(
-        (e) => RatingStorageData(key: e.stem, title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title),
-      )
+      .map((e) {
+        try {
+          return RatingStorageData(
+            key: e.stem,
+            title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
+          );
+        } catch (error, stackTrace) {
+          logger.w("Skipping unreadable rating file: path=${e.asFilePath}", error, stackTrace);
+          return null;
+        }
+      })
+      .whereType<RatingStorageData>()
       .toList();
 }
 
@@ -326,13 +337,11 @@ class CharaDetailRecordMemoController extends Notifier<MemoData> {
   String get title => state.title;
 
   void _update({required String recordId, required String memo}) {
-    state.data[recordId] = memo;
-    state = state.copyWith();
+    state = state.copyWith(data: {...state.data, recordId: memo});
   }
 
   void _remove({required String recordId}) {
-    state.data.remove(recordId);
-    state = state.copyWith();
+    state = state.copyWith(data: {...state.data}..remove(recordId));
   }
 
   void updateTitle({required String title}) {
@@ -341,7 +350,7 @@ class CharaDetailRecordMemoController extends Notifier<MemoData> {
   }
 
   void _save() {
-    _MemoDataWriter(path, state).run();
+    _MemoDataWriter(path, state.copyWith(data: {...state.data})).run();
   }
 
   void update({required String recordId, required String? memo}) {
@@ -372,7 +381,15 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   }
   return directoryPath
       .listSync()
-      .map((e) => MemoStorageData(key: e.stem, title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title))
+      .map((e) {
+        try {
+          return MemoStorageData(key: e.stem, title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title);
+        } catch (error, stackTrace) {
+          logger.w("Skipping unreadable memo file: path=${e.asFilePath}", error, stackTrace);
+          return null;
+        }
+      })
+      .whereType<MemoStorageData>()
       .toList();
 }
 
@@ -496,7 +513,7 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
         final record = recordList[rowIndex];
         return TrinaRow(
           cells: {for (final spec in visibleSpecs) spec.id: cellOf(spec, rowIndex)},
-          sortIdx: -DateTime.parse(record.metadata.capturedDate).millisecondsSinceEpoch,
+          sortIdx: -record.metadata.capturedDate.toDateTime().millisecondsSinceEpoch,
         )..setUserData(record);
       })
       .sortedBy<num>((e) => e.sortIdx)

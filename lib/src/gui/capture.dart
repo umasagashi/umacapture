@@ -96,8 +96,15 @@ class _TwoStateButton extends ConsumerStatefulWidget {
 
 class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
   bool _isInTransition;
+  Timer? _transitionTimer;
 
   _TwoStateButtonState() : _isInTransition = false;
+
+  @override
+  void dispose() {
+    _transitionTimer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -126,7 +133,12 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
     return () {
       callback();
       setState(() => _isInTransition = true);
-      Timer(const Duration(milliseconds: 500), () => setState(() => _isInTransition = false));
+      _transitionTimer?.cancel();
+      _transitionTimer = Timer(const Duration(milliseconds: 500), () {
+        if (mounted) {
+          setState(() => _isInTransition = false);
+        }
+      });
     };
   }
 }
@@ -266,15 +278,17 @@ class _CharaDetailStateWidget extends ConsumerWidget {
   }
 
   String additionalInfoText(WidgetRef ref) {
-    final notAvailable = ref.watch(platformControllerProvider) == null;
-    if (notAvailable) {
+    // Watch every provider unconditionally so the watched set never changes
+    // between builds; branching below operates on the captured values.
+    final controllerAvailable = ref.watch(platformControllerProvider) != null;
+    final isCapturing = ref.watch(capturingStateProvider);
+    final captureState = ref.watch(charaDetailCaptureStateProvider);
+    if (!controllerAvailable) {
       return "$tr_capture.capture_control.additional_info.not_available".tr();
     }
-    final isCapturing = ref.watch(capturingStateProvider);
     if (!isCapturing) {
       return "$tr_capture.capture_control.additional_info.start_capture".tr();
     }
-    final captureState = ref.watch(charaDetailCaptureStateProvider);
     if (captureState.error != null) {
       return "$tr_capture.capture_control.additional_info.error".tr();
     }
@@ -459,8 +473,8 @@ class CaptureControlGroup extends ConsumerWidget {
               elevateWhen: false,
               falseWidget: Text("$tr_capture.capture_control.start_capture_button".tr()),
               trueWidget: Text("$tr_capture.capture_control.stop_capture_button".tr()),
-              onFalsePressed: () => ref.watch(platformControllerProvider)?.startCapture(),
-              onTruePressed: () => ref.watch(platformControllerProvider)?.stopCapture(),
+              onFalsePressed: () => ref.read(platformControllerProvider)?.startCapture(),
+              onTruePressed: () => ref.read(platformControllerProvider)?.stopCapture(),
               provider: capturingStateProvider,
             ),
           ),

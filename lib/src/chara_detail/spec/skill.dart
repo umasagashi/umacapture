@@ -87,13 +87,19 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
     if (query.length < 2) {
       return foundSkills.isNotEmpty;
     }
+    // Match on distinct skill ids: a record may hold several Skill entries that
+    // share an id (different levels), which would otherwise inflate the count and
+    // let `allOf`/`sumOf` pass without every queried id being present.
+    final foundIds = foundSkills.map((e) => e.id).toSet();
     switch (logic) {
       case SkillSetLogicMode.anyOf:
-        return foundSkills.isNotEmpty;
+        return foundIds.isNotEmpty;
       case SkillSetLogicMode.allOf:
-        return foundSkills.length == query.length;
+        return foundIds.containsAll(query);
       case SkillSetLogicMode.sumOf:
-        return foundSkills.length >= min;
+        // Clamp the threshold to at least 1: a persisted min of 0 would make
+        // `length >= 0` always true, turning the filter into a show-all no-op.
+        return foundIds.length >= (min < 1 ? 1 : min);
     }
   }
 }
@@ -385,7 +391,7 @@ class _ModeSelector extends ConsumerWidget {
           tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
           child: SpinBox(
             height: 30,
-            min: 0,
+            min: 1,
             max: predicate.query.length,
             value: predicate.min,
             onChanged: (value) {
@@ -421,16 +427,24 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late final VoidCallback _commitTitle;
 
   @override
   void initState() {
     super.initState();
     title = _clonedSpecProvider.read(ref, widget.specId).title;
-    widget.onDecided.addListener(() {
+    _commitTitle = () {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
-    });
+    };
+    widget.onDecided.addListener(_commitTitle);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitTitle);
+    super.dispose();
   }
 
   Widget notationMaxWidget(WidgetRef ref) {

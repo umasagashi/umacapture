@@ -33,7 +33,9 @@ class ExternalProgramAction extends AddonAction with ExternalProgramActionMappab
 
   /// Argument template. Placeholders like `{record_id}` are substituted from the
   /// event payload after the template is split into individual arguments, so a
-  /// value containing spaces stays a single argument.
+  /// value containing spaces stays a single argument. Wrap an argument in double
+  /// quotes to keep spaces together; inside quotes, a doubled quote (`""`) is a
+  /// literal `"`.
   final String argumentTemplate;
 
   /// Hard timeout in seconds, or null for no timeout.

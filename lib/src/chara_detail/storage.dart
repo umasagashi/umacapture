@@ -26,13 +26,8 @@ part 'storage.mapper.dart';
 // repeated duplicate detections. See _soundEventSequence in platform_controller.dart.
 int _duplicatedCharaEventSequence = 0;
 
-StreamController<int> _duplicatedCharaEventController = StreamController();
-final duplicatedCharaEventProvider = StreamProvider<int>((ref) {
-  if (_duplicatedCharaEventController.hasListener) {
-    _duplicatedCharaEventController = StreamController();
-  }
-  return _duplicatedCharaEventController.stream;
-});
+final _duplicatedCharaEvent = EventStreamProvider<int>();
+final duplicatedCharaEventProvider = _duplicatedCharaEvent.provider;
 
 final charaCardIconMapProvider = settableNotifierProvider<Map<int, FilePath>>({});
 
@@ -42,15 +37,33 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
 
   Future<void> start(List<CharaDetailRecord> records) async {
     final platformController = await ref.read(platformControllerLoader.future);
+    if (platformController == null) {
+      return;
+    }
     for (final record in records) {
-      platformController!.updateRecord(record.id);
+      platformController.updateRecord(record.id);
     }
     logger.d("Start regenerating ${records.length} chara detail records.");
     state = Progress(total: records.length);
   }
 
   Future<void> updated(String id) async {
-    await ref.read(charaDetailRecordStorageLoaderProvider.notifier).reload(id);
+    // Always reload, even outside a batch: the native side can emit this for any
+    // record regeneration, and a failed reload must not abort the refresh.
+    // Completion is gated on the count reaching the total, so a single failed
+    // reload would otherwise leave the progress stuck forever.
+    try {
+      await ref.read(charaDetailRecordStorageLoaderProvider.notifier).reload(id);
+    } catch (e, s) {
+      logger.w("Failed to reload regenerated record $id: $e\n$s");
+    }
+    // Advance batch progress only while a batch is in flight. Progress.none and
+    // an already-completed batch both report isCompleted (count >= total), so a
+    // stray/late/duplicate native callback would otherwise mark a zero-length
+    // batch complete and re-fire completion (spurious success toast + rebuild).
+    if (state.isCompleted) {
+      return;
+    }
     state = state.increment();
     if (state.isCompleted) {
       Future.delayed(const Duration(milliseconds: 200), () {
@@ -150,7 +163,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     final duplicated = records.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
-      _duplicatedCharaEventController.sink.add(_duplicatedCharaEventSequence++);
+      _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
       ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
       return;
     }
@@ -168,8 +181,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
 
     // `records` already folds in any pending batch updates, so publishing it
     // and clearing the buffer keeps the next replaceBy re-snapshotting cleanly.
+    // Drop any existing entry with the same id so re-adding a record (same id)
+    // replaces it instead of appending a duplicate.
     _pendingRecords = null;
-    state = AsyncData([for (final e in records) childUpdates[e.id] ?? e, resolvedRecord]);
+    state = AsyncData([
+      for (final e in records)
+        if (e.id != resolvedRecord.id) childUpdates[e.id] ?? e,
+      resolvedRecord,
+    ]);
 
     _surfaceInheritance(resolution);
 
@@ -273,7 +292,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     // the grid only rebuilds once forceRebuild() publishes the buffer.
     final records = _pendingRecords ??= [...state.requireValue];
     final index = records.indexWhere((e) => e.id == id);
-    assert(index != -1);
+    if (index == -1) {
+      // The record was removed (e.g. deleted) during the async reload; skip.
+      return;
+    }
     records[index] = record;
   }
 

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '/src/addon/execution/action_runner.dart';
@@ -34,7 +36,13 @@ class WebhookRunner implements ActionRunner {
     final body = substitutePayload(
       action.bodyTemplate,
       payload,
-      transform: escaper == null ? null : (key, value) => spec.rawKeys.contains(key) ? value : escaper(value),
+      // A rawKeys value (record_json) is inserted unescaped so a whole JSON
+      // document can embed as a JSON value. Guard it: only insert raw when it is
+      // actually well-formed JSON, otherwise fall back to escaping it so a
+      // corrupt/hand-edited record.json can never produce an invalid request body.
+      transform: escaper == null
+          ? null
+          : (key, value) => (spec.rawKeys.contains(key) && _isValidJson(value)) ? value : escaper(value),
     );
     final options = Options(
       method: action.method,
@@ -72,7 +80,10 @@ class WebhookRunner implements ActionRunner {
             (elapsed) => ExecutionResult(
               status: ok ? ExecutionStatus.success : ExecutionStatus.failure,
               exitCode: code,
-              stdout: truncateCapture(response.data?.toString() ?? ""),
+              // The response body is intentionally not persisted: it can echo a
+              // secret (token, signed URL) or record data, and persisting it to
+              // the on-disk history would undo the URL redaction applied above.
+              // The HTTP status (exitCode / "HTTP $code") is enough to diagnose.
               error: ok ? null : "HTTP $code",
               duration: elapsed,
             ),
@@ -99,6 +110,17 @@ class WebhookRunner implements ActionRunner {
   }
 
   static bool _hasBody(String method) => method.toUpperCase() != "GET" && method.toUpperCase() != "HEAD";
+
+  /// Whether [value] parses as a JSON document, so it is safe to embed raw as a
+  /// JSON value in the request body.
+  static bool _isValidJson(String value) {
+    try {
+      jsonDecode(value);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// The header and body escaper for [contentType], defaulting to JSON for an
   /// unknown value (matching the form shown in the edit dialog).

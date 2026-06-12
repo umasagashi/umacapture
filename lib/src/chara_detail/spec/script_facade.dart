@@ -998,7 +998,12 @@ class $ValueList implements $Instance {
     wrap: true,
   );
 
-  Iterable<num> get _numbers => $value.map((e) => e as num);
+  Iterable<num> get _numbers => $value.map((e) {
+    if (e is num) {
+      return e;
+    }
+    throw ScriptLookupError('sum/max/min/average require numeric values, got ${e.runtimeType}');
+  });
 
   $Value _num(num value) => value is int ? $int(value) : $double(value.toDouble());
 

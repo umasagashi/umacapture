@@ -238,6 +238,14 @@ extension RecordTypeTranslation on RecordType {
   };
 }
 
+/// Sentinel `trainer_id` for records whose owner is unknown.
+///
+/// A friend's record captured from the player's own game exposes no recoverable
+/// trainer id, so it is stored with this nil UUID rather than the capturing
+/// player's id. Only externally shared/imported friend records carry the
+/// friend's real id. Mirrors `kUnknownTrainerId` in the native recognizer.
+const String unknownTrainerId = "00000000-0000-0000-0000-000000000000";
+
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class Metadata extends JsonEquatable with MetadataMappable {
   final String formatVersion;

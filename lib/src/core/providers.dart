@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -8,6 +10,25 @@ import '/src/core/path_entity.dart';
 final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
   return PackageInfo.fromPlatform();
 });
+
+/// A module-level broadcast event stream exposed as a [StreamProvider].
+///
+/// Replaces the duplicated boilerplate that recreated a single-subscription
+/// `StreamController` whenever the provider was re-listened
+/// (`if (controller.hasListener) controller = StreamController()`). That pattern
+/// leaked the orphaned controller and was fragile under multiple subscribers. A
+/// broadcast controller tolerates re-listening (hot-restart, tests, provider
+/// rebuilds) without the recreate-and-leak dance, so a single controller can
+/// live for the app's lifetime. Events emitted with no current listener are
+/// dropped, which matches the old behavior (the recreate discarded buffered
+/// events too): these are live UI signals, not buffered state.
+class EventStreamProvider<T> {
+  final _controller = StreamController<T>.broadcast();
+
+  late final StreamProvider<T> provider = StreamProvider<T>((ref) => _controller.stream);
+
+  void add(T event) => _controller.add(event);
+}
 
 /// A minimal [Notifier] holding an externally-settable value seeded with
 /// [initial]. Replaces the many one-off `build() => default; set(v) => state = v`
@@ -76,12 +97,14 @@ final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
     documentDir = DirectoryPath(await getApplicationDocumentsDirectory());
   }
   final supportDir = DirectoryPath(await getApplicationSupportDirectory());
-  final downloadDir = DirectoryPath(await getDownloadsDirectory());
+  // getDownloadsDirectory returns null on Android/unsupported platforms; fall
+  // back to the app's document dir so DirectoryPath never receives null.
+  final downloadDirRaw = await getDownloadsDirectory();
   final info = PathInfo(
     documentDir: documentDir / appName,
     supportDir: supportDir,
     executableDir: FilePath.resolvedExecutable.parent,
-    downloadDir: downloadDir,
+    downloadDir: downloadDirRaw != null ? DirectoryPath(downloadDirRaw) : documentDir / appName,
   );
   return info;
 });

@@ -17,6 +17,7 @@ import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/statistics.dart';
+import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
@@ -29,7 +30,8 @@ final _updaterCardTitleColor = Colors.amber.shade200;
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
-    return createDiagnosticDio(operation: "load_news").get(Const.newsUrl).then((response) => response.toString());
+    final response = await createDiagnosticDio(operation: "load_news").get(Const.newsUrl);
+    return response.toString();
   } catch (error, stackTrace) {
     logger.e("Failed to load news.", error, stackTrace);
     captureException(error, stackTrace);
@@ -44,24 +46,33 @@ class AppUpdaterGroup extends ConsumerWidget {
 
   void downloadAndOpen(WidgetRef ref) {
     ref.read(_downloadProgressProvider.notifier).set(Progress(count: 0, total: 100));
-    ref.watch(isInstallerModeLoader.future).then((isInstallerMode) {
-      final pathInfo = ref.watch(pathInfoProvider);
-      final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
-      final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
-      logger.d(downloadUrl);
-      createDiagnosticDio(operation: "download_app_update")
-          .download(
-            downloadUrl,
-            downloadPath.path,
-            onReceiveProgress: (int count, int total) {
-              ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
-            },
-          )
-          .then((_) {
-            ref.read(_downloadProgressProvider.notifier).set(null);
-            (isInstallerMode ? downloadPath : downloadPath.parent).launch();
-          });
-    });
+    ref
+        .read(isInstallerModeLoader.future)
+        .then((isInstallerMode) {
+          final pathInfo = ref.read(pathInfoProvider);
+          final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
+          final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
+          logger.d(downloadUrl);
+          return createDiagnosticDio(operation: "download_app_update")
+              .download(
+                downloadUrl,
+                downloadPath.path,
+                onReceiveProgress: (int count, int total) {
+                  ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
+                },
+              )
+              .then((_) {
+                ref.read(_downloadProgressProvider.notifier).set(null);
+                (isInstallerMode ? downloadPath : downloadPath.parent).launch();
+              });
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          // Reset the progress so the card stops spinning and becomes tappable again;
+          // without this a failed download leaves it stuck on the spinner forever.
+          logger.w("Failed to download app update: $error\n$stackTrace");
+          ref.read(_downloadProgressProvider.notifier).set(null);
+          Toaster.show(ToastData.error(description: "$tr_dashboard.app_updater.download_failed".tr()));
+        });
   }
 
   Widget downloadProgressWidget(BuildContext context, WidgetRef ref, Progress progress) {

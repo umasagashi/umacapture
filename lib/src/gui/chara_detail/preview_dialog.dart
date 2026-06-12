@@ -78,14 +78,26 @@ class PredictionData with PredictionDataMappable {
     }
     if (prediction.label is Map) {
       final Map<String, dynamic> m = prediction.label;
+      // Resolve an index against the model's label list, falling back to the
+      // raw index (like the int branch) when the label map lacks the entry or
+      // the index is out of range, instead of throwing during overlay render.
+      String labelAt(String key, Object? index) {
+        final labels = labelMap["$model.$key"];
+        final i = (index as num?)?.toInt();
+        if (labels != null && i != null && i >= 0 && i < labels.length) {
+          return labels[i];
+        }
+        return "${i ?? "?"}";
+      }
+
       if (m.containsKey("chara")) {
-        final rental = (m["rental"] ? " (${"$tr_preview.rental".tr()})" : "");
-        return labelMap["$model.card"]![m["card"]!.toInt()] + rental;
+        final rental = (m["rental"] == true ? " (${"$tr_preview.rental".tr()})" : "");
+        return labelAt("card", m["card"]) + rental;
       } else if (m.containsKey("place")) {
-        final place = labelMap["$model.place"]![m["place"]!.toInt()];
-        final ground = labelMap["$model.ground"]![m["ground"]!.toInt()];
-        final distance = labelMap["$model.distance"]![m["distance"]!.toInt()];
-        final variation = labelMap["$model.variation"]![m["variation"]!.toInt()];
+        final place = labelAt("place", m["place"]);
+        final ground = labelAt("ground", m["ground"]);
+        final distance = labelAt("distance", m["distance"]);
+        final variation = labelAt("variation", m["variation"]);
         return "$place $ground $distance $variation";
       }
       throw UnsupportedError(toString());
@@ -114,7 +126,14 @@ class PredictionContainer with PredictionContainerMappable {
   PredictionContainer(this.statusHeader, this.skillTab, this.factorTab, this.campaignTab);
 
   static PredictionContainer? load(DirectoryPath recordDir) {
-    return PredictionContainerMapper.fromJson(recordDir.filePath("prediction.json").readAsStringSync());
+    // Optional overlay data: an older or quarantined record may lack a readable
+    // prediction.json. Degrade to no overlay instead of throwing during build.
+    try {
+      return PredictionContainerMapper.fromJson(recordDir.filePath("prediction.json").readAsStringSync());
+    } catch (e, s) {
+      logger.w("Failed to load prediction.json for ${recordDir.name}: $e\n$s");
+      return null;
+    }
   }
 }
 
@@ -141,11 +160,11 @@ class ImageSizeContainer {
   }
 }
 
-class ImageViewer extends ConsumerWidget {
+class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
   final bool overlay;
-  final TransformationController transformationController;
+  final double initialScale;
   final double maxScale;
   final PredictionContainer? prediction;
 
@@ -154,40 +173,72 @@ class ImageViewer extends ConsumerWidget {
     required this.recordDir,
     required this.imageSize,
     required this.overlay,
-    required this.transformationController,
+    required this.initialScale,
     required this.maxScale,
     required this.prediction,
   });
 
   static ImageViewer? load({required DirectoryPath recordDir, required Size viewportSize, required bool overlay}) {
-    final imageSize = ImageSizeContainer.load(recordDir);
-    if (imageSize == null) {
+    // Runs inside LayoutBuilder during build: any failure (missing/corrupt
+    // size json) must return null so the caller's `?? ErrorMessageWidget`
+    // fallback engages, never throw out of the build.
+    try {
+      final imageSize = ImageSizeContainer.load(recordDir);
+      if (imageSize == null) {
+        return null;
+      }
+      final imageWidth = [
+        imageSize.skill.intersection.width,
+        imageSize.factor.intersection.width,
+        imageSize.campaign.intersection.width,
+      ].sum;
+      final scale = viewportSize.width / imageWidth;
+      // TODO: This should be async.
+      final prediction = PredictionContainer.load(recordDir);
+      return ImageViewer(
+        recordDir: recordDir,
+        imageSize: imageSize,
+        overlay: overlay,
+        initialScale: scale,
+        maxScale: scale * 3,
+        prediction: prediction,
+      );
+    } catch (e, s) {
+      logger.w("Failed to load image viewer for $recordDir: $e\n$s");
       return null;
     }
-    final imageWidth = [
-      imageSize.skill.intersection.width,
-      imageSize.factor.intersection.width,
-      imageSize.campaign.intersection.width,
-    ].sum;
-    final scale = viewportSize.width / imageWidth;
-    // TODO: This should be async.
-    final prediction = PredictionContainer.load(recordDir);
-    return ImageViewer(
-      recordDir: recordDir,
-      imageSize: imageSize,
-      overlay: overlay,
-      transformationController: TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0)),
-      maxScale: scale * 3,
-      prediction: prediction,
-    );
   }
 
-  Widget predictionTabOverlay(
-    WidgetRef ref,
-    FilePath imagePath,
-    ImageSizeInfo sizeInfo,
-    List<PredictionData>? predictions,
-  ) {
+  @override
+  ConsumerState<ImageViewer> createState() => _ImageViewerState();
+}
+
+class _ImageViewerState extends ConsumerState<ImageViewer> {
+  late TransformationController _transformationController = _buildController();
+
+  TransformationController _buildController() {
+    final scale = widget.initialScale;
+    return TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0));
+  }
+
+  @override
+  void didUpdateWidget(ImageViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The fit-to-viewport transform is derived from initialScale (viewport width / image width). Re-fit with a
+    // fresh controller only when that changes (a window resize or navigating to a differently-sized record).
+    if (widget.initialScale != oldWidget.initialScale) {
+      _transformationController.dispose();
+      _transformationController = _buildController();
+    }
+  }
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  Widget predictionTabOverlay(FilePath imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(color: Colors.black, backgroundColor: Colors.white.withValues(alpha: 0.5), fontSize: 9);
     return Stack(
@@ -227,14 +278,14 @@ class ImageViewer extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     return InteractiveViewer(
       minScale: 0.25,
-      maxScale: maxScale,
+      maxScale: widget.maxScale,
       panEnabled: true,
       scaleEnabled: true,
       constrained: false,
-      transformationController: transformationController,
+      transformationController: _transformationController,
       child: Container(
         decoration: const BoxDecoration(
           image: DecorationImage(
@@ -249,22 +300,21 @@ class ImageViewer extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             predictionTabOverlay(
-              ref,
-              recordDir.filePath("skill.png"),
-              imageSize.skill,
-              !overlay ? null : [...(prediction?.statusHeader ?? []), ...(prediction?.skillTab ?? [])],
+              widget.recordDir.filePath("skill.png"),
+              widget.imageSize.skill,
+              !widget.overlay
+                  ? null
+                  : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
             ),
             predictionTabOverlay(
-              ref,
-              recordDir.filePath("factor.png"),
-              imageSize.factor,
-              !overlay ? null : prediction?.factorTab,
+              widget.recordDir.filePath("factor.png"),
+              widget.imageSize.factor,
+              !widget.overlay ? null : widget.prediction?.factorTab,
             ),
             predictionTabOverlay(
-              ref,
-              recordDir.filePath("campaign.png"),
-              imageSize.campaign,
-              !overlay ? null : prediction?.campaignTab,
+              widget.recordDir.filePath("campaign.png"),
+              widget.imageSize.campaign,
+              !widget.overlay ? null : widget.prediction?.campaignTab,
             ),
           ],
         ),

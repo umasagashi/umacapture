@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
@@ -8,18 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/providers.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-StreamController<PathEntity> _recordExportEventController = StreamController();
-final recordExportEventProvider = StreamProvider<PathEntity>((ref) {
-  if (_recordExportEventController.hasListener) {
-    _recordExportEventController = StreamController();
-  }
-  return _recordExportEventController.stream;
-});
+final _recordExportEvent = EventStreamProvider<PathEntity>();
+final recordExportEventProvider = _recordExportEvent.provider;
 
 class CharaDetailExportButton extends ConsumerWidget {
   const CharaDetailExportButton({super.key});
@@ -68,7 +62,7 @@ class CharaDetailExportButton extends ConsumerWidget {
                     onTap: () {
                       CsvExporter(title, "records.csv", ref, CharCodec.shiftJis).export(
                         onSuccess: (path) {
-                          _recordExportEventController.sink.add(path);
+                          _recordExportEvent.add(path);
                         },
                       );
                     },
@@ -85,7 +79,7 @@ class CharaDetailExportButton extends ConsumerWidget {
                     onTap: () {
                       CsvExporter(title, "records.csv", ref, CharCodec.utf8Bom).export(
                         onSuccess: (path) {
-                          _recordExportEventController.sink.add(path);
+                          _recordExportEvent.add(path);
                         },
                       );
                     },
@@ -102,7 +96,7 @@ class CharaDetailExportButton extends ConsumerWidget {
                     onTap: () {
                       JsonExporter(title, "records.json", ref).export(
                         onSuccess: (path) {
-                          _recordExportEventController.sink.add(path);
+                          _recordExportEvent.add(path);
                         },
                       );
                     },
@@ -119,7 +113,7 @@ class CharaDetailExportButton extends ConsumerWidget {
                     onTap: () {
                       ZipExporter(title, "records.zip", ref).export(
                         onSuccess: (path) {
-                          _recordExportEventController.sink.add(path);
+                          _recordExportEvent.add(path);
                         },
                       );
                     },

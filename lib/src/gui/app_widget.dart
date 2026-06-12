@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flex_color_scheme/flex_color_scheme.dart';
@@ -15,6 +13,7 @@ import '/src/app/pages.dart';
 import '/src/app/route.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/gui/common.dart';
@@ -41,13 +40,8 @@ final sidebarExtendedStateProvider = BooleanNotifierProvider(() {
   return BooleanNotifier(entryKey: SettingsEntryKey.sidebarExtended.name, defaultValue: true);
 });
 
-StreamController<void> applicationWidgetRebuildEventController = StreamController();
-final _applicationWidgetRebuildEventProvider = StreamProvider<void>((ref) {
-  if (applicationWidgetRebuildEventController.hasListener) {
-    applicationWidgetRebuildEventController = StreamController();
-  }
-  return applicationWidgetRebuildEventController.stream;
-});
+final applicationWidgetRebuildEvent = EventStreamProvider<void>();
+final _applicationWidgetRebuildEventProvider = applicationWidgetRebuildEvent.provider;
 
 class _Sidebar extends ConsumerWidget {
   @override

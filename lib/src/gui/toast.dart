@@ -3,17 +3,12 @@ import 'dart:async';
 import 'package:auto_route/auto_route.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 
-StreamController<ToastData> _plainToastEventController = StreamController();
-final plainToastEventProvider = StreamProvider<ToastData>((ref) {
-  if (_plainToastEventController.hasListener) {
-    _plainToastEventController = StreamController();
-  }
-  return _plainToastEventController.stream;
-});
+final _plainToastEvent = EventStreamProvider<ToastData>();
+final plainToastEventProvider = _plainToastEvent.provider;
 
 enum ToastType { success, info, warning, error }
 
@@ -42,7 +37,7 @@ class ToastData {
 class Toaster {
   static void show(ToastData data) {
     assert(data.description != null || data.label != null);
-    _plainToastEventController.sink.add(data);
+    _plainToastEvent.add(data);
   }
 
   final double narrowWidth;
@@ -73,6 +68,10 @@ class Toaster {
     final barWidth = Math.min(parentSize.width - 20.0, narrowWidth);
     final isNarrow = barWidth < narrowWidth;
     final duration = data.duration ?? durationMap[data.type]!;
+    // Capture the tab router now, while [context] is valid. The SnackBar lives
+    // for up to 15s; resolving AutoTabsRouter.of(context) inside onPressed would
+    // throw if the originating widget has unmounted by the time it is tapped.
+    final tabsRouter = data.navigateOnTab != null ? AutoTabsRouter.of(context) : null;
 
     final controller = messenger.showSnackBar(
       SnackBar(
@@ -99,7 +98,7 @@ class Toaster {
             messenger.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
             data.onTap?.call();
             if (data.navigateOnTab != null) {
-              AutoTabsRouter.of(context).navigate(data.navigateOnTab!);
+              tabsRouter?.navigate(data.navigateOnTab!);
             }
           },
         ),

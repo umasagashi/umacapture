@@ -42,45 +42,20 @@ final capturingFrameRateProvider = settableNotifierProvider<double?>(null);
 // (e.g. retrying a capture quickly, or opening/closing the same tab repeatedly).
 int _soundEventSequence = 0;
 
-StreamController<int> _errorEventController = StreamController();
-final errorEventProvider = StreamProvider<int>((ref) {
-  if (_errorEventController.hasListener) {
-    _errorEventController = StreamController();
-  }
-  return _errorEventController.stream;
-});
+final _errorEvent = EventStreamProvider<int>();
+final errorEventProvider = _errorEvent.provider;
 
-StreamController<bool> _captureTriggeredEventController = StreamController();
-final captureTriggeredEventProvider = StreamProvider<bool>((ref) {
-  if (_captureTriggeredEventController.hasListener) {
-    _captureTriggeredEventController = StreamController();
-  }
-  return _captureTriggeredEventController.stream;
-});
+final _captureTriggeredEvent = EventStreamProvider<bool>();
+final captureTriggeredEventProvider = _captureTriggeredEvent.provider;
 
-StreamController<int> _scrollReadyEventController = StreamController();
-final scrollReadyEventProvider = StreamProvider<int>((ref) {
-  if (_scrollReadyEventController.hasListener) {
-    _scrollReadyEventController = StreamController();
-  }
-  return _scrollReadyEventController.stream;
-});
+final _scrollReadyEvent = EventStreamProvider<int>();
+final scrollReadyEventProvider = _scrollReadyEvent.provider;
 
-StreamController<int> _pageReadyEventController = StreamController();
-final pageReadyEventProvider = StreamProvider<int>((ref) {
-  if (_pageReadyEventController.hasListener) {
-    _pageReadyEventController = StreamController();
-  }
-  return _pageReadyEventController.stream;
-});
+final _pageReadyEvent = EventStreamProvider<int>();
+final pageReadyEventProvider = _pageReadyEvent.provider;
 
-StreamController<String> _charaDetailRecordCapturedEventController = StreamController();
-final charaDetailRecordCapturedEventProvider = StreamProvider<String>((ref) {
-  if (_charaDetailRecordCapturedEventController.hasListener) {
-    _charaDetailRecordCapturedEventController = StreamController();
-  }
-  return _charaDetailRecordCapturedEventController.stream;
-});
+final _charaDetailRecordCapturedEvent = EventStreamProvider<String>();
+final charaDetailRecordCapturedEventProvider = _charaDetailRecordCapturedEvent.provider;
 
 class CharaDetailLink {
   String id;
@@ -186,12 +161,14 @@ final charaDetailCaptureStateProvider = NotifierProvider<CharaDetailCaptureState
 final trainerIdProvider = Provider<String>((ref) {
   final entry = StorageBox(StorageBoxKey.trainerId).entry<String>("trainer_id");
   var id = entry.pull();
+  // Logs are included in bug reports, so we should not casually print the trainer ID.
   if (id == null) {
     id = const Uuid().v4();
     entry.push(id);
-    logger.i("Trainer ID generated: $id");
+    if (kDebugMode) {
+      logger.i("Trainer ID generated: $id");
+    }
   } else {
-    // Logs are included in bug reports, so we should not casually print the trainer ID.
     if (kDebugMode) {
       logger.i("Trainer ID loaded: $id");
     }
@@ -280,59 +257,93 @@ class PlatformController {
   }
 
   void _handleMessage(String message) {
-    final data = jsonDecode(message) as Map;
-    final dataType = data['type'].toString();
-    final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
-    switch (dataType) {
-      case 'onError':
-        _errorEventController.sink.add(_soundEventSequence++);
-        captureState.fail(data['message']);
-        break;
-      case 'onCaptureStarted':
-        _captureTriggeredEventController.sink.add(true);
-        captureState.reset();
-        break;
-      case 'onCaptureStopped':
-        _captureTriggeredEventController.sink.add(false);
-        captureState.reset();
-        _ref.read(capturingFrameSizeProvider.notifier).set(null);
-        _ref.read(capturingFrameRateProvider.notifier).set(null);
-        break;
-      case 'onScrollReady':
-        _scrollReadyEventController.sink.add(_soundEventSequence++);
-        break;
-      case 'onScrollUpdated':
-        captureState.progress(data['index'], data['progress']);
-        break;
-      case 'onPageReady':
-        _pageReadyEventController.sink.add(_soundEventSequence++);
-        captureState.progress(data['index'], 1);
-        break;
-      case 'onCharaDetailStarted':
-        captureState.started(RecordType.values[data['record_type'] as int]);
-        break;
-      case 'onCharaDetailFinished':
-        if (data['success']) {
-          _charaDetailRecordCapturedEventController.sink.add(data['id']);
-          captureState.success(data['id']);
-        }
-        break;
-      case 'onCharaDetailUpdated':
-        _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
-        break;
-      case 'onFrameRateReported':
-        _ref.read(capturingFrameRateProvider.notifier).set(data['fps'].toDouble());
-        break;
-      case 'onScreenshotTaken':
-        logger.i("path=${data['path']}, result='${data['result']}'");
-        _ref.read(latestScreenshotProvider.notifier).set(ScreenshotResult(FilePath(data['path']), data['result']));
-        break;
-      case 'onFrameSizeReported':
-        final size = Size(data['size']['width'].toDouble(), data['size']['height'].toDouble());
-        _ref.read(capturingFrameSizeProvider.notifier).set(size);
-        break;
-      default:
-        throw UnimplementedError(dataType);
+    // Native payloads are untyped and cross the platform channel, where neither
+    // the field set nor the Dart runtime types are guaranteed. Wrap the whole
+    // dispatch so a malformed message is logged and dropped instead of throwing
+    // out of the method-channel callback (where the error would be hard to trace
+    // and the event silently lost anyway).
+    try {
+      final data = jsonDecode(message) as Map;
+      final dataType = data['type'].toString();
+      final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
+      switch (dataType) {
+        case 'onError':
+          _errorEvent.add(_soundEventSequence++);
+          captureState.fail(data['message']);
+          break;
+        case 'onCaptureStarted':
+          _captureTriggeredEvent.add(true);
+          captureState.reset();
+          break;
+        case 'onCaptureStopped':
+          _captureTriggeredEvent.add(false);
+          captureState.reset();
+          _ref.read(capturingFrameSizeProvider.notifier).set(null);
+          _ref.read(capturingFrameRateProvider.notifier).set(null);
+          break;
+        case 'onScrollReady':
+          _scrollReadyEvent.add(_soundEventSequence++);
+          break;
+        case 'onScrollUpdated':
+          {
+            final index = data['index'] as int?;
+            final progress = (data['progress'] as num?)?.toDouble();
+            if (index != null && progress != null) {
+              captureState.progress(index, progress);
+            }
+          }
+          break;
+        case 'onPageReady':
+          {
+            _pageReadyEvent.add(_soundEventSequence++);
+            final index = data['index'] as int?;
+            if (index != null) {
+              captureState.progress(index, 1);
+            }
+          }
+          break;
+        case 'onCharaDetailStarted':
+          final recordType = data['record_type'] as int;
+          if (recordType < 0 || recordType >= RecordType.values.length) {
+            throw RangeError.value(recordType, 'record_type');
+          }
+          captureState.started(RecordType.values[recordType]);
+          break;
+        case 'onCharaDetailFinished':
+          if (data['success'] == true) {
+            _charaDetailRecordCapturedEvent.add(data['id']);
+            captureState.success(data['id']);
+          }
+          break;
+        case 'onCharaDetailUpdated':
+          _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
+          break;
+        case 'onFrameRateReported':
+          {
+            final fps = (data['fps'] as num?)?.toDouble();
+            if (fps != null) {
+              _ref.read(capturingFrameRateProvider.notifier).set(fps);
+            }
+          }
+          break;
+        case 'onScreenshotTaken':
+          logger.i("path=${data['path']}, result='${data['result']}'");
+          _ref.read(latestScreenshotProvider.notifier).set(ScreenshotResult(FilePath(data['path']), data['result']));
+          break;
+        case 'onFrameSizeReported':
+          {
+            final width = (data['size']?['width'] as num?)?.toDouble();
+            final height = (data['size']?['height'] as num?)?.toDouble();
+            if (width != null && height != null) {
+              _ref.read(capturingFrameSizeProvider.notifier).set(Size(width, height));
+            }
+          }
+          break;
+        default:
+          throw UnimplementedError(dataType);
+      }
+    } catch (e, st) {
+      logger.w("Failed to handle native message: $message", e, st);
     }
   }
 

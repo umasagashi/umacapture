@@ -32,7 +32,19 @@ class IsInRangeDateTimePredicate with IsInRangeDateTimePredicateMappable {
   IsInRangeDateTimePredicate({this.min, this.max});
 
   bool apply(DateTime value) {
-    return value.isInRange(min ?? value, max ?? value);
+    // Compare on calendar day, not the full timestamp. The bounds come from the
+    // calendar at midnight, while a record's captured value carries a time of
+    // day, so a plain `value <= max` would drop same-day records past midnight.
+    final date = DateTime(value.year, value.month, value.day);
+    final lower = min;
+    final upper = max;
+    if (lower != null && date.isBefore(DateTime(lower.year, lower.month, lower.day))) {
+      return false;
+    }
+    if (upper != null && date.isAfter(DateTime(upper.year, upper.month, upper.day))) {
+      return false;
+    }
+    return true;
   }
 
   IsInRangeDateTimePredicate copyWith({DateTime? min, DateTime? max}) {
@@ -174,7 +186,10 @@ class _DateTimeSelectorState extends ConsumerState<_DateTimeSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     final records = ref.read(charaDetailRecordStorageProvider);
-    range = spec.parse(ref.base, records).range();
+    // range() throws on an empty list, so fall back to "today" when there are no
+    // records yet (mirrors the empty-records guard in the ranged-int/label selectors).
+    final today = DateTime.now();
+    range = records.isEmpty ? Range<DateTime>(min: today, max: today) : spec.parse(ref.base, records).range();
     _focusedDay = range.max;
   }
 
@@ -248,16 +263,24 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late final VoidCallback _commitTitle;
 
   @override
   void initState() {
     super.initState();
     title = _clonedSpecProvider.read(ref, widget.specId).title;
-    widget.onDecided.addListener(() {
+    _commitTitle = () {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
-    });
+    };
+    widget.onDecided.addListener(_commitTitle);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitTitle);
+    super.dispose();
   }
 
   @override

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:easy_localization/easy_localization.dart';
@@ -10,6 +9,7 @@ import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
 import '/src/addon/payload_enricher.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
@@ -41,18 +41,11 @@ Set<String> chainVisitedTaskIds(PayloadMap payload) {
 }
 
 // Fires the (forwarded) payload of a task each time one finishes, so tasks bound
-// to the `taskExecuted` trigger can run after it. A broadcast controller that is
-// recreated when a new listener subscribes while one is already attached (the
-// pattern shared with platform_controller's event providers): this resets the
-// stream between hot-restarts / test cases so a stale controller cannot replay
-// events into a fresh subscriber.
-var _taskExecutedEventController = StreamController<PayloadMap>.broadcast();
-final taskExecutedEventProvider = StreamProvider<PayloadMap>((ref) {
-  if (_taskExecutedEventController.hasListener) {
-    _taskExecutedEventController = StreamController<PayloadMap>.broadcast();
-  }
-  return _taskExecutedEventController.stream;
-});
+// to the `taskExecuted` trigger can run after it. Backed by the shared broadcast
+// EventStreamProvider so a stale controller cannot replay events into a fresh
+// subscriber across hot-restarts / test cases.
+final _taskExecutedEvent = EventStreamProvider<PayloadMap>();
+final taskExecutedEventProvider = _taskExecutedEvent.provider;
 
 /// An in-flight execution. Holds the live cancel hook, so it exists only in
 /// memory (never persisted).
@@ -247,7 +240,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
       return;
     }
     final visited = {...chainVisitedTaskIds(payload), task.id};
-    _taskExecutedEventController.sink.add({
+    _taskExecutedEvent.add({
       ...payload,
       "event": "task_executed",
       "task_id": task.id,

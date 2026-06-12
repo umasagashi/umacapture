@@ -8,7 +8,7 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #include <opencv2/opencv.hpp>
-#pragma clang diagnostic ppop
+#pragma clang diagnostic pop
 
 #include <minimal_uuid4/minimal_uuid4.h>
 
@@ -216,6 +216,11 @@ public:
 
         cv::Mat masks;
         cv::Mat result = cv::findHomography(valid_key_points_of_to, valid_key_points_of_from, masks, cv::RANSAC, 3);
+        // findHomography returns an empty Mat when it cannot fit one (degenerate/insufficient inliers); reading
+        // matrix[2]/matrix[5] off an empty vector would be out of bounds. Treat a non-3x3 result as no match.
+        if (result.empty() || result.rows != 3 || result.cols != 3) {
+            return std::nullopt;
+        }
         std::vector<double> matrix((double *) result.datastart, (double *) result.dataend);
         const Point<double> offset = {matrix[2], matrix[5]};
 

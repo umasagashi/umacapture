@@ -278,16 +278,24 @@ class _PatternSelector extends ConsumerStatefulWidget {
 
 class _PatternSelectorState extends ConsumerState<_PatternSelector> {
   late String pattern;
+  late final VoidCallback _commitPattern;
 
   @override
   void initState() {
     super.initState();
     pattern = _clonedSpecProvider.read(ref, widget.specId).predicate.pattern?.pattern ?? "";
-    widget.onDecided.addListener(() {
+    _commitPattern = () {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(predicate: spec.predicate.copyWith(pattern: RegExp(pattern)));
       });
-    });
+    };
+    widget.onDecided.addListener(_commitPattern);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitPattern);
+    super.dispose();
   }
 
   @override
@@ -328,13 +336,14 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late final VoidCallback _commitTitle;
 
   @override
   void initState() {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
-    widget.onDecided.addListener(() {
+    _commitTitle = () {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
@@ -358,7 +367,14 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           return state;
         }
       });
-    });
+    };
+    widget.onDecided.addListener(_commitTitle);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitTitle);
+    super.dispose();
   }
 
   @override

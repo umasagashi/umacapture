@@ -228,16 +228,24 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late final VoidCallback _commitTitle;
 
   @override
   void initState() {
     super.initState();
     title = _clonedSpecProvider.read(ref, widget.specId).title;
-    widget.onDecided.addListener(() {
+    _commitTitle = () {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
-    });
+    };
+    widget.onDecided.addListener(_commitTitle);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitTitle);
+    super.dispose();
   }
 
   @override

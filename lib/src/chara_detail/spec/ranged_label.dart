@@ -158,7 +158,7 @@ class _RangedLabelSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = spec.parse(ref.base, records).range().toDouble();
+    final range = records.isEmpty ? Range<double>(min: 0, max: 0) : spec.parse(ref.base, records).range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_label.range.label".tr()),
       description: Text("$tr_ranged_label.range.description".tr()),
@@ -203,16 +203,24 @@ class _NotationSelector extends ConsumerStatefulWidget {
 
 class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   late String title;
+  late final VoidCallback _commitTitle;
 
   @override
   void initState() {
     super.initState();
     title = _clonedSpecProvider.read(ref, widget.specId).title;
-    widget.onDecided.addListener(() {
+    _commitTitle = () {
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
         return spec.copyWith(title: title);
       });
-    });
+    };
+    widget.onDecided.addListener(_commitTitle);
+  }
+
+  @override
+  void dispose() {
+    widget.onDecided.removeListener(_commitTitle);
+    super.dispose();
   }
 
   @override

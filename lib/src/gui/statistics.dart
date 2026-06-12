@@ -140,6 +140,11 @@ class MonthlyFansChartData {
   }
 
   int calcMaxValue(List<FlSpot> spots, int maxX) {
+    // `.max` throws on an empty iterable and `/ spots.length` divides by zero,
+    // so a month range that yields no data points must short-circuit.
+    if (spots.isEmpty) {
+      return 0;
+    }
     final actual = spots.map((e) => e.y).max;
     final predicted = actual * maxX / spots.length;
     return (predicted * 1.2).toInt().roundTopmost(4);
@@ -291,6 +296,9 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
       ),
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
+        if (records.isEmpty) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
         return Padding(
           padding: const EdgeInsets.only(top: 16, right: 16, bottom: 8),
           child: MonthlyFansChartData(records).build(theme, targetMonth),
@@ -405,10 +413,13 @@ class CountSRankStatisticWidget extends ConsumerWidget {
       bottom: Text("$tr_statistics.count_s_rank.bottom".tr()),
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
-        return Padding(
-          padding: const EdgeInsets.only(top: 36, bottom: 4),
-          child: CountSRankChartData(records).build(theme),
-        );
+        final chart = CountSRankChartData(records);
+        // Guard against an empty/all-active-less record set: `build` derives
+        // `maxY` from `counts.max`, which is 0 here and yields a degenerate axis.
+        if (chart.parse().sum == 0) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
+        return Padding(padding: const EdgeInsets.only(top: 36, bottom: 4), child: chart.build(theme));
       },
     );
   }
@@ -432,7 +443,10 @@ class CountStrategyChartData {
   List<int> parse() {
     List<int> d = [0, 0, 0, 0];
     for (final record in records.where((e) => e.metadata.stage == RecordStage.active)) {
-      d[record.metadata.strategy]++;
+      final strategy = record.metadata.strategy;
+      if (strategy >= 0 && strategy < d.length) {
+        d[strategy]++;
+      }
     }
     return d;
   }
@@ -479,11 +493,13 @@ class CountStrategyStatisticWidget extends ConsumerWidget {
       bottom: Text("$tr_statistics.count_strategy.bottom".tr()),
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
-        if (records.isEmpty) {
-          return Text("-", style: theme.textTheme.headlineLarge);
-        }
         final labels = ref.watch(labelMapProvider)[LabelKeys.raceStrategy]!;
         final chart = CountStrategyChartData(records, labels);
+        // Guard against a non-empty record set that yields no active records:
+        // `chart.build` would otherwise divide by a zero total and crash on NaN.round().
+        if (chart.counts.sum == 0) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
         return Padding(
           padding: const EdgeInsets.all(8),
           child: Row(
