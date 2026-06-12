@@ -93,7 +93,9 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
       case SkillSetLogicMode.allOf:
         return foundSkills.length == query.length;
       case SkillSetLogicMode.sumOf:
-        return foundSkills.length >= min;
+        // Clamp the threshold to at least 1: a persisted min of 0 would make
+        // `length >= 0` always true, turning the filter into a show-all no-op.
+        return foundSkills.length >= (min < 1 ? 1 : min);
     }
   }
 }
@@ -385,7 +387,7 @@ class _ModeSelector extends ConsumerWidget {
           tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
           child: SpinBox(
             height: 30,
-            min: 0,
+            min: 1,
             max: predicate.query.length,
             value: predicate.min,
             onChanged: (value) {
