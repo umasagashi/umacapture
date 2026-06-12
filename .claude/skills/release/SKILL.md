@@ -1,0 +1,182 @@
+---
+name: release
+description: >-
+  Cut a new umacapture release end to end: bump the app version in pubspec.yaml,
+  regenerate the version/license assets via build_runner, commit and tag on
+  develop, then build and publish the Windows exe + zip to a GitHub release with
+  flutter_distributor. Covers the two phases (version bump + codegen, then
+  flutter_distributor deploy), the FVM/Inno Setup/GITHUB_TOKEN prerequisites, and
+  the known-broken global flutter_distributor activation under Dart 3.12. Use
+  when the user wants to release, ship, publish, or bump the app version and push
+  a new build to GitHub releases.
+---
+
+# Release umacapture (version bump → codegen → flutter_distributor publish)
+
+A release has two phases:
+
+1. **Version bump + codegen + commit/push** — edit `pubspec.yaml` `version:`, run
+   `build_runner` (which regenerates `assets/version_info.json`, and
+   `assets/license_info.json` when dependencies changed), then commit and push to
+   `develop` to lock in the release commit before any build/publish work.
+2. **Tag + deploy** — tag the pushed commit, then `flutter_distributor` builds the
+   Windows installer (Inno Setup `exe`) and a `zip`, and publishes both as assets
+   on a GitHub release of `umasagashi/umacapture`.
+
+This skill runs the whole pipeline through the GitHub publish. Stop and ask the
+user if any preflight check fails.
+
+## Key paths
+
+- `pubspec.yaml` — `version:` field (semver, no leading `v`), single source of truth.
+- `lib/distribution_info.dart` — the custom build_runner `Builder`
+  (`distributionInfoBuilder`). Despite the filename it does **not** emit a Dart
+  file; it reads `pubspec.yaml` and writes the asset JSONs below.
+- `build.yaml` — wires the `distribution_info` builder (`build_to: source`,
+  `auto_apply: root_package`, `generate_for: pubspec.yaml`).
+- `assets/version_info.json` — generated `{ "version": "<pubspec version>" }`. Committed.
+- `assets/license_info.json` — generated dependency-license digest. Committed.
+  The builder **rejects** GPL / EUPL / MPL strings (`flutter`, `dbus`, etc. are
+  pre-excluded) and also copies `assets/license/*.txt` from `native/vendor`,
+  opencv, onnxruntime, clip.
+- `distribute_options.yaml` — flutter_distributor config: release `windows` with
+  two jobs, `exe` and `zip`, both published to GitHub (`umasagashi/umacapture`)
+  with `release-prerelease: "true"`, so the GitHub release is created as a
+  **pre-release** (the arg must be the quoted string `"true"` — the publisher
+  compares it to `'true'`).
+- `windows/packaging/exe/` — `make_config.yaml` + `inno_template.iss` for the
+  Inno Setup installer.
+- Artifacts land in `dist/` (gitignored): `umacapture-v<version>-windows.exe` / `.zip`.
+
+> The `msix` dependency in `pubspec.yaml` is vestigial (referenced only in a code
+> comment). Distribution is exe + zip, not msix. Do not add an msix step.
+
+## Preflight (run these checks first)
+
+All commands use the FVM-pinned toolchain. The global `flutter` on PATH already
+resolves to the FVM default (3.44.0), but verify rather than assume.
+
+1. **Flutter SDK is the pinned 3.44.0** — `flutter_distributor` shells out to
+   `flutter build windows`, so the PATH `flutter` must be the pinned one:
+   ```bash
+   flutter --version    # expect Flutter 3.44.0 / Dart 3.12.0
+   ```
+   If it is not 3.44.0, prepend `.fvm/flutter_sdk/bin` to PATH for the session.
+
+2. **Inno Setup `iscc` is available** (needed by the `exe` job):
+   ```bash
+   where iscc || ls "/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+   ```
+
+3. **`GITHUB_TOKEN` is set** (the GitHub publisher reads it). Confirm presence
+   without printing the value:
+   ```bash
+   [ -n "$GITHUB_TOKEN" ] && echo "token present" || echo "MISSING"
+   gh auth status        # should show logged in to umasagashi
+   ```
+   Never echo the token.
+
+4. **`flutter_distributor` runs under Dart 3.12** — the globally activated
+   snapshot is frequently stale and fails with
+   `Can't load Kernel binary: Invalid kernel binary format version` /
+   `doesn't support Dart 3.12.0`. Probe it, and only reactivate if broken:
+   ```bash
+   .fvm/flutter_sdk/bin/dart pub global run flutter_distributor:main --version
+   # if it errors with the kernel/version message:
+   .fvm/flutter_sdk/bin/dart pub global activate flutter_distributor
+   ```
+   Reactivation recompiles the snapshot with the FVM Dart (and pulls the latest
+   flutter_distributor, e.g. 0.6.6). Do not reactivate on every run — only when
+   the probe fails. The published executable is `flutter_distributor:main`.
+
+## Phase 1 — version bump + codegen + commit/push
+
+1. Pick the new version with the user (semver, e.g. `0.0.11`; no leading `v`).
+   The builder validates it with `Version.parse`, so it must be valid semver.
+2. Edit `pubspec.yaml` line `version: <old>` → `version: <new>`.
+3. Regenerate the assets. **Delete the generated outputs first** — build_runner
+   treats a pubspec `version:`-only change as a no-op and *skips* the
+   `distribution_info` builder, leaving `version_info.json` stale at the old
+   version. Removing the outputs forces a real rebuild. The `--force-jit` flag is
+   mandatory (a transitive native build hook is incompatible with build_runner's
+   default AOT):
+   ```bash
+   rm -f assets/version_info.json assets/license_info.json
+   .fvm/flutter_sdk/bin/dart run build_runner build --force-jit
+   ```
+   - If it throws `Rejected key found: <license>`, a dependency introduced a
+     GPL/EUPL/MPL license. Stop and resolve the dependency before continuing.
+4. Review the diff and **confirm `assets/version_info.json` now shows the new
+   version** (this is the step most likely to silently go wrong):
+   ```bash
+   cat assets/version_info.json    # must read the new <version>
+   ```
+   Expect `pubspec.yaml` and `assets/version_info.json` to change;
+   `assets/license_info.json` and `assets/license/*.txt` change only when
+   dependencies changed since the last release.
+
+Commit and push **at the end of Phase 1** to lock in the release commit before
+any build/publish work. The user-instructed version bump may be committed and
+pushed **directly to `develop`** (an explicit exception to the no-direct-push
+rule, granted for this release flow).
+
+5. Commit on `develop` (title matches the project's history, "Bump app version"):
+   ```bash
+   git commit -F - <<'EOF'
+   Bump app version
+
+   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+   EOF
+   ```
+   Stage `pubspec.yaml`, `assets/version_info.json`, and any regenerated
+   `assets/license_info.json` / `assets/license/*.txt`.
+6. Push `develop`:
+   ```bash
+   git push origin develop
+   ```
+
+## Phase 2 — tag + publish
+
+The Phase 1 commit is now fixed on the remote. Tag it and publish; the GitHub
+release the publisher creates attaches to the pushed `v<version>` tag.
+
+7. Create the annotated tag and push it:
+   ```bash
+   git tag -a "v<version>" -m "v<version>"
+   git push origin "v<version>"
+   ```
+8. Build and publish (packages both jobs and uploads to the GitHub release):
+   ```bash
+   .fvm/flutter_sdk/bin/dart pub global run flutter_distributor:main \
+     release --name windows
+   ```
+   This builds `dist/umacapture-v<version>-windows.exe` and `.zip`, then creates
+   (or reuses) the `v<version>` GitHub **pre-release** and uploads both as assets.
+9. Attach `version_info.json` as a release asset. flutter_distributor only
+   uploads the packaged exe/zip, so add this lightweight file separately (it lets
+   a client read the published version without downloading a build). `--clobber`
+   makes the step idempotent across re-runs:
+   ```bash
+   gh release upload "v<version>" assets/version_info.json --clobber
+   ```
+10. Verify the release — all three assets present and `isPrerelease` true:
+    ```bash
+    gh release view "v<version>" --json tagName,isPrerelease,isDraft,assets \
+      --jq '{tag:.tagName,prerelease:.isPrerelease,draft:.isDraft,assets:[.assets[].name]}'
+    ```
+
+## Notes / gotchas
+
+- **flutter_distributor uses the PATH `flutter`**, not FVM directly. The pinned
+  3.44.0 must be first on PATH or the build uses the wrong SDK.
+- **Ordering matters.** The bump commit is pushed in Phase 1 and the `v<version>`
+  tag in Phase 2, both before `flutter_distributor` publishes; otherwise the
+  GitHub release the publisher creates can point at the wrong commit.
+- **Releases publish as pre-releases** by default (`release-prerelease: "true"`
+  in `distribute_options.yaml`). To cut a full (non-pre-release) release instead,
+  drop that arg for the run, or promote afterwards with
+  `gh release edit "v<version>" --latest --prerelease=false`. Historically
+  pre-releases also used a date-suffixed tag, e.g. `v0.0.10-20260507`.
+- `dist/` is gitignored; build artifacts are never committed.
+- Generated assets are pinned to `eol=lf` in `.gitattributes`, so codegen
+  produces no EOL-only churn — do not renormalize.
