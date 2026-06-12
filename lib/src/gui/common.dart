@@ -242,6 +242,14 @@ class _SpinBoxState extends State<SpinBox> {
     _value = widget.value;
   }
 
+  @override
+  void didUpdateWidget(SpinBox oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.value != oldWidget.value) {
+      _value = Math.clamp(widget.min, widget.value, widget.max);
+    }
+  }
+
   Widget button(ThemeData theme, String text, int offset) {
     return TextButton(
       style: OutlinedButton.styleFrom(
