@@ -115,8 +115,8 @@ class ExternalProgramRunner implements ActionRunner {
           // CaptureBuffer for why per-chunk decoding is wrong.
           final out = CaptureBuffer();
           final err = CaptureBuffer();
-          final outDone = _drain(started.stdout, out);
-          final errDone = _drain(started.stderr, err);
+          final outDrain = _drain(started.stdout, out);
+          final errDrain = _drain(started.stderr, err);
 
           // Always bound the run: an explicit timeout when set, otherwise the
           // backstop for legacy tasks. A never-exiting process must not hold an
@@ -139,7 +139,14 @@ class ExternalProgramRunner implements ActionRunner {
             // after the direct process exits, which would otherwise hang here
             // forever and permanently hold an execution slot. After the grace
             // period, snapshot whatever has been captured so far and finish.
-            await Future.wait([outDone, errDone]).timeout(_drainGrace, onTimeout: () => const <void>[]);
+            await Future.wait([outDrain.done, errDrain.done]).timeout(_drainGrace, onTimeout: () => const <void>[]);
+            // Cancel the drain subscriptions: when the grace period elapses (a
+            // detached grandchild still holds the inherited pipe), the listeners
+            // would otherwise keep the pipe open and run forever. After a normal
+            // exit they are already done, so cancelling is a harmless no-op and
+            // does not lose captured bytes (snapshot() is repeatable).
+            unawaited(outDrain.sub.cancel());
+            unawaited(errDrain.sub.cancel());
             final status = cancelled
                 ? ExecutionStatus.cancelled
                 : timedOut
@@ -171,17 +178,24 @@ class ExternalProgramRunner implements ActionRunner {
     });
   }
 
-  /// Feeds [stream]'s raw bytes into [capture] and returns a future that
-  /// completes when the stream is exhausted or errors.
-  static Future<void> _drain(Stream<List<int>> stream, CaptureBuffer capture) {
+  /// Feeds [stream]'s raw bytes into [capture], returning the live subscription
+  /// and a future that completes when the stream is exhausted or errors.
+  ///
+  /// The caller must cancel [sub] once the drain is no longer needed; the
+  /// returned [done] future never completes if the stream stays open (e.g. a
+  /// detached grandchild holding the pipe), so it is awaited under a timeout.
+  static ({Future<void> done, StreamSubscription<List<int>> sub}) _drain(
+    Stream<List<int>> stream,
+    CaptureBuffer capture,
+  ) {
     final done = Completer<void>();
-    stream.listen(
+    final sub = stream.listen(
       capture.add,
       onError: (Object e) => logger.w("Failed to read external program output: $e"),
       onDone: done.complete,
       cancelOnError: false,
     );
-    return done.future;
+    return (done: done.future, sub: sub);
   }
 }
 
