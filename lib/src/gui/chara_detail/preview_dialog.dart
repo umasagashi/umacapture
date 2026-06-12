@@ -78,14 +78,26 @@ class PredictionData with PredictionDataMappable {
     }
     if (prediction.label is Map) {
       final Map<String, dynamic> m = prediction.label;
+      // Resolve an index against the model's label list, falling back to the
+      // raw index (like the int branch) when the label map lacks the entry or
+      // the index is out of range, instead of throwing during overlay render.
+      String labelAt(String key, Object? index) {
+        final labels = labelMap["$model.$key"];
+        final i = (index as num?)?.toInt();
+        if (labels != null && i != null && i >= 0 && i < labels.length) {
+          return labels[i];
+        }
+        return "${i ?? "?"}";
+      }
+
       if (m.containsKey("chara")) {
-        final rental = (m["rental"] ? " (${"$tr_preview.rental".tr()})" : "");
-        return labelMap["$model.card"]![m["card"]!.toInt()] + rental;
+        final rental = (m["rental"] == true ? " (${"$tr_preview.rental".tr()})" : "");
+        return labelAt("card", m["card"]) + rental;
       } else if (m.containsKey("place")) {
-        final place = labelMap["$model.place"]![m["place"]!.toInt()];
-        final ground = labelMap["$model.ground"]![m["ground"]!.toInt()];
-        final distance = labelMap["$model.distance"]![m["distance"]!.toInt()];
-        final variation = labelMap["$model.variation"]![m["variation"]!.toInt()];
+        final place = labelAt("place", m["place"]);
+        final ground = labelAt("ground", m["ground"]);
+        final distance = labelAt("distance", m["distance"]);
+        final variation = labelAt("variation", m["variation"]);
         return "$place $ground $distance $variation";
       }
       throw UnsupportedError(toString());
@@ -114,7 +126,14 @@ class PredictionContainer with PredictionContainerMappable {
   PredictionContainer(this.statusHeader, this.skillTab, this.factorTab, this.campaignTab);
 
   static PredictionContainer? load(DirectoryPath recordDir) {
-    return PredictionContainerMapper.fromJson(recordDir.filePath("prediction.json").readAsStringSync());
+    // Optional overlay data: an older or quarantined record may lack a readable
+    // prediction.json. Degrade to no overlay instead of throwing during build.
+    try {
+      return PredictionContainerMapper.fromJson(recordDir.filePath("prediction.json").readAsStringSync());
+    } catch (e, s) {
+      logger.w("Failed to load prediction.json for ${recordDir.name}: $e\n$s");
+      return null;
+    }
   }
 }
 
@@ -160,26 +179,34 @@ class ImageViewer extends ConsumerStatefulWidget {
   });
 
   static ImageViewer? load({required DirectoryPath recordDir, required Size viewportSize, required bool overlay}) {
-    final imageSize = ImageSizeContainer.load(recordDir);
-    if (imageSize == null) {
+    // Runs inside LayoutBuilder during build: any failure (missing/corrupt
+    // size json) must return null so the caller's `?? ErrorMessageWidget`
+    // fallback engages, never throw out of the build.
+    try {
+      final imageSize = ImageSizeContainer.load(recordDir);
+      if (imageSize == null) {
+        return null;
+      }
+      final imageWidth = [
+        imageSize.skill.intersection.width,
+        imageSize.factor.intersection.width,
+        imageSize.campaign.intersection.width,
+      ].sum;
+      final scale = viewportSize.width / imageWidth;
+      // TODO: This should be async.
+      final prediction = PredictionContainer.load(recordDir);
+      return ImageViewer(
+        recordDir: recordDir,
+        imageSize: imageSize,
+        overlay: overlay,
+        initialScale: scale,
+        maxScale: scale * 3,
+        prediction: prediction,
+      );
+    } catch (e, s) {
+      logger.w("Failed to load image viewer for $recordDir: $e\n$s");
       return null;
     }
-    final imageWidth = [
-      imageSize.skill.intersection.width,
-      imageSize.factor.intersection.width,
-      imageSize.campaign.intersection.width,
-    ].sum;
-    final scale = viewportSize.width / imageWidth;
-    // TODO: This should be async.
-    final prediction = PredictionContainer.load(recordDir);
-    return ImageViewer(
-      recordDir: recordDir,
-      imageSize: imageSize,
-      overlay: overlay,
-      initialScale: scale,
-      maxScale: scale * 3,
-      prediction: prediction,
-    );
   }
 
   @override
