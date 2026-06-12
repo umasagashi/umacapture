@@ -278,15 +278,17 @@ class _CharaDetailStateWidget extends ConsumerWidget {
   }
 
   String additionalInfoText(WidgetRef ref) {
-    final notAvailable = ref.watch(platformControllerProvider) == null;
-    if (notAvailable) {
+    // Watch every provider unconditionally so the watched set never changes
+    // between builds; branching below operates on the captured values.
+    final controllerAvailable = ref.watch(platformControllerProvider) != null;
+    final isCapturing = ref.watch(capturingStateProvider);
+    final captureState = ref.watch(charaDetailCaptureStateProvider);
+    if (!controllerAvailable) {
       return "$tr_capture.capture_control.additional_info.not_available".tr();
     }
-    final isCapturing = ref.watch(capturingStateProvider);
     if (!isCapturing) {
       return "$tr_capture.capture_control.additional_info.start_capture".tr();
     }
-    final captureState = ref.watch(charaDetailCaptureStateProvider);
     if (captureState.error != null) {
       return "$tr_capture.capture_control.additional_info.error".tr();
     }
