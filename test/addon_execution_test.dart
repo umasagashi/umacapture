@@ -138,6 +138,16 @@ void main() {
       final args = expandArgumentTemplate('--msg "a b" {missing}', const {});
       expect(args, ["--msg", "a b", ""]);
     });
+
+    test('treats a doubled quote inside quotes as a literal quote', () {
+      final args = expandArgumentTemplate('--msg "say ""hi"""', const {});
+      expect(args, ["--msg", 'say "hi"']);
+    });
+
+    test('keeps a quoted run with embedded literal quotes as a single argument', () {
+      final args = expandArgumentTemplate('"a ""b c"" d"', const {});
+      expect(args, ['a "b c" d']);
+    });
   });
 
   group('resolveExternalTimeoutSeconds', () {

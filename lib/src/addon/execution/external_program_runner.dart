@@ -204,6 +204,10 @@ class ExternalProgramRunner implements ActionRunner {
 /// Substituting after the split keeps a value containing spaces as a single
 /// argument. Unknown placeholders expand to the empty string.
 ///
+/// Inside a quoted run, a doubled quote (`""`) produces a literal `"`. This is
+/// the Windows-native escape and never collides with backslash path separators,
+/// so a quoted path ending in `\` stays intact.
+///
 /// This is safe for the default argv path ([ExternalProgramAction.runInShell]
 /// false): each argument is passed to the OS verbatim, so placeholder values
 /// cannot break out of their argument. With `runInShell: true` the arguments are
@@ -223,8 +227,17 @@ List<String> _tokenize(String template) {
   for (var i = 0; i < template.length; i++) {
     final ch = template[i];
     if (ch == '"') {
-      inQuotes = !inQuotes;
-      hasContent = true;
+      // Inside quotes, a doubled quote escapes a literal `"` and stays quoted.
+      // This is the Windows-native escape and never collides with backslash
+      // path separators.
+      if (inQuotes && i + 1 < template.length && template[i + 1] == '"') {
+        current.write('"');
+        hasContent = true;
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+        hasContent = true;
+      }
     } else if (ch == ' ' && !inQuotes) {
       if (hasContent) {
         result.add(current.toString());
