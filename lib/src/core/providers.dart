@@ -97,12 +97,14 @@ final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
     documentDir = DirectoryPath(await getApplicationDocumentsDirectory());
   }
   final supportDir = DirectoryPath(await getApplicationSupportDirectory());
-  final downloadDir = DirectoryPath(await getDownloadsDirectory());
+  // getDownloadsDirectory returns null on Android/unsupported platforms; fall
+  // back to the app's document dir so DirectoryPath never receives null.
+  final downloadDirRaw = await getDownloadsDirectory();
   final info = PathInfo(
     documentDir: documentDir / appName,
     supportDir: supportDir,
     executableDir: FilePath.resolvedExecutable.parent,
-    downloadDir: downloadDir,
+    downloadDir: downloadDirRaw != null ? DirectoryPath(downloadDirRaw) : documentDir / appName,
   );
   return info;
 });
