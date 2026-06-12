@@ -166,8 +166,8 @@ r.status.intelligence // 賢さ
 ### 5.3 Aptitudes（適性）
 
 バ場 `ground`・距離 `distance`・脚質 `style` の各方向にアクセスできます。各方向の値は
-**ランク**（`$Coded`、[5.10](#510-コード化された項目coded--namecode) 参照）で、`.name` がランク文字（`"A"`〜`"G"`）、
-`.code` がランクの大きさ（**`A`=7 … `G`=1**、大きいほど高い）。
+**ランク**（`$Coded`、[5.10](#510-コード化された項目coded--namecode) 参照）で、`.name` がランク文字（最高位の
+`"S"` と `"A"`〜`"G"`）、`.code` がランクの大きさ（**`S`=8、`A`=7 … `G`=1**、大きいほど高い）。
 
 ```dart
 r.aptitudes.ground.turf          // 芝適性（ランク）
@@ -182,8 +182,8 @@ r.aptitudes.style.offPace        // 差し
 r.aptitudes.style.lateCharge     // 追込
 
 // 使い方
-r.aptitudes.distance.long.name == "A"   // ちょうど A か
-r.aptitudes.distance.long.code >= 5     // C 以上か（A=7,B=6,C=5,…）
+r.aptitudes.distance.long.name == "S"   // ちょうど S か
+r.aptitudes.distance.long.code >= 5     // C 以上か（S=8,A=7,B=6,C=5,…）
 ```
 
 ### 5.4 スキル（`r.skills` の各要素）
@@ -298,14 +298,17 @@ bool filter(CharaRecord r) {
   return r.charaRank.atMost("B");
 }
 
-// 長距離適性が A 以上
+// 長距離適性が A 以上（S も該当する）
 r.aptitudes.distance.long.atLeast("A")
+
+// 長距離適性がちょうど S（最高位）
+r.aptitudes.distance.long.atLeast("S")
 
 // 同じ意味（codeOf を直接使う書き方）
 r.charaRank.code <= r.charaRank.codeOf("B")
 ```
 
-「以上／以下」は **`.code` の大小**を基準にします（適性なら `A`>`B`>…、キャラランクなら高ランクほど
+「以上／以下」は **`.code` の大小**を基準にします（適性なら `S`>`A`>`B`>…、キャラランクなら高ランクほど
 大きい）。`codeOf`/`atLeast`/`atMost` が使えるのは**順序・識別のあるコード化項目**です：
 `r.charaRank`、適性ランク、`r.trainee`、`r.races[].{title,ground,distance,strategy,weather}`、
 `r.metadata.{recordType,strategy}`、`r.factors[].subject`、`r.supportCards[].rank`。
@@ -657,7 +660,7 @@ dynamic display(CharaRecord r) {
 `Cell` の `sort` には数値だけでなく**文字列**も渡せます（独自の並び順キーにしたいとき）。
 
 ```dart
-// 表示は "A"〜"G" だが、並びは内部ランク（数値）で
+// 表示は "S"〜"G" だが、並びは内部ランク（数値）で
 dynamic display(CharaRecord r) {
   final c = r.aptitudes.distance.long;   // $Coded
   return Cell(c.name, sort: c.code);     // 表示=ランク文字、並び=ランクの大きさ
@@ -815,7 +818,7 @@ dynamic display(CharaRecord r) {
 
 Status        speed stamina power guts intelligence（int）
 Aptitudes     ground.{turf,dirt} / distance.{short,mile,middle,long}
-              style.{leadPace,withPace,offPace,lateCharge}  …各々 $Coded（.name="A".. / .code=1..7）
+              style.{leadPace,withPace,offPace,lateCharge}  …各々 $Coded（.name="S"/"A".."G" / .code=1..8）
 Skill         id name level(int?) hasTag(name)
 Factor        id name star subject($Coded) hasTag(name)
 FactorGroup   id name totalStar selfStar parent1Star parent2Star hasTag(name)
