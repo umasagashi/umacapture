@@ -48,13 +48,21 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
   }
 
   Future<void> updated(String id) async {
-    // Always increment, even if the reload fails: completion is gated on the
-    // count reaching the total, so a single failed reload would otherwise leave
-    // the progress stuck forever and never reset to Progress.none.
+    // Always reload, even outside a batch: the native side can emit this for any
+    // record regeneration, and a failed reload must not abort the refresh.
+    // Completion is gated on the count reaching the total, so a single failed
+    // reload would otherwise leave the progress stuck forever.
     try {
       await ref.read(charaDetailRecordStorageLoaderProvider.notifier).reload(id);
     } catch (e, s) {
       logger.w("Failed to reload regenerated record $id: $e\n$s");
+    }
+    // Advance batch progress only while a batch is in flight. Progress.none and
+    // an already-completed batch both report isCompleted (count >= total), so a
+    // stray/late/duplicate native callback would otherwise mark a zero-length
+    // batch complete and re-fire completion (spurious success toast + rebuild).
+    if (state.isCompleted) {
+      return;
     }
     state = state.increment();
     if (state.isCompleted) {
