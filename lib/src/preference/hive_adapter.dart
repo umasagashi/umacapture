@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
 
 import '/src/chara_detail/storage.dart';
+import '/src/core/app_logger.dart';
 import '/src/core/clipboard_alt.dart';
 
 class JsonAdapter<T> extends TypeAdapter<T?> {
@@ -13,7 +14,17 @@ class JsonAdapter<T> extends TypeAdapter<T?> {
 
   @override
   T? read(BinaryReader reader) {
-    return MapperContainer.globals.fromJson<T>(reader.readString());
+    final raw = reader.readString();
+    try {
+      return MapperContainer.globals.fromJson<T>(raw);
+    } catch (error, stackTrace) {
+      // A persisted value that can no longer decode (a retired enum value,
+      // corrupt JSON) must not crash the provider that reads it. Fall back to
+      // null so callers degrade to their default; the bad string is left on
+      // disk and the next write overwrites it.
+      logger.w("Failed to decode persisted value (typeId=$typeId): $raw", error, stackTrace);
+      return null;
+    }
   }
 
   @override
