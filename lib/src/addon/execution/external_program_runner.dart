@@ -95,7 +95,17 @@ class ExternalProgramRunner implements ActionRunner {
     var cancelled = false;
     var timedOut = false;
 
-    final args = expandArgumentTemplate(action.argumentTemplate, payload);
+    final List<String> args;
+    try {
+      args = expandArgumentTemplate(action.argumentTemplate, payload);
+    } on FormatException catch (e) {
+      // A malformed template (e.g. an unterminated quote) can never produce a
+      // valid argv; fail loudly instead of launching with mangled arguments.
+      exec.finish(
+        (elapsed) => ExecutionResult(status: ExecutionStatus.failure, error: e.toString(), duration: elapsed),
+      );
+      return exec.handle(() {});
+    }
     final workingDir = action.workingDirectory?.trim();
 
     Process.start(
@@ -208,6 +218,9 @@ class ExternalProgramRunner implements ActionRunner {
 /// the Windows-native escape and never collides with backslash path separators,
 /// so a quoted path ending in `\` stays intact.
 ///
+/// Throws a [FormatException] if a quote is left unterminated, so a malformed
+/// template surfaces as a failed execution rather than mangled arguments.
+///
 /// This is safe for the default argv path ([ExternalProgramAction.runInShell]
 /// false): each argument is passed to the OS verbatim, so placeholder values
 /// cannot break out of their argument. With `runInShell: true` the arguments are
@@ -248,6 +261,9 @@ List<String> _tokenize(String template) {
       current.write(ch);
       hasContent = true;
     }
+  }
+  if (inQuotes) {
+    throw const FormatException("Unterminated quote in argument template");
   }
   if (hasContent) result.add(current.toString());
   return result;

@@ -243,6 +243,13 @@ void main() {
       handle.cancel();
       expect((await handle.result).status, ExecutionStatus.cancelled);
     });
+
+    test('reports failure without launching when the template is malformed', () async {
+      final result = await run('--msg "abc');
+      expect(result.status, ExecutionStatus.failure);
+      expect(result.exitCode, isNull);
+      expect(result.error, contains('Unterminated quote'));
+    });
   }, skip: !Platform.isWindows ? 'Windows-only (drives cmd.exe)' : null);
 
   group('truncateCapture', () {

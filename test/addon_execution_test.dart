@@ -148,6 +148,10 @@ void main() {
       final args = expandArgumentTemplate('"a ""b c"" d"', const {});
       expect(args, ['a "b c" d']);
     });
+
+    test('throws on an unterminated quote', () {
+      expect(() => expandArgumentTemplate('--msg "abc', const {}), throwsFormatException);
+    });
   });
 
   group('resolveExternalTimeoutSeconds', () {
