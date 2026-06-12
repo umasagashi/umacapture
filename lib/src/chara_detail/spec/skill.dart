@@ -87,15 +87,19 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
     if (query.length < 2) {
       return foundSkills.isNotEmpty;
     }
+    // Match on distinct skill ids: a record may hold several Skill entries that
+    // share an id (different levels), which would otherwise inflate the count and
+    // let `allOf`/`sumOf` pass without every queried id being present.
+    final foundIds = foundSkills.map((e) => e.id).toSet();
     switch (logic) {
       case SkillSetLogicMode.anyOf:
-        return foundSkills.isNotEmpty;
+        return foundIds.isNotEmpty;
       case SkillSetLogicMode.allOf:
-        return foundSkills.length == query.length;
+        return foundIds.containsAll(query);
       case SkillSetLogicMode.sumOf:
         // Clamp the threshold to at least 1: a persisted min of 0 would make
         // `length >= 0` always true, turning the filter into a show-all no-op.
-        return foundSkills.length >= (min < 1 ? 1 : min);
+        return foundIds.length >= (min < 1 ? 1 : min);
     }
   }
 }
