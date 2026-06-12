@@ -43,6 +43,10 @@ target_compile_definitions(
         USE_CUSTOM_ASSERT
         WINVER=0x0A00
         _WIN32_WINNT=0x0A00
+        # Silence the STL1011 hard error that newer MSVC toolsets (>= 14.51) raise when the
+        # C++/WinRT capture headers (runner/window_capturer.h) still include the deprecated
+        # <experimental/coroutine> under /std:c++17. Mirrors the same define in windows/CMakeLists.txt.
+        _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
 )
 
 find_package(OpenCV REQUIRED)
