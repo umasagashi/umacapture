@@ -140,6 +140,11 @@ class MonthlyFansChartData {
   }
 
   int calcMaxValue(List<FlSpot> spots, int maxX) {
+    // `.max` throws on an empty iterable and `/ spots.length` divides by zero,
+    // so a month range that yields no data points must short-circuit.
+    if (spots.isEmpty) {
+      return 0;
+    }
     final actual = spots.map((e) => e.y).max;
     final predicted = actual * maxX / spots.length;
     return (predicted * 1.2).toInt().roundTopmost(4);
@@ -291,6 +296,9 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
       ),
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
+        if (records.isEmpty) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
         return Padding(
           padding: const EdgeInsets.only(top: 16, right: 16, bottom: 8),
           child: MonthlyFansChartData(records).build(theme, targetMonth),
