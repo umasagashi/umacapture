@@ -12,6 +12,7 @@ releases:
           args:
             repo-owner: umasagashi
             repo-name: umacapture
+            release-prerelease: "true"
       - name: zip
         package:
           platform: windows
@@ -21,3 +22,4 @@ releases:
           args:
             repo-owner: umasagashi
             repo-name: umacapture
+            release-prerelease: "true"
