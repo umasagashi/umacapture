@@ -68,6 +68,10 @@ class Toaster {
     final barWidth = Math.min(parentSize.width - 20.0, narrowWidth);
     final isNarrow = barWidth < narrowWidth;
     final duration = data.duration ?? durationMap[data.type]!;
+    // Capture the tab router now, while [context] is valid. The SnackBar lives
+    // for up to 15s; resolving AutoTabsRouter.of(context) inside onPressed would
+    // throw if the originating widget has unmounted by the time it is tapped.
+    final tabsRouter = data.navigateOnTab != null ? AutoTabsRouter.of(context) : null;
 
     final controller = messenger.showSnackBar(
       SnackBar(
@@ -94,7 +98,7 @@ class Toaster {
             messenger.hideCurrentSnackBar(reason: SnackBarClosedReason.action);
             data.onTap?.call();
             if (data.navigateOnTab != null) {
-              AutoTabsRouter.of(context).navigate(data.navigateOnTab!);
+              tabsRouter?.navigate(data.navigateOnTab!);
             }
           },
         ),
