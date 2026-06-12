@@ -64,6 +64,13 @@ inline constexpr std::array<RecordType, 4> kAllRecordTypes{
     return type == FriendStandard || type == FriendInheritance;
 }
 
+// Sentinel trainer_id for records whose owner is unknown. A friend's record captured from the
+// player's own game exposes no recoverable trainer id (only externally shared/imported friend
+// records carry the friend's real id), so it is stored with this nil UUID rather than the
+// capturing player's id, which would otherwise misattribute the record's ownership. Mirrored by
+// unknownTrainerId on the Dart side.
+inline const std::string kUnknownTrainerId = "00000000-0000-0000-0000-000000000000";
+
 struct Character {
     int icon;
     int character;

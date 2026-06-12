@@ -963,11 +963,15 @@ public:
                 record_dir / ("record_" + std::to_string(timestamp) + ".json"),
                 std::filesystem::copy_options::overwrite_existing);
         } else {
+            // A friend's record has no recoverable owner trainer id, so attribute it to the
+            // unknown-owner sentinel instead of the capturing player's id.
+            const auto &owner_trainer_id =
+                record::isFriend(record_info.record_type.value()) ? record::kUnknownTrainerId : trainer_id;
             record.metadata = {
                 version_info.format_version,
                 version_info.region,
                 {record_info.record_id},
-                trainer_id,
+                owner_trainer_id,
                 utc_now,
                 version_info.recognizer_version,
                 "active",
