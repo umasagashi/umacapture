@@ -1,6 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:version/version.dart';
 
+/// Name of the directory holding the Hive settings boxes, relative to the data
+/// root (or the native documents dir). Shared by `PathInfo.settingsDir` and
+/// `StorageBox.ensureOpened` so the location the migration copies and the
+/// location Hive opens stay in lock-step.
+const String settingsBoxDirName = "settings";
+
 class Const {
   static String get moduleUrlRoot => "https://umasagashi.com/data/umacapture";
 

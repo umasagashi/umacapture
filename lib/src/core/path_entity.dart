@@ -220,15 +220,27 @@ class DirectoryPath extends PathEntity {
   /// (logged), leaving partially-copied data for the caller to clean up.
   Future<bool> copyTreeInto(DirectoryPath destination) async {
     try {
-      await destination.create(recursive: true);
+      // Track directories we have already created so each one is made at most
+      // once: without this both the per-directory entry and every file's parent
+      // would issue a redundant recursive create (D + N syscalls for N files in
+      // D directories).
+      final created = <String>{};
+      Future<void> ensureDir(DirectoryPath dir) async {
+        if (created.add(dir.path)) {
+          await dir.create(recursive: true);
+        }
+      }
+
+      await ensureDir(destination);
       await for (final entity in list(recursive: true)) {
         final relative = PathEntity.context.relative(entity.path, from: path);
         if (entity.isFileSync) {
           final target = destination.filePath(relative);
-          await target.parent.create(recursive: true);
+          await ensureDir(target.parent);
           await entity.asFilePath.toFile().copy(target.path);
         } else {
-          await (destination / relative).create(recursive: true);
+          // Preserve empty directories, which the per-file branch never creates.
+          await ensureDir(destination / relative);
         }
       }
       return true;

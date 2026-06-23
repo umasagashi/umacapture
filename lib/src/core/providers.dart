@@ -86,7 +86,7 @@ class PathInfo {
   /// default base is [documentDir] because `Hive.initFlutter` resolves against
   /// `getApplicationDocumentsDirectory()` (i.e. `<documentDir>/settings`), not
   /// the support dir.
-  DirectoryPath get settingsDir => (dataRoot ?? documentDir) / "settings";
+  DirectoryPath get settingsDir => (dataRoot ?? documentDir) / settingsBoxDirName;
 
   DirectoryPath get charaDetailDir => storageDir / "chara_detail";
 

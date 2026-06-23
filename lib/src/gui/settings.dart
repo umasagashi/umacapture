@@ -224,7 +224,11 @@ class SystemGroup extends ConsumerWidget {
           name: (e) => "$tr_settings.system.clipboard_paste_image_mode.choice.${e!.name.snakeCase}".tr(),
           provider: clipboardPasteImageModeProvider,
         ),
-        const DataRootTile(),
+        // Windows-only: the migration flow relies on a PowerShell relaunch and on
+        // desktop path semantics (the settings box living under the documents
+        // dir). Neither holds on Android/iOS/web, so the relocation UI is hidden
+        // there rather than offering a broken migration.
+        if (CurrentPlatform.isWindows()) const DataRootTile(),
       ],
     );
   }

@@ -106,14 +106,18 @@ Future<void> writeDataRootOverride(String? root) async {
   resolvedDataRoot = root;
 }
 
-/// Whether [root] exists or can be created right now.
+/// Whether [root] is an absolute path that exists right now.
+///
+/// This only inspects the path; it never creates it. The migration flow is
+/// responsible for creating the destination before it writes the override, so a
+/// recorded root that is missing at startup means the location is genuinely
+/// unavailable (e.g. an unplugged drive, or a drive letter now pointing at a
+/// different volume) and must degrade rather than be silently re-created as an
+/// empty data directory. Rejecting relative paths keeps a hand-edited bootstrap
+/// file from resolving Hive against the process working directory.
 bool _ensureUsable(String root) {
   try {
-    final dir = Directory(root);
-    if (!dir.existsSync()) {
-      dir.createSync(recursive: true);
-    }
-    return true;
+    return p.isAbsolute(root) && Directory(root).existsSync();
   } catch (_) {
     return false;
   }

@@ -3,6 +3,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart';
 import 'package:recase/recase.dart';
 
+import '/const.dart';
 import '/src/preference/hive_adapter.dart';
 
 enum StorageBoxKey { settings, windowState, trainerId, columnSpec, versionCheck, addon }
@@ -50,11 +51,11 @@ class StorageBox {
       location = directory;
       Hive.init(directory);
     } else if (dataRoot != null) {
-      location = join(dataRoot, "settings");
+      location = join(dataRoot, settingsBoxDirName);
       Hive.init(location);
     } else {
       final packageInfo = await PackageInfo.fromPlatform();
-      location = join(packageInfo.appName, "settings");
+      location = join(packageInfo.appName, settingsBoxDirName);
       await Hive.initFlutter(location);
     }
     if (reset) {

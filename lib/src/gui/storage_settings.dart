@@ -1,16 +1,12 @@
-import 'dart:io';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:hive_ce_flutter/adapters.dart';
 import 'package:material_symbols_icons/symbols.dart';
-import 'package:path/path.dart' as p;
-import 'package:window_manager/window_manager.dart';
 
 import '/src/core/bootstrap.dart';
+import '/src/core/data_root_migration.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
@@ -190,9 +186,6 @@ class _PathBox extends StatelessWidget {
   }
 }
 
-/// How a chosen target relates to the current data, deciding the dialog content.
-enum _MigrationKind { sameLocation, invalid, empty, hasData }
-
 /// The stage the dialog is in.
 enum _Phase { overview, confirm, migrating, result }
 
@@ -225,18 +218,15 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   bool? _succeeded;
 
   late final PathInfo _source = ref.read(pathInfoProvider);
+  late final DataRootMigrationController _controller = DataRootMigrationController(source: _source);
 
   /// The destination chosen on the overview step. `null` means "reset to the
   /// native defaults"; only meaningful once [_phase] has left [_Phase.overview].
   DirectoryPath? _targetRoot;
-  PathInfo? _target;
-  _MigrationKind? _kind;
 
-  List<({DirectoryPath src, DirectoryPath dst})> _pairs(PathInfo target) => [
-    (src: _source.storageDir, dst: target.storageDir),
-    (src: _source.modulesDir, dst: target.modulesDir),
-    (src: _source.settingsDir, dst: target.settingsDir),
-  ];
+  /// How [_targetRoot] relates to the current data, deciding the confirm step's
+  /// content. Derived once from [_targetRoot] via the controller on selection.
+  MigrationKind? _kind;
 
   Future<void> _pickDestination() async {
     final picked = await FilePicker.getDirectoryPath(
@@ -248,11 +238,9 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   }
 
   void _selectTarget(DirectoryPath? root) {
-    final target = _source.withDataRoot(root);
     setState(() {
       _targetRoot = root;
-      _target = target;
-      _kind = _classify(root, target);
+      _kind = _controller.classify(root);
       _phase = _Phase.confirm;
     });
   }
@@ -261,172 +249,22 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
     setState(() {
       _phase = _Phase.overview;
       _targetRoot = null;
-      _target = null;
       _kind = null;
     });
   }
 
-  _MigrationKind _classify(DirectoryPath? root, PathInfo target) {
-    // Classify on the resolved source/destination directories, not on the
-    // `dataRoot` token: a chosen root can make some directories land back on the
-    // current ones (e.g. picking the app's own documents folder while no
-    // override is set), which the token comparison would miss and the overwrite
-    // path would then destroy by deleting the source before copying.
-    final pairs = _pairs(target);
-    final collisions = pairs.where((e) => p.equals(e.src.path, e.dst.path)).length;
-    if (collisions == pairs.length) {
-      return _MigrationKind.sameLocation;
-    }
-    if (collisions > 0 || (root != null && !_isValidTarget(root))) {
-      return _MigrationKind.invalid;
-    }
-    final hasData = pairs.any((e) => e.dst.existsSync() && e.dst.listSync().isNotEmpty);
-    return hasData ? _MigrationKind.hasData : _MigrationKind.empty;
-  }
-
-  /// Rejects a target that is the same as, or nested inside, the current data or
-  /// the executable directory — copying a tree into its own subdirectory would
-  /// corrupt it.
-  bool _isValidTarget(DirectoryPath root) {
-    final path = root.path;
-    if (!p.isAbsolute(path)) return false;
-    final forbidden = [_source.storageDir, _source.modulesDir, _source.settingsDir, _source.executableDir];
-    return !forbidden.any((dir) => p.equals(path, dir.path) || p.isWithin(dir.path, path));
-  }
-
   Future<void> _migrate() async {
     setState(() => _phase = _Phase.migrating);
-    final ok = await _runMigration(target: _target!, overwrite: _kind == _MigrationKind.hasData);
+    final ok = await _controller.migrate(
+      _targetRoot,
+      isCapturing: ref.read(capturingStateProvider),
+      stopCapture: () async => ref.read(platformControllerProvider)?.stopCapture(),
+    );
     if (!mounted) return;
     setState(() {
       _succeeded = ok;
       _phase = _Phase.result;
     });
-  }
-
-  Future<bool> _runMigration({required PathInfo target, required bool overwrite}) async {
-    // Release native file handles so storage/modules can be copied on Windows.
-    try {
-      if (ref.read(capturingStateProvider)) {
-        await ref.read(platformControllerProvider)?.stopCapture();
-      }
-    } catch (error, stackTrace) {
-      logger.w("Failed to stop capture before migration.", error, stackTrace);
-    }
-    // Flush and close Hive so the settings boxes are consistent and unlocked.
-    // After this the app cannot read settings again, so migration is the final
-    // action before restart.
-    try {
-      await Hive.close();
-    } catch (error, stackTrace) {
-      logger.e("Failed to close Hive before migration.", error, stackTrace);
-      return false;
-    }
-    // Each destination is swapped in atomically per directory: any pre-existing
-    // data is renamed aside to a sibling backup, the source is copied into a
-    // fresh destination, and only on full success are the backups deleted. On
-    // any failure every completed swap is restored, so the destination's old
-    // data is never lost mid-flight (the source is never touched either way).
-    final done = <({DirectoryPath dst, DirectoryPath? backup})>[];
-    for (final pair in _pairs(target)) {
-      // Safety net mirroring _classify: never operate when src and dst resolve
-      // to the same directory (would delete the data we are migrating).
-      if (p.equals(pair.src.path, pair.dst.path)) continue;
-      if (!pair.src.existsSync()) continue;
-      try {
-        DirectoryPath? backup;
-        if (pair.dst.existsSync()) {
-          backup = pair.dst.parent / "${pair.dst.name}.uma-old";
-          backup.deleteSync(recursive: true, emptyOk: true);
-          if (pair.dst.moveSyncSafe(backup) == null) {
-            _restore(done);
-            return false;
-          }
-        }
-        if (!await pair.src.copyTreeInto(pair.dst)) {
-          pair.dst.deleteSync(recursive: true, emptyOk: true);
-          backup?.moveSyncSafe(pair.dst);
-          _restore(done);
-          return false;
-        }
-        done.add((dst: pair.dst, backup: backup));
-      } catch (error, stackTrace) {
-        logger.e("Migration copy failed.", error, stackTrace);
-        _restore(done);
-        return false;
-      }
-    }
-    // Every swap succeeded: drop the backups, then persist the override. On
-    // failure the override is left untouched so the old location stays
-    // authoritative for the next launch.
-    for (final entry in done) {
-      entry.backup?.deleteSync(recursive: true, emptyOk: true);
-    }
-    await writeDataRootOverride(_targetRoot?.path);
-    return true;
-  }
-
-  /// Reverses completed directory swaps: removes the copied destination and
-  /// renames its backup back into place, newest first.
-  void _restore(List<({DirectoryPath dst, DirectoryPath? backup})> done) {
-    for (final entry in done.reversed) {
-      try {
-        entry.dst.deleteSync(recursive: true, emptyOk: true);
-        entry.backup?.moveSyncSafe(entry.dst);
-      } catch (error, stackTrace) {
-        logger.w("Failed to roll back partial migration copy.", error, stackTrace);
-      }
-    }
-  }
-
-  Future<void> _quit() async {
-    try {
-      await windowManager.destroy();
-    } catch (_) {
-      exit(0);
-    }
-  }
-
-  /// Relaunches the app, then quits.
-  ///
-  /// Two Windows constraints shape this:
-  /// - The native runner enforces a single instance via a named mutex
-  ///   (`windows/runner/main.cpp`), so a new instance spawned while we are
-  ///   still alive sees the mutex, foregrounds us, and exits. The relaunch must
-  ///   therefore wait until this process has fully exited (releasing the mutex).
-  /// - A child started with `Process.start(detached)` does NOT survive this
-  ///   process exiting (verified empirically). A process created via PowerShell
-  ///   `Start-Process` is reparented to the session and does survive.
-  ///
-  /// So we write a tiny relay script and launch it through `Start-Process`
-  /// (awaited, so it exists before we quit). The relay waits for our PID to
-  /// vanish, then starts a fresh instance — which re-reads the bootstrap file
-  /// and opens Hive at the migrated location. If scheduling fails the dialog
-  /// stays put so the user can still quit and relaunch manually.
-  Future<void> _restart() async {
-    final exePath = Platform.resolvedExecutable;
-    final exeDir = FilePath.resolvedExecutable.parent.path;
-    final relayScript =
-        'param([int]\$ParentPid)\n'
-        'Wait-Process -Id \$ParentPid -ErrorAction SilentlyContinue\n'
-        "Start-Process -FilePath '$exePath' -WorkingDirectory '$exeDir'\n"
-        'Remove-Item -LiteralPath \$PSCommandPath -ErrorAction SilentlyContinue\n';
-    try {
-      final relayFile = File("${Directory.systemTemp.path}\\umacapture_restart_$pid.ps1");
-      relayFile.writeAsStringSync(relayScript);
-      final relayPath = relayFile.path.replaceAll('\\', '/');
-      await Process.run("powershell", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "Start-Process powershell -WindowStyle Hidden -ArgumentList "
-            "'-NoProfile','-ExecutionPolicy','Bypass','-File','$relayPath','$pid'",
-      ]);
-    } catch (error, stackTrace) {
-      logger.e("Failed to schedule a restart.", error, stackTrace);
-      return;
-    }
-    await _quit();
   }
 
   @override
@@ -472,20 +310,20 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
         );
       case _Phase.confirm:
         switch (_kind!) {
-          case _MigrationKind.sameLocation:
+          case MigrationKind.sameLocation:
             return _MessageBlock(icon: Symbols.info_rounded, message: "$tr_storage.dialog.same_location".tr());
-          case _MigrationKind.invalid:
+          case MigrationKind.invalid:
             return _MessageBlock(
               icon: Symbols.error_rounded,
               message: "$tr_storage.dialog.invalid".tr(),
               isError: true,
             );
-          case _MigrationKind.empty:
-          case _MigrationKind.hasData:
+          case MigrationKind.empty:
+          case MigrationKind.hasData:
             return _ConfirmContent(
               from: _source.dataRoot?.path ?? "$tr_storage.dialog.default_destination".tr(),
               to: _targetRoot?.path ?? "$tr_storage.dialog.default_destination".tr(),
-              overwrite: _kind == _MigrationKind.hasData,
+              overwrite: _kind == MigrationKind.hasData,
             );
         }
     }
@@ -507,24 +345,24 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
             TextButton.icon(
               icon: const Icon(Symbols.power_settings_new_rounded),
               label: Text("$tr_storage.dialog.quit_button".tr()),
-              onPressed: _quit,
+              onPressed: _controller.quit,
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
               icon: const Icon(Symbols.restart_alt_rounded),
               label: Text("$tr_storage.dialog.restart_button".tr()),
-              onPressed: _restart,
+              onPressed: _controller.restart,
             ),
           ],
         );
       case _Phase.confirm:
-        if (_kind == _MigrationKind.sameLocation || _kind == _MigrationKind.invalid) {
+        if (_kind == MigrationKind.sameLocation || _kind == MigrationKind.invalid) {
           return Align(
             alignment: Alignment.centerRight,
             child: TextButton(onPressed: _backToOverview, child: Text("$tr_storage.dialog.back_button".tr())),
           );
         }
-        final overwrite = _kind == _MigrationKind.hasData;
+        final overwrite = _kind == MigrationKind.hasData;
         return Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
