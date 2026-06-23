@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '/const.dart';
+import '/src/core/bootstrap.dart';
 import '/src/core/localization_util.dart';
 import '/src/core/sentry_util.dart';
 import 'src/core/mapper_init.dart';
@@ -81,7 +82,10 @@ void run() {
 FutureOr<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   initializeMappers();
-  await StorageBox.ensureOpened(reset: false);
+  // Resolve the user-configured data root before opening Hive: the settings
+  // database itself is relocatable, so its location cannot be stored inside it.
+  final dataRoot = await readDataRootOverride();
+  await StorageBox.ensureOpened(reset: false, dataRoot: dataRoot);
   await setupLocalization();
   setupLicense();
   if (CurrentPlatform.hasWindowFrame()) {

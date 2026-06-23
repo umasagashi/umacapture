@@ -195,11 +195,14 @@ Future<void> _extractArchive((FilePath, DirectoryPath) args) async {
   }
 }
 
-/// Installs a manually provided modules zip into the support directory.
+/// Installs a manually provided modules zip into the modules directory.
 ///
-/// The zip is extracted into the support directory exactly like the
-/// auto-updater does, so a server-distributed `modules.zip` (whose top-level
-/// directory is `modules/`) can be applied as-is. No validation is performed.
+/// The zip is extracted into the parent of [PathInfo.modulesDir] exactly like
+/// the auto-updater does, so a server-distributed `modules.zip` (whose top-level
+/// directory is `modules/`) lands at `modulesDir` as-is. The target follows the
+/// configurable data root: `modulesDir.parent` is `dataRoot ?? supportDir`, so a
+/// relocated install writes to the same place the app reads from. No validation
+/// is performed.
 ///
 /// On success the caller must invalidate [moduleVersionLoader] (guarded by its
 /// own widget lifecycle) so the freshly extracted module takes effect without an
@@ -210,7 +213,7 @@ Future<void> _extractArchive((FilePath, DirectoryPath) args) async {
 Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
   try {
     final pathInfo = await ref.read(pathInfoLoader.future);
-    await compute(_extractArchive, (zipPath, pathInfo.supportDir));
+    await compute(_extractArchive, (zipPath, pathInfo.modulesDir.parent));
   } catch (exception, stackTrace) {
     logger.e("Failed to install module from zip: path=${zipPath.path}", exception, stackTrace);
     captureException(exception, stackTrace);
@@ -299,7 +302,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   final downloadPath = pathInfo.tempDir.filePath("modules.zip");
   try {
     await createDiagnosticDio(operation: "download_modules").download(Const.moduleZipUrl, downloadPath.path);
-    await compute(_extractArchive, (downloadPath, pathInfo.supportDir));
+    await compute(_extractArchive, (downloadPath, pathInfo.modulesDir.parent));
     downloadPath.toFile().delete();
   } catch (exception, stackTrace) {
     await _logNetworkException(

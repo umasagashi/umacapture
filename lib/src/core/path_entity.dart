@@ -211,6 +211,45 @@ class DirectoryPath extends PathEntity {
     }
   }
 
+  /// Recursively copies this directory's contents into [destination].
+  ///
+  /// Unlike [moveSyncSafe] (a same-volume rename) this works across drives, so
+  /// it is the basis of the data-root migration where the target is typically on
+  /// another volume. The destination tree is created as needed; existing files
+  /// are overwritten. Returns `true` on success, or `false` if any entry fails
+  /// (logged), leaving partially-copied data for the caller to clean up.
+  Future<bool> copyTreeInto(DirectoryPath destination) async {
+    try {
+      // Track directories we have already created so each one is made at most
+      // once: without this both the per-directory entry and every file's parent
+      // would issue a redundant recursive create (D + N syscalls for N files in
+      // D directories).
+      final created = <String>{};
+      Future<void> ensureDir(DirectoryPath dir) async {
+        if (created.add(dir.path)) {
+          await dir.create(recursive: true);
+        }
+      }
+
+      await ensureDir(destination);
+      await for (final entity in list(recursive: true)) {
+        final relative = PathEntity.context.relative(entity.path, from: path);
+        if (entity.isFileSync) {
+          final target = destination.filePath(relative);
+          await ensureDir(target.parent);
+          await entity.asFilePath.toFile().copy(target.path);
+        } else {
+          // Preserve empty directories, which the per-file branch never creates.
+          await ensureDir(destination / relative);
+        }
+      }
+      return true;
+    } catch (error, stackTrace) {
+      logger.e("Failed to copy directory tree.", error, stackTrace);
+      return false;
+    }
+  }
+
   void deleteSyncSafeWithCheck() {
     try {
       listSync(recursive: false, followLinks: false).forEach((e) => e.deleteSync(recursive: false));
