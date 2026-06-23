@@ -5,6 +5,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '/const.dart';
+import '/src/core/bootstrap.dart';
 import '/src/core/path_entity.dart';
 
 final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
@@ -56,18 +57,36 @@ class PathInfo {
   final DirectoryPath executableDir;
   final DirectoryPath downloadDir;
 
+  /// User-configured data root override (see `bootstrap.dart`).
+  ///
+  /// When non-null, the relocatable data directories ([tempDir], [storageDir],
+  /// [modulesDir], [settingsDir]) live under this root instead of their native
+  /// defaults. `null` keeps the original behavior. [executableDir] and
+  /// [downloadDir] are intentionally never relocated.
+  final DirectoryPath? dataRoot;
+
   const PathInfo({
     required this.documentDir,
     required this.supportDir,
     required this.executableDir,
     required this.downloadDir,
+    this.dataRoot,
   });
 
-  DirectoryPath get tempDir => documentDir / "temp";
+  DirectoryPath get tempDir => (dataRoot ?? documentDir) / "temp";
 
-  DirectoryPath get storageDir => documentDir / "storage";
+  DirectoryPath get storageDir => (dataRoot ?? documentDir) / "storage";
 
-  DirectoryPath get modulesDir => supportDir / "modules";
+  DirectoryPath get modulesDir => (dataRoot ?? supportDir) / "modules";
+
+  /// Directory holding the Hive settings boxes.
+  ///
+  /// Mirrors the location `StorageBox.ensureOpened` opens so the migration flow
+  /// can copy the settings database alongside the other data directories. The
+  /// default base is [documentDir] because `Hive.initFlutter` resolves against
+  /// `getApplicationDocumentsDirectory()` (i.e. `<documentDir>/settings`), not
+  /// the support dir.
+  DirectoryPath get settingsDir => (dataRoot ?? documentDir) / "settings";
 
   DirectoryPath get charaDetailDir => storageDir / "chara_detail";
 
@@ -81,8 +100,21 @@ class PathInfo {
 
   DirectoryPath get charaDetailMemoDir => charaDetailMetadataDir / "memo";
 
+  /// Returns a copy resolving its relocatable directories against [root].
+  ///
+  /// Passing `null` yields the native-default layout. Used by the migration flow
+  /// to describe the source (current) and target (chosen) layouts with the same
+  /// getters, so the two stay in lock-step.
+  PathInfo withDataRoot(DirectoryPath? root) => PathInfo(
+    documentDir: documentDir,
+    supportDir: supportDir,
+    executableDir: executableDir,
+    downloadDir: downloadDir,
+    dataRoot: root,
+  );
+
   @override
-  String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir}';
+  String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir, dataRoot: $dataRoot}';
 }
 
 final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
@@ -100,11 +132,13 @@ final pathInfoLoader = FutureProvider<PathInfo>((ref) async {
   // getDownloadsDirectory returns null on Android/unsupported platforms; fall
   // back to the app's document dir so DirectoryPath never receives null.
   final downloadDirRaw = await getDownloadsDirectory();
+  final override = resolvedDataRoot;
   final info = PathInfo(
     documentDir: documentDir / appName,
     supportDir: supportDir,
     executableDir: FilePath.resolvedExecutable.parent,
     downloadDir: downloadDirRaw != null ? DirectoryPath(downloadDirRaw) : documentDir / appName,
+    dataRoot: override == null ? null : DirectoryPath(override),
   );
   return info;
 });

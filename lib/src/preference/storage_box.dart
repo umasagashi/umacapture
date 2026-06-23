@@ -39,11 +39,19 @@ class StorageBox {
   /// [directory] overrides the storage location with an absolute path — used by
   /// tests (e.g. the integration test) to keep Hive away from the real settings
   /// directory, so test runs cannot clear or pollute the user's persisted data.
-  static Future<void> ensureOpened({bool reset = false, String? directory}) async {
+  ///
+  /// [dataRoot] is the user-configured data root resolved at startup (see
+  /// `bootstrap.dart`). When set, the settings boxes live under
+  /// `<dataRoot>/settings` instead of the native default location. [directory]
+  /// takes precedence so tests stay isolated.
+  static Future<void> ensureOpened({bool reset = false, String? directory, String? dataRoot}) async {
     final String location;
     if (directory != null) {
       location = directory;
       Hive.init(directory);
+    } else if (dataRoot != null) {
+      location = join(dataRoot, "settings");
+      Hive.init(location);
     } else {
       final packageInfo = await PackageInfo.fromPlatform();
       location = join(packageInfo.appName, "settings");

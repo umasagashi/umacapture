@@ -317,8 +317,8 @@ class Disabled extends StatelessWidget {
 }
 
 class CardDialog extends ConsumerStatefulWidget {
-  static void show(RefBase ref, WidgetBuilder builder) {
-    ref.read(dialogBuilderProvider.notifier).show(builder);
+  static void show(RefBase ref, WidgetBuilder builder, {bool barrierDismissible = true}) {
+    ref.read(dialogBuilderProvider.notifier).show(builder, barrierDismissible: barrierDismissible);
   }
 
   static void dismiss(RefBase ref) {
@@ -522,12 +522,19 @@ class FeedbackLayer extends StatelessWidget {
   }
 }
 
-class DialogController extends Notifier<WidgetBuilder?> {
-  @override
-  WidgetBuilder? build() => null;
+/// A shown dialog and whether tapping the background dismisses it.
+///
+/// [barrierDismissible] is `false` for dialogs that must not be left through the
+/// scrim — e.g. the data-root migration dialog, which closes Hive mid-flow and
+/// can only end in a restart.
+typedef DialogEntry = ({WidgetBuilder builder, bool barrierDismissible});
 
-  void show(WidgetBuilder builder) {
-    state = builder;
+class DialogController extends Notifier<DialogEntry?> {
+  @override
+  DialogEntry? build() => null;
+
+  void show(WidgetBuilder builder, {bool barrierDismissible = true}) {
+    state = (builder: builder, barrierDismissible: barrierDismissible);
   }
 
   void dismiss() {
@@ -535,7 +542,7 @@ class DialogController extends Notifier<WidgetBuilder?> {
   }
 }
 
-final dialogBuilderProvider = NotifierProvider<DialogController, WidgetBuilder?>(DialogController.new);
+final dialogBuilderProvider = NotifierProvider<DialogController, DialogEntry?>(DialogController.new);
 
 class DialogLayer extends ConsumerStatefulWidget {
   final Widget child;
@@ -549,23 +556,23 @@ class DialogLayer extends ConsumerStatefulWidget {
 class _DialogLayerState extends ConsumerState<DialogLayer> {
   @override
   Widget build(BuildContext context) {
-    final builder = ref.watch(dialogBuilderProvider);
+    final entry = ref.watch(dialogBuilderProvider);
     final theme = Theme.of(context);
     return Stack(
       alignment: Alignment.center,
       fit: StackFit.expand,
       children: [
         widget.child,
-        if (builder != null) ...[
+        if (entry != null) ...[
           GestureDetector(
-            onTap: () {
-              ref.read(dialogBuilderProvider.notifier).dismiss();
-            },
+            // A non-dismissible barrier still swallows the tap (empty callback)
+            // so it never falls through to the app behind the dialog.
+            onTap: entry.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss() : () {},
             child: Container(color: theme.shadowColor.withValues(alpha: 0.5)),
           ),
           Padding(
             padding: const EdgeInsets.all(32),
-            child: Center(child: builder(context)),
+            child: Center(child: entry.builder(context)),
           ),
         ],
       ],

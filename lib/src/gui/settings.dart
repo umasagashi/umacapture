@@ -20,6 +20,7 @@ import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_dialog.dart';
+import '/src/gui/storage_settings.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
 
@@ -45,7 +46,6 @@ class ToggleButtonWidget<T> extends ConsumerWidget {
     final current = ref.watch(provider);
     final values = ref.read(provider.notifier).values;
     return ListTile(
-      isThreeLine: true,
       title: Text(title),
       subtitle: Text(description),
       trailing: Align(
@@ -81,7 +81,6 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
     final values = ref.read(provider.notifier).values;
     final theme = Theme.of(context);
     return ListTile(
-      isThreeLine: true,
       title: Text(title),
       subtitle: Text(description),
       trailing: PopupMenuButton<T>(
@@ -117,7 +116,6 @@ class SwitchWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
-      isThreeLine: true,
       title: title,
       subtitle: description,
       trailing: Align(
@@ -226,6 +224,7 @@ class SystemGroup extends ConsumerWidget {
           name: (e) => "$tr_settings.system.clipboard_paste_image_mode.choice.${e!.name.snakeCase}".tr(),
           provider: clipboardPasteImageModeProvider,
         ),
+        const DataRootTile(),
       ],
     );
   }
