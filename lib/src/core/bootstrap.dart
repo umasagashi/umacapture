@@ -46,6 +46,15 @@ String? resolvedDataRoot;
 /// their data appears to be missing.
 bool dataRootDegraded = false;
 
+/// The data root as recorded in the bootstrap file, regardless of whether it is
+/// usable this launch.
+///
+/// Unlike [resolvedDataRoot] (which is nulled out when the root is unusable),
+/// this keeps the recorded path so the settings UI can name the location that is
+/// currently unreachable — telling the user *which* drive to reconnect — and
+/// offer to clear the stale pointer. `null` means no override is recorded.
+String? configuredDataRoot;
+
 /// Returns the fixed bootstrap file, independent of any override.
 Future<File> _bootstrapFile() async {
   final supportDir = await getApplicationSupportDirectory();
@@ -60,6 +69,7 @@ Future<File> _bootstrapFile() async {
 /// bootstrap file can never block startup.
 Future<String?> readDataRootOverride() async {
   dataRootDegraded = false;
+  configuredDataRoot = null;
   try {
     final file = await _bootstrapFile();
     if (!file.existsSync()) {
@@ -72,6 +82,9 @@ Future<String?> readDataRootOverride() async {
       resolvedDataRoot = null;
       return null;
     }
+    // Record the path before the usability check so the UI can still name an
+    // unreachable root in the degraded branch below.
+    configuredDataRoot = root;
     if (!_ensureUsable(root)) {
       logger.w("Configured data root is not usable; falling back to defaults: $root");
       dataRootDegraded = true;
@@ -99,11 +112,16 @@ Future<void> writeDataRootOverride(String? root) async {
       file.deleteSync();
     }
     resolvedDataRoot = null;
+    // Drop any stale pointer and clear the degraded flag so the settings UI
+    // stops warning about a location the user just abandoned.
+    configuredDataRoot = null;
+    dataRootDegraded = false;
     return;
   }
   final encoded = const JsonEncoder.withIndent("  ").convert({_versionKey: _bootstrapVersion, _dataRootKey: root});
   file.writeAsStringSync(encoded);
   resolvedDataRoot = root;
+  configuredDataRoot = root;
 }
 
 /// Whether [root] is an absolute path that exists right now.

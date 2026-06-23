@@ -34,12 +34,23 @@ class DataRootTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final pathInfo = ref.watch(pathInfoProvider);
     final location = pathInfo.dataRoot?.path ?? "$tr_storage.data_root.default_label".tr();
+    final errorStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error);
     return ListTile(
+      // When degraded the subtitle carries two lines (warning + the unreachable
+      // path) so the user knows which drive to reconnect; give it the room.
+      isThreeLine: dataRootDegraded && configuredDataRoot != null,
       title: Text("$tr_storage.data_root.title".tr()),
-      subtitle: Text(
-        dataRootDegraded ? "$tr_storage.degraded_warning".tr() : location,
-        style: dataRootDegraded ? theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error) : null,
-      ),
+      subtitle: dataRootDegraded
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text("$tr_storage.degraded_warning".tr(), style: errorStyle),
+                if (configuredDataRoot != null)
+                  Text(configuredDataRoot!, style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)),
+              ],
+            )
+          : Text(location),
       trailing: Padding(
         padding: const EdgeInsets.only(right: 16),
         child: Icon(
@@ -228,6 +239,16 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   /// content. Derived once from [_targetRoot] via the controller on selection.
   MigrationKind? _kind;
 
+  /// Whether the configured root was unreachable at startup. In this state the
+  /// migrate path is hidden (it would copy the native-empty layout over the
+  /// chosen root and strand the real data); only a data-free "clear override"
+  /// escape hatch is offered.
+  late final bool _degraded = dataRootDegraded;
+
+  /// True once [_clearOverride] runs, so the result step shows the clear-only
+  /// message and buttons (Hive stays open, so a restart is optional here).
+  bool _clearedOverride = false;
+
   Future<void> _pickDestination() async {
     final picked = await FilePicker.getDirectoryPath(
       dialogTitle: "$tr_storage.picker_title".tr(),
@@ -250,6 +271,7 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
       _phase = _Phase.overview;
       _targetRoot = null;
       _kind = null;
+      _clearedOverride = false;
     });
   }
 
@@ -267,13 +289,25 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
     });
   }
 
+  /// Clears the unreachable override (no data copy, Hive stays open).
+  Future<void> _clearOverride() async {
+    final ok = await _controller.clearOverride();
+    if (!mounted) return;
+    setState(() {
+      _succeeded = ok;
+      _clearedOverride = true;
+      _phase = _Phase.result;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return CardDialog(
       dialogTitle: "$tr_storage.dialog.title".tr(),
-      // No close button once Hive is closed (migrating/result): the result step
-      // offers an explicit quit/restart, which is the only safe way out.
-      closeButtonTooltip: (_phase == _Phase.migrating || _phase == _Phase.result)
+      // No close button once Hive is closed (migrating/migration result): the
+      // result step offers an explicit quit/restart, which is the only safe way
+      // out. The clear-override result keeps Hive open, so a close button is fine.
+      closeButtonTooltip: (_phase == _Phase.migrating || (_phase == _Phase.result && !_clearedOverride))
           ? null
           : "$tr_storage.dialog.close_button".tr(),
       usePageView: false,
@@ -291,6 +325,11 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   Widget _content() {
     switch (_phase) {
       case _Phase.overview:
+        // Degraded: the real data is unreachable, so migrating would strand it.
+        // Show the unavailable root and offer only the data-free clear action.
+        if (_degraded) {
+          return _DegradedContent(root: configuredDataRoot, onClear: _clearOverride);
+        }
         return _OverviewContent(
           source: _source,
           onChange: _pickDestination,
@@ -303,6 +342,13 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
           showSpinner: true,
         );
       case _Phase.result:
+        if (_clearedOverride) {
+          return _MessageBlock(
+            icon: _succeeded! ? Symbols.check_circle_rounded : Symbols.error_rounded,
+            message: "$tr_storage.dialog.${_succeeded! ? "cleared" : "clear_failure"}".tr(),
+            isError: !_succeeded!,
+          );
+        }
         return _MessageBlock(
           icon: _succeeded! ? Symbols.check_circle_rounded : Symbols.error_rounded,
           message: "$tr_storage.dialog.${_succeeded! ? "success" : "failure"}".tr(),
@@ -339,6 +385,31 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
       case _Phase.migrating:
         return null;
       case _Phase.result:
+        // Clear-override result: Hive is still open, so closing is safe. A
+        // restart is only needed to refresh the tile / clear the warning.
+        if (_clearedOverride) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: _succeeded! ? () => CardDialog.dismiss(ref.base) : _backToOverview,
+                child: Text("$tr_storage.dialog.${_succeeded! ? "close_button" : "back_button"}".tr()),
+              ),
+              const SizedBox(width: 8),
+              if (_succeeded!)
+                FilledButton.icon(
+                  icon: const Icon(Symbols.restart_alt_rounded),
+                  label: Text("$tr_storage.dialog.restart_button".tr()),
+                  onPressed: _controller.restart,
+                )
+              else
+                FilledButton(
+                  onPressed: () => CardDialog.dismiss(ref.base),
+                  child: Text("$tr_storage.dialog.close_button".tr()),
+                ),
+            ],
+          );
+        }
         return Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
@@ -434,6 +505,58 @@ class _OverviewContent extends StatelessWidget {
                     icon: const Icon(Symbols.folder_open_rounded),
                     label: Text("$tr_storage.dialog.change_button".tr()),
                     onPressed: onChange,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The degraded landing step: the configured root could not be reached this
+/// launch, so the app fell back to native defaults. Names the unreachable
+/// location, asks the user to reconnect and restart, and offers a data-free
+/// "clear override" that abandons the pointer without copying anything (a normal
+/// migrate would copy the native-empty layout over it and strand the real data).
+class _DegradedContent extends StatelessWidget {
+  /// The recorded-but-unreachable root, or `null` if it could not be recovered.
+  final String? root;
+  final VoidCallback onClear;
+
+  const _DegradedContent({required this.root, required this.onClear});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionHeader(label: "$tr_storage.dialog.unavailable_heading".tr()),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // A bare path box (no copy/open actions): the location is offline,
+              // so opening it in the explorer would just fail.
+              _LabeledPath(
+                label: "$tr_storage.dialog.unavailable_root_label".tr(),
+                child: _PathBox(path: root ?? "$tr_storage.data_root.default_label".tr()),
+              ),
+              const SizedBox(height: 16),
+              Text("$tr_storage.dialog.unavailable_help".tr(), style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  FilledButton.icon(
+                    icon: const Icon(Symbols.settings_backup_restore_rounded),
+                    label: Text("$tr_storage.dialog.clear_override_button".tr()),
+                    onPressed: onClear,
                   ),
                 ],
               ),

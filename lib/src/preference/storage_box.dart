@@ -15,20 +15,37 @@ extension _BoxKeyExtension on StorageBoxKey {
 }
 
 class StorageBox {
-  final Box _box;
+  /// Set once the data-root migration closes Hive (see `data_root_migration.dart`).
+  ///
+  /// After this every box operation becomes a no-op so the many non-interactive
+  /// writers that may still fire before the forced restart (window move/resize,
+  /// preference notifiers, sentry counters, version checks, addon history) cannot
+  /// throw on a closed box. The flag is intentionally one-way: migration's only
+  /// exits are restart/quit, and on failure Hive stays closed too.
+  static bool _closedForMigration = false;
 
-  StorageBox(StorageBoxKey key) : _box = Hive.box(key.name.snakeCase);
+  /// Marks Hive as closed for the rest of the process, neutralizing every
+  /// [StorageBox] read/write. Called by the migration flow before `Hive.close()`.
+  static void markClosedForMigration() => _closedForMigration = true;
+
+  /// Null when constructed after [markClosedForMigration]; otherwise the open box.
+  final Box? _box;
+
+  StorageBox(StorageBoxKey key) : _box = _closedForMigration ? null : Hive.box(key.name.snakeCase);
 
   T? pull<T>(String key) {
-    return _box.get(key);
+    if (_closedForMigration) return null;
+    return _box?.get(key);
   }
 
   void push<T>(String key, T value) {
-    _box.put(key, value);
+    if (_closedForMigration) return;
+    _box?.put(key, value);
   }
 
   void delete(String key) {
-    _box.delete(key);
+    if (_closedForMigration) return;
+    _box?.delete(key);
   }
 
   StorageEntry<T> entry<T>(String key) {

@@ -16,6 +16,7 @@ import '/src/core/bootstrap.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/preference/storage_box.dart';
 
 /// How a chosen target relates to the current data, deciding the dialog content.
 enum MigrationKind { sameLocation, invalid, empty, hasData }
@@ -95,7 +96,11 @@ class DataRootMigrationController {
     }
     // Flush and close Hive so the settings boxes are consistent and unlocked.
     // After this the app cannot read settings again, so migration is the final
-    // action before restart.
+    // action before restart. Neutralize StorageBox first so any non-interactive
+    // writer that fires before the restart (window move/resize, preference
+    // notifiers, sentry counters, version checks, addon history) no-ops instead
+    // of throwing on a closed box.
+    StorageBox.markClosedForMigration();
     try {
       await Hive.close();
     } catch (error, stackTrace) {
@@ -114,6 +119,25 @@ class DataRootMigrationController {
       return false;
     }
     return true;
+  }
+
+  /// Clears the override without touching any data.
+  ///
+  /// For the degraded case where the configured root is unreachable (e.g. an
+  /// unplugged drive): the app is already running on the native defaults, so a
+  /// normal [migrate] would copy that empty layout over the chosen root and
+  /// strand the real data. This instead just deletes the bootstrap override so
+  /// the next launch resolves to the native defaults cleanly. No `Hive.close()`
+  /// and no copy, so the running session is unaffected. Returns `false` (leaving
+  /// the override intact) if the bootstrap file cannot be removed.
+  Future<bool> clearOverride() async {
+    try {
+      await writeDataRootOverride(null);
+      return true;
+    } catch (error, stackTrace) {
+      logger.e("Failed to clear the data root override.", error, stackTrace);
+      return false;
+    }
   }
 
   /// Swaps each `src` directory into its `dst`, preserving any pre-existing
