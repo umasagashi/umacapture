@@ -4,7 +4,6 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 import 'package:trina_grid/trina_grid.dart';
-import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
@@ -46,6 +45,27 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   String? sortColumn;
   TrinaColumnSort sortOrder = TrinaColumnSort.none;
   late TrinaGridStateManager stateManager;
+
+  // The grid widget is kept alive across rebuilds (stable key); all data changes
+  // are pushed into the live stateManager imperatively via [_reconcile] instead
+  // of recreating the grid. TrinaGrid reads columns/rows only at init time
+  // (didUpdateWidget ignores them), so a fresh build's args would otherwise be
+  // dropped.
+  bool _loaded = false;
+
+  // The grid contents last pushed into stateManager. Used to detect whether the
+  // column set changed (and thus needs a structural replace) on the next update.
+  Grid? _appliedGrid;
+
+  // A grid update that arrived before onLoaded captured the stateManager. Applied
+  // once the grid is ready.
+  Grid? _pending;
+
+  // The current theme and selection purpose, mirrored here so the long-lived
+  // rowColorCallback/rowWrapper closures (captured once at grid init) read fresh
+  // values through `this` instead of stale locals captured at first build.
+  late ThemeData _theme;
+  SelectionPurpose? _purpose;
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
@@ -154,6 +174,59 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     );
   }
 
+  /// Whether two column lists describe the same columns in the same order.
+  ///
+  /// Compared by field id (not object identity): the provider hands back fresh
+  /// TrinaColumn objects on every rebuild, so identity would always differ.
+  bool _sameColumns(List<TrinaColumn> a, List<TrinaColumn> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].field != b[i].field) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Pushes a freshly built [Grid] into the live grid instead of recreating it.
+  ///
+  /// Columns are structurally replaced only when the field set/order changed
+  /// (e.g. preset/column edits, entering or leaving selection mode); otherwise
+  /// their widths and sort indicators are preserved. Rows are swapped wholesale,
+  /// then the saved sort is reapplied. The finer per-row diff that keeps scroll
+  /// and selection in place is a separate follow-up (stage B).
+  void _reconcile(Grid next) {
+    if (!_loaded) {
+      _pending = next;
+      return;
+    }
+    final columnsChanged = _appliedGrid == null || !_sameColumns(_appliedGrid!.columns, next.columns);
+    // Clear rows before swapping columns so the column replace operates on an
+    // empty row set (no wasted per-row cell fill/remove, no transient mismatch).
+    stateManager.removeAllRows(notify: false);
+    if (columnsChanged) {
+      stateManager.removeColumns(stateManager.columns.toList());
+      stateManager.insertColumns(0, next.columns);
+    }
+    stateManager.appendRows(next.rows);
+    if (sortColumn != null) {
+      stateManager.sortColumnByField(sortColumn!, sortOrder);
+    }
+    if (columnsChanged) {
+      // autoFitColumns measures via gridKey.currentContext, which needs the new
+      // columns laid out first, so defer it one frame.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          stateManager.autoFitColumns();
+        }
+      });
+    }
+    _appliedGrid = next;
+    stateManager.notifyListeners();
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -161,6 +234,24 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // Drives the per-row overlay's color/label so a checked row reads as either
     // "archive" or "export". Non-null whenever the checkbox column is present.
     final purpose = ref.watch(selectionModeProvider);
+    // Mirror the latest theme/purpose so the grid's long-lived row callbacks read
+    // current values. A theme change won't touch currentGridProvider, so nudge the
+    // live grid to repaint the rows with the new colors.
+    final themeChanged = _loaded && _theme != theme;
+    _theme = theme;
+    _purpose = purpose;
+    if (themeChanged) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          stateManager.notifyListeners();
+        }
+      });
+    }
+    // Apply subsequent grid changes to the live stateManager rather than letting
+    // the watch above rebuild a fresh grid (TrinaGrid ignores changed columns/rows
+    // after init). The watch stays only to seed the initial grid and the empty
+    // checks below.
+    ref.listen(currentGridProvider, (_, next) => _reconcile(next));
     if (grid.columns.isEmpty) {
       return Container();
     }
@@ -179,8 +270,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               return ColoredBox(
                 color: theme.colorScheme.surface,
                 child: TrinaGrid(
-                  // Since TrinaGrid have internal states, it won't rebuilt without changing the key each time.
-                  key: ValueKey(const Uuid().v4()),
+                  // Stable key keeps one grid (and its stateManager) alive across
+                  // rebuilds. Data changes are pushed in imperatively via
+                  // [_reconcile]; the columns/rows below only seed the initial grid.
+                  key: const ValueKey("chara_detail_grid"),
                   columns: grid.columns,
                   rows: grid.rows,
                   mode: TrinaGridMode.select,
@@ -190,6 +283,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   // hasFocus, so it disappears otherwise. Setting rowColorCallback
                   // overrides the default striping, so reproduce it for other rows.
                   rowColorCallback: (rowContext) {
+                    final theme = _theme;
                     if (rowContext.stateManager.currentRowIdx == rowContext.rowIdx) {
                       return theme.colorScheme.primaryContainer;
                     }
@@ -199,6 +293,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   // cells and is labeled "archive", so the destructive (lossy,
                   // irreversible) intent of the bulk selection is unmistakable.
                   rowWrapper: (context, rowWidget, rowData, stateManager) {
+                    final theme = _theme;
+                    final purpose = _purpose;
                     Widget row = rowWidget;
                     if (rowData.checked == true && purpose != null) {
                       row = _SelectionRowOverlay(purpose: purpose, child: row);
@@ -269,9 +365,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   ),
                   onLoaded: (TrinaGridOnLoadedEvent event) {
                     stateManager = event.stateManager;
+                    _loaded = true;
+                    _appliedGrid = grid;
                     event.stateManager.autoFitColumns();
                     if (sortColumn != null) {
                       event.stateManager.sortColumnByField(sortColumn!, sortOrder);
+                    }
+                    // A grid change may have arrived before the stateManager was
+                    // ready; apply the latest one now.
+                    if (_pending != null) {
+                      final pending = _pending!;
+                      _pending = null;
+                      _reconcile(pending);
                     }
                   },
                   onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
