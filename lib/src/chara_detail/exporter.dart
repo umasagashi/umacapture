@@ -187,14 +187,15 @@ class ZipExporter extends Exporter {
     encoder.create(args.path.path);
     // Bundle each selected record's directory (keyed by its id) plus the shared
     // label map, rather than the whole storage tree. addDirectory/addFile stream
-    // the file contents asynchronously, so they must be awaited before close():
-    // otherwise endEncode() runs before any file body is written and the archive
-    // comes out empty.
+    // the file contents asynchronously, so they (and close(), which flushes the
+    // output and writes the central directory) must all be awaited: otherwise
+    // endEncode() runs before any file body is written, or the isolate tears
+    // down before the final flush, and the archive comes out empty/truncated.
     for (final dir in args.recordDirs) {
       await encoder.addDirectory(dir.toDirectory(), followLinks: false);
     }
     await encoder.addFile(args.labelsFile.toFile());
-    encoder.close();
+    await encoder.close();
   }
 
   @override

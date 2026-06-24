@@ -139,7 +139,14 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
-        final icon = Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
+        final icon = Image.file(
+          (recordRootDir.filePath(record.traineeIconPath)).toFile(),
+          // Archived records keep their trainee icon, but guard against a
+          // missing/corrupt file so the cell shows a placeholder instead of a red
+          // error box. Sized to the cell, not the larger dialog placeholder.
+          errorBuilder: (context, error, stackTrace) =>
+              Icon(Symbols.hide_image_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        );
         return record.isFriend ? _FriendMarkedIcon(icon: icon) : icon;
       },
     )..setUserData(this);

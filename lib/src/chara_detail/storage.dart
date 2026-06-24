@@ -647,33 +647,60 @@ class ArchiveRecordArgs {
   const ArchiveRecordArgs(this.srcDirPath, this.dstDirPath, this.option);
 }
 
-/// Disposes of a single record's images and moves its directory into the
-/// archive, returning whether the move succeeded.
+/// Moves a single record's directory into the archive, then disposes of its
+/// recognition images, returning whether the record was archived.
 ///
 /// Runs inside a `compute` isolate (image decoding/encoding and a directory
 /// rename are all off the UI thread), but is also a plain top-level function so
 /// it can be unit-tested directly. The record's `record.json`, `trainee.jpg`,
 /// and image geometry `*.json` are left untouched; only the recognition PNGs are
 /// dropped or replaced.
+///
+/// The move happens first, before any file is touched: if the rename fails (a
+/// Windows file lock, a stale destination, …) the source is left completely
+/// intact rather than already stripped of its images. Once the move succeeds the
+/// record is archived, so the subsequent image disposition is best-effort — a
+/// failure there is logged but does not flip the result back to a (misleading)
+/// failure that would leave the in-memory active set out of sync with disk.
 bool archiveRecordInIsolate(ArchiveRecordArgs args) {
   try {
     final srcDir = DirectoryPath(args.srcDirPath);
     if (!srcDir.existsSync()) {
       return false;
     }
-    const imageModes = [
-      CharaDetailRecordImageMode.skillPlain,
-      CharaDetailRecordImageMode.factorPlain,
-      CharaDetailRecordImageMode.campaignPlain,
-    ];
-    if (args.option == ArchiveImageOption.resizedJpeg) {
+    final dstDir = srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath));
+    if (dstDir == null) {
+      // Move failed; the active record is untouched. Report failure so the
+      // caller keeps it in the active set.
+      return false;
+    }
+    _disposeArchivedImages(dstDir, args.option);
+    return true;
+  } catch (error, stackTrace) {
+    logger.e("Failed to archive record ${args.srcDirPath}.", error, stackTrace);
+    return false;
+  }
+}
+
+/// Drops or downscales the recognition PNGs of an already-archived record in
+/// [recordDir]. Best-effort: any failure is logged and swallowed, because the
+/// record has already been moved into the archive and must not be reported as a
+/// failed archive over a mere image-cleanup hiccup.
+void _disposeArchivedImages(DirectoryPath recordDir, ArchiveImageOption option) {
+  const imageModes = [
+    CharaDetailRecordImageMode.skillPlain,
+    CharaDetailRecordImageMode.factorPlain,
+    CharaDetailRecordImageMode.campaignPlain,
+  ];
+  try {
+    if (option == ArchiveImageOption.resizedJpeg) {
       final srcs = <String>[];
       final dsts = <String>[];
       for (final mode in imageModes) {
-        final png = srcDir.filePath(mode.fileName);
+        final png = recordDir.filePath(mode.fileName);
         if (png.existsSync()) {
           srcs.add(png.path);
-          dsts.add(srcDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).path);
+          dsts.add(recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).path);
         }
       }
       if (srcs.isNotEmpty) {
@@ -682,19 +709,17 @@ bool archiveRecordInIsolate(ArchiveRecordArgs args) {
       // Only drop a PNG once its JPEG exists, so a failed conversion keeps the
       // original rather than losing the image entirely.
       for (final mode in imageModes) {
-        if (srcDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).existsSync()) {
-          srcDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+        if (recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).existsSync()) {
+          recordDir.filePath(mode.fileName).deleteSync(emptyOk: true);
         }
       }
     } else {
       for (final mode in imageModes) {
-        srcDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+        recordDir.filePath(mode.fileName).deleteSync(emptyOk: true);
       }
     }
-    return srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath)) != null;
   } catch (error, stackTrace) {
-    logger.e("Failed to archive record ${args.srcDirPath}.", error, stackTrace);
-    return false;
+    logger.e("Failed to dispose archived images in ${recordDir.path}.", error, stackTrace);
   }
 }
 
