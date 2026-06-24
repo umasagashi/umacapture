@@ -513,6 +513,7 @@ Grid _buildGrid(
   List<CharaDetailRecord> recordList,
   List<ColumnSpec> specList, {
   bool selectionMode = false,
+  Set<String> pinnedIds = const {},
 }) {
   // Every node in the tree contributes a data column (leaves show their value,
   // container columns show a pass/fail cell), so flatten the forest for display.
@@ -597,6 +598,7 @@ Grid _buildGrid(
             for (final spec in visibleSpecs) spec.id: cellOf(spec, rowIndex),
           },
           sortIdx: -record.metadata.capturedDate.toDateTime().millisecondsSinceEpoch,
+          frozen: pinnedIds.contains(record.id) ? TrinaRowFrozen.start : TrinaRowFrozen.none,
         )..setUserData(record);
       })
       .sortedBy<num>((e) => e.sortIdx)
@@ -617,9 +619,14 @@ final currentGridProvider = Provider<Grid>((ref) {
   final gridRef = selectionMode ? ref.base.readOnly : ref.base;
   final recordList = gridRef.watch(displayedRecordsProvider);
   final specList = gridRef.watch(currentColumnSpecsProvider);
+  // Pinned rows render frozen at the top. In selection mode this resolves through
+  // the readOnly ref so toggling pins (disabled there anyway) won't rebuild and
+  // drop the in-progress checkbox selection; outside it, a pin toggle rebuilds
+  // the grid and re-derives the frozen rows from this set.
+  final pinnedIds = gridRef.watch(pinnedRecordIdsProvider);
 
   try {
-    return _buildGrid(gridRef, recordList, specList, selectionMode: selectionMode);
+    return _buildGrid(gridRef, recordList, specList, selectionMode: selectionMode, pinnedIds: pinnedIds);
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);

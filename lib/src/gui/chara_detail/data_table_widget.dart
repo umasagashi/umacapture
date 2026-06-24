@@ -54,6 +54,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // While selecting rows (to archive or export), actions that rebuild the
     // table (and would drop the in-progress selection) are disabled.
     final selecting = ref.read(selectionModeProvider) != null;
+    final isPinned = ref.read(pinnedRecordIdsProvider).contains(record.id);
     DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
     final rect = offset & const Size(1, 1);
     const height = 40.0;
@@ -93,6 +94,22 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           height: height,
           onTap: () => dirOf(record).launch(),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
+        ),
+        // Pin/unpin the row to the top of the table. Disabled while selecting,
+        // since toggling rebuilds the grid and would drop the in-progress
+        // checkbox selection.
+        PopupMenuItem(
+          height: height,
+          enabled: !selecting,
+          onTap: () {
+            final next = {...ref.read(pinnedRecordIdsProvider)};
+            isPinned ? next.remove(record.id) : next.add(record.id);
+            ref.read(pinnedRecordIdsProvider.notifier).set(next);
+          },
+          child: Text(
+            "$tr_chara_detail.context_menu.${isPinned ? "unpin" : "pin_to_top"}".tr(),
+            style: selecting ? disabledStyle : style,
+          ),
         ),
         // Re-recognition only applies to active records; archived ones have lossy
         // or no images and are intentionally excluded.
@@ -181,11 +198,43 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   // Checked rows get a translucent amber overlay that dims the
                   // cells and is labeled "archive", so the destructive (lossy,
                   // irreversible) intent of the bulk selection is unmistakable.
-                  rowWrapper: (context, rowWidget, rowData, _) {
-                    if (rowData.checked != true || purpose == null) {
-                      return rowWidget;
+                  rowWrapper: (context, rowWidget, rowData, stateManager) {
+                    Widget row = rowWidget;
+                    if (rowData.checked == true && purpose != null) {
+                      row = _SelectionRowOverlay(purpose: purpose, child: row);
                     }
-                    return _SelectionRowOverlay(purpose: purpose, child: rowWidget);
+                    // Frozen (pinned) rows bypass rowColorCallback and the normal
+                    // row border, so reproduce both here: the same alternating
+                    // stripe (and current-row highlight) as rowColorCallback above,
+                    // a normal-weight separator between pinned rows, and a single
+                    // thick rule only at the boundary with the scrollable rows.
+                    if (rowData.frozen == TrinaRowFrozen.start) {
+                      final pinned = stateManager.refRows.originalList
+                          .where((r) => r.frozen == TrinaRowFrozen.start)
+                          .toList();
+                      final pinnedIdx = pinned.indexOf(rowData);
+                      if (pinnedIdx >= 0) {
+                        final isLast = pinnedIdx == pinned.length - 1;
+                        final Color background = stateManager.currentRowIdx == pinnedIdx
+                            ? theme.colorScheme.primaryContainer
+                            : (pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor);
+                        final separator = isLast
+                            ? BorderSide(color: theme.colorScheme.primary, width: 3)
+                            : BorderSide(
+                                color: theme.focusColor,
+                                width: stateManager.configuration.style.cellHorizontalBorderWidth,
+                              );
+                        row = DecoratedBox(
+                          decoration: BoxDecoration(color: background),
+                          child: DecoratedBox(
+                            position: DecorationPosition.foreground,
+                            decoration: BoxDecoration(border: Border(bottom: separator)),
+                            child: row,
+                          ),
+                        );
+                      }
+                    }
+                    return row;
                   },
                   configuration: TrinaGridConfiguration(
                     enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
@@ -202,6 +251,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       // drawn as an overlay via rowWrapper instead (see below).
                       rowCheckedColor: Colors.transparent,
                       activatedColor: theme.colorScheme.primaryContainer,
+                      // TrinaGrid paints frozen (pinned) rows from these and
+                      // bypasses rowColorCallback for them, so its single
+                      // frozenRowColor can't reproduce the normal alternating
+                      // stripe. Make both transparent and paint the stripe + the
+                      // row separators ourselves in rowWrapper instead, so pinned
+                      // rows match normal rows except for the block boundary.
+                      frozenRowColor: Colors.transparent,
+                      frozenRowBorderColor: Colors.transparent,
                       gridBorderColor: theme.colorScheme.outline,
                       borderColor: theme.focusColor,
                       activatedBorderColor: theme.focusColor,
@@ -218,7 +275,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     }
                   },
                   onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
-                    final record = event.row.getUserData<CharaDetailRecord>()!;
+                    // event.row (== getRowByIdx(rowIdx)) is unreliable once any
+                    // row is frozen (pinned): TrinaGrid renders frozen rows in a
+                    // separate block with positional indices that don't map back
+                    // through refRows, so it would return a different record.
+                    // The tapped cell's own row is always correct.
+                    final record = event.cell.row.getUserData<CharaDetailRecord>()!;
                     final spec = event.cell.column.getUserData<ColumnSpec>();
                     showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
                   },
@@ -249,11 +311,19 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       if (!(data?.onSelected?.call(event) ?? false)) {
                         final source = ref.read(recordSourceProvider);
                         final pathInfo = ref.read(pathInfoProvider);
-                        final records = stateManager
-                            .getSortedRecords()
-                            .map((e) => recordDirOf(pathInfo, source, e))
-                            .toList();
-                        CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
+                        // event.rowIdx is unreliable once any row is frozen
+                        // (pinned): frozen rows render in a separate block and
+                        // shift the scrollable rows' indices, so it no longer maps
+                        // to getSortedRecords. Resolve the tapped record from its
+                        // own cell row and find its position by identity instead.
+                        final sorted = stateManager.getSortedRecords().toList();
+                        final record = event.cell?.row.getUserData<CharaDetailRecord>();
+                        final index = record == null ? -1 : sorted.indexOf(record);
+                        if (index < 0) {
+                          return;
+                        }
+                        final records = sorted.map((e) => recordDirOf(pathInfo, source, e)).toList();
+                        CharaDetailPreviewDialog.show(ref.base, records, index);
                       }
                     } catch (error, stackTrace) {
                       logger.e(

@@ -145,6 +145,13 @@ final selectionModeProvider = settableNotifierProvider<SelectionPurpose?>(null);
 /// switching sources.
 final selectedRecordIdsProvider = settableNotifierProvider<Set<String>>(<String>{});
 
+/// Ids of the rows pinned to the top of the data table.
+///
+/// Session-only (not persisted): a fresh launch starts with no pinned rows.
+/// Shared across record sources since ids are unique across active/archive, so a
+/// row only renders pinned in the source where it is actually displayed.
+final pinnedRecordIdsProvider = settableNotifierProvider<Set<String>>(<String>{});
+
 /// What to do with a record's recognition images when archiving it.
 enum ArchiveImageOption {
   /// Drop the images entirely (smallest result).
