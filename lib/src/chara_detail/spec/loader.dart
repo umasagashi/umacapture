@@ -607,16 +607,19 @@ Grid _buildGrid(
 
 final currentGridProvider = Provider<Grid>((ref) {
   final selectionMode = ref.watch(selectionModeProvider) != null;
-  // While selecting, read (not watch) the records and column specs so background
-  // captures, archive reloads, or column edits cannot rebuild the grid: a rebuild
-  // would reset TrinaGrid's checkboxes while selectedRecordIdsProvider kept the
-  // stale ids, so a confirm would act on rows the user no longer sees checked. The
-  // grid is rebuilt only when selection mode itself toggles (enter/exit).
-  final recordList = selectionMode ? ref.read(displayedRecordsProvider) : ref.watch(displayedRecordsProvider);
-  final specList = selectionMode ? ref.read(currentColumnSpecsProvider) : ref.watch(currentColumnSpecsProvider);
+  // While selecting, build the whole grid through a read-only ref so NONE of the
+  // providers touched during the build (records, specs, and the rating/memo/label
+  // providers that plutoColumn/cellOf watch deep inside) register a dependency.
+  // Any such rebuild would reset TrinaGrid's checkboxes while selectedRecordIdsProvider
+  // kept the stale ids, so a confirm would act on rows the user no longer sees
+  // checked. Only selectionModeProvider stays a real watch above, so the grid is
+  // rebuilt solely when selection mode itself toggles (enter/exit).
+  final gridRef = selectionMode ? ref.base.readOnly : ref.base;
+  final recordList = gridRef.watch(displayedRecordsProvider);
+  final specList = gridRef.watch(currentColumnSpecsProvider);
 
   try {
-    return _buildGrid(ref.base, recordList, specList, selectionMode: selectionMode);
+    return _buildGrid(gridRef, recordList, specList, selectionMode: selectionMode);
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);

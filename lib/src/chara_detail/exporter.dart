@@ -156,6 +156,11 @@ class CsvExporter extends Exporter {
 
   @override
   Future<dynamic> _export(FilePath path) async {
+    // Guard the same not-ready/empty case JsonExporter and ZipExporter reject:
+    // surface a StateError (routed to export()'s catchError) instead of writing a
+    // header-only CSV and firing a misleading success toast. CSV still formats
+    // from the snapshotted grid below; this only enforces the shared guard.
+    resolveSelectedRecords();
     // Drop the synthetic checkbox column injected while selecting; it carries no
     // title or exportable data and would otherwise emit a leading empty column.
     final columns = grid.columns.where((column) => column.field != checkColumnField).toList();

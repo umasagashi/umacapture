@@ -312,6 +312,12 @@ class RecordQuarantined extends RecordLoadResult {
   const RecordQuarantined(this.destination);
 }
 
+/// File name of the always-retained trainee icon inside a record's directory.
+///
+/// Single source of truth shared by [CharaDetailRecord.traineeIconPath] and the
+/// source-agnostic `traineeIconPathIn` helper in storage.dart.
+const traineeIconFileName = "trainee.jpg";
+
 // ignoreNull keeps persisted record.json byte-compatible with the native writer,
 // which omits empty optionals. Without it, toMap() emits "foreign_aptitude": null
 // / "uaf_wins": null, which the native recognizer cannot read back on re-recognize.
@@ -377,7 +383,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   bool get isFriend =>
       metadata.recordType == RecordType.friendStandard || metadata.recordType == RecordType.friendInheritance;
 
-  FilePath get traineeIconPath => DirectoryPath(id).filePath("trainee.jpg");
+  FilePath get traineeIconPath => DirectoryPath(id).filePath(traineeIconFileName);
 
   DateTime get trainedDateAsDateTime => trainedDate.replaceAll("/", "-").toDateTime();
 

@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/storage.dart';
+import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
@@ -25,9 +26,15 @@ class RegenerateRecordDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-    final record = storage.getBy(id: recordId)!;
-    final iconPath = storage.traineeIconPathOf(record);
+    // Guard against the record vanishing between show() and build() (a background
+    // capture reload, quarantine move, or the record being deleted/archived), and
+    // resolve the icon from the active source (regenerate is active-only), matching
+    // the delete/memo/rating dialogs.
+    final record = ref.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: recordId);
+    if (record == null) {
+      return dismissForMissingRecord(ref.base);
+    }
+    final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), RecordSource.active, record));
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
       child: CardDialog(
@@ -38,7 +45,14 @@ class RegenerateRecordDialog extends ConsumerWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.file(iconPath.toFile()),
+              Image.file(
+                iconPath.toFile(),
+                // The trainee icon is normally always present, but guard against a
+                // missing/corrupt file so the dialog shows a placeholder instead
+                // of a red error box.
+                errorBuilder: (context, error, stackTrace) =>
+                    Icon(Symbols.hide_image_rounded, size: 64, color: theme.colorScheme.onSurfaceVariant),
+              ),
               Text(record.metadata.capturedDate.toDateTime().toLocal().toString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               NoteCard(

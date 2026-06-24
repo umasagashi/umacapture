@@ -161,7 +161,7 @@ DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRec
 }
 
 /// Path to the (always-retained) trainee icon inside [recordDir].
-FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath("trainee.jpg");
+FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath(traineeIconFileName);
 
 /// Resolves an existing image file for [mode] in [recordDir], or `null`.
 ///
