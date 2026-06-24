@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -230,7 +231,10 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
     // Look up the record (and its icon) from whichever source is shown, so the
     // dialog also works for archived records.
     final source = ref.read(recordSourceProvider);
-    final record = ref.read(displayedRecordsProvider).firstWhere((e) => e.id == widget.recordId);
+    final record = ref.read(displayedRecordsProvider).firstWhereOrNull((e) => e.id == widget.recordId);
+    if (record == null) {
+      return dismissForMissingRecord(ref.base);
+    }
     final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 400, maxHeight: 400),

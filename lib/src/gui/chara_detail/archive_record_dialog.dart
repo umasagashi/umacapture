@@ -37,91 +37,52 @@ class _ArchiveRecordDialogState extends ConsumerState<ArchiveRecordDialog> {
     ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option);
     // The grid rebuilds without these rows; leave selection mode so the
     // checkbox column disappears and stale checks are dropped.
-    ref.read(selectionModeProvider.notifier).set(null);
-    ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+    exitSelection(ref);
     CardDialog.dismiss(ref.base);
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final count = widget.recordIds.length;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 420),
-      child: CardDialog(
-        dialogTitle: "$tr_archive_record.dialog.title".tr(),
-        closeButtonTooltip: "$tr_archive_record.dialog.cancel_button.tooltip".tr(),
-        usePageView: false,
-        content: Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "$tr_archive_record.dialog.message".tr(namedArgs: {"count": "$count"}),
-                  style: theme.textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                RadioGroup<ArchiveImageOption>(
-                  groupValue: _option,
-                  onChanged: (value) => setState(() => _option = value!),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      RadioListTile<ArchiveImageOption>(
-                        value: ArchiveImageOption.resizedJpeg,
-                        title: Text("$tr_archive_record.dialog.option.resized_jpeg.label".tr()),
-                        subtitle: Text("$tr_archive_record.dialog.option.resized_jpeg.description".tr()),
-                      ),
-                      RadioListTile<ArchiveImageOption>(
-                        value: ArchiveImageOption.none,
-                        title: Text("$tr_archive_record.dialog.option.none.label".tr()),
-                        subtitle: Text("$tr_archive_record.dialog.option.none.description".tr()),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                // Centered like the delete dialogs' caution box; the surrounding
-                // Column stretches (for the radio tiles), so Center keeps this box
-                // hugging its content instead of spanning the full width.
-                Center(child: WarningCard(message: "$tr_archive_record.dialog.description".tr())),
-              ],
-            ),
+    return BulkConfirmDialog(
+      dismissRef: ref.base,
+      dialogTitle: "$tr_archive_record.dialog.title".tr(),
+      closeTooltip: "$tr_archive_record.dialog.cancel_button.tooltip".tr(),
+      maxWidth: 500,
+      maxHeight: 420,
+      message: "$tr_archive_record.dialog.message".tr(namedArgs: {"count": "$count"}),
+      bodyExtras: [
+        RadioGroup<ArchiveImageOption>(
+          groupValue: _option,
+          onChanged: (value) => setState(() => _option = value!),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<ArchiveImageOption>(
+                value: ArchiveImageOption.resizedJpeg,
+                title: Text("$tr_archive_record.dialog.option.resized_jpeg.label".tr()),
+                subtitle: Text("$tr_archive_record.dialog.option.resized_jpeg.description".tr()),
+              ),
+              RadioListTile<ArchiveImageOption>(
+                value: ArchiveImageOption.none,
+                title: Text("$tr_archive_record.dialog.option.none.label".tr()),
+                subtitle: Text("$tr_archive_record.dialog.option.none.description".tr()),
+              ),
+            ],
           ),
         ),
-        bottom: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Tooltip(
-              message: "$tr_archive_record.dialog.cancel_button.tooltip".tr(),
-              child: OutlinedButton.icon(
-                icon: const Icon(Symbols.cancel_rounded),
-                label: Text("$tr_archive_record.dialog.cancel_button.label".tr()),
-                onPressed: () => CardDialog.dismiss(ref.base),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: "$tr_archive_record.dialog.ok_button.tooltip".tr(),
-              child: FilledButton.icon(
-                // Error-toned long-press confirm, matching the delete dialogs.
-                style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.error,
-                  foregroundColor: theme.colorScheme.onError,
-                ),
-                icon: const Icon(Symbols.archive_rounded),
-                label: Text("$tr_archive_record.dialog.ok_button.label".tr()),
-                onPressed: () {},
-                onLongPress: _confirm,
-              ),
-            ),
-          ],
-        ),
-      ),
+        const SizedBox(height: 8),
+        // Centered caution box hugging its content instead of spanning the full
+        // (stretched) width.
+        Center(child: WarningCard(message: "$tr_archive_record.dialog.description".tr())),
+      ],
+      cancelLabel: "$tr_archive_record.dialog.cancel_button.label".tr(),
+      cancelTooltip: "$tr_archive_record.dialog.cancel_button.tooltip".tr(),
+      confirmLabel: "$tr_archive_record.dialog.ok_button.label".tr(),
+      confirmTooltip: "$tr_archive_record.dialog.ok_button.tooltip".tr(),
+      confirmIcon: Symbols.archive_rounded,
+      destructive: true,
+      onConfirm: _confirm,
     );
   }
 }

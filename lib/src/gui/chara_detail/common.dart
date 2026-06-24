@@ -12,6 +12,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
+import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_common = "pages.chara_detail.column_predicate.common";
@@ -221,6 +222,162 @@ class WarningCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Closes a record-keyed dialog whose record has vanished (archived or deleted
+/// out from under it) and shows a single "record not found" toast.
+///
+/// Returns a throwaway widget so a `build()` that just discovered its record is
+/// `null` can bail without dereferencing it (the dismiss is deferred to a
+/// post-frame callback because dialogs cannot be torn down mid-build).
+Widget dismissForMissingRecord(RefBase ref) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    Toaster.show(ToastData.warning(description: "toast.record_unavailable".tr()));
+    CardDialog.dismiss(ref);
+  });
+  return const SizedBox.shrink();
+}
+
+/// The cancel/confirm button row shared by the record confirmation dialogs.
+///
+/// [destructive] dialogs (delete, archive) use the error palette and gate the
+/// action behind a long-press; non-destructive ones (export) confirm on a plain
+/// tap. Cancel always dismisses the dialog.
+class ConfirmActionRow extends StatelessWidget {
+  final RefBase dismissRef;
+  final String cancelLabel;
+  final String cancelTooltip;
+  final String confirmLabel;
+  final String confirmTooltip;
+  final IconData confirmIcon;
+  final bool destructive;
+  final VoidCallback onConfirm;
+
+  const ConfirmActionRow({
+    super.key,
+    required this.dismissRef,
+    required this.cancelLabel,
+    required this.cancelTooltip,
+    required this.confirmLabel,
+    required this.confirmTooltip,
+    required this.confirmIcon,
+    required this.destructive,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Tooltip(
+          message: cancelTooltip,
+          child: OutlinedButton.icon(
+            icon: const Icon(Symbols.cancel_rounded),
+            label: Text(cancelLabel),
+            onPressed: () => CardDialog.dismiss(dismissRef),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Tooltip(
+          message: confirmTooltip,
+          child: FilledButton.icon(
+            style: destructive
+                ? FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.error,
+                    foregroundColor: theme.colorScheme.onError,
+                  )
+                : null,
+            icon: Icon(confirmIcon),
+            label: Text(confirmLabel),
+            // Destructive actions require a deliberate long-press; a plain press
+            // is a no-op so an accidental tap cannot delete/archive.
+            onPressed: destructive ? () {} : onConfirm,
+            onLongPress: destructive ? onConfirm : null,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A confirmation dialog reporting a count, an optional body, and a shared
+/// cancel/confirm row.
+///
+/// The selection-flow counterpart dialogs (bulk delete, archive, export) share
+/// this scaffold; only the message, the [bodyExtras] below it (options, caution
+/// box), the button labels/icon, and the [destructive] flag vary.
+class BulkConfirmDialog extends StatelessWidget {
+  final RefBase dismissRef;
+  final String dialogTitle;
+  final String closeTooltip;
+  final double maxWidth;
+  final double maxHeight;
+  final String message;
+  final List<Widget> bodyExtras;
+  final String cancelLabel;
+  final String cancelTooltip;
+  final String confirmLabel;
+  final String confirmTooltip;
+  final IconData confirmIcon;
+  final bool destructive;
+  final VoidCallback onConfirm;
+
+  const BulkConfirmDialog({
+    super.key,
+    required this.dismissRef,
+    required this.dialogTitle,
+    required this.closeTooltip,
+    required this.maxWidth,
+    required this.maxHeight,
+    required this.message,
+    this.bodyExtras = const [],
+    required this.cancelLabel,
+    required this.cancelTooltip,
+    required this.confirmLabel,
+    required this.confirmTooltip,
+    required this.confirmIcon,
+    required this.destructive,
+    required this.onConfirm,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
+      child: CardDialog(
+        dialogTitle: dialogTitle,
+        closeButtonTooltip: closeTooltip,
+        usePageView: false,
+        content: Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(message, style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
+                const SizedBox(height: 12),
+                ...bodyExtras,
+              ],
+            ),
+          ),
+        ),
+        bottom: ConfirmActionRow(
+          dismissRef: dismissRef,
+          cancelLabel: cancelLabel,
+          cancelTooltip: cancelTooltip,
+          confirmLabel: confirmLabel,
+          confirmTooltip: confirmTooltip,
+          confirmIcon: confirmIcon,
+          destructive: destructive,
+          onConfirm: onConfirm,
+        ),
       ),
     );
   }

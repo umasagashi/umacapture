@@ -4,10 +4,12 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/exporter.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -92,16 +94,23 @@ class ExportRecordDialog extends ConsumerStatefulWidget {
 class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
   ExportFormat _format = ExportFormat.csvShiftJis;
 
-  Exporter _exporterFor(ExportFormat format, String title, Set<String> ids, RefBase ref) {
+  Exporter _exporterFor(
+    ExportFormat format,
+    String title,
+    Set<String> ids,
+    RecordSource source,
+    Grid grid,
+    RefBase ref,
+  ) {
     switch (format) {
       case ExportFormat.csvShiftJis:
-        return CsvExporter(title, "records.csv", ref, ids, CharCodec.shiftJis);
+        return CsvExporter(title, "records.csv", ref, ids, source, CharCodec.shiftJis, grid);
       case ExportFormat.csvUtf8Bom:
-        return CsvExporter(title, "records.csv", ref, ids, CharCodec.utf8Bom);
+        return CsvExporter(title, "records.csv", ref, ids, source, CharCodec.utf8Bom, grid);
       case ExportFormat.json:
-        return JsonExporter(title, "records.json", ref, ids);
+        return JsonExporter(title, "records.json", ref, ids, source);
       case ExportFormat.zip:
-        return ZipExporter(title, "records.zip", ref, ids);
+        return ZipExporter(title, "records.zip", ref, ids, source);
     }
   }
 
@@ -109,15 +118,25 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
     final title = "$tr_chara_detail.export.dialog_title".tr();
     final ids = widget.recordIds.toSet();
     final format = _format;
+    // Snapshot the source too: clearing selection below makes the source dropdown
+    // live again, and the picker/write run later, so the exporter must capture the
+    // source now rather than re-read it mid-flight.
+    final source = ref.read(recordSourceProvider);
+    // Snapshot the grid as well for CSV (which exports the displayed columns/cells
+    // rather than raw records). Read it before exitSelection makes the grid live
+    // again, so a later source switch cannot redirect the CSV to the other set.
+    final grid = ref.read(currentGridProvider);
     // Run the export on the container-scoped ExportRunner rather than this
     // dialog's ref: the directory picker and write outlive the dialog, which is
     // dismissed immediately below. The selection is already snapshotted into the
     // exporter, so clearing it here cannot affect the in-flight write.
     ref
         .read(exportRunnerProvider.notifier)
-        .run((rb) => _exporterFor(format, title, ids, rb), onSuccess: (path) => _recordExportEvent.add(path));
-    ref.read(selectionModeProvider.notifier).set(null);
-    ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+        .run(
+          (rb) => _exporterFor(format, title, ids, source, grid, rb),
+          onSuccess: (path) => _recordExportEvent.add(path),
+        );
+    exitSelection(ref);
     CardDialog.dismiss(ref.base);
   }
 
@@ -127,83 +146,45 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final count = widget.recordIds.length;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 560, maxHeight: 520),
-      child: CardDialog(
-        dialogTitle: "$tr_chara_detail.export.dialog.title".tr(),
-        closeButtonTooltip: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
-        usePageView: false,
-        content: Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "$tr_chara_detail.export.dialog.message".tr(namedArgs: {"count": "$count"}),
-                  style: theme.textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                RadioGroup<ExportFormat>(
-                  groupValue: _format,
-                  onChanged: (value) => setState(() => _format = value!),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _option(
-                        ExportFormat.csvShiftJis,
-                        "$tr_chara_detail.export.csv.label",
-                        "$tr_chara_detail.export.csv.tooltip",
-                      ),
-                      _option(
-                        ExportFormat.csvUtf8Bom,
-                        "$tr_chara_detail.export.csv_utf.label",
-                        "$tr_chara_detail.export.csv_utf.tooltip",
-                      ),
-                      _option(
-                        ExportFormat.json,
-                        "$tr_chara_detail.export.json.label",
-                        "$tr_chara_detail.export.json.tooltip",
-                      ),
-                      _option(
-                        ExportFormat.zip,
-                        "$tr_chara_detail.export.zip.label",
-                        "$tr_chara_detail.export.zip.tooltip",
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+    return BulkConfirmDialog(
+      dismissRef: ref.base,
+      dialogTitle: "$tr_chara_detail.export.dialog.title".tr(),
+      closeTooltip: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
+      maxWidth: 560,
+      maxHeight: 520,
+      message: "$tr_chara_detail.export.dialog.message".tr(namedArgs: {"count": "$count"}),
+      bodyExtras: [
+        RadioGroup<ExportFormat>(
+          groupValue: _format,
+          onChanged: (value) => setState(() => _format = value!),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _option(
+                ExportFormat.csvShiftJis,
+                "$tr_chara_detail.export.csv.label",
+                "$tr_chara_detail.export.csv.tooltip",
+              ),
+              _option(
+                ExportFormat.csvUtf8Bom,
+                "$tr_chara_detail.export.csv_utf.label",
+                "$tr_chara_detail.export.csv_utf.tooltip",
+              ),
+              _option(ExportFormat.json, "$tr_chara_detail.export.json.label", "$tr_chara_detail.export.json.tooltip"),
+              _option(ExportFormat.zip, "$tr_chara_detail.export.zip.label", "$tr_chara_detail.export.zip.tooltip"),
+            ],
           ),
         ),
-        bottom: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Tooltip(
-              message: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
-              child: OutlinedButton.icon(
-                icon: const Icon(Symbols.cancel_rounded),
-                label: Text("$tr_chara_detail.export.dialog.cancel_button.label".tr()),
-                onPressed: () => CardDialog.dismiss(ref.base),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: "$tr_chara_detail.export.dialog.ok_button.tooltip".tr(),
-              child: FilledButton.icon(
-                icon: const Icon(Symbols.download_rounded),
-                label: Text("$tr_chara_detail.export.dialog.ok_button.label".tr()),
-                onPressed: _confirm,
-              ),
-            ),
-          ],
-        ),
-      ),
+      ],
+      cancelLabel: "$tr_chara_detail.export.dialog.cancel_button.label".tr(),
+      cancelTooltip: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
+      confirmLabel: "$tr_chara_detail.export.dialog.ok_button.label".tr(),
+      confirmTooltip: "$tr_chara_detail.export.dialog.ok_button.tooltip".tr(),
+      confirmIcon: Symbols.download_rounded,
+      // Export is non-destructive: confirm on a plain tap, no error palette.
+      destructive: false,
+      onConfirm: _confirm,
     );
   }
 }

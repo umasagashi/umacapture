@@ -29,73 +29,31 @@ class BulkDeleteRecordDialog extends ConsumerWidget {
   }
 
   void _confirm(WidgetRef ref) {
-    if (source == RecordSource.active) {
-      ref.read(charaDetailRecordStorageLoaderProvider.notifier).deleteAll(recordIds);
-    } else {
-      ref.read(charaDetailArchiveStorageLoaderProvider.notifier).deleteAll(recordIds);
-    }
+    recordStorageFor(ref, source).deleteAll(recordIds);
     // The rows are gone; leave selection mode so the checkbox column disappears
     // and stale checks are dropped.
-    ref.read(selectionModeProvider.notifier).set(null);
-    ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+    exitSelection(ref);
     CardDialog.dismiss(ref.base);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final count = recordIds.length;
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 360),
-      child: CardDialog(
-        dialogTitle: "$tr_delete_record.bulk.title".tr(),
-        closeButtonTooltip: "$tr_delete_record.bulk.cancel_button.tooltip".tr(),
-        usePageView: false,
-        content: Expanded(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  "$tr_delete_record.bulk.message".tr(namedArgs: {"count": "$count"}),
-                  style: theme.textTheme.titleMedium,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                WarningCard(message: "$tr_delete_record.bulk.description".tr()),
-              ],
-            ),
-          ),
-        ),
-        bottom: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Tooltip(
-              message: "$tr_delete_record.bulk.cancel_button.tooltip".tr(),
-              child: OutlinedButton.icon(
-                icon: const Icon(Symbols.cancel_rounded),
-                label: Text("$tr_delete_record.bulk.cancel_button.label".tr()),
-                onPressed: () => CardDialog.dismiss(ref.base),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: "$tr_delete_record.bulk.ok_button.tooltip".tr(),
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.error,
-                  foregroundColor: theme.colorScheme.onError,
-                ),
-                icon: const Icon(Symbols.delete_rounded),
-                label: Text("$tr_delete_record.bulk.ok_button.label".tr()),
-                onPressed: () {},
-                onLongPress: () => _confirm(ref),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return BulkConfirmDialog(
+      dismissRef: ref.base,
+      dialogTitle: "$tr_delete_record.bulk.title".tr(),
+      closeTooltip: "$tr_delete_record.bulk.cancel_button.tooltip".tr(),
+      maxWidth: 500,
+      maxHeight: 360,
+      message: "$tr_delete_record.bulk.message".tr(namedArgs: {"count": "$count"}),
+      bodyExtras: [Center(child: WarningCard(message: "$tr_delete_record.bulk.description".tr()))],
+      cancelLabel: "$tr_delete_record.bulk.cancel_button.label".tr(),
+      cancelTooltip: "$tr_delete_record.bulk.cancel_button.tooltip".tr(),
+      confirmLabel: "$tr_delete_record.bulk.ok_button.label".tr(),
+      confirmTooltip: "$tr_delete_record.bulk.ok_button.tooltip".tr(),
+      confirmIcon: Symbols.delete_rounded,
+      destructive: true,
+      onConfirm: () => _confirm(ref),
     );
   }
 }
@@ -115,9 +73,10 @@ class DeleteRecordDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final record = source == RecordSource.active
-        ? ref.read(charaDetailRecordStorageLoaderProvider.notifier).getBy(id: recordId)!
-        : ref.read(charaDetailArchiveStorageLoaderProvider.notifier).getBy(id: recordId)!;
+    final record = recordStorageFor(ref, source).getBy(id: recordId);
+    if (record == null) {
+      return dismissForMissingRecord(ref.base);
+    }
     final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 500, maxHeight: 400),
@@ -143,41 +102,18 @@ class DeleteRecordDialog extends ConsumerWidget {
             ],
           ),
         ),
-        bottom: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            Tooltip(
-              message: "$tr_delete_record.dialog.cancel_button.tooltip".tr(),
-              child: OutlinedButton.icon(
-                icon: const Icon(Symbols.cancel_rounded),
-                label: Text("$tr_delete_record.dialog.cancel_button.label".tr()),
-                onPressed: () {
-                  CardDialog.dismiss(ref.base);
-                },
-              ),
-            ),
-            const SizedBox(width: 8),
-            Tooltip(
-              message: "$tr_delete_record.dialog.ok_button.tooltip".tr(),
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(
-                  backgroundColor: theme.colorScheme.error,
-                  foregroundColor: theme.colorScheme.onError,
-                ),
-                icon: const Icon(Symbols.delete_rounded),
-                label: Text("$tr_delete_record.dialog.ok_button.label".tr()),
-                onPressed: () {},
-                onLongPress: () {
-                  if (source == RecordSource.active) {
-                    ref.read(charaDetailRecordStorageLoaderProvider.notifier).delete(recordId);
-                  } else {
-                    ref.read(charaDetailArchiveStorageLoaderProvider.notifier).delete(recordId);
-                  }
-                  CardDialog.dismiss(ref.base);
-                },
-              ),
-            ),
-          ],
+        bottom: ConfirmActionRow(
+          dismissRef: ref.base,
+          cancelLabel: "$tr_delete_record.dialog.cancel_button.label".tr(),
+          cancelTooltip: "$tr_delete_record.dialog.cancel_button.tooltip".tr(),
+          confirmLabel: "$tr_delete_record.dialog.ok_button.label".tr(),
+          confirmTooltip: "$tr_delete_record.dialog.ok_button.tooltip".tr(),
+          confirmIcon: Symbols.delete_rounded,
+          destructive: true,
+          onConfirm: () {
+            recordStorageFor(ref, source).delete(recordId);
+            CardDialog.dismiss(ref.base);
+          },
         ),
       ),
     );

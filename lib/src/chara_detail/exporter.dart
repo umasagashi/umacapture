@@ -61,7 +61,28 @@ abstract class Exporter {
   /// alter the set midway through the asynchronous export.
   final Set<String> recordIds;
 
-  Exporter(this.dialogTitle, this.defaultFileName, this.ref, this.recordIds);
+  /// Record source snapshotted at trigger time. The picker and write run after
+  /// the selection scrim is gone (which makes the source dropdown live again), so
+  /// the exporter must not re-read [recordSourceProvider] mid-flight — otherwise a
+  /// source switch could redirect the write to the other set's directories.
+  final RecordSource source;
+
+  Exporter(this.dialogTitle, this.defaultFileName, this.ref, this.recordIds, this.source);
+
+  /// The records to export, drawn from the snapshotted [source] and filtered to
+  /// [recordIds].
+  ///
+  /// Throws [StateError] when the source resolves to no records while ids were
+  /// requested — e.g. the archive store is still loading (its read view yields an
+  /// empty list), which would otherwise silently write an empty file and fire a
+  /// success toast. Surfacing it routes through the export's error handler.
+  List<CharaDetailRecord> resolveSelectedRecords() {
+    final records = recordsForSource(ref, source).where((record) => recordIds.contains(record.id)).toList();
+    if (records.isEmpty && recordIds.isNotEmpty) {
+      throw StateError("No records resolved for export (source not ready or all ids missing).");
+    }
+    return records;
+  }
 
   void export({PathEntityCallback? onSuccess}) {
     getDownloadsDirectory().then((initialDirectory) {
@@ -105,7 +126,22 @@ enum CharCodec { shiftJis, utf8Bom, utf16leBom }
 class CsvExporter extends Exporter {
   final CharCodec encoding;
 
-  CsvExporter(super.dialogTitle, super.defaultFileName, super.ref, super.recordIds, this.encoding);
+  /// Grid snapshotted at export-trigger time. CSV exports the *displayed*
+  /// columns and formatted cells (not the raw records), so it needs the grid;
+  /// capturing it here keeps the same snapshot guarantee as [Exporter.source],
+  /// since the picker/write run after the selection scrim makes the grid live
+  /// again (and #3 freezes it only while selecting).
+  final Grid grid;
+
+  CsvExporter(
+    super.dialogTitle,
+    super.defaultFileName,
+    super.ref,
+    super.recordIds,
+    super.source,
+    this.encoding,
+    this.grid,
+  );
 
   List<int> encode(String content) {
     switch (encoding) {
@@ -120,7 +156,6 @@ class CsvExporter extends Exporter {
 
   @override
   Future<dynamic> _export(FilePath path) async {
-    final grid = ref.read(currentGridProvider);
     // Drop the synthetic checkbox column injected while selecting; it carries no
     // title or exportable data and would otherwise emit a leading empty column.
     final columns = grid.columns.where((column) => column.field != checkColumnField).toList();
@@ -154,7 +189,7 @@ class _JsonExporterArgs {
 }
 
 class JsonExporter extends Exporter {
-  JsonExporter(super.dialogTitle, super.defaultFileName, super.ref, super.recordIds);
+  JsonExporter(super.dialogTitle, super.defaultFileName, super.ref, super.recordIds, super.source);
 
   static void _run(_JsonExporterArgs args) {
     initializeMappers();
@@ -162,10 +197,12 @@ class JsonExporter extends Exporter {
   }
 
   @override
-  Future<dynamic> _export(FilePath path) {
-    // Export only the selected rows, drawn from the table's current source so the
-    // archive view exports its own records.
-    final records = ref.read(displayedRecordsProvider).where((record) => recordIds.contains(record.id)).toList();
+  Future<dynamic> _export(FilePath path) async {
+    // Export only the selected rows, drawn from the snapshotted source so the
+    // archive view exports its own records. async so a resolve failure rejects
+    // the future (caught by export()'s catchError) rather than throwing
+    // synchronously past it.
+    final records = resolveSelectedRecords();
     final labelMap = ref.read(labelMapProvider);
     return compute(_run, _JsonExporterArgs(path, JsonExportData(records, labelMap)));
   }
@@ -180,7 +217,7 @@ class _ZipExporterArgs {
 }
 
 class ZipExporter extends Exporter {
-  ZipExporter(super.dialogTitle, super.defaultFileName, super.ref, super.recordIds);
+  ZipExporter(super.dialogTitle, super.defaultFileName, super.ref, super.recordIds, super.source);
 
   static Future<void> _run(_ZipExporterArgs args) async {
     final encoder = ZipFileEncoder();
@@ -199,14 +236,11 @@ class ZipExporter extends Exporter {
   }
 
   @override
-  Future<dynamic> _export(FilePath path) {
+  Future<dynamic> _export(FilePath path) async {
+    // async so a resolve failure rejects the future (caught by export()'s
+    // catchError) rather than throwing synchronously past it.
     final info = ref.read(pathInfoProvider);
-    final source = ref.read(recordSourceProvider);
-    final recordDirs = ref
-        .read(displayedRecordsProvider)
-        .where((record) => recordIds.contains(record.id))
-        .map((record) => recordDirOf(info, source, record))
-        .toList();
+    final recordDirs = resolveSelectedRecords().map((record) => recordDirOf(info, source, record)).toList();
     final labelsFile = info.modulesDir.filePath("labels.json");
     return compute(_run, _ZipExporterArgs(path, recordDirs, labelsFile));
   }

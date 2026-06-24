@@ -606,9 +606,14 @@ Grid _buildGrid(
 }
 
 final currentGridProvider = Provider<Grid>((ref) {
-  final recordList = ref.watch(displayedRecordsProvider);
-  final specList = ref.watch(currentColumnSpecsProvider);
   final selectionMode = ref.watch(selectionModeProvider) != null;
+  // While selecting, read (not watch) the records and column specs so background
+  // captures, archive reloads, or column edits cannot rebuild the grid: a rebuild
+  // would reset TrinaGrid's checkboxes while selectedRecordIdsProvider kept the
+  // stale ids, so a confirm would act on rows the user no longer sees checked. The
+  // grid is rebuilt only when selection mode itself toggles (enter/exit).
+  final recordList = selectionMode ? ref.read(displayedRecordsProvider) : ref.watch(displayedRecordsProvider);
+  final specList = selectionMode ? ref.read(currentColumnSpecsProvider) : ref.watch(currentColumnSpecsProvider);
 
   try {
     return _buildGrid(ref.base, recordList, specList, selectionMode: selectionMode);

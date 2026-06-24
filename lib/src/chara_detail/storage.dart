@@ -166,17 +166,20 @@ FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath("train
 /// Resolves an existing image file for [mode] in [recordDir], or `null`.
 ///
 /// Active records store lossless `.png`; archived records may instead hold a
-/// downscaled `.jpg`, or no image at all. Prefers the `.jpg` so an archived
-/// record's smaller image is used when present.
+/// downscaled `.jpg`, or no image at all. Prefers the lossless `.png` when both
+/// exist — that only happens as a leftover when [_disposeArchivedImages] was
+/// interrupted between writing the `.jpg` and deleting the `.png`, and in that
+/// case the original is the better image. A normally-archived record (only the
+/// `.jpg` present) falls through to the `.jpg`.
 FilePath? resolveImagePath(DirectoryPath recordDir, CharaDetailRecordImageMode mode) {
   assert(mode != CharaDetailRecordImageMode.none);
-  final jpg = recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg"));
-  if (jpg.existsSync()) {
-    return jpg;
-  }
   final png = recordDir.filePath(mode.fileName);
   if (png.existsSync()) {
     return png;
+  }
+  final jpg = recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg"));
+  if (jpg.existsSync()) {
+    return jpg;
   }
   return null;
 }
@@ -193,7 +196,21 @@ void copyRecordImageToClipboard(RefBase ref, DirectoryPath recordDir, CharaDetai
   unawaited(ClipboardAlt.pasteImage(ref, imagePath));
 }
 
-class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
+/// The mutation surface shared by the active ([CharaDetailRecordStorage]) and
+/// archive ([CharaDetailArchiveStorage]) stores.
+///
+/// Lets callers that already know the [RecordSource] (delete/export flows) pick
+/// the right store via [recordStorageFor] and act on it without re-branching on
+/// the source at every call site.
+abstract interface class CharaDetailRecordMutator {
+  CharaDetailRecord? getBy({required String id});
+
+  void delete(String id);
+
+  void deleteAll(Iterable<String> ids);
+}
+
+class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
   late DirectoryPath rootDirectory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
 
@@ -412,8 +429,13 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
 
   void delete(String id) {
     final record = getBy(id: id);
-    assert(record != null);
-    recordPathOf(record!).deleteSyncSafeWithCheck();
+    // Guard rather than assert: the record can vanish between a dialog opening
+    // and its confirm (a background capture reload, or an archive of the same
+    // id), and asserts are stripped in release builds, so `record!` would throw.
+    if (record == null) {
+      return;
+    }
+    recordPathOf(record).deleteSyncSafeWithCheck();
     removeRecords([id]);
   }
 
@@ -515,7 +537,7 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
 /// capture listener, runs no version check, and builds no card/inheritance maps.
 /// That keeps capture, dedup, and re-recognition bound exclusively to the active
 /// set, so archived records are structurally excluded from re-recognition.
-class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> {
+class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
   late DirectoryPath rootDirectory;
 
   @override
@@ -537,6 +559,20 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> {
 
   CharaDetailRecord? getBy({required String id}) {
     return state.asData?.value.firstWhereOrNull((e) => e.id == id);
+  }
+
+  /// Appends just-archived [records] to the in-memory list, mirroring the active
+  /// store's [CharaDetailRecordStorage.removeRecords].
+  ///
+  /// Used by the archive flow instead of invalidating (and re-scanning every
+  /// archived directory from disk). No-op when the archive view has never been
+  /// loaded — the next build reads the moved directories straight from disk.
+  void insert(List<CharaDetailRecord> records) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    state = AsyncData([...current, ...records]);
   }
 
   /// Permanently deletes an archived record's directory and republishes.
@@ -584,11 +620,60 @@ final displayedRecordsProvider = Provider<List<CharaDetailRecord>>((ref) {
   }
 });
 
+/// The `read`-based counterpart of [displayedRecordsProvider] for a fixed
+/// [source].
+///
+/// Used by the export flow, which snapshots the source at confirm time so a
+/// later source switch cannot redirect an in-flight write to the other set.
+List<CharaDetailRecord> recordsForSource(RefBase ref, RecordSource source) {
+  switch (source) {
+    case RecordSource.active:
+      return ref.read(charaDetailRecordStorageProvider);
+    case RecordSource.archive:
+      return ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const [];
+  }
+}
+
+/// The [CharaDetailRecordMutator] backing [source].
+///
+/// Centralizes the active-vs-archive notifier choice so delete/export call sites
+/// dispatch once instead of repeating the `source == active ? ... : ...` branch.
+CharaDetailRecordMutator recordStorageFor(WidgetRef ref, RecordSource source) {
+  switch (source) {
+    case RecordSource.active:
+      return ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    case RecordSource.archive:
+      return ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
+  }
+}
+
+/// Leaves bulk-selection mode: drops the purpose and clears the checked ids.
+///
+/// The two providers are semantically coupled (a non-null purpose without a
+/// checked set, or vice versa, is meaningless), so every exit path resets both
+/// through here rather than repeating the pair.
+void exitSelection(WidgetRef ref) {
+  ref.read(selectionModeProvider.notifier).set(null);
+  ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+}
+
+/// Switches the displayed [source] and clears any in-progress selection.
+///
+/// The two are coupled: checked ids belong to the source they were checked in,
+/// so leaving them set would leak a stale selection across the switch (and a
+/// confirm could target ids absent from the new source). Routing every source
+/// switch through here keeps that invariant in one place.
+void setRecordSource(WidgetRef ref, RecordSource source) {
+  ref.read(recordSourceProvider.notifier).set(source);
+  exitSelection(ref);
+}
+
 /// Drives the bulk-archive operation and exposes its [Progress] for the UI.
 ///
-/// Mirrors [CharaDetailRecordRegenerationController]: a batch sets a non-empty
-/// [Progress], increments per record, then resets to [Progress.none]. The table
-/// shows the same circular indicator while a batch runs.
+/// Like [CharaDetailRecordRegenerationController] it sets a non-empty [Progress]
+/// while running and resets to [Progress.none] when done, so the table shows the
+/// same circular indicator. The whole batch runs in one isolate (no per-record
+/// callback), so the indicator stays a busy marker rather than advancing a count.
 class CharaArchiveController extends Notifier<Progress> {
   @override
   Progress build() => Progress.none;
@@ -600,24 +685,35 @@ class CharaArchiveController extends Notifier<Progress> {
     final pathInfo = await ref.read(pathInfoLoader.future);
     final activeRoot = pathInfo.charaDetailActiveDir;
     final archiveRoot = pathInfo.charaDetailArchiveDir;
-    state = Progress(total: ids.length);
+    // Whole-batch busy state: one isolate handles every record, so there is no
+    // per-record callback to advance a percentage. Mark it indeterminate so the
+    // indicator spins rather than sitting frozen at 0%.
+    state = Progress(total: ids.length, indeterminate: true);
+    // Snapshot the to-be-archived records before they leave the active store, so
+    // the archive store can be updated in memory (see below) without a re-scan.
+    final activeStore = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    final archivedRecordsById = {for (final id in ids) id: activeStore.getBy(id: id)};
+    // Move every selected record in a single isolate, rather than spawning one
+    // per record. The args stay aligned with [ids] so the result bools map back
+    // by index.
+    final items = [for (final id in ids) ArchiveRecordArgs((activeRoot / id).path, (archiveRoot / id).path, option)];
+    final results = await compute(archiveRecordsInIsolate, ArchiveBatchArgs(items));
     final archived = <String>[];
     var failed = 0;
-    for (final id in ids) {
-      final ok = await compute(
-        archiveRecordInIsolate,
-        ArchiveRecordArgs((activeRoot / id).path, (archiveRoot / id).path, option),
-      );
-      if (ok) {
-        archived.add(id);
+    for (var i = 0; i < ids.length; i++) {
+      if (results[i]) {
+        archived.add(ids[i]);
       } else {
         failed++;
       }
-      state = state.increment();
     }
     if (archived.isNotEmpty) {
       ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
-      ref.invalidate(charaDetailArchiveStorageLoaderProvider);
+      // Move the records into the archive store in memory, mirroring the active
+      // store's surgical removal, instead of invalidating and re-scanning every
+      // archived directory from disk. A no-op if the archive view never loaded.
+      final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
+      ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
     }
     state = Progress.none;
     if (archived.isNotEmpty) {
@@ -647,6 +743,23 @@ class ArchiveRecordArgs {
   const ArchiveRecordArgs(this.srcDirPath, this.dstDirPath, this.option);
 }
 
+/// Arguments for [archiveRecordsInIsolate]: a whole batch of per-record moves.
+class ArchiveBatchArgs {
+  final List<ArchiveRecordArgs> items;
+
+  const ArchiveBatchArgs(this.items);
+}
+
+/// Archives every record in [ArchiveBatchArgs.items] inside a single isolate,
+/// returning a per-item success flag aligned with the input order.
+///
+/// Batching avoids spawning one `compute` isolate per record (heavy on Windows).
+/// Each item is independent and best-effort via [archiveRecordInIsolate], so one
+/// record's failure neither aborts the batch nor shifts the result indices.
+List<bool> archiveRecordsInIsolate(ArchiveBatchArgs args) {
+  return [for (final item in args.items) archiveRecordInIsolate(item)];
+}
+
 /// Moves a single record's directory into the archive, then disposes of its
 /// recognition images, returning whether the record was archived.
 ///
@@ -666,6 +779,13 @@ bool archiveRecordInIsolate(ArchiveRecordArgs args) {
   try {
     final srcDir = DirectoryPath(args.srcDirPath);
     if (!srcDir.existsSync()) {
+      return false;
+    }
+    // A pre-existing destination (a leftover from an interrupted archive of the
+    // same id) makes the rename throw on Windows and report an opaque failure.
+    // Detect it explicitly so the cause is logged instead of being swallowed.
+    if (DirectoryPath(args.dstDirPath).existsSync()) {
+      logger.e("Cannot archive ${args.srcDirPath}: destination ${args.dstDirPath} already exists.");
       return false;
     }
     final dstDir = srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath));

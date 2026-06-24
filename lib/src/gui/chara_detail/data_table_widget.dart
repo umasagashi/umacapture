@@ -124,7 +124,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           onTap: () => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
           child: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
         ),
-        if (isSentryAvailable())
+        // Reports attach the recognition images for a bug repro; archived records
+        // only keep lossy/no images, so the report is diagnostically useless there.
+        // Active-only, like regenerate above.
+        if (source == RecordSource.active && isSentryAvailable())
           PopupMenuItem(
             height: height,
             onTap: () => ReportRecordDialog.show(ref.base, dirOf(record)),
@@ -231,7 +234,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // when the row list repaints — not when a single checkbox cell
                     // updates itself. Nudge the grid to repaint its rows (this
                     // reuses the existing rows, so checked state is preserved).
-                    WidgetsBinding.instance.addPostFrameCallback((_) => stateManager.notifyListeners());
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      // The page may be torn down before the next frame; skip the
+                      // notify rather than poke a disposed stateManager.
+                      if (!mounted) {
+                        return;
+                      }
+                      stateManager.notifyListeners();
+                    });
                   },
                   onSelected: (TrinaGridOnSelectedEvent event) {
                     try {
@@ -274,6 +284,37 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   }
 }
 
+/// The shared per-purpose presentation: row-overlay color/icon/label and the
+/// scrim confirm-button label. Centralized so the row overlay and the confirm
+/// button cannot drift out of sync.
+typedef _SelectionStyle = ({Color color, Color onColor, IconData icon, String rowLabelKey, String actionLabelKey});
+
+extension _SelectionPurposeStyle on SelectionPurpose {
+  _SelectionStyle style(ThemeData theme) => switch (this) {
+    SelectionPurpose.archive => (
+      color: Colors.amber,
+      onColor: Colors.black87,
+      icon: Symbols.archive_rounded,
+      rowLabelKey: "$tr_chara_detail.archive_records.row_overlay",
+      actionLabelKey: "$tr_chara_detail.archive_records.overlay.archive",
+    ),
+    SelectionPurpose.export => (
+      color: theme.colorScheme.primary,
+      onColor: theme.colorScheme.onPrimary,
+      icon: Symbols.download_rounded,
+      rowLabelKey: "$tr_chara_detail.export.row_overlay",
+      actionLabelKey: "$tr_chara_detail.export.overlay.export",
+    ),
+    SelectionPurpose.delete => (
+      color: theme.colorScheme.error,
+      onColor: theme.colorScheme.onError,
+      icon: Symbols.delete_rounded,
+      rowLabelKey: "$tr_chara_detail.delete_record.row_overlay",
+      actionLabelKey: "$tr_chara_detail.delete_record.overlay.delete",
+    ),
+  };
+}
+
 /// Translucent overlay drawn over a checked row to mark it for the pending bulk
 /// action.
 ///
@@ -290,26 +331,9 @@ class _SelectionRowOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final (Color color, IconData icon, String labelKey, Color onColor) = switch (purpose) {
-      SelectionPurpose.archive => (
-        Colors.amber,
-        Symbols.archive_rounded,
-        "$tr_chara_detail.archive_records.row_overlay",
-        Colors.black87,
-      ),
-      SelectionPurpose.export => (
-        theme.colorScheme.primary,
-        Symbols.download_rounded,
-        "$tr_chara_detail.export.row_overlay",
-        theme.colorScheme.onPrimary,
-      ),
-      SelectionPurpose.delete => (
-        theme.colorScheme.error,
-        Symbols.delete_rounded,
-        "$tr_chara_detail.delete_record.row_overlay",
-        theme.colorScheme.onError,
-      ),
-    };
+    final style = purpose.style(theme);
+    final color = style.color;
+    final onColor = style.onColor;
     return Stack(
       children: [
         child,
@@ -327,10 +351,10 @@ class _SelectionRowOverlay extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(icon, size: 16, color: onColor),
+                    Icon(style.icon, size: 16, color: onColor),
                     const SizedBox(width: 4),
                     Text(
-                      labelKey.tr(),
+                      style.rowLabelKey.tr(),
                       style: theme.textTheme.labelMedium?.copyWith(color: onColor, fontWeight: FontWeight.bold),
                     ),
                   ],
@@ -387,10 +411,7 @@ class _TopControlsLayer extends ConsumerWidget {
                       OutlinedButton.icon(
                         icon: const Icon(Symbols.cancel_rounded, size: 20),
                         label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
-                        onPressed: () {
-                          ref.read(selectionModeProvider.notifier).set(null);
-                          ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
-                        },
+                        onPressed: () => exitSelection(ref),
                       ),
                     ],
                   ),
@@ -414,14 +435,10 @@ class _SelectionConfirmButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final (IconData icon, String labelKey) = switch (purpose) {
-      SelectionPurpose.archive => (Symbols.archive_rounded, "$tr_chara_detail.archive_records.overlay.archive"),
-      SelectionPurpose.export => (Symbols.download_rounded, "$tr_chara_detail.export.overlay.export"),
-      SelectionPurpose.delete => (Symbols.delete_rounded, "$tr_chara_detail.delete_record.overlay.delete"),
-    };
+    final style = purpose.style(Theme.of(context));
     return FilledButton.icon(
-      icon: Icon(icon, size: 20),
-      label: Text(labelKey.tr()),
+      icon: Icon(style.icon, size: 20),
+      label: Text(style.actionLabelKey.tr()),
       onPressed: selectedCount == 0
           ? null
           : () {
@@ -444,23 +461,29 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
 
   Widget progressWidget(BuildContext context, Progress progress, String messageKey) {
     final theme = Theme.of(context);
+    final footer = Padding(padding: const EdgeInsets.only(top: 8), child: Text(messageKey.tr()));
     return Expanded(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          CircularPercentIndicator(
-            radius: 32.0,
-            lineWidth: 6.0,
-            animation: true,
-            animateFromLastPercent: true,
-            animationDuration: 200,
-            percent: progress.progress,
-            center: Text("${progress.percent}%"),
-            footer: Padding(padding: const EdgeInsets.only(top: 8), child: Text(messageKey.tr())),
-            backgroundColor: theme.colorScheme.secondaryContainer,
-            progressColor: theme.colorScheme.primary,
-          ),
+          // A batch with no per-record callback (archive) can't advance a count;
+          // show a spinning indicator instead of a determinate ring stuck at 0%.
+          if (progress.indeterminate)
+            Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(), footer])
+          else
+            CircularPercentIndicator(
+              radius: 32.0,
+              lineWidth: 6.0,
+              animation: true,
+              animateFromLastPercent: true,
+              animationDuration: 200,
+              percent: progress.progress,
+              center: Text("${progress.percent}%"),
+              footer: footer,
+              backgroundColor: theme.colorScheme.secondaryContainer,
+              progressColor: theme.colorScheme.primary,
+            ),
         ],
       ),
     );

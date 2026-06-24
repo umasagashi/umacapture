@@ -209,9 +209,9 @@ class _RecordSourceDropdown extends ConsumerWidget {
             if (next == null || next == source) {
               return;
             }
-            ref.read(recordSourceProvider.notifier).set(next);
-            ref.read(selectionModeProvider.notifier).set(null);
-            ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+            // Switch source and clear the selection together so checked ids do
+            // not leak across sources.
+            setRecordSource(ref, next);
           },
           items: [
             DropdownMenuItem(value: RecordSource.active, child: Text("$tr_archive_bar.source.active".tr())),

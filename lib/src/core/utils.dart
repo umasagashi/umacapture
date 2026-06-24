@@ -320,7 +320,11 @@ class Progress {
   final int total;
   final int count;
 
-  Progress({this.count = 0, required this.total});
+  /// Whether the work cannot report a percentage and should show a spinning
+  /// (indeterminate) indicator rather than a determinate ring frozen at [count].
+  final bool indeterminate;
+
+  Progress({this.count = 0, required this.total, this.indeterminate = false});
 
   static Progress get none => Progress(count: 0, total: 0);
 

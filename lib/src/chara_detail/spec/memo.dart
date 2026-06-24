@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -214,7 +215,10 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
     final theme = Theme.of(context);
     // Resolve from the displayed source so the dialog works for archived records.
     final source = ref.read(recordSourceProvider);
-    final record = ref.read(displayedRecordsProvider).firstWhere((e) => e.id == widget.recordId);
+    final record = ref.read(displayedRecordsProvider).firstWhereOrNull((e) => e.id == widget.recordId);
+    if (record == null) {
+      return dismissForMissingRecord(ref.base);
+    }
     final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
     return ConstrainedBox(

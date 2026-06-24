@@ -1418,6 +1418,7 @@
         },
         "record_export": "ファイルを保存しました。",
         "record_export_failure": "ファイルの保存に失敗しました。",
+        "record_unavailable": "対象のレコードが見つかりませんでした。",
         "module_version_check": {
             "no_version_available": "認識モジュールの取得に失敗しました。キャプチャ機能は利用できません。",
             "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",

@@ -100,4 +100,42 @@ void main() {
   test('returns false when the source directory is missing', () {
     expect(archiveRecordInIsolate(argsFor('does-not-exist', ArchiveImageOption.none)), isFalse);
   });
+
+  test('returns false and leaves the source intact when the destination already exists', () {
+    // A leftover archive/<id> (e.g. from an interrupted prior archive) must not
+    // be silently merged into or clobbered; the record stays in active/.
+    seedRecord('id-dup');
+    Directory('${archiveDir.path}/id-dup').createSync(recursive: true);
+
+    final ok = archiveRecordInIsolate(argsFor('id-dup', ArchiveImageOption.none));
+
+    expect(ok, isFalse);
+    // Source untouched: its PNGs are still present (not stripped) and not moved.
+    expect(File('${activeDir.path}/id-dup/skill.png').existsSync(), isTrue);
+    expect(File('${activeDir.path}/id-dup/record.json').existsSync(), isTrue);
+  });
+
+  test('batch archives every record in one call, results aligned with input order', () {
+    // Mix a present record, a missing one, and another present one so the result
+    // bools must line up by index (true, false, true), not just by count.
+    seedRecord('id-a');
+    seedRecord('id-c');
+    final items = [
+      argsFor('id-a', ArchiveImageOption.none),
+      argsFor('id-missing', ArchiveImageOption.none),
+      argsFor('id-c', ArchiveImageOption.resizedJpeg),
+    ];
+
+    final results = archiveRecordsInIsolate(ArchiveBatchArgs(items));
+
+    expect(results, [true, false, true]);
+    expect(Directory('${archiveDir.path}/id-a').existsSync(), isTrue);
+    expect(Directory('${archiveDir.path}/id-c').existsSync(), isTrue);
+    expect(Directory('${activeDir.path}/id-a').existsSync(), isFalse);
+    // Per-record option is honored within the batch.
+    expect(
+      resolveImagePath(DirectoryPath('${archiveDir.path}/id-c'), CharaDetailRecordImageMode.skillPlain)!.name,
+      'skill.jpg',
+    );
+  });
 }
