@@ -940,6 +940,8 @@
                 "copy_skill": "スキル画面をコピー",
                 "copy_factor": "因子画面をコピー",
                 "open_in_explorer": "フォルダを開く",
+                "pin_to_top": "上部に固定",
+                "unpin": "固定解除",
                 "regenerate_record": "再認識する",
                 "delete_record": "データを削除する",
                 "report_record": "誤認識を報告する"
