@@ -212,9 +212,10 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recordStorage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-    final record = recordStorage.getBy(id: widget.recordId)!;
-    final iconPath = recordStorage.traineeIconPathOf(record);
+    // Resolve from the displayed source so the dialog works for archived records.
+    final source = ref.read(recordSourceProvider);
+    final record = ref.read(displayedRecordsProvider).firstWhere((e) => e.id == widget.recordId);
+    final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 800, maxHeight: 400),

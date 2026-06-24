@@ -815,6 +815,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
     final context = gridKey.currentContext!;
     for (final col in columns) {
+      // The checkbox column carries no text, so the text-based precise autofit
+      // would shrink it below the checkbox's intrinsic width and clip it. Leave
+      // its fixed width untouched.
+      if (col.enableRowChecked) {
+        continue;
+      }
       final enabled = col.enableDropToResize;
       col.enableDropToResize = true; // If this flag is false, col will ignore any resizing operations.
       // autoFitColumnPrecise sizes the column to max(title, widest cell) in one

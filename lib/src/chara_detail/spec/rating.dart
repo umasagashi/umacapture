@@ -227,9 +227,11 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-    final record = storage.getBy(id: widget.recordId)!;
-    final iconPath = storage.traineeIconPathOf(record);
+    // Look up the record (and its icon) from whichever source is shown, so the
+    // dialog also works for archived records.
+    final source = ref.read(recordSourceProvider);
+    final record = ref.read(displayedRecordsProvider).firstWhere((e) => e.id == widget.recordId);
+    final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 400, maxHeight: 400),
       child: CardDialog(

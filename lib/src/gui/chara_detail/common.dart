@@ -184,6 +184,48 @@ class NoteCard extends ConsumerWidget {
   }
 }
 
+/// A deliberately loud caution box for irreversible / lossy confirmations.
+///
+/// Unlike the subtle outlined [NoteCard], this is a solid error-container fill
+/// with an error border, a warning icon and bold text — the same alarming
+/// treatment as the quarantine banner — so the consequence is impossible to
+/// miss. The Row hugs its content so the parent (a centered Column) centers the
+/// whole box, and the icon is vertically centered against the (possibly
+/// multi-line) text. Shared by the delete and archive confirmation dialogs.
+class WarningCard extends StatelessWidget {
+  final String message;
+
+  const WarningCard({super.key, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        border: Border.all(color: scheme.error),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Icon(Symbols.warning_rounded, color: scheme.onErrorContainer),
+          const SizedBox(width: 12),
+          Flexible(
+            child: Text(
+              message,
+              style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onErrorContainer, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class TagSelector extends ConsumerWidget {
   final ProviderListenable<List<Tag>> candidateTagsProvider;
   final NotifierProvider<TagSelectionNotifier, Set<String>> selectedTagsProvider;

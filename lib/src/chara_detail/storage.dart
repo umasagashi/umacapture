@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/mapper_init.dart';
@@ -104,6 +105,92 @@ extension CharaDetailRecordImageModeExtension on CharaDetailRecordImageMode {
         return "campaign.png";
     }
   }
+}
+
+/// Which record set the table currently shows.
+enum RecordSource { active, archive }
+
+/// Session-scoped toggle between the active and archive record sources.
+///
+/// Kept session-only (not persisted): the active set is the working view, so a
+/// fresh launch starts there.
+final recordSourceProvider = settableNotifierProvider<RecordSource>(RecordSource.active);
+
+/// What a bulk row selection is being gathered for.
+///
+/// The same checkbox/selection machinery (checkbox column, scrim overlay that
+/// freezes the columns and presets, per-row overlay) drives both flows; the
+/// purpose only changes which action the scrim surfaces and how the rows are
+/// labeled.
+enum SelectionPurpose {
+  /// Selecting rows to bulk-archive. Active source only.
+  archive,
+
+  /// Selecting rows to export. Available for both sources.
+  export,
+
+  /// Selecting rows to permanently delete. Available for both sources.
+  delete,
+}
+
+/// The purpose of the bulk row-selection UI currently engaged, or `null` when no
+/// selection is in progress.
+///
+/// Reset to `null` when switching sources so checked rows from the previous
+/// source do not leak across.
+final selectionModeProvider = settableNotifierProvider<SelectionPurpose?>(null);
+
+/// Ids of the rows checked for the current bulk selection, kept in sync from the
+/// grid's `onRowChecked` callback. Cleared when leaving selection mode or
+/// switching sources.
+final selectedRecordIdsProvider = settableNotifierProvider<Set<String>>(<String>{});
+
+/// What to do with a record's recognition images when archiving it.
+enum ArchiveImageOption {
+  /// Drop the images entirely (smallest result).
+  none,
+
+  /// Replace the lossless PNGs with width-clamped JPEGs.
+  resizedJpeg,
+}
+
+/// Resolves the directory holding [record]'s files for the given [source].
+DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) {
+  final root = source == RecordSource.active ? pathInfo.charaDetailActiveDir : pathInfo.charaDetailArchiveDir;
+  return root / record.id;
+}
+
+/// Path to the (always-retained) trainee icon inside [recordDir].
+FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath("trainee.jpg");
+
+/// Resolves an existing image file for [mode] in [recordDir], or `null`.
+///
+/// Active records store lossless `.png`; archived records may instead hold a
+/// downscaled `.jpg`, or no image at all. Prefers the `.jpg` so an archived
+/// record's smaller image is used when present.
+FilePath? resolveImagePath(DirectoryPath recordDir, CharaDetailRecordImageMode mode) {
+  assert(mode != CharaDetailRecordImageMode.none);
+  final jpg = recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg"));
+  if (jpg.existsSync()) {
+    return jpg;
+  }
+  final png = recordDir.filePath(mode.fileName);
+  if (png.existsSync()) {
+    return png;
+  }
+  return null;
+}
+
+/// Copies a record's image (resolved by [resolveImagePath]) to the clipboard,
+/// reporting via a toast when an archived record has no such image.
+void copyRecordImageToClipboard(RefBase ref, DirectoryPath recordDir, CharaDetailRecordImageMode mode) {
+  final imagePath = resolveImagePath(recordDir, mode);
+  if (imagePath == null) {
+    Toaster.show(ToastData.warning(description: "pages.chara_detail.archive_records.no_image".tr()));
+    return;
+  }
+  // Fire-and-forget: pasteImage reports its own outcome via a toast.
+  unawaited(ClipboardAlt.pasteImage(ref, imagePath));
 }
 
 class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
@@ -355,11 +442,32 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
   void delete(String id) {
     final record = getBy(id: id);
     assert(record != null);
-    final directory = recordPathOf(record!);
-    directory.deleteSyncSafeWithCheck();
-    // Stage the filtered list in the buffer and let forceRebuild() publish it
-    // once (rebuilding the card map), instead of emitting state twice.
-    _pendingRecords = _records.where((e) => e != record).toList();
+    recordPathOf(record!).deleteSyncSafeWithCheck();
+    removeRecords([id]);
+  }
+
+  /// Permanently deletes every record in [ids], erasing each directory then
+  /// republishing once via [removeRecords] (instead of per id).
+  void deleteAll(Iterable<String> ids) {
+    for (final id in ids) {
+      final record = getBy(id: id);
+      if (record == null) {
+        continue;
+      }
+      recordPathOf(record).deleteSyncSafeWithCheck();
+    }
+    removeRecords(ids);
+  }
+
+  /// Drops [ids] from the in-memory record set and republishes once.
+  ///
+  /// Used by [delete] (after erasing a directory) and by the archive flow (after
+  /// moving directories out of `active/`). Like [delete] it stages the filtered
+  /// list in the buffer and lets [forceRebuild] publish it a single time
+  /// (rebuilding the card map), instead of emitting state per id.
+  void removeRecords(Iterable<String> ids) {
+    final idSet = ids.toSet();
+    _pendingRecords = _records.where((e) => !idSet.contains(e.id)).toList();
     forceRebuild();
   }
 
@@ -397,6 +505,191 @@ final charaDetailRecordStorageLoaderProvider = AsyncNotifierProvider<CharaDetail
 final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref) {
   return ref.watch(charaDetailRecordStorageLoaderProvider).requireValue;
 });
+
+/// Read-only view over the archived records under `chara_detail/archive/`.
+///
+/// Deliberately minimal: unlike [CharaDetailRecordStorage] it registers no
+/// capture listener, runs no version check, and builds no card/inheritance maps.
+/// That keeps capture, dedup, and re-recognition bound exclusively to the active
+/// set, so archived records are structurally excluded from re-recognition.
+class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> {
+  late DirectoryPath rootDirectory;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async {
+    final pathInfo = await ref.watch(pathInfoLoader.future);
+    rootDirectory = pathInfo.charaDetailArchiveDir;
+    if (!rootDirectory.existsSync()) {
+      return [];
+    }
+    final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
+    return results.whereType<RecordLoaded>().map((e) => e.record).toList();
+  }
+
+  DirectoryPath recordPathOf(CharaDetailRecord record) => rootDirectory / record.id;
+
+  CharaDetailRecord? getBy({required String id}) {
+    return state.asData?.value.firstWhereOrNull((e) => e.id == id);
+  }
+
+  /// Permanently deletes an archived record's directory and republishes.
+  void delete(String id) {
+    final records = state.asData?.value;
+    if (records == null) {
+      return;
+    }
+    final record = records.firstWhereOrNull((e) => e.id == id);
+    if (record == null) {
+      return;
+    }
+    recordPathOf(record).deleteSyncSafeWithCheck();
+    state = AsyncData(records.where((e) => e.id != id).toList());
+  }
+
+  /// Permanently deletes every archived record in [ids], erasing each directory
+  /// then republishing the filtered set once.
+  void deleteAll(Iterable<String> ids) {
+    final records = state.asData?.value;
+    if (records == null) {
+      return;
+    }
+    final idSet = ids.toSet();
+    for (final record in records.where((e) => idSet.contains(e.id))) {
+      recordPathOf(record).deleteSyncSafeWithCheck();
+    }
+    state = AsyncData(records.where((e) => !idSet.contains(e.id)).toList());
+  }
+}
+
+final charaDetailArchiveStorageLoaderProvider =
+    AsyncNotifierProvider<CharaDetailArchiveStorage, List<CharaDetailRecord>>(CharaDetailArchiveStorage.new);
+
+/// The record list the table should display, following [recordSourceProvider].
+///
+/// The two sources are never shown together; this picks one. The grid watches
+/// this instead of [charaDetailRecordStorageProvider] directly.
+final displayedRecordsProvider = Provider<List<CharaDetailRecord>>((ref) {
+  switch (ref.watch(recordSourceProvider)) {
+    case RecordSource.active:
+      return ref.watch(charaDetailRecordStorageProvider);
+    case RecordSource.archive:
+      return ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const [];
+  }
+});
+
+/// Drives the bulk-archive operation and exposes its [Progress] for the UI.
+///
+/// Mirrors [CharaDetailRecordRegenerationController]: a batch sets a non-empty
+/// [Progress], increments per record, then resets to [Progress.none]. The table
+/// shows the same circular indicator while a batch runs.
+class CharaArchiveController extends Notifier<Progress> {
+  @override
+  Progress build() => Progress.none;
+
+  Future<void> archive(List<String> ids, ArchiveImageOption option) async {
+    if (ids.isEmpty) {
+      return;
+    }
+    final pathInfo = await ref.read(pathInfoLoader.future);
+    final activeRoot = pathInfo.charaDetailActiveDir;
+    final archiveRoot = pathInfo.charaDetailArchiveDir;
+    state = Progress(total: ids.length);
+    final archived = <String>[];
+    var failed = 0;
+    for (final id in ids) {
+      final ok = await compute(
+        archiveRecordInIsolate,
+        ArchiveRecordArgs((activeRoot / id).path, (archiveRoot / id).path, option),
+      );
+      if (ok) {
+        archived.add(id);
+      } else {
+        failed++;
+      }
+      state = state.increment();
+    }
+    if (archived.isNotEmpty) {
+      ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
+      ref.invalidate(charaDetailArchiveStorageLoaderProvider);
+    }
+    state = Progress.none;
+    if (archived.isNotEmpty) {
+      Toaster.show(
+        ToastData.success(
+          description: "pages.chara_detail.archive_records.success".tr(namedArgs: {"count": "${archived.length}"}),
+        ),
+      );
+    }
+    if (failed > 0) {
+      Toaster.show(
+        ToastData.error(description: "pages.chara_detail.archive_records.error".tr(namedArgs: {"count": "$failed"})),
+      );
+    }
+  }
+}
+
+final charaArchiveControllerProvider = NotifierProvider<CharaArchiveController, Progress>(CharaArchiveController.new);
+
+/// Arguments for [archiveRecordInIsolate], crossing the `compute` boundary as
+/// plain strings plus the chosen [ArchiveImageOption].
+class ArchiveRecordArgs {
+  final String srcDirPath;
+  final String dstDirPath;
+  final ArchiveImageOption option;
+
+  const ArchiveRecordArgs(this.srcDirPath, this.dstDirPath, this.option);
+}
+
+/// Disposes of a single record's images and moves its directory into the
+/// archive, returning whether the move succeeded.
+///
+/// Runs inside a `compute` isolate (image decoding/encoding and a directory
+/// rename are all off the UI thread), but is also a plain top-level function so
+/// it can be unit-tested directly. The record's `record.json`, `trainee.jpg`,
+/// and image geometry `*.json` are left untouched; only the recognition PNGs are
+/// dropped or replaced.
+bool archiveRecordInIsolate(ArchiveRecordArgs args) {
+  try {
+    final srcDir = DirectoryPath(args.srcDirPath);
+    if (!srcDir.existsSync()) {
+      return false;
+    }
+    const imageModes = [
+      CharaDetailRecordImageMode.skillPlain,
+      CharaDetailRecordImageMode.factorPlain,
+      CharaDetailRecordImageMode.campaignPlain,
+    ];
+    if (args.option == ArchiveImageOption.resizedJpeg) {
+      final srcs = <String>[];
+      final dsts = <String>[];
+      for (final mode in imageModes) {
+        final png = srcDir.filePath(mode.fileName);
+        if (png.existsSync()) {
+          srcs.add(png.path);
+          dsts.add(srcDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).path);
+        }
+      }
+      if (srcs.isNotEmpty) {
+        convertPngBatch(ImageConvertArgs(srcs, dsts));
+      }
+      // Only drop a PNG once its JPEG exists, so a failed conversion keeps the
+      // original rather than losing the image entirely.
+      for (final mode in imageModes) {
+        if (srcDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).existsSync()) {
+          srcDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+        }
+      }
+    } else {
+      for (final mode in imageModes) {
+        srcDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+      }
+    }
+    return srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath)) != null;
+  } catch (error, stackTrace) {
+    logger.e("Failed to archive record ${args.srcDirPath}.", error, stackTrace);
+    return false;
+  }
+}
 
 /// Number of records currently sitting in the quarantine folder.
 ///

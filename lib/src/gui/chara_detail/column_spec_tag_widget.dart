@@ -623,7 +623,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    _recordCount = ref.watch(charaDetailRecordStorageProvider).length;
+    // Compare against the displayed source's count (active or archive); using the
+    // active count made unfiltered columns show a badge in the archive view.
+    _recordCount = ref.watch(displayedRecordsProvider).length;
     final specs = ref.watch(currentColumnSpecsProvider);
     _counts = ref.watch(currentGridProvider).filteredCounts;
     _brokenIds = ref.watch(currentColumnSpecBrokenIdsProvider);

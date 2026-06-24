@@ -92,6 +92,12 @@ class PathInfo {
 
   DirectoryPath get charaDetailActiveDir => charaDetailDir / "active";
 
+  /// Sibling of [charaDetailActiveDir] holding archived records.
+  ///
+  /// Archived records are moved here, out of the scanned `active/` tree, so they
+  /// are excluded from capture/dedup/re-recognition while remaining browsable.
+  DirectoryPath get charaDetailArchiveDir => charaDetailDir / "archive";
+
   DirectoryPath get charaDetailQuarantineDir => charaDetailDir / "quarantine";
 
   DirectoryPath get charaDetailMetadataDir => charaDetailDir / "metadata";

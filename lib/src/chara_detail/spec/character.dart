@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart' hide tr_common;
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/core/callback.dart';
 import '/src/core/providers.dart';
@@ -122,7 +123,12 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
 
   @override
   TrinaColumn plutoColumn(RefBase ref) {
-    final recordRootDir = ref.watch(pathInfoProvider).charaDetailActiveDir;
+    // Resolve trainee icons from the currently displayed source: archived records
+    // live under archive/, not active/.
+    final pathInfo = ref.watch(pathInfoProvider);
+    final recordRootDir = ref.watch(recordSourceProvider) == RecordSource.active
+        ? pathInfo.charaDetailActiveDir
+        : pathInfo.charaDetailArchiveDir;
     return TrinaColumn(
       title: title,
       field: id,

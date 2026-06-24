@@ -5,12 +5,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/preset.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
 const tr_preset = "pages.chara_detail.preset";
+
+// ignore: constant_identifier_names
+const tr_archive_bar = "pages.chara_detail.archive_records";
+
+// ignore: constant_identifier_names
+const tr_delete_bar = "pages.chara_detail.delete_record";
+
+// ignore: constant_identifier_names
+const tr_toolbar = "pages.chara_detail.toolbar";
 
 /// Applies a name entered in a [_PresetNameDialog]. Receives the dialog's own
 /// [WidgetRef] so the mutation runs against a live ref regardless of the bar
@@ -31,6 +41,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
     final index = ref.watch(columnPresetIndexProvider);
     final selected = index.selected;
     final canDelete = index.presets.length > 1;
+    final source = ref.watch(recordSourceProvider);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
@@ -41,6 +52,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           child: Row(
             children: [
+              _GroupLabel("$tr_toolbar.preset_group".tr()),
               Tooltip(
                 message: "$tr_preset.selector_tooltip".tr(),
                 child: DropdownButtonHideUnderline(
@@ -106,10 +118,105 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                 tooltip: canDelete ? "$tr_preset.delete.tooltip".tr() : "$tr_preset.delete.disabled_tooltip".tr(),
                 onPressed: (!canDelete || selected == null) ? null : () => _PresetDeleteDialog.show(ref.base, selected),
               ),
-              const Spacer(),
+              // A single divider splits the bar into two labeled groups: preset
+              // controls (left) and record management (source switch, archive,
+              // export).
+              const _ToolbarDivider(),
+              _GroupLabel("$tr_toolbar.record_group".tr()),
+              _RecordSourceDropdown(source: source),
+              // Enter bulk-archive selection. While selecting, this whole bar is
+              // covered by a scrim overlay (see _TopControlsLayer), so the archive
+              // and cancel actions live there instead of here.
+              if (source == RecordSource.active)
+                _PresetActionButton(
+                  icon: Symbols.archive_rounded,
+                  tooltip: "$tr_archive_bar.selection_mode.enable_tooltip".tr(),
+                  onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.archive),
+                ),
+              // Delete works on either source, so it sits outside the active-only
+              // archive guard.
+              _PresetActionButton(
+                icon: Symbols.delete_rounded,
+                tooltip: "$tr_delete_bar.selection_mode.enable_tooltip".tr(),
+                onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.delete),
+              ),
+              // CharaDetailExportButton carries the same horizontal:3 margin as
+              // _PresetActionButton, so no extra spacer is needed here.
               const CharaDetailExportButton(),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Small caption marking the start of a toolbar group.
+class _GroupLabel extends StatelessWidget {
+  final String text;
+
+  const _GroupLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, right: 8),
+      child: Text(text, style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+    );
+  }
+}
+
+/// Thin vertical rule separating toolbar categories.
+class _ToolbarDivider extends StatelessWidget {
+  const _ToolbarDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: SizedBox(
+        height: 24,
+        // outline (not outlineVariant) reads clearly against the bar's
+        // surfaceContainerHighest background.
+        child: VerticalDivider(width: 1.5, thickness: 1.5, color: Theme.of(context).colorScheme.outline),
+      ),
+    );
+  }
+}
+
+/// Active/archive source picker, styled like the preset dropdown.
+///
+/// Switching clears any in-progress bulk selection so checked rows from the
+/// previous source do not leak across.
+class _RecordSourceDropdown extends ConsumerWidget {
+  final RecordSource source;
+
+  const _RecordSourceDropdown({required this.source});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return Tooltip(
+      message: "$tr_archive_bar.source.tooltip".tr(),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<RecordSource>(
+          value: source,
+          isDense: true,
+          borderRadius: BorderRadius.circular(8),
+          style: theme.textTheme.labelLarge,
+          onChanged: (next) {
+            if (next == null || next == source) {
+              return;
+            }
+            ref.read(recordSourceProvider.notifier).set(next);
+            ref.read(selectionModeProvider.notifier).set(null);
+            ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+          },
+          items: [
+            DropdownMenuItem(value: RecordSource.active, child: Text("$tr_archive_bar.source.active".tr())),
+            DropdownMenuItem(value: RecordSource.archive, child: Text("$tr_archive_bar.source.archive".tr())),
+          ],
         ),
       ),
     );

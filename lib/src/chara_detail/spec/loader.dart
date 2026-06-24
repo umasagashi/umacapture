@@ -4,6 +4,7 @@ import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:trina_grid/trina_grid.dart';
 
@@ -443,7 +444,76 @@ class Grid {
   static Grid get empty => Grid([], [], {});
 }
 
-Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec> specList) {
+/// Field id of the synthetic checkbox column injected in selection mode.
+const checkColumnField = "__selection_check__";
+
+TrinaColumn _buildCheckColumn() {
+  return TrinaColumn(
+    title: "",
+    field: checkColumnField,
+    type: TrinaColumnType.text(),
+    // Wide enough for the checkbox's material tap target plus cell padding;
+    // autoFitColumns skips this column so the width stays fixed.
+    width: 60,
+    minWidth: 60,
+    enableRowChecked: true,
+    readOnly: true,
+    enableSorting: false,
+    enableContextMenu: false,
+    enableDropToResize: false,
+    enableColumnDrag: false,
+    enableFilterMenuItem: false,
+    enableHideColumnMenuItem: false,
+    // The built-in header checkbox sits in a Flexible that shares space with the
+    // (empty) title text, so on a narrow column it gets squeezed and no longer
+    // lines up with the per-row checkboxes. Render the select-all checkbox
+    // ourselves, left-aligned with the same padding/scale as the cells.
+    titleRenderer: _selectAllCheckboxRenderer,
+  );
+}
+
+/// Header renderer drawing a tristate select-all checkbox left-aligned to match
+/// the per-row checkbox column.
+Widget _selectAllCheckboxRenderer(TrinaColumnTitleRendererContext rendererContext) {
+  final stateManager = rendererContext.stateManager;
+  return ListenableBuilder(
+    listenable: stateManager,
+    builder: (context, _) {
+      final total = stateManager.refRows.length;
+      final checked = stateManager.checkedRows.length;
+      final bool? value = (total == 0 || checked == 0) ? false : (checked >= total ? true : null);
+      return Align(
+        alignment: Alignment.centerLeft,
+        // Match the cells' left padding (TrinaGridSettings.cellPadding == 10) so
+        // the header checkbox lines up exactly with the per-row checkboxes.
+        child: Padding(
+          padding: const EdgeInsets.only(left: 10),
+          child: Transform.scale(
+            scale: 0.86,
+            child: Checkbox(
+              value: value,
+              tristate: true,
+              onChanged: (newValue) {
+                final next = newValue ?? false;
+                stateManager.toggleAllRowChecked(next);
+                // Route through the grid's onRowChecked so the toolbar's selected
+                // set and the row overlays update the same way a cell tap does.
+                stateManager.onRowChecked?.call(TrinaGridOnRowCheckedAllEvent(isChecked: next));
+              },
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+Grid _buildGrid(
+  RefBase ref,
+  List<CharaDetailRecord> recordList,
+  List<ColumnSpec> specList, {
+  bool selectionMode = false,
+}) {
   // Every node in the tree contributes a data column (leaves show their value,
   // container columns show a pass/fail cell), so flatten the forest for display.
   final displaySpecs = flattenForest(specList);
@@ -489,6 +559,16 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
   // that builds the rendered grid works from [visibleSpecs] instead.
   final visibleSpecs = displaySpecs.where((spec) => !spec.hidden).toList();
   final columns = visibleSpecs.map((spec) => spec.plutoColumn(ref)).toList();
+  // A leading checkbox column drives bulk selection. Its cells are added to
+  // every row below; the column's field must match those cell keys.
+  if (selectionMode) {
+    columns.insert(0, _buildCheckColumn());
+    // Freeze sorting while selecting: re-sorting rebuilds rows and would drop the
+    // in-progress checkbox selection.
+    for (final column in columns) {
+      column.enableSorting = false;
+    }
+  }
 
   // A row is visible only if every TOP-LEVEL spec passes. Nested specs influence
   // visibility solely through their parent container column. Computed per record
@@ -512,7 +592,10 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
       .map((rowIndex) {
         final record = recordList[rowIndex];
         return TrinaRow(
-          cells: {for (final spec in visibleSpecs) spec.id: cellOf(spec, rowIndex)},
+          cells: {
+            if (selectionMode) checkColumnField: TrinaCell(value: ""),
+            for (final spec in visibleSpecs) spec.id: cellOf(spec, rowIndex),
+          },
           sortIdx: -record.metadata.capturedDate.toDateTime().millisecondsSinceEpoch,
         )..setUserData(record);
       })
@@ -523,11 +606,12 @@ Grid _buildGrid(RefBase ref, List<CharaDetailRecord> recordList, List<ColumnSpec
 }
 
 final currentGridProvider = Provider<Grid>((ref) {
-  final recordList = ref.watch(charaDetailRecordStorageProvider);
+  final recordList = ref.watch(displayedRecordsProvider);
   final specList = ref.watch(currentColumnSpecsProvider);
+  final selectionMode = ref.watch(selectionModeProvider) != null;
 
   try {
-    return _buildGrid(ref.base, recordList, specList);
+    return _buildGrid(ref.base, recordList, specList, selectionMode: selectionMode);
   } catch (exception, stackTrace) {
     logger.e("Failed to build grid.", exception, stackTrace);
     captureException(exception, stackTrace);
