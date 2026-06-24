@@ -192,29 +192,32 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 
   /// Pushes a freshly built [Grid] into the live grid instead of recreating it.
   ///
-  /// Columns are structurally replaced only when the field set/order changed
-  /// (e.g. preset/column edits, entering or leaving selection mode); otherwise
-  /// their widths and sort indicators are preserved. Rows are swapped wholesale,
-  /// then the saved sort is reapplied. The finer per-row diff that keeps scroll
-  /// and selection in place is a separate follow-up (stage B).
+  /// When the column set/order changed (preset/column edits, entering or leaving
+  /// selection mode), the columns are structurally replaced and the rows rebuilt
+  /// wholesale. Otherwise columns keep their width and sort indicator — only
+  /// their renderers are refreshed (for columns whose renderer captured provider
+  /// data, e.g. ratings) — and the rows are diffed by record id so an unchanged
+  /// row keeps its identity, preserving the scroll offset across a cell edit.
   void _reconcile(Grid next) {
     if (!_loaded) {
       _pending = next;
       return;
     }
+    // Remember the highlighted row's record so the selection survives the update.
+    // The row diff keeps an unchanged row's identity on its own, but a structural
+    // column change rebuilds every row and clears the current cell.
+    final selectedRecord = stateManager.currentRecord;
     final columnsChanged = _appliedGrid == null || !_sameColumns(_appliedGrid!.columns, next.columns);
-    // Clear rows before swapping columns so the column replace operates on an
-    // empty row set (no wasted per-row cell fill/remove, no transient mismatch).
-    stateManager.removeAllRows(notify: false);
     if (columnsChanged) {
+      // Clear rows first so the column replace operates on an empty row set (no
+      // wasted per-row cell fill/remove, no transient cell/column mismatch).
+      stateManager.removeAllRows(notify: false);
       stateManager.removeColumns(stateManager.columns.toList());
       stateManager.insertColumns(0, next.columns);
-    }
-    stateManager.appendRows(next.rows);
-    if (sortColumn != null) {
-      stateManager.sortColumnByField(sortColumn!, sortOrder);
-    }
-    if (columnsChanged) {
+      stateManager.appendRows(next.rows);
+      if (sortColumn != null) {
+        stateManager.sortColumnByField(sortColumn!, sortOrder);
+      }
       // autoFitColumns measures via gridKey.currentContext, which needs the new
       // columns laid out first, so defer it one frame.
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -222,7 +225,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           stateManager.autoFitColumns();
         }
       });
+    } else {
+      stateManager.refreshColumnRenderers(next.columns);
+      stateManager.reconcileRows(next.rows, sortColumn: sortColumn, sortOrder: sortOrder);
     }
+    // Re-highlight the same record (skips the checkbox cell so the highlight
+    // lands on a data cell). No-op when it is still current or now filtered out.
+    stateManager.restoreCurrentRecord(selectedRecord, ignoreField: checkColumnField);
     _appliedGrid = next;
     stateManager.notifyListeners();
   }
@@ -334,6 +343,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   },
                   configuration: TrinaGridConfiguration(
                     enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
+                    // Never auto-select the first row. In select mode TrinaGrid
+                    // otherwise highlights row 0 on (re)mount whenever no cell is
+                    // current, which would override the user's row selection and
+                    // make it appear to jump to the top.
+                    enableAutoSelectFirstRow: false,
                     scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
                     style: TrinaGridStyleConfig(
                       enableCellBorderVertical: false,
@@ -792,6 +806,12 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     final theme = Theme.of(context);
     final loader = ref.watch(charaDetailInitialDataLoader);
     return loader.when(
+      // A background reload of an upstream loader (path/module/record storage)
+      // must not tear down the whole table subtree: doing so remounts the grid,
+      // resetting its scroll offset and dropping the row selection. Keep showing
+      // the existing data across reloads; only the very first load shows the
+      // spinner (no previous value to keep).
+      skipLoadingOnReload: true,
       loading: () => loading(),
       error: (errorMessage, stackTrace) => error(errorMessage, stackTrace, theme),
       data: (_) => data(context, ref),

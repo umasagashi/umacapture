@@ -855,6 +855,130 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   Iterable<CharaDetailRecord> getSortedRecords() {
     return refRows.map((e) => e.getUserData<CharaDetailRecord>()).nonNulls;
   }
+
+  /// The record of the currently highlighted (current) row, or null when no row
+  /// is selected. Captured before a reconcile so the highlight can be restored
+  /// onto the same record afterwards via [restoreCurrentRecord].
+  CharaDetailRecord? get currentRecord => currentRow?.getUserData<CharaDetailRecord>();
+
+  /// Re-selects the row for [record] so the row highlight survives a rebuild that
+  /// dropped the current cell (e.g. a structural column change clears it). No-op
+  /// when the record is already current or no longer present (filtered out).
+  void restoreCurrentRecord(CharaDetailRecord? record, {String? ignoreField}) {
+    if (record == null || currentRecord?.id == record.id) {
+      return;
+    }
+    for (var rowIdx = 0; rowIdx < refRows.length; rowIdx++) {
+      final row = refRows[rowIdx];
+      if (row.getUserData<CharaDetailRecord>()?.id != record.id) {
+        continue;
+      }
+      TrinaCell? cell;
+      for (final entry in row.cells.entries) {
+        if (entry.key != ignoreField) {
+          cell = entry.value;
+          break;
+        }
+      }
+      if (cell != null) {
+        setCurrentCell(cell, rowIdx, notify: false);
+      }
+      return;
+    }
+  }
+
+  /// Copies the renderer from each freshly built column onto the matching live
+  /// column (by field), so columns whose renderer captured a provider snapshot
+  /// (e.g. ratings) repaint with current data without a structural replace that
+  /// would drop their width and sort indicator.
+  ///
+  /// Cell-driven columns (e.g. memo, which reads the cell's user data) are
+  /// refreshed by [reconcileRows] replacing their row instead; copying their
+  /// stateless renderer here is harmless.
+  void refreshColumnRenderers(List<TrinaColumn> nextColumns) {
+    final nextByField = {for (final column in nextColumns) column.field: column};
+    for (final live in columns) {
+      final next = nextByField[live.field];
+      if (next != null) {
+        live.renderer = next.renderer;
+      }
+    }
+  }
+
+  /// Whether two rows for the same record render identically: same pinned state
+  /// and same value in every cell. Drives [reconcileRows]'s decision to leave a
+  /// row untouched (preserving scroll and identity) or replace it.
+  bool _rowContentEquals(TrinaRow a, TrinaRow b) {
+    if (a.frozen != b.frozen || a.cells.length != b.cells.length) {
+      return false;
+    }
+    for (final entry in b.cells.entries) {
+      if (a.cells[entry.key]?.value != entry.value.value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Applies [nextRows] to the live grid by record id, touching only the rows
+  /// that actually changed.
+  ///
+  /// Rows whose record vanished or whose content/pinned state changed are
+  /// removed and the fresh row is reinserted at its position in [nextRows];
+  /// unchanged rows keep their identity so the scroll offset and current cell
+  /// survive a single cell edit. Assumes the column set is unchanged (the caller
+  /// handles structural column changes with a full rebuild).
+  void reconcileRows(List<TrinaRow> nextRows, {String? sortColumn, TrinaColumnSort sortOrder = TrinaColumnSort.none}) {
+    String? idOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
+
+    final live = refRows.originalList.toList();
+    final nextById = <String, TrinaRow>{};
+    for (final row in nextRows) {
+      final id = idOf(row);
+      if (id != null) {
+        nextById[id] = row;
+      }
+    }
+
+    // Rows to keep as-is. Everything else (gone, changed, or pinned-state
+    // changed) is removed below and reinserted fresh from nextRows.
+    final unchangedIds = <String>{};
+    final toRemove = <TrinaRow>[];
+    for (final row in live) {
+      final id = idOf(row);
+      final next = id == null ? null : nextById[id];
+      if (next != null && _rowContentEquals(row, next)) {
+        unchangedIds.add(id!);
+      } else {
+        toRemove.add(row);
+      }
+    }
+    if (toRemove.isNotEmpty) {
+      removeRows(toRemove, notify: false);
+    }
+
+    // Reinsert added/changed rows at their slot in the desired order. Processing
+    // ascending keeps each index valid: unchanged rows already sit at their
+    // final position once all earlier inserts have landed.
+    for (var position = 0; position < nextRows.length; position++) {
+      final row = nextRows[position];
+      final id = idOf(row);
+      if (id == null || !unchangedIds.contains(id)) {
+        insertRows(position, [row], notify: false);
+      }
+    }
+
+    if (sortColumn != null) {
+      sortColumnByField(sortColumn, sortOrder);
+    }
+    // removeRows/insertRows keep the current cell position in sync, but
+    // sortColumnByField reorders refRows without touching it — leaving the row
+    // highlight (driven by currentRowIdx) stranded on a stale index (often the
+    // top row). Recompute the position from the still-correct current cell so the
+    // highlight stays on the selected record.
+    updateCurrentCellPosition(notify: false);
+    notifyListeners();
+  }
 }
 
 extension TrinaCellExtension on TrinaCell {
