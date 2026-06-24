@@ -259,7 +259,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   Map<int, FilePath> get charaCardIconMap {
-    return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath("trainee.jpg")));
+    return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath(traineeIconFileName)));
   }
 
   void add(CharaDetailRecord record) {
