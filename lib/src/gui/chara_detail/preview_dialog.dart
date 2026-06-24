@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
@@ -238,9 +239,20 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
     super.dispose();
   }
 
-  Widget predictionTabOverlay(FilePath imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
+  Widget predictionTabOverlay(FilePath? imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(color: Colors.black, backgroundColor: Colors.white.withValues(alpha: 0.5), fontSize: 9);
+    // Archived records may carry no image for this tab; keep the layout slot but
+    // show a placeholder instead of a broken-image box.
+    if (imagePath == null) {
+      return Container(
+        width: sizeInfo.intersection.width.toDouble(),
+        height: sizeInfo.intersection.height.toDouble(),
+        color: Colors.black.withValues(alpha: 0.04),
+        alignment: Alignment.center,
+        child: Icon(Symbols.hide_image_rounded, color: Colors.black.withValues(alpha: 0.3)),
+      );
+    }
     return Stack(
       children: [
         Image.file(
@@ -300,19 +312,19 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             predictionTabOverlay(
-              widget.recordDir.filePath("skill.png"),
+              resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.skillPlain),
               widget.imageSize.skill,
               !widget.overlay
                   ? null
                   : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
             ),
             predictionTabOverlay(
-              widget.recordDir.filePath("factor.png"),
+              resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.factorPlain),
               widget.imageSize.factor,
               !widget.overlay ? null : widget.prediction?.factorTab,
             ),
             predictionTabOverlay(
-              widget.recordDir.filePath("campaign.png"),
+              resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.campaignPlain),
               widget.imageSize.campaign,
               !widget.overlay ? null : widget.prediction?.campaignTab,
             ),

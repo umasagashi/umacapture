@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -227,9 +228,14 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-    final record = storage.getBy(id: widget.recordId)!;
-    final iconPath = storage.traineeIconPathOf(record);
+    // Look up the record (and its icon) from whichever source is shown, so the
+    // dialog also works for archived records.
+    final source = ref.read(recordSourceProvider);
+    final record = ref.read(displayedRecordsProvider).firstWhereOrNull((e) => e.id == widget.recordId);
+    if (record == null) {
+      return dismissForMissingRecord(ref.base);
+    }
+    final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 400, maxHeight: 400),
       child: CardDialog(
@@ -240,7 +246,14 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.file(iconPath.toFile()),
+              Image.file(
+                iconPath.toFile(),
+                // Archived records keep their trainee icon, but guard against a
+                // missing/corrupt file so the dialog shows a placeholder instead
+                // of a red error box.
+                errorBuilder: (context, error, stackTrace) =>
+                    Icon(Symbols.hide_image_rounded, size: 64, color: theme.colorScheme.onSurfaceVariant),
+              ),
               Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
               RatingBar.builder(

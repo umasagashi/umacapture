@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
@@ -212,9 +213,13 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final recordStorage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-    final record = recordStorage.getBy(id: widget.recordId)!;
-    final iconPath = recordStorage.traineeIconPathOf(record);
+    // Resolve from the displayed source so the dialog works for archived records.
+    final source = ref.read(recordSourceProvider);
+    final record = ref.read(displayedRecordsProvider).firstWhereOrNull((e) => e.id == widget.recordId);
+    if (record == null) {
+      return dismissForMissingRecord(ref.base);
+    }
+    final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
     final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 800, maxHeight: 400),
@@ -226,7 +231,14 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.file(iconPath.toFile()),
+              Image.file(
+                iconPath.toFile(),
+                // Archived records keep their trainee icon, but guard against a
+                // missing/corrupt file so the dialog shows a placeholder instead
+                // of a red error box.
+                errorBuilder: (context, error, stackTrace) =>
+                    Icon(Symbols.hide_image_rounded, size: 64, color: theme.colorScheme.onSurfaceVariant),
+              ),
               Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
               Padding(

@@ -320,7 +320,11 @@ class Progress {
   final int total;
   final int count;
 
-  Progress({this.count = 0, required this.total});
+  /// Whether the work cannot report a percentage and should show a spinning
+  /// (indeterminate) indicator rather than a determinate ring frozen at [count].
+  final bool indeterminate;
+
+  Progress({this.count = 0, required this.total, this.indeterminate = false});
 
   static Progress get none => Progress(count: 0, total: 0);
 
@@ -356,11 +360,20 @@ extension RefExtension on Ref {
 class RefBase {
   final dynamic _ref;
 
-  RefBase._(dynamic ref) : _ref = ref;
+  /// When true, [watch] delegates to [read], so reading through this ref
+  /// registers no provider dependency. Used to build a grid snapshot that must
+  /// not rebuild while a bulk selection is in progress (see [readOnly]).
+  final bool _readOnly;
+
+  RefBase._(this._ref, [this._readOnly = false]);
 
   T read<T>(ProviderListenable<T> provider) => _ref.read(provider);
 
-  T watch<T>(ProviderListenable<T> provider) => _ref.watch(provider);
+  T watch<T>(ProviderListenable<T> provider) => _readOnly ? _ref.read(provider) : _ref.watch(provider);
+
+  /// A view of this ref whose [watch] behaves like [read], so code that watches
+  /// providers through it registers no dependencies and will not be rebuilt.
+  RefBase get readOnly => RefBase._(_ref, true);
 }
 
 // Base class for the tag-selector providers (skill/factor tag filters in the

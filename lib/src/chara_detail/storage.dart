@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/mapper_init.dart';
@@ -106,7 +107,110 @@ extension CharaDetailRecordImageModeExtension on CharaDetailRecordImageMode {
   }
 }
 
-class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
+/// Which record set the table currently shows.
+enum RecordSource { active, archive }
+
+/// Session-scoped toggle between the active and archive record sources.
+///
+/// Kept session-only (not persisted): the active set is the working view, so a
+/// fresh launch starts there.
+final recordSourceProvider = settableNotifierProvider<RecordSource>(RecordSource.active);
+
+/// What a bulk row selection is being gathered for.
+///
+/// The same checkbox/selection machinery (checkbox column, scrim overlay that
+/// freezes the columns and presets, per-row overlay) drives both flows; the
+/// purpose only changes which action the scrim surfaces and how the rows are
+/// labeled.
+enum SelectionPurpose {
+  /// Selecting rows to bulk-archive. Active source only.
+  archive,
+
+  /// Selecting rows to export. Available for both sources.
+  export,
+
+  /// Selecting rows to permanently delete. Available for both sources.
+  delete,
+}
+
+/// The purpose of the bulk row-selection UI currently engaged, or `null` when no
+/// selection is in progress.
+///
+/// Reset to `null` when switching sources so checked rows from the previous
+/// source do not leak across.
+final selectionModeProvider = settableNotifierProvider<SelectionPurpose?>(null);
+
+/// Ids of the rows checked for the current bulk selection, kept in sync from the
+/// grid's `onRowChecked` callback. Cleared when leaving selection mode or
+/// switching sources.
+final selectedRecordIdsProvider = settableNotifierProvider<Set<String>>(<String>{});
+
+/// What to do with a record's recognition images when archiving it.
+enum ArchiveImageOption {
+  /// Drop the images entirely (smallest result).
+  none,
+
+  /// Replace the lossless PNGs with width-clamped JPEGs.
+  resizedJpeg,
+}
+
+/// Resolves the directory holding [record]'s files for the given [source].
+DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) {
+  final root = source == RecordSource.active ? pathInfo.charaDetailActiveDir : pathInfo.charaDetailArchiveDir;
+  return root / record.id;
+}
+
+/// Path to the (always-retained) trainee icon inside [recordDir].
+FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath(traineeIconFileName);
+
+/// Resolves an existing image file for [mode] in [recordDir], or `null`.
+///
+/// Active records store lossless `.png`; archived records may instead hold a
+/// downscaled `.jpg`, or no image at all. Prefers the lossless `.png` when both
+/// exist — that only happens as a leftover when [_disposeArchivedImages] was
+/// interrupted between writing the `.jpg` and deleting the `.png`, and in that
+/// case the original is the better image. A normally-archived record (only the
+/// `.jpg` present) falls through to the `.jpg`.
+FilePath? resolveImagePath(DirectoryPath recordDir, CharaDetailRecordImageMode mode) {
+  assert(mode != CharaDetailRecordImageMode.none);
+  final png = recordDir.filePath(mode.fileName);
+  if (png.existsSync()) {
+    return png;
+  }
+  final jpg = recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg"));
+  if (jpg.existsSync()) {
+    return jpg;
+  }
+  return null;
+}
+
+/// Copies a record's image (resolved by [resolveImagePath]) to the clipboard,
+/// reporting via a toast when an archived record has no such image.
+void copyRecordImageToClipboard(RefBase ref, DirectoryPath recordDir, CharaDetailRecordImageMode mode) {
+  final imagePath = resolveImagePath(recordDir, mode);
+  if (imagePath == null) {
+    Toaster.show(ToastData.warning(description: "pages.chara_detail.archive_records.no_image".tr()));
+    return;
+  }
+  // Fire-and-forget: pasteImage reports its own outcome via a toast.
+  unawaited(ClipboardAlt.pasteImage(ref, imagePath));
+}
+
+/// The mutation surface shared by the active ([CharaDetailRecordStorage]) and
+/// archive ([CharaDetailArchiveStorage]) stores.
+///
+/// Lets callers that already know the [RecordSource] (delete/export flows) pick
+/// the right store via [recordStorageFor] and act on it without re-branching on
+/// the source at every call site.
+abstract interface class CharaDetailRecordMutator {
+  CharaDetailRecord? getBy({required String id});
+
+  void delete(String id);
+
+  void deleteAll(Iterable<String> ids);
+}
+
+class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
   late DirectoryPath rootDirectory;
   final Map<int, CharaDetailRecord> charaCardMap = {};
 
@@ -118,7 +222,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     if (rootDirectory.existsSync()) {
       final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
       records.addAll(results.whereType<RecordLoaded>().map((e) => e.record));
-      _surfaceQuarantines(results.whereType<RecordQuarantined>().toList());
+      _surfaceQuarantines(ref, results.whereType<RecordQuarantined>().toList());
     }
     // Safe to write other providers here: we are past the `await` above, so the
     // synchronous build frame (which the modify-during-build guard checks) is done.
@@ -155,7 +259,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
   }
 
   Map<int, FilePath> get charaCardIconMap {
-    return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath("trainee.jpg")));
+    return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath(traineeIconFileName)));
   }
 
   void add(CharaDetailRecord record) {
@@ -249,36 +353,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       case RecordLoaded(:final record):
         add(record);
       case RecordQuarantined():
-        _surfaceQuarantines([result]);
-    }
-  }
-
-  /// Shows a single aggregated toast for records quarantined during a load.
-  ///
-  /// Centralized here on the main isolate so every load path surfaces the
-  /// outcome: the bulk startup load and [reload] run [CharaDetailRecord.load]
-  /// inside a `compute` isolate, where `Toaster.show` would be a no-op.
-  void _surfaceQuarantines(List<RecordQuarantined> quarantined) {
-    if (quarantined.isEmpty) {
-      return;
-    }
-    final destinations = quarantined.map((e) => e.destination).whereType<DirectoryPath>().toList();
-    final failed = quarantined.length - destinations.length;
-    if (destinations.isNotEmpty) {
-      // All quarantined records share the same quarantine folder; tapping the
-      // toast opens it in the file explorer so the user can inspect/recover them.
-      final quarantineDir = destinations.first.parent;
-      Toaster.show(
-        ToastData.warning(
-          description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
-          onTap: () => quarantineDir.launch(),
-        ),
-      );
-      // Refresh the persistent banner on the chara_detail tab.
-      ref.invalidate(charaDetailQuarantineCountProvider);
-    }
-    if (failed > 0) {
-      Toaster.show(ToastData.error(description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"})));
+        _surfaceQuarantines(ref, [result]);
     }
   }
 
@@ -348,18 +423,44 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       case RecordLoaded(:final record):
         replaceBy(record, id: id);
       case RecordQuarantined():
-        _surfaceQuarantines([result]);
+        _surfaceQuarantines(ref, [result]);
     }
   }
 
   void delete(String id) {
     final record = getBy(id: id);
-    assert(record != null);
-    final directory = recordPathOf(record!);
-    directory.deleteSyncSafeWithCheck();
-    // Stage the filtered list in the buffer and let forceRebuild() publish it
-    // once (rebuilding the card map), instead of emitting state twice.
-    _pendingRecords = _records.where((e) => e != record).toList();
+    // Guard rather than assert: the record can vanish between a dialog opening
+    // and its confirm (a background capture reload, or an archive of the same
+    // id), and asserts are stripped in release builds, so `record!` would throw.
+    if (record == null) {
+      return;
+    }
+    recordPathOf(record).deleteSyncSafeWithCheck();
+    removeRecords([id]);
+  }
+
+  /// Permanently deletes every record in [ids], erasing each directory then
+  /// republishing once via [removeRecords] (instead of per id).
+  void deleteAll(Iterable<String> ids) {
+    for (final id in ids) {
+      final record = getBy(id: id);
+      if (record == null) {
+        continue;
+      }
+      recordPathOf(record).deleteSyncSafeWithCheck();
+    }
+    removeRecords(ids);
+  }
+
+  /// Drops [ids] from the in-memory record set and republishes once.
+  ///
+  /// Used by [delete] (after erasing a directory) and by the archive flow (after
+  /// moving directories out of `active/`). Like [delete] it stages the filtered
+  /// list in the buffer and lets [forceRebuild] publish it a single time
+  /// (rebuilding the card map), instead of emitting state per id.
+  void removeRecords(Iterable<String> ids) {
+    final idSet = ids.toSet();
+    _pendingRecords = _records.where((e) => !idSet.contains(e.id)).toList();
     forceRebuild();
   }
 
@@ -387,6 +488,38 @@ List<RecordLoadResult> _loadAllCharaDetailRecord(DirectoryPath directory) {
       .toList();
 }
 
+/// Shows a single aggregated toast for records quarantined during a load.
+///
+/// Runs on the main isolate so every load path surfaces the outcome: the bulk
+/// startup load and [CharaDetailRecordStorage.reload] run [CharaDetailRecord.load]
+/// inside a `compute` isolate, where `Toaster.show` would be a no-op. Shared by
+/// both the active and archive storages, which each call [CharaDetailRecord.load]
+/// (the latter via [_loadAllCharaDetailRecord]) and so can both trigger a
+/// quarantine move that must be reported.
+void _surfaceQuarantines(Ref ref, List<RecordQuarantined> quarantined) {
+  if (quarantined.isEmpty) {
+    return;
+  }
+  final destinations = quarantined.map((e) => e.destination).whereType<DirectoryPath>().toList();
+  final failed = quarantined.length - destinations.length;
+  if (destinations.isNotEmpty) {
+    // All quarantined records share the same quarantine folder; tapping the
+    // toast opens it in the file explorer so the user can inspect/recover them.
+    final quarantineDir = destinations.first.parent;
+    Toaster.show(
+      ToastData.warning(
+        description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
+        onTap: () => quarantineDir.launch(),
+      ),
+    );
+    // Refresh the persistent banner on the chara_detail tab.
+    ref.invalidate(charaDetailQuarantineCountProvider);
+  }
+  if (failed > 0) {
+    Toaster.show(ToastData.error(description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"})));
+  }
+}
+
 final charaDetailRecordStorageLoaderProvider = AsyncNotifierProvider<CharaDetailRecordStorage, List<CharaDetailRecord>>(
   CharaDetailRecordStorage.new,
 );
@@ -397,6 +530,318 @@ final charaDetailRecordStorageLoaderProvider = AsyncNotifierProvider<CharaDetail
 final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref) {
   return ref.watch(charaDetailRecordStorageLoaderProvider).requireValue;
 });
+
+/// Read-only view over the archived records under `chara_detail/archive/`.
+///
+/// Deliberately minimal: unlike [CharaDetailRecordStorage] it registers no
+/// capture listener, runs no version check, and builds no card/inheritance maps.
+/// That keeps capture, dedup, and re-recognition bound exclusively to the active
+/// set, so archived records are structurally excluded from re-recognition.
+class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
+  late DirectoryPath rootDirectory;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async {
+    final pathInfo = await ref.watch(pathInfoLoader.future);
+    rootDirectory = pathInfo.charaDetailArchiveDir;
+    if (!rootDirectory.existsSync()) {
+      return [];
+    }
+    final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
+    // Loading a corrupt archived record quarantines its directory as a side
+    // effect; surface that like the active storage does, rather than silently
+    // dropping it (and leaving the count inconsistent).
+    _surfaceQuarantines(ref, results.whereType<RecordQuarantined>().toList());
+    return results.whereType<RecordLoaded>().map((e) => e.record).toList();
+  }
+
+  DirectoryPath recordPathOf(CharaDetailRecord record) => rootDirectory / record.id;
+
+  CharaDetailRecord? getBy({required String id}) {
+    return state.asData?.value.firstWhereOrNull((e) => e.id == id);
+  }
+
+  /// Appends just-archived [records] to the in-memory list, mirroring the active
+  /// store's [CharaDetailRecordStorage.removeRecords].
+  ///
+  /// Used by the archive flow instead of invalidating (and re-scanning every
+  /// archived directory from disk). No-op when the archive view has never been
+  /// loaded — the next build reads the moved directories straight from disk.
+  void insert(List<CharaDetailRecord> records) {
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    state = AsyncData([...current, ...records]);
+  }
+
+  /// Permanently deletes an archived record's directory and republishes.
+  void delete(String id) {
+    final records = state.asData?.value;
+    if (records == null) {
+      return;
+    }
+    final record = records.firstWhereOrNull((e) => e.id == id);
+    if (record == null) {
+      return;
+    }
+    recordPathOf(record).deleteSyncSafeWithCheck();
+    state = AsyncData(records.where((e) => e.id != id).toList());
+  }
+
+  /// Permanently deletes every archived record in [ids], erasing each directory
+  /// then republishing the filtered set once.
+  void deleteAll(Iterable<String> ids) {
+    final records = state.asData?.value;
+    if (records == null) {
+      return;
+    }
+    final idSet = ids.toSet();
+    for (final record in records.where((e) => idSet.contains(e.id))) {
+      recordPathOf(record).deleteSyncSafeWithCheck();
+    }
+    state = AsyncData(records.where((e) => !idSet.contains(e.id)).toList());
+  }
+}
+
+final charaDetailArchiveStorageLoaderProvider =
+    AsyncNotifierProvider<CharaDetailArchiveStorage, List<CharaDetailRecord>>(CharaDetailArchiveStorage.new);
+
+/// The record list the table should display, following [recordSourceProvider].
+///
+/// The two sources are never shown together; this picks one. The grid watches
+/// this instead of [charaDetailRecordStorageProvider] directly.
+final displayedRecordsProvider = Provider<List<CharaDetailRecord>>((ref) {
+  switch (ref.watch(recordSourceProvider)) {
+    case RecordSource.active:
+      return ref.watch(charaDetailRecordStorageProvider);
+    case RecordSource.archive:
+      return ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const [];
+  }
+});
+
+/// The `read`-based counterpart of [displayedRecordsProvider] for a fixed
+/// [source].
+///
+/// Used by the export flow, which snapshots the source at confirm time so a
+/// later source switch cannot redirect an in-flight write to the other set.
+List<CharaDetailRecord> recordsForSource(RefBase ref, RecordSource source) {
+  switch (source) {
+    case RecordSource.active:
+      return ref.read(charaDetailRecordStorageProvider);
+    case RecordSource.archive:
+      return ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const [];
+  }
+}
+
+/// The [CharaDetailRecordMutator] backing [source].
+///
+/// Centralizes the active-vs-archive notifier choice so delete/export call sites
+/// dispatch once instead of repeating the `source == active ? ... : ...` branch.
+CharaDetailRecordMutator recordStorageFor(WidgetRef ref, RecordSource source) {
+  switch (source) {
+    case RecordSource.active:
+      return ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    case RecordSource.archive:
+      return ref.read(charaDetailArchiveStorageLoaderProvider.notifier);
+  }
+}
+
+/// Leaves bulk-selection mode: drops the purpose and clears the checked ids.
+///
+/// The two providers are semantically coupled (a non-null purpose without a
+/// checked set, or vice versa, is meaningless), so every exit path resets both
+/// through here rather than repeating the pair.
+void exitSelection(WidgetRef ref) {
+  ref.read(selectionModeProvider.notifier).set(null);
+  ref.read(selectedRecordIdsProvider.notifier).set(<String>{});
+}
+
+/// Switches the displayed [source] and clears any in-progress selection.
+///
+/// The two are coupled: checked ids belong to the source they were checked in,
+/// so leaving them set would leak a stale selection across the switch (and a
+/// confirm could target ids absent from the new source). Routing every source
+/// switch through here keeps that invariant in one place.
+void setRecordSource(WidgetRef ref, RecordSource source) {
+  ref.read(recordSourceProvider.notifier).set(source);
+  exitSelection(ref);
+}
+
+/// Drives the bulk-archive operation and exposes its [Progress] for the UI.
+///
+/// Like [CharaDetailRecordRegenerationController] it sets a non-empty [Progress]
+/// while running and resets to [Progress.none] when done, so the table shows the
+/// same circular indicator. The whole batch runs in one isolate (no per-record
+/// callback), so the indicator stays a busy marker rather than advancing a count.
+class CharaArchiveController extends Notifier<Progress> {
+  @override
+  Progress build() => Progress.none;
+
+  Future<void> archive(List<String> ids, ArchiveImageOption option) async {
+    if (ids.isEmpty) {
+      return;
+    }
+    final pathInfo = await ref.read(pathInfoLoader.future);
+    final activeRoot = pathInfo.charaDetailActiveDir;
+    final archiveRoot = pathInfo.charaDetailArchiveDir;
+    // Whole-batch busy state: one isolate handles every record, so there is no
+    // per-record callback to advance a percentage. Mark it indeterminate so the
+    // indicator spins rather than sitting frozen at 0%.
+    state = Progress(total: ids.length, indeterminate: true);
+    // Snapshot the to-be-archived records before they leave the active store, so
+    // the archive store can be updated in memory (see below) without a re-scan.
+    final activeStore = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    final archivedRecordsById = {for (final id in ids) id: activeStore.getBy(id: id)};
+    // Move every selected record in a single isolate, rather than spawning one
+    // per record. The args stay aligned with [ids] so the result bools map back
+    // by index.
+    final items = [for (final id in ids) ArchiveRecordArgs((activeRoot / id).path, (archiveRoot / id).path, option)];
+    final results = await compute(archiveRecordsInIsolate, ArchiveBatchArgs(items));
+    final archived = <String>[];
+    var failed = 0;
+    for (var i = 0; i < ids.length; i++) {
+      if (results[i]) {
+        archived.add(ids[i]);
+      } else {
+        failed++;
+      }
+    }
+    if (archived.isNotEmpty) {
+      ref.read(charaDetailRecordStorageLoaderProvider.notifier).removeRecords(archived);
+      // Move the records into the archive store in memory, mirroring the active
+      // store's surgical removal, instead of invalidating and re-scanning every
+      // archived directory from disk. A no-op if the archive view never loaded.
+      final archivedRecords = [for (final id in archived) archivedRecordsById[id]].nonNulls.toList();
+      ref.read(charaDetailArchiveStorageLoaderProvider.notifier).insert(archivedRecords);
+    }
+    state = Progress.none;
+    if (archived.isNotEmpty) {
+      Toaster.show(
+        ToastData.success(
+          description: "pages.chara_detail.archive_records.success".tr(namedArgs: {"count": "${archived.length}"}),
+        ),
+      );
+    }
+    if (failed > 0) {
+      Toaster.show(
+        ToastData.error(description: "pages.chara_detail.archive_records.error".tr(namedArgs: {"count": "$failed"})),
+      );
+    }
+  }
+}
+
+final charaArchiveControllerProvider = NotifierProvider<CharaArchiveController, Progress>(CharaArchiveController.new);
+
+/// Arguments for [archiveRecordInIsolate], crossing the `compute` boundary as
+/// plain strings plus the chosen [ArchiveImageOption].
+class ArchiveRecordArgs {
+  final String srcDirPath;
+  final String dstDirPath;
+  final ArchiveImageOption option;
+
+  const ArchiveRecordArgs(this.srcDirPath, this.dstDirPath, this.option);
+}
+
+/// Arguments for [archiveRecordsInIsolate]: a whole batch of per-record moves.
+class ArchiveBatchArgs {
+  final List<ArchiveRecordArgs> items;
+
+  const ArchiveBatchArgs(this.items);
+}
+
+/// Archives every record in [ArchiveBatchArgs.items] inside a single isolate,
+/// returning a per-item success flag aligned with the input order.
+///
+/// Batching avoids spawning one `compute` isolate per record (heavy on Windows).
+/// Each item is independent and best-effort via [archiveRecordInIsolate], so one
+/// record's failure neither aborts the batch nor shifts the result indices.
+List<bool> archiveRecordsInIsolate(ArchiveBatchArgs args) {
+  return [for (final item in args.items) archiveRecordInIsolate(item)];
+}
+
+/// Moves a single record's directory into the archive, then disposes of its
+/// recognition images, returning whether the record was archived.
+///
+/// Runs inside a `compute` isolate (image decoding/encoding and a directory
+/// rename are all off the UI thread), but is also a plain top-level function so
+/// it can be unit-tested directly. The record's `record.json`, `trainee.jpg`,
+/// and image geometry `*.json` are left untouched; only the recognition PNGs are
+/// dropped or replaced.
+///
+/// The move happens first, before any file is touched: if the rename fails (a
+/// Windows file lock, a stale destination, …) the source is left completely
+/// intact rather than already stripped of its images. Once the move succeeds the
+/// record is archived, so the subsequent image disposition is best-effort — a
+/// failure there is logged but does not flip the result back to a (misleading)
+/// failure that would leave the in-memory active set out of sync with disk.
+bool archiveRecordInIsolate(ArchiveRecordArgs args) {
+  try {
+    final srcDir = DirectoryPath(args.srcDirPath);
+    if (!srcDir.existsSync()) {
+      return false;
+    }
+    // A pre-existing destination (a leftover from an interrupted archive of the
+    // same id) makes the rename throw on Windows and report an opaque failure.
+    // Detect it explicitly so the cause is logged instead of being swallowed.
+    if (DirectoryPath(args.dstDirPath).existsSync()) {
+      logger.e("Cannot archive ${args.srcDirPath}: destination ${args.dstDirPath} already exists.");
+      return false;
+    }
+    final dstDir = srcDir.moveSyncSafe(DirectoryPath(args.dstDirPath));
+    if (dstDir == null) {
+      // Move failed; the active record is untouched. Report failure so the
+      // caller keeps it in the active set.
+      return false;
+    }
+    _disposeArchivedImages(dstDir, args.option);
+    return true;
+  } catch (error, stackTrace) {
+    logger.e("Failed to archive record ${args.srcDirPath}.", error, stackTrace);
+    return false;
+  }
+}
+
+/// Drops or downscales the recognition PNGs of an already-archived record in
+/// [recordDir]. Best-effort: any failure is logged and swallowed, because the
+/// record has already been moved into the archive and must not be reported as a
+/// failed archive over a mere image-cleanup hiccup.
+void _disposeArchivedImages(DirectoryPath recordDir, ArchiveImageOption option) {
+  const imageModes = [
+    CharaDetailRecordImageMode.skillPlain,
+    CharaDetailRecordImageMode.factorPlain,
+    CharaDetailRecordImageMode.campaignPlain,
+  ];
+  try {
+    if (option == ArchiveImageOption.resizedJpeg) {
+      final srcs = <String>[];
+      final dsts = <String>[];
+      for (final mode in imageModes) {
+        final png = recordDir.filePath(mode.fileName);
+        if (png.existsSync()) {
+          srcs.add(png.path);
+          dsts.add(recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).path);
+        }
+      }
+      if (srcs.isNotEmpty) {
+        convertPngBatch(ImageConvertArgs(srcs, dsts));
+      }
+      // Only drop a PNG once its JPEG exists, so a failed conversion keeps the
+      // original rather than losing the image entirely.
+      for (final mode in imageModes) {
+        if (recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).existsSync()) {
+          recordDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+        }
+      }
+    } else {
+      for (final mode in imageModes) {
+        recordDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+      }
+    }
+  } catch (error, stackTrace) {
+    logger.e("Failed to dispose archived images in ${recordDir.path}.", error, stackTrace);
+  }
+}
 
 /// Number of records currently sitting in the quarantine folder.
 ///

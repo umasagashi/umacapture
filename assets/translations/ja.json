@@ -108,6 +108,55 @@
                 "tooltip": "表示列を新規追加"
             },
             "regenerating_message": "認識結果を更新しています",
+            "toolbar": {
+                "preset_group": "プリセット",
+                "record_group": "レコード"
+            },
+            "archive_records": {
+                "progress_message": "アーカイブしています",
+                "row_overlay": "アーカイブ",
+                "success": "{count} 件をアーカイブしました。",
+                "error": "{count} 件のアーカイブに失敗しました。",
+                "no_image": "このレコードには画像がありません。",
+                "source": {
+                    "tooltip": "表示するレコードの種類を選択します。",
+                    "active": "通常",
+                    "archive": "アーカイブ"
+                },
+                "selection_mode": {
+                    "enable_tooltip": "アーカイブするレコードを選択します。"
+                },
+                "overlay": {
+                    "message": "{count} 件を選択中（選択中はテーブルを変更できません）",
+                    "archive": "選択をアーカイブ化"
+                },
+                "cancel": {
+                    "label": "キャンセル"
+                },
+                "dialog": {
+                    "title": "アーカイブ",
+                    "message": "{count} 件のレコードをアーカイブします。",
+                    "description": "アーカイブすると閲覧専用になります。\n一度アーカイブすると元には戻せません。",
+                    "option": {
+                        "resized_jpeg": {
+                            "label": "画像を縮小して保持",
+                            "description": "画像を幅720pxのJPEGに変換します。閲覧用に画像を残しつつサイズを削減します。"
+                        },
+                        "none": {
+                            "label": "画像を保持しない",
+                            "description": "画像を削除し、レコードのファイルサイズを最小化します。"
+                        }
+                    },
+                    "cancel_button": {
+                        "label": "キャンセル",
+                        "tooltip": "アーカイブせずに閉じる"
+                    },
+                    "ok_button": {
+                        "label": "長押しでアーカイブ",
+                        "tooltip": "選択したレコードをアーカイブします"
+                    }
+                }
+            },
             "quarantine_banner": {
                 "message": "読み込めない記録が {count} 件 隔離フォルダに退避されています。",
                 "open": "フォルダを開く",
@@ -148,24 +197,40 @@
                 }
             },
             "export": {
-                "button_tooltip": "殿堂入りウマ娘をまとめてエクスポートします。",
+                "button_tooltip": "エクスポートするレコードを選択します。",
                 "dialog_title": "保存先を指定してください。",
                 "disabled_tooltip": "エクスポート中です。",
                 "csv": {
                     "label": "CSV",
-                    "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート (Shift-JIS)"
+                    "tooltip": "表示中の列構成をCSV形式でエクスポート (Shift-JIS)"
                 },
                 "csv_utf": {
                     "label": "CSV (UTF-8)",
-                    "tooltip": "テーブルに表示している項目だけをCSV形式でエクスポート (UTF-8-BOM)"
+                    "tooltip": "表示中の列構成をCSV形式でエクスポート (UTF-8-BOM)"
                 },
                 "json": {
                     "label": "JSON",
-                    "tooltip": "全ウマ娘をテキストJSON形式でエクスポート"
+                    "tooltip": "元データをJSON形式でエクスポート"
                 },
                 "zip": {
                     "label": "ZIP",
-                    "tooltip": "ストレージの生データをZIP形式でエクスポート"
+                    "tooltip": "元データをZIP形式でエクスポート"
+                },
+                "overlay": {
+                    "export": "選択をエクスポート"
+                },
+                "row_overlay": "エクスポート",
+                "dialog": {
+                    "title": "エクスポート",
+                    "message": "{count} 件のレコードをエクスポートします。",
+                    "cancel_button": {
+                        "label": "キャンセル",
+                        "tooltip": "エクスポートせずに閉じる"
+                    },
+                    "ok_button": {
+                        "label": "エクスポート",
+                        "tooltip": "選択したレコードをエクスポートします"
+                    }
                 }
             },
             "column_spec": {
@@ -976,6 +1041,26 @@
                         "tooltip": "データを完全に削除します"
                     },
                     "description": "このウマ娘を本当に削除しますか？\n削除すると復元はできません。"
+                },
+                "selection_mode": {
+                    "enable_tooltip": "削除するレコードを選択します。"
+                },
+                "overlay": {
+                    "delete": "選択を削除"
+                },
+                "row_overlay": "削除",
+                "bulk": {
+                    "title": "データ削除",
+                    "message": "{count} 件のレコードを削除します。",
+                    "description": "選択したレコードを完全に削除します。\n削除すると復元はできません。",
+                    "cancel_button": {
+                        "label": "キャンセル",
+                        "tooltip": "削除せずに閉じる"
+                    },
+                    "ok_button": {
+                        "label": "長押しで削除",
+                        "tooltip": "選択したレコードを完全に削除します"
+                    }
                 }
             },
             "regenerate_record": {
@@ -1333,6 +1418,7 @@
         },
         "record_export": "ファイルを保存しました。",
         "record_export_failure": "ファイルの保存に失敗しました。",
+        "record_unavailable": "対象のレコードが見つかりませんでした。",
         "module_version_check": {
             "no_version_available": "認識モジュールの取得に失敗しました。キャプチャ機能は利用できません。",
             "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",

@@ -10,13 +10,16 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/gui/chara_detail/archive_record_dialog.dart';
 import '/src/gui/chara_detail/column_preset_bar_widget.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
 import '/src/gui/chara_detail/delete_record_dialog.dart';
+import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/chara_detail/regenerate_record_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
@@ -46,10 +49,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
-    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    final source = ref.read(recordSourceProvider);
+    final pathInfo = ref.read(pathInfoProvider);
+    // While selecting rows (to archive or export), actions that rebuild the
+    // table (and would drop the in-progress selection) are disabled.
+    final selecting = ref.read(selectionModeProvider) != null;
+    DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
     final rect = offset & const Size(1, 1);
     const height = 40.0;
     final style = theme.textTheme.labelMedium;
+    // The per-item Text overrides PopupMenuItem's built-in disabled coloring, so
+    // grey the label ourselves for items disabled during selection.
+    final disabledStyle = style?.copyWith(color: theme.disabledColor);
     showMenu<int>(
       context: context,
       position: RelativeRect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom),
@@ -63,52 +74,63 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           onTap: () {
             final records = stateManager.getSortedRecords().toList();
             final index = records.indexOf(record);
-            final directories = records.map((e) => storage.recordPathOf(e)).toList();
+            final directories = records.map(dirOf).toList();
             return CharaDetailPreviewDialog.show(ref.base, directories, index);
           },
           child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.skillPlain),
+          onTap: () => copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
           child: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => storage.copyToClipboard(record, CharaDetailRecordImageMode.factorPlain),
+          onTap: () => copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
           child: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
         ),
         PopupMenuItem(
           height: height,
-          onTap: () => storage.recordPathOf(record).launch(),
+          onTap: () => dirOf(record).launch(),
           child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
-        PopupMenuItem(
-          height: height,
-          onTap: () async {
-            final moduleVersion = await ref.read(moduleVersionLoader.future);
-            if (moduleVersion == null) {
-              sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
-              return;
-            }
-            if (!record.isSupported(moduleVersion)) {
-              RegenerateRecordDialog.show(ref.base, recordId: record.id);
-              return;
-            }
-            ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]);
-          },
-          child: Text("$tr_chara_detail.context_menu.regenerate_record".tr(), style: style),
-        ),
+        // Re-recognition only applies to active records; archived ones have lossy
+        // or no images and are intentionally excluded.
+        if (source == RecordSource.active)
+          PopupMenuItem(
+            height: height,
+            enabled: !selecting,
+            onTap: () async {
+              final moduleVersion = await ref.read(moduleVersionLoader.future);
+              if (moduleVersion == null) {
+                sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
+                return;
+              }
+              if (!record.isSupported(moduleVersion)) {
+                RegenerateRecordDialog.show(ref.base, recordId: record.id);
+                return;
+              }
+              ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]);
+            },
+            child: Text(
+              "$tr_chara_detail.context_menu.regenerate_record".tr(),
+              style: selecting ? disabledStyle : style,
+            ),
+          ),
         const PopupMenuDivider(),
         PopupMenuItem(
           height: height,
-          onTap: () => DeleteRecordDialog.show(ref.base, recordId: record.id),
-          child: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: style),
+          enabled: !selecting,
+          onTap: () => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
+          child: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
         ),
-        if (isSentryAvailable())
+        // Reports attach the recognition images for a bug repro; archived records
+        // only keep lossy/no images, so the report is diagnostically useless there.
+        // Active-only, like regenerate above.
+        if (source == RecordSource.active && isSentryAvailable())
           PopupMenuItem(
             height: height,
-            onTap: () => ReportRecordDialog.show(ref.base, storage.recordPathOf(record)),
+            onTap: () => ReportRecordDialog.show(ref.base, dirOf(record)),
             child: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
           ),
       ],
@@ -119,6 +141,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final grid = ref.watch(currentGridProvider);
+    // Drives the per-row overlay's color/label so a checked row reads as either
+    // "archive" or "export". Non-null whenever the checkbox column is present.
+    final purpose = ref.watch(selectionModeProvider);
     if (grid.columns.isEmpty) {
       return Container();
     }
@@ -153,6 +178,15 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     }
                     return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
                   },
+                  // Checked rows get a translucent amber overlay that dims the
+                  // cells and is labeled "archive", so the destructive (lossy,
+                  // irreversible) intent of the bulk selection is unmistakable.
+                  rowWrapper: (context, rowWidget, rowData, _) {
+                    if (rowData.checked != true || purpose == null) {
+                      return rowWidget;
+                    }
+                    return _SelectionRowOverlay(purpose: purpose, child: rowWidget);
+                  },
                   configuration: TrinaGridConfiguration(
                     enterKeyAction: TrinaGridEnterKeyAction.toggleEditing,
                     scrollbar: const TrinaGridScrollbarConfig(isAlwaysShown: true, radius: 8, thickness: 12),
@@ -164,6 +198,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       // e.g. the empty space right of the last column. Without it
                       // this falls back to TrinaGrid's default Colors.white.
                       rowColor: theme.colorScheme.surface,
+                      // Keep the checked-row background neutral; the amber cue is
+                      // drawn as an overlay via rowWrapper instead (see below).
+                      rowCheckedColor: Colors.transparent,
                       activatedColor: theme.colorScheme.primaryContainer,
                       gridBorderColor: theme.colorScheme.outline,
                       borderColor: theme.focusColor,
@@ -185,12 +222,37 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     final spec = event.cell.column.getUserData<ColumnSpec>();
                     showPopup(context, ref, event.offset, record, spec!.cellAction?.tabIdx ?? 0);
                   },
+                  onRowChecked: (TrinaGridOnRowCheckedEvent event) {
+                    // Recompute the whole checked set (covers single + select-all
+                    // toggles) so the toolbar's archive action reads a live set.
+                    final ids = stateManager.checkedRows
+                        .map((row) => row.getUserData<CharaDetailRecord>()?.id)
+                        .nonNulls
+                        .toSet();
+                    ref.read(selectedRecordIdsProvider.notifier).set(ids);
+                    // The amber overlay is drawn by rowWrapper, which only re-runs
+                    // when the row list repaints — not when a single checkbox cell
+                    // updates itself. Nudge the grid to repaint its rows (this
+                    // reuses the existing rows, so checked state is preserved).
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      // The page may be torn down before the next frame; skip the
+                      // notify rather than poke a disposed stateManager.
+                      if (!mounted) {
+                        return;
+                      }
+                      stateManager.notifyListeners();
+                    });
+                  },
                   onSelected: (TrinaGridOnSelectedEvent event) {
                     try {
                       final data = event.cell?.getUserData<CellData>();
                       if (!(data?.onSelected?.call(event) ?? false)) {
-                        final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-                        final records = stateManager.getSortedRecords().map((e) => storage.recordPathOf(e)).toList();
+                        final source = ref.read(recordSourceProvider);
+                        final pathInfo = ref.read(pathInfoProvider);
+                        final records = stateManager
+                            .getSortedRecords()
+                            .map((e) => recordDirOf(pathInfo, source, e))
+                            .toList();
                         CharaDetailPreviewDialog.show(ref.base, records, event.rowIdx!);
                       }
                     } catch (error, stackTrace) {
@@ -222,31 +284,206 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   }
 }
 
+/// The shared per-purpose presentation: row-overlay color/icon/label and the
+/// scrim confirm-button label. Centralized so the row overlay and the confirm
+/// button cannot drift out of sync.
+typedef _SelectionStyle = ({Color color, Color onColor, IconData icon, String rowLabelKey, String actionLabelKey});
+
+extension _SelectionPurposeStyle on SelectionPurpose {
+  _SelectionStyle style(ThemeData theme) => switch (this) {
+    SelectionPurpose.archive => (
+      color: Colors.amber,
+      onColor: Colors.black87,
+      icon: Symbols.archive_rounded,
+      rowLabelKey: "$tr_chara_detail.archive_records.row_overlay",
+      actionLabelKey: "$tr_chara_detail.archive_records.overlay.archive",
+    ),
+    SelectionPurpose.export => (
+      color: theme.colorScheme.primary,
+      onColor: theme.colorScheme.onPrimary,
+      icon: Symbols.download_rounded,
+      rowLabelKey: "$tr_chara_detail.export.row_overlay",
+      actionLabelKey: "$tr_chara_detail.export.overlay.export",
+    ),
+    SelectionPurpose.delete => (
+      color: theme.colorScheme.error,
+      onColor: theme.colorScheme.onError,
+      icon: Symbols.delete_rounded,
+      rowLabelKey: "$tr_chara_detail.delete_record.row_overlay",
+      actionLabelKey: "$tr_chara_detail.delete_record.overlay.delete",
+    ),
+  };
+}
+
+/// Translucent overlay drawn over a checked row to mark it for the pending bulk
+/// action.
+///
+/// Dims the underlying cells and stamps a label so the action is obvious:
+/// amber/"archive" for the (irreversible) archive flow, primary/"export" for the
+/// export flow. [IgnorePointer] lets taps fall through to the checkbox beneath,
+/// so the row can still be unchecked.
+class _SelectionRowOverlay extends StatelessWidget {
+  final SelectionPurpose purpose;
+  final Widget child;
+
+  const _SelectionRowOverlay({required this.purpose, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = purpose.style(theme);
+    final color = style.color;
+    final onColor = style.onColor;
+    return Stack(
+      children: [
+        child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              color: color.withValues(alpha: 0.45),
+              alignment: Alignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              // A denser chip behind the label keeps it legible over the cell
+              // content showing through the translucent row overlay.
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(color: color.withValues(alpha: 0.95), borderRadius: BorderRadius.circular(6)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(style.icon, size: 16, color: onColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      style.rowLabelKey.tr(),
+                      style: theme.textTheme.labelMedium?.copyWith(color: onColor, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The preset bar + column chips, with a hit-absorbing scrim overlaid while
+/// bulk-archive selection is active.
+///
+/// During selection every top control (presets, source switch, column chips)
+/// must be inert — changing any of them rebuilds the grid and would drop the
+/// in-progress checkbox selection. The scrim blocks them and surfaces the only
+/// two valid actions: archive the selection, or cancel.
+class _TopControlsLayer extends ConsumerWidget {
+  const _TopControlsLayer();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final purpose = ref.watch(selectionModeProvider);
+    final selectedCount = ref.watch(selectedRecordIdsProvider).length;
+    return Stack(
+      children: [
+        const Column(mainAxisSize: MainAxisSize.min, children: [ColumnPresetBarWidget(), ColumnSpecTagWidget()]),
+        if (purpose != null)
+          Positioned.fill(
+            child: Stack(
+              children: [
+                // Scrim absorbs taps so the controls underneath are inert.
+                Positioned.fill(
+                  child: AbsorbPointer(child: ColoredBox(color: theme.colorScheme.surface.withValues(alpha: 0.85))),
+                ),
+                // The two valid actions sit above the scrim and stay interactive.
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        // Purpose-neutral ("selecting N records; columns/presets
+                        // are frozen"), so it is shared by both flows.
+                        "$tr_chara_detail.archive_records.overlay.message".tr(namedArgs: {"count": "$selectedCount"}),
+                        style: theme.textTheme.labelLarge,
+                      ),
+                      const SizedBox(width: 16),
+                      _SelectionConfirmButton(purpose: purpose, selectedCount: selectedCount),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        icon: const Icon(Symbols.cancel_rounded, size: 20),
+                        label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
+                        onPressed: () => exitSelection(ref),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The scrim's primary action, which opens the purpose's confirmation dialog
+/// ([ArchiveRecordDialog] or [ExportRecordDialog]) for the checked rows. Disabled
+/// until at least one row is checked.
+class _SelectionConfirmButton extends ConsumerWidget {
+  final SelectionPurpose purpose;
+  final int selectedCount;
+
+  const _SelectionConfirmButton({required this.purpose, required this.selectedCount});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final style = purpose.style(Theme.of(context));
+    return FilledButton.icon(
+      icon: Icon(style.icon, size: 20),
+      label: Text(style.actionLabelKey.tr()),
+      onPressed: selectedCount == 0
+          ? null
+          : () {
+              final recordIds = ref.read(selectedRecordIdsProvider).toList();
+              switch (purpose) {
+                case SelectionPurpose.archive:
+                  ArchiveRecordDialog.show(ref.base, recordIds: recordIds);
+                case SelectionPurpose.export:
+                  ExportRecordDialog.show(ref.base, recordIds: recordIds);
+                case SelectionPurpose.delete:
+                  BulkDeleteRecordDialog.show(ref.base, recordIds: recordIds, source: ref.read(recordSourceProvider));
+              }
+            },
+    );
+  }
+}
+
 class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
   const _CharaDetailDataTablePreCheckLayer();
 
-  Widget regenerationProgressWidget(BuildContext context, Progress regenerationProgress) {
+  Widget progressWidget(BuildContext context, Progress progress, String messageKey) {
     final theme = Theme.of(context);
+    final footer = Padding(padding: const EdgeInsets.only(top: 8), child: Text(messageKey.tr()));
     return Expanded(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          CircularPercentIndicator(
-            radius: 32.0,
-            lineWidth: 6.0,
-            animation: true,
-            animateFromLastPercent: true,
-            animationDuration: 200,
-            percent: regenerationProgress.progress,
-            center: Text("${regenerationProgress.percent}%"),
-            footer: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text("$tr_chara_detail.regenerating_message".tr()),
+          // A batch with no per-record callback (archive) can't advance a count;
+          // show a spinning indicator instead of a determinate ring stuck at 0%.
+          if (progress.indeterminate)
+            Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(), footer])
+          else
+            CircularPercentIndicator(
+              radius: 32.0,
+              lineWidth: 6.0,
+              animation: true,
+              animateFromLastPercent: true,
+              animationDuration: 200,
+              percent: progress.progress,
+              center: Text("${progress.percent}%"),
+              footer: footer,
+              backgroundColor: theme.colorScheme.secondaryContainer,
+              progressColor: theme.colorScheme.primary,
             ),
-            backgroundColor: theme.colorScheme.secondaryContainer,
-            progressColor: theme.colorScheme.primary,
-          ),
         ],
       ),
     );
@@ -256,9 +493,13 @@ class _CharaDetailDataTablePreCheckLayer extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final regenerationProgress = ref.watch(charaDetailRecordRegenerationControllerProvider);
     if (!regenerationProgress.isEmpty) {
-      return regenerationProgressWidget(context, regenerationProgress);
+      return progressWidget(context, regenerationProgress, "$tr_chara_detail.regenerating_message");
     }
-    if (ref.watch(charaDetailRecordStorageProvider).isEmpty) {
+    final archiveProgress = ref.watch(charaArchiveControllerProvider);
+    if (!archiveProgress.isEmpty) {
+      return progressWidget(context, archiveProgress, "$tr_chara_detail.archive_records.progress_message");
+    }
+    if (ref.watch(displayedRecordsProvider).isEmpty) {
       return Expanded(child: ErrorMessageWidget(message: "$tr_chara_detail.no_record_message".tr()));
     }
     // Guard on visible columns, not raw spec count: hidden specs still filter rows
@@ -364,8 +605,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     return Column(
       children: const [
         _QuarantineBannerWidget(),
-        ColumnPresetBarWidget(),
-        ColumnSpecTagWidget(),
+        _TopControlsLayer(),
         SizedBox(height: 4),
         _CharaDetailDataTablePreCheckLayer(),
       ],

@@ -11,6 +11,7 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart' hide tr_common;
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
@@ -122,7 +123,12 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
 
   @override
   TrinaColumn plutoColumn(RefBase ref) {
-    final recordRootDir = ref.watch(pathInfoProvider).charaDetailActiveDir;
+    // Resolve trainee icons from the currently displayed source: archived records
+    // live under archive/, not active/.
+    final pathInfo = ref.watch(pathInfoProvider);
+    final recordRootDir = ref.watch(recordSourceProvider) == RecordSource.active
+        ? pathInfo.charaDetailActiveDir
+        : pathInfo.charaDetailArchiveDir;
     return TrinaColumn(
       title: title,
       field: id,
@@ -133,7 +139,14 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
-        final icon = Image.file((recordRootDir.filePath(record.traineeIconPath)).toFile());
+        final icon = Image.file(
+          (recordRootDir.filePath(record.traineeIconPath)).toFile(),
+          // Archived records keep their trainee icon, but guard against a
+          // missing/corrupt file so the cell shows a placeholder instead of a red
+          // error box. Sized to the cell, not the larger dialog placeholder.
+          errorBuilder: (context, error, stackTrace) =>
+              Icon(Symbols.hide_image_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
+        );
         return record.isFriend ? _FriendMarkedIcon(icon: icon) : icon;
       },
     )..setUserData(this);
