@@ -928,7 +928,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// unchanged rows keep their identity so the scroll offset and current cell
   /// survive a single cell edit. Assumes the column set is unchanged (the caller
   /// handles structural column changes with a full rebuild).
-  void reconcileRows(List<TrinaRow> nextRows, {String? sortColumn, TrinaColumnSort sortOrder = TrinaColumnSort.none}) {
+  void reconcileRows(
+    List<TrinaRow> nextRows, {
+    String? sortColumn,
+    TrinaColumnSort sortOrder = TrinaColumnSort.none,
+    bool notify = true,
+  }) {
     String? idOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
 
     final live = refRows.originalList.toList();
@@ -977,7 +982,9 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     // top row). Recompute the position from the still-correct current cell so the
     // highlight stays on the selected record.
     updateCurrentCellPosition(notify: false);
-    notifyListeners();
+    if (notify) {
+      notifyListeners();
+    }
   }
 }
 

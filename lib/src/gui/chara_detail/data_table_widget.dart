@@ -227,7 +227,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       });
     } else {
       stateManager.refreshColumnRenderers(next.columns);
-      stateManager.reconcileRows(next.rows, sortColumn: sortColumn, sortOrder: sortOrder);
+      // _reconcile notifies once at the end (after restoreCurrentRecord), so the
+      // row diff and the restored selection land in a single repaint.
+      stateManager.reconcileRows(next.rows, sortColumn: sortColumn, sortOrder: sortOrder, notify: false);
     }
     // Re-highlight the same record (skips the checkbox cell so the highlight
     // lands on a data cell). No-op when it is still current or now filtered out.
@@ -251,7 +253,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _purpose = purpose;
     if (themeChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
+        // Skip when the grid has since left the tree (empty columns): its
+        // stateManager is then disposed and notifyListeners would throw.
+        if (mounted && _loaded) {
           stateManager.notifyListeners();
         }
       });
@@ -262,6 +266,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // checks below.
     ref.listen(currentGridProvider, (_, next) => _reconcile(next));
     if (grid.columns.isEmpty) {
+      // The grid leaves the tree here, disposing its stateManager. Mark it
+      // unloaded so a grid update (via the listen above) or theme repaint won't
+      // touch the dead manager; onLoaded re-initializes it when columns return.
+      _loaded = false;
       return Container();
     }
     return Expanded(
