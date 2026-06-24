@@ -67,6 +67,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   late ThemeData _theme;
   SelectionPurpose? _purpose;
 
+  // Record id -> index within the pinned (frozen) block, rebuilt once per build
+  // from the watched grid. rowWrapper reads it O(1) per row instead of rescanning
+  // every frozen row (where().toList() + indexOf) on each row's paint.
+  Map<String, int> _pinnedIndexById = const {};
+
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
     final source = ref.read(recordSourceProvider);
@@ -259,7 +264,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     if (themeChanged) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         // Skip when the grid has since left the tree (empty columns): its
-        // stateManager is then disposed and notifyListeners would throw.
+        // stateManager is then disposed, so notifying it would be a wasted no-op
+        // on a stale manager.
         if (mounted && _loaded) {
           stateManager.notifyListeners();
         }
@@ -277,6 +283,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       _loaded = false;
       return Container();
     }
+    // Index the pinned (frozen) rows once per build so rowWrapper can look up a
+    // row's position in the frozen block in O(1). build() re-runs on every grid
+    // change (it watches currentGridProvider), so this stays in sync with the
+    // rows _reconcile applies.
+    final pinnedRows = grid.rows.where((row) => row.frozen == TrinaRowFrozen.start).toList();
+    _pinnedIndexById = {
+      for (var i = 0; i < pinnedRows.length; i++) ?pinnedRows[i].getUserData<CharaDetailRecord>()?.id: i,
+    };
     return Expanded(
       child: Stack(
         alignment: Alignment.center,
@@ -311,9 +325,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // the full refRows while rowContext.rowIdx is a display index
                     // (frozen rows render in a separate block), so an index compare
                     // would highlight the wrong row.
-                    final currentId = rowContext.stateManager.currentRecord?.id;
-                    final rowId = rowContext.row.getUserData<CharaDetailRecord>()?.id;
-                    if (currentId != null && rowId == currentId) {
+                    if (rowContext.stateManager.isCurrentRecord(rowContext.row)) {
                       return theme.colorScheme.primaryContainer;
                     }
                     return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
@@ -334,18 +346,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // a normal-weight separator between pinned rows, and a single
                     // thick rule only at the boundary with the scrollable rows.
                     if (rowData.frozen == TrinaRowFrozen.start) {
-                      final pinned = stateManager.refRows.originalList
-                          .where((r) => r.frozen == TrinaRowFrozen.start)
-                          .toList();
-                      final pinnedIdx = pinned.indexOf(rowData);
+                      // Position within the frozen block, precomputed in build().
+                      final rowId = rowData.getUserData<CharaDetailRecord>()?.id;
+                      final pinnedIdx = rowId == null ? -1 : (_pinnedIndexById[rowId] ?? -1);
                       if (pinnedIdx >= 0) {
-                        final isLast = pinnedIdx == pinned.length - 1;
+                        final isLast = pinnedIdx == _pinnedIndexById.length - 1;
                         // Match the highlighted row by record id (see rowColorCallback):
                         // currentRowIdx and pinnedIdx live in different index spaces.
-                        final currentId = stateManager.currentRecord?.id;
-                        final isCurrent =
-                            currentId != null && rowData.getUserData<CharaDetailRecord>()?.id == currentId;
-                        final Color background = isCurrent
+                        final Color background = stateManager.isCurrentRecord(rowData)
                             ? theme.colorScheme.primaryContainer
                             : (pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor);
                         final separator = isLast
@@ -441,12 +449,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // updates itself. Nudge the grid to repaint its rows (this
                     // reuses the existing rows, so checked state is preserved).
                     WidgetsBinding.instance.addPostFrameCallback((_) {
-                      // The page may be torn down before the next frame; skip the
-                      // notify rather than poke a disposed stateManager.
-                      if (!mounted) {
-                        return;
+                      // The grid may leave the tree before the next frame (page torn
+                      // down, or columns emptied, which disposes the stateManager).
+                      // Guard on _loaded too — matching the other imperative
+                      // post-frame callbacks — so a stale manager is never poked.
+                      if (mounted && _loaded) {
+                        stateManager.notifyListeners();
                       }
-                      stateManager.notifyListeners();
                     });
                   },
                   onSelected: (TrinaGridOnSelectedEvent event) {

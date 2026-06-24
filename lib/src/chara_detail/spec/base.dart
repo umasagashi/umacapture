@@ -869,6 +869,31 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// onto the same record afterwards via [restoreCurrentRecord].
   CharaDetailRecord? get currentRecord => currentRow?.getUserData<CharaDetailRecord>();
 
+  /// The record id carried by [row], or null when the row has no record attached.
+  String? recordIdOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
+
+  /// Whether [row] is the currently highlighted row, matched by record id.
+  ///
+  /// Index comparison is unsafe here: with pinned (frozen) rows present,
+  /// [currentRowIdx] indexes the full refRows while render-time row indices live
+  /// in a separate frozen block, so the two index spaces disagree.
+  bool isCurrentRecord(TrinaRow row) {
+    final id = currentRecord?.id;
+    return id != null && recordIdOf(row) == id;
+  }
+
+  /// Indexes [rows] by record id, skipping rows with no record (last id wins).
+  Map<String, TrinaRow> _rowsById(Iterable<TrinaRow> rows) {
+    final byId = <String, TrinaRow>{};
+    for (final row in rows) {
+      final id = recordIdOf(row);
+      if (id != null) {
+        byId[id] = row;
+      }
+    }
+    return byId;
+  }
+
   /// Re-selects the row for [record] so the row highlight survives a rebuild that
   /// dropped the current cell (e.g. a structural column change clears it). No-op
   /// when the record is already current or no longer present (filtered out).
@@ -878,7 +903,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
     for (var rowIdx = 0; rowIdx < refRows.length; rowIdx++) {
       final row = refRows[rowIdx];
-      if (row.getUserData<CharaDetailRecord>()?.id != record.id) {
+      if (recordIdOf(row) != record.id) {
         continue;
       }
       TrinaCell? cell;
@@ -895,10 +920,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
   }
 
-  /// Copies the renderer from each freshly built column onto the matching live
-  /// column (by field), so columns whose renderer captured a provider snapshot
-  /// (e.g. ratings) repaint with current data without a structural replace that
-  /// would drop their width and sort indicator.
+  /// Copies the renderer and title from each freshly built column onto the
+  /// matching live column (by field), so columns whose renderer captured a
+  /// provider snapshot (e.g. ratings) repaint with current data — and columns
+  /// whose title is provider-derived (e.g. a renamed rating/label set, whose
+  /// field is the stable spec id) show the new header — without a structural
+  /// replace that would drop their width and sort indicator.
   ///
   /// Cell-driven columns (e.g. memo, which reads the cell's user data) are
   /// refreshed by [reconcileRows] replacing their row instead; copying their
@@ -909,6 +936,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       final next = nextByField[live.field];
       if (next != null) {
         live.renderer = next.renderer;
+        live.title = next.title;
       }
     }
   }
@@ -938,17 +966,11 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// by sortIdx, so without this the default order would come back wrong. The
   /// fresh rows still hold the canonical sortIdx; copy it back onto the live rows
   /// (same object identity).
-  void restoreCanonicalSortIdx(List<TrinaRow> nextRows) {
-    final nextById = <String, TrinaRow>{};
-    for (final row in nextRows) {
-      final id = row.getUserData<CharaDetailRecord>()?.id;
-      if (id != null) {
-        nextById[id] = row;
-      }
-    }
+  void restoreCanonicalSortIdx(List<TrinaRow> nextRows, {Map<String, TrinaRow>? nextById}) {
+    final byId = nextById ?? _rowsById(nextRows);
     for (final row in refRows.originalList) {
-      final id = row.getUserData<CharaDetailRecord>()?.id;
-      final next = id == null ? null : nextById[id];
+      final id = recordIdOf(row);
+      final next = id == null ? null : byId[id];
       if (next != null) {
         row.sortIdx = next.sortIdx;
       }
@@ -974,22 +996,24 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     TrinaColumnSort sortOrder = TrinaColumnSort.none,
     bool notify = true,
   }) {
-    String? idOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
+    // The incremental insert below uses indices into nextRows (the desired,
+    // unfiltered order). trina's insertRows interprets its index against the
+    // filtered refRows view, so the two only coincide while no trina-level
+    // column filter is active. The app filters upstream (in _buildGrid) and
+    // never enables trina's own filter, keeping refRows == originalList.
+    assert(
+      refRows.length == refRows.originalList.length,
+      'reconcileRows assumes no active trina-level filter (refRows == originalList).',
+    );
 
-    final nextById = <String, TrinaRow>{};
-    for (final row in nextRows) {
-      final id = idOf(row);
-      if (id != null) {
-        nextById[id] = row;
-      }
-    }
+    final nextById = _rowsById(nextRows);
 
     // Rows to keep as-is. Everything else (gone, changed, or pinned-state
     // changed) is removed below and reinserted fresh from nextRows.
     final unchangedIds = <String>{};
     final toRemove = <TrinaRow>[];
     for (final row in refRows.originalList) {
-      final id = idOf(row);
+      final id = recordIdOf(row);
       final next = id == null ? null : nextById[id];
       if (next != null && _rowContentEquals(row, next)) {
         unchangedIds.add(id!);
@@ -1013,7 +1037,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       // at their final position once all earlier inserts have landed.
       for (var position = 0; position < nextRows.length; position++) {
         final row = nextRows[position];
-        final id = idOf(row);
+        final id = recordIdOf(row);
         if (id == null || !unchangedIds.contains(id)) {
           insertRows(position, [row], notify: false);
         }
@@ -1021,8 +1045,9 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
 
     // insert/append overwrote the canonical sortIdx of the touched rows; restore
-    // it so a later "reset sort" reproduces the default order.
-    restoreCanonicalSortIdx(nextRows);
+    // it so a later "reset sort" reproduces the default order. Reuse the id map
+    // already built above instead of rebuilding it.
+    restoreCanonicalSortIdx(nextRows, nextById: nextById);
 
     if (sortColumn != null) {
       sortColumnByField(sortColumn, sortOrder);
