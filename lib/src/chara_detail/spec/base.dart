@@ -768,6 +768,14 @@ final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
   return ColumnPresetIndex.specEntryKey(index.selectedKey);
 });
 
+// Above this many rows to (re)insert, [reconcileRows] abandons the per-row diff
+// and replaces the whole row set in one pass. Each incremental insertRows is O(n)
+// in trina (it rescans the original list and rebuilds the filtered view), so a
+// large diff (e.g. a filter/search change that swaps most rows) would otherwise
+// be O(n^2); a wholesale removeAllRows + appendRows is O(n). Small edits stay
+// incremental so scroll offset and row identity are preserved.
+const _bulkReconcileThreshold = 32;
+
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   double _visualTextWidth(BuildContext context, String text, TextStyle style) {
     if (text.isEmpty) {
@@ -920,6 +928,33 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     return true;
   }
 
+  /// Realigns each live row's [TrinaRow.sortIdx] to the value carried by the
+  /// matching fresh row in [nextRows] (matched by record id).
+  ///
+  /// trina's insert/append paths overwrite an inserted row's sortIdx with a
+  /// neighbour-derived sequential value, so after incremental (or appendRows)
+  /// updates the app-assigned default order (`-capturedDate`, set in
+  /// `_buildGrid`) drifts. trina's "reset sort" (the third sort toggle) reorders
+  /// by sortIdx, so without this the default order would come back wrong. The
+  /// fresh rows still hold the canonical sortIdx; copy it back onto the live rows
+  /// (same object identity).
+  void restoreCanonicalSortIdx(List<TrinaRow> nextRows) {
+    final nextById = <String, TrinaRow>{};
+    for (final row in nextRows) {
+      final id = row.getUserData<CharaDetailRecord>()?.id;
+      if (id != null) {
+        nextById[id] = row;
+      }
+    }
+    for (final row in refRows.originalList) {
+      final id = row.getUserData<CharaDetailRecord>()?.id;
+      final next = id == null ? null : nextById[id];
+      if (next != null) {
+        row.sortIdx = next.sortIdx;
+      }
+    }
+  }
+
   /// Applies [nextRows] to the live grid by record id, touching only the rows
   /// that actually changed.
   ///
@@ -928,6 +963,11 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// unchanged rows keep their identity so the scroll offset and current cell
   /// survive a single cell edit. Assumes the column set is unchanged (the caller
   /// handles structural column changes with a full rebuild).
+  ///
+  /// When the diff is large (more than [_bulkReconcileThreshold] rows to
+  /// reinsert) the per-row insert would be O(n^2), so it falls back to a
+  /// wholesale replace: cheaper, at the cost of resetting scroll and selection
+  /// (the caller restores the selection by record afterwards).
   void reconcileRows(
     List<TrinaRow> nextRows, {
     String? sortColumn,
@@ -936,7 +976,6 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   }) {
     String? idOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
 
-    final live = refRows.originalList.toList();
     final nextById = <String, TrinaRow>{};
     for (final row in nextRows) {
       final id = idOf(row);
@@ -949,7 +988,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     // changed) is removed below and reinserted fresh from nextRows.
     final unchangedIds = <String>{};
     final toRemove = <TrinaRow>[];
-    for (final row in live) {
+    for (final row in refRows.originalList) {
       final id = idOf(row);
       final next = id == null ? null : nextById[id];
       if (next != null && _rowContentEquals(row, next)) {
@@ -958,20 +997,32 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
         toRemove.add(row);
       }
     }
-    if (toRemove.isNotEmpty) {
-      removeRows(toRemove, notify: false);
-    }
 
-    // Reinsert added/changed rows at their slot in the desired order. Processing
-    // ascending keeps each index valid: unchanged rows already sit at their
-    // final position once all earlier inserts have landed.
-    for (var position = 0; position < nextRows.length; position++) {
-      final row = nextRows[position];
-      final id = idOf(row);
-      if (id == null || !unchangedIds.contains(id)) {
-        insertRows(position, [row], notify: false);
+    final insertCount = nextRows.length - unchangedIds.length;
+    if (insertCount > _bulkReconcileThreshold) {
+      // Large diff: the incremental path buys nothing (most rows are reinserted)
+      // yet pays O(n^2). Replace the whole row set in one O(n) pass instead.
+      removeAllRows(notify: false);
+      appendRows(nextRows);
+    } else {
+      if (toRemove.isNotEmpty) {
+        removeRows(toRemove, notify: false);
+      }
+      // Reinsert added/changed rows at their slot in the desired order.
+      // Processing ascending keeps each index valid: unchanged rows already sit
+      // at their final position once all earlier inserts have landed.
+      for (var position = 0; position < nextRows.length; position++) {
+        final row = nextRows[position];
+        final id = idOf(row);
+        if (id == null || !unchangedIds.contains(id)) {
+          insertRows(position, [row], notify: false);
+        }
       }
     }
+
+    // insert/append overwrote the canonical sortIdx of the touched rows; restore
+    // it so a later "reset sort" reproduces the default order.
+    restoreCanonicalSortIdx(nextRows);
 
     if (sortColumn != null) {
       sortColumnByField(sortColumn, sortOrder);

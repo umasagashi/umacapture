@@ -215,13 +215,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       stateManager.removeColumns(stateManager.columns.toList());
       stateManager.insertColumns(0, next.columns);
       stateManager.appendRows(next.rows);
+      // appendRows overwrites the canonical sortIdx; restore it so a later "reset
+      // sort" reproduces the default (-capturedDate) order.
+      stateManager.restoreCanonicalSortIdx(next.rows);
       if (sortColumn != null) {
         stateManager.sortColumnByField(sortColumn!, sortOrder);
       }
       // autoFitColumns measures via gridKey.currentContext, which needs the new
-      // columns laid out first, so defer it one frame.
+      // columns laid out first, so defer it one frame. Guard on _loaded too: the
+      // grid may have left the tree (empty columns) before the frame, disposing
+      // its stateManager.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
+        if (mounted && _loaded) {
           stateManager.autoFitColumns();
         }
       });
@@ -301,7 +306,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   // overrides the default striping, so reproduce it for other rows.
                   rowColorCallback: (rowContext) {
                     final theme = _theme;
-                    if (rowContext.stateManager.currentRowIdx == rowContext.rowIdx) {
+                    // Detect the highlighted row by record id, not row index. With
+                    // pinned (frozen) rows present, currentRowIdx is an index into
+                    // the full refRows while rowContext.rowIdx is a display index
+                    // (frozen rows render in a separate block), so an index compare
+                    // would highlight the wrong row.
+                    final currentId = rowContext.stateManager.currentRecord?.id;
+                    final rowId = rowContext.row.getUserData<CharaDetailRecord>()?.id;
+                    if (currentId != null && rowId == currentId) {
                       return theme.colorScheme.primaryContainer;
                     }
                     return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
@@ -328,7 +340,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       final pinnedIdx = pinned.indexOf(rowData);
                       if (pinnedIdx >= 0) {
                         final isLast = pinnedIdx == pinned.length - 1;
-                        final Color background = stateManager.currentRowIdx == pinnedIdx
+                        // Match the highlighted row by record id (see rowColorCallback):
+                        // currentRowIdx and pinnedIdx live in different index spaces.
+                        final currentId = stateManager.currentRecord?.id;
+                        final isCurrent =
+                            currentId != null && rowData.getUserData<CharaDetailRecord>()?.id == currentId;
+                        final Color background = isCurrent
                             ? theme.colorScheme.primaryContainer
                             : (pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor);
                         final separator = isLast
