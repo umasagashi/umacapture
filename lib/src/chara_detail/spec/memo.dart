@@ -227,7 +227,14 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.file(iconPath.toFile()),
+              Image.file(
+                iconPath.toFile(),
+                // Archived records keep their trainee icon, but guard against a
+                // missing/corrupt file so the dialog shows a placeholder instead
+                // of a red error box.
+                errorBuilder: (context, error, stackTrace) =>
+                    Icon(Symbols.hide_image_rounded, size: 64, color: theme.colorScheme.onSurfaceVariant),
+              ),
               Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
               Padding(

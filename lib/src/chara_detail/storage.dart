@@ -205,7 +205,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
     if (rootDirectory.existsSync()) {
       final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
       records.addAll(results.whereType<RecordLoaded>().map((e) => e.record));
-      _surfaceQuarantines(results.whereType<RecordQuarantined>().toList());
+      _surfaceQuarantines(ref, results.whereType<RecordQuarantined>().toList());
     }
     // Safe to write other providers here: we are past the `await` above, so the
     // synchronous build frame (which the modify-during-build guard checks) is done.
@@ -336,36 +336,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       case RecordLoaded(:final record):
         add(record);
       case RecordQuarantined():
-        _surfaceQuarantines([result]);
-    }
-  }
-
-  /// Shows a single aggregated toast for records quarantined during a load.
-  ///
-  /// Centralized here on the main isolate so every load path surfaces the
-  /// outcome: the bulk startup load and [reload] run [CharaDetailRecord.load]
-  /// inside a `compute` isolate, where `Toaster.show` would be a no-op.
-  void _surfaceQuarantines(List<RecordQuarantined> quarantined) {
-    if (quarantined.isEmpty) {
-      return;
-    }
-    final destinations = quarantined.map((e) => e.destination).whereType<DirectoryPath>().toList();
-    final failed = quarantined.length - destinations.length;
-    if (destinations.isNotEmpty) {
-      // All quarantined records share the same quarantine folder; tapping the
-      // toast opens it in the file explorer so the user can inspect/recover them.
-      final quarantineDir = destinations.first.parent;
-      Toaster.show(
-        ToastData.warning(
-          description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
-          onTap: () => quarantineDir.launch(),
-        ),
-      );
-      // Refresh the persistent banner on the chara_detail tab.
-      ref.invalidate(charaDetailQuarantineCountProvider);
-    }
-    if (failed > 0) {
-      Toaster.show(ToastData.error(description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"})));
+        _surfaceQuarantines(ref, [result]);
     }
   }
 
@@ -435,7 +406,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       case RecordLoaded(:final record):
         replaceBy(record, id: id);
       case RecordQuarantined():
-        _surfaceQuarantines([result]);
+        _surfaceQuarantines(ref, [result]);
     }
   }
 
@@ -495,6 +466,38 @@ List<RecordLoadResult> _loadAllCharaDetailRecord(DirectoryPath directory) {
       .toList();
 }
 
+/// Shows a single aggregated toast for records quarantined during a load.
+///
+/// Runs on the main isolate so every load path surfaces the outcome: the bulk
+/// startup load and [CharaDetailRecordStorage.reload] run [CharaDetailRecord.load]
+/// inside a `compute` isolate, where `Toaster.show` would be a no-op. Shared by
+/// both the active and archive storages, which each call [CharaDetailRecord.load]
+/// (the latter via [_loadAllCharaDetailRecord]) and so can both trigger a
+/// quarantine move that must be reported.
+void _surfaceQuarantines(Ref ref, List<RecordQuarantined> quarantined) {
+  if (quarantined.isEmpty) {
+    return;
+  }
+  final destinations = quarantined.map((e) => e.destination).whereType<DirectoryPath>().toList();
+  final failed = quarantined.length - destinations.length;
+  if (destinations.isNotEmpty) {
+    // All quarantined records share the same quarantine folder; tapping the
+    // toast opens it in the file explorer so the user can inspect/recover them.
+    final quarantineDir = destinations.first.parent;
+    Toaster.show(
+      ToastData.warning(
+        description: "app.record_quarantined".tr(namedArgs: {"count": "${destinations.length}"}),
+        onTap: () => quarantineDir.launch(),
+      ),
+    );
+    // Refresh the persistent banner on the chara_detail tab.
+    ref.invalidate(charaDetailQuarantineCountProvider);
+  }
+  if (failed > 0) {
+    Toaster.show(ToastData.error(description: "app.record_quarantine_error".tr(namedArgs: {"count": "$failed"})));
+  }
+}
+
 final charaDetailRecordStorageLoaderProvider = AsyncNotifierProvider<CharaDetailRecordStorage, List<CharaDetailRecord>>(
   CharaDetailRecordStorage.new,
 );
@@ -523,6 +526,10 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> {
       return [];
     }
     final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
+    // Loading a corrupt archived record quarantines its directory as a side
+    // effect; surface that like the active storage does, rather than silently
+    // dropping it (and leaving the count inconsistent).
+    _surfaceQuarantines(ref, results.whereType<RecordQuarantined>().toList());
     return results.whereType<RecordLoaded>().map((e) => e.record).toList();
   }
 
