@@ -124,7 +124,11 @@ class _ResponsiveScaffold extends StatelessWidget {
               : AppBar(
                   title: Text(
                     Pages.at(router.activeIndex).label,
-                    style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary),
+                    // Match the M3 surface app bar (background is colorScheme.surface,
+                    // icons are onSurface); onPrimary here was a leftover from the
+                    // dropped primary-colored app-bar style and read near-white on
+                    // the light surface.
+                    style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onSurface),
                   ),
                 ),
           drawer: wide ? null : const _Drawer(),

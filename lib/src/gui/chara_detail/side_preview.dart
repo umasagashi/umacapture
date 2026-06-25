@@ -56,6 +56,20 @@ class SidePreviewState {
 
 final sidePreviewProvider = settableNotifierProvider<SidePreviewState?>(null);
 
+/// The left-to-right order the panel's image (mode) switches through:
+/// skill ⇔ factor (inheritance) ⇔ campaign (training info).
+const List<CharaDetailRecordImageMode> sidePreviewModeOrder = [
+  CharaDetailRecordImageMode.skillPlain,
+  CharaDetailRecordImageMode.factorPlain,
+  CharaDetailRecordImageMode.campaignPlain,
+];
+
+/// Below this app width the layout switches to the narrow (drawer + app bar)
+/// mode where there is no room for the side panel, so it is disabled (the toggle
+/// hides and the panel does not render). Matches the breakpoint in
+/// `_ResponsiveScaffold` (app_widget.dart).
+const double sidePreviewMinAppWidth = 900;
+
 /// Toolbar button that opens/closes the side preview panel.
 ///
 /// Closing the panel resets [sidePreviewProvider] to null; it only ever reopens
@@ -65,18 +79,23 @@ class SidePreviewToggleButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
+    // No room for the panel in the narrow layout, so hide the toggle entirely.
+    if (MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth) {
+      return const SizedBox.shrink();
+    }
     final open = ref.watch(sidePreviewProvider) != null;
-    return Tooltip(
-      message: "$tr_side_panel.toggle.${open ? "close" : "open"}_tooltip".tr(),
+    // Matches the preset/record toolbar icon buttons (see _PresetActionButton);
+    // the open state is shown by the icon's fill axis, not a background highlight.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
       child: IconButton(
-        isSelected: open,
-        icon: const Icon(Symbols.dock_to_right_rounded),
-        selectedIcon: Icon(Symbols.dock_to_right_rounded, color: theme.colorScheme.onPrimaryContainer),
-        style: IconButton.styleFrom(backgroundColor: open ? theme.colorScheme.primaryContainer : null),
-        onPressed: () {
-          ref.read(sidePreviewProvider.notifier).set(open ? null : const SidePreviewState());
-        },
+        icon: Icon(Symbols.dock_to_right_rounded, size: 22, fill: open ? 1 : 0),
+        tooltip: "$tr_side_panel.toggle.${open ? "close" : "open"}_tooltip".tr(),
+        onPressed: () => ref.read(sidePreviewProvider.notifier).set(open ? null : const SidePreviewState()),
+        visualDensity: VisualDensity.compact,
+        splashRadius: 20,
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        padding: EdgeInsets.zero,
       ),
     );
   }
@@ -90,8 +109,10 @@ class SidePreviewPanel extends StatelessWidget {
   final CharaDetailRecordImageMode mode;
   final bool canPrev;
   final bool canNext;
+  final bool canModeLeft;
+  final bool canModeRight;
   final ValueChanged<int> onNavigate;
-  final VoidCallback onClose;
+  final ValueChanged<int> onChangeMode;
 
   const SidePreviewPanel({
     super.key,
@@ -99,75 +120,50 @@ class SidePreviewPanel extends StatelessWidget {
     required this.mode,
     required this.canPrev,
     required this.canNext,
+    required this.canModeLeft,
+    required this.canModeRight,
     required this.onNavigate,
-    required this.onClose,
+    required this.onChangeMode,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        border: Border(left: BorderSide(color: theme.colorScheme.outline)),
-      ),
+    // No border of its own: the draggable splitter on the left already divides the
+    // panel from the grid.
+    return ColoredBox(
+      color: theme.colorScheme.surface,
       child: Column(
         children: [
-          _Header(onClose: onClose),
           Expanded(
-            child: recordDir == null
-                ? _Placeholder(message: "$tr_side_panel.empty_message".tr())
-                : Padding(
-                    padding: const EdgeInsets.all(2),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return _SidePreviewImageViewer.load(
-                              recordDir: recordDir!,
-                              mode: mode,
-                              viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
-                            ) ??
-                            _Placeholder(message: "$tr_side_panel.loading_error".tr());
-                      },
+            child: ColoredBox(
+              // Backdrop for the image area, visible when no image is shown
+              // (placeholder / load error) and in any letterbox gaps.
+              color: theme.colorScheme.surfaceContainer,
+              child: recordDir == null
+                  ? _Placeholder(message: "$tr_side_panel.empty_message".tr())
+                  : Padding(
+                      padding: const EdgeInsets.all(2),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return _SidePreviewImageViewer.load(
+                                recordDir: recordDir!,
+                                mode: mode,
+                                viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
+                              ) ??
+                              _Placeholder(message: "$tr_side_panel.loading_error".tr());
+                        },
+                      ),
                     ),
-                  ),
-          ),
-          _Footer(canPrev: canPrev, canNext: canNext, onNavigate: onNavigate),
-        ],
-      ),
-    );
-  }
-}
-
-class _Header extends StatelessWidget {
-  final VoidCallback onClose;
-
-  const _Header({required this.onClose});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primary,
-        border: Border(bottom: BorderSide(color: theme.dividerColor)),
-      ),
-      padding: const EdgeInsets.only(left: 16, right: 4),
-      height: 48,
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              "pages.chara_detail.preview.dialog.title".tr(),
-              style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.onPrimary),
             ),
           ),
-          Tooltip(
-            message: "$tr_side_panel.close_button.tooltip".tr(),
-            child: IconButton(
-              icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onPrimary),
-              splashRadius: 24,
-              onPressed: onClose,
-            ),
+          _Footer(
+            canPrev: canPrev,
+            canNext: canNext,
+            canModeLeft: canModeLeft,
+            canModeRight: canModeRight,
+            onNavigate: onNavigate,
+            onChangeMode: onChangeMode,
           ),
         ],
       ),
@@ -178,37 +174,81 @@ class _Header extends StatelessWidget {
 class _Footer extends StatelessWidget {
   final bool canPrev;
   final bool canNext;
+  final bool canModeLeft;
+  final bool canModeRight;
   final ValueChanged<int> onNavigate;
+  final ValueChanged<int> onChangeMode;
 
-  const _Footer({required this.canPrev, required this.canNext, required this.onNavigate});
+  const _Footer({
+    required this.canPrev,
+    required this.canNext,
+    required this.canModeLeft,
+    required this.canModeRight,
+    required this.onNavigate,
+    required this.onChangeMode,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: theme.dividerColor)),
-      ),
+    // left/right switch the shown image within the record (skill ⇔ factor ⇔
+    // campaign); up/down move to the previous/next record. spaceBetween pins the
+    // left/right buttons to the edges and centers the up/down pair when wide.
+    return Padding(
       padding: const EdgeInsets.all(8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.end,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Disabled(
-            disabled: !canPrev,
-            child: Tooltip(
-              message: "$tr_side_panel.up_button.tooltip".tr(),
-              child: OutlinedButton(onPressed: () => onNavigate(-1), child: const Icon(Symbols.arrow_upward_rounded)),
-            ),
+          _NavButton(
+            disabled: !canModeLeft,
+            tooltip: "$tr_side_panel.left_button.tooltip".tr(),
+            icon: Symbols.arrow_back_rounded,
+            onPressed: () => onChangeMode(-1),
           ),
-          const SizedBox(width: 8),
-          Disabled(
-            disabled: !canNext,
-            child: Tooltip(
-              message: "$tr_side_panel.down_button.tooltip".tr(),
-              child: OutlinedButton(onPressed: () => onNavigate(1), child: const Icon(Symbols.arrow_downward_rounded)),
-            ),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _NavButton(
+                disabled: !canPrev,
+                tooltip: "$tr_side_panel.up_button.tooltip".tr(),
+                icon: Symbols.arrow_upward_rounded,
+                onPressed: () => onNavigate(-1),
+              ),
+              const SizedBox(width: 8),
+              _NavButton(
+                disabled: !canNext,
+                tooltip: "$tr_side_panel.down_button.tooltip".tr(),
+                icon: Symbols.arrow_downward_rounded,
+                onPressed: () => onNavigate(1),
+              ),
+            ],
+          ),
+          _NavButton(
+            disabled: !canModeRight,
+            tooltip: "$tr_side_panel.right_button.tooltip".tr(),
+            icon: Symbols.arrow_forward_rounded,
+            onPressed: () => onChangeMode(1),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _NavButton extends StatelessWidget {
+  final bool disabled;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  const _NavButton({required this.disabled, required this.tooltip, required this.icon, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Disabled(
+      disabled: disabled,
+      child: Tooltip(
+        message: tooltip,
+        child: OutlinedButton(onPressed: onPressed, child: Icon(icon)),
       ),
     );
   }

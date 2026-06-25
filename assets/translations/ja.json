@@ -989,8 +989,11 @@
                     "down_button": {
                         "tooltip": "表の1つ下のウマ娘を表示します"
                     },
-                    "close_button": {
-                        "tooltip": "サイドプレビューを閉じる"
+                    "left_button": {
+                        "tooltip": "1つ左の画像を表示します（スキル⇔継承⇔育成情報）"
+                    },
+                    "right_button": {
+                        "tooltip": "1つ右の画像を表示します（スキル⇔継承⇔育成情報）"
                     },
                     "empty_message": "セルをクリックすると、その項目に対応する画像が表示されます。",
                     "loading_error": "ロード中にエラーが発生しました。"

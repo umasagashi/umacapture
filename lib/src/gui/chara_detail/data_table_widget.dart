@@ -115,6 +115,26 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     stateManager.notifyListeners();
   }
 
+  /// Switches the side preview to the image [delta] steps away in the
+  /// skill ⇔ factor ⇔ campaign order, keeping the shown record.
+  void _changeSidePreviewMode(int delta) {
+    final state = ref.read(sidePreviewProvider);
+    if (state == null || state.recordId == null) {
+      return;
+    }
+    final i = sidePreviewModeOrder.indexOf(state.mode);
+    if (i < 0) {
+      return;
+    }
+    final j = Math.clamp(0, i + delta, sidePreviewModeOrder.length - 1);
+    if (j == i) {
+      return;
+    }
+    ref
+        .read(sidePreviewProvider.notifier)
+        .set(SidePreviewState(recordId: state.recordId, mode: sidePreviewModeOrder[j]));
+  }
+
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
     final source = ref.read(recordSourceProvider);
@@ -651,15 +671,25 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // the id), so it works even before the grid finishes loading; the prev/next
     // reach needs the live sorted order, so it stays disabled until the
     // stateManager is ready.
+    // The narrow (drawer + app bar) layout has no room for the panel, so disable
+    // it there: the toggle is hidden (see SidePreviewToggleButton) and the panel
+    // is not rendered even if it was left open before the window shrank.
+    final narrow = MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth;
     final shownId = sidePreview?.recordId;
     DirectoryPath? sideRecordDir;
     var canPrev = false;
     var canNext = false;
-    if (sidePreview != null && shownId != null) {
+    var canModeLeft = false;
+    var canModeRight = false;
+    if (sidePreview != null && !narrow && shownId != null) {
       final source = ref.watch(recordSourceProvider);
       final pathInfo = ref.watch(pathInfoProvider);
       final root = source == RecordSource.active ? pathInfo.charaDetailActiveDir : pathInfo.charaDetailArchiveDir;
       sideRecordDir = root / shownId;
+      // Image (mode) switching within the record is independent of the grid.
+      final modeIndex = sidePreviewModeOrder.indexOf(sidePreview.mode);
+      canModeLeft = modeIndex > 0;
+      canModeRight = modeIndex >= 0 && modeIndex < sidePreviewModeOrder.length - 1;
       if (_loaded) {
         final sorted = stateManager.getSortedRecords().toList();
         final i = sorted.indexWhere((r) => r.id == shownId);
@@ -678,12 +708,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     return Expanded(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final maxPanel = Math.max(280.0, constraints.maxWidth - 360);
-          final panelWidth = Math.clamp(280.0, _panelWidth, maxPanel);
+          final maxPanel = Math.max(300.0, constraints.maxWidth - 360);
+          final panelWidth = Math.clamp(300.0, _panelWidth, maxPanel);
           return Row(
             children: [
               Expanded(child: gridStack),
-              if (sidePreview != null) ...[
+              if (sidePreview != null && !narrow) ...[
                 MouseRegion(
                   cursor: SystemMouseCursors.resizeColumn,
                   child: GestureDetector(
@@ -696,7 +726,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       // behind the cursor. Dragging the splitter left widens the
                       // right-hand panel, hence subtracting delta.dx.
                       setState(() {
-                        _panelWidth = Math.clamp(280.0, _panelWidth - details.delta.dx, maxPanel);
+                        _panelWidth = Math.clamp(300.0, _panelWidth - details.delta.dx, maxPanel);
                       });
                     },
                     child: SizedBox(
@@ -712,8 +742,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     mode: sidePreview.mode,
                     canPrev: canPrev,
                     canNext: canNext,
+                    canModeLeft: canModeLeft,
+                    canModeRight: canModeRight,
                     onNavigate: _navigateSidePreview,
-                    onClose: () => ref.read(sidePreviewProvider.notifier).set(null),
+                    onChangeMode: _changeSidePreviewMode,
                   ),
                 ),
               ],
@@ -826,18 +858,7 @@ class _TopControlsLayer extends ConsumerWidget {
     final selectedCount = ref.watch(selectedRecordIdsProvider).length;
     return Stack(
       children: [
-        const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Expanded(child: ColumnPresetBarWidget()),
-                SidePreviewToggleButton(),
-              ],
-            ),
-            ColumnSpecTagWidget(),
-          ],
-        ),
+        const Column(mainAxisSize: MainAxisSize.min, children: [ColumnPresetBarWidget(), ColumnSpecTagWidget()]),
         if (purpose != null)
           Positioned.fill(
             child: Stack(
