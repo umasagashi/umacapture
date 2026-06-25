@@ -79,7 +79,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
 
   // Width of the side preview panel, adjusted by dragging the splitter between
   // the grid and the panel. Clamped against the available width at paint time.
-  double _panelWidth = 360;
+  double _panelWidth = sidePreviewDefaultPanelWidth;
 
   /// Moves the side preview to the record [delta] rows away in display order,
   /// keeping the current image mode, and follows it with the grid highlight.
@@ -696,6 +696,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         if (i >= 0) {
           canPrev = i > 0;
           canNext = i < sorted.length - 1;
+        } else {
+          // Shown record is no longer in the sorted set (filtered out / removed):
+          // fall back to the empty placeholder instead of stranding it with no
+          // prev/next reach. Only trust this once the grid is loaded.
+          sideRecordDir = null;
         }
       }
     }
@@ -708,8 +713,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     return Expanded(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final maxPanel = Math.max(300.0, constraints.maxWidth - 360);
-          final panelWidth = Math.clamp(300.0, _panelWidth, maxPanel);
+          final maxPanel = Math.max(sidePreviewMinPanelWidth, constraints.maxWidth - sidePreviewMinGridWidth);
+          final panelWidth = Math.clamp(sidePreviewMinPanelWidth, _panelWidth, maxPanel);
           return Row(
             children: [
               Expanded(child: gridStack),
@@ -726,7 +731,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       // behind the cursor. Dragging the splitter left widens the
                       // right-hand panel, hence subtracting delta.dx.
                       setState(() {
-                        _panelWidth = Math.clamp(300.0, _panelWidth - details.delta.dx, maxPanel);
+                        _panelWidth = Math.clamp(sidePreviewMinPanelWidth, _panelWidth - details.delta.dx, maxPanel);
                       });
                     },
                     child: SizedBox(

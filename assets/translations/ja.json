@@ -975,8 +975,7 @@
                             "label": "認識結果を表示",
                             "tooltip": "認識結果を画像にオーバーレイ表示します"
                         }
-                    },
-                    "loading_error": "ロード中にエラーが発生しました。"
+                    }
                 },
                 "side_panel": {
                     "toggle": {
@@ -995,9 +994,9 @@
                     "right_button": {
                         "tooltip": "1つ右の画像の表示"
                     },
-                    "empty_message": "セルをクリックすると、その項目に対応する画像が表示されます。",
-                    "loading_error": "ロード中にエラーが発生しました。"
-                }
+                    "empty_message": "表示したいウマ娘をクリックしてください。"
+                },
+                "loading_error": "ロード中にエラーが発生しました。"
             },
             "report_record": {
                 "dialog": {

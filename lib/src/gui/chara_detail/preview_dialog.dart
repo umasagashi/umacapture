@@ -406,7 +406,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
                       viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
                       overlay: overlay,
                     ) ??
-                    ErrorMessageWidget(message: "$tr_preview.dialog.loading_error".tr());
+                    ErrorMessageWidget(message: "$tr_preview.loading_error".tr());
               },
             ),
           ),

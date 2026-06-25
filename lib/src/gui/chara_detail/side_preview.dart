@@ -70,6 +70,15 @@ const List<CharaDetailRecordImageMode> sidePreviewModeOrder = [
 /// `_ResponsiveScaffold` (app_widget.dart).
 const double sidePreviewMinAppWidth = 900;
 
+/// Default width (px) of the side preview panel before the splitter is dragged.
+const double sidePreviewDefaultPanelWidth = 360;
+
+/// Lower bound (px) the panel can be dragged down to.
+const double sidePreviewMinPanelWidth = 300;
+
+/// Minimum width (px) reserved for the grid when computing the panel's upper bound.
+const double sidePreviewMinGridWidth = 360;
+
 /// Toolbar button that opens/closes the side preview panel.
 ///
 /// Closing the panel resets [sidePreviewProvider] to null; it only ever reopens
@@ -151,7 +160,7 @@ class SidePreviewPanel extends StatelessWidget {
                                 mode: mode,
                                 viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
                               ) ??
-                              _Placeholder(message: "$tr_side_panel.loading_error".tr());
+                              _Placeholder(message: "$tr_preview.loading_error".tr());
                         },
                       ),
                     ),
