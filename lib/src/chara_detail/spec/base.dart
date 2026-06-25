@@ -768,6 +768,14 @@ final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
   return ColumnPresetIndex.specEntryKey(index.selectedKey);
 });
 
+// Above this many rows to (re)insert, [reconcileRows] abandons the per-row diff
+// and replaces the whole row set in one pass. Each incremental insertRows is O(n)
+// in trina (it rescans the original list and rebuilds the filtered view), so a
+// large diff (e.g. a filter/search change that swaps most rows) would otherwise
+// be O(n^2); a wholesale removeAllRows + appendRows is O(n). Small edits stay
+// incremental so scroll offset and row identity are preserved.
+const _bulkReconcileThreshold = 32;
+
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   double _visualTextWidth(BuildContext context, String text, TextStyle style) {
     if (text.isEmpty) {
@@ -854,6 +862,250 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
 
   Iterable<CharaDetailRecord> getSortedRecords() {
     return refRows.map((e) => e.getUserData<CharaDetailRecord>()).nonNulls;
+  }
+
+  /// The record of the currently highlighted (current) row, or null when no row
+  /// is selected. Captured before a reconcile so the highlight can be restored
+  /// onto the same record afterwards via [restoreCurrentRecord].
+  ///
+  /// Resolved from [currentCell] (the actually-selected cell's own row), not from
+  /// `currentRow` (== `refRows[currentRowIdx]`). With pinned (frozen) rows present
+  /// a tap stores a *display* index in `currentRowIdx` (frozen rows render in a
+  /// separate top block, shifting the scrollable rows' display indices) while
+  /// `refRows` keeps its own order, so `refRows[currentRowIdx]` resolves to the
+  /// wrong record. `currentCell.row` is always the tapped row — the same
+  /// unambiguous path trina's own [currentColumn]/[currentColumnField] use.
+  CharaDetailRecord? get currentRecord => currentCell?.row.getUserData<CharaDetailRecord>();
+
+  /// The record id carried by [row], or null when the row has no record attached.
+  String? recordIdOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
+
+  /// Whether [row] is the currently highlighted row, matched by record id.
+  ///
+  /// Index comparison is unsafe here: with pinned (frozen) rows present a tap
+  /// stores a *display* index in [currentRowIdx] (frozen rows render in a
+  /// separate top block) while a reconcile recomputes it against refRows, so the
+  /// two index spaces disagree. Matching [currentRecord] (resolved from the live
+  /// [currentCell]) by id sidesteps both.
+  bool isCurrentRecord(TrinaRow row) {
+    final id = currentRecord?.id;
+    return id != null && recordIdOf(row) == id;
+  }
+
+  /// Indexes [rows] by record id, skipping rows with no record (last id wins).
+  Map<String, TrinaRow> _rowsById(Iterable<TrinaRow> rows) => {for (final row in rows) ?recordIdOf(row): row};
+
+  /// Snapshots each row's current [TrinaRow.sortIdx] keyed by record id.
+  ///
+  /// Captured as plain ints *before* an insert/append mutates the rows in place,
+  /// so the canonical order can be reapplied afterwards via [applyCanonicalSortIdx].
+  Map<String, int> _sortIdxById(Iterable<TrinaRow> rows) => {for (final row in rows) ?recordIdOf(row): row.sortIdx};
+
+  /// Re-selects the row for [record] so the row highlight survives a rebuild that
+  /// dropped the current cell (e.g. a structural column change clears it). No-op
+  /// when the record is already current or no longer present (filtered out).
+  ///
+  /// Prefers the cell in [preferField] (the column the user had selected) so the
+  /// current cell stays in the same column; falls back to the first cell whose
+  /// key is not [ignoreField] (e.g. the checkbox) when that column is gone.
+  void restoreCurrentRecord(CharaDetailRecord? record, {String? preferField, String? ignoreField}) {
+    if (record == null || currentRecord?.id == record.id) {
+      return;
+    }
+    for (var rowIdx = 0; rowIdx < refRows.length; rowIdx++) {
+      final row = refRows[rowIdx];
+      if (recordIdOf(row) != record.id) {
+        continue;
+      }
+      TrinaCell? cell;
+      if (preferField != null && preferField != ignoreField) {
+        cell = row.cells[preferField];
+      }
+      if (cell == null) {
+        for (final entry in row.cells.entries) {
+          if (entry.key != ignoreField) {
+            cell = entry.value;
+            break;
+          }
+        }
+      }
+      if (cell != null) {
+        setCurrentCell(cell, rowIdx, notify: false);
+      }
+      return;
+    }
+  }
+
+  /// Copies the renderer and title from each freshly built column onto the
+  /// matching live column (by field), so columns whose renderer captured a
+  /// provider snapshot (e.g. ratings) repaint with current data — and columns
+  /// whose title is provider-derived (e.g. a renamed rating/label set, whose
+  /// field is the stable spec id) show the new header — without a structural
+  /// replace that would drop their width and sort indicator.
+  ///
+  /// Cell-driven columns (e.g. memo, which reads the cell's user data) are
+  /// refreshed by [reconcileRows] replacing their row instead; copying their
+  /// stateless renderer here is harmless.
+  void refreshColumnRenderers(List<TrinaColumn> nextColumns) {
+    final nextByField = {for (final column in nextColumns) column.field: column};
+    for (final live in columns) {
+      final next = nextByField[live.field];
+      if (next != null) {
+        live.renderer = next.renderer;
+        live.title = next.title;
+      }
+    }
+  }
+
+  /// Whether two rows for the same record render identically: same pinned state
+  /// and same value in every cell. Drives [reconcileRows]'s decision to leave a
+  /// row untouched (preserving scroll and identity) or replace it.
+  bool _rowContentEquals(TrinaRow a, TrinaRow b) {
+    if (a.frozen != b.frozen || a.cells.length != b.cells.length) {
+      return false;
+    }
+    for (final entry in b.cells.entries) {
+      if (a.cells[entry.key]?.value != entry.value.value) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Reapplies the canonical [TrinaRow.sortIdx] captured in [sortIdxById]
+  /// (keyed by record id) onto the live rows.
+  ///
+  /// trina's insert/append paths overwrite a touched row's sortIdx with a
+  /// neighbour-derived sequential value, so after incremental (or appendRows)
+  /// updates the app-assigned default order (`-capturedDate`, set in
+  /// `_buildGrid`) drifts. trina's "reset sort" (the third sort toggle) reorders
+  /// by sortIdx, so without this the default order would come back wrong.
+  ///
+  /// The snapshot must be taken (via [_sortIdxById]) *before* the insert/append
+  /// runs: trina mutates `row.sortIdx` in place, and an inserted row is the very
+  /// fresh object, so reading sortIdx back off it afterwards would just echo the
+  /// already-overwritten value.
+  void applyCanonicalSortIdx(Map<String, int> sortIdxById) {
+    for (final row in refRows.originalList) {
+      final id = recordIdOf(row);
+      final sortIdx = id == null ? null : sortIdxById[id];
+      if (sortIdx != null) {
+        row.sortIdx = sortIdx;
+      }
+    }
+  }
+
+  /// Replaces the whole live row set with [nextRows] in one O(n) pass, preserving
+  /// the canonical sort order and keeping the current cell position in sync.
+  ///
+  /// Shared by [reconcileRows]'s bulk-diff fallback and the widget's structural
+  /// column-change path. Snapshots the canonical sortIdx before append (see
+  /// [applyCanonicalSortIdx]) so a later "reset sort" reproduces the default order.
+  void replaceAllRows(List<TrinaRow> nextRows, {String? sortColumn, TrinaColumnSort sortOrder = TrinaColumnSort.none}) {
+    final sortIdxById = _sortIdxById(nextRows);
+    removeAllRows(notify: false);
+    appendRows(nextRows);
+    applyCanonicalSortIdx(sortIdxById);
+    if (sortColumn != null) {
+      sortColumnByField(sortColumn, sortOrder);
+    }
+    updateCurrentCellPosition(notify: false);
+  }
+
+  /// Applies [nextRows] to the live grid by record id, touching only the rows
+  /// that actually changed.
+  ///
+  /// Rows whose record vanished or whose content/pinned state changed are
+  /// removed and the fresh row is reinserted at its position in [nextRows];
+  /// unchanged rows keep their identity so the scroll offset and current cell
+  /// survive a single cell edit. Assumes the column set is unchanged (the caller
+  /// handles structural column changes with a full rebuild).
+  ///
+  /// When the diff is large (more than [_bulkReconcileThreshold] rows to
+  /// reinsert) the per-row insert would be O(n^2), so it falls back to a
+  /// wholesale replace: cheaper, at the cost of resetting scroll and selection
+  /// (the caller restores the selection by record afterwards).
+  ///
+  /// Returns whether any row was actually added, removed, or replaced, so the
+  /// caller can skip a column re-fit on a selection/sort-only reconcile.
+  bool reconcileRows(
+    List<TrinaRow> nextRows, {
+    String? sortColumn,
+    TrinaColumnSort sortOrder = TrinaColumnSort.none,
+    bool notify = true,
+  }) {
+    // The incremental insert below uses indices into nextRows (the desired,
+    // unfiltered order). trina's insertRows interprets its index against the
+    // filtered refRows view, so the two only coincide while no trina-level
+    // column filter is active. The app filters upstream (in _buildGrid) and
+    // never enables trina's own filter, keeping refRows == originalList.
+    assert(
+      refRows.length == refRows.originalList.length,
+      'reconcileRows assumes no active trina-level filter (refRows == originalList).',
+    );
+
+    final nextById = _rowsById(nextRows);
+
+    // Rows to keep as-is. Everything else (gone, changed, or pinned-state
+    // changed) is removed below and reinserted fresh from nextRows.
+    final unchangedIds = <String>{};
+    final toRemove = <TrinaRow>[];
+    for (final row in refRows.originalList) {
+      final id = recordIdOf(row);
+      final next = id == null ? null : nextById[id];
+      if (next != null && _rowContentEquals(row, next)) {
+        unchangedIds.add(id!);
+      } else {
+        toRemove.add(row);
+      }
+    }
+
+    final insertCount = nextRows.length - unchangedIds.length;
+    final changed = toRemove.isNotEmpty || insertCount > 0;
+    if (insertCount > _bulkReconcileThreshold) {
+      // Large diff: the incremental path buys nothing (most rows are reinserted)
+      // yet pays O(n^2). Replace the whole row set in one O(n) pass instead.
+      // replaceAllRows snapshots/restores the canonical sortIdx and syncs the
+      // current cell position itself.
+      replaceAllRows(nextRows, sortColumn: sortColumn, sortOrder: sortOrder);
+    } else {
+      // Snapshot the canonical sortIdx as plain ints before any insert mutates
+      // the rows in place; an inserted row is the fresh object itself, so reading
+      // its sortIdx back afterwards would echo the overwritten value.
+      final sortIdxById = _sortIdxById(nextRows);
+      if (toRemove.isNotEmpty) {
+        removeRows(toRemove, notify: false);
+      }
+      // Reinsert added/changed rows at their slot in the desired order.
+      // Processing ascending keeps each index valid: unchanged rows already sit
+      // at their final position once all earlier inserts have landed.
+      for (var position = 0; position < nextRows.length; position++) {
+        final row = nextRows[position];
+        final id = recordIdOf(row);
+        if (id == null || !unchangedIds.contains(id)) {
+          insertRows(position, [row], notify: false);
+        }
+      }
+      // insert overwrote the canonical sortIdx of the touched rows; restore it
+      // from the pre-insert snapshot so a later "reset sort" reproduces the
+      // default order.
+      applyCanonicalSortIdx(sortIdxById);
+
+      if (sortColumn != null) {
+        sortColumnByField(sortColumn, sortOrder);
+      }
+      // removeRows/insertRows keep the current cell position in sync, but
+      // sortColumnByField reorders refRows without touching it — leaving the row
+      // highlight (driven by currentRowIdx) stranded on a stale index (often the
+      // top row). Recompute the position from the still-correct current cell so
+      // the highlight stays on the selected record.
+      updateCurrentCellPosition(notify: false);
+    }
+
+    if (notify) {
+      notifyListeners();
+    }
+    return changed;
   }
 }
 
