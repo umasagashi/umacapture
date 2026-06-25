@@ -20,10 +20,14 @@ import 'package:path_provider/path_provider.dart';
 
 import '/src/core/app_logger.dart';
 
-/// Current on-disk schema version of [_bootstrapFileName].
+/// Current on-disk schema version of [bootstrapFileName].
 const int _bootstrapVersion = 1;
 
-const String _bootstrapFileName = "data_root.json";
+/// Name of the fixed bootstrap file that records the data root override.
+///
+/// Public so the settings UI can show its location, letting a user hand-edit the
+/// data root if the in-app change ever fails to write it.
+const String bootstrapFileName = "data_root.json";
 
 const String _versionKey = "version";
 
@@ -55,10 +59,19 @@ bool dataRootDegraded = false;
 /// offer to clear the stale pointer. `null` means no override is recorded.
 String? configuredDataRoot;
 
+/// Returns a sample `data_root.json` body pointing at [examplePath].
+///
+/// Built with the same encoder, schema version, and keys the app itself writes
+/// (see [writeDataRootOverride]), so the sample shown in the settings UI can
+/// never drift from the real format. The encoder escapes backslashes, so a
+/// Windows [examplePath] comes out correctly JSON-escaped for the user to copy.
+String sampleBootstrapContent(String examplePath) =>
+    const JsonEncoder.withIndent("  ").convert({_versionKey: _bootstrapVersion, _dataRootKey: examplePath});
+
 /// Returns the fixed bootstrap file, independent of any override.
 Future<File> _bootstrapFile() async {
   final supportDir = await getApplicationSupportDirectory();
-  return File(p.join(supportDir.path, _bootstrapFileName));
+  return File(p.join(supportDir.path, bootstrapFileName));
 }
 
 /// Reads the configured data root and caches it in [resolvedDataRoot].

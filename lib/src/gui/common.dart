@@ -393,7 +393,18 @@ class _CardDialogState extends ConsumerState<CardDialog> {
                 ),
               ),
             ),
-          if (!widget.usePageView) widget.content,
+          if (!widget.usePageView)
+            // Bound the content to the space left between the title and bottom
+            // bars and let it scroll past that, instead of overflowing the card.
+            // `Flexible` (loose) keeps short content at its natural size, so
+            // dialogs that already fit are visually unchanged; the inner scroll
+            // view still hands the content unbounded height as before.
+            Flexible(
+              child: Scrollbar(
+                controller: _controller,
+                child: SingleChildScrollView(controller: _controller, child: widget.content),
+              ),
+            ),
           if (widget.bottom != null)
             Container(
               decoration: BoxDecoration(

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
+import '/const.dart';
 import '/src/core/bootstrap.dart';
 import '/src/core/data_root_migration.dart';
 import '/src/core/path_entity.dart';
@@ -153,6 +154,116 @@ class _LabeledPath extends StatelessWidget {
         ),
         child,
       ],
+    );
+  }
+}
+
+/// A footnote pointing at the bootstrap file (`data_root.json`) that records the
+/// data root, with copy-path and reveal-in-explorer actions.
+///
+/// The in-app change writes this file, but if that ever fails (e.g. a read-only
+/// support directory), the user can edit the file by hand to set the location.
+/// The file may not exist yet in the native-default layout; the reveal action
+/// opens its parent folder so the user can create it there.
+class _BootstrapFileHint extends StatelessWidget {
+  final FilePath file;
+
+  const _BootstrapFileHint({required this.file});
+
+  /// A platform-appropriate example data root for the sample file body. It is
+  /// illustrative only; the user is expected to replace it with a real path.
+  static String get _examplePath {
+    if (CurrentPlatform.isWindows()) return r"D:\ExamplePath\umacapture";
+    if (CurrentPlatform.isMacOS()) return "/Users/you/umacapture";
+    return "/home/you/umacapture";
+  }
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: file.path));
+    Toaster.show(ToastData.success(description: "$tr_storage.dialog.path_copied".tr()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text("$tr_storage.dialog.bootstrap_hint".tr(), style: theme.textTheme.bodyMedium),
+        const SizedBox(height: 16),
+        _PathBox(
+          path: file.path,
+          trailing: [
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Symbols.content_copy_rounded),
+              tooltip: "$tr_storage.dialog.copy_path_tooltip".tr(),
+              onPressed: _copy,
+            ),
+            IconButton(
+              icon: const Icon(Symbols.folder_open_rounded),
+              tooltip: "$tr_storage.dialog.open_in_explorer_tooltip".tr(),
+              onPressed: () => file.parent.launch(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        _LabeledPath(
+          label: "$tr_storage.dialog.bootstrap_sample_label".tr(),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text("$tr_storage.dialog.bootstrap_sample_notes".tr(), style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 8),
+              _JsonSampleBox(content: sampleBootstrapContent(_examplePath)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// A bordered, multi-line read-out of a sample JSON file body with a
+/// copy-to-clipboard action, styled to match the dialog's path boxes.
+class _JsonSampleBox extends StatelessWidget {
+  final String content;
+
+  const _JsonSampleBox({required this.content});
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: content));
+    Toaster.show(ToastData.success(description: "$tr_storage.dialog.sample_copied".tr()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.dividerColor),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              child: SelectableText(content, style: theme.textTheme.bodyMedium),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Symbols.content_copy_rounded),
+            tooltip: "$tr_storage.dialog.copy_sample_tooltip".tr(),
+            visualDensity: VisualDensity.compact,
+            onPressed: _copy,
+          ),
+        ],
+      ),
     );
   }
 }
@@ -328,7 +439,11 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
         // Degraded: the real data is unreachable, so migrating would strand it.
         // Show the unavailable root and offer only the data-free clear action.
         if (_degraded) {
-          return _DegradedContent(root: configuredDataRoot, onClear: _clearOverride);
+          return _DegradedContent(
+            root: configuredDataRoot,
+            bootstrapFile: _source.supportDir.filePath(bootstrapFileName),
+            onClear: _clearOverride,
+          );
         }
         return _OverviewContent(
           source: _source,
@@ -511,6 +626,12 @@ class _OverviewContent extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(height: 24),
+        _SectionHeader(label: "$tr_storage.dialog.bootstrap_heading".tr()),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: _BootstrapFileHint(file: source.supportDir.filePath(bootstrapFileName)),
+        ),
       ],
     );
   }
@@ -524,9 +645,13 @@ class _OverviewContent extends StatelessWidget {
 class _DegradedContent extends StatelessWidget {
   /// The recorded-but-unreachable root, or `null` if it could not be recovered.
   final String? root;
+
+  /// The bootstrap file recording the root, surfaced so the user can hand-edit
+  /// or remove it if reconnecting the drive is not an option.
+  final FilePath bootstrapFile;
   final VoidCallback onClear;
 
-  const _DegradedContent({required this.root, required this.onClear});
+  const _DegradedContent({required this.root, required this.bootstrapFile, required this.onClear});
 
   @override
   Widget build(BuildContext context) {
@@ -549,6 +674,8 @@ class _DegradedContent extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text("$tr_storage.dialog.unavailable_help".tr(), style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 16),
+              _BootstrapFileHint(file: bootstrapFile),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
