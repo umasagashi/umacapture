@@ -208,6 +208,15 @@ void copyRecordImageToClipboard(RefBase ref, DirectoryPath recordDir, CharaDetai
   unawaited(ClipboardAlt.pasteImage(ref, imagePath));
 }
 
+/// Writes [record] to `record.json` under [recordDir], in the 4-space-indent
+/// on-disk format the native recognizer and the exporter produce.
+///
+/// Shared by both stores' `_persist`, which only differ in the record directory
+/// their `recordPathOf` resolves (active vs. archive root).
+void _persistRecordJson(DirectoryPath recordDir, CharaDetailRecord record) {
+  recordDir.filePath("record.json").writeAsStringSync(const JsonEncoder.withIndent('    ').convert(record.toMap()));
+}
+
 /// The mutation surface shared by the active ([CharaDetailRecordStorage]) and
 /// archive ([CharaDetailArchiveStorage]) stores.
 ///
@@ -313,20 +322,13 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
     final archiveIds = {for (final e in archiveRecords) e.id};
     final activeChildUpdates = <String, CharaDetailRecord>{};
-    final archiveChildUpdates = <CharaDetailRecord>[];
-    for (final updated in resolution.changed) {
-      if (archiveIds.contains(updated.id)) {
-        archiveChildUpdates.add(updated);
-      } else {
-        // The new record (always active) and any active children persist here.
-        _persist(updated);
-        if (updated.id != record.id) {
-          activeChildUpdates[updated.id] = updated;
-        }
+    // The new record (always active) persists here too; only existing active
+    // children feed the republish map.
+    _routeInheritanceChanges(resolution, archiveIds, (updated) {
+      if (updated.id != record.id) {
+        activeChildUpdates[updated.id] = updated;
       }
-    }
-    // Archived children are written back and republished by the archive store.
-    ref.read(charaDetailArchiveStorageLoaderProvider.notifier).applyInheritanceUpdates(archiveChildUpdates);
+    });
     _updateRecordInfo(resolvedRecord);
 
     // `activeRecords` already folds in any pending batch updates, so publishing it
@@ -360,18 +362,34 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
         ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
     final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords]);
     final archiveIds = {for (final e in archiveRecords) e.id};
+    _routeInheritanceChanges(resolution, archiveIds, (updated) {
+      replaceBy(updated, id: updated.id);
+    });
+    forceRebuild();
+    _surfaceInheritance(resolution, alwaysReport: true);
+  }
+
+  /// Routes each changed record to its owning store.
+  ///
+  /// Active records are persisted here and then handed to [onActive] for the
+  /// store-specific in-memory republish; archived records are collected and
+  /// written back (and republished) by the archive store in a single
+  /// [CharaDetailArchiveStorage.applyInheritanceUpdates] call.
+  void _routeInheritanceChanges(
+    InheritanceResolution resolution,
+    Set<String> archiveIds,
+    void Function(CharaDetailRecord updated) onActive,
+  ) {
     final archiveUpdates = <CharaDetailRecord>[];
     for (final updated in resolution.changed) {
       if (archiveIds.contains(updated.id)) {
         archiveUpdates.add(updated);
       } else {
         _persist(updated);
-        replaceBy(updated, id: updated.id);
+        onActive(updated);
       }
     }
     ref.read(charaDetailArchiveStorageLoaderProvider.notifier).applyInheritanceUpdates(archiveUpdates);
-    forceRebuild();
-    _surfaceInheritance(resolution, alwaysReport: true);
   }
 
   /// Reports the outcome of an inheritance resolution via toasts.
@@ -396,13 +414,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     }
   }
 
-  /// Writes [record] back to its `record.json`, matching the on-disk format
-  /// (4-space indent) that the native recognizer and the exporter produce.
-  void _persist(CharaDetailRecord record) {
-    recordPathOf(
-      record,
-    ).filePath("record.json").writeAsStringSync(const JsonEncoder.withIndent('    ').convert(record.toMap()));
-  }
+  /// Writes [record] back to its active `record.json` via [_persistRecordJson].
+  void _persist(CharaDetailRecord record) => _persistRecordJson(recordPathOf(record), record);
 
   void addFromFile(String id) {
     final result = CharaDetailRecord.load(rootDirectory / id);
@@ -620,14 +633,8 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     return state.asData?.value.firstWhereOrNull((e) => e.id == id);
   }
 
-  /// Writes [record] back to its archived `record.json`, matching the on-disk
-  /// 4-space-indent format of [CharaDetailRecordStorage._persist] and the native
-  /// recognizer.
-  void _persist(CharaDetailRecord record) {
-    recordPathOf(
-      record,
-    ).filePath("record.json").writeAsStringSync(const JsonEncoder.withIndent('    ').convert(record.toMap()));
-  }
+  /// Writes [record] back to its archived `record.json` via [_persistRecordJson].
+  void _persist(CharaDetailRecord record) => _persistRecordJson(recordPathOf(record), record);
 
   /// Persists inheritance-updated archived [records] and swaps them into the
   /// in-memory list by id.

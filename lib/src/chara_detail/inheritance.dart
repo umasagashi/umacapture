@@ -65,12 +65,17 @@ class InheritanceResolver {
     final changed = <CharaDetailRecord>[];
     final ambiguities = <AmbiguousMatch>[];
 
+    // Index [existing] by self key once so both directions resolve candidates in
+    // O(1) lookups instead of a full scan per slot/child. [existing] excludes
+    // newRecord, so no self-exclusion is needed here.
+    final index = _selfKeyIndex(existing);
+
     // Direction A: treat newRecord as a child and find its parents.
     var parent1 = newRecord.metadata.recordId.parent1;
     var parent2 = newRecord.metadata.recordId.parent2;
     for (final slot in const [1, 2]) {
       final key = _childKey(newRecord, slot);
-      final candidates = existing.where((p) => _selfKey(p) == key).toList();
+      final candidates = index[key] ?? const <CharaDetailRecord>[];
       if (candidates.length == 1) {
         if (slot == 1) {
           parent1 = candidates.first.id;
@@ -87,6 +92,7 @@ class InheritanceResolver {
 
     // Direction B: treat newRecord as a parent and find existing children.
     final newSelfKey = _selfKey(newRecord);
+    final sameSelf = index[newSelfKey] ?? const <CharaDetailRecord>[];
     final childUpdates = <String, CharaDetailRecord>{};
     for (final child in existing) {
       for (final slot in const [1, 2]) {
@@ -95,7 +101,7 @@ class InheritanceResolver {
         }
         // Any other stored record that also satisfies this slot makes the match
         // ambiguous (the child should already be linked to it), so skip linking.
-        final others = existing.where((p) => p.id != child.id && _selfKey(p) == newSelfKey);
+        final others = sameSelf.where((p) => p.id != child.id);
         if (others.isNotEmpty) {
           ambiguities.add(AmbiguousMatch(child.id, slot, others.length + 1));
           continue;

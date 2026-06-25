@@ -110,6 +110,22 @@ void main() {
       expect(result.ambiguities.single.candidateCount, 2);
     });
 
+    test('new parent is not linked when another stored record already satisfies the slot', () {
+      // Direction B ambiguity: the new parent and an existing record both match
+      // the child's slot, so the child is left unlinked and reported instead.
+      final child = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: [const Factor(1, 1)]);
+      final existingParent = makeRecord(id: 'p_existing', card: 10, self: [const Factor(1, 1)]);
+      final newParent = makeRecord(id: 'p_new', card: 10, self: [const Factor(1, 1)]);
+
+      final result = InheritanceResolver.resolveForNewRecord(newParent, [child, existingParent]);
+
+      expect(result.changed, isEmpty);
+      expect(result.ambiguities, hasLength(1));
+      expect(result.ambiguities.single.recordId, 'c');
+      expect(result.ambiguities.single.slot, 1);
+      expect(result.ambiguities.single.candidateCount, 2);
+    });
+
     test('card mismatch does not link', () {
       final parent = makeRecord(id: 'p', card: 11, self: [const Factor(1, 1)]);
       final child = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: [const Factor(1, 1)]);
