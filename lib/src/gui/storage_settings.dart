@@ -422,6 +422,9 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
           ? null
           : "$tr_storage.dialog.close_button".tr(),
       usePageView: false,
+      // The overview can grow taller than the card (per-directory breakdown plus
+      // the bootstrap-file hint), so let it scroll instead of overflowing.
+      scrollableContent: true,
       // Fill the dialog width instead of a fixed 480: the title bar and bottom
       // button row already stretch to the card width, so a narrower fixed
       // content was being centered with empty side gutters.
