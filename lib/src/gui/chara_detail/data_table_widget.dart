@@ -418,7 +418,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         // recomputed per notify.
                         final stripe = pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
                         final separator = isLast
-                            ? BorderSide(color: theme.colorScheme.primary, width: 3)
+                            ? BorderSide(color: theme.colorScheme.outline, width: 3)
                             : BorderSide(
                                 color: theme.focusColor,
                                 width: stateManager.configuration.style.cellHorizontalBorderWidth,
@@ -581,6 +581,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       sortColumn = event.column.field;
                       sortOrder = event.column.sort;
                     }
+                    // A header-click sort reorders the frozen rows in place
+                    // (FilteredList.sort works on originalList), but unlike
+                    // _reconcile/onLoaded it doesn't rebuild the pinned index, so
+                    // rowWrapper's stripe/boundary would read stale positions.
+                    // toggleSortColumn fires this before its own notifyListeners,
+                    // so re-indexing here lands in the very next repaint.
+                    _indexPinnedRows();
                   },
                 ),
               );
