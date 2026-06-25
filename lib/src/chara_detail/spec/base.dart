@@ -894,10 +894,20 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     return byId;
   }
 
+  /// Snapshots each row's current [TrinaRow.sortIdx] keyed by record id.
+  ///
+  /// Captured as plain ints *before* an insert/append mutates the rows in place,
+  /// so the canonical order can be reapplied afterwards via [applyCanonicalSortIdx].
+  Map<String, int> _sortIdxById(Iterable<TrinaRow> rows) => {for (final row in rows) ?recordIdOf(row): row.sortIdx};
+
   /// Re-selects the row for [record] so the row highlight survives a rebuild that
   /// dropped the current cell (e.g. a structural column change clears it). No-op
   /// when the record is already current or no longer present (filtered out).
-  void restoreCurrentRecord(CharaDetailRecord? record, {String? ignoreField}) {
+  ///
+  /// Prefers the cell in [preferField] (the column the user had selected) so the
+  /// current cell stays in the same column; falls back to the first cell whose
+  /// key is not [ignoreField] (e.g. the checkbox) when that column is gone.
+  void restoreCurrentRecord(CharaDetailRecord? record, {String? preferField, String? ignoreField}) {
     if (record == null || currentRecord?.id == record.id) {
       return;
     }
@@ -907,10 +917,15 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
         continue;
       }
       TrinaCell? cell;
-      for (final entry in row.cells.entries) {
-        if (entry.key != ignoreField) {
-          cell = entry.value;
-          break;
+      if (preferField != null && preferField != ignoreField) {
+        cell = row.cells[preferField];
+      }
+      if (cell == null) {
+        for (final entry in row.cells.entries) {
+          if (entry.key != ignoreField) {
+            cell = entry.value;
+            break;
+          }
         }
       }
       if (cell != null) {
@@ -956,25 +971,44 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     return true;
   }
 
-  /// Realigns each live row's [TrinaRow.sortIdx] to the value carried by the
-  /// matching fresh row in [nextRows] (matched by record id).
+  /// Reapplies the canonical [TrinaRow.sortIdx] captured in [sortIdxById]
+  /// (keyed by record id) onto the live rows.
   ///
-  /// trina's insert/append paths overwrite an inserted row's sortIdx with a
+  /// trina's insert/append paths overwrite a touched row's sortIdx with a
   /// neighbour-derived sequential value, so after incremental (or appendRows)
   /// updates the app-assigned default order (`-capturedDate`, set in
   /// `_buildGrid`) drifts. trina's "reset sort" (the third sort toggle) reorders
-  /// by sortIdx, so without this the default order would come back wrong. The
-  /// fresh rows still hold the canonical sortIdx; copy it back onto the live rows
-  /// (same object identity).
-  void restoreCanonicalSortIdx(List<TrinaRow> nextRows, {Map<String, TrinaRow>? nextById}) {
-    final byId = nextById ?? _rowsById(nextRows);
+  /// by sortIdx, so without this the default order would come back wrong.
+  ///
+  /// The snapshot must be taken (via [_sortIdxById]) *before* the insert/append
+  /// runs: trina mutates `row.sortIdx` in place, and an inserted row is the very
+  /// fresh object, so reading sortIdx back off it afterwards would just echo the
+  /// already-overwritten value.
+  void applyCanonicalSortIdx(Map<String, int> sortIdxById) {
     for (final row in refRows.originalList) {
       final id = recordIdOf(row);
-      final next = id == null ? null : byId[id];
-      if (next != null) {
-        row.sortIdx = next.sortIdx;
+      final sortIdx = id == null ? null : sortIdxById[id];
+      if (sortIdx != null) {
+        row.sortIdx = sortIdx;
       }
     }
+  }
+
+  /// Replaces the whole live row set with [nextRows] in one O(n) pass, preserving
+  /// the canonical sort order and keeping the current cell position in sync.
+  ///
+  /// Shared by [reconcileRows]'s bulk-diff fallback and the widget's structural
+  /// column-change path. Snapshots the canonical sortIdx before append (see
+  /// [applyCanonicalSortIdx]) so a later "reset sort" reproduces the default order.
+  void replaceAllRows(List<TrinaRow> nextRows, {String? sortColumn, TrinaColumnSort sortOrder = TrinaColumnSort.none}) {
+    final sortIdxById = _sortIdxById(nextRows);
+    removeAllRows(notify: false);
+    appendRows(nextRows);
+    applyCanonicalSortIdx(sortIdxById);
+    if (sortColumn != null) {
+      sortColumnByField(sortColumn, sortOrder);
+    }
+    updateCurrentCellPosition(notify: false);
   }
 
   /// Applies [nextRows] to the live grid by record id, touching only the rows
@@ -990,7 +1024,10 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// reinsert) the per-row insert would be O(n^2), so it falls back to a
   /// wholesale replace: cheaper, at the cost of resetting scroll and selection
   /// (the caller restores the selection by record afterwards).
-  void reconcileRows(
+  ///
+  /// Returns whether any row was actually added, removed, or replaced, so the
+  /// caller can skip a column re-fit on a selection/sort-only reconcile.
+  bool reconcileRows(
     List<TrinaRow> nextRows, {
     String? sortColumn,
     TrinaColumnSort sortOrder = TrinaColumnSort.none,
@@ -1023,12 +1060,18 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
 
     final insertCount = nextRows.length - unchangedIds.length;
+    final changed = toRemove.isNotEmpty || insertCount > 0;
     if (insertCount > _bulkReconcileThreshold) {
       // Large diff: the incremental path buys nothing (most rows are reinserted)
       // yet pays O(n^2). Replace the whole row set in one O(n) pass instead.
-      removeAllRows(notify: false);
-      appendRows(nextRows);
+      // replaceAllRows snapshots/restores the canonical sortIdx and syncs the
+      // current cell position itself.
+      replaceAllRows(nextRows, sortColumn: sortColumn, sortOrder: sortOrder);
     } else {
+      // Snapshot the canonical sortIdx as plain ints before any insert mutates
+      // the rows in place; an inserted row is the fresh object itself, so reading
+      // its sortIdx back afterwards would echo the overwritten value.
+      final sortIdxById = _sortIdxById(nextRows);
       if (toRemove.isNotEmpty) {
         removeRows(toRemove, notify: false);
       }
@@ -1042,25 +1085,26 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
           insertRows(position, [row], notify: false);
         }
       }
+      // insert overwrote the canonical sortIdx of the touched rows; restore it
+      // from the pre-insert snapshot so a later "reset sort" reproduces the
+      // default order.
+      applyCanonicalSortIdx(sortIdxById);
+
+      if (sortColumn != null) {
+        sortColumnByField(sortColumn, sortOrder);
+      }
+      // removeRows/insertRows keep the current cell position in sync, but
+      // sortColumnByField reorders refRows without touching it — leaving the row
+      // highlight (driven by currentRowIdx) stranded on a stale index (often the
+      // top row). Recompute the position from the still-correct current cell so
+      // the highlight stays on the selected record.
+      updateCurrentCellPosition(notify: false);
     }
 
-    // insert/append overwrote the canonical sortIdx of the touched rows; restore
-    // it so a later "reset sort" reproduces the default order. Reuse the id map
-    // already built above instead of rebuilding it.
-    restoreCanonicalSortIdx(nextRows, nextById: nextById);
-
-    if (sortColumn != null) {
-      sortColumnByField(sortColumn, sortOrder);
-    }
-    // removeRows/insertRows keep the current cell position in sync, but
-    // sortColumnByField reorders refRows without touching it — leaving the row
-    // highlight (driven by currentRowIdx) stranded on a stale index (often the
-    // top row). Recompute the position from the still-correct current cell so the
-    // highlight stays on the selected record.
-    updateCurrentCellPosition(notify: false);
     if (notify) {
       notifyListeners();
     }
+    return changed;
   }
 }
 

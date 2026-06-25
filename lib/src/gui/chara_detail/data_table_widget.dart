@@ -195,6 +195,21 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     return true;
   }
 
+  /// Runs [action] after the current frame, but only while the grid is still
+  /// mounted and loaded.
+  ///
+  /// Every imperative grid poke is deferred this way: the grid may leave the tree
+  /// before the next frame (page torn down, or columns emptied — which disposes
+  /// the stateManager), so the guard keeps a stale/disposed manager from being
+  /// touched.
+  void _afterFrame(VoidCallback action) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _loaded) {
+        action();
+      }
+    });
+  }
+
   /// Pushes a freshly built [Grid] into the live grid instead of recreating it.
   ///
   /// When the column set/order changed (preset/column edits, entering or leaving
@@ -208,10 +223,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       _pending = next;
       return;
     }
-    // Remember the highlighted row's record so the selection survives the update.
-    // The row diff keeps an unchanged row's identity on its own, but a structural
-    // column change rebuilds every row and clears the current cell.
+    // Remember the highlighted row's record (and which column the user had
+    // selected) so the selection survives the update. The row diff keeps an
+    // unchanged row's identity on its own, but a structural column change
+    // rebuilds every row and clears the current cell.
     final selectedRecord = stateManager.currentRecord;
+    final selectedField = stateManager.currentColumnField;
     final columnsChanged = _appliedGrid == null || !_sameColumns(_appliedGrid!.columns, next.columns);
     if (columnsChanged) {
       // Clear rows first so the column replace operates on an empty row set (no
@@ -219,31 +236,34 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       stateManager.removeAllRows(notify: false);
       stateManager.removeColumns(stateManager.columns.toList());
       stateManager.insertColumns(0, next.columns);
-      stateManager.appendRows(next.rows);
-      // appendRows overwrites the canonical sortIdx; restore it so a later "reset
-      // sort" reproduces the default (-capturedDate) order.
-      stateManager.restoreCanonicalSortIdx(next.rows);
-      if (sortColumn != null) {
-        stateManager.sortColumnByField(sortColumn!, sortOrder);
-      }
+      // Replace the row set wholesale, restoring the canonical sortIdx and the
+      // current cell position (shared with reconcileRows' bulk fallback).
+      stateManager.replaceAllRows(next.rows, sortColumn: sortColumn, sortOrder: sortOrder);
       // autoFitColumns measures via gridKey.currentContext, which needs the new
-      // columns laid out first, so defer it one frame. Guard on _loaded too: the
-      // grid may have left the tree (empty columns) before the frame, disposing
-      // its stateManager.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && _loaded) {
-          stateManager.autoFitColumns();
-        }
-      });
+      // columns laid out first, so defer it one frame (the grid may have left the
+      // tree before the frame, disposing its stateManager — _afterFrame guards that).
+      _afterFrame(() => stateManager.autoFitColumns());
     } else {
       stateManager.refreshColumnRenderers(next.columns);
       // _reconcile notifies once at the end (after restoreCurrentRecord), so the
       // row diff and the restored selection land in a single repaint.
-      stateManager.reconcileRows(next.rows, sortColumn: sortColumn, sortOrder: sortOrder, notify: false);
+      final rowsChanged = stateManager.reconcileRows(
+        next.rows,
+        sortColumn: sortColumn,
+        sortOrder: sortOrder,
+        notify: false,
+      );
+      // Re-fit columns when the row set actually changed (e.g. a cell edited to a
+      // longer value), matching the pre-incremental behavior. Skipped on a
+      // selection/sort-only reconcile so widths don't churn needlessly.
+      if (rowsChanged) {
+        _afterFrame(() => stateManager.autoFitColumns());
+      }
     }
-    // Re-highlight the same record (skips the checkbox cell so the highlight
-    // lands on a data cell). No-op when it is still current or now filtered out.
-    stateManager.restoreCurrentRecord(selectedRecord, ignoreField: checkColumnField);
+    // Re-highlight the same record on the same column when possible (skips the
+    // checkbox cell so the highlight lands on a data cell). No-op when it is still
+    // current or now filtered out.
+    stateManager.restoreCurrentRecord(selectedRecord, preferField: selectedField, ignoreField: checkColumnField);
     _appliedGrid = next;
     stateManager.notifyListeners();
   }
@@ -262,14 +282,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _theme = theme;
     _purpose = purpose;
     if (themeChanged) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        // Skip when the grid has since left the tree (empty columns): its
-        // stateManager is then disposed, so notifying it would be a wasted no-op
-        // on a stale manager.
-        if (mounted && _loaded) {
-          stateManager.notifyListeners();
-        }
-      });
+      // The grid's long-lived row callbacks read _theme; nudge them to repaint
+      // with the new colors (a theme change doesn't touch currentGridProvider).
+      _afterFrame(() => stateManager.notifyListeners());
     }
     // Apply subsequent grid changes to the live stateManager rather than letting
     // the watch above rebuild a fresh grid (TrinaGrid ignores changed columns/rows
@@ -448,15 +463,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // when the row list repaints — not when a single checkbox cell
                     // updates itself. Nudge the grid to repaint its rows (this
                     // reuses the existing rows, so checked state is preserved).
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      // The grid may leave the tree before the next frame (page torn
-                      // down, or columns emptied, which disposes the stateManager).
-                      // Guard on _loaded too — matching the other imperative
-                      // post-frame callbacks — so a stale manager is never poked.
-                      if (mounted && _loaded) {
-                        stateManager.notifyListeners();
-                      }
-                    });
+                    _afterFrame(() => stateManager.notifyListeners());
                   },
                   onSelected: (TrinaGridOnSelectedEvent event) {
                     try {
