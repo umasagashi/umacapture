@@ -977,6 +977,23 @@
                         }
                     },
                     "loading_error": "ロード中にエラーが発生しました。"
+                },
+                "side_panel": {
+                    "toggle": {
+                        "open_tooltip": "サイドプレビューを開く",
+                        "close_tooltip": "サイドプレビューを閉じる"
+                    },
+                    "up_button": {
+                        "tooltip": "表の1つ上のウマ娘を表示します"
+                    },
+                    "down_button": {
+                        "tooltip": "表の1つ下のウマ娘を表示します"
+                    },
+                    "close_button": {
+                        "tooltip": "サイドプレビューを閉じる"
+                    },
+                    "empty_message": "セルをクリックすると、その項目に対応する画像が表示されます。",
+                    "loading_error": "ロード中にエラーが発生しました。"
                 }
             },
             "report_record": {

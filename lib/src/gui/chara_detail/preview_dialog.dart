@@ -1,6 +1,7 @@
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -164,6 +165,8 @@ class ImageSizeContainer {
 class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
+  final Size viewportSize;
+  final Size contentSize;
   final bool overlay;
   final double initialScale;
   final double maxScale;
@@ -173,6 +176,8 @@ class ImageViewer extends ConsumerStatefulWidget {
     super.key,
     required this.recordDir,
     required this.imageSize,
+    required this.viewportSize,
+    required this.contentSize,
     required this.overlay,
     required this.initialScale,
     required this.maxScale,
@@ -193,12 +198,21 @@ class ImageViewer extends ConsumerStatefulWidget {
         imageSize.factor.intersection.width,
         imageSize.campaign.intersection.width,
       ].sum;
+      // The three tabs render side by side, so the content is as wide as their
+      // combined width and as tall as the tallest one.
+      final maxHeight = [
+        imageSize.skill.intersection.height,
+        imageSize.factor.intersection.height,
+        imageSize.campaign.intersection.height,
+      ].reduce((a, b) => a > b ? a : b);
       final scale = viewportSize.width / imageWidth;
       // TODO: This should be async.
       final prediction = PredictionContainer.load(recordDir);
       return ImageViewer(
         recordDir: recordDir,
         imageSize: imageSize,
+        viewportSize: viewportSize,
+        contentSize: Size(imageWidth.toDouble(), maxHeight.toDouble()),
         overlay: overlay,
         initialScale: scale,
         maxScale: scale * 3,
@@ -291,44 +305,63 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return InteractiveViewer(
-      minScale: 0.25,
-      maxScale: widget.maxScale,
-      panEnabled: true,
-      scaleEnabled: true,
-      constrained: false,
-      transformationController: _transformationController,
-      child: Container(
-        decoration: const BoxDecoration(
-          image: DecorationImage(
-            image: AssetImage("assets/image/tile_background.png"),
-            repeat: ImageRepeat.repeat,
-            opacity: 0.1,
+    return Listener(
+      // Custom, delta-magnitude-independent wheel zoom (see [applyWheelZoom]);
+      // InteractiveViewer's own scaling is disabled so it doesn't double-zoom.
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) {
+          applyWheelZoom(
+            _transformationController,
+            event.localPosition,
+            event.scrollDelta.dy,
+            // fit-to-width is the lower bound: zooming out further would shrink the
+            // tabs below the viewport width and reveal left/right margins.
+            minScale: widget.initialScale,
+            maxScale: widget.maxScale,
+            viewportSize: widget.viewportSize,
+            contentSize: widget.contentSize,
+          );
+        }
+      },
+      child: InteractiveViewer(
+        minScale: widget.initialScale,
+        maxScale: widget.maxScale,
+        panEnabled: true,
+        scaleEnabled: false,
+        constrained: false,
+        transformationController: _transformationController,
+        child: Container(
+          decoration: const BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage("assets/image/tile_background.png"),
+              repeat: ImageRepeat.repeat,
+              opacity: 0.1,
+            ),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            predictionTabOverlay(
-              resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.skillPlain),
-              widget.imageSize.skill,
-              !widget.overlay
-                  ? null
-                  : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
-            ),
-            predictionTabOverlay(
-              resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.factorPlain),
-              widget.imageSize.factor,
-              !widget.overlay ? null : widget.prediction?.factorTab,
-            ),
-            predictionTabOverlay(
-              resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.campaignPlain),
-              widget.imageSize.campaign,
-              !widget.overlay ? null : widget.prediction?.campaignTab,
-            ),
-          ],
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              predictionTabOverlay(
+                resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.skillPlain),
+                widget.imageSize.skill,
+                !widget.overlay
+                    ? null
+                    : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
+              ),
+              predictionTabOverlay(
+                resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.factorPlain),
+                widget.imageSize.factor,
+                !widget.overlay ? null : widget.prediction?.factorTab,
+              ),
+              predictionTabOverlay(
+                resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.campaignPlain),
+                widget.imageSize.campaign,
+                !widget.overlay ? null : widget.prediction?.campaignTab,
+              ),
+            ],
+          ),
         ),
       ),
     );

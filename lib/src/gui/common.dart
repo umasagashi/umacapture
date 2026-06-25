@@ -316,6 +316,70 @@ class Disabled extends StatelessWidget {
   }
 }
 
+/// Applies one mouse-wheel notch of zoom to [controller], centered on
+/// [localPosition] (in viewport coordinates).
+///
+/// The step is a fixed multiplicative [stepFactor] per event, deliberately
+/// independent of the scroll delta's magnitude: input devices (precision
+/// touchpads, smooth-scroll mice) emit wildly varying `scrollDelta` per notch —
+/// often a large first delta then small ones — and [InteractiveViewer]'s built-in
+/// `exp(-delta / scaleFactor)` mapping turns a large delta into a sudden multi-x
+/// jump. Using only the sign of [scrollDeltaY] (up/away zooms in) gives a uniform,
+/// predictable step. Pair this with `InteractiveViewer(scaleEnabled: false)` so the
+/// widget's own wheel handling doesn't also fire.
+///
+/// The scale is clamped to `[minScale, maxScale]` and the resulting translation is
+/// clamped so [contentSize] (the child's unscaled size) keeps covering
+/// [viewportSize] on any axis where the scaled content is at least as large — no
+/// empty margin is ever shown along such an axis. Callers that must never show a
+/// horizontal margin should set `minScale` to the fit-to-width scale so the scaled
+/// width can never drop below the viewport width.
+void applyWheelZoom(
+  TransformationController controller,
+  Offset localPosition,
+  double scrollDeltaY, {
+  required double minScale,
+  required double maxScale,
+  required Size viewportSize,
+  required Size contentSize,
+  double stepFactor = 1.2,
+}) {
+  if (scrollDeltaY == 0) {
+    return;
+  }
+  final double current = controller.value.getMaxScaleOnAxis();
+  final double target = (current * (scrollDeltaY < 0 ? stepFactor : 1 / stepFactor)).clamp(minScale, maxScale);
+  if (target == current) {
+    return;
+  }
+  final double applied = target / current;
+  // Scale about the cursor's scene point so it stays under the pointer.
+  final Offset scene = controller.toScene(localPosition);
+  final matrix = controller.value.clone()
+    ..translateByDouble(scene.dx, scene.dy, 0, 1)
+    ..scaleByDouble(applied, applied, applied, 1)
+    ..translateByDouble(-scene.dx, -scene.dy, 0, 1);
+
+  // Keep the content covering the viewport (no margin) on each axis where the
+  // scaled content is large enough to span it. The free axis (scaled content
+  // smaller than the viewport, e.g. a short image's height) is left untouched.
+  final double scale = matrix.getMaxScaleOnAxis();
+  final translation = matrix.getTranslation();
+  double clampAxis(double offset, double scaledLength, double viewportLength) {
+    if (scaledLength >= viewportLength) {
+      return offset.clamp(viewportLength - scaledLength, 0.0);
+    }
+    return offset;
+  }
+
+  matrix.setTranslationRaw(
+    clampAxis(translation.x, contentSize.width * scale, viewportSize.width),
+    clampAxis(translation.y, contentSize.height * scale, viewportSize.height),
+    translation.z,
+  );
+  controller.value = matrix;
+}
+
 class CardDialog extends ConsumerStatefulWidget {
   static void show(RefBase ref, WidgetBuilder builder, {bool barrierDismissible = true}) {
     ref.read(dialogBuilderProvider.notifier).show(builder, barrierDismissible: barrierDismissible);
