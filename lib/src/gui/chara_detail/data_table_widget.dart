@@ -67,10 +67,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   late ThemeData _theme;
   SelectionPurpose? _purpose;
 
-  // Record id -> index within the pinned (frozen) block, rebuilt once per build
-  // from the watched grid. rowWrapper reads it O(1) per row instead of rescanning
-  // every frozen row (where().toList() + indexOf) on each row's paint.
+  // Record id -> index within the pinned (frozen) block, rebuilt from the live
+  // grid by [_indexPinnedRows] after every reconcile. rowWrapper reads it O(1)
+  // per row instead of rescanning every frozen row (where().toList() + indexOf)
+  // on each row's paint. [_pinnedRowCount] is the frozen-row count (not the map
+  // size, which collapses on a duplicate/missing id) so isLast stays correct.
   Map<String, int> _pinnedIndexById = const {};
+  int _pinnedRowCount = 0;
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
     final theme = Theme.of(context);
@@ -210,6 +213,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     });
   }
 
+  /// Rebuilds the frozen-row index from the live grid, in the order the renderer
+  /// iterates (refRows.originalList filtered to frozen).
+  ///
+  /// Called after every reconcile (and the initial load) because a sort reorders
+  /// pinned rows among themselves, so the watched provider's row order is not a
+  /// reliable source. rowWrapper reads the resulting field at paint time.
+  void _indexPinnedRows() {
+    final pinnedRows = stateManager.refRows.originalList.where((row) => row.frozen == TrinaRowFrozen.start).toList();
+    _pinnedRowCount = pinnedRows.length;
+    _pinnedIndexById = {for (var i = 0; i < pinnedRows.length; i++) ?stateManager.recordIdOf(pinnedRows[i]): i};
+  }
+
   /// Pushes a freshly built [Grid] into the live grid instead of recreating it.
   ///
   /// When the column set/order changed (preset/column edits, entering or leaving
@@ -265,6 +280,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // current or now filtered out.
     stateManager.restoreCurrentRecord(selectedRecord, preferField: selectedField, ignoreField: checkColumnField);
     _appliedGrid = next;
+    // Re-index the pinned block from the now-final live row order before the
+    // repaint so rowWrapper's O(1) lookup matches what the renderer draws.
+    _indexPinnedRows();
     stateManager.notifyListeners();
   }
 
@@ -298,14 +316,6 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       _loaded = false;
       return Container();
     }
-    // Index the pinned (frozen) rows once per build so rowWrapper can look up a
-    // row's position in the frozen block in O(1). build() re-runs on every grid
-    // change (it watches currentGridProvider), so this stays in sync with the
-    // rows _reconcile applies.
-    final pinnedRows = grid.rows.where((row) => row.frozen == TrinaRowFrozen.start).toList();
-    _pinnedIndexById = {
-      for (var i = 0; i < pinnedRows.length; i++) ?pinnedRows[i].getUserData<CharaDetailRecord>()?.id: i,
-    };
     return Expanded(
       child: Stack(
         alignment: Alignment.center,
@@ -361,11 +371,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // a normal-weight separator between pinned rows, and a single
                     // thick rule only at the boundary with the scrollable rows.
                     if (rowData.frozen == TrinaRowFrozen.start) {
-                      // Position within the frozen block, precomputed in build().
-                      final rowId = rowData.getUserData<CharaDetailRecord>()?.id;
+                      // Position within the frozen block, precomputed by
+                      // [_indexPinnedRows] from the live row order.
+                      final rowId = stateManager.recordIdOf(rowData);
                       final pinnedIdx = rowId == null ? -1 : (_pinnedIndexById[rowId] ?? -1);
                       if (pinnedIdx >= 0) {
-                        final isLast = pinnedIdx == _pinnedIndexById.length - 1;
+                        final isLast = pinnedIdx == _pinnedRowCount - 1;
                         // Match the highlighted row by record id (see rowColorCallback):
                         // currentRowIdx and pinnedIdx live in different index spaces.
                         final Color background = stateManager.isCurrentRecord(rowData)
@@ -433,6 +444,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     if (sortColumn != null) {
                       event.stateManager.sortColumnByField(sortColumn!, sortOrder);
                     }
+                    // Index the pinned block so frozen rows are styled on first
+                    // load; a later _pending reconcile reindexes (harmlessly).
+                    _indexPinnedRows();
                     // A grid change may have arrived before the stateManager was
                     // ready; apply the latest one now.
                     if (_pending != null) {

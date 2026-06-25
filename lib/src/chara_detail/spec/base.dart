@@ -883,16 +883,7 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   }
 
   /// Indexes [rows] by record id, skipping rows with no record (last id wins).
-  Map<String, TrinaRow> _rowsById(Iterable<TrinaRow> rows) {
-    final byId = <String, TrinaRow>{};
-    for (final row in rows) {
-      final id = recordIdOf(row);
-      if (id != null) {
-        byId[id] = row;
-      }
-    }
-    return byId;
-  }
+  Map<String, TrinaRow> _rowsById(Iterable<TrinaRow> rows) => {for (final row in rows) ?recordIdOf(row): row};
 
   /// Snapshots each row's current [TrinaRow.sortIdx] keyed by record id.
   ///
