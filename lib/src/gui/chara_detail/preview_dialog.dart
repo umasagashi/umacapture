@@ -188,6 +188,13 @@ final predictionContainerProvider = Provider.autoDispose.family<PredictionContai
   return PredictionContainer.load(DirectoryPath(path));
 });
 
+/// Whether a record still has its `prediction.json` (a cheap existence check, no
+/// parse). Archiving drops it, so the overlay visualization is offered only when
+/// this is true.
+final predictionAvailableProvider = Provider.autoDispose.family<bool, String>((ref, path) {
+  return DirectoryPath(path).filePath("prediction.json").existsSync();
+});
+
 class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
@@ -323,7 +330,16 @@ class _PreviewContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final imageSize = this.imageSize;
     if (imageSize == null) {
-      return ErrorMessageWidget(message: "$tr_preview.loading_error".tr());
+      // The size json is gone. If the images are gone too, this is an intentional
+      // image-less archive (the geometry json is dropped alongside the images), so
+      // show the neutral "no image" message; otherwise it is a genuine load error.
+      const modes = [
+        CharaDetailRecordImageMode.skillPlain,
+        CharaDetailRecordImageMode.factorPlain,
+        CharaDetailRecordImageMode.campaignPlain,
+      ];
+      final hasAnyImage = modes.any((mode) => resolveImagePath(recordDir, mode) != null);
+      return ErrorMessageWidget(message: hasAnyImage ? "$tr_preview.loading_error".tr() : "$tr_preview.no_image".tr());
     }
     final imageWidth = [
       imageSize.skill.intersection.width,
@@ -384,7 +400,13 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
     // overlay toggle reuses the cached value, so only navigating to another record
     // re-reads json. The overlay's prediction is read only while it is on.
     final imageSize = ref.watch(imageSizeContainerProvider(recordDir.path));
-    final prediction = overlay ? ref.watch(predictionContainerProvider(recordDir.path)) : null;
+    // The overlay is only meaningful while prediction.json exists; archiving drops
+    // it. Gate on availability so the toggle isn't a dead button on archived
+    // records, but keep the user's `overlay` preference so it re-applies when
+    // navigating back to a record that still has predictions.
+    final predictionAvailable = ref.watch(predictionAvailableProvider(recordDir.path));
+    final effectiveOverlay = overlay && predictionAvailable;
+    final prediction = effectiveOverlay ? ref.watch(predictionContainerProvider(recordDir.path)) : null;
     return CardDialog(
       dialogTitle: "$tr_preview.dialog.title".tr(),
       closeButtonTooltip: "$tr_preview.dialog.close_button.tooltip".tr(),
@@ -400,7 +422,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
               recordDir: recordDir,
               imageSize: imageSize,
               prediction: prediction,
-              overlay: overlay,
+              overlay: effectiveOverlay,
             ),
           ),
         ),
@@ -409,19 +431,20 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
         child: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Tooltip(
-              message: "$tr_preview.dialog.visualize_prediction.$overlay.tooltip".tr(),
-              child: OutlinedButton.icon(
-                icon: Icon(overlay ? Symbols.subtitles_off_rounded : Symbols.subtitles_rounded),
-                label: Text("$tr_preview.dialog.visualize_prediction.$overlay.label".tr()),
-                onPressed: () {
-                  setState(() {
-                    overlay = !overlay;
-                  });
-                },
+            if (predictionAvailable)
+              Tooltip(
+                message: "$tr_preview.dialog.visualize_prediction.$effectiveOverlay.tooltip".tr(),
+                child: OutlinedButton.icon(
+                  icon: Icon(effectiveOverlay ? Symbols.subtitles_off_rounded : Symbols.subtitles_rounded),
+                  label: Text("$tr_preview.dialog.visualize_prediction.$effectiveOverlay.label".tr()),
+                  onPressed: () {
+                    setState(() {
+                      overlay = !overlay;
+                    });
+                  },
+                ),
               ),
-            ),
-            if (isSentryAvailable() && overlay) ...[
+            if (isSentryAvailable() && effectiveOverlay) ...[
               const SizedBox(width: 8),
               Tooltip(
                 message: "$tr_preview.dialog.report_button.tooltip".tr(),

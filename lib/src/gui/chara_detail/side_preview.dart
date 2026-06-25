@@ -314,21 +314,20 @@ class _SidePreviewImage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final imagePath = resolveImagePath(recordDir, mode);
     final container = ref.watch(imageSizeContainerProvider(recordDir.path));
-    // An unreadable/corrupt or degenerate size json is a genuine load error. The
-    // geometry json is retained even when archiving drops the images, so it is
-    // checked first: a present-but-imageless record is the intentional case below,
-    // not an error.
+    // No image file: archiving dropped it (and, for an image-less archive, the
+    // geometry json with it). This is the intentional, neutral case, so it is
+    // checked first and shows a "no image" message rather than a load error.
+    if (imagePath == null) {
+      return _Placeholder(message: "$tr_preview.no_image".tr());
+    }
+    // The image exists but its size json is unreadable/corrupt or degenerate: a
+    // genuine load error.
     if (container == null) {
       return _Placeholder(message: "$tr_preview.loading_error".tr());
     }
     final size = mode.intersectionSizeIn(container);
     if (size.width <= 0) {
       return _Placeholder(message: "$tr_preview.loading_error".tr());
-    }
-    // No image file (archiving dropped it): this is expected, not an error, so show
-    // a neutral "no image" message instead of the load-error one.
-    if (imagePath == null) {
-      return _Placeholder(message: "$tr_preview.no_image".tr());
     }
     return LayoutBuilder(
       builder: (context, constraints) {

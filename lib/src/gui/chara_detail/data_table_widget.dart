@@ -31,9 +31,13 @@ import '/src/gui/toast.dart';
 const tr_chara_detail = "pages.chara_detail";
 
 final charaDetailInitialDataLoader = FutureProvider((ref) async {
-  return Future.wait([ref.watch(pathInfoLoader.future)]).then((_) {
-    return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
-  });
+  final pathInfo = await ref.watch(pathInfoLoader.future);
+  // One-time repair of archived records whose geometry json predates being kept in
+  // sync with the downscaled image. Runs before the stores load so the preview
+  // reads the corrected geometry. Idempotent and gated, so it is a no-op after the
+  // first launch.
+  await runArchiveGeometryMigrationIfNeeded(pathInfo);
+  return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
 });
 
 class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
