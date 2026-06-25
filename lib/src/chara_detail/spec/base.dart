@@ -867,16 +867,26 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   /// The record of the currently highlighted (current) row, or null when no row
   /// is selected. Captured before a reconcile so the highlight can be restored
   /// onto the same record afterwards via [restoreCurrentRecord].
-  CharaDetailRecord? get currentRecord => currentRow?.getUserData<CharaDetailRecord>();
+  ///
+  /// Resolved from [currentCell] (the actually-selected cell's own row), not from
+  /// `currentRow` (== `refRows[currentRowIdx]`). With pinned (frozen) rows present
+  /// a tap stores a *display* index in `currentRowIdx` (frozen rows render in a
+  /// separate top block, shifting the scrollable rows' display indices) while
+  /// `refRows` keeps its own order, so `refRows[currentRowIdx]` resolves to the
+  /// wrong record. `currentCell.row` is always the tapped row — the same
+  /// unambiguous path trina's own [currentColumn]/[currentColumnField] use.
+  CharaDetailRecord? get currentRecord => currentCell?.row.getUserData<CharaDetailRecord>();
 
   /// The record id carried by [row], or null when the row has no record attached.
   String? recordIdOf(TrinaRow row) => row.getUserData<CharaDetailRecord>()?.id;
 
   /// Whether [row] is the currently highlighted row, matched by record id.
   ///
-  /// Index comparison is unsafe here: with pinned (frozen) rows present,
-  /// [currentRowIdx] indexes the full refRows while render-time row indices live
-  /// in a separate frozen block, so the two index spaces disagree.
+  /// Index comparison is unsafe here: with pinned (frozen) rows present a tap
+  /// stores a *display* index in [currentRowIdx] (frozen rows render in a
+  /// separate top block) while a reconcile recomputes it against refRows, so the
+  /// two index spaces disagree. Matching [currentRecord] (resolved from the live
+  /// [currentCell]) by id sidesteps both.
   bool isCurrentRecord(TrinaRow row) {
     final id = currentRecord?.id;
     return id != null && recordIdOf(row) == id;

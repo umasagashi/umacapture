@@ -377,24 +377,43 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       final pinnedIdx = rowId == null ? -1 : (_pinnedIndexById[rowId] ?? -1);
                       if (pinnedIdx >= 0) {
                         final isLast = pinnedIdx == _pinnedRowCount - 1;
-                        // Match the highlighted row by record id (see rowColorCallback):
-                        // currentRowIdx and pinnedIdx live in different index spaces.
-                        final Color background = stateManager.isCurrentRecord(rowData)
-                            ? theme.colorScheme.primaryContainer
-                            : (pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor);
+                        // The stripe and separator don't depend on the selection, so
+                        // compute them once; only the current-row highlight below is
+                        // recomputed per notify.
+                        final stripe = pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
                         final separator = isLast
                             ? BorderSide(color: theme.colorScheme.primary, width: 3)
                             : BorderSide(
                                 color: theme.focusColor,
                                 width: stateManager.configuration.style.cellHorizontalBorderWidth,
                               );
-                        row = DecoratedBox(
-                          decoration: BoxDecoration(color: background),
-                          child: DecoratedBox(
-                            position: DecorationPosition.foreground,
-                            decoration: BoxDecoration(border: Border(bottom: separator)),
-                            child: row,
-                          ),
+                        final bordered = DecoratedBox(
+                          position: DecorationPosition.foreground,
+                          decoration: BoxDecoration(border: Border(bottom: separator)),
+                          child: row,
+                        );
+                        // The current-row highlight must track currentCell changes.
+                        // Scrollable rows get this for free: their highlight is
+                        // painted inside TrinaBaseRow (via rowColorCallback), which
+                        // listens to the stateManager and rebuilds on every notify.
+                        // Frozen rows render with a transparent frozenRowColor and
+                        // bypass rowColorCallback, so this outer wrapper paints their
+                        // highlight — but it only re-runs on a body rebuild, leaving a
+                        // stale highlight when the selection moves to another row.
+                        // Listen to the stateManager here so the background repaints by
+                        // record id whenever the current row changes.
+                        row = ListenableBuilder(
+                          listenable: stateManager,
+                          builder: (context, child) {
+                            final background = stateManager.isCurrentRecord(rowData)
+                                ? theme.colorScheme.primaryContainer
+                                : stripe;
+                            return DecoratedBox(
+                              decoration: BoxDecoration(color: background),
+                              child: child,
+                            );
+                          },
+                          child: bordered,
                         );
                       }
                     }
@@ -419,7 +438,17 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       // Keep the checked-row background neutral; the amber cue is
                       // drawn as an overlay via rowWrapper instead (see below).
                       rowCheckedColor: Colors.transparent,
-                      activatedColor: theme.colorScheme.primaryContainer,
+                      // Disable trina's built-in current-row fill. It highlights
+                      // the row where `currentRowIdx == widget.rowIdx`, comparing
+                      // a (tap-set) display index against each row's display
+                      // index. With pinned (frozen) rows that index space drifts
+                      // out of sync with refRows after a reconcile, so the
+                      // built-in fill lands on the wrong row — a second highlight
+                      // on top of the record-id one we paint in rowColorCallback/
+                      // rowWrapper. A transparent color fails trina's
+                      // `activatedColor.a > 0` guard, leaving our callback's color
+                      // in place, so the highlight is driven solely by record id.
+                      activatedColor: Colors.transparent,
                       // TrinaGrid paints frozen (pinned) rows from these and
                       // bypasses rowColorCallback for them, so its single
                       // frozenRowColor can't reproduce the normal alternating
