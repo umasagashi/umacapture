@@ -87,9 +87,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
     const constraints = BoxConstraints(minHeight: 40);
     final style = theme.textTheme.labelMedium;
-    // The per-item Text overrides the menu's built-in disabled coloring, so grey
-    // the label ourselves for items disabled during selection.
+    // The per-item Text/Icon overrides MenuItem's built-in disabled coloring, so
+    // grey both the label and the leading icon ourselves for items disabled
+    // during selection.
     final disabledStyle = style?.copyWith(color: theme.disabledColor);
+    final disabledIconColor = selecting ? theme.disabledColor : null;
+    // Material Symbols are a variable font; bump the wght axis so the thin
+    // default strokes read clearly at the 16px menu icon size.
+    const iconWeight = 700.0;
     final menu = ContextMenu(
       position: offset,
       entries: <ContextMenuEntry>[
@@ -99,6 +104,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         MenuItem(
           constraints: constraints,
           enabled: !selecting,
+          icon: Icon(isPinned ? Symbols.keep_off : Symbols.keep, weight: iconWeight, color: disabledIconColor),
           onSelected: (_) {
             final next = {...ref.read(pinnedRecordIdsProvider)};
             isPinned ? next.remove(record.id) : next.add(record.id);
@@ -111,6 +117,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         ),
         MenuItem(
           constraints: constraints,
+          icon: const Icon(Symbols.visibility, weight: iconWeight),
           onSelected: (_) {
             final records = stateManager.getSortedRecords().toList();
             final index = records.indexOf(record);
@@ -119,17 +126,62 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           },
           label: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
-        MenuItem(
+        // File group: open the record's folder and copy the recognition images.
+        MenuItem.submenu(
           constraints: constraints,
-          onSelected: (_) => dirOf(record).launch(),
-          label: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
+          icon: const Icon(Symbols.folder, weight: iconWeight),
+          label: Text("$tr_chara_detail.context_menu.group_file".tr(), style: style),
+          items: [
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.content_copy, weight: iconWeight),
+              onSelected: (_) =>
+                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
+              label: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.content_copy, weight: iconWeight),
+              onSelected: (_) =>
+                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
+              label: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.folder_open, weight: iconWeight),
+              onSelected: (_) => dirOf(record).launch(),
+              label: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
+            ),
+          ],
         ),
-        // Re-recognition only applies to active records; archived ones have lossy
-        // or no images and are intentionally excluded.
+        // Destructive record actions, set off by a divider: archive (active-only;
+        // archived records cannot be archived again) then delete (both sources).
+        const MenuDivider(),
         if (source == RecordSource.active)
           MenuItem(
             constraints: constraints,
             enabled: !selecting,
+            icon: Icon(Symbols.archive, weight: iconWeight, color: disabledIconColor),
+            onSelected: (_) => ArchiveRecordDialog.show(ref.base, recordId: record.id, source: source),
+            label: Text("$tr_chara_detail.context_menu.archive_record".tr(), style: selecting ? disabledStyle : style),
+          ),
+        MenuItem(
+          constraints: constraints,
+          enabled: !selecting,
+          icon: Icon(Symbols.delete, weight: iconWeight, color: disabledIconColor),
+          onSelected: (_) => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
+          label: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
+        ),
+        // Recognition actions, listed inline (active records only), so the
+        // trailing divider that sets them off is active-only too — otherwise an
+        // archived record would end on a dangling separator. Re-recognize, then
+        // report a misrecognition (Sentry builds only).
+        if (source == RecordSource.active) const MenuDivider(),
+        if (source == RecordSource.active)
+          MenuItem(
+            constraints: constraints,
+            enabled: !selecting,
+            icon: Icon(Symbols.autorenew, weight: iconWeight, color: disabledIconColor),
             onSelected: (_) async {
               final moduleVersion = await ref.read(moduleVersionLoader.future);
               if (moduleVersion == null) {
@@ -147,43 +199,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               style: selecting ? disabledStyle : style,
             ),
           ),
-        const MenuDivider(),
-        MenuItem(
-          constraints: constraints,
-          enabled: !selecting,
-          onSelected: (_) => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
-          label: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
-        ),
-        // Reports attach the recognition images for a bug repro; archived records
-        // only keep lossy/no images, so the report is diagnostically useless there.
-        // Active-only, like regenerate above.
         if (source == RecordSource.active && isSentryAvailable())
           MenuItem(
             constraints: constraints,
+            icon: const Icon(Symbols.flag, weight: iconWeight),
             onSelected: (_) => ReportRecordDialog.show(ref.base, dirOf(record)),
             label: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
           ),
-        // Secondary actions (image copies) grouped into a submenu at the bottom,
-        // separated from the destructive actions above.
-        const MenuDivider(),
-        MenuItem.submenu(
-          constraints: constraints,
-          label: Text("$tr_chara_detail.context_menu.others".tr(), style: style),
-          items: [
-            MenuItem(
-              constraints: constraints,
-              onSelected: (_) =>
-                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
-              label: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
-            ),
-            MenuItem(
-              constraints: constraints,
-              onSelected: (_) =>
-                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
-              label: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
-            ),
-          ],
-        ),
       ],
     );
     showContextMenu(
@@ -712,8 +734,8 @@ class _TopControlsLayer extends ConsumerWidget {
 }
 
 /// The scrim's primary action, which opens the purpose's confirmation dialog
-/// ([ArchiveRecordDialog] or [ExportRecordDialog]) for the checked rows. Disabled
-/// until at least one row is checked.
+/// ([BulkArchiveRecordDialog] or [ExportRecordDialog]) for the checked rows.
+/// Disabled until at least one row is checked.
 class _SelectionConfirmButton extends ConsumerWidget {
   final SelectionPurpose purpose;
   final int selectedCount;
@@ -732,7 +754,7 @@ class _SelectionConfirmButton extends ConsumerWidget {
               final recordIds = ref.read(selectedRecordIdsProvider).toList();
               switch (purpose) {
                 case SelectionPurpose.archive:
-                  ArchiveRecordDialog.show(ref.base, recordIds: recordIds);
+                  BulkArchiveRecordDialog.show(ref.base, recordIds: recordIds);
                 case SelectionPurpose.export:
                   ExportRecordDialog.show(ref.base, recordIds: recordIds);
                 case SelectionPurpose.delete:

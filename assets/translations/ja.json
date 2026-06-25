@@ -942,10 +942,11 @@
                 "open_in_explorer": "フォルダを開く",
                 "pin_to_top": "上部に固定",
                 "unpin": "固定解除",
-                "regenerate_record": "再認識する",
-                "delete_record": "データを削除する",
-                "report_record": "誤認識を報告する",
-                "others": "その他"
+                "regenerate_record": "再認識",
+                "delete_record": "データを削除",
+                "report_record": "誤認識を報告",
+                "archive_record": "データをアーカイブ",
+                "group_file": "ファイル"
             },
             "preview": {
                 "rental": "レンタル",
