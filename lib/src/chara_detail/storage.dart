@@ -161,11 +161,15 @@ enum ArchiveImageOption {
   resizedJpeg,
 }
 
-/// Resolves the directory holding [record]'s files for the given [source].
-DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) {
+/// Resolves the directory holding the record with [id]'s files for [source].
+DirectoryPath recordDirOfId(PathInfo pathInfo, RecordSource source, String id) {
   final root = source == RecordSource.active ? pathInfo.charaDetailActiveDir : pathInfo.charaDetailArchiveDir;
-  return root / record.id;
+  return root / id;
 }
+
+/// Resolves the directory holding [record]'s files for the given [source].
+DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) =>
+    recordDirOfId(pathInfo, source, record.id);
 
 /// Path to the (always-retained) trainee icon inside [recordDir].
 FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath(traineeIconFileName);

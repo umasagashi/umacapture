@@ -78,25 +78,50 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   int _pinnedRowCount = 0;
 
   // Width of the side preview panel, adjusted by dragging the splitter between
-  // the grid and the panel. Clamped against the available width at paint time.
-  double _panelWidth = sidePreviewDefaultPanelWidth;
+  // the grid and the panel. Clamped against the available width at paint time. A
+  // ValueNotifier (not setState) so a splitter drag rebuilds only the splitter +
+  // panel, not the whole table body (which re-derives the grid order each build).
+  final ValueNotifier<double> _panelWidth = ValueNotifier(sidePreviewDefaultPanelWidth);
 
-  /// Moves the side preview to the record [delta] rows away in display order,
-  /// keeping the current image mode, and follows it with the grid highlight.
-  ///
-  /// No-op until the grid is loaded (stateManager ready) or when the shown record
-  /// is no longer in the sorted set (filtered out).
-  void _navigateSidePreview(int delta) {
+  // Id of the grid's current (highlighted) record, mirrored from onActiveCellChanged
+  // so the side preview panel can follow the grid selection without storing its own
+  // record id. The panel subtree listens to this; the grid body does not rebuild.
+  final ValueNotifier<String?> _currentRecordId = ValueNotifier(null);
+
+  @override
+  void dispose() {
+    _panelWidth.dispose();
+    _currentRecordId.dispose();
+    super.dispose();
+  }
+
+  /// The live display order and the position of the record with [id] within it,
+  /// or null when the grid is not loaded. The index is -1 when [id] is not in the
+  /// sorted set (filtered out / removed).
+  (List<CharaDetailRecord>, int)? _locateSorted(String id) {
     if (!_loaded) {
-      return;
-    }
-    final state = ref.read(sidePreviewProvider);
-    final id = state?.recordId;
-    if (state == null || id == null) {
-      return;
+      return null;
     }
     final sorted = stateManager.getSortedRecords().toList();
-    final i = sorted.indexWhere((r) => r.id == id);
+    return (sorted, sorted.indexWhere((r) => r.id == id));
+  }
+
+  /// Moves the grid's current record [delta] rows away in display order; the side
+  /// preview panel follows it (it tracks the current record). Keeps the current
+  /// column so the highlight stays in place.
+  ///
+  /// No-op until the grid is loaded, when no record is current, or when the current
+  /// record is no longer in the sorted set (filtered out).
+  void _navigateSidePreview(int delta) {
+    final current = _loaded ? stateManager.currentRecord : null;
+    if (current == null) {
+      return;
+    }
+    final located = _locateSorted(current.id);
+    if (located == null) {
+      return;
+    }
+    final (sorted, i) = located;
     if (i < 0) {
       return;
     }
@@ -104,11 +129,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     if (j == i) {
       return;
     }
-    final next = sorted[j];
-    ref.read(sidePreviewProvider.notifier).set(SidePreviewState(recordId: next.id, mode: state.mode));
-    // Keep the grid highlight in sync with the panel (best effort).
+    // Move the grid selection; restoreCurrentRecord's setCurrentCell fires
+    // onActiveCellChanged, which updates _currentRecordId and so the panel.
     stateManager.restoreCurrentRecord(
-      next,
+      sorted[j],
       preferField: stateManager.currentColumnField,
       ignoreField: checkColumnField,
     );
@@ -119,20 +143,14 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   /// skill ⇔ factor ⇔ campaign order, keeping the shown record.
   void _changeSidePreviewMode(int delta) {
     final state = ref.read(sidePreviewProvider);
-    if (state == null || state.recordId == null) {
+    if (state == null) {
       return;
     }
-    final i = sidePreviewModeOrder.indexOf(state.mode);
-    if (i < 0) {
+    final next = sidePreviewModeStep(state.mode, delta);
+    if (next == null) {
       return;
     }
-    final j = Math.clamp(0, i + delta, sidePreviewModeOrder.length - 1);
-    if (j == i) {
-      return;
-    }
-    ref
-        .read(sidePreviewProvider.notifier)
-        .set(SidePreviewState(recordId: state.recordId, mode: sidePreviewModeOrder[j]));
+    ref.read(sidePreviewProvider.notifier).set(SidePreviewState(mode: next));
   }
 
   void showPopup(BuildContext context, WidgetRef ref, Offset offset, CharaDetailRecord record, int initialPage) {
@@ -404,23 +422,15 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // after init). The watch stays only to seed the initial grid and the empty
     // checks below.
     ref.listen(currentGridProvider, (_, next) => _reconcile(next));
-    ref.listen(recordSourceProvider, (prev, next) {
-      if (prev == next) {
-        return;
-      }
-      // The shown record id belongs to the previous source (ids are unique across
-      // sources), so clear it on switch — keep the panel open showing its empty
-      // placeholder instead of flashing a loading error for a now-missing directory.
-      final current = ref.read(sidePreviewProvider);
-      if (current != null && current.recordId != null) {
-        ref.read(sidePreviewProvider.notifier).set(const SidePreviewState());
-      }
-    });
+    // No source-switch listener needed: the panel tracks the grid's current record
+    // and re-resolves it against the live sorted set each build, so a source switch
+    // (the old record's id is absent from the new source) falls back to the empty
+    // placeholder on its own.
     final sidePreview = ref.watch(sidePreviewProvider);
     // The narrow (drawer + app bar) layout has no room for the panel, so it is
     // disabled there (toggle hidden, panel not rendered). Computed up here so the
     // grid's onSelected handler — built below — can also gate on it.
-    final narrow = MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth;
+    final narrow = !isSidePreviewAllowed(context);
     if (grid.columns.isEmpty) {
       // The grid leaves the tree here, disposing its stateManager. Mark it
       // unloaded so a grid update (via the listen above) or theme repaint won't
@@ -594,7 +604,16 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     _pending = null;
                     _reconcile(pending);
                   }
+                  // Seed the side preview's record tracker from whatever is current
+                  // after load (normally nothing, since auto-select is disabled).
+                  _currentRecordId.value = event.stateManager.currentRecord?.id;
                 },
+                // The side preview panel follows the grid's current record. This
+                // fires on every current-cell change — user taps and the
+                // programmatic restoreCurrentRecord in _navigateSidePreview alike
+                // (setCurrentCell calls it even with notify:false) — so mirroring the
+                // id here keeps the panel in sync without the panel storing its own.
+                onActiveCellChanged: (_) => _currentRecordId.value = stateManager.currentRecord?.id,
                 onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
                   // event.row (== getRowByIdx(rowIdx)) is unreliable once any
                   // row is frozen (pinned): TrinaGrid renders frozen rows in a
@@ -628,16 +647,23 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         return;
                       }
                       // While the side preview panel is open (and visible — not in
-                      // the narrow layout where it is hidden/auto-closed), a cell
-                      // click feeds the panel instead of opening the modal dialog:
-                      // the row picks the record, the column picks which screen to
-                      // show.
+                      // the narrow layout where it is hidden), a cell click only
+                      // picks which screen to show (the column's mode); the panel
+                      // follows the grid's current record (already set by the tap, via
+                      // onActiveCellChanged), so it isn't set here. Suppress the dialog.
+                      //
+                      // The breakpoint is re-evaluated here, not read from the
+                      // build-scope `narrow`: TrinaGrid captures this onSelected
+                      // closure once (at grid load) and never refreshes it, so a
+                      // captured `narrow` would stay frozen at its first-build value
+                      // and feed the hidden panel after the window shrinks.
                       final sidePreview = ref.read(sidePreviewProvider);
-                      if (sidePreview != null && !narrow) {
+                      if (sidePreview != null && isSidePreviewAllowed(context)) {
                         final action = event.cell?.column.getUserData<ColumnSpec>()?.cellAction;
-                        ref
-                            .read(sidePreviewProvider.notifier)
-                            .set(SidePreviewState(recordId: record.id, mode: imageModeForColumnAction(action)));
+                        final mode = imageModeForColumnAction(action);
+                        if (mode != sidePreview.mode) {
+                          ref.read(sidePreviewProvider.notifier).set(SidePreviewState(mode: mode));
+                        }
                         return;
                       }
                       final source = ref.read(recordSourceProvider);
@@ -684,54 +710,17 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       ],
     );
 
-    // Resolve the panel's record/navigation state (only when the panel is open).
-    // The directory is derived from the record id directly (recordDirOf needs only
-    // the id), so it works even before the grid finishes loading; the prev/next
-    // reach needs the live sorted order, so it stays disabled until the
-    // stateManager is ready.
-    // The toggle is hidden in the narrow layout (see SidePreviewToggleButton) and
-    // the panel is not rendered even if it was left open before the window shrank.
-    if (narrow && sidePreview != null) {
-      // The narrow layout has no room for the panel and the toggle is hidden, so
-      // the user can't close it; close it here. A cell click would otherwise feed
-      // the invisible panel (see onSelected) instead of opening the dialog.
-      // _afterFrame requires _loaded, but closing must happen regardless, so guard
-      // only on mounted. Setting the provider null during build is not allowed.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) {
-          ref.read(sidePreviewProvider.notifier).set(null);
-        }
-      });
-    }
-    final shownId = sidePreview?.recordId;
-    DirectoryPath? sideRecordDir;
-    var canPrev = false;
-    var canNext = false;
-    var canModeLeft = false;
-    var canModeRight = false;
-    if (sidePreview != null && !narrow && shownId != null) {
-      final source = ref.watch(recordSourceProvider);
-      final pathInfo = ref.watch(pathInfoProvider);
-      final root = source == RecordSource.active ? pathInfo.charaDetailActiveDir : pathInfo.charaDetailArchiveDir;
-      sideRecordDir = root / shownId;
-      // Image (mode) switching within the record is independent of the grid.
-      final modeIndex = sidePreviewModeOrder.indexOf(sidePreview.mode);
-      canModeLeft = modeIndex > 0;
-      canModeRight = modeIndex >= 0 && modeIndex < sidePreviewModeOrder.length - 1;
-      if (_loaded) {
-        final sorted = stateManager.getSortedRecords().toList();
-        final i = sorted.indexWhere((r) => r.id == shownId);
-        if (i >= 0) {
-          canPrev = i > 0;
-          canNext = i < sorted.length - 1;
-        } else {
-          // Shown record is no longer in the sorted set (filtered out / removed):
-          // fall back to the empty placeholder instead of stranding it with no
-          // prev/next reach. Only trust this once the grid is loaded.
-          sideRecordDir = null;
-        }
-      }
-    }
+    // The panel follows the grid's current record (mirrored into _currentRecordId);
+    // its directory is resolved against the active source. Watch source/pathInfo here
+    // in the build phase — the nested builders below run during layout, where
+    // ref.watch is unsafe — and pass them down. Only needed while the panel shows.
+    //
+    // In the narrow layout the panel is simply not rendered (see the Row below) and a
+    // cell click opens the dialog instead (onSelected re-checks the breakpoint), so
+    // the open state is left untouched — widening the window restores the panel.
+    final sideShown = sidePreview != null && !narrow;
+    final sideSource = sideShown ? ref.watch(recordSourceProvider) : null;
+    final sidePathInfo = sideShown ? ref.watch(pathInfoProvider) : null;
 
     // Keep the grid mounted at a stable tree position whether or not the panel is
     // open: its ValueKey only preserves identity among siblings, so moving the
@@ -742,53 +731,95 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       child: LayoutBuilder(
         builder: (context, constraints) {
           final maxPanel = Math.max(sidePreviewMinPanelWidth, constraints.maxWidth - sidePreviewMinGridWidth);
-          final panelWidth = Math.clamp(sidePreviewMinPanelWidth, _panelWidth, maxPanel);
           return Row(
             children: [
               Expanded(child: gridStack),
-              if (sidePreview != null && !narrow) ...[
-                MouseRegion(
-                  cursor: SystemMouseCursors.resizeColumn,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onHorizontalDragStart: (_) {
-                      // Re-seat the stored width to the currently displayed
-                      // (clamped) value so a drag begun after the window shrank
-                      // doesn't snap back to a stale wider value. Updates the field
-                      // only (display is unchanged), so no setState is needed.
-                      _panelWidth = panelWidth;
-                    },
-                    onHorizontalDragUpdate: (details) {
-                      // Accumulate against the live field, not the build-local
-                      // `panelWidth`: several drag updates can fire before a
-                      // rebuild, and each would otherwise read the same stale base
-                      // (only the last setState winning), so the width would lag
-                      // behind the cursor. Dragging the splitter left widens the
-                      // right-hand panel, hence subtracting delta.dx.
-                      setState(() {
-                        _panelWidth = Math.clamp(sidePreviewMinPanelWidth, _panelWidth - details.delta.dx, maxPanel);
-                      });
-                    },
-                    child: SizedBox(
-                      width: 10,
-                      child: Center(child: Container(width: 2, color: theme.colorScheme.outline)),
-                    ),
-                  ),
+              // Re-resolve which record the panel shows whenever the grid's current
+              // record changes (taps / prev-next mirror into _currentRecordId). The
+              // sorted lookup runs here, not on splitter drag — that is the inner
+              // _panelWidth builder.
+              if (sidePreview != null && !narrow)
+                ValueListenableBuilder<String?>(
+                  valueListenable: _currentRecordId,
+                  builder: (context, currentId, _) {
+                    DirectoryPath? sideRecordDir;
+                    var canPrev = false;
+                    var canNext = false;
+                    if (currentId != null && sideSource != null && sidePathInfo != null) {
+                      final located = _locateSorted(currentId);
+                      if (located != null) {
+                        final (sorted, i) = located;
+                        if (i >= 0) {
+                          // i < 0 means the current record is no longer in the sorted
+                          // set (filtered out, or a stale selection after a source
+                          // switch): leave recordDir null so the panel shows its
+                          // placeholder instead of a missing-directory error.
+                          sideRecordDir = recordDirOfId(sidePathInfo, sideSource, currentId);
+                          canPrev = i > 0;
+                          canNext = i < sorted.length - 1;
+                        }
+                      }
+                    }
+                    final hasRecord = sideRecordDir != null;
+                    final canModeLeft = hasRecord && canStepSidePreviewMode(sidePreview.mode, -1);
+                    final canModeRight = hasRecord && canStepSidePreviewMode(sidePreview.mode, 1);
+                    // Only the splitter + panel listen to _panelWidth, so dragging the
+                    // splitter rebuilds just this subtree — not the sorted lookup above.
+                    return ValueListenableBuilder<double>(
+                      valueListenable: _panelWidth,
+                      builder: (context, width, _) {
+                        final panelWidth = Math.clamp(sidePreviewMinPanelWidth, width, maxPanel);
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            MouseRegion(
+                              cursor: SystemMouseCursors.resizeColumn,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onHorizontalDragStart: (_) {
+                                  // Re-seat the stored width to the currently displayed
+                                  // (clamped) value so a drag begun after the window
+                                  // shrank doesn't snap back to a stale wider value.
+                                  _panelWidth.value = panelWidth;
+                                },
+                                onHorizontalDragUpdate: (details) {
+                                  // Accumulate against the live value, not the
+                                  // build-local `panelWidth`: several drag updates can
+                                  // fire before a rebuild, and each would otherwise read
+                                  // the same stale base, so the width would lag behind
+                                  // the cursor. Dragging the splitter left widens the
+                                  // right-hand panel, hence subtracting delta.dx.
+                                  _panelWidth.value = Math.clamp(
+                                    sidePreviewMinPanelWidth,
+                                    _panelWidth.value - details.delta.dx,
+                                    maxPanel,
+                                  );
+                                },
+                                child: SizedBox(
+                                  width: 10,
+                                  child: Center(child: Container(width: 2, color: theme.colorScheme.outline)),
+                                ),
+                              ),
+                            ),
+                            SizedBox(
+                              width: panelWidth,
+                              child: SidePreviewPanel(
+                                recordDir: sideRecordDir,
+                                mode: sidePreview.mode,
+                                canPrev: canPrev,
+                                canNext: canNext,
+                                canModeLeft: canModeLeft,
+                                canModeRight: canModeRight,
+                                onNavigate: _navigateSidePreview,
+                                onChangeMode: _changeSidePreviewMode,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
                 ),
-                SizedBox(
-                  width: panelWidth,
-                  child: SidePreviewPanel(
-                    recordDir: sideRecordDir,
-                    mode: sidePreview.mode,
-                    canPrev: canPrev,
-                    canNext: canNext,
-                    canModeLeft: canModeLeft,
-                    canModeRight: canModeRight,
-                    onNavigate: _navigateSidePreview,
-                    onChangeMode: _changeSidePreviewMode,
-                  ),
-                ),
-              ],
             ],
           );
         },

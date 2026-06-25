@@ -7,6 +7,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/utils.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/common.dart';
 
@@ -35,21 +36,23 @@ extension on CharaDetailRecordImageMode {
     CharaDetailRecordImageMode.skillPlain => container.skill.intersection.size,
     CharaDetailRecordImageMode.factorPlain => container.factor.intersection.size,
     CharaDetailRecordImageMode.campaignPlain => container.campaign.intersection.size,
-    CharaDetailRecordImageMode.none => container.skill.intersection.size,
+    // Unreachable: the panel only ever shows one of the three plain modes (see
+    // sidePreviewModeOrder / imageModeForColumnAction). Fail loudly like the
+    // sibling `fileName` extension rather than fabricating a size for `.none`.
+    CharaDetailRecordImageMode.none => throw UnimplementedError(),
   };
 }
 
 /// Session-only UI state for the right-hand preview panel.
 ///
 /// `null` (in [sidePreviewProvider]) means the panel is closed; a non-null value
-/// means it is open. [recordId] is null right after opening — before any cell is
-/// clicked — so the panel shows its empty placeholder. [mode] selects which of the
-/// record's three screens (skill / factor / campaign) is shown.
+/// means it is open. The panel does not store which record it shows — it follows
+/// the grid's current (highlighted) record — so this carries only [mode], which
+/// selects which of the record's three screens (skill / factor / campaign) is shown.
 class SidePreviewState {
-  final String? recordId;
   final CharaDetailRecordImageMode mode;
 
-  const SidePreviewState({this.recordId, this.mode = CharaDetailRecordImageMode.skillPlain});
+  const SidePreviewState({this.mode = CharaDetailRecordImageMode.skillPlain});
 }
 
 final sidePreviewProvider = settableNotifierProvider<SidePreviewState?>(null);
@@ -61,6 +64,29 @@ const List<CharaDetailRecordImageMode> sidePreviewModeOrder = [
   CharaDetailRecordImageMode.factorPlain,
   CharaDetailRecordImageMode.campaignPlain,
 ];
+
+/// The mode [delta] steps away from [mode] in [sidePreviewModeOrder], clamped to
+/// the ends. Returns null when [mode] is not in the order or the step would not
+/// move (already at the relevant end).
+CharaDetailRecordImageMode? sidePreviewModeStep(CharaDetailRecordImageMode mode, int delta) {
+  final i = sidePreviewModeOrder.indexOf(mode);
+  if (i < 0) {
+    return null;
+  }
+  final j = Math.clamp(0, i + delta, sidePreviewModeOrder.length - 1);
+  return j == i ? null : sidePreviewModeOrder[j];
+}
+
+/// Whether the panel can switch [delta] steps from [mode] (used to enable/disable
+/// the left/right image buttons).
+bool canStepSidePreviewMode(CharaDetailRecordImageMode mode, int delta) => sidePreviewModeStep(mode, delta) != null;
+
+/// Whether the layout is wide enough to host the side preview panel.
+///
+/// Below [sidePreviewMinAppWidth] the narrow (drawer + app bar) layout has no room
+/// for it, so the toggle hides and the panel is not rendered. Single source of the
+/// breakpoint, shared by the toolbar toggle and the data table.
+bool isSidePreviewAllowed(BuildContext context) => MediaQuery.sizeOf(context).width >= sidePreviewMinAppWidth;
 
 /// Below this app width the layout switches to the narrow (drawer + app bar)
 /// mode where there is no room for the side panel, so it is disabled (the toggle
@@ -87,7 +113,7 @@ class SidePreviewToggleButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     // No room for the panel in the narrow layout, so hide the toggle entirely.
-    if (MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth) {
+    if (!isSidePreviewAllowed(context)) {
       return const SizedBox.shrink();
     }
     final open = ref.watch(sidePreviewProvider) != null;
