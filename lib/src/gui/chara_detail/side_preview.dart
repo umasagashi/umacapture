@@ -359,6 +359,15 @@ class _SidePreviewImageViewerState extends State<_SidePreviewImageViewer> {
     if (widget.initialScale != oldWidget.initialScale) {
       _transformationController.dispose();
       _transformationController = _buildController();
+    } else if (widget.viewportSize != oldWidget.viewportSize) {
+      // initialScale depends only on the width, so a height-only resize keeps the
+      // controller as-is and would leave a stale bottom margin once the viewport
+      // grows taller than where the user had panned. Re-clamp the existing pan.
+      clampPanToCoverViewport(
+        _transformationController,
+        viewportSize: widget.viewportSize,
+        contentSize: widget.imageSize,
+      );
     }
   }
 

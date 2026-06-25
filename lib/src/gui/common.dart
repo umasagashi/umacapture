@@ -359,10 +359,25 @@ void applyWheelZoom(
     ..translateByDouble(scene.dx, scene.dy, 0, 1)
     ..scaleByDouble(applied, applied, applied, 1)
     ..translateByDouble(-scene.dx, -scene.dy, 0, 1);
+  controller.value = matrix;
 
   // Keep the content covering the viewport (no margin) on each axis where the
-  // scaled content is large enough to span it. The free axis (scaled content
-  // smaller than the viewport, e.g. a short image's height) is left untouched.
+  // scaled content is large enough to span it.
+  clampPanToCoverViewport(controller, viewportSize: viewportSize, contentSize: contentSize);
+}
+
+/// Clamps [controller]'s pan so [contentSize] (the child's unscaled size) keeps
+/// covering [viewportSize] on any axis where the scaled content spans it — no
+/// empty margin is shown along such an axis.
+///
+/// The scale is left untouched; an axis where the scaled content is smaller than
+/// the viewport (e.g. a short image's height) is left as-is.
+void clampPanToCoverViewport(
+  TransformationController controller, {
+  required Size viewportSize,
+  required Size contentSize,
+}) {
+  final matrix = controller.value.clone();
   final double scale = matrix.getMaxScaleOnAxis();
   final translation = matrix.getTranslation();
   double clampAxis(double offset, double scaledLength, double viewportLength) {

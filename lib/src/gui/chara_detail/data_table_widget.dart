@@ -404,6 +404,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // after init). The watch stays only to seed the initial grid and the empty
     // checks below.
     ref.listen(currentGridProvider, (_, next) => _reconcile(next));
+    ref.listen(recordSourceProvider, (prev, next) {
+      if (prev == next) {
+        return;
+      }
+      // The shown record id belongs to the previous source (ids are unique across
+      // sources), so clear it on switch — keep the panel open showing its empty
+      // placeholder instead of flashing a loading error for a now-missing directory.
+      final current = ref.read(sidePreviewProvider);
+      if (current != null && current.recordId != null) {
+        ref.read(sidePreviewProvider.notifier).set(const SidePreviewState());
+      }
+    });
     final sidePreview = ref.watch(sidePreviewProvider);
     if (grid.columns.isEmpty) {
       // The grid leaves the tree here, disposing its stateManager. Mark it
@@ -675,6 +687,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // it there: the toggle is hidden (see SidePreviewToggleButton) and the panel
     // is not rendered even if it was left open before the window shrank.
     final narrow = MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth;
+    if (narrow && sidePreview != null) {
+      // The narrow layout has no room for the panel and the toggle is hidden, so
+      // the user can't close it; close it here. A cell click would otherwise feed
+      // the invisible panel (see onSelected) instead of opening the dialog.
+      // _afterFrame requires _loaded, but closing must happen regardless, so guard
+      // only on mounted. Setting the provider null during build is not allowed.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(sidePreviewProvider.notifier).set(null);
+        }
+      });
+    }
     final shownId = sidePreview?.recordId;
     DirectoryPath? sideRecordDir;
     var canPrev = false;
@@ -723,6 +747,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   cursor: SystemMouseCursors.resizeColumn,
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
+                    onHorizontalDragStart: (_) {
+                      // Re-seat the stored width to the currently displayed
+                      // (clamped) value so a drag begun after the window shrank
+                      // doesn't snap back to a stale wider value. Updates the field
+                      // only (display is unchanged), so no setState is needed.
+                      _panelWidth = panelWidth;
+                    },
                     onHorizontalDragUpdate: (details) {
                       // Accumulate against the live field, not the build-local
                       // `panelWidth`: several drag updates can fire before a
