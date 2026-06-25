@@ -944,7 +944,8 @@
                 "unpin": "固定解除",
                 "regenerate_record": "再認識する",
                 "delete_record": "データを削除する",
-                "report_record": "誤認識を報告する"
+                "report_record": "誤認識を報告する",
+                "others": "その他"
             },
             "preview": {
                 "rental": "レンタル",

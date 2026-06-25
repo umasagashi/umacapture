@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_context_menu/flutter_context_menu.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
@@ -84,68 +85,52 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     final selecting = ref.read(selectionModeProvider) != null;
     final isPinned = ref.read(pinnedRecordIdsProvider).contains(record.id);
     DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
-    final rect = offset & const Size(1, 1);
-    const height = 40.0;
+    const constraints = BoxConstraints(minHeight: 40);
     final style = theme.textTheme.labelMedium;
-    // The per-item Text overrides PopupMenuItem's built-in disabled coloring, so
-    // grey the label ourselves for items disabled during selection.
+    // The per-item Text overrides the menu's built-in disabled coloring, so grey
+    // the label ourselves for items disabled during selection.
     final disabledStyle = style?.copyWith(color: theme.disabledColor);
-    showMenu<int>(
-      context: context,
-      position: RelativeRect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom),
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outline),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      items: [
-        PopupMenuItem(
-          height: height,
-          onTap: () {
+    final menu = ContextMenu(
+      position: offset,
+      entries: <ContextMenuEntry>[
+        // Pin/unpin the row to the top of the table. Disabled while selecting,
+        // since toggling rebuilds the grid and would drop the in-progress
+        // checkbox selection.
+        MenuItem(
+          constraints: constraints,
+          enabled: !selecting,
+          onSelected: (_) {
+            final next = {...ref.read(pinnedRecordIdsProvider)};
+            isPinned ? next.remove(record.id) : next.add(record.id);
+            ref.read(pinnedRecordIdsProvider.notifier).set(next);
+          },
+          label: Text(
+            "$tr_chara_detail.context_menu.${isPinned ? "unpin" : "pin_to_top"}".tr(),
+            style: selecting ? disabledStyle : style,
+          ),
+        ),
+        MenuItem(
+          constraints: constraints,
+          onSelected: (_) {
             final records = stateManager.getSortedRecords().toList();
             final index = records.indexOf(record);
             final directories = records.map(dirOf).toList();
             return CharaDetailPreviewDialog.show(ref.base, directories, index);
           },
-          child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
+          label: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
-        ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
-        ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => dirOf(record).launch(),
-          child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
-        ),
-        // Pin/unpin the row to the top of the table. Disabled while selecting,
-        // since toggling rebuilds the grid and would drop the in-progress
-        // checkbox selection.
-        PopupMenuItem(
-          height: height,
-          enabled: !selecting,
-          onTap: () {
-            final next = {...ref.read(pinnedRecordIdsProvider)};
-            isPinned ? next.remove(record.id) : next.add(record.id);
-            ref.read(pinnedRecordIdsProvider.notifier).set(next);
-          },
-          child: Text(
-            "$tr_chara_detail.context_menu.${isPinned ? "unpin" : "pin_to_top"}".tr(),
-            style: selecting ? disabledStyle : style,
-          ),
+        MenuItem(
+          constraints: constraints,
+          onSelected: (_) => dirOf(record).launch(),
+          label: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
         ),
         // Re-recognition only applies to active records; archived ones have lossy
         // or no images and are intentionally excluded.
         if (source == RecordSource.active)
-          PopupMenuItem(
-            height: height,
+          MenuItem(
+            constraints: constraints,
             enabled: !selecting,
-            onTap: () async {
+            onSelected: (_) async {
               final moduleVersion = await ref.read(moduleVersionLoader.future);
               if (moduleVersion == null) {
                 sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
@@ -157,28 +142,57 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               }
               ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]);
             },
-            child: Text(
+            label: Text(
               "$tr_chara_detail.context_menu.regenerate_record".tr(),
               style: selecting ? disabledStyle : style,
             ),
           ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          height: height,
+        const MenuDivider(),
+        MenuItem(
+          constraints: constraints,
           enabled: !selecting,
-          onTap: () => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
-          child: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
+          onSelected: (_) => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
+          label: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
         ),
         // Reports attach the recognition images for a bug repro; archived records
         // only keep lossy/no images, so the report is diagnostically useless there.
         // Active-only, like regenerate above.
         if (source == RecordSource.active && isSentryAvailable())
-          PopupMenuItem(
-            height: height,
-            onTap: () => ReportRecordDialog.show(ref.base, dirOf(record)),
-            child: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
+          MenuItem(
+            constraints: constraints,
+            onSelected: (_) => ReportRecordDialog.show(ref.base, dirOf(record)),
+            label: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
           ),
+        // Secondary actions (image copies) grouped into a submenu at the bottom,
+        // separated from the destructive actions above.
+        const MenuDivider(),
+        MenuItem.submenu(
+          constraints: constraints,
+          label: Text("$tr_chara_detail.context_menu.others".tr(), style: style),
+          items: [
+            MenuItem(
+              constraints: constraints,
+              onSelected: (_) =>
+                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
+              label: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              onSelected: (_) =>
+                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
+              label: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
+            ),
+          ],
+        ),
       ],
+    );
+    showContextMenu(
+      context,
+      contextMenu: menu,
+      routeOptions: const MenuRouteOptions(
+        transitionDuration: Duration(milliseconds: 120),
+        reverseTransitionDuration: Duration(milliseconds: 120),
+      ),
     );
   }
 
