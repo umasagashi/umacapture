@@ -33,10 +33,12 @@ class BulkArchiveRecordDialog extends ConsumerStatefulWidget {
 }
 
 class _BulkArchiveRecordDialogState extends ConsumerState<BulkArchiveRecordDialog> {
-  ArchiveImageOption _option = ArchiveImageOption.resizedJpeg;
+  // Starts unselected so the user must deliberately pick an image disposition;
+  // the confirm button stays disabled until then.
+  ArchiveImageOption? _option;
 
   void _confirm() {
-    ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option);
+    ref.read(charaArchiveControllerProvider.notifier).archive(widget.recordIds, _option!);
     // The grid rebuilds without these rows; leave selection mode so the
     // checkbox column disappears and stale checks are dropped.
     exitSelection(ref);
@@ -85,6 +87,7 @@ class _BulkArchiveRecordDialogState extends ConsumerState<BulkArchiveRecordDialo
       confirmIcon: Symbols.archive_rounded,
       destructive: true,
       onConfirm: _confirm,
+      confirmEnabled: _option != null,
     );
   }
 }
@@ -111,10 +114,12 @@ class ArchiveRecordDialog extends ConsumerStatefulWidget {
 }
 
 class _ArchiveRecordDialogState extends ConsumerState<ArchiveRecordDialog> {
-  ArchiveImageOption _option = ArchiveImageOption.resizedJpeg;
+  // Starts unselected so the user must deliberately pick an image disposition;
+  // the confirm button stays disabled until then.
+  ArchiveImageOption? _option;
 
   void _confirm() {
-    ref.read(charaArchiveControllerProvider.notifier).archive([widget.recordId], _option);
+    ref.read(charaArchiveControllerProvider.notifier).archive([widget.recordId], _option!);
     CardDialog.dismiss(ref.base);
   }
 
@@ -182,6 +187,7 @@ class _ArchiveRecordDialogState extends ConsumerState<ArchiveRecordDialog> {
           confirmIcon: Symbols.archive_rounded,
           destructive: true,
           onConfirm: _confirm,
+          enabled: _option != null,
         ),
       ),
     );
