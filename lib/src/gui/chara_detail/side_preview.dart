@@ -314,14 +314,21 @@ class _SidePreviewImage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final imagePath = resolveImagePath(recordDir, mode);
     final container = ref.watch(imageSizeContainerProvider(recordDir.path));
-    // A missing image or unreadable/corrupt size json (e.g. an archived record)
-    // falls back to the load-error placeholder instead of a broken view.
-    if (imagePath == null || container == null) {
+    // An unreadable/corrupt or degenerate size json is a genuine load error. The
+    // geometry json is retained even when archiving drops the images, so it is
+    // checked first: a present-but-imageless record is the intentional case below,
+    // not an error.
+    if (container == null) {
       return _Placeholder(message: "$tr_preview.loading_error".tr());
     }
     final size = mode.intersectionSizeIn(container);
     if (size.width <= 0) {
       return _Placeholder(message: "$tr_preview.loading_error".tr());
+    }
+    // No image file (archiving dropped it): this is expected, not an error, so show
+    // a neutral "no image" message instead of the load-error one.
+    if (imagePath == null) {
+      return _Placeholder(message: "$tr_preview.no_image".tr());
     }
     return LayoutBuilder(
       builder: (context, constraints) {
