@@ -119,12 +119,12 @@
                 "error": "{count} 件のアーカイブに失敗しました。",
                 "no_image": "このレコードには画像がありません。",
                 "source": {
-                    "tooltip": "表示するレコードの種類を選択します。",
+                    "tooltip": "表示するレコード種別の選択",
                     "active": "通常",
                     "archive": "アーカイブ"
                 },
                 "selection_mode": {
-                    "enable_tooltip": "アーカイブするレコードを選択します。"
+                    "enable_tooltip": "アーカイブするレコードの選択"
                 },
                 "overlay": {
                     "message": "{count} 件を選択中（選択中はテーブルを変更できません）",
@@ -168,25 +168,25 @@
             },
             "preset": {
                 "default_title": "デフォルト",
-                "selector_tooltip": "適用する列プリセットを選択します。",
+                "selector_tooltip": "適用する列プリセットの選択",
                 "create": {
-                    "tooltip": "新しい空のプリセットを作成します。",
+                    "tooltip": "新しい空のプリセットの作成",
                     "dialog_title": "プリセットを作成",
                     "name_label": "プリセット名",
                     "default_name": "新規プリセット"
                 },
                 "duplicate": {
-                    "tooltip": "現在のプリセットを複製します。",
+                    "tooltip": "現在のプリセットの複製",
                     "dialog_title": "プリセットを複製",
                     "copy_suffix": " のコピー"
                 },
                 "rename": {
-                    "tooltip": "現在のプリセットの名前を変更します。",
+                    "tooltip": "現在のプリセット名の変更",
                     "dialog_title": "プリセット名を変更"
                 },
                 "delete": {
-                    "tooltip": "現在のプリセットを削除します。",
-                    "disabled_tooltip": "最後のプリセットは削除できません。",
+                    "tooltip": "現在のプリセットの削除",
+                    "disabled_tooltip": "最後のプリセットは削除不可",
                     "dialog_title": "プリセットを削除",
                     "confirm_message": "プリセット「{title}」を削除します。よろしいですか？"
                 },
@@ -197,7 +197,7 @@
                 }
             },
             "export": {
-                "button_tooltip": "エクスポートするレコードを選択します。",
+                "button_tooltip": "エクスポートするレコードの選択",
                 "dialog_title": "保存先を指定してください。",
                 "disabled_tooltip": "エクスポート中です。",
                 "csv": {
@@ -980,20 +980,20 @@
                 },
                 "side_panel": {
                     "toggle": {
-                        "open_tooltip": "サイドプレビューを開く",
-                        "close_tooltip": "サイドプレビューを閉じる"
+                        "open_tooltip": "サイドプレビューの表示",
+                        "close_tooltip": "サイドプレビューの非表示"
                     },
                     "up_button": {
-                        "tooltip": "表の1つ上のウマ娘を表示します"
+                        "tooltip": "表の1つ上のウマ娘の表示"
                     },
                     "down_button": {
-                        "tooltip": "表の1つ下のウマ娘を表示します"
+                        "tooltip": "表の1つ下のウマ娘の表示"
                     },
                     "left_button": {
-                        "tooltip": "1つ左の画像を表示します（スキル⇔継承⇔育成情報）"
+                        "tooltip": "1つ左の画像の表示"
                     },
                     "right_button": {
-                        "tooltip": "1つ右の画像を表示します（スキル⇔継承⇔育成情報）"
+                        "tooltip": "1つ右の画像の表示"
                     },
                     "empty_message": "セルをクリックすると、その項目に対応する画像が表示されます。",
                     "loading_error": "ロード中にエラーが発生しました。"
@@ -1067,7 +1067,7 @@
                     "description": "このウマ娘を本当に削除しますか？\n削除すると復元はできません。"
                 },
                 "selection_mode": {
-                    "enable_tooltip": "削除するレコードを選択します。"
+                    "enable_tooltip": "削除するレコードの選択"
                 },
                 "overlay": {
                     "delete": "選択を削除"
