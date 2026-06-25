@@ -256,6 +256,11 @@ class ConfirmActionRow extends StatelessWidget {
   final bool destructive;
   final VoidCallback onConfirm;
 
+  /// Whether the confirm button accepts input. When false the button is greyed
+  /// and both tap and long-press are no-ops, e.g. until a required choice (an
+  /// archive image option) has been made.
+  final bool enabled;
+
   const ConfirmActionRow({
     super.key,
     required this.dismissRef,
@@ -266,6 +271,7 @@ class ConfirmActionRow extends StatelessWidget {
     required this.confirmIcon,
     required this.destructive,
     required this.onConfirm,
+    this.enabled = true,
   });
 
   @override
@@ -295,9 +301,14 @@ class ConfirmActionRow extends StatelessWidget {
             icon: Icon(confirmIcon),
             label: Text(confirmLabel),
             // Destructive actions require a deliberate long-press; a plain press
-            // is a no-op so an accidental tap cannot delete/archive.
-            onPressed: destructive ? () {} : onConfirm,
-            onLongPress: destructive ? onConfirm : null,
+            // is a no-op so an accidental tap cannot delete/archive. When
+            // disabled, both are null so the button greys out entirely.
+            onPressed: !enabled
+                ? null
+                : destructive
+                ? () {}
+                : onConfirm,
+            onLongPress: enabled && destructive ? onConfirm : null,
           ),
         ),
       ],
@@ -327,6 +338,10 @@ class BulkConfirmDialog extends StatelessWidget {
   final bool destructive;
   final VoidCallback onConfirm;
 
+  /// Forwarded to [ConfirmActionRow.enabled]; greys out the confirm button until
+  /// a required choice has been made.
+  final bool confirmEnabled;
+
   const BulkConfirmDialog({
     super.key,
     required this.dismissRef,
@@ -343,6 +358,7 @@ class BulkConfirmDialog extends StatelessWidget {
     required this.confirmIcon,
     required this.destructive,
     required this.onConfirm,
+    this.confirmEnabled = true,
   });
 
   @override
@@ -377,6 +393,7 @@ class BulkConfirmDialog extends StatelessWidget {
           confirmIcon: confirmIcon,
           destructive: destructive,
           onConfirm: onConfirm,
+          enabled: confirmEnabled,
         ),
       ),
     );

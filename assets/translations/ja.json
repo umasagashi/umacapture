@@ -942,9 +942,11 @@
                 "open_in_explorer": "フォルダを開く",
                 "pin_to_top": "上部に固定",
                 "unpin": "固定解除",
-                "regenerate_record": "再認識する",
-                "delete_record": "データを削除する",
-                "report_record": "誤認識を報告する"
+                "regenerate_record": "再認識",
+                "delete_record": "データを削除",
+                "report_record": "誤認識を報告",
+                "archive_record": "データをアーカイブ",
+                "group_file": "ファイル"
             },
             "preview": {
                 "rental": "レンタル",
@@ -1277,7 +1279,7 @@
             "storage": {
                 "data_root": {
                     "title": "データの保存先",
-                    "default_label": "既定の場所",
+                    "default_label": "現在はデフォルト設定です。",
                     "records_label": "レコード",
                     "modules_label": "認識モジュール",
                     "settings_label": "設定"
@@ -1294,6 +1296,12 @@
                     "copy_path_tooltip": "パスをコピー",
                     "open_in_explorer_tooltip": "エクスプローラーで開く",
                     "path_copied": "パスをコピーしました。",
+                    "bootstrap_heading": "保存先設定の設定ファイル",
+                    "bootstrap_hint": "保存先の設定は次のパスに記録されます。アプリから変更できない場合は、このファイルを新規作成・直接編集して指定してください。",
+                    "bootstrap_sample_label": "記入例",
+                    "bootstrap_sample_notes": "・data_root の値を新しい保存先に置き換えてください。\n・パス区切り「\\」は「\\\\」と2つ重ねるか、代わりに「/」を使用してください。",
+                    "copy_sample_tooltip": "サンプルをコピー",
+                    "sample_copied": "サンプルをコピーしました。",
                     "change_button": "保存先を変更",
                     "reset_button": "デフォルトに戻す",
                     "back_button": "戻る",

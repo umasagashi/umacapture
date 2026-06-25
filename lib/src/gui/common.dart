@@ -331,6 +331,12 @@ class CardDialog extends ConsumerStatefulWidget {
   final Widget? bottom;
   final bool usePageView;
 
+  /// Opt-in scroll/clip for tall, self-sizing content when [usePageView] is
+  /// false. Leave false for content that uses `Expanded`/`Flexible` (the common
+  /// case): such content must be placed directly under the dialog's `Column`, as
+  /// a `SingleChildScrollView` cannot host an `Expanded` child.
+  final bool scrollableContent;
+
   const CardDialog({
     super.key,
     required this.dialogTitle,
@@ -338,6 +344,7 @@ class CardDialog extends ConsumerStatefulWidget {
     required this.content,
     this.bottom,
     this.usePageView = true,
+    this.scrollableContent = false,
   });
 
   @override
@@ -393,7 +400,23 @@ class _CardDialogState extends ConsumerState<CardDialog> {
                 ),
               ),
             ),
-          if (!widget.usePageView) widget.content,
+          if (!widget.usePageView && widget.scrollableContent)
+            // Bound the content to the space left between the title and bottom
+            // bars and let it scroll past that, instead of overflowing the card.
+            // `Flexible` (loose) keeps short content at its natural size, so
+            // dialogs that already fit are visually unchanged; the inner scroll
+            // view still hands the content unbounded height as before.
+            //
+            // Only for content that sizes itself; `Expanded`/`Flexible` content
+            // cannot live inside a `SingleChildScrollView`, so it uses the
+            // direct-placement branch below.
+            Flexible(
+              child: Scrollbar(
+                controller: _controller,
+                child: SingleChildScrollView(controller: _controller, child: widget.content),
+              ),
+            ),
+          if (!widget.usePageView && !widget.scrollableContent) widget.content,
           if (widget.bottom != null)
             Container(
               decoration: BoxDecoration(

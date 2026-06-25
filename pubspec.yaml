@@ -65,6 +65,7 @@ dependencies:
   window_manager: ^0.5.1
   yaml: ^3.1.1
   material_symbols_icons: ^4.2928.1
+  flutter_context_menu: ^0.4.2
 
 dev_dependencies:
   flutter_test:

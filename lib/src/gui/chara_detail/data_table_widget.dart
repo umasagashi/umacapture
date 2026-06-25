@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_context_menu/flutter_context_menu.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
@@ -84,68 +85,104 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     final selecting = ref.read(selectionModeProvider) != null;
     final isPinned = ref.read(pinnedRecordIdsProvider).contains(record.id);
     DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
-    final rect = offset & const Size(1, 1);
-    const height = 40.0;
+    const constraints = BoxConstraints(minHeight: 40);
     final style = theme.textTheme.labelMedium;
-    // The per-item Text overrides PopupMenuItem's built-in disabled coloring, so
-    // grey the label ourselves for items disabled during selection.
+    // The per-item Text/Icon overrides MenuItem's built-in disabled coloring, so
+    // grey both the label and the leading icon ourselves for items disabled
+    // during selection.
     final disabledStyle = style?.copyWith(color: theme.disabledColor);
-    showMenu<int>(
-      context: context,
-      position: RelativeRect.fromLTRB(rect.left, rect.top, rect.right, rect.bottom),
-      shape: RoundedRectangleBorder(
-        side: BorderSide(color: theme.colorScheme.outline),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      items: [
-        PopupMenuItem(
-          height: height,
-          onTap: () {
+    final disabledIconColor = selecting ? theme.disabledColor : null;
+    // Material Symbols are a variable font; bump the wght axis so the thin
+    // default strokes read clearly at the 16px menu icon size.
+    const iconWeight = 700.0;
+    final menu = ContextMenu(
+      position: offset,
+      entries: <ContextMenuEntry>[
+        // Pin/unpin the row to the top of the table. Disabled while selecting,
+        // since toggling rebuilds the grid and would drop the in-progress
+        // checkbox selection.
+        MenuItem(
+          constraints: constraints,
+          enabled: !selecting,
+          icon: Icon(isPinned ? Symbols.keep_off : Symbols.keep, weight: iconWeight, color: disabledIconColor),
+          onSelected: (_) {
+            final next = {...ref.read(pinnedRecordIdsProvider)};
+            isPinned ? next.remove(record.id) : next.add(record.id);
+            ref.read(pinnedRecordIdsProvider.notifier).set(next);
+          },
+          label: Text(
+            "$tr_chara_detail.context_menu.${isPinned ? "unpin" : "pin_to_top"}".tr(),
+            style: selecting ? disabledStyle : style,
+          ),
+        ),
+        MenuItem(
+          constraints: constraints,
+          icon: const Icon(Symbols.visibility, weight: iconWeight),
+          onSelected: (_) {
             final records = stateManager.getSortedRecords().toList();
             final index = records.indexOf(record);
             final directories = records.map(dirOf).toList();
             return CharaDetailPreviewDialog.show(ref.base, directories, index);
           },
-          child: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
+          label: Text("$tr_chara_detail.context_menu.preview".tr(), style: style),
         ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
+        // File group: open the record's folder and copy the recognition images.
+        MenuItem.submenu(
+          constraints: constraints,
+          icon: const Icon(Symbols.folder, weight: iconWeight),
+          label: Text("$tr_chara_detail.context_menu.group_file".tr(), style: style),
+          items: [
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.content_copy, weight: iconWeight),
+              onSelected: (_) =>
+                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.skillPlain),
+              label: Text("$tr_chara_detail.context_menu.copy_skill".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.content_copy, weight: iconWeight),
+              onSelected: (_) =>
+                  copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
+              label: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.folder_open, weight: iconWeight),
+              onSelected: (_) => dirOf(record).launch(),
+              label: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
+            ),
+          ],
         ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
-          child: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
-        ),
-        PopupMenuItem(
-          height: height,
-          onTap: () => dirOf(record).launch(),
-          child: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
-        ),
-        // Pin/unpin the row to the top of the table. Disabled while selecting,
-        // since toggling rebuilds the grid and would drop the in-progress
-        // checkbox selection.
-        PopupMenuItem(
-          height: height,
-          enabled: !selecting,
-          onTap: () {
-            final next = {...ref.read(pinnedRecordIdsProvider)};
-            isPinned ? next.remove(record.id) : next.add(record.id);
-            ref.read(pinnedRecordIdsProvider.notifier).set(next);
-          },
-          child: Text(
-            "$tr_chara_detail.context_menu.${isPinned ? "unpin" : "pin_to_top"}".tr(),
-            style: selecting ? disabledStyle : style,
-          ),
-        ),
-        // Re-recognition only applies to active records; archived ones have lossy
-        // or no images and are intentionally excluded.
+        // Destructive record actions, set off by a divider: archive (active-only;
+        // archived records cannot be archived again) then delete (both sources).
+        const MenuDivider(),
         if (source == RecordSource.active)
-          PopupMenuItem(
-            height: height,
+          MenuItem(
+            constraints: constraints,
             enabled: !selecting,
-            onTap: () async {
+            icon: Icon(Symbols.archive, weight: iconWeight, color: disabledIconColor),
+            onSelected: (_) => ArchiveRecordDialog.show(ref.base, recordId: record.id, source: source),
+            label: Text("$tr_chara_detail.context_menu.archive_record".tr(), style: selecting ? disabledStyle : style),
+          ),
+        MenuItem(
+          constraints: constraints,
+          enabled: !selecting,
+          icon: Icon(Symbols.delete, weight: iconWeight, color: disabledIconColor),
+          onSelected: (_) => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
+          label: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
+        ),
+        // Recognition actions, listed inline (active records only), so the
+        // trailing divider that sets them off is active-only too — otherwise an
+        // archived record would end on a dangling separator. Re-recognize, then
+        // report a misrecognition (Sentry builds only).
+        if (source == RecordSource.active) const MenuDivider(),
+        if (source == RecordSource.active)
+          MenuItem(
+            constraints: constraints,
+            enabled: !selecting,
+            icon: Icon(Symbols.autorenew, weight: iconWeight, color: disabledIconColor),
+            onSelected: (_) async {
               final moduleVersion = await ref.read(moduleVersionLoader.future);
               if (moduleVersion == null) {
                 sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.noVersionAvailable);
@@ -157,28 +194,27 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               }
               ref.read(charaDetailRecordRegenerationControllerProvider.notifier).start([record]);
             },
-            child: Text(
+            label: Text(
               "$tr_chara_detail.context_menu.regenerate_record".tr(),
               style: selecting ? disabledStyle : style,
             ),
           ),
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          height: height,
-          enabled: !selecting,
-          onTap: () => DeleteRecordDialog.show(ref.base, recordId: record.id, source: source),
-          child: Text("$tr_chara_detail.context_menu.delete_record".tr(), style: selecting ? disabledStyle : style),
-        ),
-        // Reports attach the recognition images for a bug repro; archived records
-        // only keep lossy/no images, so the report is diagnostically useless there.
-        // Active-only, like regenerate above.
         if (source == RecordSource.active && isSentryAvailable())
-          PopupMenuItem(
-            height: height,
-            onTap: () => ReportRecordDialog.show(ref.base, dirOf(record)),
-            child: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
+          MenuItem(
+            constraints: constraints,
+            icon: const Icon(Symbols.flag, weight: iconWeight),
+            onSelected: (_) => ReportRecordDialog.show(ref.base, dirOf(record)),
+            label: Text("$tr_chara_detail.context_menu.report_record".tr(), style: style),
           ),
       ],
+    );
+    showContextMenu(
+      context,
+      contextMenu: menu,
+      routeOptions: const MenuRouteOptions(
+        transitionDuration: Duration(milliseconds: 120),
+        reverseTransitionDuration: Duration(milliseconds: 120),
+      ),
     );
   }
 
@@ -382,7 +418,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         // recomputed per notify.
                         final stripe = pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
                         final separator = isLast
-                            ? BorderSide(color: theme.colorScheme.primary, width: 3)
+                            ? BorderSide(color: theme.colorScheme.outline, width: 3)
                             : BorderSide(
                                 color: theme.focusColor,
                                 width: stateManager.configuration.style.cellHorizontalBorderWidth,
@@ -545,6 +581,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       sortColumn = event.column.field;
                       sortOrder = event.column.sort;
                     }
+                    // A header-click sort reorders the frozen rows in place
+                    // (FilteredList.sort works on originalList), but unlike
+                    // _reconcile/onLoaded it doesn't rebuild the pinned index, so
+                    // rowWrapper's stripe/boundary would read stale positions.
+                    // toggleSortColumn fires this before its own notifyListeners,
+                    // so re-indexing here lands in the very next repaint.
+                    _indexPinnedRows();
                   },
                 ),
               );
@@ -698,8 +741,8 @@ class _TopControlsLayer extends ConsumerWidget {
 }
 
 /// The scrim's primary action, which opens the purpose's confirmation dialog
-/// ([ArchiveRecordDialog] or [ExportRecordDialog]) for the checked rows. Disabled
-/// until at least one row is checked.
+/// ([BulkArchiveRecordDialog] or [ExportRecordDialog]) for the checked rows.
+/// Disabled until at least one row is checked.
 class _SelectionConfirmButton extends ConsumerWidget {
   final SelectionPurpose purpose;
   final int selectedCount;
@@ -718,7 +761,7 @@ class _SelectionConfirmButton extends ConsumerWidget {
               final recordIds = ref.read(selectedRecordIdsProvider).toList();
               switch (purpose) {
                 case SelectionPurpose.archive:
-                  ArchiveRecordDialog.show(ref.base, recordIds: recordIds);
+                  BulkArchiveRecordDialog.show(ref.base, recordIds: recordIds);
                 case SelectionPurpose.export:
                   ExportRecordDialog.show(ref.base, recordIds: recordIds);
                 case SelectionPurpose.delete:

@@ -73,7 +73,7 @@ class CharaDetailExportButton extends ConsumerWidget {
 
 /// Format picker shown after rows are selected for export.
 ///
-/// Mirrors [ArchiveRecordDialog]: it runs from its own [WidgetRef] (so the
+/// Mirrors [BulkArchiveRecordDialog]: it runs from its own [WidgetRef] (so the
 /// asynchronous export survives the scrim being torn down), reports how many
 /// records are involved, and lets the user pick one disposition for the whole
 /// batch. Export is non-destructive, so a plain confirm replaces the archive
