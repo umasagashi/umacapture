@@ -417,6 +417,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       }
     });
     final sidePreview = ref.watch(sidePreviewProvider);
+    // The narrow (drawer + app bar) layout has no room for the panel, so it is
+    // disabled there (toggle hidden, panel not rendered). Computed up here so the
+    // grid's onSelected handler — built below — can also gate on it.
+    final narrow = MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth;
     if (grid.columns.isEmpty) {
       // The grid leaves the tree here, disposing its stateManager. Mark it
       // unloaded so a grid update (via the listen above) or theme repaint won't
@@ -623,11 +627,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       if (record == null) {
                         return;
                       }
-                      // While the side preview panel is open, a cell click feeds
-                      // the panel instead of opening the modal dialog: the row
-                      // picks the record, the column picks which screen to show.
+                      // While the side preview panel is open (and visible — not in
+                      // the narrow layout where it is hidden/auto-closed), a cell
+                      // click feeds the panel instead of opening the modal dialog:
+                      // the row picks the record, the column picks which screen to
+                      // show.
                       final sidePreview = ref.read(sidePreviewProvider);
-                      if (sidePreview != null) {
+                      if (sidePreview != null && !narrow) {
                         final action = event.cell?.column.getUserData<ColumnSpec>()?.cellAction;
                         ref
                             .read(sidePreviewProvider.notifier)
@@ -683,10 +689,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // the id), so it works even before the grid finishes loading; the prev/next
     // reach needs the live sorted order, so it stays disabled until the
     // stateManager is ready.
-    // The narrow (drawer + app bar) layout has no room for the panel, so disable
-    // it there: the toggle is hidden (see SidePreviewToggleButton) and the panel
-    // is not rendered even if it was left open before the window shrank.
-    final narrow = MediaQuery.sizeOf(context).width < sidePreviewMinAppWidth;
+    // The toggle is hidden in the narrow layout (see SidePreviewToggleButton) and
+    // the panel is not rendered even if it was left open before the window shrank.
     if (narrow && sidePreview != null) {
       // The narrow layout has no room for the panel and the toggle is hidden, so
       // the user can't close it; close it here. A cell click would otherwise feed

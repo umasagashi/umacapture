@@ -1,5 +1,4 @@
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,7 +7,6 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
-import '/src/core/utils.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/common.dart';
 
@@ -153,16 +151,7 @@ class SidePreviewPanel extends StatelessWidget {
                   ? _Placeholder(message: "$tr_side_panel.empty_message".tr())
                   : Padding(
                       padding: const EdgeInsets.all(2),
-                      child: LayoutBuilder(
-                        builder: (context, constraints) {
-                          return _SidePreviewImageViewer.load(
-                                recordDir: recordDir!,
-                                mode: mode,
-                                viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
-                              ) ??
-                              _Placeholder(message: "$tr_preview.loading_error".tr());
-                        },
-                      ),
+                      child: _SidePreviewImage(recordDir: recordDir!, mode: mode),
                     ),
             ),
           ),
@@ -284,142 +273,42 @@ class _Placeholder extends StatelessWidget {
   }
 }
 
-/// Single-image zoom/pan viewer, a trimmed-down sibling of the dialog's
-/// [ImageViewer]: one screen, fit-to-width on load, no prediction overlay.
-class _SidePreviewImageViewer extends StatefulWidget {
-  final FilePath imagePath;
-  final Size imageSize;
-  final Size viewportSize;
-  final double initialScale;
-  final double maxScale;
+/// Single-image zoom/pan view for one record screen: fit-to-width on load, no
+/// prediction overlay. Shares [WheelZoomViewer] (zoom/pan) and
+/// [imageSizeContainerProvider] (memoized size load) with the dialog's
+/// [ImageViewer], so the size json is read once per record — not on every panel
+/// resize or splitter drag — and the wheel/pan behavior cannot drift apart.
+class _SidePreviewImage extends ConsumerWidget {
+  final DirectoryPath recordDir;
+  final CharaDetailRecordImageMode mode;
 
-  const _SidePreviewImageViewer({
-    required this.imagePath,
-    required this.imageSize,
-    required this.viewportSize,
-    required this.initialScale,
-    required this.maxScale,
-  });
+  const _SidePreviewImage({required this.recordDir, required this.mode});
 
-  /// Builds the viewer, or returns null so the caller falls back to a placeholder.
-  ///
-  /// Runs inside a [LayoutBuilder] during build, so any failure (missing image or
-  /// unreadable/corrupt size json — e.g. an archived record) must return null
-  /// rather than throw out of the build.
-  static Widget? load({
-    required DirectoryPath recordDir,
-    required CharaDetailRecordImageMode mode,
-    required Size viewportSize,
-  }) {
-    try {
-      final imagePath = resolveImagePath(recordDir, mode);
-      if (imagePath == null) {
-        return null;
-      }
-      final container = ImageSizeContainer.load(recordDir);
-      if (container == null) {
-        return null;
-      }
-      final size = mode.intersectionSizeIn(container);
-      if (size.width <= 0) {
-        return null;
-      }
-      final scale = viewportSize.width / size.width;
-      return _SidePreviewImageViewer(
-        imagePath: imagePath,
-        imageSize: size,
-        viewportSize: viewportSize,
-        initialScale: scale,
-        maxScale: scale * 3,
-      );
-    } catch (e, s) {
-      logger.w("Failed to load side preview for $recordDir: $e\n$s");
-      return null;
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final imagePath = resolveImagePath(recordDir, mode);
+    final container = ref.watch(imageSizeContainerProvider(recordDir.path));
+    // A missing image or unreadable/corrupt size json (e.g. an archived record)
+    // falls back to the load-error placeholder instead of a broken view.
+    if (imagePath == null || container == null) {
+      return _Placeholder(message: "$tr_preview.loading_error".tr());
     }
-  }
-
-  @override
-  State<_SidePreviewImageViewer> createState() => _SidePreviewImageViewerState();
-}
-
-class _SidePreviewImageViewerState extends State<_SidePreviewImageViewer> {
-  late TransformationController _transformationController = _buildController();
-
-  TransformationController _buildController() {
-    final scale = widget.initialScale;
-    return TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0));
-  }
-
-  @override
-  void didUpdateWidget(_SidePreviewImageViewer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // The fit-to-viewport transform is derived from initialScale (viewport width /
-    // image width). Re-fit with a fresh controller only when that changes (a panel
-    // resize or navigating to a differently-sized record).
-    if (widget.initialScale != oldWidget.initialScale) {
-      _transformationController.dispose();
-      _transformationController = _buildController();
-    } else if (widget.viewportSize != oldWidget.viewportSize) {
-      // initialScale depends only on the width, so a height-only resize keeps the
-      // controller as-is and would leave a stale bottom margin once the viewport
-      // grows taller than where the user had panned. Re-clamp the existing pan.
-      clampPanToCoverViewport(
-        _transformationController,
-        viewportSize: widget.viewportSize,
-        contentSize: widget.imageSize,
-      );
+    final size = mode.intersectionSizeIn(container);
+    if (size.width <= 0) {
+      return _Placeholder(message: "$tr_preview.loading_error".tr());
     }
-  }
-
-  @override
-  void dispose() {
-    _transformationController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Listener(
-      // Custom, delta-magnitude-independent wheel zoom (see [applyWheelZoom]);
-      // InteractiveViewer's own scaling is disabled so it doesn't double-zoom.
-      onPointerSignal: (event) {
-        if (event is PointerScrollEvent) {
-          applyWheelZoom(
-            _transformationController,
-            event.localPosition,
-            event.scrollDelta.dy,
-            // fit-to-width is the lower bound: zooming out further would shrink the
-            // image below the viewport width and reveal left/right margins.
-            minScale: widget.initialScale,
-            maxScale: widget.maxScale,
-            viewportSize: widget.viewportSize,
-            contentSize: widget.imageSize,
-          );
-        }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+        final scale = viewportSize.width / size.width;
+        return WheelZoomViewer(
+          contentSize: size,
+          viewportSize: viewportSize,
+          initialScale: scale,
+          maxScale: scale * 3,
+          child: Image.file(imagePath.toFile(), width: size.width, height: size.height, fit: BoxFit.none),
+        );
       },
-      child: InteractiveViewer(
-        minScale: widget.initialScale,
-        maxScale: widget.maxScale,
-        panEnabled: true,
-        scaleEnabled: false,
-        constrained: false,
-        transformationController: _transformationController,
-        child: Container(
-          decoration: const BoxDecoration(
-            image: DecorationImage(
-              image: AssetImage("assets/image/tile_background.png"),
-              repeat: ImageRepeat.repeat,
-              opacity: 0.1,
-            ),
-          ),
-          child: Image.file(
-            widget.imagePath.toFile(),
-            width: widget.imageSize.width,
-            height: widget.imageSize.height,
-            fit: BoxFit.none,
-          ),
-        ),
-      ),
     );
   }
 }

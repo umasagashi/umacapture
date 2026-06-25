@@ -1,7 +1,6 @@
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -162,6 +161,33 @@ class ImageSizeContainer {
   }
 }
 
+/// Memoized, layout-independent loaders for a record's preview data, keyed by the
+/// record directory's path string.
+///
+/// Both loaders do synchronous disk I/O, so they must not run on every layout
+/// pass: the preview dialog and side panel both read them from inside a
+/// `LayoutBuilder` that re-runs on resize / splitter drag / overlay toggle.
+/// `autoDispose.family` keeps the result cached while continuously watched and
+/// frees it a frame after the last watcher leaves (e.g. navigating to another
+/// record). The key is the path string because [DirectoryPath] uses identity
+/// equality (a fresh instance per build would never cache-hit).
+final imageSizeContainerProvider = Provider.autoDispose.family<ImageSizeContainer?, String>((ref, path) {
+  // size json may be missing or corrupt (e.g. an archived record); degrade to a
+  // placeholder instead of throwing out of the watching build.
+  try {
+    return ImageSizeContainer.load(DirectoryPath(path));
+  } catch (e, s) {
+    logger.w("Failed to load image size for $path: $e\n$s");
+    return null;
+  }
+});
+
+final predictionContainerProvider = Provider.autoDispose.family<PredictionContainer?, String>((ref, path) {
+  // PredictionContainer.load already degrades to null on a missing/unreadable
+  // prediction.json.
+  return PredictionContainer.load(DirectoryPath(path));
+});
+
 class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
@@ -184,75 +210,11 @@ class ImageViewer extends ConsumerStatefulWidget {
     required this.prediction,
   });
 
-  static ImageViewer? load({required DirectoryPath recordDir, required Size viewportSize, required bool overlay}) {
-    // Runs inside LayoutBuilder during build: any failure (missing/corrupt
-    // size json) must return null so the caller's `?? ErrorMessageWidget`
-    // fallback engages, never throw out of the build.
-    try {
-      final imageSize = ImageSizeContainer.load(recordDir);
-      if (imageSize == null) {
-        return null;
-      }
-      final imageWidth = [
-        imageSize.skill.intersection.width,
-        imageSize.factor.intersection.width,
-        imageSize.campaign.intersection.width,
-      ].sum;
-      // The three tabs render side by side, so the content is as wide as their
-      // combined width and as tall as the tallest one.
-      final maxHeight = [
-        imageSize.skill.intersection.height,
-        imageSize.factor.intersection.height,
-        imageSize.campaign.intersection.height,
-      ].reduce((a, b) => a > b ? a : b);
-      final scale = viewportSize.width / imageWidth;
-      // TODO: This should be async.
-      final prediction = PredictionContainer.load(recordDir);
-      return ImageViewer(
-        recordDir: recordDir,
-        imageSize: imageSize,
-        viewportSize: viewportSize,
-        contentSize: Size(imageWidth.toDouble(), maxHeight.toDouble()),
-        overlay: overlay,
-        initialScale: scale,
-        maxScale: scale * 3,
-        prediction: prediction,
-      );
-    } catch (e, s) {
-      logger.w("Failed to load image viewer for $recordDir: $e\n$s");
-      return null;
-    }
-  }
-
   @override
   ConsumerState<ImageViewer> createState() => _ImageViewerState();
 }
 
 class _ImageViewerState extends ConsumerState<ImageViewer> {
-  late TransformationController _transformationController = _buildController();
-
-  TransformationController _buildController() {
-    final scale = widget.initialScale;
-    return TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0));
-  }
-
-  @override
-  void didUpdateWidget(ImageViewer oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // The fit-to-viewport transform is derived from initialScale (viewport width / image width). Re-fit with a
-    // fresh controller only when that changes (a window resize or navigating to a differently-sized record).
-    if (widget.initialScale != oldWidget.initialScale) {
-      _transformationController.dispose();
-      _transformationController = _buildController();
-    }
-  }
-
-  @override
-  void dispose() {
-    _transformationController.dispose();
-    super.dispose();
-  }
-
   Widget predictionTabOverlay(FilePath? imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
     final labelMap = ref.watch(labelMapProvider);
     final textStyle = TextStyle(color: Colors.black, backgroundColor: Colors.white.withValues(alpha: 0.5), fontSize: 9);
@@ -305,65 +267,93 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      // Custom, delta-magnitude-independent wheel zoom (see [applyWheelZoom]);
-      // InteractiveViewer's own scaling is disabled so it doesn't double-zoom.
-      onPointerSignal: (event) {
-        if (event is PointerScrollEvent) {
-          applyWheelZoom(
-            _transformationController,
-            event.localPosition,
-            event.scrollDelta.dy,
-            // fit-to-width is the lower bound: zooming out further would shrink the
-            // tabs below the viewport width and reveal left/right margins.
-            minScale: widget.initialScale,
-            maxScale: widget.maxScale,
-            viewportSize: widget.viewportSize,
-            contentSize: widget.contentSize,
-          );
-        }
-      },
-      child: InteractiveViewer(
-        minScale: widget.initialScale,
-        maxScale: widget.maxScale,
-        panEnabled: true,
-        scaleEnabled: false,
-        constrained: false,
-        transformationController: _transformationController,
-        child: Container(
-          decoration: const BoxDecoration(
-            image: DecorationImage(
-              image: AssetImage("assets/image/tile_background.png"),
-              repeat: ImageRepeat.repeat,
-              opacity: 0.1,
-            ),
+    return WheelZoomViewer(
+      contentSize: widget.contentSize,
+      viewportSize: widget.viewportSize,
+      initialScale: widget.initialScale,
+      maxScale: widget.maxScale,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          predictionTabOverlay(
+            resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.skillPlain),
+            widget.imageSize.skill,
+            !widget.overlay
+                ? null
+                : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
           ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.start,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              predictionTabOverlay(
-                resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.skillPlain),
-                widget.imageSize.skill,
-                !widget.overlay
-                    ? null
-                    : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
-              ),
-              predictionTabOverlay(
-                resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.factorPlain),
-                widget.imageSize.factor,
-                !widget.overlay ? null : widget.prediction?.factorTab,
-              ),
-              predictionTabOverlay(
-                resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.campaignPlain),
-                widget.imageSize.campaign,
-                !widget.overlay ? null : widget.prediction?.campaignTab,
-              ),
-            ],
+          predictionTabOverlay(
+            resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.factorPlain),
+            widget.imageSize.factor,
+            !widget.overlay ? null : widget.prediction?.factorTab,
           ),
-        ),
+          predictionTabOverlay(
+            resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.campaignPlain),
+            widget.imageSize.campaign,
+            !widget.overlay ? null : widget.prediction?.campaignTab,
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// The dialog's zoomable image area: turns the already-loaded [imageSize] into a
+/// fit-to-width [ImageViewer], or shows the load-error placeholder when the size
+/// data is missing or degenerate.
+///
+/// Takes the loaded data as inputs (watched by the dialog's build) so the disk
+/// reads stay out of the [LayoutBuilder], which re-runs during layout.
+class _PreviewContent extends StatelessWidget {
+  final DirectoryPath recordDir;
+  final ImageSizeContainer? imageSize;
+  final PredictionContainer? prediction;
+  final bool overlay;
+
+  const _PreviewContent({
+    required this.recordDir,
+    required this.imageSize,
+    required this.prediction,
+    required this.overlay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final imageSize = this.imageSize;
+    if (imageSize == null) {
+      return ErrorMessageWidget(message: "$tr_preview.loading_error".tr());
+    }
+    final imageWidth = [
+      imageSize.skill.intersection.width,
+      imageSize.factor.intersection.width,
+      imageSize.campaign.intersection.width,
+    ].sum;
+    if (imageWidth <= 0) {
+      return ErrorMessageWidget(message: "$tr_preview.loading_error".tr());
+    }
+    // The three tabs render side by side, so the content is as wide as their
+    // combined width and as tall as the tallest one.
+    final maxHeight = [
+      imageSize.skill.intersection.height,
+      imageSize.factor.intersection.height,
+      imageSize.campaign.intersection.height,
+    ].reduce((a, b) => a > b ? a : b);
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final scale = constraints.maxWidth / imageWidth;
+        return ImageViewer(
+          recordDir: recordDir,
+          imageSize: imageSize,
+          viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
+          contentSize: Size(imageWidth.toDouble(), maxHeight.toDouble()),
+          overlay: overlay,
+          initialScale: scale,
+          maxScale: scale * 3,
+          prediction: prediction,
+        );
+      },
     );
   }
 }
@@ -388,6 +378,13 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
 
   @override
   Widget build(BuildContext context) {
+    final recordDir = widget.recordDirs[currentIdx];
+    // Watch the memoized disk loads here in the build phase (not inside the
+    // LayoutBuilder below, which runs during layout): re-running on resize /
+    // overlay toggle reuses the cached value, so only navigating to another record
+    // re-reads json. The overlay's prediction is read only while it is on.
+    final imageSize = ref.watch(imageSizeContainerProvider(recordDir.path));
+    final prediction = overlay ? ref.watch(predictionContainerProvider(recordDir.path)) : null;
     return CardDialog(
       dialogTitle: "$tr_preview.dialog.title".tr(),
       closeButtonTooltip: "$tr_preview.dialog.close_button.tooltip".tr(),
@@ -399,15 +396,11 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
           },
           child: Padding(
             padding: const EdgeInsets.all(2),
-            child: LayoutBuilder(
-              builder: (BuildContext context, BoxConstraints constraints) {
-                return ImageViewer.load(
-                      recordDir: widget.recordDirs[currentIdx],
-                      viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
-                      overlay: overlay,
-                    ) ??
-                    ErrorMessageWidget(message: "$tr_preview.loading_error".tr());
-              },
+            child: _PreviewContent(
+              recordDir: recordDir,
+              imageSize: imageSize,
+              prediction: prediction,
+              overlay: overlay,
             ),
           ),
         ),
