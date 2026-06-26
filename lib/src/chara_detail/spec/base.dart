@@ -913,6 +913,54 @@ final selectedColumnSpecEntryKeyProvider = Provider<String>((ref) {
 // incremental so scroll offset and row identity are preserved.
 const _bulkReconcileThreshold = 32;
 
+// A text-rendering ([ColumnSpec.wrapsText]) column paired with its per-pass
+// layout: the content max-width text wraps within and the vertical cell padding
+// added to the wrapped height. Constant across rows within one row-height pass.
+typedef _WrapColumn = ({TrinaColumn col, ColumnSpec spec, double maxWidth, double verticalPadding});
+
+// Measures wrapped-text row heights for one [applyRowHeights] pass. Built once
+// from the wrapping columns' fixed layout so the per-row scan does no repeated
+// column-metadata lookups, and reuses a single [TextPainter] across every cell
+// instead of allocating one per measurement. Call [dispose] when the pass ends.
+class _RowHeightMeasurer {
+  _RowHeightMeasurer({required this._columns, required this._style, required TextScaler textScaler})
+    : _painter = TextPainter(textDirection: ui.TextDirection.ltr, textScaler: textScaler);
+
+  final List<_WrapColumn> _columns;
+  final TextStyle _style;
+  final TextPainter _painter;
+
+  // The rendered height of [row]'s wrapped text across its text-rendering
+  // columns, or 0 when none wrap. Mirrors how [CellText] lays the same text out
+  // so a grown row fits exactly: a column clamped below its content wraps and
+  // must grow the row, while an auto-fit column stays one line and adds nothing.
+  double contentHeight(TrinaRow row) {
+    var maxHeight = 0.0;
+    for (final column in _columns) {
+      final cell = row.cells[column.col.field];
+      final text = column.spec.measuredText(cell, column.col.formattedValueForDisplay(cell?.value));
+      final height = _wrappedHeight(text, column.maxWidth) + column.verticalPadding;
+      if (height > maxHeight) {
+        maxHeight = height;
+      }
+    }
+    // The 2px buffer absorbs sub-pixel rounding so the last wrapped line is never clipped.
+    return maxHeight > 0 ? maxHeight + 2 : 0;
+  }
+
+  double _wrappedHeight(String text, double maxWidth) {
+    if (text.isEmpty || maxWidth <= 0) {
+      return 0;
+    }
+    _painter
+      ..text = TextSpan(style: _style, text: text)
+      ..layout(maxWidth: maxWidth);
+    return _painter.height;
+  }
+
+  void dispose() => _painter.dispose();
+}
+
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   double _visualTextWidth(BuildContext context, String text, TextStyle style) {
     if (text.isEmpty) {
@@ -984,45 +1032,27 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
   }
 
-  // Measures the rendered height of [text] wrapped to [maxWidth] in [style],
-  // matching how [CellText] lays the same text out so a grown row fits exactly.
-  double _wrappedTextHeight(BuildContext context, String text, TextStyle style, double maxWidth) {
-    if (text.isEmpty || maxWidth <= 0) {
-      return 0;
-    }
-    final textPainter = TextPainter(
-      text: TextSpan(style: style, text: text),
-      textDirection: ui.TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-    )..layout(maxWidth: maxWidth);
-    return textPainter.height;
-  }
-
-  // The rendered height of a row's wrapped text across its text-rendering
-  // columns, or 0 when none wrap. Every text ([wrapsText]) column is measured:
-  // an auto-fit column normally sized to its widest cell stays one line and adds
-  // nothing, but a column clamped below its content (by the [maxWidth] cap in
-  // [autoFitColumns], or by a text scale larger than the auto-fit measurement
-  // assumed) wraps and must grow the row. Widget/icon columns render at a fixed
-  // height, so the scan skips them.
-  double _contentHeight(BuildContext context, TrinaRow row, TextStyle style) {
-    var maxHeight = 0.0;
+  // The text-rendering ([ColumnSpec.wrapsText]) columns paired with their fixed
+  // per-pass layout (content max-width and vertical padding), computed once so
+  // the per-row height scan in [_RowHeightMeasurer] does no repeated
+  // column-metadata lookups. Widget/icon columns render at a fixed height and a
+  // column without a spec (the checkbox column) is excluded.
+  List<_WrapColumn> _wrappingColumns() {
+    final result = <_WrapColumn>[];
     for (final col in columns) {
       final spec = col.getUserData<ColumnSpec>();
       if (spec == null || !spec.wrapsText) {
         continue;
       }
       final cellPadding = col.cellPadding ?? configuration.style.defaultCellPadding;
-      final cell = row.cells[col.field];
-      final text = spec.measuredText(cell, col.formattedValueForDisplay(cell?.value));
-      final height =
-          _wrappedTextHeight(context, text, style, col.width - cellPadding.horizontal) + cellPadding.vertical;
-      if (height > maxHeight) {
-        maxHeight = height;
-      }
+      result.add((
+        col: col,
+        spec: spec,
+        maxWidth: col.width - cellPadding.horizontal,
+        verticalPadding: cellPadding.vertical,
+      ));
     }
-    // The 2px buffer absorbs sub-pixel rounding so the last wrapped line is never clipped.
-    return maxHeight > 0 ? maxHeight + 2 : 0;
+    return result;
   }
 
   // The pixel height of [minLines] text lines plus the default cell padding,
@@ -1033,7 +1063,9 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       textDirection: ui.TextDirection.ltr,
       textScaler: MediaQuery.textScalerOf(context),
     )..layout();
-    return painter.preferredLineHeight * minLines + configuration.style.defaultCellPadding.vertical;
+    final height = painter.preferredLineHeight * minLines + configuration.style.defaultCellPadding.vertical;
+    painter.dispose();
+    return height;
   }
 
   // Sizes every row for [mode], flooring at [minLines] text lines: wrap fixes all
@@ -1049,15 +1081,23 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
     final style = DefaultTextStyle.of(context).style;
     final minHeight = _minRowHeight(context, style, minLines);
+    // The auto modes measure wrapped text; wrap fills the floor without measuring.
+    final measurer = mode == RowHeightMode.wrap
+        ? null
+        : _RowHeightMeasurer(columns: _wrappingColumns(), style: style, textScaler: MediaQuery.textScalerOf(context));
     final List<double> targets;
-    switch (mode) {
-      case RowHeightMode.wrap:
-        targets = List.filled(refRows.length, minHeight);
-      case RowHeightMode.autoPerRow:
-        targets = [for (final row in refRows) max(minHeight, _contentHeight(context, row, style))];
-      case RowHeightMode.autoUniform:
-        final tallest = refRows.fold<double>(minHeight, (h, row) => max(h, _contentHeight(context, row, style)));
-        targets = List.filled(refRows.length, tallest);
+    try {
+      switch (mode) {
+        case RowHeightMode.wrap:
+          targets = List.filled(refRows.length, minHeight);
+        case RowHeightMode.autoPerRow:
+          targets = [for (final row in refRows) max(minHeight, measurer!.contentHeight(row))];
+        case RowHeightMode.autoUniform:
+          final tallest = refRows.fold<double>(minHeight, (h, row) => max(h, measurer!.contentHeight(row)));
+          targets = List.filled(refRows.length, tallest);
+      }
+    } finally {
+      measurer?.dispose();
     }
     var changed = false;
     for (var i = 0; i < refRows.length; i++) {
@@ -1185,12 +1225,20 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     }
   }
 
-  /// Copies the renderer and title from each freshly built column onto the
-  /// matching live column (by field), so columns whose renderer captured a
-  /// provider snapshot (e.g. ratings) repaint with current data — and columns
-  /// whose title is provider-derived (e.g. a renamed rating/label set, whose
-  /// field is the stable spec id) show the new header — without a structural
-  /// replace that would drop their width and sort indicator.
+  /// Copies the renderer, title, and [ColumnSpec] user data from each freshly
+  /// built column onto the matching live column (by field), so columns whose
+  /// renderer captured a provider snapshot (e.g. ratings) repaint with current
+  /// data — and columns whose title is provider-derived (e.g. a renamed
+  /// rating/label set, whose field is the stable spec id) show the new header —
+  /// without a structural replace that would drop their width and sort indicator.
+  ///
+  /// Re-seating the spec keeps the live column's user data in sync with the
+  /// current spec after a non-structural edit (e.g. a skill column's display
+  /// count). Width-persisting callers read the spec back off the live column, so
+  /// a stale spec here would let a later resize/reset overwrite that edit. The
+  /// rebuilt spec carries the current pinned width (every spec mutation also
+  /// persists it), so re-seating never loses a width. The checkbox column has no
+  /// spec and is left untouched.
   ///
   /// Cell-driven columns (e.g. memo, which reads the cell's user data) are
   /// refreshed by [reconcileRows] replacing their row instead; copying their
@@ -1202,6 +1250,10 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       if (next != null) {
         live.renderer = next.renderer;
         live.title = next.title;
+        final nextSpec = next.getUserData<ColumnSpec>();
+        if (nextSpec != null) {
+          live.setUserData(nextSpec);
+        }
       }
     }
   }

@@ -339,8 +339,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   /// Pins any column the user just dragged: a live width that drifts from the
   /// recorded baseline persists onto its spec as an explicit width, which makes
   /// [autoFitColumns] skip it thereafter. The live column's user data is updated
-  /// in lockstep (refreshColumnRenderers preserves it) so a later content re-fit
-  /// keeps skipping the now-pinned column rather than measuring it back to auto.
+  /// in lockstep so a later content re-fit keeps skipping the now-pinned column
+  /// rather than measuring it back to auto. The replaceById below also rebuilds
+  /// the grid, and refreshColumnRenderers re-seats this same spec onto the live
+  /// column, so the user data stays in sync with the loader either way.
   void _persistResizedColumns() {
     if (!_loaded) {
       return;
