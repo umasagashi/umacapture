@@ -115,6 +115,12 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: IsInRangeRatingPredicate());
+
   RatingColumnSpec copyWith({
     String? id,
     String? title,

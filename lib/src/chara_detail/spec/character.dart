@@ -99,6 +99,12 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: CharacterCardPredicate.any());
+
   CharacterCardColumnSpec copyWith({
     String? id,
     String? title,

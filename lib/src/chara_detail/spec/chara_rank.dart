@@ -26,6 +26,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     super.hidden,
     super.description,
     super.width,
+    super.builderId,
   });
 
   @override
@@ -52,6 +53,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
+    String? builderId,
   }) {
     return CharaRankColumnSpec(
       id: id ?? this.id,
@@ -62,6 +64,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
+      builderId: builderId ?? this.builderId,
     );
   }
 }
@@ -80,8 +83,17 @@ class CharaRankColumnBuilder extends ColumnBuilder {
   @override
   final ColumnBuilderType type;
 
-  CharaRankColumnBuilder({required this.title, required this.category, required this.parser, this.min, this.max})
-    : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
+  @override
+  final String? builderId;
+
+  CharaRankColumnBuilder({
+    required this.title,
+    required this.category,
+    required this.parser,
+    this.min,
+    this.max,
+    this.builderId,
+  }) : type = (min != null || max != null) ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
   CharaRankColumnSpec build(RefBase ref) {
@@ -90,6 +102,7 @@ class CharaRankColumnBuilder extends ColumnBuilder {
       title: title,
       parser: parser,
       labelKey: LabelKeys.charaRank,
+      builderId: builderId,
       predicate: IsInRangeIntegerPredicate(min: min, max: max),
     );
   }

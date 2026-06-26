@@ -70,6 +70,12 @@ class RangedLabelColumnSpecMapper
     _$width,
     opt: true,
   );
+  static String? _$builderId(RangedLabelColumnSpec v) => v.builderId;
+  static const Field<RangedLabelColumnSpec, String> _f$builderId = Field(
+    'builderId',
+    _$builderId,
+    opt: true,
+  );
 
   @override
   final MappableFields<RangedLabelColumnSpec> fields = const {
@@ -82,6 +88,7 @@ class RangedLabelColumnSpecMapper
     #hidden: _f$hidden,
     #description: _f$description,
     #width: _f$width,
+    #builderId: _f$builderId,
   };
   @override
   final bool ignoreNull = true;
@@ -109,6 +116,7 @@ class RangedLabelColumnSpecMapper
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
       width: data.dec(_f$width),
+      builderId: data.dec(_f$builderId),
     );
   }
 

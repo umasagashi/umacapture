@@ -125,6 +125,12 @@ class SimpleLabelColumnSpecMapper
     _$width,
     opt: true,
   );
+  static String? _$builderId(SimpleLabelColumnSpec v) => v.builderId;
+  static const Field<SimpleLabelColumnSpec, String> _f$builderId = Field(
+    'builderId',
+    _$builderId,
+    opt: true,
+  );
 
   @override
   final MappableFields<SimpleLabelColumnSpec> fields = const {
@@ -137,6 +143,7 @@ class SimpleLabelColumnSpecMapper
     #hidden: _f$hidden,
     #description: _f$description,
     #width: _f$width,
+    #builderId: _f$builderId,
   };
   @override
   final bool ignoreNull = true;
@@ -164,6 +171,7 @@ class SimpleLabelColumnSpecMapper
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
       width: data.dec(_f$width),
+      builderId: data.dec(_f$builderId),
     );
   }
 

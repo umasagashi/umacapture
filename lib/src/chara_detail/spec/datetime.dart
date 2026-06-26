@@ -105,6 +105,12 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: IsInRangeDateTimePredicate());
+
   DateTimeColumnSpec copyWith({
     String? id,
     String? title,

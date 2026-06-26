@@ -314,6 +314,10 @@
                         "label": "列を削除",
                         "tooltip": "この列をテーブルから削除"
                     },
+                    "reset_button": {
+                        "label": "列をリセット",
+                        "tooltip": "この列の絞り込み条件を既定に戻す"
+                    },
                     "close_button": {
                         "tooltip": "反映せずにキャンセル"
                     }

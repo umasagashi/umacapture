@@ -170,6 +170,12 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: FamilyRegistrationPredicate.any());
+
   FamilyRegistrationColumnSpec copyWith({
     String? id,
     String? title,

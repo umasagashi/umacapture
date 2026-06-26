@@ -60,6 +60,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   final double? width;
 
+  @override
+  final String? builderId;
+
   RangedLabelColumnSpec({
     required this.id,
     required this.title,
@@ -70,6 +73,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     this.hidden = false,
     this.description,
     this.width,
+    this.builderId,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
@@ -81,6 +85,13 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
+      copyWith(predicate: defaultSpec is RangedLabelColumnSpec ? defaultSpec.predicate : IsInRangeIntegerPredicate());
+
   RangedLabelColumnSpec copyWith({
     String? id,
     String? title,
@@ -90,6 +101,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
+    String? builderId,
   }) {
     return RangedLabelColumnSpec(
       id: id ?? this.id,
@@ -100,6 +112,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
+      builderId: builderId ?? this.builderId,
     );
   }
 
@@ -289,6 +302,9 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
   @override
   final ColumnBuilderType type;
 
+  @override
+  final String? builderId;
+
   RangedLabelColumnBuilder({
     required this.title,
     required this.category,
@@ -296,6 +312,7 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
     required this.parser,
     this.cellAction,
     this.min,
+    this.builderId,
   }) : type = min != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
@@ -306,6 +323,7 @@ class RangedLabelColumnBuilder extends ColumnBuilder {
       parser: parser,
       labelKey: labelKey,
       cellAction: cellAction,
+      builderId: builderId,
       predicate: IsInRangeIntegerPredicate(min: min),
     );
   }

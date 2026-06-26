@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,6 +18,7 @@ import '/src/chara_detail/spec/rating.dart';
 import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
+import '/src/core/utils.dart';
 
 // ignore: constant_identifier_names
 const tr_columns = "pages.chara_detail.columns";
@@ -49,6 +51,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.trainee,
       parser: EvaluationValueParser(),
       max: 5,
+      builderId: "chara_rank_less_than_a",
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.status.speed.title".tr(),
@@ -141,6 +144,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       labelKey: LabelKeys.aptitude,
       parser: ShortRangeAptitudeParser(),
       min: 7,
+      builderId: "aptitude_short_range",
     ),
     RangedLabelColumnBuilder(
       title: "$tr_columns.aptitude.shortcuts.mile_range.title".tr(),
@@ -148,6 +152,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       labelKey: LabelKeys.aptitude,
       parser: MileRangeAptitudeParser(),
       min: 7,
+      builderId: "aptitude_mile_range",
     ),
     RangedLabelColumnBuilder(
       title: "$tr_columns.aptitude.shortcuts.middle_range.title".tr(),
@@ -155,6 +160,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       labelKey: LabelKeys.aptitude,
       parser: MiddleRangeAptitudeParser(),
       min: 7,
+      builderId: "aptitude_middle_range",
     ),
     RangedLabelColumnBuilder(
       title: "$tr_columns.aptitude.shortcuts.long_range.title".tr(),
@@ -162,6 +168,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       labelKey: LabelKeys.aptitude,
       parser: LongRangeAptitudeParser(),
       min: 7,
+      builderId: "aptitude_long_range",
     ),
     SkillColumnBuilder(title: "$tr_columns.skill.title".tr(), category: ColumnCategory.skill, parser: SkillParser()),
     FilteredSkillColumnBuilder(
@@ -171,6 +178,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       isFilterColumn: true,
       initialTags: {"skill_status_up"},
       initialIds: skillInfo.where((e) => e.tags.contains("skill_status_up")).map((e) => e.sid).toSet(),
+      builderId: "skill_status_up",
     ),
     FilteredSkillColumnBuilder(
       title: "$tr_columns.skill.shortcuts.consolidation.title".tr(),
@@ -178,6 +186,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: SkillParser(),
       isFilterColumn: true,
       initialIds: {179},
+      builderId: "skill_consolidation",
     ),
     FactorColumnBuilder(
       title: "$tr_columns.factor.title".tr(),
@@ -192,6 +201,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_status"},
       initialIds: factorInfo.where((e) => e.tags.contains("factor_status")).map((e) => e.sid).toSet(),
       initialStar: 1,
+      builderId: "factor_status",
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.aptitude.title".tr(),
@@ -201,6 +211,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_aptitude"},
       initialIds: factorInfo.where((e) => e.tags.contains("factor_aptitude")).map((e) => e.sid).toSet(),
       initialStar: 1,
+      builderId: "factor_aptitude",
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.scenario.title".tr(),
@@ -210,6 +221,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_scenario"},
       initialIds: factorInfo.where((e) => e.tags.contains("factor_scenario")).map((e) => e.sid).toSet(),
       initialStar: 1,
+      builderId: "factor_scenario",
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.short_range.title".tr(),
@@ -219,6 +231,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_aptitude"},
       initialIds: {66},
       initialStar: 1,
+      builderId: "factor_short_range",
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.mile_range.title".tr(),
@@ -228,6 +241,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_aptitude"},
       initialIds: {27},
       initialStar: 1,
+      builderId: "factor_mile_range",
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.middle_range.title".tr(),
@@ -237,6 +251,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_aptitude"},
       initialIds: {73},
       initialStar: 1,
+      builderId: "factor_middle_range",
     ),
     FilteredFactorColumnBuilder(
       title: "$tr_columns.factor.shortcuts.long_range.title".tr(),
@@ -246,6 +261,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialFactorTags: {"factor_aptitude"},
       initialIds: {142},
       initialStar: 1,
+      builderId: "factor_long_range",
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.fans.title".tr(),
@@ -301,6 +317,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         labelKey: LabelKeys.raceStrategy,
         parser: RaceStrategyParser(),
         rejects: strategies.where((e) => e.$1 != strategy.$1).map((e) => e.$1).toSet(),
+        builderId: "race_strategy_${strategy.$1}",
       ),
     if (ratingStorages.isEmpty)
       RatingColumnBuilder(
@@ -365,3 +382,21 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
     LogicColumnBuilder(title: "$tr_columns.logic.xnor.title".tr(), logic: LogicMode.xnor),
   ];
 });
+
+/// Rebuilds the default spec that [spec] was created from, or null when it carries
+/// no [ColumnSpec.builderId] (a plain column, or one added before the field
+/// existed) or its builder no longer exists.
+///
+/// Used by the column dialog's "reset filter" action: re-running the matching
+/// builder reproduces the column's default predicate — including builders whose
+/// ids derive from current game data — without storing it on the spec. The caller
+/// adopts only the predicate (via [ColumnSpec.withFilterReset]); the fresh
+/// id/title are discarded.
+ColumnSpec? builderSpecOf(RefBase ref, ColumnSpec spec) {
+  final id = spec.builderId;
+  if (id == null) {
+    return null;
+  }
+  final builder = ref.read(columnBuilderProvider).firstWhereOrNull((b) => b.builderId == id);
+  return builder?.build(ref);
+}

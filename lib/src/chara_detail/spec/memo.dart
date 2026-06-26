@@ -104,6 +104,12 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: RegExpPredicate());
+
+  @override
   String measuredText(TrinaCell? cell, String formatted) =>
       cell?.getUserData<MemoCellData>()?.value == null ? "$tr_memo.cell.description".tr() : formatted;
 

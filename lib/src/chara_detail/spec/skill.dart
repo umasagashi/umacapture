@@ -145,6 +145,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   final double? width;
 
   @override
+  final String? builderId;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   SkillColumnSpec({
@@ -158,6 +161,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     this.hidden = false,
     this.description,
     this.width,
+    this.builderId,
   });
 
   @override
@@ -168,6 +172,13 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
 
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
+
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
+      copyWith(predicate: defaultSpec is SkillColumnSpec ? defaultSpec.predicate : AggregateSkillPredicate.any());
 
   SkillColumnSpec copyWith({
     String? id,
@@ -180,6 +191,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
+    String? builderId,
   }) {
     return SkillColumnSpec(
       id: id ?? this.id,
@@ -192,6 +204,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
+      builderId: builderId ?? this.builderId,
     );
   }
 
@@ -561,6 +574,9 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
   final Set<int> initialIds;
 
   @override
+  final String? builderId;
+
+  @override
   final String title;
 
   @override
@@ -576,6 +592,7 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
     bool isFilterColumn = true,
     this.initialTags = const {},
     required this.initialIds,
+    this.builderId,
   }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
@@ -584,6 +601,7 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       parser: parser,
+      builderId: builderId,
       predicate: AggregateSkillPredicate(
         query: initialIds,
         logic: SkillSetLogicMode.anyOf,
