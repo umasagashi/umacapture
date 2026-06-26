@@ -208,6 +208,15 @@ void copyRecordImageToClipboard(RefBase ref, DirectoryPath recordDir, CharaDetai
   unawaited(ClipboardAlt.pasteImage(ref, imagePath));
 }
 
+/// Writes [record] to `record.json` under [recordDir], in the 4-space-indent
+/// on-disk format the native recognizer and the exporter produce.
+///
+/// Shared by both stores' `_persist`, which only differ in the record directory
+/// their `recordPathOf` resolves (active vs. archive root).
+void _persistRecordJson(DirectoryPath recordDir, CharaDetailRecord record) {
+  recordDir.filePath("record.json").writeAsStringSync(const JsonEncoder.withIndent('    ').convert(record.toMap()));
+}
+
 /// The mutation surface shared by the active ([CharaDetailRecordStorage]) and
 /// archive ([CharaDetailArchiveStorage]) stores.
 ///
@@ -230,6 +239,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   Future<List<CharaDetailRecord>> build() async {
     final pathInfo = await ref.watch(pathInfoLoader.future);
     rootDirectory = pathInfo.charaDetailActiveDir;
+    // Trigger the archive build in parallel so capture-time dedup and inheritance
+    // resolution can consider archived records. read (not watch, and not awaited):
+    // this starts the archive build without subscribing, so later archive
+    // mutations (e.g. an inheritance write-back) do not rebuild this store, and
+    // the capture listener below is registered without waiting for the archive
+    // scan. Until the scan lands, add() reads its asData snapshot and degrades to
+    // active-only via the `?? const []` fallback.
+    ref.read(charaDetailArchiveStorageLoaderProvider);
     final List<CharaDetailRecord> records = [];
     if (rootDirectory.existsSync()) {
       final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
@@ -243,7 +260,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       _updateRecordInfo(e);
     }
     // riverpod 3 removed StreamProvider.stream; listen to the AsyncValue and react
-    // to each newly captured record id.
+    // to each newly captured record id. Registered with no intervening await after
+    // the active load (the archive load above is deliberately not awaited), so the
+    // window between this store building and the listener attaching stays as small
+    // as it was before archived records were considered: the capture event stream
+    // is a broadcast stream with no buffering, so an event delivered before this
+    // listener attaches is lost. The callback stays synchronous so add() (and its
+    // duplicate-fail override) completes within the stream-delivery microtask,
+    // before the next native capture message is processed.
     ref.listen(charaDetailRecordCapturedEventProvider, (_, next) {
       next.whenData((e) => addFromFile(e));
     });
@@ -275,8 +299,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   void add(CharaDetailRecord record) {
-    final records = _records;
-    final duplicated = records.firstWhereOrNull((e) => record.isSameChara(e));
+    final activeRecords = _records;
+    // Consider archived records too, so a re-capture of an archived chara is
+    // rejected as a duplicate and inheritance can link across both sets. Falls
+    // back to active-only if the archive failed to preload (see build()).
+    final archiveRecords =
+        ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+    final existing = [...activeRecords, ...archiveRecords];
+    final duplicated = existing.firstWhereOrNull((e) => record.isSameChara(e));
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
       _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
@@ -284,25 +314,30 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       return;
     }
 
-    // Link this record to existing parents/children by matching factors and
-    // card, then persist any record.json (this record and/or existing children)
-    // whose parent ids changed.
-    final resolution = InheritanceResolver.resolveForNewRecord(record, records);
+    // Link this record to existing parents/children (in either the active or the
+    // archive set) by matching factors and card, then persist any record.json
+    // whose parent ids changed, routing each change back to its owning store.
+    final resolution = InheritanceResolver.resolveForNewRecord(record, existing);
     final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
-    final childUpdates = {for (final e in resolution.changed.where((e) => e.id != record.id)) e.id: e};
-    for (final updated in resolution.changed) {
-      _persist(updated);
-    }
+    final archiveIds = {for (final e in archiveRecords) e.id};
+    final activeChildUpdates = <String, CharaDetailRecord>{};
+    // The new record (always active) persists here too; only existing active
+    // children feed the republish map.
+    _routeInheritanceChanges(resolution, archiveIds, (updated) {
+      if (updated.id != record.id) {
+        activeChildUpdates[updated.id] = updated;
+      }
+    });
     _updateRecordInfo(resolvedRecord);
 
-    // `records` already folds in any pending batch updates, so publishing it
+    // `activeRecords` already folds in any pending batch updates, so publishing it
     // and clearing the buffer keeps the next replaceBy re-snapshotting cleanly.
     // Drop any existing entry with the same id so re-adding a record (same id)
     // replaces it instead of appending a duplicate.
     _pendingRecords = null;
     state = AsyncData([
-      for (final e in records)
-        if (e.id != resolvedRecord.id) childUpdates[e.id] ?? e,
+      for (final e in activeRecords)
+        if (e.id != resolvedRecord.id) activeChildUpdates[e.id] ?? e,
       resolvedRecord,
     ]);
 
@@ -317,16 +352,52 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// Re-resolves parent/child links across every stored record (manual action).
   ///
   /// Unlike the per-capture resolution, this is authoritative: it both sets and
-  /// clears links so the whole storage reflects the current matches. Records
-  /// whose links change are rewritten to disk and republished.
+  /// clears links so the whole storage reflects the current matches. The active
+  /// and archive sets are resolved together, and each changed record is rewritten
+  /// to disk and republished in its owning store. Aborts with a warning if the
+  /// archive has not loaded (build() no longer awaits it), because clearing links
+  /// against a missing archive would destroy valid active->archive links.
   void resolveAllInheritance() {
-    final resolution = InheritanceResolver.resolveAll(_records);
-    for (final updated in resolution.changed) {
-      _persist(updated);
-      replaceBy(updated, id: updated.id);
+    // resolveAll is authoritative: it clears links that no longer resolve. If the
+    // archive failed to load (or is still building), treating it as empty would
+    // clear every active->archive link as unresolvable and rewrite those
+    // record.json files, destroying valid links. Abort instead of degrading; the
+    // capture-time add() path is additive and stays safe without this guard.
+    final archiveRecords = ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value;
+    if (archiveRecords == null) {
+      Toaster.show(ToastData.warning(description: "app.inheritance.archive_not_ready".tr()));
+      return;
     }
+    final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords]);
+    final archiveIds = {for (final e in archiveRecords) e.id};
+    _routeInheritanceChanges(resolution, archiveIds, (updated) {
+      replaceBy(updated, id: updated.id);
+    });
     forceRebuild();
     _surfaceInheritance(resolution, alwaysReport: true);
+  }
+
+  /// Routes each changed record to its owning store.
+  ///
+  /// Active records are persisted here and then handed to [onActive] for the
+  /// store-specific in-memory republish; archived records are collected and
+  /// written back (and republished) by the archive store in a single
+  /// [CharaDetailArchiveStorage.applyInheritanceUpdates] call.
+  void _routeInheritanceChanges(
+    InheritanceResolution resolution,
+    Set<String> archiveIds,
+    void Function(CharaDetailRecord updated) onActive,
+  ) {
+    final archiveUpdates = <CharaDetailRecord>[];
+    for (final updated in resolution.changed) {
+      if (archiveIds.contains(updated.id)) {
+        archiveUpdates.add(updated);
+      } else {
+        _persist(updated);
+        onActive(updated);
+      }
+    }
+    ref.read(charaDetailArchiveStorageLoaderProvider.notifier).applyInheritanceUpdates(archiveUpdates);
   }
 
   /// Reports the outcome of an inheritance resolution via toasts.
@@ -351,13 +422,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     }
   }
 
-  /// Writes [record] back to its `record.json`, matching the on-disk format
-  /// (4-space indent) that the native recognizer and the exporter produce.
-  void _persist(CharaDetailRecord record) {
-    recordPathOf(
-      record,
-    ).filePath("record.json").writeAsStringSync(const JsonEncoder.withIndent('    ').convert(record.toMap()));
-  }
+  /// Writes [record] back to its active `record.json` via [_persistRecordJson].
+  void _persist(CharaDetailRecord record) => _persistRecordJson(recordPathOf(record), record);
 
   void addFromFile(String id) {
     final result = CharaDetailRecord.load(rootDirectory / id);
@@ -440,6 +506,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   void delete(String id) {
+    // Deleting a record does not clear other records' parentN links to it; the
+    // dangling id is harmless and is cleared on the next resolveAllInheritance
+    // (see InheritanceResolver).
     final record = getBy(id: id);
     // Guard rather than assert: the record can vanish between a dialog opening
     // and its confirm (a background capture reload, or an archive of the same
@@ -543,12 +612,14 @@ final charaDetailRecordStorageProvider = Provider<List<CharaDetailRecord>>((ref)
   return ref.watch(charaDetailRecordStorageLoaderProvider).requireValue;
 });
 
-/// Read-only view over the archived records under `chara_detail/archive/`.
+/// Storage for the archived records under `chara_detail/archive/`.
 ///
 /// Deliberately minimal: unlike [CharaDetailRecordStorage] it registers no
-/// capture listener, runs no version check, and builds no card/inheritance maps.
-/// That keeps capture, dedup, and re-recognition bound exclusively to the active
-/// set, so archived records are structurally excluded from re-recognition.
+/// capture listener and runs no version check, so archived records are
+/// structurally excluded from re-recognition. They are, however, included in
+/// capture-time and manual inheritance resolution and in capture dedup: the
+/// active store reads this set as extra candidates and writes back any archived
+/// record whose parent links change via [applyInheritanceUpdates].
 class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> implements CharaDetailRecordMutator {
   late DirectoryPath rootDirectory;
 
@@ -571,6 +642,31 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
   CharaDetailRecord? getBy({required String id}) {
     return state.asData?.value.firstWhereOrNull((e) => e.id == id);
+  }
+
+  /// Writes [record] back to its archived `record.json` via [_persistRecordJson].
+  void _persist(CharaDetailRecord record) => _persistRecordJson(recordPathOf(record), record);
+
+  /// Persists inheritance-updated archived [records] and swaps them into the
+  /// in-memory list by id.
+  ///
+  /// Called by the active store's capture-time and manual inheritance resolution
+  /// when an archived record's parent links change. A no-op for an empty list.
+  /// Disk is always updated; the in-memory swap is skipped only if the archive
+  /// view never loaded (the next build reads the updated json from disk).
+  void applyInheritanceUpdates(List<CharaDetailRecord> records) {
+    if (records.isEmpty) {
+      return;
+    }
+    for (final record in records) {
+      _persist(record);
+    }
+    final current = state.asData?.value;
+    if (current == null) {
+      return;
+    }
+    final byId = {for (final record in records) record.id: record};
+    state = AsyncData([for (final e in current) byId[e.id] ?? e]);
   }
 
   /// Appends just-archived [records] to the in-memory list, mirroring the active

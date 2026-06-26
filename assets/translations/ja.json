@@ -12,7 +12,8 @@
         "record_quarantine_error": "読み込めない記録 {count} 件の退避に失敗しました。",
         "inheritance": {
             "resolved": "親子関係を {count} 件解決しました。",
-            "ambiguous": "親候補が複数一致したため {count} 件はリンクしませんでした。"
+            "ambiguous": "親候補が複数一致したため {count} 件はリンクしませんでした。",
+            "archive_not_ready": "アーカイブの読み込みが完了していないため、親子関係の再解決を中止しました。"
         }
     },
     "pages": {
