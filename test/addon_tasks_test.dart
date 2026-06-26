@@ -259,8 +259,11 @@ void main() {
       expect(result.status, ExecutionStatus.success);
     });
 
-    BuiltinActionDescriptor neverCompleting(String key) =>
-        BuiltinActionDescriptor(key: key, labelKey: key, run: (ref, payload, argument) => Completer<void>().future);
+    BuiltinActionDescriptor neverCompleting(String key) => BuiltinActionDescriptor(
+      key: key,
+      labelKey: key,
+      run: (ref, payload, argument, secondaryArgument) => Completer<void>().future,
+    );
 
     test('a builtin that never completes is bounded by the timeout', () async {
       builtinActionRegistry['stuck_timeout'] = neverCompleting('stuck_timeout');
@@ -282,7 +285,7 @@ void main() {
       builtinActionRegistry['stuck_cancel'] = BuiltinActionDescriptor(
         key: 'stuck_cancel',
         labelKey: 'stuck_cancel',
-        run: (ref, payload, argument) => completer.future,
+        run: (ref, payload, argument, secondaryArgument) => completer.future,
       );
       addTearDown(() => builtinActionRegistry.remove('stuck_cancel'));
 

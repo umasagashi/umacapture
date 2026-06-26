@@ -277,11 +277,18 @@ class BuiltinActionMapper extends SubClassMapperBase<BuiltinAction> {
     _$argument,
     opt: true,
   );
+  static String? _$secondaryArgument(BuiltinAction v) => v.secondaryArgument;
+  static const Field<BuiltinAction, String> _f$secondaryArgument = Field(
+    'secondaryArgument',
+    _$secondaryArgument,
+    opt: true,
+  );
 
   @override
   final MappableFields<BuiltinAction> fields = const {
     #actionKey: _f$actionKey,
     #argument: _f$argument,
+    #secondaryArgument: _f$secondaryArgument,
   };
 
   @override
@@ -296,6 +303,7 @@ class BuiltinActionMapper extends SubClassMapperBase<BuiltinAction> {
     return BuiltinAction(
       actionKey: data.dec(_f$actionKey),
       argument: data.dec(_f$argument),
+      secondaryArgument: data.dec(_f$secondaryArgument),
     );
   }
 

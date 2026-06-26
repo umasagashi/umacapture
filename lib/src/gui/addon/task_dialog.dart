@@ -82,6 +82,7 @@ class _ActionFields {
   // is required); an existing action overwrites it in seed().
   final webhookTimeout = TextEditingController(text: "${WebhookAction.defaultTimeoutSeconds}");
   final builtinArg = TextEditingController();
+  final builtinArg2 = TextEditingController();
   bool runInShell = false;
   String builtinKey = builtinActionRegistry.keys.first;
   String webhookMethod = _webhookMethods.first;
@@ -111,8 +112,10 @@ class _ActionFields {
         // the key dropdown's assert, so fall back to the first registry entry.
         builtinKey = builtinActionRegistry.containsKey(a.actionKey) ? a.actionKey : builtinActionRegistry.keys.first;
         builtinArg.text = a.argument ?? builtinActionRegistry[builtinKey]?.defaultArgument ?? "";
+        builtinArg2.text = a.secondaryArgument ?? builtinActionRegistry[builtinKey]?.defaultSecondArgument ?? "";
       default:
         builtinArg.text = builtinActionRegistry[builtinKey]?.defaultArgument ?? "";
+        builtinArg2.text = builtinActionRegistry[builtinKey]?.defaultSecondArgument ?? "";
     }
   }
 
@@ -125,6 +128,7 @@ class _ActionFields {
     body.dispose();
     webhookTimeout.dispose();
     builtinArg.dispose();
+    builtinArg2.dispose();
   }
 
   bool isValid(_ActionKind kind, TriggerEvent trigger) {
@@ -166,7 +170,11 @@ class _ActionFields {
         final argument = (options != null && !options.any((o) => o.value == builtinArg.text))
             ? descriptor!.defaultArgument
             : builtinArg.text;
-        return BuiltinAction(actionKey: builtinKey, argument: descriptor?.usesArgument == true ? argument : null);
+        return BuiltinAction(
+          actionKey: builtinKey,
+          argument: descriptor?.usesArgument == true ? argument : null,
+          secondaryArgument: descriptor?.usesSecondArgument == true ? builtinArg2.text : null,
+        );
     }
   }
 }
@@ -512,6 +520,13 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
     if (f.builtinArg.text.isEmpty || f.builtinArg.text == previousDefault || invalidForOptions) {
       f.builtinArg.text = next?.defaultArgument ?? "";
     }
+    // Reset the second argument the same way: only when it is empty or still the
+    // previous action's default, so a value the user actually typed survives a
+    // key switch.
+    final previousSecondDefault = builtinActionRegistry[f.builtinKey]?.defaultSecondArgument ?? "";
+    if (f.builtinArg2.text.isEmpty || f.builtinArg2.text == previousSecondDefault) {
+      f.builtinArg2.text = next?.defaultSecondArgument ?? "";
+    }
     f.builtinKey = key;
     onChanged();
   }
@@ -537,6 +552,20 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
           ),
         ),
         if (descriptor.argumentUsesPlaceholders) ...[const SizedBox(height: 8), _PlaceholderDropdown(trigger: trigger)],
+      ],
+    ],
+    if (descriptor?.usesSecondArgument == true) ...[
+      const SizedBox(height: 16),
+      TextField(
+        controller: f.builtinArg2,
+        decoration: InputDecoration(
+          labelText: (descriptor!.secondaryArgumentLabelKey ?? "$tr_addon.dialog.builtin.argument").tr(),
+          helperText: (descriptor.secondaryArgumentHelperKey ?? "$tr_addon.dialog.arguments.helper").tr(),
+        ),
+      ),
+      if (descriptor.secondaryArgumentUsesPlaceholders) ...[
+        const SizedBox(height: 8),
+        _PlaceholderDropdown(trigger: trigger),
       ],
     ],
   ];

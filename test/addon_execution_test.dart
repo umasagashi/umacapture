@@ -51,6 +51,7 @@ void main() {
         timeoutSeconds: 10,
       ),
       BuiltinAction(actionKey: 'show_toast', argument: '{event}'),
+      BuiltinAction(actionKey: 'copy_file_to_path', argument: 'skill', secondaryArgument: r'D:\out\{record_id}.png'),
     ];
 
     for (final action in actions) {
@@ -371,8 +372,18 @@ void main() {
     test('record-dependent builtins are flagged requiresRecord', () {
       expect(builtinActionRegistry['copy_image_to_clipboard']!.requiresRecord, isTrue);
       expect(builtinActionRegistry['copy_file_to_clipboard']!.requiresRecord, isTrue);
+      expect(builtinActionRegistry['copy_file_to_path']!.requiresRecord, isTrue);
       expect(builtinActionRegistry['show_toast']!.requiresRecord, isFalse);
       expect(builtinActionRegistry['play_sound']!.requiresRecord, isFalse);
+    });
+
+    test('copy_file_to_path takes a destination as its second argument', () {
+      final descriptor = builtinActionRegistry['copy_file_to_path']!;
+      expect(descriptor.usesArgument, isTrue);
+      expect(descriptor.usesSecondArgument, isTrue);
+      // The destination is a free-text path template, so it accepts placeholders
+      // (unlike the keyword first argument).
+      expect(descriptor.secondaryArgumentUsesPlaceholders, isTrue);
     });
 
     test('only record-bearing triggers expose record_id', () {
@@ -407,8 +418,11 @@ void main() {
       // silently copy the wrong image).
       final imageKeys = builtinActionRegistry['copy_image_to_clipboard']!.argumentOptions!.map((o) => o.value);
       final fileKeys = builtinActionRegistry['copy_file_to_clipboard']!.argumentOptions!.map((o) => o.value);
+      final pathKeys = builtinActionRegistry['copy_file_to_path']!.argumentOptions!.map((o) => o.value);
       expect(imageKeys, ['trainee', 'skill', 'factor', 'campaign']);
       expect(fileKeys, ['trainee', 'skill', 'factor', 'campaign', 'record_json']);
+      // The copy-to-path action offers the same source set as copy-to-clipboard.
+      expect(pathKeys, ['trainee', 'skill', 'factor', 'campaign', 'record_json']);
     });
   });
 

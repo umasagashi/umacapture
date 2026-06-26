@@ -123,8 +123,20 @@ class BuiltinAction extends AddonAction with BuiltinActionMappable {
   /// from the event payload. Null for actions that take no argument.
   final String? argument;
 
-  const BuiltinAction({required this.actionKey, this.argument});
+  /// Optional second argument for actions that need two inputs (e.g. the
+  /// copy-to-path action: [argument] selects which file, this carries the
+  /// destination path template). Placeholders are substituted the same way. Null
+  /// for actions that take at most one argument.
+  final String? secondaryArgument;
+
+  const BuiltinAction({required this.actionKey, this.argument, this.secondaryArgument});
 
   @override
-  String describe() => argument == null || argument!.isEmpty ? actionKey : '$actionKey: $argument';
+  String describe() {
+    if (argument == null || argument!.isEmpty) {
+      return actionKey;
+    }
+    final base = '$actionKey: $argument';
+    return secondaryArgument == null || secondaryArgument!.isEmpty ? base : '$base → $secondaryArgument';
+  }
 }
