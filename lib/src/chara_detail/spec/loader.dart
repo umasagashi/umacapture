@@ -560,6 +560,17 @@ Grid _buildGrid(
   // that builds the rendered grid works from [visibleSpecs] instead.
   final visibleSpecs = displaySpecs.where((spec) => !spec.hidden).toList();
   final columns = visibleSpecs.map((spec) => spec.plutoColumn(ref)).toList();
+  // Sanitize pinned widths read back from storage (see ColumnSpec.clampedWidth):
+  // trina clamps to minColumnWidth only on interactive resize, not at build, so a
+  // corrupted persisted value would otherwise render broken. Index-aligned with
+  // visibleSpecs since columns is the map() of it; the checkbox column is inserted
+  // below and is not a ColumnSpec, so it is unaffected.
+  for (final (index, spec) in visibleSpecs.indexed) {
+    final width = spec.clampedWidth;
+    if (width != null) {
+      columns[index].width = width;
+    }
+  }
   // A leading checkbox column drives bulk selection. Its cells are added to
   // every row below; the column's field must match those cell keys.
   if (selectionMode) {

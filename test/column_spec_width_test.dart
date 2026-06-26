@@ -99,5 +99,23 @@ void main() {
       // Cleared width must round-trip as absent, not as a sentinel value.
       expect(cleared.toMap().containsKey('width'), isFalse);
     });
+
+    // clampedWidth guards the value applied to the grid column: trina enforces
+    // minColumnWidth (80) only on interactive resize, not at construction, so a
+    // corrupted persisted value must be sanitized before it reaches the layout.
+    test('$type clampedWidth sanitizes corrupted persisted widths', () {
+      // Unpinned stays null (the column keeps auto-fitting).
+      expect(make().clampedWidth, isNull);
+      // A healthy pinned value passes through untouched.
+      expect(make(width: 287.5).clampedWidth, 287.5);
+      // Too small / negative snaps up to trina's minimum column width.
+      expect(make(width: -50.0).clampedWidth, 80.0);
+      expect(make(width: 0.0).clampedWidth, 80.0);
+      // Absurdly large snaps down to the pinned-width ceiling.
+      expect(make(width: 99999.0).clampedWidth, 2000.0);
+      // Non-finite values fall back to the default column width.
+      expect(make(width: double.nan).clampedWidth, 200.0);
+      expect(make(width: double.infinity).clampedWidth, 200.0);
+    });
   }
 }

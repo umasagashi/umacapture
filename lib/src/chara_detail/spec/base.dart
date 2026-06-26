@@ -261,6 +261,10 @@ extension ColumnSpecCellActionExtension on ColumnSpecCellAction {
   }
 }
 
+/// Upper bound for a pinned column width. Generous on purpose: it only guards
+/// against corrupted/absurd persisted values, not legitimately wide columns.
+const _maxPinnedColumnWidth = 2000.0;
+
 @MappableClass(discriminatorKey: 'type')
 abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   String get type => runtimeType.toString();
@@ -302,6 +306,22 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// keeps the content-driven auto-fit. Every editable concrete spec overrides this
   /// with a stored field and implements [withWidth].
   double? get width => null;
+
+  /// The pinned [width] sanitized for rendering, or null when unpinned. trina
+  /// only enforces [TrinaGridSettings.minColumnWidth] during interactive resize,
+  /// not at column construction, so a corrupted or hand-edited persisted value
+  /// (negative, zero, NaN, infinity, or absurdly large) would otherwise render a
+  /// broken layout. A non-finite value falls back to the default width.
+  double? get clampedWidth {
+    final value = width;
+    if (value == null) {
+      return null;
+    }
+    if (!value.isFinite) {
+      return TrinaGridSettings.columnWidth;
+    }
+    return value.clamp(TrinaGridSettings.minColumnWidth, _maxPinnedColumnWidth);
+  }
 
   /// Returns a copy of this spec with its pinned [width] replaced (null clears it,
   /// reverting the column to auto-fit). Like [withHidden], every editable concrete
@@ -978,15 +998,18 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     return textPainter.height;
   }
 
-  // The rendered height of a row's wrapped text across its pinned, text-rendering
-  // columns, or 0 when none can wrap. Only pinned ([width] != null), text
-  // ([wrapsText]) columns wrap — auto-fit columns are sized to their widest cell,
-  // and widget/icon columns render at a fixed height — so the scan skips them.
+  // The rendered height of a row's wrapped text across its text-rendering
+  // columns, or 0 when none wrap. Every text ([wrapsText]) column is measured:
+  // an auto-fit column normally sized to its widest cell stays one line and adds
+  // nothing, but a column clamped below its content (by the [maxWidth] cap in
+  // [autoFitColumns], or by a text scale larger than the auto-fit measurement
+  // assumed) wraps and must grow the row. Widget/icon columns render at a fixed
+  // height, so the scan skips them.
   double _contentHeight(BuildContext context, TrinaRow row, TextStyle style) {
     var maxHeight = 0.0;
     for (final col in columns) {
       final spec = col.getUserData<ColumnSpec>();
-      if (spec == null || spec.width == null || !spec.wrapsText) {
+      if (spec == null || !spec.wrapsText) {
         continue;
       }
       final cellPadding = col.cellPadding ?? configuration.style.defaultCellPadding;
