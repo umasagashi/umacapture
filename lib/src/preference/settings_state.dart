@@ -13,6 +13,8 @@ enum SettingsEntryKey {
   allowPostUserData,
   forceResizeMode,
   autoRowHeight,
+  rowHeightMode,
+  minRowLines,
   sentryReportLastMonth,
   sentryReportTotalCount,
 }

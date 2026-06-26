@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
+import 'package:recase/recase.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/core/utils.dart';
@@ -64,7 +65,8 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
   }
 }
 
-/// Display-related table preferences (currently just the row-height behavior).
+/// Display-related table preferences: the row-height mode and its minimum line
+/// count.
 class _DisplaySettingsGroup extends ConsumerWidget {
   const _DisplaySettingsGroup();
 
@@ -74,10 +76,18 @@ class _DisplaySettingsGroup extends ConsumerWidget {
       title: "$tr_table_settings.display.title".tr(),
       padding: EdgeInsets.zero,
       children: [
-        SwitchWidget(
-          title: Text("$tr_table_settings.display.auto_row_height.title".tr()),
-          description: Text("$tr_table_settings.display.auto_row_height.description".tr()),
-          provider: charaDetailAutoRowHeightProvider,
+        DropdownButtonWidget<RowHeightMode>(
+          title: "$tr_table_settings.display.row_height_mode.title".tr(),
+          description: "$tr_table_settings.display.row_height_mode.description".tr(),
+          name: (e) => "$tr_table_settings.display.row_height_mode.choice.${e.name.snakeCase}".tr(),
+          provider: charaDetailRowHeightModeProvider,
+        ),
+        StepperWidget(
+          title: Text("$tr_table_settings.display.min_row_lines.title".tr()),
+          description: Text("$tr_table_settings.display.min_row_lines.description".tr()),
+          provider: charaDetailMinRowLinesProvider,
+          min: 1,
+          max: 6,
         ),
       ],
     );

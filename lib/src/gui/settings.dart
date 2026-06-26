@@ -127,6 +127,58 @@ class SwitchWidget extends ConsumerWidget {
   }
 }
 
+/// A compact −/value/+ stepper bound to an [IntNotifierProvider], clamped to
+/// [min]..[max] (the buttons disable at the bounds). Mirrors [SwitchWidget]'s
+/// shape for use in the same settings groups.
+class StepperWidget extends ConsumerWidget {
+  final Widget title;
+  final Widget description;
+  final IntNotifierProvider provider;
+  final int min;
+  final int max;
+
+  const StepperWidget({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.provider,
+    required this.min,
+    required this.max,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final value = ref.watch(provider);
+    final notifier = ref.read(provider.notifier);
+    return ListTile(
+      title: title,
+      subtitle: description,
+      trailing: Align(
+        widthFactor: 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Symbols.remove_rounded),
+              visualDensity: VisualDensity.compact,
+              onPressed: value <= min ? null : notifier.decrement,
+            ),
+            SizedBox(
+              width: 24,
+              child: Text("$value", textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
+            ),
+            IconButton(
+              icon: const Icon(Symbols.add_rounded),
+              visualDensity: VisualDensity.compact,
+              onPressed: value >= max ? null : notifier.increment,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _BrightnessWidget extends ConsumerWidget {
   static final _iconMap = <ThemeMode, Widget>{
     ThemeMode.light: Tooltip(

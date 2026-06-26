@@ -318,17 +318,19 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _appliedWidths = {for (final col in stateManager.columns) col.field: col.width};
   }
 
-  /// Reflows row heights for the current auto-row-height setting: grows rows to
-  /// fit wrapped text (on), or restores the fixed grid height (off). Runs after
-  /// every autoFit/resize since wrapping depends on the final column widths, and
-  /// on a setting toggle. Re-indexes the pinned block because the height pass
-  /// replaces the row objects it touches.
+  /// Reflows row heights for the current row-height mode and minimum line count:
+  /// wrap fixes rows at the floor, autoPerRow grows each row to its text, and
+  /// autoUniform grows all rows to the tallest. Runs after every autoFit/resize
+  /// since wrapping depends on the final column widths, and on a setting change.
+  /// Re-indexes the pinned block because the height pass replaces the row objects
+  /// it touches.
   void _applyRowHeights() {
     if (!_loaded) {
       return;
     }
-    final expand = ref.read(charaDetailAutoRowHeightProvider);
-    if (stateManager.applyAutoRowHeights(expand: expand)) {
+    final mode = ref.read(charaDetailRowHeightModeProvider);
+    final minLines = ref.read(charaDetailMinRowLinesProvider);
+    if (stateManager.applyRowHeights(mode: mode, minLines: minLines)) {
       _indexPinnedRows();
       stateManager.notifyListeners();
     }
@@ -622,9 +624,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // after init). The watch stays only to seed the initial grid and the empty
     // checks below.
     ref.listen(currentGridProvider, (_, next) => _reconcile(next));
-    // Toggling auto row height doesn't rebuild the grid (only the CellText cells,
-    // which watch the setting), so reflow the live row heights here on change.
-    ref.listen(charaDetailAutoRowHeightProvider, (_, _) => _afterFrame(_applyRowHeights));
+    // Changing the row-height mode or minimum doesn't rebuild the grid (only the
+    // CellText cells, which watch the settings), so reflow the live row heights
+    // here on change.
+    ref.listen(charaDetailRowHeightModeProvider, (_, _) => _afterFrame(_applyRowHeights));
+    ref.listen(charaDetailMinRowLinesProvider, (_, _) => _afterFrame(_applyRowHeights));
     // No source-switch listener needed: the panel tracks the grid's current record
     // and re-resolves it against the live sorted set each build, so a source switch
     // (the old record's id is absent from the new source) falls back to the empty

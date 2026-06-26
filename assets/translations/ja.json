@@ -121,9 +121,18 @@
                 },
                 "display": {
                     "title": "表示",
-                    "auto_row_height": {
-                        "title": "行の高さを内容に合わせる",
-                        "description": "オンにすると長いテキストを折り返して行を高くします。オフにすると行の高さを固定し、2行を超えるテキストは省略します。"
+                    "row_height_mode": {
+                        "title": "行の高さ",
+                        "description": "行の高さの調整方法を選びます。",
+                        "choice": {
+                            "wrap": "折り返し",
+                            "auto_per_row": "自動調整（行）",
+                            "auto_uniform": "自動調整（均一）"
+                        }
+                    },
+                    "min_row_lines": {
+                        "title": "最低行高さ（行数）",
+                        "description": "折り返しでは固定の行数、自動調整では行の高さの下限になります。"
                     }
                 }
             },

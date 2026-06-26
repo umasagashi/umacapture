@@ -7,6 +7,56 @@
 
 part of 'base.dart';
 
+class RowHeightModeMapper extends EnumMapper<RowHeightMode> {
+  RowHeightModeMapper._();
+
+  static RowHeightModeMapper? _instance;
+  static RowHeightModeMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = RowHeightModeMapper._());
+    }
+    return _instance!;
+  }
+
+  static RowHeightMode fromValue(dynamic value) {
+    ensureInitialized();
+    return MapperContainer.globals.fromValue(value);
+  }
+
+  @override
+  RowHeightMode decode(dynamic value) {
+    switch (value) {
+      case r'wrap':
+        return RowHeightMode.wrap;
+      case r'auto_per_row':
+        return RowHeightMode.autoPerRow;
+      case r'auto_uniform':
+        return RowHeightMode.autoUniform;
+      default:
+        throw MapperException.unknownEnumValue(value);
+    }
+  }
+
+  @override
+  dynamic encode(RowHeightMode self) {
+    switch (self) {
+      case RowHeightMode.wrap:
+        return r'wrap';
+      case RowHeightMode.autoPerRow:
+        return r'auto_per_row';
+      case RowHeightMode.autoUniform:
+        return r'auto_uniform';
+    }
+  }
+}
+
+extension RowHeightModeMapperExtension on RowHeightMode {
+  String toValue() {
+    RowHeightModeMapper.ensureInitialized();
+    return MapperContainer.globals.toValue<RowHeightMode>(this) as String;
+  }
+}
+
 class ColumnSpecCellActionMapper extends EnumMapper<ColumnSpecCellAction> {
   ColumnSpecCellActionMapper._();
 

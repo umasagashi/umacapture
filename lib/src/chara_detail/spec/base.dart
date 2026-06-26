@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:collection/collection.dart';
@@ -29,20 +30,60 @@ const tr_common = "pages.chara_detail.column_predicate.common";
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
 
-/// Whether table cells grow their row to fit the wrapped text (true) or keep a
-/// fixed row height and ellipsize at two lines (false). A global display toggle,
-/// persisted in settings and watched by [CellText] and the row-height pass, so a
-/// narrowed column either reflows into taller rows or truncates cleanly instead
-/// of clipping its third line.
-final charaDetailAutoRowHeightProvider = BooleanNotifierProvider(() {
-  return BooleanNotifier(entryKey: SettingsEntryKey.autoRowHeight.name, defaultValue: false);
+/// How table rows size themselves to their text. A global display preference,
+/// persisted in settings and watched by [CellText] and the row-height pass.
+///
+/// - [wrap]: every row is fixed at the minimum height; text wraps up to the
+///   minimum line count and then ellipsizes (the former "auto off" behavior,
+///   now with a configurable line count).
+/// - [autoPerRow]: each row grows to fit its own wrapped text, floored at the
+///   minimum height (the former "auto on" behavior, now with a floor).
+/// - [autoUniform]: every row takes the height of the tallest row's wrapped
+///   text, floored at the minimum height, so the grid stays visually even.
+@MappableEnum(caseStyle: CaseStyle.snakeCase)
+enum RowHeightMode { wrap, autoPerRow, autoUniform }
+
+/// The current row-height mode, persisted across launches. Migrates the legacy
+/// boolean [SettingsEntryKey.autoRowHeight] on first read: a user who had
+/// auto-grow on lands on [RowHeightMode.autoPerRow], everyone else on the
+/// default [RowHeightMode.wrap].
+final charaDetailRowHeightModeProvider = ExclusiveItemsNotifierProvider<RowHeightMode>(() {
+  return _RowHeightModeNotifier();
 });
 
-/// Renders a text-based cell, switching between auto-grow (full wrap, no line
-/// cap) and fixed-height (two lines + ellipsis) per [charaDetailAutoRowHeightProvider].
+class _RowHeightModeNotifier extends ExclusiveItemsNotifier<RowHeightMode> {
+  _RowHeightModeNotifier()
+    : super(
+        entryKey: SettingsEntryKey.rowHeightMode.name,
+        values: RowHeightMode.values,
+        defaultValue: RowHeightMode.wrap,
+      );
+
+  @override
+  RowHeightMode build() {
+    final stored = super.build();
+    final box = ref.read(storageBoxProvider);
+    if (box.pull<RowHeightMode>(SettingsEntryKey.rowHeightMode.name) != null) {
+      return stored;
+    }
+    // No new-style value yet: honor the retired auto-row-height toggle once.
+    final legacy = box.pull<bool>(SettingsEntryKey.autoRowHeight.name);
+    return legacy == true ? RowHeightMode.autoPerRow : stored;
+  }
+}
+
+/// The minimum row height in text lines (default two). Acts as the fixed height
+/// in [RowHeightMode.wrap] and as the floor in the auto modes.
+final charaDetailMinRowLinesProvider = IntNotifierProvider(() {
+  return IntNotifier(entryKey: SettingsEntryKey.minRowLines.name, defaultValue: 2, min: 1, max: 6);
+});
+
+/// Renders a text-based cell, capping the line count only in
+/// [RowHeightMode.wrap] (minimum lines + ellipsis) and otherwise wrapping
+/// freely so the row-height pass can grow the row to fit.
 ///
 /// Every text column renderer uses this instead of a bare [Text] so the
-/// row-height toggle is honored consistently; the row-height pass measures the
+/// row-height mode is honored consistently; the row-height pass measures the
 /// same text at the same width so a grown row exactly fits the wrapped lines.
 class CellText extends ConsumerWidget {
   const CellText(this.data, {super.key, this.textAlign, this.style, this.opacity});
@@ -57,14 +98,15 @@ class CellText extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final expand = ref.watch(charaDetailAutoRowHeightProvider);
+    final clamp = ref.watch(charaDetailRowHeightModeProvider) == RowHeightMode.wrap;
+    final minLines = ref.watch(charaDetailMinRowLinesProvider);
     final text = Text(
       data,
       textAlign: textAlign,
       style: style,
       softWrap: true,
-      maxLines: expand ? null : 2,
-      overflow: expand ? null : TextOverflow.ellipsis,
+      maxLines: clamp ? minLines : null,
+      overflow: clamp ? TextOverflow.ellipsis : null,
     );
     return opacity == null ? text : Opacity(opacity: opacity!, child: text);
   }
@@ -931,13 +973,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     return textPainter.height;
   }
 
-  // The height a row needs to fully show its pinned columns' wrapped text, or null
-  // when the fixed grid height already suffices. Only pinned ([width] != null),
-  // text-rendering ([wrapsText]) columns can wrap — auto-fit columns are sized to
-  // their widest cell, and widget/icon columns render at a fixed height — so the
-  // scan is bounded to those.
-  double? _expandedRowHeight(BuildContext context, TrinaRow row, TextStyle style, double base) {
-    var maxHeight = base;
+  // The rendered height of a row's wrapped text across its pinned, text-rendering
+  // columns, or 0 when none can wrap. Only pinned ([width] != null), text
+  // ([wrapsText]) columns wrap — auto-fit columns are sized to their widest cell,
+  // and widget/icon columns render at a fixed height — so the scan skips them.
+  double _contentHeight(BuildContext context, TrinaRow row, TextStyle style) {
+    var maxHeight = 0.0;
     for (final col in columns) {
       final spec = col.getUserData<ColumnSpec>();
       if (spec == null || spec.width == null || !spec.wrapsText) {
@@ -951,28 +992,48 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
         maxHeight = height;
       }
     }
-    // The 2px buffer absorbs sub-pixel rounding so the last wrapped line is never
-    // clipped. null leaves the row at the grid default (no growth needed).
-    return maxHeight > base ? maxHeight + 2 : null;
+    // The 2px buffer absorbs sub-pixel rounding so the last wrapped line is never clipped.
+    return maxHeight > 0 ? maxHeight + 2 : 0;
   }
 
-  // Sets each row's height to fit wrapped text in pinned columns ([expand]), or
-  // clears it back to the fixed grid height (!expand). trina's setRowHeight
-  // rebuilds the row, dropping its attached record and notifying per row, so rows
-  // are replaced here in one pass — carrying over cells, key, flags, and the
-  // record user-data — and the caller notifies once. Returns whether anything
-  // changed.
-  bool applyAutoRowHeights({required bool expand}) {
+  // The pixel height of [minLines] text lines plus the default cell padding,
+  // serving as the fixed height in wrap mode and the floor in the auto modes.
+  double _minRowHeight(BuildContext context, TextStyle style, int minLines) {
+    final painter = TextPainter(
+      text: TextSpan(style: style, text: 'X'),
+      textDirection: ui.TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return painter.preferredLineHeight * minLines + configuration.style.defaultCellPadding.vertical;
+  }
+
+  // Sizes every row for [mode], flooring at [minLines] text lines: wrap fixes all
+  // rows at the floor, autoPerRow grows each to its own text, autoUniform grows
+  // all to the tallest row's text. trina's setRowHeight rebuilds the row, dropping
+  // its attached record and notifying per row, so rows are replaced here in one
+  // pass — carrying over cells, key, flags, and the record user-data — and the
+  // caller notifies once. Returns whether anything changed.
+  bool applyRowHeights({required RowHeightMode mode, required int minLines}) {
     final context = gridKey.currentContext;
     if (context == null) {
       return false;
     }
     final style = DefaultTextStyle.of(context).style;
-    final base = configuration.style.rowHeight;
+    final minHeight = _minRowHeight(context, style, minLines);
+    final List<double> targets;
+    switch (mode) {
+      case RowHeightMode.wrap:
+        targets = List.filled(refRows.length, minHeight);
+      case RowHeightMode.autoPerRow:
+        targets = [for (final row in refRows) max(minHeight, _contentHeight(context, row, style))];
+      case RowHeightMode.autoUniform:
+        final tallest = refRows.fold<double>(minHeight, (h, row) => max(h, _contentHeight(context, row, style)));
+        targets = List.filled(refRows.length, tallest);
+    }
     var changed = false;
     for (var i = 0; i < refRows.length; i++) {
       final row = refRows[i];
-      final target = expand ? _expandedRowHeight(context, row, style, base) : null;
+      final target = targets[i];
       if (row.height == target) {
         continue;
       }

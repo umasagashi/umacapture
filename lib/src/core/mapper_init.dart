@@ -94,4 +94,5 @@ void initializeMappers() {
   // Enums stored on their own in Hive.
   CharaDetailRecordImageModeMapper.ensureInitialized();
   ClipboardPasteImageModeMapper.ensureInitialized();
+  RowHeightModeMapper.ensureInitialized();
 }
