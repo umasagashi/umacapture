@@ -169,4 +169,55 @@ void main() {
     expect(active.length, lengthBefore, reason: 'duplicate not added to the active set');
     expect(container.read(charaDetailCaptureStateProvider).error, 'duplicated_character');
   });
+
+  test('resolveAllInheritance keeps active->archive links when the archive failed to load', () async {
+    final root = DirectoryPath(tempRoot.path);
+    final info = pathInfoFor(root);
+    final activeDir = info.charaDetailActiveDir;
+
+    // Active child already linked to an archived parent on disk. resolveAll is
+    // authoritative and would clear this link if it treated the (failed) archive
+    // as empty; the guard must abort and leave the link intact.
+    writeRecord(
+      activeDir,
+      makeRecord(
+        id: 'child-active',
+        card: 20,
+        parent1Card: 10,
+        parent1: const [Factor(1, 1)],
+        parent1Id: 'parent-archive',
+      ),
+    );
+
+    final container = ProviderContainer(
+      overrides: [
+        pathInfoLoader.overrideWith((ref) async => pathInfoFor(root)),
+        moduleVersionLoader.overrideWith((ref) async => null),
+        // Force the archive store into an error state so its asData is null.
+        charaDetailArchiveStorageLoaderProvider.overrideWith(_FailingArchiveStorage.new),
+      ],
+    );
+    addTearDown(container.dispose);
+    final active = container.read(charaDetailRecordStorageLoaderProvider.notifier);
+    await container.read(charaDetailRecordStorageLoaderProvider.future);
+    // Let the overridden archive build settle into AsyncError before resolving.
+    await container.read(charaDetailArchiveStorageLoaderProvider.future).catchError((_) => <CharaDetailRecord>[]);
+
+    expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive', reason: 'precondition: starts linked');
+
+    active.resolveAllInheritance();
+
+    // Link preserved on disk and in memory; not cleared against the missing archive.
+    expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive');
+    expect(active.getBy(id: 'child-active')!.metadata.recordId.parent1, 'parent-archive');
+  });
+}
+
+/// Archive store stand-in whose build always fails, so its provider settles into
+/// [AsyncError] (asData == null) — exercising resolveAllInheritance's guard.
+class _FailingArchiveStorage extends CharaDetailArchiveStorage {
+  @override
+  Future<List<CharaDetailRecord>> build() async {
+    throw StateError('archive load failed');
+  }
 }

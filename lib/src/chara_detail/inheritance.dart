@@ -16,6 +16,13 @@ import '/src/chara_detail/chara_detail_record.dart';
 ///
 /// The factor list order is guaranteed by the recognizer, so the lists are
 /// compared as-is (no sorting). Matching is keyed on a `card|factors` string.
+///
+/// Deleting a record does not clean up links that point at it: a child keeps the
+/// deleted id in its `parentN` slot. That dangling id is harmless — it resolves
+/// to "no parent" in `resolveRegisteredAncestors` — and is cleared the next time
+/// the authoritative [resolveAll] (manual re-resolution) runs. This holds for
+/// both the active and archive sets; a deletion in either leaves the other's
+/// links to be reconciled on the next manual pass.
 class InheritanceResolver {
   const InheritanceResolver._();
 

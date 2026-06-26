@@ -239,11 +239,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   Future<List<CharaDetailRecord>> build() async {
     final pathInfo = await ref.watch(pathInfoLoader.future);
     rootDirectory = pathInfo.charaDetailActiveDir;
-    // Kick off the archive load in parallel so capture-time dedup and inheritance
-    // resolution can consider archived records. read (not watch): this triggers the
-    // archive build without subscribing, so later archive mutations (e.g. an
-    // inheritance write-back) do not rebuild this store.
-    final archiveLoad = ref.read(charaDetailArchiveStorageLoaderProvider.future);
+    // Trigger the archive build in parallel so capture-time dedup and inheritance
+    // resolution can consider archived records. read (not watch, and not awaited):
+    // this starts the archive build without subscribing, so later archive
+    // mutations (e.g. an inheritance write-back) do not rebuild this store, and
+    // the capture listener below is registered without waiting for the archive
+    // scan. Until the scan lands, add() reads its asData snapshot and degrades to
+    // active-only via the `?? const []` fallback.
+    ref.read(charaDetailArchiveStorageLoaderProvider);
     final List<CharaDetailRecord> records = [];
     if (rootDirectory.existsSync()) {
       final results = await compute(_loadAllCharaDetailRecord, rootDirectory);
@@ -256,19 +259,15 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     for (final e in records) {
       _updateRecordInfo(e);
     }
-    // Ensure the archive has finished loading before we start accepting captures,
-    // so add()'s synchronous read sees it. Guard so an archive load failure does
-    // not take down the active store; add() then degrades to active-only via the
-    // `?? const []` fallback.
-    try {
-      await archiveLoad;
-    } catch (e, s) {
-      logger.w("Archive preload failed; dedup/inheritance fall back to active-only: $e\n$s");
-    }
     // riverpod 3 removed StreamProvider.stream; listen to the AsyncValue and react
-    // to each newly captured record id. The callback stays synchronous so add()
-    // (and its duplicate-fail override) completes within the stream-delivery
-    // microtask, before the next native capture message is processed.
+    // to each newly captured record id. Registered with no intervening await after
+    // the active load (the archive load above is deliberately not awaited), so the
+    // window between this store building and the listener attaching stays as small
+    // as it was before archived records were considered: the capture event stream
+    // is a broadcast stream with no buffering, so an event delivered before this
+    // listener attaches is lost. The callback stays synchronous so add() (and its
+    // duplicate-fail override) completes within the stream-delivery microtask,
+    // before the next native capture message is processed.
     ref.listen(charaDetailRecordCapturedEventProvider, (_, next) {
       next.whenData((e) => addFromFile(e));
     });
@@ -355,11 +354,20 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// Unlike the per-capture resolution, this is authoritative: it both sets and
   /// clears links so the whole storage reflects the current matches. The active
   /// and archive sets are resolved together, and each changed record is rewritten
-  /// to disk and republished in its owning store. The archive is loaded by the
-  /// time this store exists (build() awaits it), so the read is synchronous.
+  /// to disk and republished in its owning store. Aborts with a warning if the
+  /// archive has not loaded (build() no longer awaits it), because clearing links
+  /// against a missing archive would destroy valid active->archive links.
   void resolveAllInheritance() {
-    final archiveRecords =
-        ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+    // resolveAll is authoritative: it clears links that no longer resolve. If the
+    // archive failed to load (or is still building), treating it as empty would
+    // clear every active->archive link as unresolvable and rewrite those
+    // record.json files, destroying valid links. Abort instead of degrading; the
+    // capture-time add() path is additive and stays safe without this guard.
+    final archiveRecords = ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value;
+    if (archiveRecords == null) {
+      Toaster.show(ToastData.warning(description: "app.inheritance.archive_not_ready".tr()));
+      return;
+    }
     final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords]);
     final archiveIds = {for (final e in archiveRecords) e.id};
     _routeInheritanceChanges(resolution, archiveIds, (updated) {
@@ -498,6 +506,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   void delete(String id) {
+    // Deleting a record does not clear other records' parentN links to it; the
+    // dangling id is harmless and is cleared on the next resolveAllInheritance
+    // (see InheritanceResolver).
     final record = getBy(id: id);
     // Guard rather than assert: the record can vanish between a dialog opening
     // and its confirm (a background capture reload, or an archive of the same
