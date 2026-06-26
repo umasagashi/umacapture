@@ -555,6 +555,12 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     _$description,
     opt: true,
   );
+  static double? _$width(FactorColumnSpec v) => v.width;
+  static const Field<FactorColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
   static String _$labelKey(FactorColumnSpec v) => v.labelKey;
   static const Field<FactorColumnSpec, String> _f$labelKey = Field(
     'labelKey',
@@ -573,6 +579,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     #hiddenElements: _f$hiddenElements,
     #hidden: _f$hidden,
     #description: _f$description,
+    #width: _f$width,
     #labelKey: _f$labelKey,
   };
   @override
@@ -601,6 +608,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
       hiddenElements: data.dec(_f$hiddenElements),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
+      width: data.dec(_f$width),
     );
   }
 

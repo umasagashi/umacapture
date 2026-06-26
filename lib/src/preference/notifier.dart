@@ -75,3 +75,33 @@ class BooleanNotifier extends Notifier<bool> {
     set(!state);
   }
 }
+
+typedef IntNotifierProvider = NotifierProvider<IntNotifier, int>;
+
+class IntNotifier extends Notifier<int> {
+  final int _defaultValue;
+  final int min;
+  final int max;
+  final String? _entryKey;
+
+  StorageEntry<int>? _entry;
+
+  IntNotifier({required this._defaultValue, this.min = 0, this.max = 1 << 31, this._entryKey});
+
+  @override
+  int build() {
+    final key = _entryKey;
+    _entry = key == null ? null : StorageEntry<int>(box: ref.watch(storageBoxProvider), key: key);
+    return (_entry?.pull() ?? _defaultValue).clamp(min, max);
+  }
+
+  void set(int value) {
+    final clamped = value.clamp(min, max);
+    state = clamped;
+    _entry?.push(clamped);
+  }
+
+  void increment() => set(state + 1);
+
+  void decrement() => set(state - 1);
+}

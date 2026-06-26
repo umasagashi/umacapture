@@ -113,6 +113,12 @@ class FamilyRegistrationColumnSpecMapper
   static String? _$description(FamilyRegistrationColumnSpec v) => v.description;
   static const Field<FamilyRegistrationColumnSpec, String> _f$description =
       Field('description', _$description, opt: true);
+  static double? _$width(FamilyRegistrationColumnSpec v) => v.width;
+  static const Field<FamilyRegistrationColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
 
   @override
   final MappableFields<FamilyRegistrationColumnSpec> fields = const {
@@ -121,6 +127,7 @@ class FamilyRegistrationColumnSpecMapper
     #predicate: _f$predicate,
     #hidden: _f$hidden,
     #description: _f$description,
+    #width: _f$width,
   };
   @override
   final bool ignoreNull = true;
@@ -144,6 +151,7 @@ class FamilyRegistrationColumnSpecMapper
       predicate: data.dec(_f$predicate),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
+      width: data.dec(_f$width),
     );
   }
 

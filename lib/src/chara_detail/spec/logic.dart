@@ -8,7 +8,6 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -57,7 +56,7 @@ class LogicCellData implements CellData {
   String get csv => passed ? "1" : "0";
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 /// A column that combines the filter conditions of its [children] with a logical
@@ -87,6 +86,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   final String? description;
 
+  @override
+  final double? width;
+
   LogicColumnSpec({
     required this.id,
     required this.title,
@@ -94,7 +96,12 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
     this.children = const [],
     this.hidden = false,
     this.description,
+    this.width,
   });
+
+  // Renders a fixed-size pass/fail icon, not wrapping text.
+  @override
+  bool get wrapsText => false;
 
   @override
   bool get acceptsChildren => true;
@@ -112,6 +119,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   LogicColumnSpec copyWith({
     String? id,
     String? title,
@@ -119,6 +129,7 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
     List<ColumnSpec>? children,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return LogicColumnSpec(
       id: id ?? this.id,
@@ -127,6 +138,7 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
       children: children ?? this.children,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -177,8 +189,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
       field: id,
       type: TrinaColumnType.number(),
       textAlign: TrinaColumnTextAlign.center,
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       readOnly: true,

@@ -2,6 +2,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_ce/hive.dart';
 
+import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/app_logger.dart';
 import '/src/core/clipboard_alt.dart';
@@ -42,4 +43,5 @@ void registerHiveAdapters() {
   Hive.registerAdapter(JsonAdapter<ThemeMode>(2));
   Hive.registerAdapter(JsonAdapter<CharaDetailRecordImageMode>(3));
   Hive.registerAdapter(JsonAdapter<ClipboardPasteImageMode>(4));
+  Hive.registerAdapter(JsonAdapter<RowHeightMode>(5));
 }

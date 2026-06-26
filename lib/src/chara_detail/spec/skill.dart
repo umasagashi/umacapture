@@ -11,7 +11,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -114,7 +113,7 @@ class SkillCellData implements CellData {
   String get csv => const CsvEncoder().convert([skills]);
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableEnum()
@@ -143,6 +142,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   final String? description;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   SkillColumnSpec({
@@ -155,6 +157,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     this.hiddenElements = const {},
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -162,6 +165,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   SkillColumnSpec copyWith({
     String? id,
@@ -173,6 +179,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     Set<SkillDialogElements>? hiddenElements,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return SkillColumnSpec(
       id: id ?? this.id,
@@ -184,6 +191,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       hiddenElements: hiddenElements ?? this.hiddenElements,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -216,13 +224,14 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SkillCellData>()!;
-        return Text(data.label);
+        return CellText(data.label);
       },
     )..setUserData(this);
   }

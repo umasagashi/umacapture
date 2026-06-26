@@ -9,7 +9,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -45,7 +44,7 @@ class SimpleLabelCellData implements CellData {
   String get csv => label;
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'SimpleLabelColumnSpec', ignoreNull: true)
@@ -69,6 +68,9 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   @override
   final String? description;
 
+  @override
+  final double? width;
+
   SimpleLabelColumnSpec({
     required this.id,
     required this.title,
@@ -78,6 +80,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
     ColumnSpecCellAction? cellAction,
     this.hidden = false,
     this.description,
+    this.width,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
@@ -85,6 +88,9 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   SimpleLabelColumnSpec copyWith({
     String? id,
@@ -94,6 +100,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
     SimpleLabelPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return SimpleLabelColumnSpec(
       id: id ?? this.id,
@@ -103,6 +110,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -128,13 +136,14 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       readOnly: true,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SimpleLabelCellData>()!;
-        return Text(data.label, textAlign: TextAlign.center);
+        return CellText(data.label, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

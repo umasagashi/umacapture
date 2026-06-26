@@ -130,6 +130,12 @@ class RangedIntegerColumnSpecMapper
     _$description,
     opt: true,
   );
+  static double? _$width(RangedIntegerColumnSpec v) => v.width;
+  static const Field<RangedIntegerColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
 
   @override
   final MappableFields<RangedIntegerColumnSpec> fields = const {
@@ -140,6 +146,7 @@ class RangedIntegerColumnSpecMapper
     #cellAction: _f$cellAction,
     #hidden: _f$hidden,
     #description: _f$description,
+    #width: _f$width,
   };
   @override
   final bool ignoreNull = true;
@@ -165,6 +172,7 @@ class RangedIntegerColumnSpecMapper
       cellAction: data.dec(_f$cellAction),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
+      width: data.dec(_f$width),
     );
   }
 

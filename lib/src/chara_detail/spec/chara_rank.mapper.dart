@@ -59,6 +59,12 @@ class CharaRankColumnSpecMapper
     _$description,
     opt: true,
   );
+  static double? _$width(CharaRankColumnSpec v) => v.width;
+  static const Field<CharaRankColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
   static ColumnSpecCellAction _$cellAction(CharaRankColumnSpec v) =>
       v.cellAction;
   static const Field<CharaRankColumnSpec, ColumnSpecCellAction> _f$cellAction =
@@ -73,6 +79,7 @@ class CharaRankColumnSpecMapper
     #predicate: _f$predicate,
     #hidden: _f$hidden,
     #description: _f$description,
+    #width: _f$width,
     #cellAction: _f$cellAction,
   };
   @override
@@ -95,6 +102,7 @@ class CharaRankColumnSpecMapper
       predicate: data.dec(_f$predicate),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
+      width: data.dec(_f$width),
     );
   }
 

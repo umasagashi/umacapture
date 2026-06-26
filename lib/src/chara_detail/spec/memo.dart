@@ -12,7 +12,6 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
@@ -48,7 +47,7 @@ class MemoCellData implements CellData {
   final String? value;
 
   @override
-  final Predicate<TrinaGridOnSelectedEvent>? onSelected;
+  final CellSelectedCallback? onSelected;
 
   @override
   String get csv => value ?? "";
@@ -79,6 +78,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   final bool hidden;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   MemoColumnSpec({
@@ -89,6 +91,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     required this.storageKey,
     this.description,
     this.hidden = false,
+    this.width,
   });
 
   @override
@@ -96,6 +99,13 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
+  @override
+  String measuredText(TrinaCell? cell, String formatted) =>
+      cell?.getUserData<MemoCellData>()?.value == null ? "$tr_memo.cell.description".tr() : formatted;
 
   MemoColumnSpec copyWith({
     String? id,
@@ -105,6 +115,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     String? storageKey,
     Object? description = _unset,
     bool? hidden,
+    Object? width = _unset,
   }) {
     return MemoColumnSpec(
       id: id ?? this.id,
@@ -114,6 +125,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
       storageKey: storageKey ?? this.storageKey,
       description: identical(description, _unset) ? this.description : description as String?,
       hidden: hidden ?? this.hidden,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -129,9 +141,13 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, String? value) {
+  TrinaCell plutoCell(RefBase _, String? value) {
+    // The onSelected closure must NOT capture this build-scoped grid ref: it is
+    // disposed when [currentGridProvider] rebuilds (a column resize, a memo save),
+    // and a kept cell would then read through a dead ref. The table passes a live
+    // ref in at tap time instead (see [CellSelectedCallback]).
     return TrinaCell(value: value ?? "_" * 20)..setUserData(
-      MemoCellData(value, (TrinaGridOnSelectedEvent event) {
+      MemoCellData(value, (RefBase ref, TrinaGridOnSelectedEvent event) {
         final record = event.row!.getUserData<CharaDetailRecord>()!;
         final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
         _RecordMemoDialog.show(
@@ -151,15 +167,16 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<MemoCellData>()!;
         if (data.value == null) {
-          return Opacity(opacity: 0.4, child: Text("$tr_memo.cell.description".tr()));
+          return CellText("$tr_memo.cell.description".tr(), opacity: 0.4);
         } else {
-          return Text(data.value!);
+          return CellText(data.value!);
         }
       },
     )..setUserData(this);

@@ -13,7 +13,6 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -59,7 +58,7 @@ class RatingCellData implements CellData {
   String get csv => value == null ? "" : ratingFormatter.format(value);
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'RatingColumnSpec', ignoreNull: true)
@@ -85,7 +84,14 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   final bool hidden;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
+
+  // Renders fixed-size rating stars, not wrapping text.
+  @override
+  bool get wrapsText => false;
 
   final range = Range<double>(min: 0.0, max: 5.0);
 
@@ -97,6 +103,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     required this.storageKey,
     this.description,
     this.hidden = false,
+    this.width,
   });
 
   @override
@@ -104,6 +111,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   RatingColumnSpec copyWith({
     String? id,
@@ -113,6 +123,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     String? storageKey,
     Object? description = _unset,
     bool? hidden,
+    Object? width = _unset,
   }) {
     return RatingColumnSpec(
       id: id ?? this.id,
@@ -122,6 +133,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
       storageKey: storageKey ?? this.storageKey,
       description: identical(description, _unset) ? this.description : description as String?,
       hidden: hidden ?? this.hidden,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -148,8 +160,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {

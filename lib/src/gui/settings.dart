@@ -65,6 +65,11 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
   final String title;
   final String description;
   final String Function(T) name;
+
+  /// Optional per-item tooltip shown on hover over each menu entry. Null (the
+  /// default) leaves the entries untooltipped.
+  final String Function(T)? tooltip;
+
   final ExclusiveItemsNotifierProvider<T> provider;
 
   const DropdownButtonWidget({
@@ -72,6 +77,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
     required this.title,
     required this.description,
     required this.name,
+    this.tooltip,
     required this.provider,
   });
 
@@ -88,7 +94,16 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
         tooltip: '',
         initialValue: current,
         itemBuilder: (BuildContext context) => <PopupMenuEntry<T>>[
-          for (final item in values) PopupMenuItem<T>(value: item, child: Text(name(item))),
+          for (final item in values)
+            PopupMenuItem<T>(
+              value: item,
+              child: tooltip == null
+                  ? Text(name(item))
+                  : Tooltip(
+                      message: tooltip!(item),
+                      child: SizedBox(width: double.infinity, child: Text(name(item))),
+                    ),
+            ),
         ],
         onSelected: (T item) => ref.read(provider.notifier).setValue(item),
         child: Container(
@@ -123,6 +138,58 @@ class SwitchWidget extends ConsumerWidget {
         child: Switch(value: ref.watch(provider), onChanged: (enabled) => ref.read(provider.notifier).set(enabled)),
       ),
       onTap: () => ref.read(provider.notifier).toggle(),
+    );
+  }
+}
+
+/// A compact −/value/+ stepper bound to an [IntNotifierProvider], clamped to
+/// [min]..[max] (the buttons disable at the bounds). Mirrors [SwitchWidget]'s
+/// shape for use in the same settings groups.
+class StepperWidget extends ConsumerWidget {
+  final Widget title;
+  final Widget description;
+  final IntNotifierProvider provider;
+  final int min;
+  final int max;
+
+  const StepperWidget({
+    super.key,
+    required this.title,
+    required this.description,
+    required this.provider,
+    required this.min,
+    required this.max,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final value = ref.watch(provider);
+    final notifier = ref.read(provider.notifier);
+    return ListTile(
+      title: title,
+      subtitle: description,
+      trailing: Align(
+        widthFactor: 1,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: const Icon(Symbols.remove_rounded),
+              visualDensity: VisualDensity.compact,
+              onPressed: value <= min ? null : notifier.decrement,
+            ),
+            SizedBox(
+              width: 24,
+              child: Text("$value", textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
+            ),
+            IconButton(
+              icon: const Icon(Symbols.add_rounded),
+              visualDensity: VisualDensity.compact,
+              onPressed: value >= max ? null : notifier.increment,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

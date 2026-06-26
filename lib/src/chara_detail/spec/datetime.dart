@@ -10,7 +10,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -61,7 +60,7 @@ class DateTimeCellData implements CellData {
   String get csv => value.toString();
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'DateTimeColumnSpec', ignoreNull: true)
@@ -82,6 +81,9 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   final String? description;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openCampaignPreview;
 
   DateTimeColumnSpec({
@@ -91,6 +93,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
     required this.predicate,
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -99,6 +102,9 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   DateTimeColumnSpec copyWith({
     String? id,
     String? title,
@@ -106,6 +112,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
     IsInRangeDateTimePredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return DateTimeColumnSpec(
       id: id ?? this.id,
@@ -114,6 +121,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -139,12 +147,13 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
-        return Text(context.cell.value, textAlign: TextAlign.center);
+        return CellText(context.cell.value, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

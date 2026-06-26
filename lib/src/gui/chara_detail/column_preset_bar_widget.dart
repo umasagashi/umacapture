@@ -7,6 +7,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/chara_detail_settings_dialog.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
@@ -155,10 +156,16 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                     // CharaDetailExportButton carries the same horizontal:3
                     // margin as _PresetActionButton, so no extra spacer is needed.
                     const CharaDetailExportButton(),
+                    // Caps the record group right after export, setting it off
+                    // from the right-pinned controls.
+                    const _ToolbarDivider(),
                   ],
                 ),
               ),
-              // View toggle for the side preview panel, pinned to the right edge.
+              // Table settings dialog, then the side preview toggle, pinned to
+              // the right edge, with a divider between the two.
+              const CharaDetailSettingsButton(),
+              const _ToolbarDivider(),
               const SidePreviewToggleButton(),
             ],
           ),

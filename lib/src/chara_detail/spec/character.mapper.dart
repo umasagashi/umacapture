@@ -110,6 +110,12 @@ class CharacterCardColumnSpecMapper
     _$description,
     opt: true,
   );
+  static double? _$width(CharacterCardColumnSpec v) => v.width;
+  static const Field<CharacterCardColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
 
   @override
   final MappableFields<CharacterCardColumnSpec> fields = const {
@@ -119,6 +125,7 @@ class CharacterCardColumnSpecMapper
     #predicate: _f$predicate,
     #hidden: _f$hidden,
     #description: _f$description,
+    #width: _f$width,
   };
   @override
   final bool ignoreNull = true;
@@ -143,6 +150,7 @@ class CharacterCardColumnSpecMapper
       predicate: data.dec(_f$predicate),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
+      width: data.dec(_f$width),
     );
   }
 

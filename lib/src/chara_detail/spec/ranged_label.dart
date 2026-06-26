@@ -11,7 +11,6 @@ import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -34,7 +33,7 @@ class RangedLabelCellData implements CellData {
   String get csv => label;
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'RangedLabelColumnSpec', ignoreNull: true)
@@ -58,6 +57,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   final String? description;
 
+  @override
+  final double? width;
+
   RangedLabelColumnSpec({
     required this.id,
     required this.title,
@@ -67,6 +69,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     ColumnSpecCellAction? cellAction,
     this.hidden = false,
     this.description,
+    this.width,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
@@ -74,6 +77,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   RangedLabelColumnSpec copyWith({
     String? id,
@@ -83,6 +89,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return RangedLabelColumnSpec(
       id: id ?? this.id,
@@ -92,6 +99,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -117,13 +125,14 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       title: title,
       field: id,
       type: TrinaColumnType.number(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedLabelCellData>()!;
-        return Text(data.label, textAlign: TextAlign.center);
+        return CellText(data.label, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

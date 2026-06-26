@@ -19,7 +19,6 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/script_facade.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/code_highlight_field.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -413,7 +412,7 @@ class ScriptCellData implements CellData {
   String get csv => result.display;
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 /// Column type for script cells: the whole [ScriptCellResult] lives in
@@ -511,6 +510,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   @override
   final bool hidden;
 
+  @override
+  final double? width;
+
   ScriptColumnSpec({
     required this.id,
     required this.title,
@@ -518,6 +520,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     this.apiVersion = scriptApiVersion,
     this.description,
     this.hidden = false,
+    this.width,
   });
 
   @override
@@ -526,6 +529,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   ScriptColumnSpec copyWith({
     String? id,
     String? title,
@@ -533,6 +539,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     int? apiVersion,
     Object? description = _unset,
     bool? hidden,
+    Object? width = _unset,
   }) {
     return ScriptColumnSpec(
       id: id ?? this.id,
@@ -541,6 +548,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       apiVersion: apiVersion ?? this.apiVersion,
       description: identical(description, _unset) ? this.description : description as String?,
       hidden: hidden ?? this.hidden,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -643,8 +651,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       field: id,
       type: const _ScriptColumnType(),
       textAlign: _numericSort ? TrinaColumnTextAlign.right : TrinaColumnTextAlign.left,
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       // Auto-fit measures formattedValueForDisplay(cell.value); make that the real
@@ -683,11 +692,7 @@ class _ScriptCell extends StatelessWidget {
       );
     }
     final iconData = result.icon == null ? null : _iconMap[result.icon!];
-    final text = Text(
-      result.display,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(color: _resolveColor(result.color)),
-    );
+    final text = CellText(result.display, style: TextStyle(color: _resolveColor(result.color)));
     final row = Row(
       mainAxisSize: MainAxisSize.min,
       children: [

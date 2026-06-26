@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:collection/collection.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -12,7 +14,6 @@ import '/src/chara_detail/spec/base.dart' hide tr_common;
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -49,7 +50,7 @@ class CharacterCardCellData implements CellData {
   String get csv => name;
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'CharacterCardColumnSpec', ignoreNull: true)
@@ -70,7 +71,14 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   final String? description;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
+
+  // Renders a fixed-size trainee portrait, not wrapping text.
+  @override
+  bool get wrapsText => false;
 
   CharacterCardColumnSpec({
     required this.id,
@@ -79,6 +87,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
     required this.predicate,
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -87,6 +96,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   CharacterCardColumnSpec copyWith({
     String? id,
     String? title,
@@ -94,6 +106,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
     CharacterCardPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return CharacterCardColumnSpec(
       id: id ?? this.id,
@@ -102,6 +115,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -133,8 +147,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       title: title,
       field: id,
       type: TrinaColumnType.number(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
@@ -186,30 +201,43 @@ class _FriendMarkedIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.passthrough,
-      children: [
-        icon,
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: FractionallySizedBox(
-            widthFactor: 0.6,
-            child: Container(
-              decoration: const ShapeDecoration(color: Color(0xFFEC6A8E), shape: StadiumBorder()),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  "$tr_character.marker.friend".tr(),
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+    // The portrait is a square fit to the cell, so its side is the smaller of the
+    // available width and height — which shrinks/grows as the row height (or
+    // column width) changes. Derive the banner's width, font, and padding from
+    // that side so the rental marker resizes at the icon's scale instead of
+    // staying pinned to a fixed font.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final height = constraints.maxHeight;
+        final side = (width.isFinite && height.isFinite) ? min(width, height) : (height.isFinite ? height : width);
+        final bannerWidth = side * 0.75;
+        return Stack(
+          fit: StackFit.passthrough,
+          children: [
+            icon,
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Center(
+                child: Container(
+                  width: bannerWidth,
+                  decoration: const ShapeDecoration(color: Color(0xFFEC6A8E), shape: StadiumBorder()),
+                  padding: EdgeInsets.symmetric(horizontal: bannerWidth * 0.08, vertical: bannerWidth * 0.02),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      "$tr_character.marker.friend".tr(),
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: bannerWidth * 0.3),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
