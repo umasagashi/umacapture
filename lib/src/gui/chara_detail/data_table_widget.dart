@@ -869,7 +869,25 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   // programmatic restoreCurrentRecord in _navigateSidePreview alike
                   // (setCurrentCell calls it even with notify:false) — so mirroring the
                   // id here keeps the panel in sync without the panel storing its own.
-                  onActiveCellChanged: (_) => _currentRecordId.value = stateManager.currentRecord?.id,
+                  onActiveCellChanged: (_) {
+                    _currentRecordId.value = stateManager.currentRecord?.id;
+                    // Keep the shown image (mode) following the focused column on every
+                    // current-cell change — keyboard moves and the programmatic
+                    // restoreCurrentRecord alike, not just mouse clicks (which also pass
+                    // through onSelected). The panel only tracks the record id; the mode
+                    // is re-derived here from the focused column's cell action so the
+                    // image always matches the column in focus. The breakpoint is
+                    // re-checked (not read from the captured `narrow`) for the same
+                    // reason onSelected does: this closure is captured once at grid load.
+                    final sidePreview = ref.read(sidePreviewProvider);
+                    if (sidePreview != null && isSidePreviewAllowed(context)) {
+                      final action = stateManager.currentCell?.column.getUserData<ColumnSpec>()?.cellAction;
+                      final mode = imageModeForColumnAction(action);
+                      if (mode != sidePreview.mode) {
+                        ref.read(sidePreviewProvider.notifier).set(SidePreviewState(mode: mode));
+                      }
+                    }
+                  },
                   onRowSecondaryTap: (TrinaGridOnRowSecondaryTapEvent event) {
                     // event.row (== getRowByIdx(rowIdx)) is unreliable once any
                     // row is frozen (pinned): TrinaGrid renders frozen rows in a
@@ -906,23 +924,18 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                           return;
                         }
                         // While the side preview panel is open (and visible — not in
-                        // the narrow layout where it is hidden), a cell click only
-                        // picks which screen to show (the column's mode); the panel
-                        // follows the grid's current record (already set by the tap, via
-                        // onActiveCellChanged), so it isn't set here. Suppress the dialog.
+                        // the narrow layout where it is hidden), a cell click only moves
+                        // the focus: the panel follows the grid's current record and the
+                        // shown image is re-derived from the focused column, both in
+                        // onActiveCellChanged (which the tap also fires). So here we only
+                        // suppress the dialog.
                         //
                         // The breakpoint is re-evaluated here, not read from the
                         // build-scope `narrow`: TrinaGrid captures this onSelected
                         // closure once (at grid load) and never refreshes it, so a
                         // captured `narrow` would stay frozen at its first-build value
                         // and feed the hidden panel after the window shrinks.
-                        final sidePreview = ref.read(sidePreviewProvider);
-                        if (sidePreview != null && isSidePreviewAllowed(context)) {
-                          final action = event.cell?.column.getUserData<ColumnSpec>()?.cellAction;
-                          final mode = imageModeForColumnAction(action);
-                          if (mode != sidePreview.mode) {
-                            ref.read(sidePreviewProvider.notifier).set(SidePreviewState(mode: mode));
-                          }
+                        if (ref.read(sidePreviewProvider) != null && isSidePreviewAllowed(context)) {
                           return;
                         }
                         final source = ref.read(recordSourceProvider);
