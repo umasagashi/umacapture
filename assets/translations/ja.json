@@ -974,7 +974,12 @@
             },
             "column_context_menu": {
                 "reset_width": "列幅を自動調整に戻す",
-                "reset_all_widths": "すべての列幅を自動調整に戻す"
+                "sort": {
+                    "label": "ソート順",
+                    "ascending": "昇順",
+                    "descending": "降順",
+                    "none": "ソート解除"
+                }
             },
             "preview": {
                 "rental": "レンタル",

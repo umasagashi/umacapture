@@ -403,7 +403,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   }
 
   /// Opens the column-header context menu (right-click on a header) offering to
-  /// revert this column — or every column — to content-driven auto width.
+  /// sort the column (ascending/descending/clear, via a submenu) or revert it to
+  /// content-driven auto width.
   void _showColumnHeaderMenu(BuildContext context, Offset position, TrinaColumn column) {
     final theme = Theme.of(context);
     final style = theme.textTheme.labelMedium;
@@ -421,11 +422,30 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
           onSelected: (_) => _resetColumnWidth(column),
           label: Text("$tr_chara_detail.column_context_menu.reset_width".tr(), style: pinned ? style : disabledStyle),
         ),
-        MenuItem(
+        MenuItem.submenu(
           constraints: constraints,
-          icon: const Icon(Symbols.replay, weight: iconWeight),
-          onSelected: (_) => _resetAllColumnWidths(),
-          label: Text("$tr_chara_detail.column_context_menu.reset_all_widths".tr(), style: style),
+          icon: const Icon(Symbols.swap_vert, weight: iconWeight),
+          label: Text("$tr_chara_detail.column_context_menu.sort.label".tr(), style: style),
+          items: [
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.arrow_upward, weight: iconWeight),
+              onSelected: (_) => _sortColumn(column, TrinaColumnSort.ascending),
+              label: Text("$tr_chara_detail.column_context_menu.sort.ascending".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.arrow_downward, weight: iconWeight),
+              onSelected: (_) => _sortColumn(column, TrinaColumnSort.descending),
+              label: Text("$tr_chara_detail.column_context_menu.sort.descending".tr(), style: style),
+            ),
+            MenuItem(
+              constraints: constraints,
+              icon: const Icon(Symbols.close, weight: iconWeight),
+              onSelected: (_) => _sortColumn(column, TrinaColumnSort.none),
+              label: Text("$tr_chara_detail.column_context_menu.sort.none".tr(), style: style),
+            ),
+          ],
         ),
       ],
     );
@@ -457,32 +477,30 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     });
   }
 
-  /// Reverts every currently displayed column to auto width. Nested logic-column
-  /// children never carry a width, so clearing the live columns covers all pins.
-  void _resetAllColumnWidths() {
+  /// Sorts [column] in [order] from the header context menu. Unlike a header
+  /// click (toggleSortColumn), the direct sort calls don't fire onSorted, so the
+  /// sort bookkeeping and the pinned-row index are updated here to match — none
+  /// restores the original order via sortBySortIdx.
+  void _sortColumn(TrinaColumn column, TrinaColumnSort order) {
     if (!_loaded) {
       return;
     }
-    final selection = ref.read(currentColumnSpecsLoaderProvider.notifier);
-    var any = false;
-    for (final col in stateManager.columns) {
-      final spec = col.getUserData<ColumnSpec>();
-      if (spec == null || spec.width == null) {
-        continue;
-      }
-      final cleared = spec.withWidth(null);
-      col.setUserData(cleared);
-      selection.replaceById(cleared);
-      any = true;
+    switch (order) {
+      case TrinaColumnSort.ascending:
+        stateManager.sortAscending(column);
+      case TrinaColumnSort.descending:
+        stateManager.sortDescending(column);
+      case TrinaColumnSort.none:
+        stateManager.sortBySortIdx(column);
     }
-    if (!any) {
-      return;
+    if (order == TrinaColumnSort.none) {
+      sortColumn = null;
+      sortOrder = TrinaColumnSort.none;
+    } else {
+      sortColumn = column.field;
+      sortOrder = order;
     }
-    _afterFrame(() {
-      stateManager.autoFitColumns();
-      _snapshotColumnWidths();
-      _applyRowHeights();
-    });
+    _indexPinnedRows();
   }
 
   /// Whether two column lists describe the same columns in the same order.
