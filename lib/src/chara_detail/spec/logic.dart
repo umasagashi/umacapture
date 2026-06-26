@@ -87,6 +87,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   final String? description;
 
+  @override
+  final double? width;
+
   LogicColumnSpec({
     required this.id,
     required this.title,
@@ -94,6 +97,7 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
     this.children = const [],
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -112,6 +116,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   LogicColumnSpec copyWith({
     String? id,
     String? title,
@@ -119,6 +126,7 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
     List<ColumnSpec>? children,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return LogicColumnSpec(
       id: id ?? this.id,
@@ -127,6 +135,7 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
       children: children ?? this.children,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -177,8 +186,9 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
       field: id,
       type: TrinaColumnType.number(),
       textAlign: TrinaColumnTextAlign.center,
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       readOnly: true,

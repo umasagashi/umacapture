@@ -264,6 +264,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   final String? description;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   FactorColumnSpec({
@@ -276,6 +279,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.hiddenElements = const {},
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -283,6 +287,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   FactorColumnSpec copyWith({
     String? id,
@@ -294,6 +301,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     Set<FactorDialogElements>? hiddenElements,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return FactorColumnSpec(
       id: id ?? this.id,
@@ -305,6 +313,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       hiddenElements: hiddenElements ?? this.hiddenElements,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -360,8 +369,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {

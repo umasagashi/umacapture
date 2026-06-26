@@ -79,6 +79,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   final bool hidden;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   MemoColumnSpec({
@@ -89,6 +92,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     required this.storageKey,
     this.description,
     this.hidden = false,
+    this.width,
   });
 
   @override
@@ -96,6 +100,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   MemoColumnSpec copyWith({
     String? id,
@@ -105,6 +112,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     String? storageKey,
     Object? description = _unset,
     bool? hidden,
+    Object? width = _unset,
   }) {
     return MemoColumnSpec(
       id: id ?? this.id,
@@ -114,6 +122,7 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
       storageKey: storageKey ?? this.storageKey,
       description: identical(description, _unset) ? this.description : description as String?,
       hidden: hidden ?? this.hidden,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -151,8 +160,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<MemoCellData>()!;

@@ -71,6 +71,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   @override
   final String? description;
 
+  @override
+  final double? width;
+
   RangedIntegerColumnSpec({
     required this.id,
     required this.title,
@@ -79,6 +82,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
     ColumnSpecCellAction? cellAction,
     this.hidden = false,
     this.description,
+    this.width,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
@@ -87,6 +91,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   RangedIntegerColumnSpec copyWith({
     String? id,
     String? title,
@@ -94,6 +101,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return RangedIntegerColumnSpec(
       id: id ?? this.id,
@@ -103,6 +111,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
       cellAction: cellAction,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -128,8 +137,9 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
       field: id,
       type: TrinaColumnType.number(),
       textAlign: TrinaColumnTextAlign.right,
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {

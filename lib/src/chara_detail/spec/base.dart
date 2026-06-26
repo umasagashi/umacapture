@@ -211,6 +211,21 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// it generically here.
   String? get description => null;
 
+  /// User-pinned display width for this column in logical pixels, or null when the
+  /// column auto-fits to its content. A non-null value makes [autoFitColumns] skip
+  /// the column so the user's chosen width survives data and layout changes; null
+  /// (the default, and what legacy specs saved before this field existed decode to)
+  /// keeps the content-driven auto-fit. Every editable concrete spec overrides this
+  /// with a stored field and implements [withWidth].
+  double? get width => null;
+
+  /// Returns a copy of this spec with its pinned [width] replaced (null clears it,
+  /// reverting the column to auto-fit). Like [withHidden], every editable concrete
+  /// spec must override this via copyWith; the base throws rather than silently
+  /// no-op'ing so a spec that forgets to override fails loudly. The undecodable
+  /// placeholder, which is never editable, overrides this back to a no-op.
+  ColumnSpec withWidth(double? width) => throw UnsupportedError('Concrete specs must override withWidth');
+
   /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
   /// editable spec must override this via copyWith. Unlike [withChildren] (which
   /// leaf columns legitimately no-op on), the base throws rather than silently
@@ -359,6 +374,11 @@ class BrokenPlaceholderSpec extends ColumnSpec<Null> {
   // Inert for the same reason as [withHidden]: a broken column is never edited.
   @override
   ColumnSpec withDescription(String? description) => this;
+
+  // Inert like [withHidden]/[withDescription]: a broken column is never resized.
+  // Its width getter inherits the base default (null), so it always auto-fits.
+  @override
+  ColumnSpec withWidth(double? width) => this;
 
   @override
   List<Null> parse(RefBase ref, List<CharaDetailRecord> records) {
@@ -827,6 +847,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       // would shrink it below the checkbox's intrinsic width and clip it. Leave
       // its fixed width untouched.
       if (col.enableRowChecked) {
+        continue;
+      }
+      // A column the user has pinned to an explicit width (spec.width != null) is
+      // intentionally excluded so its chosen width survives data/layout changes.
+      // Its width was applied at plutoColumn build time and must not be remeasured.
+      if (col.getUserData<ColumnSpec>()?.width != null) {
         continue;
       }
       final enabled = col.enableDropToResize;

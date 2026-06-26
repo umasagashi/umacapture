@@ -109,6 +109,12 @@ class MemoColumnSpecMapper extends SubClassMapperBase<MemoColumnSpec> {
     opt: true,
     def: false,
   );
+  static double? _$width(MemoColumnSpec v) => v.width;
+  static const Field<MemoColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
 
   @override
   final MappableFields<MemoColumnSpec> fields = const {
@@ -119,6 +125,7 @@ class MemoColumnSpecMapper extends SubClassMapperBase<MemoColumnSpec> {
     #storageKey: _f$storageKey,
     #description: _f$description,
     #hidden: _f$hidden,
+    #width: _f$width,
   };
   @override
   final bool ignoreNull = true;
@@ -144,6 +151,7 @@ class MemoColumnSpecMapper extends SubClassMapperBase<MemoColumnSpec> {
       storageKey: data.dec(_f$storageKey),
       description: data.dec(_f$description),
       hidden: data.dec(_f$hidden),
+      width: data.dec(_f$width),
     );
   }
 

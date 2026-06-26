@@ -85,6 +85,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   final bool hidden;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   final range = Range<double>(min: 0.0, max: 5.0);
@@ -97,6 +100,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     required this.storageKey,
     this.description,
     this.hidden = false,
+    this.width,
   });
 
   @override
@@ -104,6 +108,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
+
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
 
   RatingColumnSpec copyWith({
     String? id,
@@ -113,6 +120,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
     String? storageKey,
     Object? description = _unset,
     bool? hidden,
+    Object? width = _unset,
   }) {
     return RatingColumnSpec(
       id: id ?? this.id,
@@ -122,6 +130,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
       storageKey: storageKey ?? this.storageKey,
       description: identical(description, _unset) ? this.description : description as String?,
       hidden: hidden ?? this.hidden,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -148,8 +157,9 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {

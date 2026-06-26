@@ -70,6 +70,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   final String? description;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
   CharacterCardColumnSpec({
@@ -79,6 +82,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
     required this.predicate,
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -87,6 +91,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   CharacterCardColumnSpec copyWith({
     String? id,
     String? title,
@@ -94,6 +101,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
     CharacterCardPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return CharacterCardColumnSpec(
       id: id ?? this.id,
@@ -102,6 +110,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -133,8 +142,9 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       title: title,
       field: id,
       type: TrinaColumnType.number(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {

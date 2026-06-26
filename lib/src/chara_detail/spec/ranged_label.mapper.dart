@@ -64,6 +64,12 @@ class RangedLabelColumnSpecMapper
     _$description,
     opt: true,
   );
+  static double? _$width(RangedLabelColumnSpec v) => v.width;
+  static const Field<RangedLabelColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
 
   @override
   final MappableFields<RangedLabelColumnSpec> fields = const {
@@ -75,6 +81,7 @@ class RangedLabelColumnSpecMapper
     #cellAction: _f$cellAction,
     #hidden: _f$hidden,
     #description: _f$description,
+    #width: _f$width,
   };
   @override
   final bool ignoreNull = true;
@@ -101,6 +108,7 @@ class RangedLabelColumnSpecMapper
       cellAction: data.dec(_f$cellAction),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
+      width: data.dec(_f$width),
     );
   }
 

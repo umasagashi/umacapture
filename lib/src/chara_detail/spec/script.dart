@@ -511,6 +511,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   @override
   final bool hidden;
 
+  @override
+  final double? width;
+
   ScriptColumnSpec({
     required this.id,
     required this.title,
@@ -518,6 +521,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     this.apiVersion = scriptApiVersion,
     this.description,
     this.hidden = false,
+    this.width,
   });
 
   @override
@@ -526,6 +530,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   ScriptColumnSpec copyWith({
     String? id,
     String? title,
@@ -533,6 +540,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     int? apiVersion,
     Object? description = _unset,
     bool? hidden,
+    Object? width = _unset,
   }) {
     return ScriptColumnSpec(
       id: id ?? this.id,
@@ -541,6 +549,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       apiVersion: apiVersion ?? this.apiVersion,
       description: identical(description, _unset) ? this.description : description as String?,
       hidden: hidden ?? this.hidden,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -643,8 +652,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
       field: id,
       type: const _ScriptColumnType(),
       textAlign: _numericSort ? TrinaColumnTextAlign.right : TrinaColumnTextAlign.left,
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       enableEditingMode: false,
       // Auto-fit measures formattedValueForDisplay(cell.value); make that the real

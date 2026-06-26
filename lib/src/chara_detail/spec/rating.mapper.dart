@@ -125,6 +125,12 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
     opt: true,
     def: false,
   );
+  static double? _$width(RatingColumnSpec v) => v.width;
+  static const Field<RatingColumnSpec, double> _f$width = Field(
+    'width',
+    _$width,
+    opt: true,
+  );
   static Range<double> _$range(RatingColumnSpec v) => v.range;
   static const Field<RatingColumnSpec, Range<double>> _f$range = Field(
     'range',
@@ -141,6 +147,7 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
     #storageKey: _f$storageKey,
     #description: _f$description,
     #hidden: _f$hidden,
+    #width: _f$width,
     #range: _f$range,
   };
   @override
@@ -167,6 +174,7 @@ class RatingColumnSpecMapper extends SubClassMapperBase<RatingColumnSpec> {
       storageKey: data.dec(_f$storageKey),
       description: data.dec(_f$description),
       hidden: data.dec(_f$hidden),
+      width: data.dec(_f$width),
     );
   }
 

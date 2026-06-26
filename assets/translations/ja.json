@@ -949,6 +949,10 @@
                 "archive_record": "データをアーカイブ",
                 "group_file": "ファイル"
             },
+            "column_context_menu": {
+                "reset_width": "列幅を自動調整に戻す",
+                "reset_all_widths": "すべての列幅を自動調整に戻す"
+            },
             "preview": {
                 "rental": "レンタル",
                 "dialog": {

@@ -144,6 +144,9 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   final String? description;
 
   @override
+  final double? width;
+
+  @override
   ColumnSpecCellAction? get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   FamilyRegistrationColumnSpec({
@@ -152,6 +155,7 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
     required this.predicate,
     this.hidden = false,
     this.description,
+    this.width,
   });
 
   @override
@@ -160,12 +164,16 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   @override
   ColumnSpec withDescription(String? description) => copyWith(description: description);
 
+  @override
+  ColumnSpec withWidth(double? width) => copyWith(width: width);
+
   FamilyRegistrationColumnSpec copyWith({
     String? id,
     String? title,
     FamilyRegistrationPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return FamilyRegistrationColumnSpec(
       id: id ?? this.id,
@@ -173,6 +181,7 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
@@ -202,8 +211,9 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
       title: title,
       field: id,
       type: TrinaColumnType.text(),
+      width: width ?? TrinaGridSettings.columnWidth,
       enableContextMenu: false,
-      enableDropToResize: false,
+      enableDropToResize: true,
       enableColumnDrag: false,
       readOnly: true,
       renderer: (TrinaColumnRendererContext context) {

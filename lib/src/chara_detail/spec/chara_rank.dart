@@ -25,6 +25,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     required super.predicate,
     super.hidden,
     super.description,
+    super.width,
   });
 
   @override
@@ -50,6 +51,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
+    Object? width = _unset,
   }) {
     return CharaRankColumnSpec(
       id: id ?? this.id,
@@ -59,6 +61,7 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
       predicate: predicate ?? this.predicate,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
+      width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 }
