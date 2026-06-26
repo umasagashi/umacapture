@@ -12,7 +12,6 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
@@ -48,7 +47,7 @@ class MemoCellData implements CellData {
   final String? value;
 
   @override
-  final Predicate<TrinaGridOnSelectedEvent>? onSelected;
+  final CellSelectedCallback? onSelected;
 
   @override
   String get csv => value ?? "";
@@ -104,6 +103,10 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  String measuredText(TrinaCell? cell, String formatted) =>
+      cell?.getUserData<MemoCellData>()?.value == null ? "$tr_memo.cell.description".tr() : formatted;
+
   MemoColumnSpec copyWith({
     String? id,
     String? title,
@@ -138,9 +141,13 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
   }
 
   @override
-  TrinaCell plutoCell(RefBase ref, String? value) {
+  TrinaCell plutoCell(RefBase _, String? value) {
+    // The onSelected closure must NOT capture this build-scoped grid ref: it is
+    // disposed when [currentGridProvider] rebuilds (a column resize, a memo save),
+    // and a kept cell would then read through a dead ref. The table passes a live
+    // ref in at tap time instead (see [CellSelectedCallback]).
     return TrinaCell(value: value ?? "_" * 20)..setUserData(
-      MemoCellData(value, (TrinaGridOnSelectedEvent event) {
+      MemoCellData(value, (RefBase ref, TrinaGridOnSelectedEvent event) {
         final record = event.row!.getUserData<CharaDetailRecord>()!;
         final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
         _RecordMemoDialog.show(

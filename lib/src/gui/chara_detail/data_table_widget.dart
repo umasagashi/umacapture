@@ -368,9 +368,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _applyRowHeights();
   }
 
-  /// The column whose header occupies the local x offset [dx] (header band only),
-  /// accounting for frozen columns and the horizontal scroll offset. Returns null
-  /// outside any column (e.g. past the last column or in an empty grid).
+  /// The column whose header occupies the content-space x offset [dx] (grid
+  /// inset already removed by the caller), accounting for frozen columns and the
+  /// horizontal scroll offset. Returns null outside any column (e.g. past the
+  /// last column or in an empty grid).
   TrinaColumn? _columnAtHeaderOffset(double dx) {
     final sm = stateManager;
     if (sm.showFrozenColumn) {
@@ -685,10 +686,16 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                 if (!_loaded || event.buttons != kSecondaryButton) {
                   return;
                 }
-                if (event.localPosition.dy > stateManager.columnHeight) {
+                // trina's _GridContainer insets its content by gridBorderWidth +
+                // gridPadding, which the Listener's localPosition doesn't account
+                // for. Map into content space before the header-band check and
+                // column hit-test so both land on the right column / boundary.
+                final inset = stateManager.gridBorderWidth + stateManager.gridPadding;
+                final local = event.localPosition - Offset(inset, inset);
+                if (local.dy < 0 || local.dy > stateManager.columnHeight) {
                   return;
                 }
-                final column = _columnAtHeaderOffset(event.localPosition.dx);
+                final column = _columnAtHeaderOffset(local.dx);
                 if (column == null || column.enableRowChecked) {
                   return;
                 }
@@ -888,7 +895,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   onSelected: (TrinaGridOnSelectedEvent event) {
                     try {
                       final data = event.cell?.getUserData<CellData>();
-                      if (!(data?.onSelected?.call(event) ?? false)) {
+                      // Pass this State's live ref (stable for the widget's
+                      // lifetime), never a grid-build ref the cell captured: the
+                      // grid provider may have rebuilt and disposed that one.
+                      if (!(data?.onSelected?.call(ref.base, event) ?? false)) {
                         final record = event.cell?.row.getUserData<CharaDetailRecord>();
                         if (record == null) {
                           return;

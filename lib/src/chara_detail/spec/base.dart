@@ -14,7 +14,6 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/spec/spec_tree.dart';
-import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
@@ -317,6 +316,12 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// to false so the auto row-height pass never inflates a row from their
   /// width-measurement placeholder text. Defaults to true.
   bool get wrapsText => true;
+
+  /// The text the cell actually paints, used by the row-height pass to measure
+  /// wrapped height. Defaults to the trina-formatted cell value; specs whose
+  /// renderer substitutes text (e.g. memo's null placeholder) override this so
+  /// the measured height matches what is shown.
+  String measuredText(TrinaCell? cell, String formatted) => formatted;
 
   /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
   /// editable spec must override this via copyWith. Unlike [withChildren] (which
@@ -985,7 +990,8 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
         continue;
       }
       final cellPadding = col.cellPadding ?? configuration.style.defaultCellPadding;
-      final text = col.formattedValueForDisplay(row.cells[col.field]?.value);
+      final cell = row.cells[col.field];
+      final text = spec.measuredText(cell, col.formattedValueForDisplay(cell?.value));
       final height =
           _wrappedTextHeight(context, text, style, col.width - cellPadding.horizontal) + cellPadding.vertical;
       if (height > maxHeight) {
@@ -1353,6 +1359,15 @@ extension TrinaColumnWithUserData on TrinaColumn {
   void setUserData<T>(T value) => _userData[this] = value;
 }
 
+/// Handles a cell selection (tap), given a live [RefBase] supplied by the table
+/// at call time and the trina select event. Returns whether it consumed the tap.
+///
+/// The ref is passed in rather than captured because a long-lived cell closure
+/// must not hold the grid-build ref: that ref is disposed whenever
+/// [currentGridProvider] rebuilds (e.g. a column resize persists its width, or a
+/// memo/rating is saved), after which a kept cell would read through a dead ref.
+typedef CellSelectedCallback = bool Function(RefBase ref, TrinaGridOnSelectedEvent event);
+
 abstract class CellData implements Exportable {
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected;
+  CellSelectedCallback? get onSelected;
 }

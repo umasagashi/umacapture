@@ -19,7 +19,6 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/script_facade.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/code_highlight_field.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -413,7 +412,7 @@ class ScriptCellData implements CellData {
   String get csv => result.display;
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 /// Column type for script cells: the whole [ScriptCellResult] lives in

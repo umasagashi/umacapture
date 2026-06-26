@@ -14,7 +14,6 @@ import '/src/chara_detail/spec/base.dart' hide tr_common;
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/callback.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
@@ -51,7 +50,7 @@ class CharacterCardCellData implements CellData {
   String get csv => name;
 
   @override
-  Predicate<TrinaGridOnSelectedEvent>? get onSelected => null;
+  CellSelectedCallback? get onSelected => null;
 }
 
 @MappableClass(discriminatorValue: 'CharacterCardColumnSpec', ignoreNull: true)
