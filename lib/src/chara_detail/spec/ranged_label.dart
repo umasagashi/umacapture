@@ -133,7 +133,7 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedLabelCellData>()!;
-        return Text(data.label, textAlign: TextAlign.center);
+        return CellText(data.label, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

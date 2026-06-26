@@ -17,6 +17,8 @@ import '/src/core/callback.dart';
 import '/src/core/json_adapter.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
+import '/src/preference/notifier.dart';
+import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
 part 'base.mapper.dart';
@@ -26,6 +28,47 @@ const tr_common = "pages.chara_detail.column_predicate.common";
 
 typedef LabelMap = Map<String, List<String>>;
 typedef OnSpecChanged = void Function(ColumnSpec);
+
+/// Whether table cells grow their row to fit the wrapped text (true) or keep a
+/// fixed row height and ellipsize at two lines (false). A global display toggle,
+/// persisted in settings and watched by [CellText] and the row-height pass, so a
+/// narrowed column either reflows into taller rows or truncates cleanly instead
+/// of clipping its third line.
+final charaDetailAutoRowHeightProvider = BooleanNotifierProvider(() {
+  return BooleanNotifier(entryKey: SettingsEntryKey.autoRowHeight.name, defaultValue: false);
+});
+
+/// Renders a text-based cell, switching between auto-grow (full wrap, no line
+/// cap) and fixed-height (two lines + ellipsis) per [charaDetailAutoRowHeightProvider].
+///
+/// Every text column renderer uses this instead of a bare [Text] so the
+/// row-height toggle is honored consistently; the row-height pass measures the
+/// same text at the same width so a grown row exactly fits the wrapped lines.
+class CellText extends ConsumerWidget {
+  const CellText(this.data, {super.key, this.textAlign, this.style, this.opacity});
+
+  final String data;
+  final TextAlign? textAlign;
+  final TextStyle? style;
+
+  /// Dims the text (e.g. the memo placeholder) without a separate Opacity widget
+  /// that would change the cell's measured height.
+  final double? opacity;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final expand = ref.watch(charaDetailAutoRowHeightProvider);
+    final text = Text(
+      data,
+      textAlign: textAlign,
+      style: style,
+      softWrap: true,
+      maxLines: expand ? null : 2,
+      overflow: expand ? null : TextOverflow.ellipsis,
+    );
+    return opacity == null ? text : Opacity(opacity: opacity!, child: text);
+  }
+}
 
 enum ColumnCategory {
   trainee,
@@ -225,6 +268,13 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// no-op'ing so a spec that forgets to override fails loudly. The undecodable
   /// placeholder, which is never editable, overrides this back to a no-op.
   ColumnSpec withWidth(double? width) => throw UnsupportedError('Concrete specs must override withWidth');
+
+  /// Whether this column renders wrapping text (and so can grow a row's height
+  /// when narrowed). Columns that render a fixed-height widget or icon (character
+  /// portrait, logic mark, rating stars, family-registration badge) override this
+  /// to false so the auto row-height pass never inflates a row from their
+  /// width-measurement placeholder text. Defaults to true.
+  bool get wrapsText => true;
 
   /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
   /// editable spec must override this via copyWith. Unlike [withChildren] (which
@@ -865,6 +915,89 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       }
       col.enableDropToResize = enabled;
     }
+  }
+
+  // Measures the rendered height of [text] wrapped to [maxWidth] in [style],
+  // matching how [CellText] lays the same text out so a grown row fits exactly.
+  double _wrappedTextHeight(BuildContext context, String text, TextStyle style, double maxWidth) {
+    if (text.isEmpty || maxWidth <= 0) {
+      return 0;
+    }
+    final textPainter = TextPainter(
+      text: TextSpan(style: style, text: text),
+      textDirection: ui.TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout(maxWidth: maxWidth);
+    return textPainter.height;
+  }
+
+  // The height a row needs to fully show its pinned columns' wrapped text, or null
+  // when the fixed grid height already suffices. Only pinned ([width] != null),
+  // text-rendering ([wrapsText]) columns can wrap — auto-fit columns are sized to
+  // their widest cell, and widget/icon columns render at a fixed height — so the
+  // scan is bounded to those.
+  double? _expandedRowHeight(BuildContext context, TrinaRow row, TextStyle style, double base) {
+    var maxHeight = base;
+    for (final col in columns) {
+      final spec = col.getUserData<ColumnSpec>();
+      if (spec == null || spec.width == null || !spec.wrapsText) {
+        continue;
+      }
+      final cellPadding = col.cellPadding ?? configuration.style.defaultCellPadding;
+      final text = col.formattedValueForDisplay(row.cells[col.field]?.value);
+      final height =
+          _wrappedTextHeight(context, text, style, col.width - cellPadding.horizontal) + cellPadding.vertical;
+      if (height > maxHeight) {
+        maxHeight = height;
+      }
+    }
+    // The 2px buffer absorbs sub-pixel rounding so the last wrapped line is never
+    // clipped. null leaves the row at the grid default (no growth needed).
+    return maxHeight > base ? maxHeight + 2 : null;
+  }
+
+  // Sets each row's height to fit wrapped text in pinned columns ([expand]), or
+  // clears it back to the fixed grid height (!expand). trina's setRowHeight
+  // rebuilds the row, dropping its attached record and notifying per row, so rows
+  // are replaced here in one pass — carrying over cells, key, flags, and the
+  // record user-data — and the caller notifies once. Returns whether anything
+  // changed.
+  bool applyAutoRowHeights({required bool expand}) {
+    final context = gridKey.currentContext;
+    if (context == null) {
+      return false;
+    }
+    final style = DefaultTextStyle.of(context).style;
+    final base = configuration.style.rowHeight;
+    var changed = false;
+    for (var i = 0; i < refRows.length; i++) {
+      final row = refRows[i];
+      final target = expand ? _expandedRowHeight(context, row, style, base) : null;
+      if (row.height == target) {
+        continue;
+      }
+      final record = row.getUserData<CharaDetailRecord>();
+      final newRow =
+          TrinaRow(
+              cells: row.cells,
+              type: row.type,
+              sortIdx: row.sortIdx,
+              data: row.data,
+              checked: row.checked ?? false,
+              key: row.key,
+              frozen: row.frozen,
+              height: target,
+              metadata: row.metadata,
+            )
+            ..setParent(row.parent)
+            ..setState(row.state);
+      if (record != null) {
+        newRow.setUserData(record);
+      }
+      refRows[i] = newRow;
+      changed = true;
+    }
+    return changed;
   }
 
   TrinaColumn? getColumn(String field) {

@@ -75,6 +75,10 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
+  // Renders a fixed-size trainee portrait, not wrapping text.
+  @override
+  bool get wrapsText => false;
+
   CharacterCardColumnSpec({
     required this.id,
     required this.title,

@@ -111,7 +111,11 @@
             "regenerating_message": "認識結果を更新しています",
             "toolbar": {
                 "preset_group": "プリセット",
-                "record_group": "レコード"
+                "record_group": "レコード",
+                "row_height": {
+                    "expand_tooltip": "行の高さを内容に合わせて広げる",
+                    "collapse_tooltip": "行の高さを固定し2行で省略する"
+                }
             },
             "archive_records": {
                 "progress_message": "アーカイブしています",

@@ -149,6 +149,10 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   @override
   ColumnSpecCellAction? get cellAction => ColumnSpecCellAction.openFactorPreview;
 
+  // Renders a fixed-size registration badge widget, not wrapping text.
+  @override
+  bool get wrapsText => false;
+
   FamilyRegistrationColumnSpec({
     required this.id,
     required this.title,

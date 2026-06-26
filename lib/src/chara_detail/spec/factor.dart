@@ -376,7 +376,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<FactorCellData>()!;
-        return Text(data.label);
+        return CellText(data.label);
       },
     )..setUserData(this);
   }

@@ -318,6 +318,22 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _appliedWidths = {for (final col in stateManager.columns) col.field: col.width};
   }
 
+  /// Reflows row heights for the current auto-row-height setting: grows rows to
+  /// fit wrapped text (on), or restores the fixed grid height (off). Runs after
+  /// every autoFit/resize since wrapping depends on the final column widths, and
+  /// on a setting toggle. Re-indexes the pinned block because the height pass
+  /// replaces the row objects it touches.
+  void _applyRowHeights() {
+    if (!_loaded) {
+      return;
+    }
+    final expand = ref.read(charaDetailAutoRowHeightProvider);
+    if (stateManager.applyAutoRowHeights(expand: expand)) {
+      _indexPinnedRows();
+      stateManager.notifyListeners();
+    }
+  }
+
   /// Pins any column the user just dragged: a live width that drifts from the
   /// recorded baseline persists onto its spec as an explicit width, which makes
   /// [autoFitColumns] skip it thereafter. The live column's user data is updated
@@ -347,6 +363,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       selection.replaceById(spec);
     }
     _snapshotColumnWidths();
+    _applyRowHeights();
   }
 
   /// The column whose header occupies the local x offset [dx] (header band only),
@@ -434,6 +451,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _afterFrame(() {
       stateManager.autoFitColumns();
       _snapshotColumnWidths();
+      _applyRowHeights();
     });
   }
 
@@ -461,6 +479,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _afterFrame(() {
       stateManager.autoFitColumns();
       _snapshotColumnWidths();
+      _applyRowHeights();
     });
   }
 
@@ -542,6 +561,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
       _afterFrame(() {
         stateManager.autoFitColumns();
         _snapshotColumnWidths();
+        _applyRowHeights();
       });
     } else {
       stateManager.refreshColumnRenderers(next.columns);
@@ -560,6 +580,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         _afterFrame(() {
           stateManager.autoFitColumns();
           _snapshotColumnWidths();
+          _applyRowHeights();
         });
       }
     }
@@ -589,14 +610,21 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     _purpose = purpose;
     if (themeChanged) {
       // The grid's long-lived row callbacks read _theme; nudge them to repaint
-      // with the new colors (a theme change doesn't touch currentGridProvider).
-      _afterFrame(() => stateManager.notifyListeners());
+      // with the new colors (a theme change doesn't touch currentGridProvider). A
+      // font/text-scale change also alters wrapping, so re-fit row heights too.
+      _afterFrame(() {
+        _applyRowHeights();
+        stateManager.notifyListeners();
+      });
     }
     // Apply subsequent grid changes to the live stateManager rather than letting
     // the watch above rebuild a fresh grid (TrinaGrid ignores changed columns/rows
     // after init). The watch stays only to seed the initial grid and the empty
     // checks below.
     ref.listen(currentGridProvider, (_, next) => _reconcile(next));
+    // Toggling auto row height doesn't rebuild the grid (only the CellText cells,
+    // which watch the setting), so reflow the live row heights here on change.
+    ref.listen(charaDetailAutoRowHeightProvider, (_, _) => _afterFrame(_applyRowHeights));
     // No source-switch listener needed: the panel tracks the grid's current record
     // and re-resolves it against the live sorted set each build, so a source switch
     // (the old record's id is absent from the new source) falls back to the empty
@@ -787,6 +815,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     _appliedGrid = grid;
                     event.stateManager.autoFitColumns();
                     _snapshotColumnWidths();
+                    _applyRowHeights();
                     if (sortColumn != null) {
                       event.stateManager.sortColumnByField(sortColumn!, sortOrder);
                     }

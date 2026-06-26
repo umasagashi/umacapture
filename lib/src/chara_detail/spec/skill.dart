@@ -232,7 +232,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SkillCellData>()!;
-        return Text(data.label);
+        return CellText(data.label);
       },
     )..setUserData(this);
   }

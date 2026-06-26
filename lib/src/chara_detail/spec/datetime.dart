@@ -154,7 +154,7 @@ class DateTimeColumnSpec extends ColumnSpec<DateTime> with DateTimeColumnSpecMap
       enableColumnDrag: false,
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
-        return Text(context.cell.value, textAlign: TextAlign.center);
+        return CellText(context.cell.value, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

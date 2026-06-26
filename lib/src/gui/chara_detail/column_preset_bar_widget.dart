@@ -28,6 +28,30 @@ const tr_toolbar = "pages.chara_detail.toolbar";
 /// widget's lifecycle.
 typedef _PresetNameSubmit = void Function(WidgetRef ref, String name);
 
+/// Toolbar button toggling whether table cells grow their row to fit wrapped
+/// text or stay fixed-height with a two-line ellipsis. Mirrors
+/// [SidePreviewToggleButton]'s styling; the on state is shown by the icon fill.
+class RowHeightToggleButton extends ConsumerWidget {
+  const RowHeightToggleButton({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final expand = ref.watch(charaDetailAutoRowHeightProvider);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: IconButton(
+        icon: Icon(Symbols.wrap_text_rounded, size: 22, fill: expand ? 1 : 0),
+        tooltip: "$tr_toolbar.row_height.${expand ? "collapse" : "expand"}_tooltip".tr(),
+        onPressed: () => ref.read(charaDetailAutoRowHeightProvider.notifier).toggle(),
+        visualDensity: VisualDensity.compact,
+        splashRadius: 20,
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        padding: EdgeInsets.zero,
+      ),
+    );
+  }
+}
+
 /// Toolbar-style control row letting the user pick which column preset is
 /// applied and manage the preset list (create, duplicate, rename, delete). Sits
 /// above the column chips; the selected preset drives [columnPresetIndexProvider],
@@ -158,7 +182,9 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                   ],
                 ),
               ),
-              // View toggle for the side preview panel, pinned to the right edge.
+              // Row-height (wrap vs. ellipsis) toggle, then the side preview
+              // toggle, pinned to the right edge.
+              const RowHeightToggleButton(),
               const SidePreviewToggleButton(),
             ],
           ),

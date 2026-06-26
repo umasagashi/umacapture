@@ -167,9 +167,9 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<MemoCellData>()!;
         if (data.value == null) {
-          return Opacity(opacity: 0.4, child: Text("$tr_memo.cell.description".tr()));
+          return CellText("$tr_memo.cell.description".tr(), opacity: 0.4);
         } else {
-          return Text(data.value!);
+          return CellText(data.value!);
         }
       },
     )..setUserData(this);

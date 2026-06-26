@@ -90,6 +90,10 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
   @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openSkillPreview;
 
+  // Renders fixed-size rating stars, not wrapping text.
+  @override
+  bool get wrapsText => false;
+
   final range = Range<double>(min: 0.0, max: 5.0);
 
   RatingColumnSpec({

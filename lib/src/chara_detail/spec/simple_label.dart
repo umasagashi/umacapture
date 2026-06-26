@@ -144,7 +144,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
       readOnly: true,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<SimpleLabelCellData>()!;
-        return Text(data.label, textAlign: TextAlign.center);
+        return CellText(data.label, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

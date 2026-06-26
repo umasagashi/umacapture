@@ -100,6 +100,10 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
     this.width,
   });
 
+  // Renders a fixed-size pass/fail icon, not wrapping text.
+  @override
+  bool get wrapsText => false;
+
   @override
   bool get acceptsChildren => true;
 

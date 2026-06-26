@@ -693,11 +693,7 @@ class _ScriptCell extends StatelessWidget {
       );
     }
     final iconData = result.icon == null ? null : _iconMap[result.icon!];
-    final text = Text(
-      result.display,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(color: _resolveColor(result.color)),
-    );
+    final text = CellText(result.display, style: TextStyle(color: _resolveColor(result.color)));
     final row = Row(
       mainAxisSize: MainAxisSize.min,
       children: [

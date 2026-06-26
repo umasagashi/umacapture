@@ -144,7 +144,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
-        return Text(data.value.toNumberString(), textAlign: TextAlign.center);
+        return CellText(data.value.toNumberString(), textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }

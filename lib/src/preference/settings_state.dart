@@ -12,6 +12,7 @@ enum SettingsEntryKey {
   soundEffect,
   allowPostUserData,
   forceResizeMode,
+  autoRowHeight,
   sentryReportLastMonth,
   sentryReportTotalCount,
 }
