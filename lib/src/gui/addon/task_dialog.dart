@@ -138,7 +138,9 @@ class _ActionFields {
         url.text.trim().isNotEmpty &&
             urlErrorKey(url.text) == null &&
             timeoutErrorKey(webhookTimeout.text, required: true) == null,
-      _ActionKind.builtin => !builtinNeedsUnavailableRecord(builtinKey, trigger),
+      _ActionKind.builtin =>
+        !builtinNeedsUnavailableRecord(builtinKey, trigger) &&
+            (builtinActionRegistry[builtinKey]?.usesSecondArgument != true || builtinArg2.text.trim().isNotEmpty),
     };
   }
 
