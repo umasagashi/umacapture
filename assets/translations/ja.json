@@ -114,7 +114,7 @@
                 "record_group": "レコード"
             },
             "settings": {
-                "button_tooltip": "テーブルの表示設定",
+                "button_tooltip": "テーブル設定",
                 "dialog": {
                     "title": "テーブル設定",
                     "close_button": "閉じる"
@@ -122,17 +122,22 @@
                 "display": {
                     "title": "表示",
                     "row_height_mode": {
-                        "title": "行の高さ",
-                        "description": "行の高さの調整方法を選びます。",
+                        "title": "行高さ自動調整",
+                        "description": "文字数が多いセルの高さの調整方法を指定します。",
                         "choice": {
                             "wrap": "折り返し",
                             "auto_per_row": "自動調整（行）",
                             "auto_uniform": "自動調整（均一）"
+                        },
+                        "tooltip": {
+                            "wrap": "行の高さを下限値で固定し、収まらない文字は省略記号で表示します。",
+                            "auto_per_row": "行ごとに高さを調整して、すべての内容が収まるようにします。",
+                            "auto_uniform": "すべての行を最も高い行に揃えて、すべての内容が収まるようにします。"
                         }
                     },
                     "min_row_lines": {
-                        "title": "最低行高さ（行数）",
-                        "description": "折り返しでは固定の行数、自動調整では行の高さの下限になります。"
+                        "title": "行高さ下限",
+                        "description": "すべての行の高さの下限とする行数を指定します。"
                     }
                 }
             },

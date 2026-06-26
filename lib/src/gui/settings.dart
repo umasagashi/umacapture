@@ -65,6 +65,11 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
   final String title;
   final String description;
   final String Function(T) name;
+
+  /// Optional per-item tooltip shown on hover over each menu entry. Null (the
+  /// default) leaves the entries untooltipped.
+  final String Function(T)? tooltip;
+
   final ExclusiveItemsNotifierProvider<T> provider;
 
   const DropdownButtonWidget({
@@ -72,6 +77,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
     required this.title,
     required this.description,
     required this.name,
+    this.tooltip,
     required this.provider,
   });
 
@@ -88,7 +94,16 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
         tooltip: '',
         initialValue: current,
         itemBuilder: (BuildContext context) => <PopupMenuEntry<T>>[
-          for (final item in values) PopupMenuItem<T>(value: item, child: Text(name(item))),
+          for (final item in values)
+            PopupMenuItem<T>(
+              value: item,
+              child: tooltip == null
+                  ? Text(name(item))
+                  : Tooltip(
+                      message: tooltip!(item),
+                      child: SizedBox(width: double.infinity, child: Text(name(item))),
+                    ),
+            ),
         ],
         onSelected: (T item) => ref.read(provider.notifier).setValue(item),
         child: Container(

@@ -81,6 +81,7 @@ class _DisplaySettingsGroup extends ConsumerWidget {
           title: "$tr_table_settings.display.row_height_mode.title".tr(),
           description: "$tr_table_settings.display.row_height_mode.description".tr(),
           name: (e) => "$tr_table_settings.display.row_height_mode.choice.${e.name.snakeCase}".tr(),
+          tooltip: (e) => "$tr_table_settings.display.row_height_mode.tooltip.${e.name.snakeCase}".tr(),
           provider: charaDetailRowHeightModeProvider,
         ),
         StepperWidget(
