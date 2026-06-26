@@ -93,6 +93,12 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: IsInRangeIntegerPredicate());
+
   RangedIntegerColumnSpec copyWith({
     String? id,
     String? title,

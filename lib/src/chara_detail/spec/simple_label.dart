@@ -71,6 +71,9 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   @override
   final double? width;
 
+  @override
+  final String? builderId;
+
   SimpleLabelColumnSpec({
     required this.id,
     required this.title,
@@ -81,6 +84,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
     this.hidden = false,
     this.description,
     this.width,
+    this.builderId,
   }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
 
   @override
@@ -92,6 +96,13 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
 
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
+      copyWith(predicate: defaultSpec is SimpleLabelColumnSpec ? defaultSpec.predicate : SimpleLabelPredicate.any());
+
   SimpleLabelColumnSpec copyWith({
     String? id,
     String? title,
@@ -101,6 +112,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
+    String? builderId,
   }) {
     return SimpleLabelColumnSpec(
       id: id ?? this.id,
@@ -111,6 +123,7 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
+      builderId: builderId ?? this.builderId,
     );
   }
 
@@ -314,6 +327,9 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
   @override
   final ColumnBuilderType type;
 
+  @override
+  final String? builderId;
+
   SimpleLabelColumnBuilder({
     required this.title,
     required this.category,
@@ -321,6 +337,7 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
     required this.parser,
     this.rejects,
     this.cellAction,
+    this.builderId,
   }) : type = rejects != null ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
@@ -332,6 +349,7 @@ class SimpleLabelColumnBuilder extends ColumnBuilder {
       labelKey: labelKey,
       predicate: rejects == null ? SimpleLabelPredicate.any() : SimpleLabelPredicate(rejects: rejects!),
       cellAction: cellAction,
+      builderId: builderId,
     );
   }
 }

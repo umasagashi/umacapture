@@ -4,6 +4,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/builder.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/core/callback.dart';
 import '/src/core/utils.dart';
@@ -204,6 +205,13 @@ class _ColumnSpecDialogState extends ConsumerState<ColumnSpecDialog> {
   // disposed when the dialog closes, instead of leaking a fresh one per build.
   final PlainChangeNotifier _onDecided = PlainChangeNotifier();
 
+  // Bumped by the reset button to force the selector subtree to rebuild from the
+  // (just-reset) clone. Selector fields keep local widget state — a slider's
+  // position, a text field's controller — that does not resync when the clone's
+  // predicate is replaced externally, so resetting the clone alone leaves the UI
+  // stale. Re-keying the subtree re-seeds every field from the clone.
+  int _resetEpoch = 0;
+
   @override
   void dispose() {
     _onDecided.dispose();
@@ -214,26 +222,60 @@ class _ColumnSpecDialogState extends ConsumerState<ColumnSpecDialog> {
   Widget build(BuildContext context) {
     final specId = widget.spec.id;
     // Ensure that the cloned spec will not be disposed while the dialog is still open.
-    ref.watch(specCloneProvider(specId));
+    // Watching it also re-renders the bottom bar when the filter is reset, so the
+    // reset button can hide once there is nothing left to clear.
+    final clone = ref.watch(specCloneProvider(specId));
     final saveEnabled = ref.watch(columnSpecSaveEnabledProvider(specId));
 
     return CardDialog(
       dialogTitle: "$tr_chara_detail.column_predicate.dialog.title".tr(),
       closeButtonTooltip: "$tr_chara_detail.column_predicate.dialog.close_button.tooltip".tr(),
-      content: widget.spec.selector(_onDecided),
+      content: KeyedSubtree(key: ValueKey(_resetEpoch), child: widget.spec.selector(_onDecided)),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Tooltip(
-            message: "$tr_chara_detail.column_predicate.dialog.delete_button.tooltip".tr(),
-            child: OutlinedButton.icon(
-              icon: const Icon(Symbols.delete_forever_rounded),
-              label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
-              onPressed: () {
-                ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
-                CardDialog.dismiss(ref.base);
-              },
-            ),
+          // Left group: destructive delete, then the filter reset right beside it.
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Tooltip(
+                message: "$tr_chara_detail.column_predicate.dialog.delete_button.tooltip".tr(),
+                child: OutlinedButton.icon(
+                  icon: const Icon(Symbols.delete_forever_rounded),
+                  label: Text("$tr_chara_detail.column_predicate.dialog.delete_button.label".tr()),
+                  onPressed: () {
+                    ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);
+                    CardDialog.dismiss(ref.base);
+                  },
+                ),
+              ),
+              // Reset the column's filter (predicate) to its default, keeping the other
+              // settings. For a preset column the default is the preset (rebuilt via
+              // builderSpecOf); otherwise it is "accept every row". Edits the clone only,
+              // so it is committed by OK and discarded by Cancel like every other field.
+              // Hidden for columns that carry no resettable filter (containers, script).
+              if (clone.hasFilter) ...[
+                const SizedBox(width: 8),
+                Tooltip(
+                  message: "$tr_chara_detail.column_predicate.dialog.reset_button.tooltip".tr(),
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Symbols.filter_alt_off_rounded),
+                    label: Text("$tr_chara_detail.column_predicate.dialog.reset_button.label".tr()),
+                    onPressed: () {
+                      // Flush the deferred fields (title/visibility/description) into the
+                      // clone first so the upcoming rebuild re-seeds them from their
+                      // current UI values, not the stale originals.
+                      _onDecided.notifyListeners();
+                      final defaultSpec = builderSpecOf(ref.base, ref.read(specCloneProvider(specId)));
+                      ref.read(specCloneProvider(specId).notifier).update((spec) => spec.withFilterReset(defaultSpec));
+                      // Re-key the selector subtree so its fields re-seed from the reset
+                      // clone; the user can then tweak the reset value and OK commits it.
+                      setState(() => _resetEpoch++);
+                    },
+                  ),
+                ),
+              ],
+            ],
           ),
           Tooltip(
             message: saveEnabled

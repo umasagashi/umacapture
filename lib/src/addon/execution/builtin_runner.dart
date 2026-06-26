@@ -37,7 +37,9 @@ class BuiltinRunner implements ActionRunner {
         return;
       }
       try {
-        await descriptor.run(ref, payload, action.argument).timeout(ref.read(builtinTimeoutProvider));
+        await descriptor
+            .run(ref, payload, action.argument, action.secondaryArgument)
+            .timeout(ref.read(builtinTimeoutProvider));
         exec.finish((elapsed) => ExecutionResult(status: ExecutionStatus.success, duration: elapsed));
       } on TimeoutException {
         logger.w("Builtin action '${action.actionKey}' timed out.");

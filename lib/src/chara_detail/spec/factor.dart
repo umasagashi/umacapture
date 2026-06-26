@@ -266,6 +266,9 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   final double? width;
 
   @override
+  final String? builderId;
+
+  @override
   ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openFactorPreview;
 
   FactorColumnSpec({
@@ -279,6 +282,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.hidden = false,
     this.description,
     this.width,
+    this.builderId,
   });
 
   @override
@@ -289,6 +293,13 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
 
   @override
   ColumnSpec withWidth(double? width) => copyWith(width: width);
+
+  @override
+  bool get hasFilter => true;
+
+  @override
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
+      copyWith(predicate: defaultSpec is FactorColumnSpec ? defaultSpec.predicate : AggregateFactorSetPredicate.any());
 
   FactorColumnSpec copyWith({
     String? id,
@@ -301,6 +312,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
+    String? builderId,
   }) {
     return FactorColumnSpec(
       id: id ?? this.id,
@@ -313,6 +325,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
+      builderId: builderId ?? this.builderId,
     );
   }
 
@@ -837,6 +850,9 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
   @override
   final ColumnBuilderType type;
 
+  @override
+  final String? builderId;
+
   FilteredFactorColumnBuilder({
     required this.title,
     required this.category,
@@ -846,6 +862,7 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
     this.initialSkillTags = const {},
     required this.initialIds,
     required this.initialStar,
+    this.builderId,
   }) : type = isFilterColumn ? ColumnBuilderType.filter : ColumnBuilderType.normal;
 
   @override
@@ -854,6 +871,7 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
       id: const Uuid().v4(),
       title: title,
       parser: parser,
+      builderId: builderId,
       predicate: AggregateFactorSetPredicate(
         query: initialIds,
         logic: FactorSetLogicMode.mixed,

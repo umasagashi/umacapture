@@ -151,6 +151,13 @@ abstract class ColumnBuilder {
 
   ColumnBuilderType get type => ColumnBuilderType.normal;
 
+  /// Stable identifier for a builder that produces a non-default filter, stamped
+  /// onto the spec it builds so the column can later regenerate its default filter
+  /// by re-running this builder (see `builderSpecOf`). Null for plain builders
+  /// whose default is "accept every row"; filter-bearing builders override it with
+  /// a stored value.
+  String? get builderId => null;
+
   /// Optional explanatory tooltip shown on the builder chip in the add-column
   /// dialog. Null means no tooltip (the default for data columns).
   String? get tooltip => null;
@@ -359,6 +366,34 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// undecodable placeholder, which is never editable, overrides this to a no-op.
   ColumnSpec withDescription(String? description) =>
       throw UnsupportedError('Concrete specs must override withDescription');
+
+  /// Whether this column carries a resettable row filter (predicate). Filtering
+  /// leaf columns override this to true so the column dialog offers a "reset
+  /// filter" button; containers (logic) and non-filtering columns leave it false
+  /// and the button stays hidden. Pairs with [withFilterReset].
+  bool get hasFilter => false;
+
+  /// Identifier of the column builder (the "add column" template) this column was
+  /// created from, or null when it carries no such origin (a plain column, or one
+  /// added before this field existed). Used by the dialog to regenerate the
+  /// column's default filter on reset (see `builderSpecOf` in builder.dart).
+  /// Builder-default-capable leaf specs override this with a stored field;
+  /// everything else has none.
+  String? get builderId => null;
+
+  /// Returns a copy of this spec with its filter (predicate) reset to its default,
+  /// preserving the display settings (title, width, hidden, description).
+  ///
+  /// [defaultSpec] is the freshly rebuilt spec for this column's [builderId]
+  /// (resolved by the caller via builder.dart's `builderSpecOf`), or null when the
+  /// column has no builder origin — in which case the default is "accept every
+  /// row". Filtering leaf columns override this and adopt `defaultSpec`'s predicate
+  /// when it is the same spec type, else fall back to accept-all. Unlike
+  /// [withHidden] the base default is a no-op (not a throw) so containers, the
+  /// script column, and the undecodable placeholder — none of which expose a
+  /// resettable filter — are safe to call unconditionally. The dialog only surfaces
+  /// the reset action when [hasFilter].
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => this;
 
   /// Child specs nested under this column. Only container columns (logic columns)
   /// have children; leaf columns return an empty list. Used by the tree-aware

@@ -11,9 +11,10 @@ import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
 
 /// A function performing a built-in action. Receives the long-lived dispatcher
-/// [RefBase] (for reaching providers), the event [payload], and the optional
-/// user-configured [argument] (already declared by the descriptor).
-typedef BuiltinFn = Future<void> Function(RefBase ref, PayloadMap payload, String? argument);
+/// [RefBase] (for reaching providers), the event [payload], the optional
+/// user-configured [argument], and the optional [secondaryArgument] (both already
+/// declared by the descriptor; actions that take fewer simply ignore the rest).
+typedef BuiltinFn = Future<void> Function(RefBase ref, PayloadMap payload, String? argument, String? secondaryArgument);
 
 /// A selectable value for a built-in action argument, shown as a dropdown option
 /// in the edit dialog instead of a free-text field.
@@ -66,6 +67,26 @@ class BuiltinActionDescriptor {
   /// Default argument template for a freshly configured action.
   final String defaultArgument;
 
+  /// Whether this action takes a second free-form argument (e.g. a destination
+  /// path), shown as an additional text field below the first. Used by actions
+  /// that need two inputs at once, where the first is an options dropdown.
+  final bool usesSecondArgument;
+
+  /// Translation key for the second argument field's label (only used when
+  /// [usesSecondArgument]).
+  final String? secondaryArgumentLabelKey;
+
+  /// Translation key for the second argument field's helper text. Defaults to the
+  /// shared "placeholders are substituted" hint.
+  final String? secondaryArgumentHelperKey;
+
+  /// Whether the second argument accepts payload `{placeholders}` (and so shows
+  /// the placeholder dropdown beneath its field).
+  final bool secondaryArgumentUsesPlaceholders;
+
+  /// Default template for the second argument of a freshly configured action.
+  final String defaultSecondArgument;
+
   final BuiltinFn run;
 
   const BuiltinActionDescriptor({
@@ -79,6 +100,11 @@ class BuiltinActionDescriptor {
     this.argumentUsesPlaceholders = true,
     this.argumentOptions,
     this.defaultArgument = '',
+    this.usesSecondArgument = false,
+    this.secondaryArgumentLabelKey,
+    this.secondaryArgumentHelperKey,
+    this.secondaryArgumentUsesPlaceholders = true,
+    this.defaultSecondArgument = '',
   });
 }
 
@@ -114,7 +140,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     usesArgument: true,
     argumentLabelKey: "$_trBuiltin.show_toast_argument",
     defaultArgument: "{event}",
-    run: (ref, payload, argument) async {
+    run: (ref, payload, argument, secondaryArgument) async {
       final text = substitutePayload(argument ?? "{event}", payload);
       Toaster.show(ToastData.info(description: text));
     },
@@ -125,7 +151,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     usesArgument: true,
     argumentLabelKey: "$_trBuiltin.copy_payload_argument",
     defaultArgument: "{record_id}",
-    run: (ref, payload, argument) async {
+    run: (ref, payload, argument, secondaryArgument) async {
       final text = substitutePayload(argument ?? "{record_id}", payload);
       await Clipboard.setData(ClipboardData(text: text));
     },
@@ -139,7 +165,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     argumentUsesPlaceholders: false,
     argumentOptions: _imageKindOptions("image"),
     defaultArgument: "trainee",
-    run: (ref, payload, argument) async {
+    run: (ref, payload, argument, secondaryArgument) async {
       final record = _requireRecord(ref, payload);
       // silent: the execution-history entry already reports the outcome, so an
       // automated/chained run shouldn't also pop a clipboard toast.
@@ -163,15 +189,40 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       BuiltinArgumentOption("record_json", "$_trBuiltin.options.file_record"),
     ],
     defaultArgument: "trainee",
-    run: (ref, payload, argument) async {
+    run: (ref, payload, argument, secondaryArgument) async {
       final record = _requireRecord(ref, payload);
-      final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-      final kind = (argument ?? "trainee").trim();
-      final path = kind == "record_json"
-          ? storage.recordPathOf(record).filePath(recordJsonName)
-          : _recordImagePath(ref, record, kind);
+      final path = _recordFilePath(ref, record, (argument ?? "trainee").trim());
       final ok = await ClipboardAlt.pasteFile(ref, path, silent: true);
       if (!ok) throw StateError("Failed to copy file to clipboard.");
+    },
+  ),
+  "copy_file_to_path": BuiltinActionDescriptor(
+    key: "copy_file_to_path",
+    labelKey: "$_trBuiltin.copy_file_to_path",
+    usesArgument: true,
+    requiresRecord: true,
+    argumentLabelKey: "$_trBuiltin.copy_file_argument",
+    argumentUsesPlaceholders: false,
+    argumentOptions: [
+      ..._imageKindOptions("file"),
+      BuiltinArgumentOption("record_json", "$_trBuiltin.options.file_record"),
+    ],
+    defaultArgument: "trainee",
+    usesSecondArgument: true,
+    secondaryArgumentLabelKey: "$_trBuiltin.copy_file_to_path_destination",
+    defaultSecondArgument: "",
+    run: (ref, payload, argument, secondaryArgument) async {
+      final record = _requireRecord(ref, payload);
+      final source = _recordFilePath(ref, record, (argument ?? "trainee").trim());
+      final destination = substitutePayload(secondaryArgument ?? "", payload).trim();
+      if (destination.isEmpty) {
+        throw StateError("No destination path configured for the copy-to-path action.");
+      }
+      final target = FilePath(destination);
+      // Create the destination's parent folders so a template pointing into a new
+      // subfolder works on the first run, then overwrite any existing file.
+      await target.parent.create(recursive: true);
+      await source.toFile().copy(target.path);
     },
   ),
   "play_sound": BuiltinActionDescriptor(
@@ -186,7 +237,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       BuiltinArgumentOption("error", "$_trBuiltin.options.sound_error"),
     ],
     defaultArgument: "attention_normal",
-    run: (ref, payload, argument) async {
+    run: (ref, payload, argument, secondaryArgument) async {
       final type = switch ((argument ?? "attention_normal").trim()) {
         "attention_weak" => SoundType.attentionWeak,
         "error" => SoundType.error,
@@ -221,4 +272,15 @@ FilePath _recordImagePath(RefBase ref, CharaDetailRecord record, String kind) {
   final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
   final resolver = _recordImageKinds[kind] ?? _recordImageKinds["trainee"]!;
   return resolver(storage, record);
+}
+
+/// Resolves the file referenced by a `copy_file_*` action's [kind] keyword:
+/// `record_json` maps to the record's json file, every other keyword to an image
+/// via [_recordImagePath]. Shared by the clipboard and the copy-to-path actions.
+FilePath _recordFilePath(RefBase ref, CharaDetailRecord record, String kind) {
+  if (kind == "record_json") {
+    final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+    return storage.recordPathOf(record).filePath(recordJsonName);
+  }
+  return _recordImagePath(ref, record, kind);
 }
