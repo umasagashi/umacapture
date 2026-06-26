@@ -19,6 +19,7 @@ import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/toast.dart';
+import '/src/preference/storage_box.dart';
 
 part 'storage.mapper.dart';
 
@@ -161,11 +162,15 @@ enum ArchiveImageOption {
   resizedJpeg,
 }
 
-/// Resolves the directory holding [record]'s files for the given [source].
-DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) {
+/// Resolves the directory holding the record with [id]'s files for [source].
+DirectoryPath recordDirOfId(PathInfo pathInfo, RecordSource source, String id) {
   final root = source == RecordSource.active ? pathInfo.charaDetailActiveDir : pathInfo.charaDetailArchiveDir;
-  return root / record.id;
+  return root / id;
 }
+
+/// Resolves the directory holding [record]'s files for the given [source].
+DirectoryPath recordDirOf(PathInfo pathInfo, RecordSource source, CharaDetailRecord record) =>
+    recordDirOfId(pathInfo, source, record.id);
 
 /// Path to the (always-retained) trainee icon inside [recordDir].
 FilePath traineeIconPathIn(DirectoryPath recordDir) => recordDir.filePath(traineeIconFileName);
@@ -772,9 +777,9 @@ List<bool> archiveRecordsInIsolate(ArchiveBatchArgs args) {
 ///
 /// Runs inside a `compute` isolate (image decoding/encoding and a directory
 /// rename are all off the UI thread), but is also a plain top-level function so
-/// it can be unit-tested directly. The record's `record.json`, `trainee.jpg`,
-/// and image geometry `*.json` are left untouched; only the recognition PNGs are
-/// dropped or replaced.
+/// it can be unit-tested directly. The record's `record.json` and `trainee.jpg`
+/// are left untouched; the recognition images, their geometry `*.json`, and the
+/// large `prediction.json` are dropped or rewritten by [_disposeArchivedImages].
 ///
 /// The move happens first, before any file is touched: if the rename fails (a
 /// Windows file lock, a stale destination, …) the source is left completely
@@ -809,10 +814,14 @@ bool archiveRecordInIsolate(ArchiveRecordArgs args) {
   }
 }
 
-/// Drops or downscales the recognition PNGs of an already-archived record in
-/// [recordDir]. Best-effort: any failure is logged and swallowed, because the
-/// record has already been moved into the archive and must not be reported as a
-/// failed archive over a mere image-cleanup hiccup.
+/// Disposes of an already-archived record's recognition data in [recordDir]:
+/// always drops the large `prediction.json`; for [ArchiveImageOption.resizedJpeg]
+/// downscales the PNGs to JPEGs and rescales their geometry json to match; for
+/// [ArchiveImageOption.none] drops the images and their geometry json.
+///
+/// Best-effort: any failure is logged and swallowed, because the record has
+/// already been moved into the archive and must not be reported as a failed
+/// archive over a mere image-cleanup hiccup.
 void _disposeArchivedImages(DirectoryPath recordDir, ArchiveImageOption option) {
   const imageModes = [
     CharaDetailRecordImageMode.skillPlain,
@@ -820,34 +829,131 @@ void _disposeArchivedImages(DirectoryPath recordDir, ArchiveImageOption option) 
     CharaDetailRecordImageMode.campaignPlain,
   ];
   try {
+    // The recognition overlay data (prediction.json) is large and the overlay is
+    // not offered for archived records, so drop it regardless of the image option.
+    recordDir.filePath("prediction.json").deleteSync(emptyOk: true);
     if (option == ArchiveImageOption.resizedJpeg) {
+      // Convert each present PNG to a JPEG, keeping the mode alongside each pair so
+      // the conversion result (the JPEG's pixel size) can be matched back to the
+      // right geometry json afterwards.
+      final modes = <CharaDetailRecordImageMode>[];
       final srcs = <String>[];
       final dsts = <String>[];
       for (final mode in imageModes) {
         final png = recordDir.filePath(mode.fileName);
         if (png.existsSync()) {
+          modes.add(mode);
           srcs.add(png.path);
           dsts.add(recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).path);
         }
       }
-      if (srcs.isNotEmpty) {
-        convertPngBatch(ImageConvertArgs(srcs, dsts));
-      }
-      // Only drop a PNG once its JPEG exists, so a failed conversion keeps the
-      // original rather than losing the image entirely.
-      for (final mode in imageModes) {
+      final results = srcs.isEmpty ? const <ImageConvertResult?>[] : convertPngBatch(ImageConvertArgs(srcs, dsts));
+      for (var i = 0; i < modes.length; i++) {
+        final mode = modes[i];
+        // Only drop a PNG once its JPEG exists, so a failed conversion keeps the
+        // original rather than losing the image entirely.
         if (recordDir.filePath(mode.fileName.replaceAll(".png", ".jpg")).existsSync()) {
           recordDir.filePath(mode.fileName).deleteSync(emptyOk: true);
         }
+        // Rescale the geometry json to the (possibly downscaled) JPEG so the
+        // preview's layout box matches the image to the pixel instead of leaving
+        // the original capture size that produces gaps.
+        final result = i < results.length ? results[i] : null;
+        if (result != null) {
+          scaleIntersectionJson(
+            recordDir.filePath(mode.fileName.replaceAll(".png", ".json")),
+            newWidth: result.dstWidth,
+            newHeight: result.dstHeight,
+          );
+        }
       }
     } else {
+      // Drop the images and their geometry json together: an image-less archive
+      // has no use for the layout metadata, and the preview treats a missing image
+      // as the neutral "no image" case rather than a load error.
       for (final mode in imageModes) {
         recordDir.filePath(mode.fileName).deleteSync(emptyOk: true);
+        recordDir.filePath(mode.fileName.replaceAll(".png", ".json")).deleteSync(emptyOk: true);
       }
     }
   } catch (error, stackTrace) {
     logger.e("Failed to dispose archived images in ${recordDir.path}.", error, stackTrace);
   }
+}
+
+/// One-time repair of records archived before geometry json was kept in sync with
+/// the downscaled image.
+///
+/// Older archives carry a `prediction.json` and a geometry `*.json` written at the
+/// original capture resolution, while the archived `*.jpg` was downscaled to
+/// <=720px. The preview then sizes its layout box from the stale json and draws
+/// the smaller image with gaps. This brings each archived record in line with the
+/// current [_disposeArchivedImages] behaviour:
+///
+/// - drop `prediction.json` (large, unused for archived records);
+/// - for each tab, if an image exists, rescale its geometry json to the image's
+///   actual pixel size; if no image exists, drop the now-useless geometry json.
+///
+/// Best-effort and idempotent: a record already in the target state is left
+/// effectively unchanged, so a re-run (or a partially-completed prior run) is safe.
+void _migrateArchivedRecord(DirectoryPath recordDir) {
+  const imageModes = [
+    CharaDetailRecordImageMode.skillPlain,
+    CharaDetailRecordImageMode.factorPlain,
+    CharaDetailRecordImageMode.campaignPlain,
+  ];
+  try {
+    recordDir.filePath("prediction.json").deleteSync(emptyOk: true);
+    for (final mode in imageModes) {
+      final jsonFile = recordDir.filePath(mode.fileName.replaceAll(".png", ".json"));
+      final image = resolveImagePath(recordDir, mode);
+      if (image == null) {
+        jsonFile.deleteSync(emptyOk: true);
+        continue;
+      }
+      final size = readImageSize(image);
+      if (size != null) {
+        scaleIntersectionJson(jsonFile, newWidth: size.width, newHeight: size.height);
+      }
+    }
+  } catch (error, stackTrace) {
+    logger.e("Failed to migrate archived record ${recordDir.path}.", error, stackTrace);
+  }
+}
+
+/// Runs [_migrateArchivedRecord] over every record directory under the archive
+/// root at [archiveDirPath], returning the number of records visited.
+///
+/// A plain top-level function so it can run inside a `compute` isolate (file I/O
+/// and image-header reads off the UI thread) and be unit-tested directly.
+int migrateArchivedRecordsInIsolate(String archiveDirPath) {
+  final archiveDir = DirectoryPath(archiveDirPath);
+  if (!archiveDir.existsSync()) {
+    return 0;
+  }
+  final dirs = archiveDir.listSync(recursive: false, followLinks: false);
+  for (final entry in dirs) {
+    _migrateArchivedRecord(entry.asDirectoryPath);
+  }
+  return dirs.length;
+}
+
+/// Hive key marking the one-time archive geometry/prediction cleanup as done.
+const _archiveGeometryMigrationKey = "chara_detail_archive_geometry_v1";
+
+/// Runs the one-time [migrateArchivedRecordsInIsolate] cleanup the first time
+/// only, recording completion so later launches skip the archive scan.
+///
+/// The migration itself is idempotent, so the flag is purely an optimization: a
+/// missing flag (or a crash before it is set) just re-runs a harmless pass.
+Future<void> runArchiveGeometryMigrationIfNeeded(PathInfo pathInfo) async {
+  final entry = StorageBox(StorageBoxKey.dataMigration).entry<bool>(_archiveGeometryMigrationKey);
+  if (entry.pull() == true) {
+    return;
+  }
+  final count = await compute(migrateArchivedRecordsInIsolate, pathInfo.charaDetailArchiveDir.path);
+  logger.i("Archive geometry migration visited $count archived record(s).");
+  entry.push(true);
 }
 
 /// Number of records currently sitting in the quarantine folder.

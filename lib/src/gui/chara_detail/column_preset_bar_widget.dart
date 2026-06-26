@@ -8,6 +8,7 @@ import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/export_button.dart';
+import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
 
 // ignore: constant_identifier_names
@@ -52,97 +53,113 @@ class ColumnPresetBarWidget extends ConsumerWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           child: Row(
             children: [
-              _GroupLabel("$tr_toolbar.preset_group".tr()),
-              Tooltip(
-                message: "$tr_preset.selector_tooltip".tr(),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    // Guard like the sibling action buttons (which use `selected`):
-                    // if selectedKey ever fails to resolve to a present preset,
-                    // render unselected instead of asserting "exactly one item".
-                    value: selected?.key,
-                    isDense: true,
-                    borderRadius: BorderRadius.circular(8),
-                    style: theme.textTheme.labelLarge,
-                    onChanged: (key) {
-                      if (key != null) {
-                        ref.read(columnPresetIndexProvider.notifier).select(key);
-                      }
-                    },
-                    items: [
-                      for (final preset in index.presets)
-                        DropdownMenuItem<String>(value: preset.key, child: Text(preset.title)),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 4),
-              _PresetActionButton(
-                icon: Symbols.add_rounded,
-                tooltip: "$tr_preset.create.tooltip".tr(),
-                onPressed: () => _PresetNameDialog.show(
-                  ref.base,
-                  dialogTitle: "$tr_preset.create.dialog_title".tr(),
-                  initialName: "$tr_preset.create.default_name".tr(),
-                  onSubmit: (ref, name) => ref.read(columnPresetIndexProvider.notifier).create(name),
-                ),
-              ),
-              _PresetActionButton(
-                icon: Symbols.content_copy_rounded,
-                tooltip: "$tr_preset.duplicate.tooltip".tr(),
-                onPressed: selected == null
-                    ? null
-                    : () => _PresetNameDialog.show(
-                        ref.base,
-                        dialogTitle: "$tr_preset.duplicate.dialog_title".tr(),
-                        initialName: "${selected.title}${"$tr_preset.duplicate.copy_suffix".tr()}",
-                        onSubmit: (ref, name) =>
-                            ref.read(columnPresetIndexProvider.notifier).duplicate(selected.key, name),
+              // The preset/record controls wrap onto a second line when the window
+              // is too narrow for them (so every button stays visible and tappable
+              // instead of overflowing or scrolling off); the side-preview toggle
+              // stays pinned to the right edge.
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  runSpacing: 4,
+                  children: [
+                    _GroupLabel("$tr_toolbar.preset_group".tr()),
+                    Tooltip(
+                      message: "$tr_preset.selector_tooltip".tr(),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          // Guard like the sibling action buttons (which use `selected`):
+                          // if selectedKey ever fails to resolve to a present preset,
+                          // render unselected instead of asserting "exactly one item".
+                          value: selected?.key,
+                          isDense: true,
+                          borderRadius: BorderRadius.circular(8),
+                          style: theme.textTheme.labelLarge,
+                          onChanged: (key) {
+                            if (key != null) {
+                              ref.read(columnPresetIndexProvider.notifier).select(key);
+                            }
+                          },
+                          items: [
+                            for (final preset in index.presets)
+                              DropdownMenuItem<String>(value: preset.key, child: Text(preset.title)),
+                          ],
+                        ),
                       ),
-              ),
-              _PresetActionButton(
-                icon: Symbols.edit_rounded,
-                tooltip: "$tr_preset.rename.tooltip".tr(),
-                onPressed: selected == null
-                    ? null
-                    : () => _PresetNameDialog.show(
+                    ),
+                    const SizedBox(width: 4),
+                    _PresetActionButton(
+                      icon: Symbols.add_rounded,
+                      tooltip: "$tr_preset.create.tooltip".tr(),
+                      onPressed: () => _PresetNameDialog.show(
                         ref.base,
-                        dialogTitle: "$tr_preset.rename.dialog_title".tr(),
-                        initialName: selected.title,
-                        onSubmit: (ref, name) =>
-                            ref.read(columnPresetIndexProvider.notifier).rename(selected.key, name),
+                        dialogTitle: "$tr_preset.create.dialog_title".tr(),
+                        initialName: "$tr_preset.create.default_name".tr(),
+                        onSubmit: (ref, name) => ref.read(columnPresetIndexProvider.notifier).create(name),
                       ),
-              ),
-              _PresetActionButton(
-                icon: Symbols.delete_rounded,
-                tooltip: canDelete ? "$tr_preset.delete.tooltip".tr() : "$tr_preset.delete.disabled_tooltip".tr(),
-                onPressed: (!canDelete || selected == null) ? null : () => _PresetDeleteDialog.show(ref.base, selected),
-              ),
-              // A single divider splits the bar into two labeled groups: preset
-              // controls (left) and record management (source switch, archive,
-              // export).
-              const _ToolbarDivider(),
-              _GroupLabel("$tr_toolbar.record_group".tr()),
-              _RecordSourceDropdown(source: source),
-              // Enter bulk-archive selection. While selecting, this whole bar is
-              // covered by a scrim overlay (see _TopControlsLayer), so the archive
-              // and cancel actions live there instead of here.
-              if (source == RecordSource.active)
-                _PresetActionButton(
-                  icon: Symbols.archive_rounded,
-                  tooltip: "$tr_archive_bar.selection_mode.enable_tooltip".tr(),
-                  onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.archive),
+                    ),
+                    _PresetActionButton(
+                      icon: Symbols.content_copy_rounded,
+                      tooltip: "$tr_preset.duplicate.tooltip".tr(),
+                      onPressed: selected == null
+                          ? null
+                          : () => _PresetNameDialog.show(
+                              ref.base,
+                              dialogTitle: "$tr_preset.duplicate.dialog_title".tr(),
+                              initialName: "${selected.title}${"$tr_preset.duplicate.copy_suffix".tr()}",
+                              onSubmit: (ref, name) =>
+                                  ref.read(columnPresetIndexProvider.notifier).duplicate(selected.key, name),
+                            ),
+                    ),
+                    _PresetActionButton(
+                      icon: Symbols.edit_rounded,
+                      tooltip: "$tr_preset.rename.tooltip".tr(),
+                      onPressed: selected == null
+                          ? null
+                          : () => _PresetNameDialog.show(
+                              ref.base,
+                              dialogTitle: "$tr_preset.rename.dialog_title".tr(),
+                              initialName: selected.title,
+                              onSubmit: (ref, name) =>
+                                  ref.read(columnPresetIndexProvider.notifier).rename(selected.key, name),
+                            ),
+                    ),
+                    _PresetActionButton(
+                      icon: Symbols.delete_rounded,
+                      tooltip: canDelete ? "$tr_preset.delete.tooltip".tr() : "$tr_preset.delete.disabled_tooltip".tr(),
+                      onPressed: (!canDelete || selected == null)
+                          ? null
+                          : () => _PresetDeleteDialog.show(ref.base, selected),
+                    ),
+                    // A single divider splits the bar into two labeled groups: preset
+                    // controls (left) and record management (source switch, archive,
+                    // export).
+                    const _ToolbarDivider(),
+                    _GroupLabel("$tr_toolbar.record_group".tr()),
+                    _RecordSourceDropdown(source: source),
+                    // Enter bulk-archive selection. While selecting, this whole bar is
+                    // covered by a scrim overlay (see _TopControlsLayer), so the archive
+                    // and cancel actions live there instead of here.
+                    if (source == RecordSource.active)
+                      _PresetActionButton(
+                        icon: Symbols.archive_rounded,
+                        tooltip: "$tr_archive_bar.selection_mode.enable_tooltip".tr(),
+                        onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.archive),
+                      ),
+                    // Delete works on either source, so it sits outside the active-only
+                    // archive guard.
+                    _PresetActionButton(
+                      icon: Symbols.delete_rounded,
+                      tooltip: "$tr_delete_bar.selection_mode.enable_tooltip".tr(),
+                      onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.delete),
+                    ),
+                    // CharaDetailExportButton carries the same horizontal:3
+                    // margin as _PresetActionButton, so no extra spacer is needed.
+                    const CharaDetailExportButton(),
+                  ],
                 ),
-              // Delete works on either source, so it sits outside the active-only
-              // archive guard.
-              _PresetActionButton(
-                icon: Symbols.delete_rounded,
-                tooltip: "$tr_delete_bar.selection_mode.enable_tooltip".tr(),
-                onPressed: () => ref.read(selectionModeProvider.notifier).set(SelectionPurpose.delete),
               ),
-              // CharaDetailExportButton carries the same horizontal:3 margin as
-              // _PresetActionButton, so no extra spacer is needed here.
-              const CharaDetailExportButton(),
+              // View toggle for the side preview panel, pinned to the right edge.
+              const SidePreviewToggleButton(),
             ],
           ),
         ),

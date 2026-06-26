@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback_sentry/feedback_sentry.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -313,6 +314,204 @@ class Disabled extends StatelessWidget {
     } else {
       return wrappedChild();
     }
+  }
+}
+
+/// Applies one mouse-wheel notch of zoom to [controller], centered on
+/// [localPosition] (in viewport coordinates).
+///
+/// The step is a fixed multiplicative [stepFactor] per event, deliberately
+/// independent of the scroll delta's magnitude: input devices (precision
+/// touchpads, smooth-scroll mice) emit wildly varying `scrollDelta` per notch —
+/// often a large first delta then small ones — and [InteractiveViewer]'s built-in
+/// `exp(-delta / scaleFactor)` mapping turns a large delta into a sudden multi-x
+/// jump. Using only the sign of [scrollDeltaY] (up/away zooms in) gives a uniform,
+/// predictable step. Pair this with `InteractiveViewer(scaleEnabled: false)` so the
+/// widget's own wheel handling doesn't also fire.
+///
+/// The scale is clamped to `[minScale, maxScale]` and the resulting translation is
+/// clamped so [contentSize] (the child's unscaled size) keeps covering
+/// [viewportSize] on any axis where the scaled content is at least as large — no
+/// empty margin is ever shown along such an axis. Callers that must never show a
+/// horizontal margin should set `minScale` to the fit-to-width scale so the scaled
+/// width can never drop below the viewport width.
+void applyWheelZoom(
+  TransformationController controller,
+  Offset localPosition,
+  double scrollDeltaY, {
+  required double minScale,
+  required double maxScale,
+  required Size viewportSize,
+  required Size contentSize,
+  double stepFactor = 1.2,
+}) {
+  if (scrollDeltaY == 0) {
+    return;
+  }
+  final double current = controller.value.getMaxScaleOnAxis();
+  final double target = (current * (scrollDeltaY < 0 ? stepFactor : 1 / stepFactor)).clamp(minScale, maxScale);
+  if (target == current) {
+    return;
+  }
+  final double applied = target / current;
+  // Scale about the cursor's scene point so it stays under the pointer.
+  final Offset scene = controller.toScene(localPosition);
+  final matrix = controller.value.clone()
+    ..translateByDouble(scene.dx, scene.dy, 0, 1)
+    ..scaleByDouble(applied, applied, applied, 1)
+    ..translateByDouble(-scene.dx, -scene.dy, 0, 1);
+  // Clamp the pan on the in-memory matrix and assign once, so a single wheel
+  // notch produces exactly one notification (not one for the zoom and another
+  // for the cover-clamp).
+  controller.value = _coverViewportClamped(matrix, viewportSize: viewportSize, contentSize: contentSize);
+}
+
+/// Clamps [controller]'s pan so [contentSize] (the child's unscaled size) keeps
+/// covering [viewportSize] on any axis where the scaled content spans it — no
+/// empty margin is shown along such an axis.
+///
+/// The scale is left untouched; an axis where the scaled content is smaller than
+/// the viewport (e.g. a short image's height) is left as-is.
+void clampPanToCoverViewport(
+  TransformationController controller, {
+  required Size viewportSize,
+  required Size contentSize,
+}) {
+  controller.value = _coverViewportClamped(
+    controller.value.clone(),
+    viewportSize: viewportSize,
+    contentSize: contentSize,
+  );
+}
+
+/// Returns [matrix] with its translation clamped so [contentSize] keeps covering
+/// [viewportSize] on every axis where the scaled content spans it.
+///
+/// Pure: the scale is left untouched and the input matrix is mutated in place and
+/// returned, so callers can assign `controller.value` exactly once.
+Matrix4 _coverViewportClamped(Matrix4 matrix, {required Size viewportSize, required Size contentSize}) {
+  final double scale = matrix.getMaxScaleOnAxis();
+  final translation = matrix.getTranslation();
+  double clampAxis(double offset, double scaledLength, double viewportLength) {
+    if (scaledLength >= viewportLength) {
+      return offset.clamp(viewportLength - scaledLength, 0.0);
+    }
+    return offset;
+  }
+
+  matrix.setTranslationRaw(
+    clampAxis(translation.x, contentSize.width * scale, viewportSize.width),
+    clampAxis(translation.y, contentSize.height * scale, viewportSize.height),
+    translation.z,
+  );
+  return matrix;
+}
+
+/// A zoom/pan viewer that renders [child] (its natural, unscaled size given by
+/// [contentSize]) inside a fit-to-[viewportSize] [InteractiveViewer] with custom
+/// mouse-wheel zoom.
+///
+/// Wheel zoom uses [applyWheelZoom] (fixed step per notch, cursor-anchored,
+/// cover-clamped); [InteractiveViewer]'s own scaling is disabled so it never
+/// double-zooms. Panning is enabled and clamped to keep [child] covering the
+/// viewport on any axis where the scaled content spans it.
+///
+/// Shared by the preview dialog and the side preview panel so their zoom/pan
+/// behavior cannot drift apart.
+class WheelZoomViewer extends StatefulWidget {
+  final Widget child;
+  final Size contentSize;
+  final Size viewportSize;
+  final double initialScale;
+  final double maxScale;
+
+  const WheelZoomViewer({
+    super.key,
+    required this.child,
+    required this.contentSize,
+    required this.viewportSize,
+    required this.initialScale,
+    required this.maxScale,
+  });
+
+  @override
+  State<WheelZoomViewer> createState() => _WheelZoomViewerState();
+}
+
+class _WheelZoomViewerState extends State<WheelZoomViewer> {
+  late TransformationController _transformationController = _buildController();
+
+  TransformationController _buildController() {
+    final scale = widget.initialScale;
+    return TransformationController(Matrix4.identity()..scaleByDouble(scale, scale, scale, 1.0));
+  }
+
+  @override
+  void didUpdateWidget(WheelZoomViewer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // The fit-to-viewport transform is derived from initialScale (viewport width /
+    // content width). Re-fit with a fresh controller only when that changes (a
+    // viewport-width resize or a differently-sized content).
+    if (widget.initialScale != oldWidget.initialScale) {
+      _transformationController.dispose();
+      _transformationController = _buildController();
+    } else if (widget.viewportSize != oldWidget.viewportSize) {
+      // initialScale depends only on the width, so a height-only resize keeps the
+      // controller as-is and would leave a stale bottom margin once the viewport
+      // grows taller than where the user had panned. Re-clamp the existing pan.
+      clampPanToCoverViewport(
+        _transformationController,
+        viewportSize: widget.viewportSize,
+        contentSize: widget.contentSize,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      // Custom, delta-magnitude-independent wheel zoom (see [applyWheelZoom]);
+      // InteractiveViewer's own scaling is disabled so it doesn't double-zoom.
+      onPointerSignal: (event) {
+        if (event is PointerScrollEvent) {
+          applyWheelZoom(
+            _transformationController,
+            event.localPosition,
+            event.scrollDelta.dy,
+            // fit-to-width is the lower bound: zooming out further would shrink the
+            // content below the viewport width and reveal left/right margins.
+            minScale: widget.initialScale,
+            maxScale: widget.maxScale,
+            viewportSize: widget.viewportSize,
+            contentSize: widget.contentSize,
+          );
+        }
+      },
+      child: InteractiveViewer(
+        minScale: widget.initialScale,
+        maxScale: widget.maxScale,
+        panEnabled: true,
+        scaleEnabled: false,
+        constrained: false,
+        transformationController: _transformationController,
+        child: Container(
+          decoration: const BoxDecoration(
+            image: DecorationImage(
+              image: AssetImage("assets/image/tile_background.png"),
+              repeat: ImageRepeat.repeat,
+              opacity: 0.1,
+            ),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
   }
 }
 
