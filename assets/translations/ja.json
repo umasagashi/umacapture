@@ -111,10 +111,20 @@
             "regenerating_message": "認識結果を更新しています",
             "toolbar": {
                 "preset_group": "プリセット",
-                "record_group": "レコード",
-                "row_height": {
-                    "expand_tooltip": "行の高さを内容に合わせて広げる",
-                    "collapse_tooltip": "行の高さを固定し2行で省略する"
+                "record_group": "レコード"
+            },
+            "settings": {
+                "button_tooltip": "テーブルの表示設定",
+                "dialog": {
+                    "title": "テーブル設定",
+                    "close_button": "閉じる"
+                },
+                "display": {
+                    "title": "表示",
+                    "auto_row_height": {
+                        "title": "行の高さを内容に合わせる",
+                        "description": "オンにすると長いテキストを折り返して行を高くします。オフにすると行の高さを固定し、2行を超えるテキストは省略します。"
+                    }
                 }
             },
             "archive_records": {

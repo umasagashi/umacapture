@@ -7,6 +7,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/preset.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/chara_detail_settings_dialog.dart';
 import '/src/gui/chara_detail/export_button.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
@@ -27,30 +28,6 @@ const tr_toolbar = "pages.chara_detail.toolbar";
 /// [WidgetRef] so the mutation runs against a live ref regardless of the bar
 /// widget's lifecycle.
 typedef _PresetNameSubmit = void Function(WidgetRef ref, String name);
-
-/// Toolbar button toggling whether table cells grow their row to fit wrapped
-/// text or stay fixed-height with a two-line ellipsis. Mirrors
-/// [SidePreviewToggleButton]'s styling; the on state is shown by the icon fill.
-class RowHeightToggleButton extends ConsumerWidget {
-  const RowHeightToggleButton({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final expand = ref.watch(charaDetailAutoRowHeightProvider);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
-      child: IconButton(
-        icon: Icon(Symbols.wrap_text_rounded, size: 22, fill: expand ? 1 : 0),
-        tooltip: "$tr_toolbar.row_height.${expand ? "collapse" : "expand"}_tooltip".tr(),
-        onPressed: () => ref.read(charaDetailAutoRowHeightProvider.notifier).toggle(),
-        visualDensity: VisualDensity.compact,
-        splashRadius: 20,
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-        padding: EdgeInsets.zero,
-      ),
-    );
-  }
-}
 
 /// Toolbar-style control row letting the user pick which column preset is
 /// applied and manage the preset list (create, duplicate, rename, delete). Sits
@@ -182,9 +159,9 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                   ],
                 ),
               ),
-              // Row-height (wrap vs. ellipsis) toggle, then the side preview
-              // toggle, pinned to the right edge.
-              const RowHeightToggleButton(),
+              // Table settings dialog, then the side preview toggle, pinned to
+              // the right edge.
+              const CharaDetailSettingsButton(),
               const SidePreviewToggleButton(),
             ],
           ),
