@@ -156,12 +156,16 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                     // CharaDetailExportButton carries the same horizontal:3
                     // margin as _PresetActionButton, so no extra spacer is needed.
                     const CharaDetailExportButton(),
+                    // Caps the record group right after export, setting it off
+                    // from the right-pinned controls.
+                    const _ToolbarDivider(),
                   ],
                 ),
               ),
               // Table settings dialog, then the side preview toggle, pinned to
-              // the right edge.
+              // the right edge, with a divider between the two.
               const CharaDetailSettingsButton(),
+              const _ToolbarDivider(),
               const SidePreviewToggleButton(),
             ],
           ),
