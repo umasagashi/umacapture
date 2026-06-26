@@ -75,7 +75,7 @@ class _RowHeightModeNotifier extends ExclusiveItemsNotifier<RowHeightMode> {
 /// The minimum row height in text lines (default two). Acts as the fixed height
 /// in [RowHeightMode.wrap] and as the floor in the auto modes.
 final charaDetailMinRowLinesProvider = IntNotifierProvider(() {
-  return IntNotifier(entryKey: SettingsEntryKey.minRowLines.name, defaultValue: 2, min: 1, max: 6);
+  return IntNotifier(entryKey: SettingsEntryKey.minRowLines.name, defaultValue: 2, min: 1, max: 20);
 });
 
 /// Renders a text-based cell, capping the line count only in

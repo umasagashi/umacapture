@@ -6,6 +6,7 @@ import 'package:recase/recase.dart';
 
 import '/src/chara_detail/spec/base.dart';
 import '/src/core/utils.dart';
+import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
 
@@ -35,9 +36,9 @@ class CharaDetailSettingsButton extends ConsumerWidget {
   }
 }
 
-/// Settings dialog for the chara-detail table. Hosts one [ListCard] group per
-/// settings category; add a row to a group (or a new group widget to [content])
-/// as preferences grow — the same shape as the global [SettingsPage].
+/// Settings dialog for the chara-detail table. Hosts one [FormGroup] per settings
+/// category — the same divider-headed grouping as the column-customize dialog —
+/// so further preferences can be added as new groups or rows.
 class CharaDetailSettingsDialog extends ConsumerWidget {
   const CharaDetailSettingsDialog({super.key});
 
@@ -57,7 +58,7 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
         content: const Padding(
           padding: EdgeInsets.all(8),
           // One group today; append more group widgets here (separated by a
-          // SizedBox(height: 8)) as the table gains settings.
+          // SizedBox(height: 16)) as the table gains settings.
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_DisplaySettingsGroup()]),
         ),
       ),
@@ -66,15 +67,15 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
 }
 
 /// Display-related table preferences: the row-height mode and its minimum line
-/// count.
+/// count. Grouped under a [FormGroup] header, with each row in the same
+/// list-tile style as the global settings page.
 class _DisplaySettingsGroup extends ConsumerWidget {
   const _DisplaySettingsGroup();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListCard(
-      title: "$tr_table_settings.display.title".tr(),
-      padding: EdgeInsets.zero,
+    return FormGroup(
+      title: Text("$tr_table_settings.display.title".tr()),
       children: [
         DropdownButtonWidget<RowHeightMode>(
           title: "$tr_table_settings.display.row_height_mode.title".tr(),
@@ -87,7 +88,7 @@ class _DisplaySettingsGroup extends ConsumerWidget {
           description: Text("$tr_table_settings.display.min_row_lines.description".tr()),
           provider: charaDetailMinRowLinesProvider,
           min: 1,
-          max: 6,
+          max: 20,
         ),
       ],
     );
