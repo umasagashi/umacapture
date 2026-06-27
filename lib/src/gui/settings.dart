@@ -21,6 +21,7 @@ import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/storage_settings.dart';
+import '/src/gui/theme_gallery.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
 
@@ -72,6 +73,9 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
 
   final ExclusiveItemsNotifierProvider<T> provider;
 
+  /// Text style for the selected-value label. Null keeps the default size.
+  final TextStyle? style;
+
   const DropdownButtonWidget({
     super.key,
     required this.title,
@@ -79,6 +83,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
     required this.name,
     this.tooltip,
     required this.provider,
+    this.style,
   });
 
   @override
@@ -113,7 +118,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
           decoration: BoxDecoration(
             border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
           ),
-          child: Text(name(current)),
+          child: Text(name(current), style: style),
         ),
       ),
       onTap: () => ref.read(provider.notifier).next(),
@@ -142,9 +147,10 @@ class SwitchWidget extends ConsumerWidget {
   }
 }
 
-/// A compact −/value/+ stepper bound to an [IntNotifierProvider], clamped to
-/// [min]..[max] (the buttons disable at the bounds). Mirrors [SwitchWidget]'s
-/// shape for use in the same settings groups.
+/// A compact −/value/+ spinbox bound to an [IntNotifierProvider], clamped to
+/// [min]..[max] (the buttons disable at the bounds). The value is also directly
+/// editable via the shared [IntStepperField]. Mirrors [SwitchWidget]'s shape for
+/// use in the same settings groups.
 class StepperWidget extends ConsumerWidget {
   final Widget title;
   final Widget description;
@@ -164,31 +170,12 @@ class StepperWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final value = ref.watch(provider);
-    final notifier = ref.read(provider.notifier);
     return ListTile(
       title: title,
       subtitle: description,
       trailing: Align(
         widthFactor: 1,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Symbols.remove_rounded),
-              visualDensity: VisualDensity.compact,
-              onPressed: value <= min ? null : notifier.decrement,
-            ),
-            SizedBox(
-              width: 24,
-              child: Text("$value", textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-            ),
-            IconButton(
-              icon: const Icon(Symbols.add_rounded),
-              visualDensity: VisualDensity.compact,
-              onPressed: value >= max ? null : notifier.increment,
-            ),
-          ],
-        ),
+        child: IntStepperField(value: value, min: min, max: max, onChanged: ref.read(provider.notifier).set),
       ),
     );
   }
@@ -471,14 +458,43 @@ class AboutGroup extends ConsumerWidget {
   }
 }
 
+/// Debug-only settings group. Hidden in release builds; hosts developer tools
+/// such as the theme color gallery used for the ongoing theme review.
+class DebugSettingsGroup extends ConsumerWidget {
+  const DebugSettingsGroup({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: 'Debug',
+      padding: EdgeInsets.zero,
+      children: [
+        ListTile(
+          title: const Text('Theme gallery'),
+          subtitle: const Text('Inspect the live ColorScheme, tokens, and hardcoded colors as swatches.'),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.palette_rounded)),
+          onTap: () => ThemeGalleryDialog.show(ref.base),
+        ),
+      ],
+    );
+  }
+}
+
 @RoutePage()
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return const ListTilePageRootWidget(
-      children: [StyleSettingsGroup(), CaptureSettingsGroup(), SystemGroup(), PrivacySettingsGroup(), AboutGroup()],
+    return ListTilePageRootWidget(
+      children: [
+        const StyleSettingsGroup(),
+        const CaptureSettingsGroup(),
+        const SystemGroup(),
+        const PrivacySettingsGroup(),
+        const AboutGroup(),
+        if (kDebugMode) const DebugSettingsGroup(),
+      ],
     );
   }
 }

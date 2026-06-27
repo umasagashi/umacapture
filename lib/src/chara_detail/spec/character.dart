@@ -10,7 +10,7 @@ import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/spec/base.dart' hide tr_common;
+import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/storage.dart';
@@ -18,6 +18,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
+import '/src/gui/theme_extensions.dart';
 
 part 'character.mapper.dart';
 
@@ -218,6 +219,7 @@ class _FriendMarkedIcon extends StatelessWidget {
         final height = constraints.maxHeight;
         final side = (width.isFinite && height.isFinite) ? min(width, height) : (height.isFinite ? height : width);
         final bannerWidth = side * 0.75;
+        final semantic = Theme.of(context).semantic;
         return Stack(
           fit: StackFit.passthrough,
           children: [
@@ -229,13 +231,17 @@ class _FriendMarkedIcon extends StatelessWidget {
               child: Center(
                 child: Container(
                   width: bannerWidth,
-                  decoration: const ShapeDecoration(color: Color(0xFFEC6A8E), shape: StadiumBorder()),
+                  decoration: ShapeDecoration(color: semantic.brandBanner, shape: const StadiumBorder()),
                   padding: EdgeInsets.symmetric(horizontal: bannerWidth * 0.08, vertical: bannerWidth * 0.02),
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Text(
                       "$tr_character.marker.friend".tr(),
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: bannerWidth * 0.3),
+                      style: TextStyle(
+                        color: semantic.onBrandBanner,
+                        fontWeight: FontWeight.bold,
+                        fontSize: bannerWidth * 0.3,
+                      ),
                     ),
                   ),
                 ),
@@ -267,7 +273,6 @@ class _CharaCardChip extends ConsumerWidget {
           padding: const EdgeInsets.only(left: 4),
           child: FilterChip(
             label: Padding(padding: const EdgeInsets.only(left: 36), child: Text(card.cardInfo.names.first)),
-            backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
             showCheckmark: false,
             selected: selected,
             onSelected: (selected) {
@@ -451,19 +456,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_character.notation.label".tr()),
-      description: Text("$tr_character.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
-        FormLine(
-          title: Text("$tr_character.notation.title.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: title,
-              onChanged: (value) {
-                title = value;
-              },
-            ),
-          ],
+        FormTile(
+          title: Text("$tr_common.notation.title.label".tr()),
+          description: Text("$tr_common.notation.title.description".tr()),
+          trailing: DenseTextField(
+            initialText: title,
+            minWidth: 140,
+            onChanged: (value) {
+              title = value;
+            },
+          ),
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

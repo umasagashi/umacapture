@@ -374,7 +374,6 @@ class _FamilyRegistrationSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final counts = (FamilyRegistrationStatus.slotCount + 1).range().toList();
-    final theme = Theme.of(context);
     return FormGroup(
       title: Text("$tr_family_registration.selection.label".tr()),
       description: Text("$tr_family_registration.selection.description".tr()),
@@ -390,9 +389,6 @@ class _FamilyRegistrationSelector extends ConsumerWidget {
                 for (final count in counts)
                   FilterChip(
                     label: Text(_countLabel(count)),
-                    backgroundColor: !spec.predicate.rejects.contains(count)
-                        ? null
-                        : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(count),
                     onSelected: (selected) {
@@ -449,19 +445,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_family_registration.notation.label".tr()),
-      description: Text("$tr_family_registration.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
-        FormLine(
-          title: Text("$tr_family_registration.notation.title.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: title,
-              onChanged: (value) {
-                title = value;
-              },
-            ),
-          ],
+        FormTile(
+          title: Text("$tr_common.notation.title.label".tr()),
+          description: Text("$tr_common.notation.title.description".tr()),
+          trailing: DenseTextField(
+            initialText: title,
+            minWidth: 140,
+            onChanged: (value) {
+              title = value;
+            },
+          ),
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

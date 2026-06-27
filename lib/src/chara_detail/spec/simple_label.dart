@@ -198,7 +198,6 @@ class _SimpleLabelSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     final indices = labels.length.range().toList();
-    final theme = Theme.of(context);
     return FormGroup(
       title: Text("$tr_simple_label.selection.label".tr()),
       description: Text("$tr_simple_label.selection.description".tr()),
@@ -214,9 +213,6 @@ class _SimpleLabelSelector extends ConsumerWidget {
                 for (final index in indices)
                   FilterChip(
                     label: Text(labels[index].joinLines(" ")),
-                    backgroundColor: !spec.predicate.rejects.contains(index)
-                        ? null
-                        : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
                     onSelected: (selected) {
@@ -273,19 +269,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_simple_label.notation.label".tr()),
-      description: Text("$tr_simple_label.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
-        FormLine(
-          title: Text("$tr_simple_label.notation.title.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: title,
-              onChanged: (value) {
-                title = value;
-              },
-            ),
-          ],
+        FormTile(
+          title: Text("$tr_common.notation.title.label".tr()),
+          description: Text("$tr_common.notation.title.description".tr()),
+          trailing: DenseTextField(
+            initialText: title,
+            minWidth: 140,
+            onChanged: (value) {
+              title = value;
+            },
+          ),
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

@@ -18,6 +18,7 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 
 part 'rating.mapper.dart';
 
@@ -291,7 +292,12 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                   });
                 },
                 itemBuilder: (BuildContext context, int index) {
-                  return const Icon(Symbols.star_rate_rounded, color: Colors.amber, weight: 400, fill: 1);
+                  return Icon(
+                    Symbols.star_rate_rounded,
+                    color: Theme.of(context).semantic.ratingAccent,
+                    weight: 400,
+                    fill: 1,
+                  );
                 },
               ),
               const SizedBox(height: 8),
@@ -387,7 +393,12 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
               }
             },
             itemBuilder: (BuildContext context, int index) {
-              return const Icon(Symbols.star_rate_rounded, color: Colors.amber, weight: 400, fill: 1);
+              return Icon(
+                Symbols.star_rate_rounded,
+                color: Theme.of(context).semantic.ratingAccent,
+                weight: 400,
+                fill: 1,
+              );
             },
           ),
         ),
@@ -497,19 +508,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_rating.notation.label".tr()),
-      description: Text("$tr_rating.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
-        FormLine(
-          title: Text("$tr_rating.notation.title.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: title,
-              onChanged: (value) {
-                title = value;
-              },
-            ),
-          ],
+        FormTile(
+          title: Text("$tr_common.notation.title.label".tr()),
+          description: Text("$tr_common.notation.title.description".tr()),
+          trailing: DenseTextField(
+            initialText: title,
+            minWidth: 140,
+            onChanged: (value) {
+              title = value;
+            },
+          ),
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

@@ -49,18 +49,17 @@ class CharaDetailSettingsDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 520, maxHeight: 640),
+      // Mirror the column-customize dialog's chrome for a consistent look: the
+      // same width cap and the default page-view scroll (its always-visible
+      // scrollbar and 8px content padding), so the content needs no padding of
+      // its own. FormGroup fills the width on its own, so no stretch is needed.
+      constraints: const BoxConstraints(maxWidth: 960),
       child: CardDialog(
         dialogTitle: "$tr_table_settings.dialog.title".tr(),
         closeButtonTooltip: "$tr_table_settings.dialog.close_button".tr(),
-        usePageView: false,
-        scrollableContent: true,
-        content: const Padding(
-          padding: EdgeInsets.all(8),
-          // One group today; append more group widgets here (separated by a
-          // SizedBox(height: 16)) as the table gains settings.
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [_DisplaySettingsGroup()]),
-        ),
+        // One group today; append more group widgets here (separated by a
+        // SizedBox(height: 32), as in the column dialog) as the table gains settings.
+        content: const Column(children: [_DisplaySettingsGroup()]),
       ),
     );
   }
@@ -74,6 +73,8 @@ class _DisplaySettingsGroup extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // The provider-bound settings widgets are plain ListTiles, so each is
+    // followed by a FormTileDivider to match the column dialog's ruled-list look.
     return FormGroup(
       title: Text("$tr_table_settings.display.title".tr()),
       children: [
@@ -83,7 +84,9 @@ class _DisplaySettingsGroup extends ConsumerWidget {
           name: (e) => "$tr_table_settings.display.row_height_mode.choice.${e.name.snakeCase}".tr(),
           tooltip: (e) => "$tr_table_settings.display.row_height_mode.tooltip.${e.name.snakeCase}".tr(),
           provider: charaDetailRowHeightModeProvider,
+          style: Theme.of(context).textTheme.titleSmall,
         ),
+        const FormTileDivider(),
         StepperWidget(
           title: Text("$tr_table_settings.display.min_row_lines.title".tr()),
           description: Text("$tr_table_settings.display.min_row_lines.description".tr()),
@@ -91,6 +94,7 @@ class _DisplaySettingsGroup extends ConsumerWidget {
           min: 1,
           max: 20,
         ),
+        const FormTileDivider(),
       ],
     );
   }

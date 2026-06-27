@@ -35,7 +35,7 @@ class _WindowCaptionButtonState extends State<WindowCaptionButtonAlt> {
           child: Container(
             constraints: const BoxConstraints(minWidth: 46, minHeight: kWindowCaptionHeight),
             decoration: BoxDecoration(
-              color: hovering ? theme.colorScheme.onSurface.withValues(alpha: 0.06) : Colors.transparent,
+              color: hovering ? theme.colorScheme.onSurface.withValues(alpha: 0.08) : Colors.transparent,
             ),
             child: Center(child: widget.icon),
           ),

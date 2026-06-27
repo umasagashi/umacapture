@@ -301,19 +301,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_datetime.notation.label".tr()),
-      description: Text("$tr_datetime.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
-        FormLine(
-          title: Text("$tr_datetime.notation.title.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: title,
-              onChanged: (value) {
-                title = value;
-              },
-            ),
-          ],
+        FormTile(
+          title: Text("$tr_common.notation.title.label".tr()),
+          description: Text("$tr_common.notation.title.description".tr()),
+          trailing: DenseTextField(
+            initialText: title,
+            minWidth: 140,
+            onChanged: (value) {
+              title = value;
+            },
+          ),
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Reject commits whose staged Dart files are not `dart format`-clean.
+# Reject commits that (a) leave staged Dart files unformatted, or (b) introduce
+# new raw color literals outside the theme.
 #
 # The page width is read from analysis_options.yaml (`formatter.page_width`), so
 # this stays in sync with the project setting. Enable it once per clone with:
@@ -21,5 +22,50 @@ if ! "$DART" format --output=none --set-exit-if-changed "${files[@]}"; then
   echo "✖ Staged Dart files are not formatted. Run:" >&2
   echo "    $DART format ${files[*]}" >&2
   echo "  then re-stage and commit." >&2
+  exit 1
+fi
+
+# Block *newly added* raw color literals. New code must read colors from the
+# theme: ColorScheme roles, or the AppSemanticColors / AppChartColors /
+# CodeHighlightColors extensions in lib/src/gui/theme_extensions.dart. Only added
+# lines are scanned, so pre-existing literals awaiting migration are grandfathered.
+#
+# Allowlist: files that legitimately hold the canonical literals.
+color_allowlist=(
+  "lib/src/gui/theme_extensions.dart"
+  "lib/src/gui/theme_gallery.dart"
+)
+# Word-boundary on Colors/Color so identifiers like `AppSemanticColors.light`
+# or `ColoredBox` are not mistaken for the Flutter `Colors` / `Color` APIs.
+# Only literal colors are blocked; alpha applied to a theme role
+# (e.g. `colorScheme.scrim.withValues(alpha: .3)`) is allowed, while literal
+# alpha (`Colors.black.withValues(...)`) is still caught by the `Colors.` rule.
+# `Colors.transparent` is structural ("no color", no theme role exists) and is
+# stripped before matching so it is not flagged.
+color_pattern='\bColors\.|\bColor\(0x'
+
+violations=""
+for f in "${files[@]}"; do
+  for allowed in "${color_allowlist[@]}"; do
+    [ "$f" = "$allowed" ] && continue 2
+  done
+  # Added lines only: keep '+' lines, drop the '+++' header, strip the leading '+'.
+  added="$(git diff --cached -U0 -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+' | sed -E 's/^\+//' || true)"
+  hits="$(printf '%s\n' "$added" | sed -E 's/Colors\.transparent//g' | grep -E "$color_pattern" || true)"
+  if [ -n "$hits" ]; then
+    violations+="  $f:"$'\n'
+    while IFS= read -r line; do
+      [ -n "$line" ] && violations+="    ${line#"${line%%[![:space:]]*}"}"$'\n'
+    done <<< "$hits"
+  fi
+done
+
+if [ -n "$violations" ]; then
+  echo "" >&2
+  echo "✖ New raw color literals are not allowed. Read colors from the theme" >&2
+  echo "  (ColorScheme roles, or the *Colors ThemeExtensions in" >&2
+  echo "  lib/src/gui/theme_extensions.dart) instead:" >&2
+  echo "" >&2
+  printf '%s' "$violations" >&2
   exit 1
 fi

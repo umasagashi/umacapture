@@ -24,6 +24,7 @@ import '/src/gui/chara_detail/code_highlight_field.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
 
 part 'script.mapper.dart';
@@ -688,7 +689,7 @@ class _ScriptCell extends StatelessWidget {
     if (result.error != null) {
       return Tooltip(
         message: result.error!,
-        child: const Icon(Symbols.error_rounded, size: 18, color: Colors.orange),
+        child: Icon(Symbols.error_rounded, size: 18, color: Theme.of(context).semantic.warning),
       );
     }
     final iconData = result.icon == null ? null : _iconMap[result.icon!];
@@ -1220,12 +1221,13 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
         const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: ExperimentalBanner()),
         const SizedBox(height: 16),
         FormGroup(
-          title: Text("$tr_script.notation.label".tr()),
-          description: Text("$tr_script.notation.description".tr()),
+          title: Text("$tr_common.notation.label".tr()),
+          description: Text("$tr_common.notation.description".tr()),
           children: [
-            FormLine(
-              title: Text("$tr_script.notation.title.label".tr()),
-              children: [DenseTextField(initialText: title, onChanged: (value) => title = value)],
+            FormTile(
+              title: Text("$tr_common.notation.title.label".tr()),
+              description: Text("$tr_common.notation.title.description".tr()),
+              trailing: DenseTextField(initialText: title, minWidth: 140, onChanged: (value) => title = value),
             ),
             ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
             ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
@@ -1336,7 +1338,7 @@ class _PreviewPanel extends StatelessWidget {
           if (estTotal > _costWarnMicros)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text("$tr_script.preview.cost_warning".tr(), style: TextStyle(color: theme.colorScheme.tertiary)),
+              child: Text("$tr_script.preview.cost_warning".tr(), style: TextStyle(color: theme.colorScheme.secondary)),
             ),
           if (firstError != null)
             _message(theme, "$tr_script.preview.runtime_error".tr(), firstError, theme.colorScheme.error),
@@ -1345,7 +1347,7 @@ class _PreviewPanel extends StatelessWidget {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 "$tr_script.preview.zero_records_warning".tr(),
-                style: TextStyle(color: theme.colorScheme.tertiary, fontWeight: FontWeight.bold),
+                style: TextStyle(color: theme.colorScheme.secondary, fontWeight: FontWeight.bold),
               ),
             ),
           if (result.ok && recordCount > 0)
@@ -1446,7 +1448,7 @@ class _PreviewGrid extends StatelessWidget {
             enableCellBorderVertical: false,
             gridBackgroundColor: theme.colorScheme.surface,
             rowColor: theme.colorScheme.surface,
-            evenRowColor: theme.colorScheme.stripedRowColor,
+            evenRowColor: theme.colorScheme.surfaceContainer,
             gridBorderColor: theme.colorScheme.outline,
             columnTextStyle: theme.textTheme.titleSmall!,
             cellTextStyle: theme.textTheme.bodyMedium!,

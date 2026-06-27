@@ -6,6 +6,7 @@ import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
+import '/src/gui/theme_extensions.dart';
 
 final _plainToastEvent = EventStreamProvider<ToastData>();
 final plainToastEventProvider = _plainToastEvent.provider;
@@ -53,17 +54,19 @@ class Toaster {
     ToastType.warning: Symbols.warning_rounded,
     ToastType.error: Symbols.dangerous_rounded,
   };
-  final Map<ToastType, Color> colorMap = {
-    ToastType.success: Colors.green.shade500,
-    ToastType.info: Colors.blue.shade500,
-    ToastType.warning: Colors.orange.shade500,
-    ToastType.error: Colors.red.shade400,
-  };
-
   Toaster({this.narrowWidth = 600.0});
+
+  Color _backgroundColor(AppSemanticColors semantic, ToastType type) => switch (type) {
+    ToastType.success => semantic.success,
+    ToastType.info => semantic.info,
+    ToastType.warning => semantic.warning,
+    ToastType.error => semantic.danger,
+  };
 
   void showToast(BuildContext context, ToastData data) {
     final messenger = ScaffoldMessenger.of(context);
+    final semantic = Theme.of(context).semantic;
+    final onAccent = semantic.onAccent;
     final parentSize = MediaQuery.of(context).size;
     final barWidth = Math.min(parentSize.width - 20.0, narrowWidth);
     final isNarrow = barWidth < narrowWidth;
@@ -78,19 +81,19 @@ class Toaster {
         width: barWidth,
         padding: const EdgeInsets.symmetric(vertical: 10),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
-        backgroundColor: colorMap[data.type],
+        backgroundColor: _backgroundColor(semantic, data.type),
         behavior: SnackBarBehavior.floating,
         dismissDirection: isNarrow ? DismissDirection.horizontal : DismissDirection.down,
         duration: duration,
-        action: isNarrow ? null : SnackBarAction(textColor: Colors.white, label: 'CLOSE', onPressed: () {}),
+        action: isNarrow ? null : SnackBarAction(textColor: onAccent, label: 'CLOSE', onPressed: () {}),
         content: TextButton.icon(
-          icon: Icon(iconMap[data.type], color: Colors.white),
+          icon: Icon(iconMap[data.type], color: onAccent),
           label: Padding(
             padding: const EdgeInsets.only(left: 10),
             child: Align(
               heightFactor: 1,
               alignment: Alignment.centerLeft,
-              child: data.label ?? Text(data.description!, style: const TextStyle(color: Colors.white, fontSize: 16)),
+              child: data.label ?? Text(data.description!, style: TextStyle(color: onAccent, fontSize: 16)),
             ),
           ),
           style: ButtonStyle(overlayColor: WidgetStateProperty.all<Color>(Colors.transparent)),

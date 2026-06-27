@@ -17,16 +17,13 @@ import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/statistics.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_dashboard = "pages.dashboard";
 
 final _downloadProgressProvider = settableNotifierProvider<Progress?>(null);
-
-/// Title/background color for attention-grabbing updater cards on the dashboard
-/// (app update available, recognition module update needed).
-final _updaterCardTitleColor = Colors.amber.shade200;
 
 final _newsMarkdownLoader = FutureProvider<String>((ref) async {
   try {
@@ -117,7 +114,7 @@ class AppUpdaterGroup extends ConsumerWidget {
     final downloadProgress = ref.watch(_downloadProgressProvider);
     return ListCard(
       title: "$tr_dashboard.app_updater.title".tr(),
-      titleColor: _updaterCardTitleColor,
+      titleColor: Theme.of(context).semantic.noticeContainer,
       padding: EdgeInsets.zero,
       children: [
         ListTile(
@@ -143,7 +140,7 @@ class ModuleUpdaterGroup extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return ListCard(
       title: "$tr_dashboard.module_updater.title".tr(),
-      titleColor: _updaterCardTitleColor,
+      titleColor: Theme.of(context).semantic.noticeContainer,
       padding: EdgeInsets.zero,
       children: [
         ListTile(

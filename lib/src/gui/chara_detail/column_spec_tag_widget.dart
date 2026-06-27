@@ -179,9 +179,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             avatar: broken ? Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer) : null,
             label: spec.label(),
             tooltip: _tooltipFor(spec),
-            backgroundColor: highlight
-                ? theme.colorScheme.secondaryContainer
-                : (broken ? theme.colorScheme.errorContainer : null),
+            backgroundColor: broken
+                ? theme.colorScheme.errorContainer
+                : (highlight ? theme.colorScheme.secondaryContainer : null),
             onPressed: () {
               ColumnSpecDialog.show(ref.base, spec);
             },
@@ -280,7 +280,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
+        color: theme.colorScheme.surfaceContainerLowest,
         border: Border.all(color: highlight ? theme.colorScheme.primary : theme.colorScheme.primaryContainer),
         borderRadius: BorderRadius.circular(12),
       ),
@@ -636,20 +636,76 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
       _slot(const ValueKey('add-button'), specs.isEmpty ? addButtonWithLabel(theme) : addButton(theme)),
     ];
 
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 4),
-      child: Align(
-        alignment: Alignment.topLeft,
-        // One drop target spans the whole tag area; the live slot is picked
-        // geometrically in _onMove rather than per-chip, so no gaps appear.
-        child: DragTarget<ColumnSpec>(
-          onWillAcceptWithDetails: (_) => _draggingId != null,
-          onMove: (details) => _onMove(details.offset),
-          builder: (context, candidateData, rejectedData) {
-            return _ReorderWrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
-          },
+    return _SettingsGroupFrame(
+      label: "$tr_chara_detail.toolbar.column_group".tr(),
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 6),
+        child: Align(
+          alignment: Alignment.topLeft,
+          // One drop target spans the whole tag area; the live slot is picked
+          // geometrically in _onMove rather than per-chip, so no gaps appear.
+          child: DragTarget<ColumnSpec>(
+            onWillAcceptWithDetails: (_) => _draggingId != null,
+            onMove: (details) => _onMove(details.offset),
+            builder: (context, candidateData, rejectedData) {
+              return _ReorderWrap(runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: children);
+            },
+          ),
         ),
       ),
+    );
+  }
+}
+
+// Wraps the column chips in a labelled, fieldset-style frame so the run of chips
+// reads as one settings group. The legend straddles the top border, masking the
+// stroke behind it with a [ColorScheme.surface] backdrop; the chips render inside
+// the box. This is purely cosmetic — it adds no behaviour and does not touch the
+// chips.
+class _SettingsGroupFrame extends StatelessWidget {
+  const _SettingsGroupFrame({required this.label, required this.child});
+
+  final String label;
+  final Widget child;
+
+  // Vertical room the legend needs; the border line sits at its centre, so half
+  // the legend rises above the frame and half overlaps the top stroke.
+  static const double _legendHeight = 16;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Stack(
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: _legendHeight / 2),
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            border: Border.all(color: theme.colorScheme.outlineVariant),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: child,
+        ),
+        Positioned(
+          top: 0,
+          left: 10,
+          child: ColoredBox(
+            color: theme.colorScheme.surface,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: SizedBox(
+                height: _legendHeight,
+                child: Center(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

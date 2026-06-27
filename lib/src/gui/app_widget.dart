@@ -17,6 +17,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/window_manager_alt.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
@@ -53,6 +54,9 @@ class _Sidebar extends ConsumerWidget {
       children: [
         NavigationRail(
           extended: isExtended,
+          // Slightly narrower than the M3 default (256) when expanded; the
+          // labels do not need the full width and it leaves more room for content.
+          minExtendedWidth: 220,
           selectedIndex: tabsRouter.activeIndex,
           useIndicator: true,
           destinations: [
@@ -245,33 +249,59 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     return base?.copyWith(fontWeight: FontWeight.values[Math.min(baseIndex + offset, maxIndex)]);
   }
 
-  // Material 3 derives the surfaceContainer* ramp from the near-neutral palette,
-  // so background panels/chips/rows that read these roles look plain gray and the
-  // FlexColorScheme surface blend cannot tint them. Blend the light-blue
-  // primaryContainer into the container ramp so those surfaces read as blue rather
-  // than gray, without darkening them the way primary would. Tune via [blend].
-  ColorScheme tintSurfaceContainers(ColorScheme scheme) {
-    final blend = scheme.brightness == Brightness.light ? 0.20 : 0.18;
-    Color tint(Color c) => Color.alphaBlend(scheme.primaryContainer.withValues(alpha: blend), c);
-    return scheme.copyWith(
-      surfaceContainerHigh: tint(scheme.surfaceContainerHigh),
-      surfaceContainerHighest: tint(scheme.surfaceContainerHighest),
-    );
-  }
-
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
     final offset = ref.watch(fontBoldSettingProvider) ? 3 : 0;
+    final isLight = base.colorScheme.brightness == Brightness.light;
+    // Recolor the two lowest surface-container tints to a pale "water blue"
+    // derived from secondaryContainer (lightened toward the surface), so the
+    // lowest cards/rows read with a soft blue cast instead of neutral grey.
+    final scheme = base.colorScheme;
+    final tintedScheme = scheme.copyWith(
+      surfaceContainerLowest: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.65),
+      surfaceContainerLow: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.45),
+      // An even paler tint than surfaceContainerLowest (further lightened toward
+      // surface), used as the subtle fill behind outlined NoteCard groups.
+      surfaceBright: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.82),
+      // Role consolidation (frees the now-unused tertiaryContainer /
+      // onTertiaryContainer names). Values are preserved, only the role they live
+      // under changes: secondary absorbs the old tertiary accent (script column),
+      // and tertiary now carries the card/dialog header band — the base
+      // (pre-lightened) scaffold tint, paired with the old onTertiaryContainer.
+      secondary: scheme.tertiary,
+      onSecondary: scheme.onTertiary,
+      tertiary: base.scaffoldBackgroundColor,
+      onTertiary: scheme.onTertiaryContainer,
+    );
     return base.copyWith(
-      colorScheme: tintSurfaceContainers(base.colorScheme),
+      colorScheme: tintedScheme,
+      // Page background uses the surfaceContainerHigh role.
+      scaffoldBackgroundColor: scheme.surfaceContainerHigh,
+      extensions: <ThemeExtension<dynamic>>[
+        isLight ? AppSemanticColors.light(base.colorScheme) : AppSemanticColors.dark(base.colorScheme),
+        AppChartColors.standard(),
+        isLight ? CodeHighlightColors.light() : CodeHighlightColors.dark(),
+      ],
       tooltipTheme: base.tooltipTheme.copyWith(
         textStyle: modifyFontWeight(base.tooltipTheme.textStyle, offset),
         waitDuration: const Duration(milliseconds: 100),
         showDuration: Duration.zero,
       ),
+      // Chips are borderless app-wide and default to a single neutral tone
+      // (surfaceContainerHigh). `side` is forced off because FilterChip/
+      // ChoiceChip otherwise paint the Material 3 state-dependent outline
+      // (unselected), which overrides `shape.side`. Per-chip `backgroundColor` /
+      // `shape` still override these (e.g. primaryContainer action chips, the
+      // circular add button, selected filter chips).
       chipTheme: base.chipTheme.copyWith(
         labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
-        shape: StadiumBorder(side: base.chipTheme.shape?.side ?? BorderSide.none),
+        backgroundColor: base.colorScheme.surfaceContainerHigh,
+        selectedColor: base.colorScheme.primaryContainer,
+        side: BorderSide.none,
+        shape: const StadiumBorder(),
       ),
+      // Cards sit on the base surface role app-wide; raised accents (e.g. the
+      // ListCard header band) layer above it via surfaceContainer roles.
+      cardTheme: base.cardTheme.copyWith(color: scheme.surface),
       textTheme: base.textTheme.copyWith(
         displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
         displayMedium: modifyFontWeight(base.textTheme.displayMedium, offset),

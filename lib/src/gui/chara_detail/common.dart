@@ -14,35 +14,6 @@ import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 import '/src/gui/toast.dart';
 
-// ignore: constant_identifier_names
-const tr_common = "pages.chara_detail.column_predicate.common";
-
-class FormLine extends ConsumerWidget {
-  final Widget title;
-  final List<Widget> children;
-
-  const FormLine({super.key, required this.title, required this.children});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Padding(padding: const EdgeInsets.only(right: 4), child: title),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class FormGroup extends ConsumerWidget {
   final Widget title;
   final Widget? description;
@@ -52,13 +23,20 @@ class FormGroup extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Heading: bold accent-colored title plus a full-width trailing rule. The
+        // group rule is full-strength while the per-row dividers are inset and
+        // faded, so the hierarchy reads as heading > items.
         Row(
           children: [
-            title,
-            const Expanded(child: Divider(indent: 8)),
+            DefaultTextStyle.merge(
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: title),
+            ),
+            Expanded(child: Divider(indent: 8, color: theme.colorScheme.outline)),
           ],
         ),
         if (description != null)
@@ -69,6 +47,64 @@ class FormGroup extends ConsumerWidget {
         ...children,
       ],
     );
+  }
+}
+
+/// A single settings row laid out like a [ListTile], matching the global
+/// settings widgets (`SwitchWidget`, `DropdownButtonWidget`, `StepperWidget`).
+///
+/// Purely presentational: it takes an already-built [trailing] control so the
+/// column dialog's commit-on-OK fields keep their own local state, unlike the
+/// provider-bound settings widgets. The [trailing] is wrapped in
+/// `Align(widthFactor: 1)` exactly like those widgets so the control hugs the
+/// right edge. Use this in a [FormGroup] for rows whose control fits a single
+/// trailing slot (a switch, a stepper, a short field, or a small choice-chip
+/// set); full-width controls (sliders, large chip grids) go straight into the
+/// [FormGroup] instead.
+///
+/// A hairline [Divider] is drawn under the row so consecutive tiles read as a
+/// ruled list — this keeps the left label tied to its far-right control when the
+/// dialog is wide. It is deliberately inset and faded (lighter than the full-width
+/// [FormGroup] header rule) so the per-item separators stay subordinate to the
+/// group heading. Pass `divider: false` to drop it (e.g. a lone row in a group).
+class FormTile extends StatelessWidget {
+  final Widget title;
+  final Widget? description;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool divider;
+
+  const FormTile({super.key, required this.title, this.description, this.trailing, this.onTap, this.divider = true});
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = ListTile(
+      title: title,
+      subtitle: description,
+      trailing: trailing == null ? null : Align(widthFactor: 1, child: trailing),
+      onTap: onTap,
+    );
+    if (!divider) {
+      return tile;
+    }
+    return Column(mainAxisSize: MainAxisSize.min, children: [tile, const FormTileDivider()]);
+  }
+}
+
+/// The hairline rule drawn under each [FormTile] row.
+///
+/// Inset and faded relative to the full-strength [FormGroup] header rule, so
+/// item separators read as subordinate to the group heading. Exposed so rows
+/// that are not [FormTile]s (e.g. the provider-bound settings widgets reused in
+/// the table-settings dialog) can interleave the same separator for a consistent
+/// ruled-list look.
+class FormTileDivider extends StatelessWidget {
+  const FormTileDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final outlineVariant = Theme.of(context).colorScheme.outlineVariant;
+    return Divider(height: 1, indent: 32, endIndent: 32, color: outlineVariant.withValues(alpha: 0.5));
   }
 }
 
@@ -86,6 +122,10 @@ class DenseTextField extends ConsumerStatefulWidget {
   /// still grows with longer input.
   final double? minWidth;
 
+  /// Text style for the input. Null falls back to the theme's `titleSmall`, so
+  /// the dialog's free-text fields match the dropdowns' size by default.
+  final TextStyle? style;
+
   const DenseTextField({
     super.key,
     this.initialText,
@@ -95,6 +135,7 @@ class DenseTextField extends ConsumerStatefulWidget {
     this.allowEmpty = false,
     this.hintText,
     this.minWidth,
+    this.style,
   }) : assert((initialText == null) != (controller == null));
 
   @override
@@ -125,6 +166,7 @@ class DenseTextFieldState extends ConsumerState<DenseTextField> {
     Widget field = IntrinsicWidth(
       child: TextFormField(
         controller: controller,
+        style: widget.style ?? Theme.of(context).textTheme.titleSmall,
         decoration: InputDecoration(
           isDense: true,
           isCollapsed: true,
@@ -167,7 +209,7 @@ class NoteCard extends ConsumerWidget {
     final baseColor = color ?? theme.colorScheme.primaryContainer;
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
+        color: theme.colorScheme.surfaceBright,
         border: Border.all(color: baseColor),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -408,7 +450,6 @@ class TagSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final candidateTags = ref.watch(candidateTagsProvider);
     final selectedTags = ref.watch(selectedTagsProvider);
     return Align(
@@ -420,7 +461,6 @@ class TagSelector extends ConsumerWidget {
           for (final tag in candidateTags)
             FilterChip(
               label: Text(tag.name),
-              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceContainerLow,
               showCheckmark: false,
               selected: selectedTags.contains(tag.id),
               onSelected: (selected) {
@@ -435,6 +475,7 @@ class TagSelector extends ConsumerWidget {
 
 class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   final Widget title;
+  final Widget? description;
   final String prefix;
   final bool tooltip;
   final List<T> values;
@@ -446,6 +487,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   const ChoiceFormLine({
     super.key,
     required this.title,
+    this.description,
     required this.prefix,
     this.tooltip = true,
     required this.values,
@@ -454,26 +496,59 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
     required this.onSelected,
   });
 
-  Widget chip(BuildContext context, WidgetRef ref, T value) {
-    final theme = Theme.of(context);
-    final isDisabled = disabled?.contains(value) ?? false;
-    final isSelected = value == selected;
-    return Disabled(
-      disabled: isDisabled,
-      tooltip: isDisabled ? "$prefix.${value.name.snakeCase}.disabled_tooltip".tr() : "",
-      child: ChoiceChip(
-        label: Text("$prefix.${value.name.snakeCase}.label".tr()),
-        tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
-        backgroundColor: isSelected ? null : theme.colorScheme.surfaceContainerLow,
-        selected: isSelected,
-        onSelected: (_) => onSelected(value),
-      ),
-    );
-  }
+  String _label(T value) => "$prefix.${value.name.snakeCase}.label".tr();
+
+  String _tooltip(T value) => "$prefix.${value.name.snakeCase}.tooltip".tr();
+
+  String _disabledTooltip(T value) => "$prefix.${value.name.snakeCase}.disabled_tooltip".tr();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return FormLine(title: title, children: [for (final value in values) chip(context, ref, value)]);
+    final theme = Theme.of(context);
+    final disabledSet = disabled ?? const {};
+    // When every option is disabled the whole control is inert (e.g. the
+    // logic mode while a single item is selected); show it greyed with the
+    // selected option's disabled tooltip, matching the former chip behaviour.
+    final allDisabled = values.isNotEmpty && values.every(disabledSet.contains);
+    // A single-select dropdown mirroring the settings DropdownButtonWidget: the
+    // current label sits in a bottom-bordered box that opens a popup menu.
+    final button = PopupMenuButton<T>(
+      tooltip: "",
+      enabled: !allDisabled,
+      initialValue: selected,
+      itemBuilder: (context) => [
+        for (final value in values)
+          PopupMenuItem<T>(
+            value: value,
+            enabled: !disabledSet.contains(value),
+            child: SizedBox(
+              width: double.infinity,
+              child: tooltip ? Tooltip(message: _tooltip(value), child: Text(_label(value))) : Text(_label(value)),
+            ),
+          ),
+      ],
+      onSelected: (value) => onSelected(value),
+      // No `alignment` here: a Container with an alignment expands to fill the
+      // parent's bounded constraints, which would make the ListTile trailing
+      // consume the whole tile width. Centring is done via the Text instead, and
+      // the minWidth lives on the Text so the box still grows with longer labels.
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 100),
+          child: Text(_label(selected), textAlign: TextAlign.center, style: theme.textTheme.titleSmall),
+        ),
+      ),
+    );
+    return FormTile(
+      title: title,
+      description: description,
+      trailing: allDisabled ? Disabled(disabled: true, tooltip: _disabledTooltip(selected), child: button) : button,
+    );
   }
 }
 
@@ -487,15 +562,7 @@ class _SelectorChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    return FilterChip(
-      label: label,
-      backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
-      showCheckmark: false,
-      tooltip: tooltip,
-      selected: selected,
-      onSelected: onSelected,
-    );
+    return FilterChip(label: label, showCheckmark: false, tooltip: tooltip, selected: selected, onSelected: onSelected);
   }
 }
 

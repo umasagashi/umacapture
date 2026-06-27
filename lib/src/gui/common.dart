@@ -3,21 +3,12 @@ import 'package:feedback_sentry/feedback_sentry.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
-
-extension SurfaceTintExtension on ColorScheme {
-  /// A very light blue surface, used for statistic card backgrounds.
-  /// Lighter than the tinted surfaceContainer roles.
-  Color get blueTintedSurface => Color.alphaBlend(primaryContainer.withValues(alpha: 0.10), surface);
-
-  /// The shaded background for striped (even) table rows. A stronger blue tint
-  /// than [blueTintedSurface] so the striping reads clearly against the rows.
-  Color get stripedRowColor => Color.alphaBlend(primaryContainer.withValues(alpha: 0.20), surface);
-}
 
 class ListCard extends StatelessWidget {
   final String? title;
@@ -53,17 +44,15 @@ class ListCard extends StatelessWidget {
         children: [
           if (title != null)
             ListTile(
-              // Header band: blend halfway between the brand-tinted scaffold
-              // background and the (near-white) card surface, giving a subtle
-              // blue band. Surface-container roles carry little blend under the
-              // highScaffoldLowSurface mode, so we derive the tint from scaffold.
-              // [titleColor] overrides this to call out attention-grabbing cards.
-              tileColor: titleColor ?? Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5),
+              // Header band: the tertiary role, so the title strip reads as a
+              // tinted accent band over the card surface. [titleColor] overrides
+              // this to call out attention-grabbing cards.
+              tileColor: titleColor ?? theme.colorScheme.tertiary,
               title: Text(
                 title!,
                 style: theme.textTheme.headlineSmall?.copyWith(
                   color: titleColor == null
-                      ? null
+                      ? theme.colorScheme.onTertiary
                       : (ThemeData.estimateBrightnessForColor(titleColor!) == Brightness.dark
                             ? Colors.white
                             : Colors.black),
@@ -210,85 +199,113 @@ class ErrorMessageWidget extends StatelessWidget {
   }
 }
 
-class SpinBox extends StatefulWidget {
+/// A −/value/+ spinbox with an editable, digits-only centre field, clamped to
+/// [min]..[max] (the buttons disable at the bounds).
+///
+/// Presentational: the parent owns the value and is notified of edits via
+/// [onChanged]; typing a number and submitting (or unfocusing) commits it,
+/// snapping invalid, empty, or out-of-range input back to a clamped value.
+/// Shared by the provider-bound settings `StepperWidget` and the column-customize
+/// dialogs so numeric inputs look and behave identically everywhere.
+class IntStepperField extends StatefulWidget {
+  final int value;
   final int min;
   final int max;
-  final int value;
   final ValueChanged<int> onChanged;
-  final double width;
-  final double? height;
-  final bool use10;
+  final double fieldWidth;
 
-  const SpinBox({
+  const IntStepperField({
     super.key,
+    required this.value,
     required this.min,
     required this.max,
-    required this.value,
     required this.onChanged,
-    this.width = 48,
-    this.height,
-    bool? use10,
-  }) : use10 = use10 ?? max > 10;
+    this.fieldWidth = 44,
+  });
 
   @override
-  State<StatefulWidget> createState() => _SpinBoxState();
+  State<IntStepperField> createState() => _IntStepperFieldState();
 }
 
-class _SpinBoxState extends State<SpinBox> {
-  late int _value;
+class _IntStepperFieldState extends State<IntStepperField> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  int get _clampedValue => Math.clamp(widget.min, widget.value, widget.max);
 
   @override
   void initState() {
     super.initState();
-    _value = widget.value;
+    _controller = TextEditingController(text: "$_clampedValue");
+    _focusNode = FocusNode();
+    // Commit when focus leaves the field (e.g. clicking elsewhere), not only on
+    // the Enter key, so a typed-but-unsubmitted value is not silently dropped.
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        _commit();
+      }
+    });
   }
 
   @override
-  void didUpdateWidget(SpinBox oldWidget) {
+  void didUpdateWidget(IntStepperField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.value != oldWidget.value) {
-      _value = Math.clamp(widget.min, widget.value, widget.max);
+    // Sync the field when the value changes externally (the −/+ buttons or a
+    // parent rebuild), but never while the user is mid-edit.
+    if (!_focusNode.hasFocus && _controller.text != "$_clampedValue") {
+      _controller.text = "$_clampedValue";
     }
   }
 
-  Widget button(ThemeData theme, String text, int offset) {
-    return TextButton(
-      style: OutlinedButton.styleFrom(
-        backgroundColor: theme.colorScheme.primaryContainer,
-        padding: EdgeInsets.zero,
-        visualDensity: VisualDensity.compact,
-      ),
-      onPressed: () {
-        setState(() {
-          _value = Math.clamp(widget.min, _value + offset, widget.max);
-          widget.onChanged(_value);
-        });
-      },
-      child: Text(text, style: const TextStyle(fontSize: 12)),
-    );
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _emit(int value) => widget.onChanged(Math.clamp(widget.min, value, widget.max));
+
+  void _commit() {
+    final parsed = int.tryParse(_controller.text);
+    if (parsed != null) {
+      _emit(parsed);
+    }
+    // Snap the field back to a valid number for invalid, empty, or out-of-range
+    // input.
+    _controller.text = "$_clampedValue";
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      height: widget.height,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          if (widget.use10) ...[button(theme, "-10", -10), const SizedBox(width: 4)],
-          button(theme, "-1", -1),
-          Container(
-            constraints: BoxConstraints(minWidth: widget.width),
-            alignment: Alignment.center,
-            child: Text(_value.toString(), style: const TextStyle(fontSize: 16)),
+    final value = _clampedValue;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Symbols.remove_rounded),
+          visualDensity: VisualDensity.compact,
+          onPressed: value <= widget.min ? null : () => _emit(value - 1),
+        ),
+        SizedBox(
+          width: widget.fieldWidth,
+          child: TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: Theme.of(context).textTheme.titleMedium,
+            decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 4)),
+            onSubmitted: (_) => _commit(),
           ),
-          button(theme, "+1", 1),
-          if (widget.use10) ...[const SizedBox(width: 4), button(theme, "+10", 10)],
-        ],
-      ),
+        ),
+        IconButton(
+          icon: const Icon(Symbols.add_rounded),
+          visualDensity: VisualDensity.compact,
+          onPressed: value >= widget.max ? null : () => _emit(value + 1),
+        ),
+      ],
     );
   }
 }
@@ -567,18 +584,18 @@ class _CardDialogState extends ConsumerState<CardDialog> {
       child: Column(
         children: [
           ListTile(
-            tileColor: theme.colorScheme.primary,
+            tileColor: theme.colorScheme.tertiary,
             shape: Border(bottom: BorderSide(color: theme.dividerColor)),
             title: Text(
               widget.dialogTitle,
-              style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary),
+              style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onTertiary),
             ),
             trailing: widget.closeButtonTooltip == null
                 ? null
                 : Tooltip(
                     message: widget.closeButtonTooltip,
                     child: IconButton(
-                      icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onPrimary),
+                      icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onTertiary),
                       splashRadius: 24,
                       onPressed: () {
                         CardDialog.dismiss(ref.base);
@@ -641,21 +658,21 @@ class ExperimentalBanner extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.tertiaryContainer,
-        border: Border.all(color: theme.colorScheme.tertiary),
+        color: theme.colorScheme.tertiary,
+        border: Border.all(color: theme.colorScheme.secondary),
         borderRadius: BorderRadius.circular(8),
       ),
       padding: const EdgeInsets.all(12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Symbols.science_rounded, size: 20, color: theme.colorScheme.onTertiaryContainer),
+          Icon(Symbols.science_rounded, size: 20, color: theme.colorScheme.onTertiary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               "common.experimental_warning".tr(),
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onTertiaryContainer,
+                color: theme.colorScheme.onTertiary,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -790,7 +807,7 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
             // A non-dismissible barrier still swallows the tap (empty callback)
             // so it never falls through to the app behind the dialog.
             onTap: entry.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss() : () {},
-            child: Container(color: theme.shadowColor.withValues(alpha: 0.5)),
+            child: Container(color: theme.colorScheme.scrim.withValues(alpha: 0.5)),
           ),
           Padding(
             padding: const EdgeInsets.all(32),

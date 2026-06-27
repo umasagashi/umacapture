@@ -111,7 +111,8 @@
             "regenerating_message": "認識結果を更新しています",
             "toolbar": {
                 "preset_group": "プリセット",
-                "record_group": "レコード"
+                "record_group": "レコード",
+                "column_group": "列設定"
             },
             "settings": {
                 "button_tooltip": "テーブル設定",
@@ -360,8 +361,14 @@
                         "hidden_marker": "非表示",
                         "tooltip_field": {
                             "label": "説明",
-                            "tooltip": "列チップにマウスを乗せたときに表示される説明文です。",
+                            "tooltip": "列チップにマウスを乗せたときに表示される説明文を指定します。",
                             "empty": "説明がありません"
+                        },
+                        "label": "表示",
+                        "description": "列の表示方法を指定します。",
+                        "title": {
+                            "label": "表示名",
+                            "description": "テーブルのヘッダーに表示する列名を指定します。"
                         }
                     }
                 },
@@ -370,13 +377,6 @@
                         "label": "範囲",
                         "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
                         "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     }
                 },
                 "ranged_integer": {
@@ -384,13 +384,6 @@
                         "label": "範囲",
                         "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
                         "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     }
                 },
                 "character": {
@@ -401,13 +394,6 @@
                     "tooltip": {
                         "accept": "含む",
                         "reject": "含まない"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     },
                     "marker": {
                         "friend": "レンタル"
@@ -441,17 +427,15 @@
                         },
                         "count": {
                             "label": "個数",
-                            "disabled_tooltip": "【@:pages.chara_detail.column_predicate.skill.mode.sum_of.label】を選択している時だけ変更できます。"
-                        }
+                            "disabled_tooltip": "【@:pages.chara_detail.column_predicate.skill.mode.sum_of.label】を選択している時だけ変更できます。",
+                            "description": "「個数」を選んだとき、そのうちのいくつを持っていれば対象とするかを指定します。"
+                        },
+                        "description": "複数のスキルを選択したとき、そのどれを検索対象とするかを指定します。"
                     },
                     "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
                         "max": {
-                            "label": "表示上限数"
-                        },
-                        "title": {
-                            "label": "表示名"
+                            "label": "表示上限数",
+                            "description": "セルに表示するスキルの最大数を指定します。0 にすると個数のみ表示します。"
                         }
                     },
                     "expand": {
@@ -488,7 +472,8 @@
                                 "label": "区別しない",
                                 "description": "を区別せずに",
                                 "disabled_tooltip": "複数の因子を選択している時だけ変更できます。"
-                            }
+                            },
+                            "description": "複数の因子を選択したとき、そのどれを検索対象とするかを指定します。"
                         },
                         "subject": {
                             "label": "集計",
@@ -499,7 +484,8 @@
                             "family": {
                                 "label": "家系全体",
                                 "description": "親を含む家系全体"
-                            }
+                            },
+                            "description": "因子を数える範囲を指定します。"
                         },
                         "element": {
                             "label": "条件",
@@ -513,17 +499,20 @@
                                 "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.logic.mixed.label】または【@:pages.chara_detail.column_predicate.factor.mode.subject.family.label】を選択している時だけ選べます。"
                             },
                             "value": {
-                                "star": "星数",
+                                "star": {
+                                    "label": "星数",
+                                    "description": "星数またはその合計の下限を指定します。"
+                                },
                                 "count": {
                                     "label": "因子数",
-                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ変更できます。"
+                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ変更できます。",
+                                    "description": "因子の数（星数含まず）の下限を指定します。"
                                 }
-                            }
+                            },
+                            "description": "星数と所持数のどちらで判定するかを指定します。"
                         }
                     },
                     "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
                         "mode": {
                             "label": "星数表示",
                             "sum_only": {
@@ -537,13 +526,12 @@
                             "each": {
                                 "label": "個別",
                                 "tooltip": "( 育成ウマ娘 / 親1 / 親2 )"
-                            }
+                            },
+                            "description": "セルに星数をどの粒度で表示するかを指定します。"
                         },
                         "max": {
-                            "label": "表示上限数"
-                        },
-                        "title": {
-                            "label": "表示名"
+                            "label": "表示上限数",
+                            "description": "セルに表示する因子の最大数を指定します。0 にすると個数のみ表示します。"
                         }
                     }
                 },
@@ -552,13 +540,6 @@
                         "label": "範囲",
                         "description": "範囲内で育成したウマ娘がテーブルに表示されます。",
                         "reset_button": "リセット"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     }
                 },
                 "simple_label": {
@@ -569,13 +550,6 @@
                     "tooltip": {
                         "accept": "含む",
                         "reject": "含まない"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     }
                 },
                 "family_registration": {
@@ -586,13 +560,6 @@
                     "tooltip": {
                         "accept": "含む",
                         "reject": "含まない"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     }
                 },
                 "rating": {
@@ -613,13 +580,6 @@
                         "label": "範囲",
                         "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
                         "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
-                        }
                     },
                     "storage": {
                         "label": "データ削除",
@@ -647,14 +607,8 @@
                         "label": "検索",
                         "description": "メモが正規表現にマッチするウマ娘がテーブルに表示されます。",
                         "regexp": {
-                            "label": "正規表現"
-                        }
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "表示名"
+                            "label": "正規表現",
+                            "description": "ここに入力した正規表現でメモを検索します。"
                         }
                     },
                     "storage": {
@@ -666,13 +620,6 @@
                     }
                 },
                 "script": {
-                    "notation": {
-                        "label": "表記",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "タイトル"
-                        }
-                    },
                     "code": {
                         "label": "コード",
                         "description": "filter（行の表示可否）と display（セルの内容）の2関数を定義してください。",
@@ -745,13 +692,6 @@
                         "nand": "NAND",
                         "nor": "NOR",
                         "xnor": "XNOR"
-                    },
-                    "notation": {
-                        "label": "表示",
-                        "description": "列の表示方法を指定します。",
-                        "title": {
-                            "label": "列名"
-                        }
                     },
                     "tooltip": {
                         "empty": "入力なし（カラムをドラッグして入力を追加できます）"

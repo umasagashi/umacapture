@@ -26,7 +26,10 @@ import '/src/gui/chara_detail/regenerate_record_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
+import '/src/preference/settings_state.dart';
+import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
@@ -48,7 +51,8 @@ class _CharaDetailDataTableWidget extends ConsumerStatefulWidget {
   ConsumerState<ConsumerStatefulWidget> createState() => _CharaDetailDataTableWidgetState();
 }
 
-class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTableWidget> {
+class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTableWidget>
+    with SingleTickerProviderStateMixin {
   String? sortColumn;
   TrinaColumnSort sortOrder = TrinaColumnSort.none;
   late TrinaGridStateManager stateManager;
@@ -95,13 +99,70 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
   // panel, not the whole table body (which re-derives the grid order each build).
   final ValueNotifier<double> _panelWidth = ValueNotifier(sidePreviewDefaultPanelWidth);
 
+  // Persists the panel width across launches. The live value stays a ValueNotifier
+  // (not a watched provider) so a splitter drag rebuilds only the splitter + panel;
+  // this entry just seeds it at launch and is written back when a drag ends.
+  StorageEntry<double>? _panelWidthEntry;
+
   // Id of the grid's current (highlighted) record, mirrored from onActiveCellChanged
   // so the side preview panel can follow the grid selection without storing its own
   // record id. The panel subtree listens to this; the grid body does not rebuild.
   final ValueNotifier<String?> _currentRecordId = ValueNotifier(null);
 
+  // Drives the side preview panel's open/close slide: 0 = closed (subtree
+  // unmounted), 1 = fully open. The panel never floats over the grid — it shares
+  // the row with it — so opening/closing animates a horizontal reveal while the
+  // grid smoothly takes back (or yields) the freed width.
+  late final AnimationController _sidePanelController = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  );
+  late final CurvedAnimation _sidePanelReveal = CurvedAnimation(
+    parent: _sidePanelController,
+    curve: Curves.easeOutCubic,
+    reverseCurve: Curves.easeInCubic,
+  );
+
+  // The last shown side-preview state, retained so the panel keeps rendering its
+  // content while it slides closed — by then [sidePreviewProvider] has already
+  // gone null, so build falls back to this until the slide settles.
+  SidePreviewState? _lastSidePreview;
+
+  @override
+  void initState() {
+    super.initState();
+    // Seed the slide to match the persisted open state so a panel restored open at
+    // launch is shown already-open, not sliding in. The slide only plays on later
+    // toggles.
+    final restored = ref.read(sidePreviewProvider);
+    if (restored != null) {
+      _lastSidePreview = restored;
+      _sidePanelController.value = 1;
+    }
+    // Seed the panel width from storage (lower-bounded here; the upper bound
+    // against the window width is clamped at paint time). Written back on drag end.
+    _panelWidthEntry = StorageEntry<double>(
+      box: ref.read(storageBoxProvider),
+      key: SettingsEntryKey.sidePreviewWidth.name,
+    );
+    final storedWidth = _panelWidthEntry?.pull();
+    if (storedWidth != null) {
+      _panelWidth.value = Math.max(sidePreviewMinPanelWidth, storedWidth);
+    }
+    // Drop the panel subtree once the closing slide finishes. Build gates the
+    // subtree on the controller value, and only a rebuild re-evaluates that gate,
+    // so the dismissed edge needs an explicit setState to unmount it.
+    _sidePanelController.addStatusListener((status) {
+      if (status == AnimationStatus.dismissed && mounted) {
+        setState(() {});
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _sidePanelReveal.dispose();
+    _sidePanelController.dispose();
     _panelWidth.dispose();
     _currentRecordId.dispose();
     super.dispose();
@@ -728,7 +789,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     if (rowContext.stateManager.isCurrentRecord(rowContext.row)) {
                       return theme.colorScheme.primaryContainer;
                     }
-                    return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
+                    return rowContext.rowIdx.isEven
+                        ? theme.colorScheme.surface
+                        : theme.colorScheme.surfaceContainerLowest;
                   },
                   // Checked rows get a translucent amber overlay that dims the
                   // cells and is labeled "archive", so the destructive (lossy,
@@ -755,7 +818,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         // The stripe and separator don't depend on the selection, so
                         // compute them once; only the current-row highlight below is
                         // recomputed per notify.
-                        final stripe = pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
+                        final stripe = pinnedIdx.isEven
+                            ? theme.colorScheme.surface
+                            : theme.colorScheme.surfaceContainerLowest;
                         final separator = isLast
                             ? BorderSide(color: theme.colorScheme.outline, width: 3)
                             : BorderSide(
@@ -995,7 +1060,20 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // In the narrow layout the panel is simply not rendered (see the Row below) and a
     // cell click opens the dialog instead (onSelected re-checks the breakpoint), so
     // the open state is left untouched — widening the window restores the panel.
-    final sideShown = sidePreview != null && !narrow;
+    // Drive the open/close slide off the toggle (and the narrow-layout gate). The
+    // calls are idempotent while already settled or animating, so running them each
+    // build is safe; they only start a ticker, never setState. While sliding closed
+    // sidePreview is already null, so the subtree renders [_lastSidePreview] until
+    // the controller reaches 0 (its status listener then rebuilds to unmount it).
+    final wantSide = sidePreview != null && !narrow;
+    if (wantSide) {
+      _lastSidePreview = sidePreview;
+      _sidePanelController.forward();
+    } else {
+      _sidePanelController.reverse();
+    }
+    final sideShown = wantSide || _sidePanelController.value > 0;
+    final sideState = sidePreview ?? _lastSidePreview;
     final sideSource = sideShown ? ref.watch(recordSourceProvider) : null;
     final sidePathInfo = sideShown ? ref.watch(pathInfoProvider) : null;
 
@@ -1015,87 +1093,103 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
               // record changes (taps / prev-next mirror into _currentRecordId). The
               // sorted lookup runs here, not on splitter drag — that is the inner
               // _panelWidth builder.
-              if (sidePreview != null && !narrow)
-                ValueListenableBuilder<String?>(
-                  valueListenable: _currentRecordId,
-                  builder: (context, currentId, _) {
-                    DirectoryPath? sideRecordDir;
-                    var canPrev = false;
-                    var canNext = false;
-                    if (currentId != null && sideSource != null && sidePathInfo != null) {
-                      final located = _locateSorted(currentId);
-                      if (located != null) {
-                        final (sorted, i) = located;
-                        if (i >= 0) {
-                          // i < 0 means the current record is no longer in the sorted
-                          // set (filtered out, or a stale selection after a source
-                          // switch): leave recordDir null so the panel shows its
-                          // placeholder instead of a missing-directory error.
-                          sideRecordDir = recordDirOfId(sidePathInfo, sideSource, currentId);
-                          canPrev = i > 0;
-                          canNext = i < sorted.length - 1;
+              if (sideShown && sideState != null)
+                // Clip + reveal the panel along the horizontal axis so opening and
+                // closing slide in from / out to the right edge instead of snapping.
+                // The child keeps its full width (so its image never reflows mid-
+                // slide); SizeTransition clips it to the animated fraction, and the
+                // grid's Expanded takes back the freed width each frame.
+                ClipRect(
+                  child: SizeTransition(
+                    axis: Axis.horizontal,
+                    alignment: Alignment.centerRight,
+                    sizeFactor: _sidePanelReveal,
+                    child: ValueListenableBuilder<String?>(
+                      valueListenable: _currentRecordId,
+                      builder: (context, currentId, _) {
+                        DirectoryPath? sideRecordDir;
+                        var canPrev = false;
+                        var canNext = false;
+                        if (currentId != null && sideSource != null && sidePathInfo != null) {
+                          final located = _locateSorted(currentId);
+                          if (located != null) {
+                            final (sorted, i) = located;
+                            if (i >= 0) {
+                              // i < 0 means the current record is no longer in the sorted
+                              // set (filtered out, or a stale selection after a source
+                              // switch): leave recordDir null so the panel shows its
+                              // placeholder instead of a missing-directory error.
+                              sideRecordDir = recordDirOfId(sidePathInfo, sideSource, currentId);
+                              canPrev = i > 0;
+                              canNext = i < sorted.length - 1;
+                            }
+                          }
                         }
-                      }
-                    }
-                    final hasRecord = sideRecordDir != null;
-                    final canModeLeft = hasRecord && canStepSidePreviewMode(sidePreview.mode, -1);
-                    final canModeRight = hasRecord && canStepSidePreviewMode(sidePreview.mode, 1);
-                    // Only the splitter + panel listen to _panelWidth, so dragging the
-                    // splitter rebuilds just this subtree — not the sorted lookup above.
-                    return ValueListenableBuilder<double>(
-                      valueListenable: _panelWidth,
-                      builder: (context, width, _) {
-                        final panelWidth = Math.clamp(sidePreviewMinPanelWidth, width, maxPanel);
-                        return Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            MouseRegion(
-                              cursor: SystemMouseCursors.resizeColumn,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onHorizontalDragStart: (_) {
-                                  // Re-seat the stored width to the currently displayed
-                                  // (clamped) value so a drag begun after the window
-                                  // shrank doesn't snap back to a stale wider value.
-                                  _panelWidth.value = panelWidth;
-                                },
-                                onHorizontalDragUpdate: (details) {
-                                  // Accumulate against the live value, not the
-                                  // build-local `panelWidth`: several drag updates can
-                                  // fire before a rebuild, and each would otherwise read
-                                  // the same stale base, so the width would lag behind
-                                  // the cursor. Dragging the splitter left widens the
-                                  // right-hand panel, hence subtracting delta.dx.
-                                  _panelWidth.value = Math.clamp(
-                                    sidePreviewMinPanelWidth,
-                                    _panelWidth.value - details.delta.dx,
-                                    maxPanel,
-                                  );
-                                },
-                                child: SizedBox(
-                                  width: 10,
-                                  child: Center(child: Container(width: 2, color: theme.colorScheme.outline)),
+                        final hasRecord = sideRecordDir != null;
+                        final canModeLeft = hasRecord && canStepSidePreviewMode(sideState.mode, -1);
+                        final canModeRight = hasRecord && canStepSidePreviewMode(sideState.mode, 1);
+                        // Only the splitter + panel listen to _panelWidth, so dragging the
+                        // splitter rebuilds just this subtree — not the sorted lookup above.
+                        return ValueListenableBuilder<double>(
+                          valueListenable: _panelWidth,
+                          builder: (context, width, _) {
+                            final panelWidth = Math.clamp(sidePreviewMinPanelWidth, width, maxPanel);
+                            return Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                MouseRegion(
+                                  cursor: SystemMouseCursors.resizeColumn,
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onHorizontalDragStart: (_) {
+                                      // Re-seat the stored width to the currently displayed
+                                      // (clamped) value so a drag begun after the window
+                                      // shrank doesn't snap back to a stale wider value.
+                                      _panelWidth.value = panelWidth;
+                                    },
+                                    onHorizontalDragUpdate: (details) {
+                                      // Accumulate against the live value, not the
+                                      // build-local `panelWidth`: several drag updates can
+                                      // fire before a rebuild, and each would otherwise read
+                                      // the same stale base, so the width would lag behind
+                                      // the cursor. Dragging the splitter left widens the
+                                      // right-hand panel, hence subtracting delta.dx.
+                                      _panelWidth.value = Math.clamp(
+                                        sidePreviewMinPanelWidth,
+                                        _panelWidth.value - details.delta.dx,
+                                        maxPanel,
+                                      );
+                                    },
+                                    // Persist once the drag settles rather than on
+                                    // every update, so the panel reopens at the size
+                                    // the user left it.
+                                    onHorizontalDragEnd: (_) => _panelWidthEntry?.push(_panelWidth.value),
+                                    child: SizedBox(
+                                      width: 10,
+                                      child: Center(child: Container(width: 2, color: theme.colorScheme.outline)),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            SizedBox(
-                              width: panelWidth,
-                              child: SidePreviewPanel(
-                                recordDir: sideRecordDir,
-                                mode: sidePreview.mode,
-                                canPrev: canPrev,
-                                canNext: canNext,
-                                canModeLeft: canModeLeft,
-                                canModeRight: canModeRight,
-                                onNavigate: _navigateSidePreview,
-                                onChangeMode: _changeSidePreviewMode,
-                              ),
-                            ),
-                          ],
+                                SizedBox(
+                                  width: panelWidth,
+                                  child: SidePreviewPanel(
+                                    recordDir: sideRecordDir,
+                                    mode: sideState.mode,
+                                    canPrev: canPrev,
+                                    canNext: canNext,
+                                    canModeLeft: canModeLeft,
+                                    canModeRight: canModeRight,
+                                    onNavigate: _navigateSidePreview,
+                                    onChangeMode: _changeSidePreviewMode,
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
                         );
                       },
-                    );
-                  },
+                    ),
+                  ),
                 ),
             ],
           );
@@ -1113,8 +1207,8 @@ typedef _SelectionStyle = ({Color color, Color onColor, IconData icon, String ro
 extension _SelectionPurposeStyle on SelectionPurpose {
   _SelectionStyle style(ThemeData theme) => switch (this) {
     SelectionPurpose.archive => (
-      color: Colors.amber,
-      onColor: Colors.black87,
+      color: theme.semantic.noticeContainer,
+      onColor: theme.semantic.onNoticeContainer,
       icon: Symbols.archive_rounded,
       rowLabelKey: "$tr_chara_detail.archive_records.row_overlay",
       actionLabelKey: "$tr_chara_detail.archive_records.overlay.archive",
@@ -1217,7 +1311,9 @@ class _TopControlsLayer extends ConsumerWidget {
                 ),
                 // The two valid actions sit above the scrim and stay interactive.
                 Center(
-                  child: Row(
+                  // Label on its own line above the action buttons, so a long
+                  // message does not overflow the row on narrow windows.
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
@@ -1226,13 +1322,18 @@ class _TopControlsLayer extends ConsumerWidget {
                         "$tr_chara_detail.archive_records.overlay.message".tr(namedArgs: {"count": "$selectedCount"}),
                         style: theme.textTheme.labelLarge,
                       ),
-                      const SizedBox(width: 16),
-                      _SelectionConfirmButton(purpose: purpose, selectedCount: selectedCount),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        icon: const Icon(Symbols.cancel_rounded, size: 20),
-                        label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
-                        onPressed: () => exitSelection(ref),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _SelectionConfirmButton(purpose: purpose, selectedCount: selectedCount),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            icon: const Icon(Symbols.cancel_rounded, size: 20),
+                            label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
+                            onPressed: () => exitSelection(ref),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -1427,7 +1528,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       children: const [
         _QuarantineBannerWidget(),
         _TopControlsLayer(),
-        SizedBox(height: 4),
+        SizedBox(height: 8),
         _CharaDetailDataTablePreCheckLayer(),
       ],
     );

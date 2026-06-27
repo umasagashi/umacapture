@@ -224,16 +224,17 @@ class ImageViewer extends ConsumerStatefulWidget {
 class _ImageViewerState extends ConsumerState<ImageViewer> {
   Widget predictionTabOverlay(FilePath? imagePath, ImageSizeInfo sizeInfo, List<PredictionData>? predictions) {
     final labelMap = ref.watch(labelMapProvider);
-    final textStyle = TextStyle(color: Colors.black, backgroundColor: Colors.white.withValues(alpha: 0.5), fontSize: 9);
+    final cs = Theme.of(context).colorScheme;
+    final textStyle = TextStyle(color: cs.onSurface, backgroundColor: cs.surface.withValues(alpha: 0.5), fontSize: 9);
     // Archived records may carry no image for this tab; keep the layout slot but
     // show a placeholder instead of a broken-image box.
     if (imagePath == null) {
       return Container(
         width: sizeInfo.intersection.width.toDouble(),
         height: sizeInfo.intersection.height.toDouble(),
-        color: Colors.black.withValues(alpha: 0.04),
+        color: cs.onSurface.withValues(alpha: 0.04),
         alignment: Alignment.center,
-        child: Icon(Symbols.hide_image_rounded, color: Colors.black.withValues(alpha: 0.3)),
+        child: Icon(Symbols.hide_image_rounded, color: cs.onSurfaceVariant),
       );
     }
     return Stack(
@@ -257,7 +258,7 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
                   height: data.rect.height.toDouble() + 1,
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.zero,
-                    border: Border.all(color: Colors.black.withValues(alpha: 0.5)),
+                    border: Border.all(color: cs.outline),
                   ),
                 ),
                 SizedBox(
