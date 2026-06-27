@@ -39,7 +39,6 @@ class ThemeGalleryDialog extends ConsumerWidget {
         children: [
           _ColorSchemeSection(),
           _ThemeDataSection(),
-          _TokenSection(),
           _BlendSection(),
           _SemanticSection(),
           _ChartSection(),
@@ -67,9 +66,8 @@ class _Swatch extends StatelessWidget {
   final String label;
   final Color color;
   final Color? onColor;
-  final String? sub;
 
-  const _Swatch(this.label, this.color, {this.onColor, this.sub});
+  const _Swatch(this.label, this.color, {this.onColor});
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +92,6 @@ class _Swatch extends StatelessWidget {
               style: TextStyle(color: foreground, fontWeight: FontWeight.bold, fontSize: 12),
             ),
           ),
-          if (sub != null) Text(sub!, style: TextStyle(color: foreground, fontSize: 10)),
           Text(_hex(color), style: TextStyle(color: foreground, fontSize: 11)),
         ],
       ),
@@ -330,31 +327,6 @@ class _ThemeDataSection extends StatelessWidget {
   }
 }
 
-class _TokenSection extends StatelessWidget {
-  const _TokenSection();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final cs = theme.colorScheme;
-    return _Section(
-      'Theme blends',
-      [
-        _SwatchRow(
-          _Swatch(
-            'ListCard header',
-            Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5)!,
-            onColor: cs.onSurface,
-            sub: 'lerp(scaf,card,.5)',
-          ),
-          'Header band color of plain (non-attention) ListCard headers.',
-        ),
-      ],
-      note: 'Composed in common.dart. Striped rows / stat cards now use the surfaceContainer roles directly.',
-    );
-  }
-}
-
 class _BlendSection extends StatelessWidget {
   const _BlendSection();
 
@@ -509,8 +481,9 @@ const Map<String, String> _roleUsages = {
   'surface': 'Base backgrounds: data-table, window chrome, side preview.',
   'onSurface': 'Default body text and icon color.',
   'onSurfaceVariant': 'Secondary text: setting descriptions, captions, muted labels.',
-  'surfaceContainerLow': 'Low-contrast card/panel backgrounds (chara-detail, family, script, labels).',
-  'surfaceContainer': 'Panel backgrounds (addon list, side preview).',
+  'surfaceContainerLow': 'Low-contrast card/panel backgrounds (chara-detail, family, script, labels); stat card body.',
+  'surfaceContainer': 'Panel backgrounds (addon list, side preview); striped table/script rows.',
+  'surfaceContainerHigh': 'ListCard header band.',
   'surfaceContainerHighest': 'Raised backgrounds: input fields, module-update, column builder, statistics.',
   'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame.',
   'onInverseSurface': 'Text on the inverse surface (column builder dialog).',
