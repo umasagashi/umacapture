@@ -167,7 +167,7 @@ class NoteCard extends ConsumerWidget {
     final baseColor = color ?? theme.colorScheme.primaryContainer;
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
+        color: theme.colorScheme.surfaceContainerLowest,
         border: Border.all(color: baseColor),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -408,7 +408,6 @@ class TagSelector extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final candidateTags = ref.watch(candidateTagsProvider);
     final selectedTags = ref.watch(selectedTagsProvider);
     return Align(
@@ -420,7 +419,6 @@ class TagSelector extends ConsumerWidget {
           for (final tag in candidateTags)
             FilterChip(
               label: Text(tag.name),
-              backgroundColor: selectedTags.contains(tag.id) ? null : theme.colorScheme.surfaceContainerLow,
               showCheckmark: false,
               selected: selectedTags.contains(tag.id),
               onSelected: (selected) {
@@ -455,7 +453,6 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   });
 
   Widget chip(BuildContext context, WidgetRef ref, T value) {
-    final theme = Theme.of(context);
     final isDisabled = disabled?.contains(value) ?? false;
     final isSelected = value == selected;
     return Disabled(
@@ -464,7 +461,6 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
       child: ChoiceChip(
         label: Text("$prefix.${value.name.snakeCase}.label".tr()),
         tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
-        backgroundColor: isSelected ? null : theme.colorScheme.surfaceContainerLow,
         selected: isSelected,
         onSelected: (_) => onSelected(value),
       ),
@@ -487,15 +483,7 @@ class _SelectorChip extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    return FilterChip(
-      label: label,
-      backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
-      showCheckmark: false,
-      tooltip: tooltip,
-      selected: selected,
-      onSelected: onSelected,
-    );
+    return FilterChip(label: label, showCheckmark: false, tooltip: tooltip, selected: selected, onSelected: onSelected);
   }
 }
 

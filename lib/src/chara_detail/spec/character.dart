@@ -273,7 +273,6 @@ class _CharaCardChip extends ConsumerWidget {
           padding: const EdgeInsets.only(left: 4),
           child: FilterChip(
             label: Padding(padding: const EdgeInsets.only(left: 36), child: Text(card.cardInfo.names.first)),
-            backgroundColor: selected ? null : theme.colorScheme.surfaceContainerLow,
             showCheckmark: false,
             selected: selected,
             onSelected: (selected) {

@@ -249,7 +249,27 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
     final offset = ref.watch(fontBoldSettingProvider) ? 3 : 0;
     final isLight = base.colorScheme.brightness == Brightness.light;
+    // Recolor the two lowest surface-container tints to a pale "water blue"
+    // derived from secondaryContainer (lightened toward the surface), so the
+    // lowest cards/rows read with a soft blue cast instead of neutral grey.
+    final scheme = base.colorScheme;
+    final tintedScheme = scheme.copyWith(
+      surfaceContainerLowest: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.65),
+      surfaceContainerLow: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.45),
+      // Role consolidation (frees the now-unused tertiaryContainer /
+      // onTertiaryContainer names). Values are preserved, only the role they live
+      // under changes: secondary absorbs the old tertiary accent (script column),
+      // and tertiary now carries the card/dialog header band — the base
+      // (pre-lightened) scaffold tint, paired with the old onTertiaryContainer.
+      secondary: scheme.tertiary,
+      onSecondary: scheme.onTertiary,
+      tertiary: base.scaffoldBackgroundColor,
+      onTertiary: scheme.onTertiaryContainer,
+    );
     return base.copyWith(
+      colorScheme: tintedScheme,
+      // Page background uses the surfaceContainerHigh role.
+      scaffoldBackgroundColor: scheme.surfaceContainerHigh,
       extensions: <ThemeExtension<dynamic>>[
         isLight ? AppSemanticColors.light(base.colorScheme) : AppSemanticColors.dark(base.colorScheme),
         AppChartColors.standard(),
@@ -260,10 +280,22 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         waitDuration: const Duration(milliseconds: 100),
         showDuration: Duration.zero,
       ),
+      // Chips are borderless app-wide and default to a single neutral tone
+      // (surfaceContainerHigh). `side` is forced off because FilterChip/
+      // ChoiceChip otherwise paint the Material 3 state-dependent outline
+      // (unselected), which overrides `shape.side`. Per-chip `backgroundColor` /
+      // `shape` still override these (e.g. primaryContainer action chips, the
+      // circular add button, selected filter chips).
       chipTheme: base.chipTheme.copyWith(
         labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
-        shape: StadiumBorder(side: base.chipTheme.shape?.side ?? BorderSide.none),
+        backgroundColor: base.colorScheme.surfaceContainerHigh,
+        selectedColor: base.colorScheme.primaryContainer,
+        side: BorderSide.none,
+        shape: const StadiumBorder(),
       ),
+      // Cards sit on the base surface role app-wide; raised accents (e.g. the
+      // ListCard header band) layer above it via surfaceContainer roles.
+      cardTheme: base.cardTheme.copyWith(color: scheme.surface),
       textTheme: base.textTheme.copyWith(
         displayLarge: modifyFontWeight(base.textTheme.displayLarge, offset),
         displayMedium: modifyFontWeight(base.textTheme.displayMedium, offset),

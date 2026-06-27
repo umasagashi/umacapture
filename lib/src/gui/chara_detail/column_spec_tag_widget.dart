@@ -179,9 +179,9 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
             avatar: broken ? Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer) : null,
             label: spec.label(),
             tooltip: _tooltipFor(spec),
-            backgroundColor: highlight
-                ? theme.colorScheme.secondaryContainer
-                : (broken ? theme.colorScheme.errorContainer : null),
+            backgroundColor: broken
+                ? theme.colorScheme.errorContainer
+                : (highlight ? theme.colorScheme.secondaryContainer : null),
             onPressed: () {
               ColumnSpecDialog.show(ref.base, spec);
             },
@@ -280,7 +280,7 @@ class _ColumnSpecTagWidgetState extends ConsumerState<ColumnSpecTagWidget> {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
+        color: theme.colorScheme.surfaceContainerLowest,
         border: Border.all(color: highlight ? theme.colorScheme.primary : theme.colorScheme.primaryContainer),
         borderRadius: BorderRadius.circular(12),
       ),

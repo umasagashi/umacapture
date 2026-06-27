@@ -157,7 +157,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
+                  color: theme.colorScheme.surfaceContainerLowest,
+                  border: Border.all(color: theme.colorScheme.primaryContainer),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Wrap(
@@ -175,7 +176,8 @@ class ColumnBuilderDialog extends ConsumerWidget {
                 margin: const EdgeInsets.only(top: 16),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
+                  color: theme.colorScheme.surfaceContainerLowest,
+                  border: Border.all(color: theme.colorScheme.primaryContainer),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Wrap(

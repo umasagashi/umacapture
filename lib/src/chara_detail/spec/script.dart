@@ -1337,7 +1337,7 @@ class _PreviewPanel extends StatelessWidget {
           if (estTotal > _costWarnMicros)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text("$tr_script.preview.cost_warning".tr(), style: TextStyle(color: theme.colorScheme.tertiary)),
+              child: Text("$tr_script.preview.cost_warning".tr(), style: TextStyle(color: theme.colorScheme.secondary)),
             ),
           if (firstError != null)
             _message(theme, "$tr_script.preview.runtime_error".tr(), firstError, theme.colorScheme.error),
@@ -1346,7 +1346,7 @@ class _PreviewPanel extends StatelessWidget {
               padding: const EdgeInsets.only(top: 4),
               child: Text(
                 "$tr_script.preview.zero_records_warning".tr(),
-                style: TextStyle(color: theme.colorScheme.tertiary, fontWeight: FontWeight.bold),
+                style: TextStyle(color: theme.colorScheme.secondary, fontWeight: FontWeight.bold),
               ),
             ),
           if (result.ok && recordCount > 0)

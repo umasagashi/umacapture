@@ -198,7 +198,6 @@ class _SimpleLabelSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     final indices = labels.length.range().toList();
-    final theme = Theme.of(context);
     return FormGroup(
       title: Text("$tr_simple_label.selection.label".tr()),
       description: Text("$tr_simple_label.selection.description".tr()),
@@ -214,9 +213,6 @@ class _SimpleLabelSelector extends ConsumerWidget {
                 for (final index in indices)
                   FilterChip(
                     label: Text(labels[index].joinLines(" ")),
-                    backgroundColor: !spec.predicate.rejects.contains(index)
-                        ? null
-                        : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(index),
                     onSelected: (selected) {

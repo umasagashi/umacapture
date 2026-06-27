@@ -43,15 +43,15 @@ class ListCard extends StatelessWidget {
         children: [
           if (title != null)
             ListTile(
-              // Header band: a neutral surfaceContainer role one step above the
-              // card surface, so the title strip reads as a subtle raised band.
-              // [titleColor] overrides this to call out attention-grabbing cards.
-              tileColor: titleColor ?? theme.colorScheme.surfaceContainerHigh,
+              // Header band: the tertiary role, so the title strip reads as a
+              // tinted accent band over the card surface. [titleColor] overrides
+              // this to call out attention-grabbing cards.
+              tileColor: titleColor ?? theme.colorScheme.tertiary,
               title: Text(
                 title!,
                 style: theme.textTheme.headlineSmall?.copyWith(
                   color: titleColor == null
-                      ? null
+                      ? theme.colorScheme.onTertiary
                       : (ThemeData.estimateBrightnessForColor(titleColor!) == Brightness.dark
                             ? Colors.white
                             : Colors.black),
@@ -555,18 +555,18 @@ class _CardDialogState extends ConsumerState<CardDialog> {
       child: Column(
         children: [
           ListTile(
-            tileColor: theme.colorScheme.primary,
+            tileColor: theme.colorScheme.tertiary,
             shape: Border(bottom: BorderSide(color: theme.dividerColor)),
             title: Text(
               widget.dialogTitle,
-              style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onPrimary),
+              style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onTertiary),
             ),
             trailing: widget.closeButtonTooltip == null
                 ? null
                 : Tooltip(
                     message: widget.closeButtonTooltip,
                     child: IconButton(
-                      icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onPrimary),
+                      icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onTertiary),
                       splashRadius: 24,
                       onPressed: () {
                         CardDialog.dismiss(ref.base);
@@ -629,21 +629,21 @@ class ExperimentalBanner extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.tertiaryContainer,
-        border: Border.all(color: theme.colorScheme.tertiary),
+        color: theme.colorScheme.tertiary,
+        border: Border.all(color: theme.colorScheme.secondary),
         borderRadius: BorderRadius.circular(8),
       ),
       padding: const EdgeInsets.all(12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Symbols.science_rounded, size: 20, color: theme.colorScheme.onTertiaryContainer),
+          Icon(Symbols.science_rounded, size: 20, color: theme.colorScheme.onTertiary),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               "common.experimental_warning".tr(),
               style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onTertiaryContainer,
+                color: theme.colorScheme.onTertiary,
                 fontWeight: FontWeight.bold,
               ),
             ),

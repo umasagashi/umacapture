@@ -374,7 +374,6 @@ class _FamilyRegistrationSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final counts = (FamilyRegistrationStatus.slotCount + 1).range().toList();
-    final theme = Theme.of(context);
     return FormGroup(
       title: Text("$tr_family_registration.selection.label".tr()),
       description: Text("$tr_family_registration.selection.description".tr()),
@@ -390,9 +389,6 @@ class _FamilyRegistrationSelector extends ConsumerWidget {
                 for (final count in counts)
                   FilterChip(
                     label: Text(_countLabel(count)),
-                    backgroundColor: !spec.predicate.rejects.contains(count)
-                        ? null
-                        : theme.colorScheme.surfaceContainerLow,
                     showCheckmark: false,
                     selected: !spec.predicate.rejects.contains(count),
                     onSelected: (selected) {
