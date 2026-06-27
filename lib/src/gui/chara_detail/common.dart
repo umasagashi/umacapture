@@ -14,35 +14,6 @@ import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 import '/src/gui/toast.dart';
 
-// ignore: constant_identifier_names
-const tr_common = "pages.chara_detail.column_predicate.common";
-
-class FormLine extends ConsumerWidget {
-  final Widget title;
-  final List<Widget> children;
-
-  const FormLine({super.key, required this.title, required this.children});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Align(
-        alignment: Alignment.topLeft,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Padding(padding: const EdgeInsets.only(right: 4), child: title),
-            ...children,
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class FormGroup extends ConsumerWidget {
   final Widget title;
   final Widget? description;
@@ -52,13 +23,20 @@ class FormGroup extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Heading: bold accent-colored title plus a full-width trailing rule. The
+        // group rule is full-strength while the per-row dividers are inset and
+        // faded, so the hierarchy reads as heading > items.
         Row(
           children: [
-            title,
-            const Expanded(child: Divider(indent: 8)),
+            DefaultTextStyle.merge(
+              style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
+              child: Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: title),
+            ),
+            Expanded(child: Divider(indent: 8, color: theme.colorScheme.outline)),
           ],
         ),
         if (description != null)
@@ -67,6 +45,56 @@ class FormGroup extends ConsumerWidget {
             child: Align(alignment: Alignment.topLeft, child: description),
           ),
         ...children,
+      ],
+    );
+  }
+}
+
+/// A single settings row laid out like a [ListTile], matching the global
+/// settings widgets (`SwitchWidget`, `DropdownButtonWidget`, `StepperWidget`).
+///
+/// Purely presentational: it takes an already-built [trailing] control so the
+/// column dialog's commit-on-OK fields keep their own local state, unlike the
+/// provider-bound settings widgets. The [trailing] is wrapped in
+/// `Align(widthFactor: 1)` exactly like those widgets so the control hugs the
+/// right edge. Use this in a [FormGroup] for rows whose control fits a single
+/// trailing slot (a switch, a stepper, a short field, or a small choice-chip
+/// set); full-width controls (sliders, large chip grids) go straight into the
+/// [FormGroup] instead.
+///
+/// A hairline [Divider] is drawn under the row so consecutive tiles read as a
+/// ruled list — this keeps the left label tied to its far-right control when the
+/// dialog is wide. It is deliberately inset and faded (lighter than the full-width
+/// [FormGroup] header rule) so the per-item separators stay subordinate to the
+/// group heading. Pass `divider: false` to drop it (e.g. a lone row in a group).
+class FormTile extends StatelessWidget {
+  final Widget title;
+  final Widget? description;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool divider;
+
+  const FormTile({super.key, required this.title, this.description, this.trailing, this.onTap, this.divider = true});
+
+  @override
+  Widget build(BuildContext context) {
+    final tile = ListTile(
+      title: title,
+      subtitle: description,
+      trailing: trailing == null ? null : Align(widthFactor: 1, child: trailing),
+      onTap: onTap,
+    );
+    if (!divider) {
+      return tile;
+    }
+    // Inset and faded relative to the full-strength group header rule, so item
+    // separators read as subordinate to the group heading.
+    final outlineVariant = Theme.of(context).colorScheme.outlineVariant;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        tile,
+        Divider(height: 1, indent: 32, endIndent: 32, color: outlineVariant.withValues(alpha: 0.5)),
       ],
     );
   }
@@ -433,6 +461,7 @@ class TagSelector extends ConsumerWidget {
 
 class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   final Widget title;
+  final Widget? description;
   final String prefix;
   final bool tooltip;
   final List<T> values;
@@ -444,6 +473,7 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
   const ChoiceFormLine({
     super.key,
     required this.title,
+    this.description,
     required this.prefix,
     this.tooltip = true,
     required this.values,
@@ -469,7 +499,17 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return FormLine(title: title, children: [for (final value in values) chip(context, ref, value)]);
+    return FormTile(
+      title: title,
+      description: description,
+      trailing: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        alignment: WrapAlignment.end,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [for (final value in values) chip(context, ref, value)],
+      ),
+    );
   }
 }
 

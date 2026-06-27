@@ -415,7 +415,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       modeText += "$sep${"$tr_factor.mode.element.label".tr()}: $count";
     }
 
-    modeText += "$sep${"$tr_factor.mode.element.value.star".tr()}: ${predicate.element.star}";
+    modeText += "$sep${"$tr_factor.mode.element.value.star.label".tr()}: ${predicate.element.star}";
 
     if (predicate.element.mode == FactorSearchElementMode.starAndCount) {
       modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
@@ -578,6 +578,7 @@ class _ModeSelector extends ConsumerWidget {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return ChoiceFormLine<FactorSetLogicMode>(
       title: Text("$tr_factor.mode.logic.label".tr()),
+      description: Text("$tr_factor.mode.logic.description".tr()),
       prefix: "$tr_factor.mode.logic",
       tooltip: false,
       values: FactorSetLogicMode.values,
@@ -595,6 +596,7 @@ class _ModeSelector extends ConsumerWidget {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return ChoiceFormLine<FactorSearchSubjectMode>(
       title: Text("$tr_factor.mode.subject.label".tr()),
+      description: Text("$tr_factor.mode.subject.description".tr()),
       prefix: "$tr_factor.mode.subject",
       tooltip: false,
       values: FactorSearchSubjectMode.values,
@@ -611,6 +613,7 @@ class _ModeSelector extends ConsumerWidget {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return ChoiceFormLine<FactorSearchElementMode>(
       title: Text("$tr_factor.mode.element.label".tr()),
+      description: Text("$tr_factor.mode.element.description".tr()),
       prefix: "$tr_factor.mode.element",
       tooltip: false,
       values: FactorSearchElementMode.values,
@@ -628,49 +631,47 @@ class _ModeSelector extends ConsumerWidget {
 
   Widget elementStarWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    return FormLine(
-      title: Text("$tr_factor.mode.element.value.star".tr()),
-      children: [
-        SpinBox(
-          height: 30,
-          min: 0,
-          max: predicate.starMaxLimit,
-          value: predicate.element.star,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(star: value)),
-              );
-            });
-          },
-        ),
-      ],
+    return FormTile(
+      title: Text("$tr_factor.mode.element.value.star.label".tr()),
+      description: Text("$tr_factor.mode.element.value.star.description".tr()),
+      trailing: SpinBox(
+        height: 30,
+        min: 0,
+        max: predicate.starMaxLimit,
+        value: predicate.element.star,
+        onChanged: (value) {
+          _clonedSpecProvider.update(ref, specId, (spec) {
+            return spec.copyWith(
+              predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(star: value)),
+            );
+          });
+        },
+      ),
     );
   }
 
   Widget elementCountWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    return FormLine(
+    return FormTile(
       title: Text("$tr_factor.mode.element.value.count.label".tr()),
-      children: [
-        Disabled(
-          disabled: predicate.element.mode == FactorSearchElementMode.starOnly,
-          tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
-          child: SpinBox(
-            height: 30,
-            min: 0,
-            max: predicate.countMaxLimit,
-            value: predicate.element.count,
-            onChanged: (value) {
-              _clonedSpecProvider.update(ref, specId, (spec) {
-                return spec.copyWith(
-                  predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(count: value)),
-                );
-              });
-            },
-          ),
+      description: Text("$tr_factor.mode.element.value.count.description".tr()),
+      trailing: Disabled(
+        disabled: predicate.element.mode == FactorSearchElementMode.starOnly,
+        tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
+        child: SpinBox(
+          height: 30,
+          min: 0,
+          max: predicate.countMaxLimit,
+          value: predicate.element.count,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(count: value)),
+              );
+            });
+          },
         ),
-      ],
+      ),
     );
   }
 
@@ -727,6 +728,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
     return ChoiceFormLine<FactorNotationMode>(
       title: Text("$tr_factor.notation.mode.label".tr()),
+      description: Text("$tr_factor.notation.mode.description".tr()),
       prefix: "$tr_factor.notation.mode",
       values: FactorNotationMode.values,
       selected: predicate.notation.mode,
@@ -742,45 +744,43 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
   Widget notationMaxWidget(WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
-    return FormLine(
+    return FormTile(
       title: Text("$tr_factor.notation.max.label".tr()),
-      children: [
-        SpinBox(
-          height: 30,
-          min: 0,
-          max: 100,
-          value: predicate.notation.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
-              );
-            });
-          },
-        ),
-      ],
+      description: Text("$tr_factor.notation.max.description".tr()),
+      trailing: SpinBox(
+        height: 30,
+        min: 0,
+        max: 100,
+        value: predicate.notation.max,
+        onChanged: (value) {
+          _clonedSpecProvider.update(ref, widget.specId, (spec) {
+            return spec.copyWith(
+              predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
+            );
+          });
+        },
+      ),
     );
   }
 
   Widget notationTitleWidget(WidgetRef ref) {
-    return FormLine(
-      title: Text("$tr_factor.notation.title.label".tr()),
-      children: [
-        DenseTextField(
-          initialText: title,
-          onChanged: (value) {
-            title = value;
-          },
-        ),
-      ],
+    return FormTile(
+      title: Text("$tr_common.notation.title.label".tr()),
+      description: Text("$tr_common.notation.title.description".tr()),
+      trailing: DenseTextField(
+        initialText: title,
+        onChanged: (value) {
+          title = value;
+        },
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_factor.notation.label".tr()),
-      description: Text("$tr_factor.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
         notationChoiceWidget(context, ref),
         notationMaxWidget(ref),

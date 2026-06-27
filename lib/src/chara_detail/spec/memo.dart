@@ -340,18 +340,17 @@ class _PatternSelectorState extends ConsumerState<_PatternSelector> {
       title: Text("$tr_memo.pattern.label".tr()),
       description: Text("$tr_memo.pattern.description".tr()),
       children: [
-        FormLine(
+        FormTile(
           title: Text("$tr_memo.pattern.regexp.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: predicate.pattern?.pattern ?? "",
-              allowEmpty: true,
-              hintText: ".*",
-              onChanged: (value) {
-                pattern = value;
-              },
-            ),
-          ],
+          description: Text("$tr_memo.pattern.regexp.description".tr()),
+          trailing: DenseTextField(
+            initialText: predicate.pattern?.pattern ?? "",
+            allowEmpty: true,
+            hintText: ".*",
+            onChanged: (value) {
+              pattern = value;
+            },
+          ),
         ),
       ],
     );
@@ -415,19 +414,18 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   @override
   Widget build(BuildContext context) {
     return FormGroup(
-      title: Text("$tr_memo.notation.label".tr()),
-      description: Text("$tr_memo.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
-        FormLine(
-          title: Text("$tr_memo.notation.title.label".tr()),
-          children: [
-            DenseTextField(
-              initialText: title,
-              onChanged: (value) {
-                title = value;
-              },
-            ),
-          ],
+        FormTile(
+          title: Text("$tr_common.notation.title.label".tr()),
+          description: Text("$tr_common.notation.title.description".tr()),
+          trailing: DenseTextField(
+            initialText: title,
+            onChanged: (value) {
+              title = value;
+            },
+          ),
         ),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

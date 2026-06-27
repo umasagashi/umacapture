@@ -390,6 +390,7 @@ class _ModeSelector extends ConsumerWidget {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
     return ChoiceFormLine<SkillSetLogicMode>(
       title: Text("$tr_skill.mode.label".tr()),
+      description: Text("$tr_skill.mode.description".tr()),
       prefix: "$tr_skill.mode",
       tooltip: false,
       values: SkillSetLogicMode.values,
@@ -405,25 +406,24 @@ class _ModeSelector extends ConsumerWidget {
 
   Widget minCountWidget(BuildContext context, WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, specId).predicate;
-    return FormLine(
+    return FormTile(
       title: Text("$tr_skill.mode.count.label".tr()),
-      children: [
-        Disabled(
-          disabled: predicate.logic != SkillSetLogicMode.sumOf,
-          tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
-          child: SpinBox(
-            height: 30,
-            min: 1,
-            max: predicate.query.length,
-            value: predicate.min,
-            onChanged: (value) {
-              _clonedSpecProvider.update(ref, specId, (spec) {
-                return spec.copyWith(predicate: spec.predicate.copyWith(min: value));
-              });
-            },
-          ),
+      description: Text("$tr_skill.mode.count.description".tr()),
+      trailing: Disabled(
+        disabled: predicate.logic != SkillSetLogicMode.sumOf,
+        tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
+        child: SpinBox(
+          height: 30,
+          min: 1,
+          max: predicate.query.length,
+          value: predicate.min,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(predicate: spec.predicate.copyWith(min: value));
+            });
+          },
         ),
-      ],
+      ),
     );
   }
 
@@ -471,37 +471,35 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
 
   Widget notationMaxWidget(WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
-    return FormLine(
+    return FormTile(
       title: Text("$tr_skill.notation.max.label".tr()),
-      children: [
-        SpinBox(
-          height: 30,
-          min: 0,
-          max: 100,
-          value: predicate.notation.max,
-          onChanged: (value) {
-            _clonedSpecProvider.update(ref, widget.specId, (spec) {
-              return spec.copyWith(
-                predicate: spec.predicate.copyWith(notation: SkillNotation(max: value)),
-              );
-            });
-          },
-        ),
-      ],
+      description: Text("$tr_skill.notation.max.description".tr()),
+      trailing: SpinBox(
+        height: 30,
+        min: 0,
+        max: 100,
+        value: predicate.notation.max,
+        onChanged: (value) {
+          _clonedSpecProvider.update(ref, widget.specId, (spec) {
+            return spec.copyWith(
+              predicate: spec.predicate.copyWith(notation: SkillNotation(max: value)),
+            );
+          });
+        },
+      ),
     );
   }
 
   Widget notationTitleWidget(WidgetRef ref) {
-    return FormLine(
-      title: Text("$tr_skill.notation.title.label".tr()),
-      children: [
-        DenseTextField(
-          initialText: title,
-          onChanged: (value) {
-            title = value;
-          },
-        ),
-      ],
+    return FormTile(
+      title: Text("$tr_common.notation.title.label".tr()),
+      description: Text("$tr_common.notation.title.description".tr()),
+      trailing: DenseTextField(
+        initialText: title,
+        onChanged: (value) {
+          title = value;
+        },
+      ),
     );
   }
 
@@ -509,8 +507,8 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   Widget build(BuildContext context) {
     final hiddenElements = _clonedSpecProvider.watch(ref, widget.specId).hiddenElements;
     return FormGroup(
-      title: Text("$tr_skill.notation.label".tr()),
-      description: Text("$tr_skill.notation.description".tr()),
+      title: Text("$tr_common.notation.label".tr()),
+      description: Text("$tr_common.notation.description".tr()),
       children: [
         if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationMaxWidget(ref),
         notationTitleWidget(ref),

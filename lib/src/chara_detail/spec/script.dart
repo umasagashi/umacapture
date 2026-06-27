@@ -1221,12 +1221,13 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
         const Padding(padding: EdgeInsets.symmetric(horizontal: 8), child: ExperimentalBanner()),
         const SizedBox(height: 16),
         FormGroup(
-          title: Text("$tr_script.notation.label".tr()),
-          description: Text("$tr_script.notation.description".tr()),
+          title: Text("$tr_common.notation.label".tr()),
+          description: Text("$tr_common.notation.description".tr()),
           children: [
-            FormLine(
-              title: Text("$tr_script.notation.title.label".tr()),
-              children: [DenseTextField(initialText: title, onChanged: (value) => title = value)],
+            FormTile(
+              title: Text("$tr_common.notation.title.label".tr()),
+              description: Text("$tr_common.notation.title.description".tr()),
+              trailing: DenseTextField(initialText: title, onChanged: (value) => title = value),
             ),
             ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
             ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
