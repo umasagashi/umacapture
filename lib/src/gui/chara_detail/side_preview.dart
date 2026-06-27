@@ -6,10 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
-import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/common.dart';
+import '/src/preference/settings_state.dart';
+import '/src/preference/storage_box.dart';
 
 // ignore: constant_identifier_names
 const tr_side_panel = "pages.chara_detail.preview.side_panel";
@@ -43,7 +44,7 @@ extension on CharaDetailRecordImageMode {
   };
 }
 
-/// Session-only UI state for the right-hand preview panel.
+/// UI state for the right-hand preview panel.
 ///
 /// `null` (in [sidePreviewProvider]) means the panel is closed; a non-null value
 /// means it is open. The panel does not store which record it shows — it follows
@@ -55,7 +56,28 @@ class SidePreviewState {
   const SidePreviewState({this.mode = CharaDetailRecordImageMode.skillPlain});
 }
 
-final sidePreviewProvider = settableNotifierProvider<SidePreviewState?>(null);
+final sidePreviewProvider = NotifierProvider<SidePreviewNotifier, SidePreviewState?>(SidePreviewNotifier.new);
+
+/// Holds the right preview panel's state and persists its open/closed flag across
+/// launches, like the left sidebar ([sidebarExtendedStateProvider]).
+///
+/// Only the open/closed flag is stored; the shown [SidePreviewState.mode] is
+/// session-only and resets to the default each launch. A fresh install (or any
+/// build predating this key) has no stored value, so the panel defaults to closed.
+class SidePreviewNotifier extends Notifier<SidePreviewState?> {
+  StorageEntry<bool>? _openEntry;
+
+  @override
+  SidePreviewState? build() {
+    _openEntry = StorageEntry<bool>(box: ref.watch(storageBoxProvider), key: SettingsEntryKey.sidePreviewOpen.name);
+    return (_openEntry?.pull() ?? false) ? const SidePreviewState() : null;
+  }
+
+  void set(SidePreviewState? value) {
+    state = value;
+    _openEntry?.push(value != null);
+  }
+}
 
 /// The left-to-right order the panel's image (mode) switches through:
 /// skill ⇔ factor (inheritance) ⇔ campaign (training info).

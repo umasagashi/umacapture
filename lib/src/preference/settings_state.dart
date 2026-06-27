@@ -6,6 +6,8 @@ enum SettingsEntryKey {
   themeMode,
   fontBold,
   sidebarExtended,
+  sidePreviewOpen,
+  sidePreviewWidth,
   autoStartCapture,
   autoCopyClipboard,
   clipboardPasteImageMode,
