@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/utils.dart';
@@ -7,8 +8,8 @@ import '/src/gui/theme_extensions.dart';
 
 /// A debug-only inspector and the single source of truth for the app's palette.
 ///
-/// Renders the full `ColorScheme` role set (roles the app never references are
-/// shown dimmed with a "not used" note), the `ThemeData` colors, the role-based
+/// Renders the full `ColorScheme` role set (roles the app never references keep
+/// their normal swatch but carry a "not used" note), the `ThemeData` colors, the role-based
 /// translucent composites resolved over the real background they are painted on,
 /// and the custom `ThemeExtension` tokens (`AppSemanticColors`, `AppChartColors`,
 /// `CodeHighlightColors`). Each swatch is annotated with a short description of
@@ -61,6 +62,18 @@ String _hex(Color color) {
 Color _contrastOn(Color background) =>
     ThemeData.estimateBrightnessForColor(background) == Brightness.dark ? Colors.white : Colors.black;
 
+/// Wraps a swatch so tapping it copies [name] to the clipboard, and shows a
+/// click cursor on hover.
+Widget _copyable(String name, Widget child) {
+  return MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      onTap: () => Clipboard.setData(ClipboardData(text: name)),
+      child: child,
+    ),
+  );
+}
+
 /// A solid swatch showing a color's label and resolved hex.
 class _Swatch extends StatelessWidget {
   final String label;
@@ -72,28 +85,27 @@ class _Swatch extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final foreground = onColor ?? _contrastOn(color);
-    return Container(
-      width: 168,
-      height: 64,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Theme.of(context).dividerColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: foreground, fontWeight: FontWeight.bold, fontSize: 12),
+    return _copyable(
+      label,
+      Container(
+        width: 168,
+        height: 64,
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: foreground, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
             ),
-          ),
-          Text(_hex(color), style: TextStyle(color: foreground, fontSize: 11)),
-        ],
+            Text(_hex(color), style: TextStyle(color: foreground, fontSize: 11)),
+          ],
+        ),
       ),
     );
   }
@@ -115,46 +127,45 @@ class _BlendSwatch extends StatelessWidget {
     final composite = Color.alphaBlend(overlay, base);
     final foreground = _contrastOn(composite);
     final alphaPct = (overlay.a * 100).round();
-    return Container(
-      width: 168,
-      height: 64,
-      decoration: BoxDecoration(
-        color: composite,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Theme.of(context).dividerColor),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Row(
-        children: [
-          SizedBox(
-            width: 34,
-            height: 64,
-            child: CustomPaint(
-              painter: const _CheckerPainter(),
-              child: ColoredBox(color: overlay),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: foreground, fontWeight: FontWeight.bold, fontSize: 12),
-                    ),
-                  ),
-                  Text('$alphaPct% / $baseLabel', style: TextStyle(color: foreground, fontSize: 10)),
-                  Text(_hex(composite), style: TextStyle(color: foreground, fontSize: 11)),
-                ],
+    return _copyable(
+      label,
+      Container(
+        width: 168,
+        height: 64,
+        decoration: BoxDecoration(color: composite, borderRadius: BorderRadius.circular(8)),
+        clipBehavior: Clip.antiAlias,
+        child: Row(
+          children: [
+            SizedBox(
+              width: 34,
+              height: 64,
+              child: CustomPaint(
+                painter: const _CheckerPainter(),
+                child: ColoredBox(color: overlay),
               ),
             ),
-          ),
-        ],
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: foreground, fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                    ),
+                    Text('$alphaPct% / $baseLabel', style: TextStyle(color: foreground, fontSize: 10)),
+                    Text(_hex(composite), style: TextStyle(color: foreground, fontSize: 11)),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -201,7 +212,9 @@ class _SwatchRow extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Opacity(opacity: unused ? 0.45 : 1, child: swatch),
+          // Unused roles render at full color (only the description marks them
+          // "not used"), so the swatch stays readable for the palette review.
+          swatch,
           const SizedBox(width: 12),
           Expanded(
             child: Padding(
@@ -297,7 +310,7 @@ class _ColorSchemeSection extends StatelessWidget {
           _roleUsages[name] ?? _unusedNote(name),
           unused: !_roleUsages.containsKey(name),
         ),
-    ], note: 'FlexScheme.blue + surface blend. Dimmed rows are unused roles.');
+    ], note: 'FlexScheme.blue + surface blend. Rows marked "not used" are unreferenced roles.');
   }
 }
 
@@ -465,35 +478,40 @@ class _CodeHighlightSection extends StatelessWidget {
 // Snapshot of what each ColorScheme role is used for in the app. Derived from a
 // scan of `lib/`; re-check if relied upon for a refactor.
 const Map<String, String> _roleUsages = {
-  'primary': 'Brand accent: dialog header bands, selected tag chips, button outlines, data-table accents, progress.',
-  'onPrimary': 'Text and icons drawn on primary surfaces (dialog headers, selected chips).',
+  'primary': 'Brand accent: add-column button, drag/slot accents, data-table accents, progress.',
+  'onPrimary': 'Text and icons on primary fills (add-column button, data-table accents).',
   'primaryContainer':
-      'Tint source and light accent fills: surface-tint tokens, tag/stat/table-row tints, chara-detail panels.',
-  'secondaryContainer': 'Subtle highlight backgrounds: capture info panel, dashboard, data-table, tag chips.',
+      'Light accent fills: selected filter/choice chips (global chipTheme); NoteCard, logic-column and '
+      'column-builder group borders; character avatar; table/stat accents.',
+  'secondaryContainer':
+      'Subtle highlight backgrounds: capture info panel, dashboard, data-table; tag chip drag highlight.',
   'onSecondaryContainer': 'Text on secondaryContainer (capture info panel).',
-  'tertiary': 'Special-emphasis accents in the script column.',
-  'tertiaryContainer': 'Tertiary badge background.',
-  'onTertiaryContainer': 'Text on tertiary badges.',
+  'secondary': 'Accent text: script cost / zero-record warnings; experimental-warning card border.',
+  'tertiary': 'Card and dialog header band (ListCard, CardDialog) and the experimental-warning card background.',
+  'onTertiary': 'Text and icons on the card/dialog header band and the experimental-warning card.',
   'error': 'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs, task failures.',
   'onError': 'Text and icons on error surfaces.',
   'errorContainer': 'Error/warning card and chip backgrounds.',
   'onErrorContainer': 'Text and icons on errorContainer backgrounds.',
-  'surface': 'Base backgrounds: data-table, window chrome, side preview.',
+  'surface': 'Base backgrounds: card surfaces (global cardTheme), data-table, window chrome, side preview, script.',
   'onSurface': 'Default body text and icon color.',
   'onSurfaceVariant': 'Secondary text: setting descriptions, captions, muted labels.',
-  'surfaceContainerLow': 'Low-contrast card/panel backgrounds (chara-detail, family, script, labels); stat card body.',
-  'surfaceContainer': 'Panel backgrounds (addon list, side preview); striped table/script rows.',
-  'surfaceContainerHigh': 'ListCard header band.',
-  'surfaceContainerHighest': 'Raised backgrounds: input fields, module-update, column builder, statistics.',
+  'surfaceContainerLowest':
+      'Pale water-blue tint: NoteCard / logic-column / column-builder group backgrounds, table odd rows.',
+  'surfaceContainerLow': 'Script name-copy chips and the statistics chart panel; recolored to a pale water-blue tint.',
+  'surfaceContainer': 'Panel backgrounds (addon list, side preview); striped script rows.',
+  'surfaceContainerHigh': 'Chip backgrounds (global chipTheme) and the page background (scaffold).',
+  'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',
   'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame.',
+  'scrim': 'Dim backdrop behind modal dialogs (DialogLayer).',
   'onInverseSurface': 'Text on the inverse surface (column builder dialog).',
 };
 
 const Map<String, String> _themeDataUsages = {
-  'scaffoldBackground': 'Page background; one end of the ListCard header blend.',
-  'cardColor': 'Card backgrounds (license page) and the ListCard header blend.',
+  'scaffoldBackground': 'Page background behind cards and content.',
+  'cardColor': 'Card background on the license page (Card with an explicit cardColor).',
   'dividerColor': 'Divider and border lines (dialog frames, table borders).',
-  'shadowColor': 'Source color for the modal scrim overlay.',
+  'shadowColor': 'Elevation shadow color for raised Material surfaces (cards, dialogs).',
   'disabledColor': 'Disabled-state elements (data-table, family registration, script).',
   'hintColor': 'Input placeholders and hints (task dialog, column builder, script).',
 };

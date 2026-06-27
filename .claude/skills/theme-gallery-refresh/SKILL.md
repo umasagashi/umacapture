@@ -1,13 +1,13 @@
 ---
 name: theme-gallery-refresh
 description: >-
-  Refresh the in-app debug theme gallery (lib/src/gui/theme_gallery.dart) so it
-  matches the current code. Use when the user wants to update, regenerate, or
-  re-sync the theme/color gallery, after colors are added/removed/recolored, or
-  when the gallery's swatches, usage descriptions, "used vs unused" marks, or
-  translucent-composite list have gone stale. Rescans lib/ for ColorScheme role
-  usage, hardcoded color literals, and alpha/blend sites, then updates the
-  gallery's data tables and relaunches the app to verify.
+  Use after ANY UI under lib/ is added or changed — new widgets, screens, or
+  dialogs; restyled or recolored components; added, removed, or recolored colors;
+  new ColorScheme roles, ThemeExtension tokens, or translucent/alpha composites.
+  Treat this as mandatory whenever a change touches the UI, so the in-app debug
+  theme gallery never drifts from the code. Also use when the user asks to update,
+  regenerate, or re-sync the theme/color gallery, or when its swatches, usage
+  descriptions, "used vs unused" marks, or translucent-composite list look stale.
 ---
 
 # Refreshing the theme gallery
@@ -26,8 +26,10 @@ file.
 
 1. `_roleUsages` — map of `ColorScheme` role → one-line description of what it is
    used for. Its **keys also decide which roles count as "used"**: a role absent
-   from the map renders dimmed with a "not used" note (`_unusedNote`). So adding
-   first/last use of a role changes both its description and its used/unused mark.
+   from the map keeps its normal swatch but carries a "not used" note
+   (`_unusedNote`) — the swatch is **not** dimmed, so the color stays readable. So
+   adding first/last use of a role changes both its description and its
+   used/unused mark.
 2. `_themeDataUsages` — same idea for `ThemeData` colors (dividerColor, etc.).
 3. The hand-written entries in `_BlendSection` (translucent composites) — each
    lists an overlay/base and a usage description.
@@ -57,7 +59,8 @@ themselves when `lib/src/gui/theme_extensions.dart` changes).
      entry. Roles **new** to the scan need an entry (write a concrete, one-line
      "what it's used for" description — read the cited files to phrase it, do not
      guess). Roles that **dropped out** of the scan should be removed from
-     `_roleUsages` so they flip to the dimmed "not used" state.
+     `_roleUsages` so they flip to the "not used" state (note only; the swatch
+     keeps its normal color).
    - Same for `_themeDataUsages` vs the "ThemeData colors" block.
    - Cross-check `_BlendSection` against the "Translucent / blend sites" block:
      add swatches for new `withValues(alpha:)` / `alphaBlend` overlays, drop ones
@@ -100,6 +103,7 @@ themselves when `lib/src/gui/theme_extensions.dart` changes).
   is not needed.
 - The gallery is `kDebugMode`-only; it never ships in release builds.
 - Keep the descriptions terse and concrete. If a role/literal is genuinely unused,
-  let it fall through to the dimmed "not used" state rather than inventing a use.
+  let it fall through to the "not used" state (a note, not a dimmed swatch) rather
+  than inventing a use.
 - The scanner deliberately skips `theme_gallery.dart` itself and generated files
   (`*.g.dart`, `*.gr.dart`, `*.mapper.dart`).
