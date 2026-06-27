@@ -21,6 +21,7 @@ import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/storage_settings.dart';
+import '/src/gui/theme_gallery.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
 
@@ -471,14 +472,43 @@ class AboutGroup extends ConsumerWidget {
   }
 }
 
+/// Debug-only settings group. Hidden in release builds; hosts developer tools
+/// such as the theme color gallery used for the ongoing theme review.
+class DebugSettingsGroup extends ConsumerWidget {
+  const DebugSettingsGroup({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: 'Debug',
+      padding: EdgeInsets.zero,
+      children: [
+        ListTile(
+          title: const Text('Theme gallery'),
+          subtitle: const Text('Inspect the live ColorScheme, tokens, and hardcoded colors as swatches.'),
+          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.palette_rounded)),
+          onTap: () => ThemeGalleryDialog.show(ref.base),
+        ),
+      ],
+    );
+  }
+}
+
 @RoutePage()
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return const ListTilePageRootWidget(
-      children: [StyleSettingsGroup(), CaptureSettingsGroup(), SystemGroup(), PrivacySettingsGroup(), AboutGroup()],
+    return ListTilePageRootWidget(
+      children: [
+        const StyleSettingsGroup(),
+        const CaptureSettingsGroup(),
+        const SystemGroup(),
+        const PrivacySettingsGroup(),
+        const AboutGroup(),
+        if (kDebugMode) const DebugSettingsGroup(),
+      ],
     );
   }
 }
