@@ -277,6 +277,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
           description: Text("$tr_common.notation.title.description".tr()),
           trailing: DenseTextField(
             initialText: title,
+            minWidth: 140,
             onChanged: (value) {
               title = value;
             },

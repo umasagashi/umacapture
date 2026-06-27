@@ -262,7 +262,7 @@ class _ColumnSpecDialogState extends ConsumerState<ColumnSpecDialog> {
                   Tooltip(
                     message: "$tr_chara_detail.column_predicate.dialog.reset_button.tooltip".tr(),
                     child: OutlinedButton.icon(
-                      icon: const Icon(Symbols.filter_alt_off_rounded),
+                      icon: const Icon(Symbols.settings_backup_restore_rounded),
                       label: Text("$tr_chara_detail.column_predicate.dialog.reset_button.label".tr()),
                       onPressed: () {
                         // Flush the deferred fields (title/visibility/description) into the

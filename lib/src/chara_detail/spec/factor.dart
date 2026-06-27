@@ -634,8 +634,7 @@ class _ModeSelector extends ConsumerWidget {
     return FormTile(
       title: Text("$tr_factor.mode.element.value.star.label".tr()),
       description: Text("$tr_factor.mode.element.value.star.description".tr()),
-      trailing: SpinBox(
-        height: 30,
+      trailing: IntStepperField(
         min: 0,
         max: predicate.starMaxLimit,
         value: predicate.element.star,
@@ -658,8 +657,7 @@ class _ModeSelector extends ConsumerWidget {
       trailing: Disabled(
         disabled: predicate.element.mode == FactorSearchElementMode.starOnly,
         tooltip: "$tr_factor.mode.element.value.count.disabled_tooltip".tr(),
-        child: SpinBox(
-          height: 30,
+        child: IntStepperField(
           min: 0,
           max: predicate.countMaxLimit,
           value: predicate.element.count,
@@ -747,8 +745,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     return FormTile(
       title: Text("$tr_factor.notation.max.label".tr()),
       description: Text("$tr_factor.notation.max.description".tr()),
-      trailing: SpinBox(
-        height: 30,
+      trailing: IntStepperField(
         min: 0,
         max: 100,
         value: predicate.notation.max,
@@ -769,6 +766,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       description: Text("$tr_common.notation.title.description".tr()),
       trailing: DenseTextField(
         initialText: title,
+        minWidth: 140,
         onChanged: (value) {
           title = value;
         },

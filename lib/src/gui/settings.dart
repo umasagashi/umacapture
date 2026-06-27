@@ -73,6 +73,9 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
 
   final ExclusiveItemsNotifierProvider<T> provider;
 
+  /// Text style for the selected-value label. Null keeps the default size.
+  final TextStyle? style;
+
   const DropdownButtonWidget({
     super.key,
     required this.title,
@@ -80,6 +83,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
     required this.name,
     this.tooltip,
     required this.provider,
+    this.style,
   });
 
   @override
@@ -114,7 +118,7 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
           decoration: BoxDecoration(
             border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
           ),
-          child: Text(name(current)),
+          child: Text(name(current), style: style),
         ),
       ),
       onTap: () => ref.read(provider.notifier).next(),
@@ -143,9 +147,10 @@ class SwitchWidget extends ConsumerWidget {
   }
 }
 
-/// A compact −/value/+ stepper bound to an [IntNotifierProvider], clamped to
-/// [min]..[max] (the buttons disable at the bounds). Mirrors [SwitchWidget]'s
-/// shape for use in the same settings groups.
+/// A compact −/value/+ spinbox bound to an [IntNotifierProvider], clamped to
+/// [min]..[max] (the buttons disable at the bounds). The value is also directly
+/// editable via the shared [IntStepperField]. Mirrors [SwitchWidget]'s shape for
+/// use in the same settings groups.
 class StepperWidget extends ConsumerWidget {
   final Widget title;
   final Widget description;
@@ -165,31 +170,12 @@ class StepperWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final value = ref.watch(provider);
-    final notifier = ref.read(provider.notifier);
     return ListTile(
       title: title,
       subtitle: description,
       trailing: Align(
         widthFactor: 1,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              icon: const Icon(Symbols.remove_rounded),
-              visualDensity: VisualDensity.compact,
-              onPressed: value <= min ? null : notifier.decrement,
-            ),
-            SizedBox(
-              width: 24,
-              child: Text("$value", textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleMedium),
-            ),
-            IconButton(
-              icon: const Icon(Symbols.add_rounded),
-              visualDensity: VisualDensity.compact,
-              onPressed: value >= max ? null : notifier.increment,
-            ),
-          ],
-        ),
+        child: IntStepperField(value: value, min: min, max: max, onChanged: ref.read(provider.notifier).set),
       ),
     );
   }

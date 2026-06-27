@@ -1227,7 +1227,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
             FormTile(
               title: Text("$tr_common.notation.title.label".tr()),
               description: Text("$tr_common.notation.title.description".tr()),
-              trailing: DenseTextField(initialText: title, onChanged: (value) => title = value),
+              trailing: DenseTextField(initialText: title, minWidth: 140, onChanged: (value) => title = value),
             ),
             ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
             ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),

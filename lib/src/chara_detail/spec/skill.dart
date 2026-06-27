@@ -412,8 +412,7 @@ class _ModeSelector extends ConsumerWidget {
       trailing: Disabled(
         disabled: predicate.logic != SkillSetLogicMode.sumOf,
         tooltip: "$tr_skill.mode.count.disabled_tooltip".tr(),
-        child: SpinBox(
-          height: 30,
+        child: IntStepperField(
           min: 1,
           max: predicate.query.length,
           value: predicate.min,
@@ -474,8 +473,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     return FormTile(
       title: Text("$tr_skill.notation.max.label".tr()),
       description: Text("$tr_skill.notation.max.description".tr()),
-      trailing: SpinBox(
-        height: 30,
+      trailing: IntStepperField(
         min: 0,
         max: 100,
         value: predicate.notation.max,
@@ -496,6 +494,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       description: Text("$tr_common.notation.title.description".tr()),
       trailing: DenseTextField(
         initialText: title,
+        minWidth: 140,
         onChanged: (value) {
           title = value;
         },

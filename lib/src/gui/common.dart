@@ -3,6 +3,7 @@ import 'package:feedback_sentry/feedback_sentry.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -198,85 +199,113 @@ class ErrorMessageWidget extends StatelessWidget {
   }
 }
 
-class SpinBox extends StatefulWidget {
+/// A −/value/+ spinbox with an editable, digits-only centre field, clamped to
+/// [min]..[max] (the buttons disable at the bounds).
+///
+/// Presentational: the parent owns the value and is notified of edits via
+/// [onChanged]; typing a number and submitting (or unfocusing) commits it,
+/// snapping invalid, empty, or out-of-range input back to a clamped value.
+/// Shared by the provider-bound settings `StepperWidget` and the column-customize
+/// dialogs so numeric inputs look and behave identically everywhere.
+class IntStepperField extends StatefulWidget {
+  final int value;
   final int min;
   final int max;
-  final int value;
   final ValueChanged<int> onChanged;
-  final double width;
-  final double? height;
-  final bool use10;
+  final double fieldWidth;
 
-  const SpinBox({
+  const IntStepperField({
     super.key,
+    required this.value,
     required this.min,
     required this.max,
-    required this.value,
     required this.onChanged,
-    this.width = 48,
-    this.height,
-    bool? use10,
-  }) : use10 = use10 ?? max > 10;
+    this.fieldWidth = 44,
+  });
 
   @override
-  State<StatefulWidget> createState() => _SpinBoxState();
+  State<IntStepperField> createState() => _IntStepperFieldState();
 }
 
-class _SpinBoxState extends State<SpinBox> {
-  late int _value;
+class _IntStepperFieldState extends State<IntStepperField> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  int get _clampedValue => Math.clamp(widget.min, widget.value, widget.max);
 
   @override
   void initState() {
     super.initState();
-    _value = widget.value;
+    _controller = TextEditingController(text: "$_clampedValue");
+    _focusNode = FocusNode();
+    // Commit when focus leaves the field (e.g. clicking elsewhere), not only on
+    // the Enter key, so a typed-but-unsubmitted value is not silently dropped.
+    _focusNode.addListener(() {
+      if (!_focusNode.hasFocus) {
+        _commit();
+      }
+    });
   }
 
   @override
-  void didUpdateWidget(SpinBox oldWidget) {
+  void didUpdateWidget(IntStepperField oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.value != oldWidget.value) {
-      _value = Math.clamp(widget.min, widget.value, widget.max);
+    // Sync the field when the value changes externally (the −/+ buttons or a
+    // parent rebuild), but never while the user is mid-edit.
+    if (!_focusNode.hasFocus && _controller.text != "$_clampedValue") {
+      _controller.text = "$_clampedValue";
     }
   }
 
-  Widget button(ThemeData theme, String text, int offset) {
-    return TextButton(
-      style: OutlinedButton.styleFrom(
-        backgroundColor: theme.colorScheme.primaryContainer,
-        padding: EdgeInsets.zero,
-        visualDensity: VisualDensity.compact,
-      ),
-      onPressed: () {
-        setState(() {
-          _value = Math.clamp(widget.min, _value + offset, widget.max);
-          widget.onChanged(_value);
-        });
-      },
-      child: Text(text, style: const TextStyle(fontSize: 12)),
-    );
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _emit(int value) => widget.onChanged(Math.clamp(widget.min, value, widget.max));
+
+  void _commit() {
+    final parsed = int.tryParse(_controller.text);
+    if (parsed != null) {
+      _emit(parsed);
+    }
+    // Snap the field back to a valid number for invalid, empty, or out-of-range
+    // input.
+    _controller.text = "$_clampedValue";
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SizedBox(
-      height: widget.height,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          if (widget.use10) ...[button(theme, "-10", -10), const SizedBox(width: 4)],
-          button(theme, "-1", -1),
-          Container(
-            constraints: BoxConstraints(minWidth: widget.width),
-            alignment: Alignment.center,
-            child: Text(_value.toString(), style: const TextStyle(fontSize: 16)),
+    final value = _clampedValue;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Symbols.remove_rounded),
+          visualDensity: VisualDensity.compact,
+          onPressed: value <= widget.min ? null : () => _emit(value - 1),
+        ),
+        SizedBox(
+          width: widget.fieldWidth,
+          child: TextField(
+            controller: _controller,
+            focusNode: _focusNode,
+            textAlign: TextAlign.center,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: Theme.of(context).textTheme.titleMedium,
+            decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(vertical: 4)),
+            onSubmitted: (_) => _commit(),
           ),
-          button(theme, "+1", 1),
-          if (widget.use10) ...[const SizedBox(width: 4), button(theme, "+10", 10)],
-        ],
-      ),
+        ),
+        IconButton(
+          icon: const Icon(Symbols.add_rounded),
+          visualDensity: VisualDensity.compact,
+          onPressed: value >= widget.max ? null : () => _emit(value + 1),
+        ),
+      ],
     );
   }
 }

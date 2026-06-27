@@ -87,16 +87,24 @@ class FormTile extends StatelessWidget {
     if (!divider) {
       return tile;
     }
-    // Inset and faded relative to the full-strength group header rule, so item
-    // separators read as subordinate to the group heading.
+    return Column(mainAxisSize: MainAxisSize.min, children: [tile, const FormTileDivider()]);
+  }
+}
+
+/// The hairline rule drawn under each [FormTile] row.
+///
+/// Inset and faded relative to the full-strength [FormGroup] header rule, so
+/// item separators read as subordinate to the group heading. Exposed so rows
+/// that are not [FormTile]s (e.g. the provider-bound settings widgets reused in
+/// the table-settings dialog) can interleave the same separator for a consistent
+/// ruled-list look.
+class FormTileDivider extends StatelessWidget {
+  const FormTileDivider({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     final outlineVariant = Theme.of(context).colorScheme.outlineVariant;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        tile,
-        Divider(height: 1, indent: 32, endIndent: 32, color: outlineVariant.withValues(alpha: 0.5)),
-      ],
-    );
+    return Divider(height: 1, indent: 32, endIndent: 32, color: outlineVariant.withValues(alpha: 0.5));
   }
 }
 
@@ -114,6 +122,10 @@ class DenseTextField extends ConsumerStatefulWidget {
   /// still grows with longer input.
   final double? minWidth;
 
+  /// Text style for the input. Null falls back to the theme's `titleSmall`, so
+  /// the dialog's free-text fields match the dropdowns' size by default.
+  final TextStyle? style;
+
   const DenseTextField({
     super.key,
     this.initialText,
@@ -123,6 +135,7 @@ class DenseTextField extends ConsumerStatefulWidget {
     this.allowEmpty = false,
     this.hintText,
     this.minWidth,
+    this.style,
   }) : assert((initialText == null) != (controller == null));
 
   @override
@@ -153,6 +166,7 @@ class DenseTextFieldState extends ConsumerState<DenseTextField> {
     Widget field = IntrinsicWidth(
       child: TextFormField(
         controller: controller,
+        style: widget.style ?? Theme.of(context).textTheme.titleSmall,
         decoration: InputDecoration(
           isDense: true,
           isCollapsed: true,
@@ -195,7 +209,7 @@ class NoteCard extends ConsumerWidget {
     final baseColor = color ?? theme.colorScheme.primaryContainer;
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerLowest,
+        color: theme.colorScheme.surfaceBright,
         border: Border.all(color: baseColor),
         borderRadius: BorderRadius.circular(8),
       ),
@@ -482,33 +496,58 @@ class ChoiceFormLine<T extends Enum> extends ConsumerWidget {
     required this.onSelected,
   });
 
-  Widget chip(BuildContext context, WidgetRef ref, T value) {
-    final isDisabled = disabled?.contains(value) ?? false;
-    final isSelected = value == selected;
-    return Disabled(
-      disabled: isDisabled,
-      tooltip: isDisabled ? "$prefix.${value.name.snakeCase}.disabled_tooltip".tr() : "",
-      child: ChoiceChip(
-        label: Text("$prefix.${value.name.snakeCase}.label".tr()),
-        tooltip: tooltip ? "$prefix.${value.name.snakeCase}.tooltip".tr() : "",
-        selected: isSelected,
-        onSelected: (_) => onSelected(value),
-      ),
-    );
-  }
+  String _label(T value) => "$prefix.${value.name.snakeCase}.label".tr();
+
+  String _tooltip(T value) => "$prefix.${value.name.snakeCase}.tooltip".tr();
+
+  String _disabledTooltip(T value) => "$prefix.${value.name.snakeCase}.disabled_tooltip".tr();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final disabledSet = disabled ?? const {};
+    // When every option is disabled the whole control is inert (e.g. the
+    // logic mode while a single item is selected); show it greyed with the
+    // selected option's disabled tooltip, matching the former chip behaviour.
+    final allDisabled = values.isNotEmpty && values.every(disabledSet.contains);
+    // A single-select dropdown mirroring the settings DropdownButtonWidget: the
+    // current label sits in a bottom-bordered box that opens a popup menu.
+    final button = PopupMenuButton<T>(
+      tooltip: "",
+      enabled: !allDisabled,
+      initialValue: selected,
+      itemBuilder: (context) => [
+        for (final value in values)
+          PopupMenuItem<T>(
+            value: value,
+            enabled: !disabledSet.contains(value),
+            child: SizedBox(
+              width: double.infinity,
+              child: tooltip ? Tooltip(message: _tooltip(value), child: Text(_label(value))) : Text(_label(value)),
+            ),
+          ),
+      ],
+      onSelected: (value) => onSelected(value),
+      // No `alignment` here: a Container with an alignment expands to fill the
+      // parent's bounded constraints, which would make the ListTile trailing
+      // consume the whole tile width. Centring is done via the Text instead, and
+      // the minWidth lives on the Text so the box still grows with longer labels.
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 100),
+          child: Text(_label(selected), textAlign: TextAlign.center, style: theme.textTheme.titleSmall),
+        ),
+      ),
+    );
     return FormTile(
       title: title,
       description: description,
-      trailing: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        alignment: WrapAlignment.end,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [for (final value in values) chip(context, ref, value)],
-      ),
+      trailing: allDisabled ? Disabled(disabled: true, tooltip: _disabledTooltip(selected), child: button) : button,
     );
   }
 }

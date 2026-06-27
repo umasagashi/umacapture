@@ -259,6 +259,9 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
     final tintedScheme = scheme.copyWith(
       surfaceContainerLowest: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.65),
       surfaceContainerLow: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.45),
+      // An even paler tint than surfaceContainerLowest (further lightened toward
+      // surface), used as the subtle fill behind outlined NoteCard groups.
+      surfaceBright: Color.lerp(scheme.secondaryContainer, scheme.surface, 0.82),
       // Role consolidation (frees the now-unused tertiaryContainer /
       // onTertiaryContainer names). Values are preserved, only the role they live
       // under changes: secondary absorbs the old tertiary accent (script column),
