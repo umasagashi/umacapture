@@ -24,6 +24,7 @@ import '/src/gui/chara_detail/code_highlight_field.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
 
 part 'script.mapper.dart';
@@ -688,7 +689,7 @@ class _ScriptCell extends StatelessWidget {
     if (result.error != null) {
       return Tooltip(
         message: result.error!,
-        child: const Icon(Symbols.error_rounded, size: 18, color: Colors.orange),
+        child: Icon(Symbols.error_rounded, size: 18, color: Theme.of(context).semantic.warning),
       );
     }
     final iconData = result.icon == null ? null : _iconMap[result.icon!];

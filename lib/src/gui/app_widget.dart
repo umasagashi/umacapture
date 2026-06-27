@@ -17,6 +17,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/window_manager_alt.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
@@ -261,8 +262,14 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
 
   ThemeData modifyTheme(WidgetRef ref, ThemeData base) {
     final offset = ref.watch(fontBoldSettingProvider) ? 3 : 0;
+    final isLight = base.colorScheme.brightness == Brightness.light;
     return base.copyWith(
       colorScheme: tintSurfaceContainers(base.colorScheme),
+      extensions: <ThemeExtension<dynamic>>[
+        isLight ? AppSemanticColors.light(base.colorScheme) : AppSemanticColors.dark(base.colorScheme),
+        AppChartColors.standard(),
+        isLight ? CodeHighlightColors.light() : CodeHighlightColors.dark(),
+      ],
       tooltipTheme: base.tooltipTheme.copyWith(
         textStyle: modifyFontWeight(base.tooltipTheme.textStyle, offset),
         waitDuration: const Duration(milliseconds: 100),

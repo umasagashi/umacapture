@@ -26,6 +26,7 @@ import '/src/gui/chara_detail/regenerate_record_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
@@ -1113,8 +1114,8 @@ typedef _SelectionStyle = ({Color color, Color onColor, IconData icon, String ro
 extension _SelectionPurposeStyle on SelectionPurpose {
   _SelectionStyle style(ThemeData theme) => switch (this) {
     SelectionPurpose.archive => (
-      color: Colors.amber,
-      onColor: Colors.black87,
+      color: theme.semantic.noticeContainer,
+      onColor: theme.semantic.onNoticeContainer,
       icon: Symbols.archive_rounded,
       rowLabelKey: "$tr_chara_detail.archive_records.row_overlay",
       actionLabelKey: "$tr_chara_detail.archive_records.overlay.archive",

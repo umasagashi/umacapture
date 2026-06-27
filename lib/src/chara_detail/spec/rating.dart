@@ -18,6 +18,7 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 
 part 'rating.mapper.dart';
 
@@ -291,7 +292,12 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                   });
                 },
                 itemBuilder: (BuildContext context, int index) {
-                  return const Icon(Symbols.star_rate_rounded, color: Colors.amber, weight: 400, fill: 1);
+                  return Icon(
+                    Symbols.star_rate_rounded,
+                    color: Theme.of(context).semantic.ratingAccent,
+                    weight: 400,
+                    fill: 1,
+                  );
                 },
               ),
               const SizedBox(height: 8),
@@ -387,7 +393,12 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
               }
             },
             itemBuilder: (BuildContext context, int index) {
-              return const Icon(Symbols.star_rate_rounded, color: Colors.amber, weight: 400, fill: 1);
+              return Icon(
+                Symbols.star_rate_rounded,
+                color: Theme.of(context).semantic.ratingAccent,
+                weight: 400,
+                fill: 1,
+              );
             },
           ),
         ),

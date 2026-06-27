@@ -17,6 +17,7 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/report_screen_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 
@@ -150,14 +151,14 @@ class _ScrollStateWidget extends ConsumerWidget {
 
   const _ScrollStateWidget({required this.header, required this.progress, required this.disable});
 
-  Color _progressColor() {
+  Color _progressColor(AppSemanticColors semantic) {
     if (disable) {
-      return Colors.grey;
+      return semantic.mutedIndicator;
     }
     if (progress == 1) {
-      return Colors.green;
+      return semantic.success;
     }
-    return Colors.orange;
+    return semantic.warning;
   }
 
   String _progressText() {
@@ -183,7 +184,7 @@ class _ScrollStateWidget extends ConsumerWidget {
         center: Text("${(progress * 100).toInt()}%"),
         footer: Text(_progressText()),
         backgroundColor: theme.colorScheme.surfaceContainerHighest,
-        progressColor: _progressColor(),
+        progressColor: _progressColor(theme.semantic),
       ),
     );
   }
@@ -349,15 +350,16 @@ class _CharaDetailStateWidget extends ConsumerWidget {
 enum _Requirement { good, unsure, insufficient }
 
 class _CapturingPlatformInfoWidget extends ConsumerWidget {
-  final colorMap = {
-    _Requirement.good: Colors.green.shade500,
-    _Requirement.unsure: Colors.orange.shade500,
-    _Requirement.insufficient: Colors.red.shade500,
-  };
   final iconMap = {
     _Requirement.good: Symbols.check_rounded,
     _Requirement.unsure: Symbols.warning_rounded,
     _Requirement.insufficient: Symbols.block_rounded,
+  };
+
+  Color _requirementColor(AppSemanticColors semantic, _Requirement requirement) => switch (requirement) {
+    _Requirement.good => semantic.success,
+    _Requirement.unsure => semantic.warning,
+    _Requirement.insufficient => semantic.danger,
   };
 
   Widget chip({
@@ -366,16 +368,20 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
     required String tooltip,
     required _Requirement requirement,
   }) {
+    final onAccent = theme.semantic.onAccent;
     return Tooltip(
       message: tooltip,
       child: Container(
-        decoration: BoxDecoration(color: colorMap[requirement], borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(
+          color: _requirementColor(theme.semantic, requirement),
+          borderRadius: BorderRadius.circular(16),
+        ),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Row(
           children: [
-            Icon(iconMap[requirement], color: Colors.white, size: 14),
+            Icon(iconMap[requirement], color: onAccent, size: 14),
             const SizedBox(width: 4),
-            Text(label, style: theme.textTheme.labelSmall?.copyWith(color: Colors.white)),
+            Text(label, style: theme.textTheme.labelSmall?.copyWith(color: onAccent)),
           ],
         ),
       ),

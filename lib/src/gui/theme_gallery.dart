@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 
 /// A debug-only inspector and the single source of truth for the app's palette.
 ///
@@ -459,25 +460,27 @@ class _SemanticSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Hardcoded status/brand colors actually used in the app. These do not follow
-    // the scheme; shown so a review can decide which to promote to a semantic
-    // ThemeExtension.
-    final entries = <(String, Color, String)>[
-      ('success green.500', Colors.green.shade500, 'Toast success, capture requirement OK, filter-logic pass mark.'),
-      ('info blue.500', Colors.blue.shade500, 'Toast informational messages.'),
-      ('warning orange.500', Colors.orange.shade500, 'Toast warning, capture requirement unsure, script error icon.'),
-      ('toast error red.400', Colors.red.shade400, 'Toast error messages.'),
-      ('requirement red.500', Colors.red.shade500, 'Capture requirement insufficient indicator.'),
-      ('addon running blue.300', Colors.blue.shade300, 'Addon task "running" status color.'),
-      ('addon success green.700', Colors.green.shade700, 'Addon task "success" status color.'),
-      ('rating amber', Colors.amber, 'Star rating icons; data-table warning mark.'),
-      ('updater amber.200', Colors.amber.shade200, 'Updater notification card title background.'),
-      ('disabled grey', Colors.grey, 'Capture progress "not started" indicator.'),
-      ('chara banner pink', const Color(0xFFEC6A8E), 'Character-name banner background.'),
+    // Live values from the AppSemanticColors extension (theme_extensions.dart),
+    // brightness-tuned. These replaced the scattered status/brand literals.
+    final s = Theme.of(context).semantic;
+    final entries = <(String, Color, Color?, String)>[
+      ('success', s.success, null, 'Toast success, capture requirement OK, addon success.'),
+      ('warning', s.warning, null, 'Toast warning, capture requirement unsure, addon timeout, script error icon.'),
+      ('info', s.info, null, 'Info toasts, addon running status.'),
+      ('danger', s.danger, null, 'Toast error, capture requirement insufficient (wired to colorScheme.error).'),
+      ('onAccent', s.onAccent, s.success, 'Text/icons drawn on a filled accent (toast chips, requirement chips).'),
+      ('ratingAccent', s.ratingAccent, null, 'Rating star icons.'),
+      ('noticeContainer', s.noticeContainer, s.onNoticeContainer, 'Updater card title band; archive row overlay.'),
+      ('onNoticeContainer', s.onNoticeContainer, s.noticeContainer, 'Text/icons on noticeContainer.'),
+      ('brandBanner', s.brandBanner, s.onBrandBanner, 'Character-name banner background.'),
+      ('onBrandBanner', s.onBrandBanner, s.brandBanner, 'Text on the character banner.'),
+      ('mutedIndicator', s.mutedIndicator, null, 'Capture progress "not started" indicator.'),
     ];
-    return _Section('Hardcoded semantic / brand colors', [
-      for (final (name, color, usage) in entries) _SwatchRow(_Swatch(name, color), usage),
-    ], note: 'Mirrored literals — not theme-aware. Source of truth is each widget.');
+    return _Section(
+      'Semantic / brand tokens (AppSemanticColors)',
+      [for (final (name, color, on, usage) in entries) _SwatchRow(_Swatch(name, color, onColor: on), usage)],
+      note: 'Theme-driven, light/dark-aware. Defined in lib/src/gui/theme_extensions.dart.',
+    );
   }
 }
 
@@ -486,26 +489,13 @@ class _ChartSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const _Section('Chart palette', [
-      _SwatchRow(_Swatch('chart 0', Color(0xFF0293EE)), 'Category color 0 of the count-by-strategy charts.'),
-      _SwatchRow(_Swatch('chart 1', Color(0xFFF8B250)), 'Category color 1 of the count-by-strategy charts.'),
-      _SwatchRow(_Swatch('chart 2', Color(0xFF845BEF)), 'Category color 2 of the count-by-strategy charts.'),
-      _SwatchRow(_Swatch('chart 3', Color(0xFF13D38E)), 'Category color 3 of the count-by-strategy charts.'),
-    ], note: 'statistics.dart — same four colors in both themes.');
+    final categories = Theme.of(context).chart.categories;
+    return _Section('Chart palette (AppChartColors)', [
+      for (final (i, color) in categories.indexed)
+        _SwatchRow(_Swatch('category $i', color), 'Category color $i of the count-by-strategy charts.'),
+    ], note: 'Theme-driven. Defined in lib/src/gui/theme_extensions.dart.');
   }
 }
-
-// Code-highlight palette mirrored from code_highlight_field.dart (light, dark).
-const List<(String, int, int)> _codeHighlight = [
-  ('comment', 0xFF008000, 0xFF6A9955),
-  ('keyword / literal', 0xFF0000FF, 0xFF569CD6),
-  ('type / class', 0xFF267F99, 0xFF4EC9B0),
-  ('title / function', 0xFF795E26, 0xFFDCDCAA),
-  ('string', 0xFFA31515, 0xFFCE9178),
-  ('number', 0xFF098658, 0xFFB5CEA8),
-  ('meta / symbol', 0xFFAF00DB, 0xFFC586C0),
-  ('variable', 0xFF001080, 0xFF9CDCFE),
-];
 
 class _CodeHighlightSection extends StatelessWidget {
   const _CodeHighlightSection();
@@ -513,16 +503,18 @@ class _CodeHighlightSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final styles = Theme.of(context).codeHighlight.styles;
     return _Section(
-      'Code highlight (active: ${isDark ? 'dark' : 'light'})',
+      'Code highlight (CodeHighlightColors, active: ${isDark ? 'dark' : 'light'})',
       [
-        for (final (token, light, dark) in _codeHighlight)
-          _SwatchRow(
-            _Swatch(token, Color(isDark ? dark : light), onColor: isDark ? Colors.black : Colors.white),
-            'Syntax highlight color for $token tokens in the script editor.',
-          ),
+        for (final entry in styles.entries)
+          if (entry.value.color != null)
+            _SwatchRow(
+              _Swatch(entry.key, entry.value.color!),
+              'Syntax highlight color for ${entry.key} tokens in the script editor.',
+            ),
       ],
-      note: 'VS Code-style syntax palette. code_highlight_field.dart.',
+      note: 'VS Code-style palette. Theme-driven; defined in lib/src/gui/theme_extensions.dart.',
     );
   }
 }

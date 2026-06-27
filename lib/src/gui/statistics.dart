@@ -14,6 +14,7 @@ import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/theme_extensions.dart';
 
 // ignore: constant_identifier_names
 const tr_statistics = "pages.statistics";
@@ -433,9 +434,9 @@ class CountStrategyChartData {
 
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
-  final colors = [const Color(0xff0293ee), const Color(0xfff8b250), const Color(0xff845bef), const Color(0xff13d38e)];
+  final List<Color> colors;
 
-  CountStrategyChartData(this.records, this.labels) {
+  CountStrategyChartData(this.records, this.labels, this.colors) {
     counts = parse();
     indices = counts.indexed.sortedBy<num>((e) => -e.$2).map((e) => e.$1).toList();
   }
@@ -494,7 +495,7 @@ class CountStrategyStatisticWidget extends ConsumerWidget {
       builder: () {
         final records = ref.watch(charaDetailRecordStorageProvider);
         final labels = ref.watch(labelMapProvider)[LabelKeys.raceStrategy]!;
-        final chart = CountStrategyChartData(records, labels);
+        final chart = CountStrategyChartData(records, labels, theme.chart.categories);
         // Guard against a non-empty record set that yields no active records:
         // `chart.build` would otherwise divide by a zero total and crash on NaN.round().
         if (chart.counts.sum == 0) {

@@ -29,13 +29,15 @@ file.
    from the map renders dimmed with a "not used" note (`_unusedNote`). So adding
    first/last use of a role changes both its description and its used/unused mark.
 2. `_themeDataUsages` — same idea for `ThemeData` colors (dividerColor, etc.).
-3. The hand-written entries in `_BlendSection` (translucent composites),
-   `_SemanticSection` (hardcoded brand/status colors), `_ChartSection`, and
-   `_CodeHighlightSection` — each lists a color and a usage description.
+3. The hand-written entries in `_BlendSection` (translucent composites) — each
+   lists an overlay/base and a usage description.
 
 What is **live and needs no editing**: the swatch colors/hex, the
 `_ColorSchemeSection` role list (it already enumerates the full standard role
-set), and the tint-token values.
+set), the tint-token values, and `_SemanticSection` / `_ChartSection` /
+`_CodeHighlightSection` (these now read the `AppSemanticColors` /
+`AppChartColors` / `CodeHighlightColors` extensions directly, so they update
+themselves when `lib/src/gui/theme_extensions.dart` changes).
 
 ## Steps
 
@@ -61,8 +63,12 @@ set), and the tint-token values.
      add swatches for new `withValues(alpha:)` / `alphaBlend` overlays, drop ones
      that disappeared, and keep each `_BlendSwatch`'s `overlay` / `base` /
      `baseLabel` matching how the code actually composes the color.
-   - Cross-check `_SemanticSection` / `_ChartSection` / `_CodeHighlightSection`
-     against the "Hardcoded color literals" block for new or removed literals.
+   - The semantic / chart / code-highlight sections are **live** — they read the
+     `ThemeExtension`s. New non-scheme colors belong in
+     `lib/src/gui/theme_extensions.dart` (add a token + register it in
+     `app_widget.dart`); the gallery then shows them automatically. Remaining raw
+     literals in the "Hardcoded color literals" scan block are migration debt for
+     a later slice, not gallery edits.
 
 3. **Write descriptions, not file lists.** The right column is a human-readable
    "what it's used for" sentence (English, per the repo language policy), not a
