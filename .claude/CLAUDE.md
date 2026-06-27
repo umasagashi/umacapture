@@ -33,8 +33,12 @@ Runtime/user-facing strings (e.g. localized UI text under `assets/translations/`
 - New code reads colors from the theme — `ColorScheme` roles via
   `Theme.of(context).colorScheme`, or the `AppSemanticColors` / `AppChartColors` /
   `CodeHighlightColors` `ThemeExtension`s in `lib/src/gui/theme_extensions.dart`.
-  Do not add raw `Colors.*`, `Color(0x…)`, or ad-hoc `withValues(alpha:)` /
-  `withOpacity(…)`.
+  Do not add raw `Colors.*` or `Color(0x…)` literals.
+- Alpha **on a theme role** is fine when the design calls for it
+  (`colorScheme.scrim.withValues(alpha: .3)`, state-layer overlays, glows);
+  alpha on a **literal** is not (and is caught via the literal itself).
+- `Colors.transparent` is allowed (it means "no color"; there is no theme role
+  for it).
 - The same pre-commit hook rejects **newly added** color literals outside an
   allowlist (`theme_extensions.dart`, `theme_gallery.dart`). It scans added lines
   only, so pre-existing literals awaiting migration are grandfathered until their

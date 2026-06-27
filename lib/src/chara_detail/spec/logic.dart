@@ -11,6 +11,7 @@ import '/src/chara_detail/spec/base.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
+import '/src/gui/theme_extensions.dart';
 
 part 'logic.mapper.dart';
 
@@ -195,12 +196,19 @@ class LogicColumnSpec extends ColumnSpec<bool> with LogicColumnSpecMappable, Con
       enableColumnDrag: false,
       enableEditingMode: false,
       readOnly: true,
-      renderer: (TrinaColumnRendererContext context) {
-        final data = context.cell.getUserData<LogicCellData>()!;
-        return Icon(
-          data.passed ? Symbols.check_rounded : Symbols.close_rounded,
-          color: data.passed ? Colors.green : Colors.red,
-          size: 18,
+      renderer: (TrinaColumnRendererContext rendererContext) {
+        final data = rendererContext.cell.getUserData<LogicCellData>()!;
+        // The Trina renderer has no BuildContext; a Builder gives one so the
+        // pass/fail icon can read the theme's semantic success/danger roles.
+        return Builder(
+          builder: (context) {
+            final semantic = Theme.of(context).semantic;
+            return Icon(
+              data.passed ? Symbols.check_rounded : Symbols.close_rounded,
+              color: data.passed ? semantic.success : semantic.danger,
+              size: 18,
+            );
+          },
         );
       },
     )..setUserData(this);

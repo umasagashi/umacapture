@@ -780,7 +780,7 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
             // A non-dismissible barrier still swallows the tap (empty callback)
             // so it never falls through to the app behind the dialog.
             onTap: entry.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss() : () {},
-            child: Container(color: theme.shadowColor.withValues(alpha: 0.5)),
+            child: Container(color: theme.colorScheme.scrim.withValues(alpha: 0.5)),
           ),
           Padding(
             padding: const EdgeInsets.all(32),

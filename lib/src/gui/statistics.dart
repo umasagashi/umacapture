@@ -465,7 +465,7 @@ class CountStrategyChartData {
             value: counts[i].toDouble(),
             title: "${(100 * counts[i] / total).round().toNumberString()} %",
             radius: space / 2,
-            titleStyle: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+            titleStyle: TextStyle(fontWeight: FontWeight.bold, color: theme.semantic.onAccent),
             titlePositionPercentageOffset: 0.65,
           ),
       ],

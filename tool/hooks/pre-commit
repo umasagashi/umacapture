@@ -37,7 +37,12 @@ color_allowlist=(
 )
 # Word-boundary on Colors/Color so identifiers like `AppSemanticColors.light`
 # or `ColoredBox` are not mistaken for the Flutter `Colors` / `Color` APIs.
-color_pattern='\bColors\.|\bColor\(0x|withValues\(alpha:|withOpacity\('
+# Only literal colors are blocked; alpha applied to a theme role
+# (e.g. `colorScheme.scrim.withValues(alpha: .3)`) is allowed, while literal
+# alpha (`Colors.black.withValues(...)`) is still caught by the `Colors.` rule.
+# `Colors.transparent` is structural ("no color", no theme role exists) and is
+# stripped before matching so it is not flagged.
+color_pattern='\bColors\.|\bColor\(0x'
 
 violations=""
 for f in "${files[@]}"; do
@@ -46,7 +51,7 @@ for f in "${files[@]}"; do
   done
   # Added lines only: keep '+' lines, drop the '+++' header, strip the leading '+'.
   added="$(git diff --cached -U0 -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+' | sed -E 's/^\+//' || true)"
-  hits="$(printf '%s\n' "$added" | grep -E "$color_pattern" || true)"
+  hits="$(printf '%s\n' "$added" | sed -E 's/Colors\.transparent//g' | grep -E "$color_pattern" || true)"
   if [ -n "$hits" ]; then
     violations+="  $f:"$'\n'
     while IFS= read -r line; do

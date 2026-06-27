@@ -8,10 +8,11 @@ import '/src/gui/theme_extensions.dart';
 /// A debug-only inspector and the single source of truth for the app's palette.
 ///
 /// Renders the full `ColorScheme` role set (roles the app never references are
-/// shown dimmed with a "not used" note), the surface-tint tokens, the
-/// translucent / blended composites resolved over the real background they are
-/// painted on, and the scattered hardcoded brand/status colors. Each swatch is
-/// annotated with a short description of what the color is used for.
+/// shown dimmed with a "not used" note), the `ThemeData` colors, the role-based
+/// translucent composites resolved over the real background they are painted on,
+/// and the custom `ThemeExtension` tokens (`AppSemanticColors`, `AppChartColors`,
+/// `CodeHighlightColors`). Each swatch is annotated with a short description of
+/// what the color is used for.
 ///
 /// Reached from a `kDebugMode`-guarded tile in the settings page. Swatches
 /// resolve against the *current* theme brightness, so toggle the app theme mode
@@ -360,22 +361,22 @@ class _BlendSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final shadow = Theme.of(context).shadowColor;
+    final s = Theme.of(context).semantic;
     return _Section(
-      'Translucent composites (as painted)',
+      'Translucent composites (role-based alpha, as painted)',
       [
         _SwatchRow(
           _BlendSwatch(
             'hover overlay',
-            overlay: cs.onSurface.withValues(alpha: 0.06),
+            overlay: cs.onSurface.withValues(alpha: 0.08),
             base: cs.surface,
             baseLabel: 'surface',
           ),
-          'Hover highlight on the window-control buttons.',
+          'Hover highlight on the window-control buttons (M3 state opacity).',
         ),
         _SwatchRow(
-          _BlendSwatch('modal scrim', overlay: shadow.withValues(alpha: 0.5), base: cs.surface, baseLabel: 'surface'),
-          'Dim backdrop painted behind modal dialogs.',
+          _BlendSwatch('modal scrim', overlay: cs.scrim.withValues(alpha: 0.5), base: cs.surface, baseLabel: 'surface'),
+          'Dim backdrop behind modal dialogs (scrim role).',
         ),
         _SwatchRow(
           _BlendSwatch('tag glow', overlay: cs.primary.withValues(alpha: 0.45), base: cs.surface, baseLabel: 'surface'),
@@ -392,51 +393,35 @@ class _BlendSection extends StatelessWidget {
         ),
         _SwatchRow(
           _BlendSwatch(
-            'warning cell',
-            overlay: Colors.amber.withValues(alpha: 0.45),
+            'selection overlay',
+            overlay: s.noticeContainer.withValues(alpha: 0.45),
             base: cs.surface,
             baseLabel: 'surface',
           ),
-          'Warning-cell highlight in the data table.',
+          'Row overlay marking selected rows (per-purpose role at 45%; archive shown).',
         ),
         _SwatchRow(
           _BlendSwatch(
             'preview text bg',
-            overlay: Colors.white.withValues(alpha: 0.5),
-            base: const Color(0xFF808080),
+            overlay: cs.surface.withValues(alpha: 0.5),
+            base: cs.onSurface,
             baseLabel: 'image',
           ),
-          'Caption background drawn over the preview image.',
-        ),
-        _SwatchRow(
-          _BlendSwatch(
-            'preview border',
-            overlay: Colors.black.withValues(alpha: 0.5),
-            base: Colors.white,
-            baseLabel: 'white',
-          ),
-          'Border around the preview thumbnail.',
-        ),
-        _SwatchRow(
-          _BlendSwatch(
-            'preview placeholder',
-            overlay: Colors.black.withValues(alpha: 0.3),
-            base: Colors.white,
-            baseLabel: 'white',
-          ),
-          'Tint of the "no image" placeholder icon.',
+          'Caption background over the preview image (surface role).',
         ),
         _SwatchRow(
           _BlendSwatch(
             'preview empty bg',
-            overlay: Colors.black.withValues(alpha: 0.04),
-            base: Colors.white,
-            baseLabel: 'white',
+            overlay: cs.onSurface.withValues(alpha: 0.04),
+            base: cs.surface,
+            baseLabel: 'surface',
           ),
-          'Fill of the empty preview area.',
+          'Fill of the empty preview placeholder.',
         ),
       ],
-      note: 'Left chip = raw translucent over a checkerboard; body = composite over the real background, with its hex.',
+      note:
+          'Left chip = raw translucent over a checkerboard; body = composite over the real background. '
+          'Alpha is applied to theme roles, not literals.',
     );
   }
 }
