@@ -387,6 +387,15 @@ class _BlendSection extends StatelessWidget {
         ),
         _SwatchRow(
           _BlendSwatch(
+            'selection label chip',
+            overlay: s.noticeContainer.withValues(alpha: 0.95),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Denser chip behind the selected-row label so it stays legible over the translucent overlay.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
             'preview text bg',
             overlay: cs.surface.withValues(alpha: 0.5),
             base: cs.onSurface,
@@ -402,6 +411,24 @@ class _BlendSection extends StatelessWidget {
             baseLabel: 'surface',
           ),
           'Fill of the empty preview placeholder.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'row divider',
+            overlay: cs.outlineVariant.withValues(alpha: 0.5),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Inset hairline separating each settings row in the column-customize and table-settings dialogs.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'truth-table border',
+            overlay: cs.onInverseSurface.withValues(alpha: 0.4),
+            base: cs.inverseSurface,
+            baseLabel: 'inverseSurface',
+          ),
+          'Inner grid lines of the logic truth-table rendered inside the column-builder tooltip.',
         ),
       ],
       note:
@@ -502,7 +529,9 @@ const Map<String, String> _roleUsages = {
   'surfaceContainer': 'Panel backgrounds (addon list, side preview); striped script rows.',
   'surfaceContainerHigh': 'Chip backgrounds (global chipTheme) and the page background (scaffold).',
   'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',
-  'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame.',
+  'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules.',
+  'outlineVariant':
+      'Faint outlines: the column-chip "settings group" frame and the inset per-row dividers in the column/table settings dialogs.',
   'scrim': 'Dim backdrop behind modal dialogs (DialogLayer).',
   'onInverseSurface': 'Text on the inverse surface (column builder dialog).',
 };
