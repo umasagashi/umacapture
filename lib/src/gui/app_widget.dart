@@ -54,6 +54,9 @@ class _Sidebar extends ConsumerWidget {
       children: [
         NavigationRail(
           extended: isExtended,
+          // Slightly narrower than the M3 default (256) when expanded; the
+          // labels do not need the full width and it leaves more room for content.
+          minExtendedWidth: 220,
           selectedIndex: tabsRouter.activeIndex,
           useIndicator: true,
           destinations: [
