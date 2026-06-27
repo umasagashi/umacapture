@@ -1222,7 +1222,9 @@ class _TopControlsLayer extends ConsumerWidget {
                 ),
                 // The two valid actions sit above the scrim and stay interactive.
                 Center(
-                  child: Row(
+                  // Label on its own line above the action buttons, so a long
+                  // message does not overflow the row on narrow windows.
+                  child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
@@ -1231,13 +1233,18 @@ class _TopControlsLayer extends ConsumerWidget {
                         "$tr_chara_detail.archive_records.overlay.message".tr(namedArgs: {"count": "$selectedCount"}),
                         style: theme.textTheme.labelLarge,
                       ),
-                      const SizedBox(width: 16),
-                      _SelectionConfirmButton(purpose: purpose, selectedCount: selectedCount),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        icon: const Icon(Symbols.cancel_rounded, size: 20),
-                        label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
-                        onPressed: () => exitSelection(ref),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _SelectionConfirmButton(purpose: purpose, selectedCount: selectedCount),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            icon: const Icon(Symbols.cancel_rounded, size: 20),
+                            label: Text("$tr_chara_detail.archive_records.cancel.label".tr()),
+                            onPressed: () => exitSelection(ref),
+                          ),
+                        ],
                       ),
                     ],
                   ),
