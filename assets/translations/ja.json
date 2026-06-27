@@ -111,7 +111,8 @@
             "regenerating_message": "認識結果を更新しています",
             "toolbar": {
                 "preset_group": "プリセット",
-                "record_group": "レコード"
+                "record_group": "レコード",
+                "column_group": "列設定"
             },
             "settings": {
                 "button_tooltip": "テーブル設定",
