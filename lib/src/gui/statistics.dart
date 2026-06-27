@@ -46,7 +46,7 @@ class _StatisticTile extends ConsumerWidget {
           Expanded(
             child: Container(
               alignment: Alignment.center,
-              color: theme.colorScheme.blueTintedSurface,
+              color: theme.colorScheme.surfaceContainerLow,
               child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),

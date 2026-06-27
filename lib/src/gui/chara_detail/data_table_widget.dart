@@ -729,7 +729,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     if (rowContext.stateManager.isCurrentRecord(rowContext.row)) {
                       return theme.colorScheme.primaryContainer;
                     }
-                    return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
+                    return rowContext.rowIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.surfaceContainer;
                   },
                   // Checked rows get a translucent amber overlay that dims the
                   // cells and is labeled "archive", so the destructive (lossy,
@@ -756,7 +756,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                         // The stripe and separator don't depend on the selection, so
                         // compute them once; only the current-row highlight below is
                         // recomputed per notify.
-                        final stripe = pinnedIdx.isEven ? theme.colorScheme.surface : theme.colorScheme.stripedRowColor;
+                        final stripe = pinnedIdx.isEven
+                            ? theme.colorScheme.surface
+                            : theme.colorScheme.surfaceContainer;
                         final separator = isLast
                             ? BorderSide(color: theme.colorScheme.outline, width: 3)
                             : BorderSide(

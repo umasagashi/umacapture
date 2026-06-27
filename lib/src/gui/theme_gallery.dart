@@ -292,25 +292,19 @@ class _ColorSchemeSection extends StatelessWidget {
       ('scrim', cs.scrim, null),
       ('surfaceTint', cs.surfaceTint, null),
     ];
-    return _Section(
-      'ColorScheme roles',
-      [
-        for (final (name, color, on) in roles)
-          _SwatchRow(
-            _Swatch(name, color, onColor: on),
-            _roleUsages[name] ?? _unusedNote(name),
-            unused: !_roleUsages.containsKey(name),
-          ),
-      ],
-      note:
-          'FlexScheme.blue + surface blend. Dimmed rows are unused roles. surfaceContainerHighest is tinted at build.',
-    );
+    return _Section('ColorScheme roles', [
+      for (final (name, color, on) in roles)
+        _SwatchRow(
+          _Swatch(name, color, onColor: on),
+          _roleUsages[name] ?? _unusedNote(name),
+          unused: !_roleUsages.containsKey(name),
+        ),
+    ], note: 'FlexScheme.blue + surface blend. Dimmed rows are unused roles.');
   }
 }
 
 /// Note shown for a `ColorScheme` role the app never references.
 String _unusedNote(String role) => switch (role) {
-  'surfaceContainerHigh' => 'Not referenced directly, but tinted at build time alongside surfaceContainerHighest.',
   'shadow' => 'Not used as a role; ThemeData.shadowColor drives shadows instead.',
   _ => 'Not used in the app.',
 };
@@ -343,19 +337,11 @@ class _TokenSection extends StatelessWidget {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
     return _Section(
-      'Surface-tint tokens & theme blends',
+      'Theme blends',
       [
         _SwatchRow(
-          _Swatch('blueTintedSurface', cs.blueTintedSurface, onColor: cs.onSurface, sub: 'primCont@10%/surf'),
-          'Light-blue background for statistic cards.',
-        ),
-        _SwatchRow(
-          _Swatch('stripedRowColor', cs.stripedRowColor, onColor: cs.onSurface, sub: 'primCont@20%/surf'),
-          'Striped (even) row background in the data table and script grid.',
-        ),
-        _SwatchRow(
           _Swatch(
-            'CardDialog header',
+            'ListCard header',
             Color.lerp(theme.scaffoldBackgroundColor, theme.cardColor, 0.5)!,
             onColor: cs.onSurface,
             sub: 'lerp(scaf,card,.5)',
@@ -363,7 +349,7 @@ class _TokenSection extends StatelessWidget {
           'Header band color of plain (non-attention) ListCard headers.',
         ),
       ],
-      note: 'Composed in common.dart / app_widget.dart. surfaceContainerHighest above already reflects its tint.',
+      note: 'Composed in common.dart. Striped rows / stat cards now use the surfaceContainer roles directly.',
     );
   }
 }
