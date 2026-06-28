@@ -78,6 +78,8 @@ class SkillDialogElementsMapper extends EnumMapper<SkillDialogElements> {
     switch (value) {
       case r'selection':
         return SkillDialogElements.selection;
+      case r'selectionList':
+        return SkillDialogElements.selectionList;
       case r'selectionTags':
         return SkillDialogElements.selectionTags;
       case r'mode':
@@ -94,6 +96,8 @@ class SkillDialogElementsMapper extends EnumMapper<SkillDialogElements> {
     switch (self) {
       case SkillDialogElements.selection:
         return r'selection';
+      case SkillDialogElements.selectionList:
+        return r'selectionList';
       case SkillDialogElements.selectionTags:
         return r'selectionTags';
       case SkillDialogElements.mode:
@@ -313,6 +317,13 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     opt: true,
     def: const {},
   );
+  static bool _$selectByTag(SkillColumnSpec v) => v.selectByTag;
+  static const Field<SkillColumnSpec, bool> _f$selectByTag = Field(
+    'selectByTag',
+    _$selectByTag,
+    opt: true,
+    def: false,
+  );
   static bool _$hidden(SkillColumnSpec v) => v.hidden;
   static const Field<SkillColumnSpec, bool> _f$hidden = Field(
     'hidden',
@@ -354,6 +365,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
     #showAllWhenQueryIsEmpty: _f$showAllWhenQueryIsEmpty,
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
+    #selectByTag: _f$selectByTag,
     #hidden: _f$hidden,
     #description: _f$description,
     #width: _f$width,
@@ -384,6 +396,7 @@ class SkillColumnSpecMapper extends SubClassMapperBase<SkillColumnSpec> {
       showAllWhenQueryIsEmpty: data.dec(_f$showAllWhenQueryIsEmpty),
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
+      selectByTag: data.dec(_f$selectByTag),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
       width: data.dec(_f$width),

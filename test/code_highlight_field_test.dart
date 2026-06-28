@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:highlight/highlight.dart' show highlight;
 import 'package:umacapture/src/gui/chara_detail/code_highlight_field.dart';
+import 'package:umacapture/src/gui/theme_extensions.dart';
 
 const _source =
     'bool filter(CharaRecord r) {\n'
@@ -36,7 +37,13 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: ThemeData(brightness: Brightness.dark),
+        // Register the same code-highlight tokens the app installs in
+        // app_widget.dart; DartHighlightController.buildTextSpan reads them via
+        // Theme.of(context).codeHighlight, which asserts the extension is present.
+        theme: ThemeData(
+          brightness: Brightness.dark,
+          extensions: <ThemeExtension<dynamic>>[CodeHighlightColors.dark()],
+        ),
         home: Scaffold(
           body: Builder(
             builder: (context) {

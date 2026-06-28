@@ -609,6 +609,13 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
   // encoded null-description spec therefore produce the same shape).
   static const _hiddenKey = 'hidden';
 
+  // Serialized field name of the skill/factor "select by tag" flag. Like
+  // [_hiddenKey], it is a non-null bool (default false) added after specs already
+  // existed on disk, so it is always emitted yet absent from legacy maps. Excluded
+  // from the incompleteness check so those legacy specs are not flagged broken
+  // merely for lacking it.
+  static const _selectByTagKey = 'selectByTag';
+
   Set<String> get brokenIds => {..._brokenIds};
 
   void _clearBroken(String id) {
@@ -693,6 +700,9 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
       // broken. Excluded here (like _childrenKey) rather than in the generic
       // isSpecMapIncomplete, since this is the only spec-level entry point.
       if (entry.key == _hiddenKey) continue;
+      // 'selectByTag' was likewise added after specs existed on disk; its absence
+      // decodes to the default (false) and must not flag a spec as broken.
+      if (entry.key == _selectByTagKey) continue;
       if (!raw.containsKey(entry.key)) return true;
       if (isSpecMapIncomplete(raw[entry.key], entry.value)) return true;
     }

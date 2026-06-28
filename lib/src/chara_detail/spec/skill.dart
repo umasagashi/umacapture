@@ -82,6 +82,12 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
   }
 
   bool apply(List<Skill> value) {
+    if (query.isEmpty) {
+      // An empty query is "Any" (matches every record); whether the cell then shows
+      // anything is decided by the column's showAllWhenQueryIsEmpty, not here. This
+      // mirrors AggregateFactorSetPredicate.apply so skill and factor columns agree.
+      return true;
+    }
     final foundSkills = extract(value);
     if (query.length < 2) {
       return foundSkills.isNotEmpty;
@@ -117,7 +123,7 @@ class SkillCellData implements CellData {
 }
 
 @MappableEnum()
-enum SkillDialogElements { selection, selectionTags, mode, notationMax }
+enum SkillDialogElements { selection, selectionList, selectionTags, mode, notationMax }
 
 @MappableClass(discriminatorValue: 'SkillColumnSpec', ignoreNull: true)
 class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappable {
@@ -128,6 +134,12 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   final bool showAllWhenQueryIsEmpty;
   final bool showAvailableOnly;
   final Set<SkillDialogElements> hiddenElements;
+
+  /// When true, the column is defined by its tags rather than hand-picked skills:
+  /// the query is resolved live from `predicate.tags` against the current skill
+  /// master at evaluation time (so newly tagged skills are included automatically),
+  /// and the individual skill list is hidden in the dialog.
+  final bool selectByTag;
 
   @override
   final String id;
@@ -158,6 +170,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     this.showAllWhenQueryIsEmpty = true,
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
+    this.selectByTag = false,
     this.hidden = false,
     this.description,
     this.width,
@@ -177,8 +190,12 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   bool get hasFilter => true;
 
   @override
-  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
-      copyWith(predicate: defaultSpec is SkillColumnSpec ? defaultSpec.predicate : AggregateSkillPredicate.any());
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => defaultSpec is SkillColumnSpec
+      // Adopt the default's selectByTag along with its predicate: the two must stay
+      // consistent. This also migrates a legacy frozen preset (e.g. the green-skill
+      // shortcut) to the tag-driven mode when the user resets its filter.
+      ? copyWith(predicate: defaultSpec.predicate, selectByTag: defaultSpec.selectByTag)
+      : copyWith(predicate: AggregateSkillPredicate.any(), selectByTag: false);
 
   SkillColumnSpec copyWith({
     String? id,
@@ -188,6 +205,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     bool? showAllWhenQueryIsEmpty,
     bool? showAvailableOnly,
     Set<SkillDialogElements>? hiddenElements,
+    bool? selectByTag,
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
@@ -201,6 +219,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
+      selectByTag: selectByTag ?? this.selectByTag,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
@@ -213,15 +232,44 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     return records.map((e) => List<Skill>.from(parser.parse(e))).toList();
   }
 
+  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
+  /// the query is resolved live from the current skill master so newly tagged skills
+  /// are picked up automatically; otherwise the stored predicate is used as-is.
+  AggregateSkillPredicate _resolved(RefBase ref) {
+    if (!selectByTag) {
+      return predicate;
+    }
+    return predicate.copyWith(query: ref.read(_skillTagQueryProvider(_skillTagsKey(predicate.tags))));
+  }
+
   @override
   List<bool> evaluate(RefBase ref, List<List<Skill>> values) {
-    return values.map((e) => predicate.apply(e)).toList();
+    final resolved = _resolved(ref);
+    if (selectByTag && resolved.query.isEmpty && predicate.tags.isNotEmpty) {
+      // Tags are selected but resolve to no skill in the current master: nothing can
+      // match, so every row is filtered out instead of falling through to apply()'s
+      // empty-query "Any" (which would keep every record that has any skill at all).
+      return List<bool>.filled(values.length, false);
+    }
+    return values.map((e) => resolved.apply(e)).toList();
+  }
+
+  /// Skills to display, honoring [showAllWhenQueryIsEmpty]: an empty query shows the
+  /// record's full skill list only when the flag is set (the plain skill column);
+  /// otherwise (e.g. a tag-driven column with no tag selected yet) it shows nothing,
+  /// mirroring [FactorColumnSpec._extract].
+  List<Skill> _extract(AggregateSkillPredicate predicate, List<Skill> value) {
+    if (predicate.query.isEmpty && !showAllWhenQueryIsEmpty) {
+      return [];
+    }
+    return predicate.extract(value);
   }
 
   @override
   TrinaCell plutoCell(RefBase ref, List<Skill> value) {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
-    final foundSkills = predicate.extract(value);
+    final predicate = _resolved(ref);
+    final foundSkills = _extract(predicate, value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
       return TrinaCell(value: foundSkills.length.toString().padLeft(3, "0"))
@@ -251,6 +299,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
 
   @override
   String tooltip(RefBase ref) {
+    final predicate = _resolved(ref);
     if (predicate.query.isEmpty) {
       return "Any";
     }
@@ -283,6 +332,22 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   }
 }
 
+// Canonical, order-independent key for a tag set so the family provider below
+// caches by content (a Set's `==` is identity, not value equality). Tag ids are
+// snake_case identifiers ([a-z0-9_]+), so the comma separator can never collide.
+String _skillTagsKey(Set<String> tags) => (tags.toList()..sort()).join(',');
+
+// Resolves a tag set to the sids of every skill in the current master that carries
+// all of them (AND). Memoized per tag-key and recomputed when [skillInfoProvider]
+// changes, so a tag-driven column automatically follows game-data updates.
+final _skillTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
+  if (key.isEmpty) {
+    return const <int>{};
+  }
+  final tags = key.split(',').toSet();
+  return ref.watch(skillInfoProvider).where((e) => e.tags.containsAll(tags)).map((e) => e.sid).toSet();
+});
+
 final _clonedSpecProvider = SpecProviderAccessor<SkillColumnSpec>();
 
 class _SelectedTags extends TagSelectionNotifier {
@@ -294,6 +359,20 @@ class _SelectedTags extends TagSelectionNotifier {
   Set<String> build() {
     final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
     return Set.from(spec.predicate.tags);
+  }
+
+  @override
+  void toggle(String tag, {bool? shouldExists}) {
+    super.toggle(tag, shouldExists: shouldExists);
+    final spec = ref.read(specCloneProvider(specId)) as SkillColumnSpec;
+    if (!spec.selectByTag) {
+      return;
+    }
+    // Tag-driven column: persist the chosen tags into the spec. The query is not
+    // stored — it is resolved live from the tags at evaluation time (see [_resolved]).
+    ref
+        .read(specCloneProvider(specId).notifier)
+        .update((s) => (s as SkillColumnSpec).copyWith(predicate: s.predicate.copyWith(tags: state)));
   }
 }
 
@@ -330,17 +409,32 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
   }
 
   Widget tagsWidget() {
+    final selector = TagSelector(
+      candidateTagsProvider: skillTagProvider,
+      selectedTagsProvider: _selectedTagsProvider(widget.specId),
+    );
+    // A tag-driven column shows the chips without the NoteCard frame, and its tags
+    // define the column (so a dedicated description); a normal column keeps them
+    // inside the bordered note alongside the individual skill list.
+    if (_clonedSpecProvider.watch(ref, widget.specId).selectByTag) {
+      return Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text("$tr_skill.selection.tags.tag_driven_description".tr()),
+            ),
+            const SizedBox(height: 12),
+            selector,
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.all(8),
-      child: NoteCard(
-        description: Text("$tr_skill.selection.tags.description".tr()),
-        children: [
-          TagSelector(
-            candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: _selectedTagsProvider(widget.specId),
-          ),
-        ],
-      ),
+      child: NoteCard(description: Text("$tr_skill.selection.tags.description".tr()), children: [selector]),
     );
   }
 
@@ -367,7 +461,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
       title: Text("$tr_skill.selection.label".tr()),
       children: [
         if (!hiddenElements.contains(SkillDialogElements.selectionTags)) tagsWidget(),
-        selectorWidget(context),
+        if (!hiddenElements.contains(SkillDialogElements.selectionList)) selectorWidget(context),
       ],
     );
   }
@@ -615,6 +709,57 @@ class FilteredSkillColumnBuilder extends ColumnBuilder {
         },
         if (initialTags.isNotEmpty) ...{SkillDialogElements.selectionTags},
       },
+      showAllWhenQueryIsEmpty: false,
+      showAvailableOnly: false,
+    );
+  }
+}
+
+/// Builds a tag-driven skill column ([SkillColumnSpec.selectByTag]): its query is
+/// resolved live from [initialTags] against the current skill master, so newly
+/// tagged skills are matched automatically.
+///
+/// With empty [initialTags] this is the user-facing "pick a tag" column (the dialog
+/// shows the tag selector). A preset can instead pin [initialTags] and hide the
+/// whole selection group via [hiddenElements] (e.g. `{selection, mode}` to leave
+/// only the display group editable).
+class TagDrivenSkillColumnBuilder extends ColumnBuilder {
+  final Parser parser;
+  final Set<String> initialTags;
+  final Set<SkillDialogElements> hiddenElements;
+
+  @override
+  final ColumnBuilderType type;
+
+  @override
+  final String? builderId;
+
+  @override
+  final String title;
+
+  @override
+  final ColumnCategory category;
+
+  TagDrivenSkillColumnBuilder({
+    required this.title,
+    required this.category,
+    required this.parser,
+    this.builderId,
+    this.initialTags = const {},
+    this.hiddenElements = const {SkillDialogElements.selectionList, SkillDialogElements.mode},
+    this.type = ColumnBuilderType.normal,
+  });
+
+  @override
+  ColumnSpec<List<Skill>> build(RefBase ref) {
+    return SkillColumnSpec(
+      id: const Uuid().v4(),
+      title: title,
+      parser: parser,
+      builderId: builderId,
+      predicate: AggregateSkillPredicate(notation: SkillNotation(max: 3), tags: initialTags),
+      selectByTag: true,
+      hiddenElements: hiddenElements,
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
     );

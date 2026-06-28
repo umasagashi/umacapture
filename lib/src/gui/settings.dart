@@ -111,14 +111,21 @@ class DropdownButtonWidget<T> extends ConsumerWidget {
             ),
         ],
         onSelected: (T item) => ref.read(provider.notifier).setValue(item),
+        // Mirrors the choice dropdown in chara_detail/common.dart: no Container
+        // `alignment` (which would expand to fill the ListTile and trip the
+        // "trailing widget consumes the entire tile width" assertion). The label is
+        // centred via the Text, and the minWidth lets the box grow with longer labels
+        // instead of wrapping them.
         child: Container(
-          alignment: Alignment.center,
           margin: const EdgeInsets.symmetric(vertical: 8),
-          width: 100,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
             border: Border(bottom: BorderSide(width: 1, color: theme.colorScheme.onSurface)),
           ),
-          child: Text(name(current), style: style),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 100),
+            child: Text(name(current), textAlign: TextAlign.center, style: style),
+          ),
         ),
       ),
       onTap: () => ref.read(provider.notifier).next(),

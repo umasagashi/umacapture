@@ -238,7 +238,7 @@ class FactorCellData implements CellData {
 }
 
 @MappableEnum()
-enum FactorDialogElements { selectionTags, modeLogic }
+enum FactorDialogElements { selectionList, selectionTags, modeLogic }
 
 @MappableClass(discriminatorValue: 'FactorColumnSpec', ignoreNull: true)
 class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappable {
@@ -249,6 +249,12 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   final bool showAllWhenQueryIsEmpty;
   final bool showAvailableOnly;
   final Set<FactorDialogElements> hiddenElements;
+
+  /// When true, the column is defined by its tags rather than hand-picked factors:
+  /// the query is resolved live from `predicate.factorTags`/`skillTags` against the
+  /// current factor master at evaluation time (so newly tagged factors are included
+  /// automatically), and the individual factor list is hidden in the dialog.
+  final bool selectByTag;
 
   @override
   final String id;
@@ -279,6 +285,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     this.showAllWhenQueryIsEmpty = true,
     this.showAvailableOnly = true,
     this.hiddenElements = const {},
+    this.selectByTag = false,
     this.hidden = false,
     this.description,
     this.width,
@@ -298,8 +305,10 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   bool get hasFilter => true;
 
   @override
-  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
-      copyWith(predicate: defaultSpec is FactorColumnSpec ? defaultSpec.predicate : AggregateFactorSetPredicate.any());
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => defaultSpec is FactorColumnSpec
+      // Keep selectByTag consistent with the adopted predicate (see SkillColumnSpec).
+      ? copyWith(predicate: defaultSpec.predicate, selectByTag: defaultSpec.selectByTag)
+      : copyWith(predicate: AggregateFactorSetPredicate.any(), selectByTag: false);
 
   FactorColumnSpec copyWith({
     String? id,
@@ -309,6 +318,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     bool? showAllWhenQueryIsEmpty,
     bool? showAvailableOnly,
     Set<FactorDialogElements>? hiddenElements,
+    bool? selectByTag,
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
@@ -322,6 +332,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       showAllWhenQueryIsEmpty: showAllWhenQueryIsEmpty ?? this.showAllWhenQueryIsEmpty,
       showAvailableOnly: showAvailableOnly ?? this.showAvailableOnly,
       hiddenElements: hiddenElements ?? this.hiddenElements,
+      selectByTag: selectByTag ?? this.selectByTag,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
@@ -334,12 +345,31 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     return List<FactorSet>.from(records.map(parser.parse));
   }
 
-  @override
-  List<bool> evaluate(RefBase ref, List<FactorSet> values) {
-    return values.map((e) => predicate.apply(e)).toList();
+  /// The predicate to evaluate/render with. For a tag-driven column ([selectByTag]),
+  /// the query is resolved live from the current factor master so newly tagged
+  /// factors are picked up automatically; otherwise the stored predicate is used.
+  AggregateFactorSetPredicate _resolved(RefBase ref) {
+    if (!selectByTag) {
+      return predicate;
+    }
+    final query = ref.read(_factorTagQueryProvider(_factorTagsKey(predicate.factorTags, predicate.skillTags)));
+    return predicate.copyWith(query: query);
   }
 
-  List<QueriedFactor> _extract(FactorSet factorSet) {
+  @override
+  List<bool> evaluate(RefBase ref, List<FactorSet> values) {
+    final resolved = _resolved(ref);
+    if (selectByTag && resolved.query.isEmpty && (predicate.factorTags.isNotEmpty || predicate.skillTags.isNotEmpty)) {
+      // Tags are selected but resolve to no factor in the current master (e.g. the
+      // "gold skill" tag, which has no inheritable factor): nothing can match, so
+      // every row is filtered out instead of falling through to apply()'s
+      // empty-query "Any".
+      return List<bool>.filled(values.length, false);
+    }
+    return values.map((e) => resolved.apply(e)).toList();
+  }
+
+  List<QueriedFactor> _extract(AggregateFactorSetPredicate predicate, FactorSet factorSet) {
     final traineeOnly = predicate.subject == FactorSearchSubjectMode.trainee;
     if (predicate.query.isEmpty) {
       if (!showAllWhenQueryIsEmpty) {
@@ -357,7 +387,8 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
 
   @override
   TrinaCell plutoCell(RefBase ref, FactorSet value) {
-    final factors = _extract(value);
+    final predicate = _resolved(ref);
+    final factors = _extract(predicate, value);
     if (predicate.notation.max == 0) {
       final q = QueriedFactor(
         id: 0,
@@ -395,6 +426,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
 
   @override
   String tooltip(RefBase ref) {
+    final predicate = _resolved(ref);
     if (predicate.query.isEmpty) {
       return "Any";
     }
@@ -437,6 +469,38 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   }
 }
 
+// Canonical, order-independent key for the two tag axes so the family provider
+// below caches by content (a Set's `==` is identity, not value equality). Tag ids
+// are snake_case identifiers ([a-z0-9_]+), so the comma/semicolon separators can
+// never collide.
+String _factorTagsKey(Set<String> factorTags, Set<String> skillTags) {
+  final f = (factorTags.toList()..sort()).join(',');
+  final s = (skillTags.toList()..sort()).join(',');
+  return '$f;$s';
+}
+
+// Resolves the two tag axes to the sids of every factor in the current master that
+// carries all selected factor tags and whose skill carries all selected skill tags
+// (AND). Memoized per tag-key and recomputed when [factorInfoProvider] changes, so a
+// tag-driven column automatically follows game-data updates.
+final _factorTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
+  final parts = key.split(';');
+  final factorTags = parts[0].isEmpty ? <String>{} : parts[0].split(',').toSet();
+  final skillTags = parts.length < 2 || parts[1].isEmpty ? <String>{} : parts[1].split(',').toSet();
+  if (factorTags.isEmpty && skillTags.isEmpty) {
+    return const <int>{};
+  }
+  return ref
+      .watch(factorInfoProvider)
+      .where((e) {
+        final factorContains = e.tags.containsAll(factorTags);
+        final skillContains = e.skillInfo?.tags.containsAll(skillTags) ?? skillTags.isEmpty;
+        return factorContains && skillContains;
+      })
+      .map((e) => e.sid)
+      .toSet();
+});
+
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
 
 class _SelectedSkillTags extends TagSelectionNotifier {
@@ -448,6 +512,21 @@ class _SelectedSkillTags extends TagSelectionNotifier {
   Set<String> build() {
     final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
     return Set.from(spec.predicate.skillTags);
+  }
+
+  @override
+  void toggle(String tag, {bool? shouldExists}) {
+    super.toggle(tag, shouldExists: shouldExists);
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    if (!spec.selectByTag) {
+      return;
+    }
+    // Tag-driven column: persist the chosen skill tags into the spec. The query is
+    // not stored — it is resolved live from the tags at evaluation time (see
+    // [_resolved]). Only this axis is touched; the factor axis keeps its value.
+    ref
+        .read(specCloneProvider(specId).notifier)
+        .update((s) => (s as FactorColumnSpec).copyWith(predicate: s.predicate.copyWith(skillTags: state)));
   }
 }
 
@@ -464,6 +543,21 @@ class _SelectedFactorTags extends TagSelectionNotifier {
   Set<String> build() {
     final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
     return Set.from(spec.predicate.factorTags);
+  }
+
+  @override
+  void toggle(String tag, {bool? shouldExists}) {
+    super.toggle(tag, shouldExists: shouldExists);
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    if (!spec.selectByTag) {
+      return;
+    }
+    // Tag-driven column: persist the chosen factor tags into the spec. The query is
+    // not stored — it is resolved live from the tags at evaluation time (see
+    // [_resolved]). Only this axis is touched; the skill axis keeps its value.
+    ref
+        .read(specCloneProvider(specId).notifier)
+        .update((s) => (s as FactorColumnSpec).copyWith(predicate: s.predicate.copyWith(factorTags: state)));
   }
 }
 
@@ -501,28 +595,45 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
   }
 
   Widget tagsWidget() {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: NoteCard(
-        description: Text("$tr_factor.selection.tags.description".tr()),
+    final selectors = [
+      TagSelector(
+        candidateTagsProvider: factorTagProvider,
+        selectedTagsProvider: _selectedFactorTagsProvider(widget.specId),
+      ),
+      Row(
         children: [
-          TagSelector(
-            candidateTagsProvider: factorTagProvider,
-            selectedTagsProvider: _selectedFactorTagsProvider(widget.specId),
-          ),
-          Row(
-            children: [
-              const Expanded(child: Divider()),
-              Padding(padding: const EdgeInsets.all(8), child: Text("$tr_factor.selection.tags.skill_tags.label".tr())),
-              const Expanded(child: Divider()),
-            ],
-          ),
-          TagSelector(
-            candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: _selectedSkillTagsProvider(widget.specId),
-          ),
+          const Expanded(child: Divider()),
+          Padding(padding: const EdgeInsets.all(8), child: Text("$tr_factor.selection.tags.skill_tags.label".tr())),
+          const Expanded(child: Divider()),
         ],
       ),
+      TagSelector(
+        candidateTagsProvider: skillTagProvider,
+        selectedTagsProvider: _selectedSkillTagsProvider(widget.specId),
+      ),
+    ];
+    // A tag-driven column shows the chips without the NoteCard frame, and its tags
+    // define the column (so a dedicated description); a normal column keeps them
+    // inside the bordered note alongside the individual factor list.
+    if (_clonedSpecProvider.watch(ref, widget.specId).selectByTag) {
+      return Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text("$tr_factor.selection.tags.tag_driven_description".tr()),
+            ),
+            const SizedBox(height: 12),
+            ...selectors,
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: NoteCard(description: Text("$tr_factor.selection.tags.description".tr()), children: selectors),
     );
   }
 
@@ -549,7 +660,7 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
       title: Text("$tr_factor.selection.label".tr()),
       children: [
         if (!spec.hiddenElements.contains(FactorDialogElements.selectionTags)) tagsWidget(),
-        selectorWidget(context),
+        if (!spec.hiddenElements.contains(FactorDialogElements.selectionList)) selectorWidget(context),
       ],
     );
   }
@@ -880,6 +991,45 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
         skillTags: initialSkillTags,
       ),
       hiddenElements: {FactorDialogElements.selectionTags, FactorDialogElements.modeLogic},
+      showAllWhenQueryIsEmpty: false,
+      showAvailableOnly: false,
+    );
+  }
+}
+
+/// Builds a factor column the user defines purely by tag: the dialog shows the
+/// factor/skill tag selectors and hides the individual factor list and logic mode.
+/// Selecting a tag freezes the query to the matching factors (see
+/// [FactorColumnSpec.selectByTag]).
+class TagDrivenFactorColumnBuilder extends ColumnBuilder {
+  final Parser parser;
+
+  @override
+  final String title;
+
+  @override
+  final ColumnCategory category;
+
+  @override
+  final String? builderId;
+
+  TagDrivenFactorColumnBuilder({required this.title, required this.category, required this.parser, this.builderId});
+
+  @override
+  ColumnSpec<FactorSet> build(RefBase ref) {
+    return FactorColumnSpec(
+      id: const Uuid().v4(),
+      title: title,
+      parser: parser,
+      builderId: builderId,
+      predicate: AggregateFactorSetPredicate(
+        logic: FactorSetLogicMode.mixed,
+        subject: FactorSearchSubjectMode.family,
+        element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
+        notation: FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
+      ),
+      selectByTag: true,
+      hiddenElements: {FactorDialogElements.selectionList, FactorDialogElements.modeLogic},
       showAllWhenQueryIsEmpty: false,
       showAvailableOnly: false,
     );
