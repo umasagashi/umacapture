@@ -81,12 +81,9 @@ enum _RecordCategory {
     _RecordCategory.friend,
   ];
 
-  /// Owner-oriented split (all / user / friend), used by the factor tiles where
-  /// only the player-vs-friend distinction matters.
+  /// Owner-oriented split (all / player / friend), used by the factor and ranking
+  /// tiles where only the player-vs-friend distinction matters.
   static const ownerWay = [_RecordCategory.all, _RecordCategory.user, _RecordCategory.friend];
-
-  /// Ranking split; inheritance-only records carry no evaluation/skill data.
-  static const rankWay = [_RecordCategory.all, _RecordCategory.trained, _RecordCategory.friend];
 
   /// Localized label, read from the shared `statistics.category` block.
   String get label => switch (this) {
@@ -215,6 +212,7 @@ class _RankingEntry extends StatelessWidget {
   final bool isFriend;
   final String valueLabel;
   final String? secondaryLabel;
+  final double iconValueGap;
 
   const _RankingEntry({
     required this.rank,
@@ -222,6 +220,7 @@ class _RankingEntry extends StatelessWidget {
     required this.isFriend,
     required this.valueLabel,
     this.secondaryLabel,
+    this.iconValueGap = 10,
   });
 
   @override
@@ -232,18 +231,21 @@ class _RankingEntry extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-            width: 24,
-            child: Text("$rank", style: theme.textTheme.titleSmall, textAlign: TextAlign.center),
+            width: 16,
+            child: Text("$rank", style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
           ),
           const SizedBox(width: 4),
-          isFriend ? SizedBox.square(dimension: 32, child: FriendMarkedIcon(icon: icon)) : icon,
-          const SizedBox(width: 8),
+          isFriend ? SizedBox.square(dimension: 42, child: FriendMarkedIcon(icon: icon)) : icon,
+          SizedBox(width: iconValueGap),
           Expanded(
-            child: Text(valueLabel, style: theme.textTheme.titleMedium, textAlign: TextAlign.end),
+            child: Text(valueLabel, style: theme.textTheme.titleLarge, textAlign: TextAlign.end),
           ),
           if (secondaryLabel != null) ...[
             const SizedBox(width: 6),
-            Text(secondaryLabel!, style: theme.textTheme.titleMedium?.copyWith(color: theme.colorScheme.primary)),
+            Text(
+              secondaryLabel!,
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
           ],
         ],
       ),
@@ -251,7 +253,7 @@ class _RankingEntry extends StatelessWidget {
   }
 }
 
-/// Top-5 ranking tile shared by the evaluation / skill-count / factor-count tiles.
+/// Top-3 ranking tile shared by the evaluation / skill-count / factor-count tiles.
 class _RankingStatisticWidget extends ConsumerStatefulWidget {
   final String titleKey;
   final List<_RecordCategory> options;
@@ -260,11 +262,15 @@ class _RankingStatisticWidget extends ConsumerStatefulWidget {
   /// Optional trailing label per record (e.g. the chara rank for evaluation).
   final String Function(WidgetRef, CharaDetailRecord)? secondaryLabelOf;
 
+  /// Gap between the trainee icon and the value column.
+  final double iconValueGap;
+
   const _RankingStatisticWidget({
     required this.titleKey,
     required this.options,
     required this.valueOf,
     this.secondaryLabelOf,
+    this.iconValueGap = 10,
   });
 
   @override
@@ -291,21 +297,27 @@ class _RankingStatisticWidgetState extends ConsumerState<_RankingStatisticWidget
         }
         final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
         records.sort((a, b) => widget.valueOf(b).compareTo(widget.valueOf(a)));
-        final top = records.take(5).toList();
+        final top = records.take(3).toList();
         return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              for (final entry in top.indexed)
-                _RankingEntry(
-                  rank: entry.$1 + 1,
-                  icon: Image.file(storage.traineeIconPathOf(entry.$2).toFile(), height: 32),
-                  isFriend: entry.$2.isFriend,
-                  valueLabel: widget.valueOf(entry.$2).toNumberString(),
-                  secondaryLabel: widget.secondaryLabelOf?.call(ref, entry.$2),
-                ),
-            ],
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          // IntrinsicWidth sizes every row to the widest one, so the centered
+          // block keeps the right-aligned values lined up across rows.
+          child: IntrinsicWidth(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final entry in top.indexed)
+                  _RankingEntry(
+                    rank: entry.$1 + 1,
+                    icon: Image.file(storage.traineeIconPathOf(entry.$2).toFile(), height: 42),
+                    isFriend: entry.$2.isFriend,
+                    valueLabel: widget.valueOf(entry.$2).toNumberString(),
+                    secondaryLabel: widget.secondaryLabelOf?.call(ref, entry.$2),
+                    iconValueGap: widget.iconValueGap,
+                  ),
+              ],
+            ),
           ),
         );
       },
@@ -320,7 +332,7 @@ class EvaluationRankingStatisticWidget {
       mainAxisCellCount: 1,
       child: _RankingStatisticWidget(
         titleKey: "$tr_statistics.evaluation_value.title",
-        options: _RecordCategory.rankWay,
+        options: _RecordCategory.ownerWay,
         valueOf: _evaluationValueOf,
         secondaryLabelOf: _rankLabelOf,
       ),
@@ -335,8 +347,9 @@ class SkillCountRankingStatisticWidget {
       mainAxisCellCount: 1,
       child: _RankingStatisticWidget(
         titleKey: "$tr_statistics.count_skill.title",
-        options: _RecordCategory.rankWay,
+        options: _RecordCategory.ownerWay,
         valueOf: _skillCountOf,
+        iconValueGap: 22,
       ),
     );
   }
@@ -351,6 +364,7 @@ class FactorCountRankingStatisticWidget {
         titleKey: "$tr_statistics.count_factor.title",
         options: _RecordCategory.ownerWay,
         valueOf: _factorCountOf,
+        iconValueGap: 22,
       ),
     );
   }
@@ -814,9 +828,9 @@ class _CountStrategyStatisticWidgetState extends ConsumerState<CountStrategyStat
 }
 
 /// Counts records by the family-wide star sum (self + both parents, type-ignored)
-/// of the factors tagged [tag], bucketed into exactly 6 / 7 / 8 / 9.
+/// of the factors tagged [tag], bucketed into exactly 3..9.
 class _FactorStarSumChartData {
-  static const buckets = [6, 7, 8, 9];
+  static const buckets = [3, 4, 5, 6, 7, 8, 9];
 
   final List<CharaDetailRecord> records;
   final Set<int> ids;
@@ -840,7 +854,7 @@ class _FactorStarSumChartData {
     return counts;
   }
 
-  BarChart build(ThemeData theme) => _buildCountBarChart(theme, parse(), const ["6", "7", "8", "9"]);
+  BarChart build(ThemeData theme) => _buildCountBarChart(theme, parse(), const ["3", "4", "5", "6", "7", "8", "9"]);
 }
 
 class _FactorStarSumStatisticWidget extends ConsumerStatefulWidget {
@@ -906,8 +920,12 @@ class _EvaluationScatterChartData {
 
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
+  /// Trained (own) records only: friend records are not the player's own runs,
+  /// and inheritance-only records carry no evaluation value.
   _EvaluationScatterChartData(List<CharaDetailRecord> records)
-    : records = records.where((record) => !record.isFriend).toList();
+    : records = records
+          .where((record) => (record.metadata.recordType ?? RecordType.standard) == RecordType.standard)
+          .toList();
 
   double _monthOffset(DateTime date, DateTime start) {
     final months = (date.year - start.year) * 12 + (date.month - start.month);

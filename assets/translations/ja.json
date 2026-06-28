@@ -1409,25 +1409,25 @@
                 "trained": "育成",
                 "inheritance": "継承",
                 "friend": "フレンド",
-                "user": "ユーザー"
+                "user": "プレイヤー"
             },
             "record_count": {
                 "title": "殿堂入り登録数"
             },
             "evaluation_value": {
-                "title": "評価点ランキング"
+                "title": "評価点上位"
             },
             "count_skill": {
-                "title": "スキル数ランキング"
+                "title": "スキル数上位"
             },
             "count_factor": {
-                "title": "因子数ランキング"
+                "title": "因子数上位"
             },
             "monthly_fans": {
-                "title": "月間ファン獲得数"
+                "title": "月間ファン獲得数（プレイヤーのみ）"
             },
             "evaluation_trend": {
-                "title": "評価点の推移"
+                "title": "評価点の推移（プレイヤーのみ）"
             },
             "count_s_rank": {
                 "title": "適性S保有数",
