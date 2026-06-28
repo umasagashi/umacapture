@@ -472,10 +472,11 @@ class _ChartSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final categories = Theme.of(context).chart.categories;
+    final chart = Theme.of(context).chart;
     return _Section('Chart palette (AppChartColors)', [
-      for (final (i, color) in categories.indexed)
+      for (final (i, color) in chart.categories.indexed)
         _SwatchRow(_Swatch('category $i', color), 'Category color $i of the count-by-strategy charts.'),
+      _SwatchRow(_Swatch('series', chart.series), 'Single-series color for the bar, line, and scatter charts.'),
     ], note: 'Theme-driven. Defined in lib/src/gui/theme_extensions.dart.');
   }
 }
