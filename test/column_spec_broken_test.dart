@@ -100,6 +100,20 @@ void main() {
     expect(container.read(currentColumnSpecBrokenIdsProvider), contains('legacy'));
   });
 
+  test('a spec saved before selectByTag existed loads healthy, not broken', () async {
+    // completeFactorMap() carries every field except selectByTag (a non-null bool
+    // added later). Its absence must decode to the default (false) without flagging
+    // the column broken — the same grandfathering the 'hidden' flag relies on.
+    seed([completeFactorMap('grandfathered')]);
+    final container = ProviderContainer.test();
+    await container.read(currentColumnSpecsLoaderProvider.future);
+
+    final specs = container.read(currentColumnSpecsProvider);
+    expect(specs.single, isA<FactorColumnSpec>());
+    expect((specs.single as FactorColumnSpec).selectByTag, isFalse);
+    expect(container.read(currentColumnSpecBrokenIdsProvider), isNot(contains('grandfathered')));
+  });
+
   test('broken flag survives reload until the user heals via replaceById', () async {
     seed([legacyFactorMap('legacy')]);
 
