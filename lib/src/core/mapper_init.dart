@@ -20,6 +20,7 @@ import '/src/chara_detail/spec/race_grade.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
+import '/src/chara_detail/spec/relation_bonus.dart';
 import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
@@ -55,6 +56,7 @@ void initializeMappers() {
   ColumnSpecMapper.ensureInitialized();
   RangedIntegerColumnSpecMapper.ensureInitialized();
   RaceGradeWinningCountColumnSpecMapper.ensureInitialized();
+  RelationBonusColumnSpecMapper.ensureInitialized();
   RangedLabelColumnSpecMapper.ensureInitialized();
   CharaRankColumnSpecMapper.ensureInitialized();
   SimpleLabelColumnSpecMapper.ensureInitialized();

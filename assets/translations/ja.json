@@ -896,6 +896,14 @@
                 "race_strategy": {
                     "title": "作戦"
                 },
+                "relation_bonus": {
+                    "title": "重賞ボーナス",
+                    "cell": {
+                        "confirmed": "確定（祖先 {linked}/{total} リンク済み）",
+                        "incomplete": "未確定（祖先 {linked}/{total} リンク済み・値はさらに増える可能性があります）",
+                        "unlinked": "親がリンクされていないため値がありません"
+                    }
+                },
                 "rating": {
                     "title": "レーティング"
                 },
