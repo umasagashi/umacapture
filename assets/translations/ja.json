@@ -1408,16 +1408,26 @@
                 "all": "全体",
                 "trained": "育成",
                 "inheritance": "継承",
-                "friend": "フレンド"
+                "friend": "フレンド",
+                "user": "ユーザー"
             },
             "record_count": {
                 "title": "殿堂入り登録数"
             },
             "evaluation_value": {
-                "title": "最高評価点"
+                "title": "評価点ランキング"
+            },
+            "count_skill": {
+                "title": "スキル数ランキング"
+            },
+            "count_factor": {
+                "title": "因子数ランキング"
             },
             "monthly_fans": {
                 "title": "月間ファン獲得数"
+            },
+            "evaluation_trend": {
+                "title": "評価点の推移"
             },
             "count_s_rank": {
                 "title": "適性S保有数",
@@ -1430,6 +1440,12 @@
             },
             "count_strategy": {
                 "title": "作戦採用率"
+            },
+            "count_blue_factor": {
+                "title": "青因子保有数"
+            },
+            "count_red_factor": {
+                "title": "赤因子保有数"
             }
         }
     },
