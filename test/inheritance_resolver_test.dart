@@ -174,14 +174,33 @@ void main() {
       expect(result.ambiguities, isEmpty);
     });
 
-    test('clears a stale link that no longer resolves', () {
+    test('preserves an existing link even when it no longer resolves', () {
+      // Additive resolution never clears a set link, so a once-resolved lineage
+      // (and the relation bonus derived from it) is not torn down by a later pass.
       final child = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: [const Factor(1, 1)], parent1Id: 'gone');
 
       final result = InheritanceResolver.resolveAll([child]);
 
-      final updated = result.changed.single;
+      expect(result.changed, isEmpty);
+    });
+
+    test('fills an empty slot while preserving the other set slot', () {
+      final parent2 = makeRecord(id: 'p2', card: 30, self: [const Factor(2, 2)]);
+      final child = makeRecord(
+        id: 'c',
+        card: 20,
+        parent1Card: 10,
+        parent1: [const Factor(1, 1)],
+        parent1Id: 'kept', // already linked (now stale); must survive
+        parent2Card: 30,
+        parent2: [const Factor(2, 2)],
+      );
+
+      final updated = InheritanceResolver.resolveAll([child, parent2]).changed.single;
+
       expect(updated.id, 'c');
-      expect(updated.metadata.recordId.parent1, isNull);
+      expect(updated.metadata.recordId.parent1, 'kept', reason: 'existing link preserved');
+      expect(updated.metadata.recordId.parent2, 'p2', reason: 'empty slot filled');
     });
   });
 

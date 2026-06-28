@@ -356,18 +356,17 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
 
   /// Re-resolves parent/child links across every stored record (manual action).
   ///
-  /// Unlike the per-capture resolution, this is authoritative: it both sets and
-  /// clears links so the whole storage reflects the current matches. The active
-  /// and archive sets are resolved together, and each changed record is rewritten
-  /// to disk and republished in its owning store. Aborts with a warning if the
-  /// archive has not loaded (build() no longer awaits it), because clearing links
-  /// against a missing archive would destroy valid active->archive links.
+  /// Additive like the per-capture path: it only fills empty parent slots and
+  /// never clears a set link. The active and archive sets are resolved together,
+  /// and each changed record is rewritten to disk and republished in its owning
+  /// store. Aborts with a warning if the archive has not loaded (build() no longer
+  /// awaits it): the relation-bonus recompute walks archived ancestors, so running
+  /// it without the archive would tear down bonuses that depend on them.
   void resolveAllInheritance() {
-    // resolveAll is authoritative: it clears links that no longer resolve. If the
-    // archive failed to load (or is still building), treating it as empty would
-    // clear every active->archive link as unresolvable and rewrite those
-    // record.json files, destroying valid links. Abort instead of degrading; the
-    // capture-time add() path is additive and stays safe without this guard.
+    // Abort if the archive failed to load (or is still building). Links are never
+    // cleared (resolution is additive), but the relation-bonus recompute reads
+    // archived ancestors' race data; treating the archive as empty would drop
+    // every active->archive pair to zero and rewrite those bonuses downward.
     final archiveRecords = ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value;
     if (archiveRecords == null) {
       Toaster.show(ToastData.warning(description: "app.inheritance.archive_not_ready".tr()));

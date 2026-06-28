@@ -19,12 +19,13 @@ import '/src/chara_detail/chara_detail_record.dart';
 /// The factor list order is guaranteed by the recognizer, so the lists are
 /// compared as-is (no sorting). Matching is keyed on a `card|factors` string.
 ///
-/// Deleting a record does not clean up links that point at it: a child keeps the
-/// deleted id in its `parentN` slot. That dangling id is harmless — it resolves
-/// to "no parent" in `resolveRegisteredAncestors` — and is cleared the next time
-/// the authoritative [resolveAll] (manual re-resolution) runs. This holds for
-/// both the active and archive sets; a deletion in either leaves the other's
-/// links to be reconciled on the next manual pass.
+/// Resolution is additive: it only fills empty parent slots and never clears or
+/// re-points a link that is already set. A once-resolved lineage therefore stays
+/// stable across passes, so the relation bonus derived from it is not torn down
+/// by a later re-resolution. Deleting a record does not clean up links that point
+/// at it — a child keeps the deleted id in its `parentN` slot — but that dangling
+/// id is harmless: it resolves to "no parent" in `resolveRegisteredAncestors` and
+/// simply contributes nothing to the bonus.
 ///
 /// ## Relation bonus
 ///
@@ -46,24 +47,32 @@ class InheritanceResolver {
   /// field can be set to a new value (including null) when a real one is passed.
   static const Object _keepBonus = Object();
 
-  /// Authoritatively recomputes every record's parent links across [records].
+  /// Fills every still-empty parent slot across [records] (manual, whole-storage
+  /// re-resolution).
   ///
-  /// This is idempotent: it both sets newly-resolvable links and clears links
-  /// that no longer resolve (or became ambiguous). Use it for the manual,
-  /// whole-storage re-resolution. Returns only the records whose links changed.
+  /// Resolution is additive: an already-set link is preserved as-is — never
+  /// cleared or re-pointed — so a once-resolved lineage stays stable. Only empty
+  /// slots are filled (a slot matching multiple candidates is reported as
+  /// ambiguous and left empty). Returns only the records that changed.
   ///
   /// When [g1RaceSids] is non-empty, each record's [Metadata.relationBonus] is
-  /// also recomputed from the freshly resolved lineage, and a record whose bonus
-  /// changed is returned even if its links did not. An empty set (the default)
-  /// leaves the bonus untouched, preserving the link-only behaviour.
+  /// also recomputed from the resolved lineage, and a record whose bonus changed
+  /// is returned even if its links did not. An empty set (the default) leaves the
+  /// bonus untouched, preserving the link-only behaviour.
   static InheritanceResolution resolveAll(List<CharaDetailRecord> records, {Set<int> g1RaceSids = const {}}) {
     final index = _selfKeyIndex(records);
     final ambiguities = <AmbiguousMatch>[];
 
-    // Phase 1: resolve every record's parent links.
+    // Phase 1: fill each record's empty parent slots, preserving existing links.
     final resolvedLinks = <String, _Links>{};
     for (final child in records) {
-      String? resolved(int slot) {
+      // Additive: an already-set link is kept as-is — never cleared or
+      // re-pointed — so a once-resolved lineage (and the relation bonus derived
+      // from it) is not torn down by a later pass. Only an empty slot is filled.
+      String? resolveSlot(int slot, String? current) {
+        if (current != null) {
+          return current;
+        }
         final candidates = (index[_childKey(child, slot)] ?? const <CharaDetailRecord>[])
             .where((p) => p.id != child.id)
             .toList();
@@ -76,7 +85,10 @@ class InheritanceResolver {
         return null;
       }
 
-      resolvedLinks[child.id] = (parent1: resolved(1), parent2: resolved(2));
+      resolvedLinks[child.id] = (
+        parent1: resolveSlot(1, child.metadata.recordId.parent1),
+        parent2: resolveSlot(2, child.metadata.recordId.parent2),
+      );
     }
 
     // Phase 2: build a record-by-id map with the resolved links applied so the
@@ -99,10 +111,11 @@ class InheritanceResolver {
 
   /// Resolves links touched by a newly captured [newRecord] against [existing].
   ///
-  /// This is additive and narrow for links: it only sets [newRecord]'s own
-  /// parents and fills [existing] children's slots that [newRecord] uniquely
-  /// satisfies. It never clears or re-evaluates unrelated links. [existing] must
-  /// not contain [newRecord].
+  /// This is additive and narrow for links: it only fills [newRecord]'s own empty
+  /// parent slots and the empty slots of [existing] children that [newRecord]
+  /// uniquely satisfies. An already-set link is left untouched (never cleared or
+  /// re-pointed), and unrelated links are never re-evaluated. [existing] must not
+  /// contain [newRecord].
   ///
   /// When [g1RaceSids] is non-empty, [Metadata.relationBonus] is also recomputed
   /// for [newRecord] and for every stored record whose lineage now reaches
@@ -126,10 +139,14 @@ class InheritanceResolver {
     // newRecord, so no self-exclusion is needed here.
     final index = _selfKeyIndex(existing);
 
-    // Direction A: treat newRecord as a child and find its parents.
+    // Direction A: treat newRecord as a child and fill its empty parent slots.
     var parent1 = newRecord.metadata.recordId.parent1;
     var parent2 = newRecord.metadata.recordId.parent2;
     for (final slot in const [1, 2]) {
+      // Additive: leave an already-linked slot untouched (never re-point it).
+      if ((slot == 1 ? parent1 : parent2) != null) {
+        continue;
+      }
       final key = _childKey(newRecord, slot);
       final candidates = index[key] ?? const <CharaDetailRecord>[];
       if (candidates.length == 1) {
@@ -153,17 +170,19 @@ class InheritanceResolver {
         if (_childKey(child, slot) != newSelfKey) {
           continue;
         }
-        // Any other stored record that also satisfies this slot makes the match
-        // ambiguous (the child should already be linked to it), so skip linking.
-        final others = sameSelf.where((p) => p.id != child.id);
-        if (others.isNotEmpty) {
-          ambiguities.add(AmbiguousMatch(child.id, slot, others.length + 1));
-          continue;
-        }
+        // Additive: leave an already-linked slot untouched (whether it points at
+        // newRecord from an earlier iteration or at another record).
         final current =
             childLinks[child.id] ??
             (parent1: child.metadata.recordId.parent1, parent2: child.metadata.recordId.parent2);
-        if ((slot == 1 ? current.parent1 : current.parent2) == newRecord.id) {
+        if ((slot == 1 ? current.parent1 : current.parent2) != null) {
+          continue;
+        }
+        // Any other stored record that also satisfies this empty slot makes the
+        // match ambiguous, so skip linking and report it.
+        final others = sameSelf.where((p) => p.id != child.id);
+        if (others.isNotEmpty) {
+          ambiguities.add(AmbiguousMatch(child.id, slot, others.length + 1));
           continue;
         }
         childLinks[child.id] = (
