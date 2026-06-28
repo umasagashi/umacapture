@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
@@ -22,6 +23,10 @@ import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
 part 'storage.mapper.dart';
+
+// Grade tag whose shared wins feed the inheritance relation bonus (G1 only, per
+// the current game rule). Matches the literal used by the race-grade column.
+const _gradeG1 = "grade_g1";
 
 // Monotonic id so each duplicated-chara event yields a distinct StreamProvider value; the sound
 // listener uses ref.listen(), which would otherwise dedupe equal consecutive AsyncData and skip
@@ -317,7 +322,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     // Link this record to existing parents/children (in either the active or the
     // archive set) by matching factors and card, then persist any record.json
     // whose parent ids changed, routing each change back to its owning store.
-    final resolution = InheritanceResolver.resolveForNewRecord(record, existing);
+    final resolution = InheritanceResolver.resolveForNewRecord(record, existing, g1RaceSids: _g1RaceSids());
     final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
     final archiveIds = {for (final e in archiveRecords) e.id};
     final activeChildUpdates = <String, CharaDetailRecord>{};
@@ -368,13 +373,29 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       Toaster.show(ToastData.warning(description: "app.inheritance.archive_not_ready".tr()));
       return;
     }
-    final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords]);
+    final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords], g1RaceSids: _g1RaceSids());
     final archiveIds = {for (final e in archiveRecords) e.id};
     _routeInheritanceChanges(resolution, archiveIds, (updated) {
       replaceBy(updated, id: updated.id);
     });
     forceRebuild();
     _surfaceInheritance(resolution, alwaysReport: true);
+  }
+
+  /// G1 race title sids for the relation-bonus computation, or an empty set when
+  /// the race-title module has not finished loading.
+  ///
+  /// Read through the loader's async state because [raceGradeSidProvider] (and
+  /// [raceTitleInfoProvider] underneath it) dereference `.value!` and throw
+  /// before the module resolves. An empty set tells the resolver to leave
+  /// [Metadata.relationBonus] untouched, so link resolution still runs at capture
+  /// time before the module is ready; the next full re-resolve fills the bonus in.
+  Set<int> _g1RaceSids() {
+    final loaded = ref.read(raceTitleInfoLoader).asData;
+    if (loaded == null) {
+      return const {};
+    }
+    return ref.read(raceGradeSidProvider(_gradeG1));
   }
 
   /// Routes each changed record to its owning store.
