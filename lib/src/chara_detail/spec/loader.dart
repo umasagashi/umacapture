@@ -31,9 +31,9 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(labelMapLoader.future),
       ref.watch(_skillInfoLoader.future),
       ref.watch(_skillTagLoader.future),
-      ref.watch(_factorInfoLoader.future),
+      ref.watch(factorInfoLoader.future),
       ref.watch(_factorTagLoader.future),
-      ref.watch(_charaRankBorderLoader.future),
+      ref.watch(charaRankBorderLoader.future),
       ref.watch(_charaCardInfoLoader.future),
       ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
       ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
@@ -100,7 +100,7 @@ final skillTagProvider = Provider<List<Tag>>((ref) {
   return ref.watch(_skillTagLoader).value!;
 });
 
-final _factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
+final factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   final skillInfo = (await ref.watch(_skillInfoLoader.future)).toMap((e) => e.sid);
@@ -110,7 +110,7 @@ final _factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
 });
 
 final factorInfoProvider = Provider<List<FactorInfo>>((ref) {
-  return ref.watch(_factorInfoLoader).value!;
+  return ref.watch(factorInfoLoader).value!;
 });
 
 final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
@@ -129,14 +129,14 @@ final factorTagProvider = Provider<List<Tag>>((ref) {
   return ref.watch(_factorTagLoader).value!;
 });
 
-final _charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
+final charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   return compute(_loadFromJson<List<int>>, path.modulesDir.filePath("rank_border.json"));
 });
 
 final charaRankBorderProvider = Provider<List<int>>((ref) {
-  return ref.watch(_charaRankBorderLoader).value!;
+  return ref.watch(charaRankBorderLoader).value!;
 });
 
 final _charaCardInfoLoader = FutureProvider<List<CharaCardInfo>>((ref) async {
