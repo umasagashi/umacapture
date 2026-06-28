@@ -468,12 +468,10 @@ Future<void> _runWithSentry(AppRunner runner) async {
     await Directory(nativeDatabasePath).create(recursive: true);
     await SentryFlutter.init((SentryFlutterOptions options) {
       options.nativeDatabasePath = nativeDatabasePath;
-      if (kDebugMode) {
-        options.dsn = "https://6ccc0a047e5c42c788f907599f0d4e97@o1367286.ingest.sentry.io/6668087";
-      } else {
-        options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
-      }
-      options.release = appVersion.toString() + (kDebugMode ? "-debug" : "");
+      // Debug builds never reach here (see runWithSentry), so only the release
+      // project DSN remains.
+      options.dsn = "https://6f9ab436b1ad46e2b1be72d8f44f03e0@o1367286.ingest.sentry.io/6670477";
+      options.release = appVersion.toString();
       options.enablePrintBreadcrumbs = false;
       options.beforeSend = (SentryEvent event, Hint hint) async {
         final customHint = CustomHint.from(hint);
@@ -498,7 +496,10 @@ Future<void> _runWithSentry(AppRunner runner) async {
 }
 
 Future<void> runWithSentry(AppRunner runner) async {
-  if (allowPostUserData() == PostUserData.deny) {
+  // Never initialize Sentry in debug builds: developer-side errors must not be
+  // reported. Skipping init leaves HubAdapter disabled, so every captureXxx
+  // helper and the log breadcrumbs become no-ops.
+  if (kDebugMode || allowPostUserData() == PostUserData.deny) {
     logger.i("Error logging is disabled.");
     runner();
   } else {
