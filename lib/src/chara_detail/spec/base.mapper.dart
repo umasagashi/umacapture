@@ -404,6 +404,89 @@ mixin CharaCardInfoMappable {
   }
 }
 
+class RaceTitleInfoMapper extends ClassMapperBase<RaceTitleInfo> {
+  RaceTitleInfoMapper._();
+
+  static RaceTitleInfoMapper? _instance;
+  static RaceTitleInfoMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = RaceTitleInfoMapper._());
+    }
+    return _instance!;
+  }
+
+  @override
+  final String id = 'RaceTitleInfo';
+
+  static int _$sid(RaceTitleInfo v) => v.sid;
+  static const Field<RaceTitleInfo, int> _f$sid = Field('sid', _$sid);
+  static int _$sortKey(RaceTitleInfo v) => v.sortKey;
+  static const Field<RaceTitleInfo, int> _f$sortKey = Field(
+    'sortKey',
+    _$sortKey,
+    key: r'sort_key',
+  );
+  static List<String> _$names(RaceTitleInfo v) => v.names;
+  static const Field<RaceTitleInfo, List<String>> _f$names = Field(
+    'names',
+    _$names,
+  );
+  static List<String> _$descriptions(RaceTitleInfo v) => v.descriptions;
+  static const Field<RaceTitleInfo, List<String>> _f$descriptions = Field(
+    'descriptions',
+    _$descriptions,
+  );
+  static Set<String> _$tags(RaceTitleInfo v) => v.tags;
+  static const Field<RaceTitleInfo, Set<String>> _f$tags = Field(
+    'tags',
+    _$tags,
+  );
+
+  @override
+  final MappableFields<RaceTitleInfo> fields = const {
+    #sid: _f$sid,
+    #sortKey: _f$sortKey,
+    #names: _f$names,
+    #descriptions: _f$descriptions,
+    #tags: _f$tags,
+  };
+
+  static RaceTitleInfo _instantiate(DecodingData data) {
+    return RaceTitleInfo(
+      data.dec(_f$sid),
+      data.dec(_f$sortKey),
+      data.dec(_f$names),
+      data.dec(_f$descriptions),
+      data.dec(_f$tags),
+    );
+  }
+
+  @override
+  final Function instantiate = _instantiate;
+
+  static RaceTitleInfo fromMap(Map<String, dynamic> map) {
+    return ensureInitialized().decodeMap<RaceTitleInfo>(map);
+  }
+
+  static RaceTitleInfo fromJson(String json) {
+    return ensureInitialized().decodeJson<RaceTitleInfo>(json);
+  }
+}
+
+mixin RaceTitleInfoMappable {
+  String toJson() {
+    return RaceTitleInfoMapper.ensureInitialized().encodeJson<RaceTitleInfo>(
+      this as RaceTitleInfo,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return RaceTitleInfoMapper.ensureInitialized().encodeMap<RaceTitleInfo>(
+      this as RaceTitleInfo,
+    );
+  }
+}
+
 class ColumnSpecMapper extends ClassMapperBase<ColumnSpec> {
   ColumnSpecMapper._();
 

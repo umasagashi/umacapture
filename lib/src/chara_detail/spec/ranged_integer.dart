@@ -122,7 +122,7 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
 
   @override
   List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
-    return List<int>.from(records.map(parser.parse));
+    return List<int>.from(parser.parseList(ref, records));
   }
 
   @override

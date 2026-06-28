@@ -35,6 +35,7 @@ final moduleInfoLoaders = FutureProvider((ref) async {
       ref.watch(_factorTagLoader.future),
       ref.watch(charaRankBorderLoader.future),
       ref.watch(_charaCardInfoLoader.future),
+      ref.watch(raceTitleInfoLoader.future),
       ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
       ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
     ]).then((_) {
@@ -147,6 +148,23 @@ final _charaCardInfoLoader = FutureProvider<List<CharaCardInfo>>((ref) async {
 
 final charaCardInfoProvider = Provider<List<CharaCardInfo>>((ref) {
   return ref.watch(_charaCardInfoLoader).value!;
+});
+
+final raceTitleInfoLoader = FutureProvider<List<RaceTitleInfo>>((ref) async {
+  await ref.watch(moduleVersionLoader.future);
+  final path = await ref.watch(pathInfoLoader.future);
+  return compute(_loadFromJson<List<RaceTitleInfo>>, path.modulesDir.filePath("race_title_info.json"));
+});
+
+final raceTitleInfoProvider = Provider<List<RaceTitleInfo>>((ref) {
+  return ref.watch(raceTitleInfoLoader).value!;
+});
+
+// Resolves a grade tag (e.g. "grade_g1") to the sids of every race title that
+// carries it. Memoized per grade and recomputed when [raceTitleInfoProvider]
+// changes, so a grade-driven column automatically follows game-data updates.
+final raceGradeSidProvider = Provider.family<Set<int>, String>((ref, grade) {
+  return ref.watch(raceTitleInfoProvider).where((e) => e.tags.contains(grade)).map((e) => e.sid).toSet();
 });
 
 class AvailableCharaCardInfo {

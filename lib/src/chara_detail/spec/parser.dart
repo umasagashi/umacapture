@@ -1,6 +1,7 @@
 import 'package:dart_mappable/dart_mappable.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/core/utils.dart';
 
 part 'parser.mapper.dart';
@@ -10,6 +11,13 @@ abstract class Parser<T> with ParserMappable<T> {
   String get type => runtimeType.toString();
 
   T parse(CharaDetailRecord record);
+
+  /// Parses a whole record list, with access to the provider graph via [ref].
+  ///
+  /// Defaults to mapping [parse] over the records, so pure (record-only)
+  /// parsers need no change. Parsers whose value depends on module data (loaded
+  /// through providers) override this and ignore [parse].
+  List<T> parseList(RefBase ref, List<CharaDetailRecord> records) => records.map(parse).toList();
 }
 
 @MappableClass(discriminatorValue: 'EvaluationValueParser')
@@ -158,6 +166,26 @@ class CapturedDateParser extends Parser<DateTime> with CapturedDateParserMappabl
 class RaceWinningCountParser extends Parser<int> with RaceWinningCountParserMappable {
   @override
   int parse(CharaDetailRecord record) => record.races.where((e) => e.won).length;
+}
+
+@MappableClass(discriminatorValue: 'RaceGradeWinningCountParser')
+class RaceGradeWinningCountParser extends Parser<int> with RaceGradeWinningCountParserMappable {
+  /// The grade tag to count wins for (e.g. "grade_g1"). Stored (not the resolved
+  /// sid set) so the count follows game-data updates; sids are resolved per parse
+  /// via [raceGradeSidProvider].
+  final String grade;
+
+  RaceGradeWinningCountParser({this.grade = "grade_g1"});
+
+  @override
+  int parse(CharaDetailRecord record) =>
+      throw UnsupportedError("RaceGradeWinningCountParser requires module data; use parseList");
+
+  @override
+  List<int> parseList(RefBase ref, List<CharaDetailRecord> records) {
+    final sids = ref.read(raceGradeSidProvider(grade));
+    return records.map((r) => r.races.where((e) => e.won && sids.contains(e.title)).length).toList();
+  }
 }
 
 @MappableClass(discriminatorValue: 'RecordTypeParser')

@@ -78,6 +78,7 @@ void initializeMappers() {
   SkillInfoMapper.ensureInitialized();
   FactorInfoMapper.ensureInitialized();
   CharaCardInfoMapper.ensureInitialized();
+  RaceTitleInfoMapper.ensureInitialized();
   TagMapper.ensureInitialized();
   RatingDataMapper.ensureInitialized();
   MemoDataMapper.ensureInitialized();

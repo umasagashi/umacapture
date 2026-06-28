@@ -252,6 +252,19 @@ class CharaCardInfo with CharaCardInfoMappable {
   CharaCardInfo(this.sid, this.sortKey, this.names);
 }
 
+@MappableClass(caseStyle: CaseStyle.snakeCase)
+class RaceTitleInfo with RaceTitleInfoMappable {
+  final int sid;
+  final int sortKey;
+  final List<String> names;
+  final List<String> descriptions;
+  final Set<String> tags;
+
+  RaceTitleInfo(this.sid, this.sortKey, this.names, this.descriptions, this.tags);
+
+  String get label => names.first;
+}
+
 @MappableEnum()
 enum ColumnSpecCellAction { openSkillPreview, openFactorPreview, openCampaignPreview }
 

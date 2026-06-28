@@ -307,6 +307,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: RaceWinningCountParser(),
       cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
+    RangedIntegerColumnBuilder(
+      title: "$tr_columns.race_winning_count_g1.title".tr(),
+      category: ColumnCategory.race,
+      parser: RaceGradeWinningCountParser(),
+      cellAction: ColumnSpecCellAction.openCampaignPreview,
+    ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.record_type.title".tr(),
       category: ColumnCategory.metadata,
