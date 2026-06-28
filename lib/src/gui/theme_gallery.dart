@@ -523,9 +523,10 @@ const Map<String, String> _roleUsages = {
   'surface': 'Base backgrounds: card surfaces (global cardTheme), data-table, window chrome, side preview, script.',
   'onSurface': 'Default body text and icon color.',
   'onSurfaceVariant': 'Secondary text: setting descriptions, captions, muted labels.',
+  'surfaceBright': 'Pale water-blue tint filling the NoteCard body (paired with a primaryContainer border).',
   'surfaceContainerLowest':
-      'Pale water-blue tint: NoteCard / logic-column / column-builder group backgrounds, table odd rows.',
-  'surfaceContainerLow': 'Script name-copy chips and the statistics chart panel; recolored to a pale water-blue tint.',
+      'Pale water-blue tint: logic-column and column-builder group backgrounds; data-table striped rows.',
+  'surfaceContainerLow': 'Script name-copy chips; recolored to a pale water-blue tint.',
   'surfaceContainer': 'Panel backgrounds (addon list, side preview); striped script rows.',
   'surfaceContainerHigh': 'Chip backgrounds (global chipTheme) and the page background (scaffold).',
   'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',

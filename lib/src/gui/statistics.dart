@@ -37,7 +37,9 @@ class _StatisticTile extends ConsumerWidget {
     final theme = Theme.of(context);
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: theme.colorScheme.primaryContainer, width: 2),
+        // No fill: the whole tile (title/footer strips and the transparent chart
+        // body) follows the enclosing card background (cardTheme.color).
+        border: Border.all(color: theme.colorScheme.primaryContainer, width: 1.5),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Column(
@@ -46,7 +48,7 @@ class _StatisticTile extends ConsumerWidget {
           Expanded(
             child: Container(
               alignment: Alignment.center,
-              color: theme.colorScheme.surfaceContainerLow,
+              color: Colors.transparent,
               child: ref.watch(statisticsInitialLoader).guarded((_) => builder()),
             ),
           ),
