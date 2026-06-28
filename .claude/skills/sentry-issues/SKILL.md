@@ -6,9 +6,9 @@ description: >-
   pull umacapture's Sentry issues, crash reports, or error logs — e.g. "check
   Sentry", "what errors are users hitting", "show the latest crashes", "is there
   anything new on release X", or when they want the full stack trace / tags /
-  context of a specific issue. Covers the production and debug projects, the
-  release-version filter, and the difference between readable Dart exceptions and
-  unsymbolicated native crashes.
+  context of a specific issue. Covers the production project (the debug project
+  no longer receives events), the release-version filter, and the difference
+  between readable Dart exceptions and unsymbolicated native crashes.
 ---
 
 # Inspecting umacapture's Sentry issues
@@ -27,10 +27,13 @@ These are baked into the helper script, but keep them visible for ad-hoc calls:
 | Region | `sentry.io` (US) |
 | Org id | `1367286` |
 | **release** project (production, `kReleaseMode`) | `6670477` |
-| **debug** project (`kDebugMode`) | `6668087` |
+| **debug** project (legacy, no longer reported to) | `6668087` |
 
 The numeric ids work directly in API paths, so no org/project *slug* lookup is
 needed. Default to the **release** project — that's where real users' errors land.
+As of the "disable error reporting in debug builds" change, debug builds skip
+Sentry initialization entirely, so the debug project receives no new events; only
+its historical issues remain.
 
 ## Default scope: latest release build only
 

@@ -31,7 +31,7 @@ from pathlib import Path
 ORG_ID = "1367286"
 PROJECTS = {
     "release": "6670477",  # production build (kReleaseMode)
-    "debug": "6668087",  # kDebugMode build
+    "debug": "6668087",  # legacy: debug builds no longer init Sentry; historical events only
 }
 DEFAULT_TOKEN_PATH = "~/.sentry_token"
 BASE = "https://sentry.io/api/0"
