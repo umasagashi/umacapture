@@ -1404,20 +1404,23 @@
             }
         },
         "statistics": {
+            "category": {
+                "all": "全体",
+                "trained": "育成",
+                "inheritance": "継承",
+                "friend": "フレンド"
+            },
             "record_count": {
-                "title": "殿堂入り登録数",
-                "bottom": "全体"
+                "title": "殿堂入り登録数"
             },
             "evaluation_value": {
-                "title": "最高評価点",
-                "bottom": "全体"
+                "title": "最高評価点"
             },
             "monthly_fans": {
                 "title": "月間ファン獲得数"
             },
             "count_s_rank": {
                 "title": "適性S保有数",
-                "bottom": "全体",
                 "aptitude": {
                     "short_range": "短距離",
                     "mile_range": "マイル",
@@ -1426,8 +1429,7 @@
                 }
             },
             "count_strategy": {
-                "title": "作戦採用率",
-                "bottom": "全体"
+                "title": "作戦採用率"
             }
         }
     },

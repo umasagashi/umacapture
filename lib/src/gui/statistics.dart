@@ -8,6 +8,7 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/spec/character.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/callback.dart';
@@ -59,7 +60,76 @@ class _StatisticTile extends ConsumerWidget {
   }
 }
 
-class NumberOfRecordStatisticWidget extends ConsumerWidget {
+/// Record-type filter shared by the switchable statistics tiles.
+enum _RecordCategory {
+  all,
+  trained,
+  inheritance,
+  friend;
+
+  /// Localized label, read from the shared `statistics.category` block.
+  String get label => switch (this) {
+    _RecordCategory.all => "$tr_statistics.category.all".tr(),
+    _RecordCategory.trained => "$tr_statistics.category.trained".tr(),
+    _RecordCategory.inheritance => "$tr_statistics.category.inheritance".tr(),
+    _RecordCategory.friend => "$tr_statistics.category.friend".tr(),
+  };
+
+  bool matches(CharaDetailRecord record) {
+    // A null recordType means a legacy record captured before the type was
+    // recognized; the app treats those as standard (see RecordTypeParser).
+    final type = record.metadata.recordType ?? RecordType.standard;
+    return switch (this) {
+      _RecordCategory.all => true,
+      _RecordCategory.trained => type == RecordType.standard,
+      _RecordCategory.inheritance => type == RecordType.inheritanceOnly,
+      _RecordCategory.friend => type == RecordType.friendStandard || type == RecordType.friendInheritance,
+    };
+  }
+}
+
+/// A left/right switcher over [options] driving a [_RecordCategory] selection,
+/// styled like the other statistics-tile footers (arrows flanking a label).
+class _CategorySwitcher extends StatelessWidget {
+  final List<_RecordCategory> options;
+  final _RecordCategory selected;
+  final ValueChanged<_RecordCategory> onChanged;
+
+  const _CategorySwitcher({required this.options, required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final index = options.indexOf(selected);
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Disabled(
+          disabled: index == 0,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            splashRadius: 16,
+            icon: const Icon(Symbols.keyboard_arrow_left_rounded),
+            onPressed: () => onChanged(options[index - 1]),
+          ),
+        ),
+        Text(selected.label),
+        Disabled(
+          disabled: index == options.length - 1,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            splashRadius: 16,
+            icon: const Icon(Symbols.keyboard_arrow_right_rounded),
+            onPressed: () => onChanged(options[index + 1]),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class NumberOfRecordStatisticWidget extends ConsumerStatefulWidget {
   const NumberOfRecordStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
@@ -71,20 +141,32 @@ class NumberOfRecordStatisticWidget extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NumberOfRecordStatisticWidget> createState() => _NumberOfRecordStatisticWidgetState();
+}
+
+class _NumberOfRecordStatisticWidgetState extends ConsumerState<NumberOfRecordStatisticWidget> {
+  _RecordCategory category = _RecordCategory.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return _StatisticTile(
       title: Text("$tr_statistics.record_count.title".tr()),
-      bottom: Text("$tr_statistics.record_count.bottom".tr()),
+      bottom: _CategorySwitcher(
+        options: _RecordCategory.values,
+        selected: category,
+        onChanged: (value) => setState(() => category = value),
+      ),
       builder: () {
-        final theme = Theme.of(context);
         final records = ref.watch(charaDetailRecordStorageProvider);
-        return Text("${records.length}", style: theme.textTheme.headlineLarge);
+        final count = records.where(category.matches).length;
+        return Text("$count", style: theme.textTheme.headlineLarge);
       },
     );
   }
 }
 
-class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
+class MaxEvaluationValueStatisticWidget extends ConsumerStatefulWidget {
   const MaxEvaluationValueStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
@@ -96,22 +178,40 @@ class MaxEvaluationValueStatisticWidget extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MaxEvaluationValueStatisticWidget> createState() => _MaxEvaluationValueStatisticWidgetState();
+}
+
+class _MaxEvaluationValueStatisticWidgetState extends ConsumerState<MaxEvaluationValueStatisticWidget> {
+  // Inheritance-only records carry no evaluation value, so that category is omitted.
+  static const _options = [_RecordCategory.all, _RecordCategory.trained, _RecordCategory.friend];
+
+  _RecordCategory category = _RecordCategory.all;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return _StatisticTile(
       title: Text("$tr_statistics.evaluation_value.title".tr()),
-      bottom: Text("$tr_statistics.evaluation_value.bottom".tr()),
+      bottom: _CategorySwitcher(
+        options: _options,
+        selected: category,
+        onChanged: (value) => setState(() => category = value),
+      ),
       builder: () {
-        final records = ref.watch(charaDetailRecordStorageProvider);
+        final records = ref.watch(charaDetailRecordStorageProvider).where(category.matches);
         if (records.isEmpty) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
         final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
         final best = records.reduce((a, b) => a.evaluationValue > b.evaluationValue ? a : b);
+        final icon = Image.file(storage.traineeIconPathOf(best).toFile(), height: 56);
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Image.file(storage.traineeIconPathOf(best).toFile(), height: 56),
+            // A friend's (rental) record gets the same rental banner as the
+            // data table's character column. The fixed box bounds the marker's
+            // LayoutBuilder, which otherwise sizes off the unbounded column.
+            best.isFriend ? SizedBox.square(dimension: 56, child: FriendMarkedIcon(icon: icon)) : icon,
             Text(best.evaluationValue.toNumberString(), style: theme.textTheme.headlineMedium),
           ],
         );
@@ -124,7 +224,10 @@ class MonthlyFansChartData {
   final List<CharaDetailRecord> records;
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
-  MonthlyFansChartData(this.records);
+  /// Friend (practice-partner) records are excluded: their fan counts belong to
+  /// the friend's trainee, not the player's own monthly fan acquisition.
+  MonthlyFansChartData(List<CharaDetailRecord> records)
+    : records = records.where((record) => !record.isFriend).toList();
 
   List<FlSpot> parse({required DateTime start, required DateTime end}) {
     final targets = records.where((record) => record.trainedDateAsDateTime.isInRange(start, end));
@@ -236,7 +339,6 @@ class MonthlyFansChartData {
 }
 
 class MonthlyFansStatisticWidget extends ConsumerStatefulWidget {
-  final DateTime start = DateTime(2021, 2);
   final DateTime end = DateTime.now();
 
   MonthlyFansStatisticWidget({super.key});
@@ -261,13 +363,19 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final records = ref.watch(charaDetailRecordStorageProvider);
+    // The earliest navigable month is the month of the oldest player (non-friend)
+    // record; with no such record, fall back to the current month.
+    final playerDates = records.where((record) => !record.isFriend).map((record) => record.trainedDateAsDateTime);
+    final oldest = playerDates.isEmpty ? widget.end : playerDates.reduce((a, b) => a.isBefore(b) ? a : b);
+    final start = DateTime(oldest.year, oldest.month);
     return _StatisticTile(
       title: Text("$tr_statistics.monthly_fans.title".tr()),
       bottom: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Disabled(
-            disabled: targetMonth.isSameMonth(widget.start),
+            disabled: targetMonth.isSameMonth(start),
             child: IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
@@ -275,7 +383,7 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
               icon: const Icon(Symbols.keyboard_arrow_left_rounded),
               onPressed: () {
                 setState(() {
-                  targetMonth = DateTimeExtension.later(targetMonth.lastMonth(), widget.start);
+                  targetMonth = DateTimeExtension.later(targetMonth.lastMonth(), start);
                 });
               },
             ),
@@ -298,7 +406,6 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
         ],
       ),
       builder: () {
-        final records = ref.watch(charaDetailRecordStorageProvider);
         if (records.isEmpty) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
@@ -397,7 +504,7 @@ class CountSRankChartData {
   }
 }
 
-class CountSRankStatisticWidget extends ConsumerWidget {
+class CountSRankStatisticWidget extends ConsumerStatefulWidget {
   const CountSRankStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
@@ -409,13 +516,24 @@ class CountSRankStatisticWidget extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CountSRankStatisticWidget> createState() => _CountSRankStatisticWidgetState();
+}
+
+class _CountSRankStatisticWidgetState extends ConsumerState<CountSRankStatisticWidget> {
+  _RecordCategory category = _RecordCategory.all;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return _StatisticTile(
       title: Text("$tr_statistics.count_s_rank.title".tr()),
-      bottom: Text("$tr_statistics.count_s_rank.bottom".tr()),
+      bottom: _CategorySwitcher(
+        options: _RecordCategory.values,
+        selected: category,
+        onChanged: (value) => setState(() => category = value),
+      ),
       builder: () {
-        final records = ref.watch(charaDetailRecordStorageProvider);
+        final records = ref.watch(charaDetailRecordStorageProvider).where(category.matches).toList();
         final chart = CountSRankChartData(records);
         // Guard against an empty/all-active-less record set: `build` derives
         // `maxY` from `counts.max`, which is 0 here and yields a degenerate axis.
@@ -477,7 +595,7 @@ class CountStrategyChartData {
   }
 }
 
-class CountStrategyStatisticWidget extends ConsumerWidget {
+class CountStrategyStatisticWidget extends ConsumerStatefulWidget {
   const CountStrategyStatisticWidget({super.key});
 
   static StaggeredGridTile asTile() {
@@ -489,13 +607,24 @@ class CountStrategyStatisticWidget extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<CountStrategyStatisticWidget> createState() => _CountStrategyStatisticWidgetState();
+}
+
+class _CountStrategyStatisticWidgetState extends ConsumerState<CountStrategyStatisticWidget> {
+  _RecordCategory category = _RecordCategory.all;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return _StatisticTile(
       title: Text("$tr_statistics.count_strategy.title".tr()),
-      bottom: Text("$tr_statistics.count_strategy.bottom".tr()),
+      bottom: _CategorySwitcher(
+        options: _RecordCategory.values,
+        selected: category,
+        onChanged: (value) => setState(() => category = value),
+      ),
       builder: () {
-        final records = ref.watch(charaDetailRecordStorageProvider);
+        final records = ref.watch(charaDetailRecordStorageProvider).where(category.matches).toList();
         final labels = ref.watch(labelMapProvider)[LabelKeys.raceStrategy]!;
         final chart = CountStrategyChartData(records, labels, theme.chart.categories);
         // Guard against a non-empty record set that yields no active records:
