@@ -226,6 +226,8 @@ class FactorDialogElementsMapper extends EnumMapper<FactorDialogElements> {
   @override
   FactorDialogElements decode(dynamic value) {
     switch (value) {
+      case r'selectionList':
+        return FactorDialogElements.selectionList;
       case r'selectionTags':
         return FactorDialogElements.selectionTags;
       case r'modeLogic':
@@ -238,6 +240,8 @@ class FactorDialogElementsMapper extends EnumMapper<FactorDialogElements> {
   @override
   dynamic encode(FactorDialogElements self) {
     switch (self) {
+      case FactorDialogElements.selectionList:
+        return r'selectionList';
       case FactorDialogElements.selectionTags:
         return r'selectionTags';
       case FactorDialogElements.modeLogic:
@@ -542,6 +546,13 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     opt: true,
     def: const {},
   );
+  static bool _$selectByTag(FactorColumnSpec v) => v.selectByTag;
+  static const Field<FactorColumnSpec, bool> _f$selectByTag = Field(
+    'selectByTag',
+    _$selectByTag,
+    opt: true,
+    def: false,
+  );
   static bool _$hidden(FactorColumnSpec v) => v.hidden;
   static const Field<FactorColumnSpec, bool> _f$hidden = Field(
     'hidden',
@@ -583,6 +594,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
     #showAllWhenQueryIsEmpty: _f$showAllWhenQueryIsEmpty,
     #showAvailableOnly: _f$showAvailableOnly,
     #hiddenElements: _f$hiddenElements,
+    #selectByTag: _f$selectByTag,
     #hidden: _f$hidden,
     #description: _f$description,
     #width: _f$width,
@@ -613,6 +625,7 @@ class FactorColumnSpecMapper extends SubClassMapperBase<FactorColumnSpec> {
       showAllWhenQueryIsEmpty: data.dec(_f$showAllWhenQueryIsEmpty),
       showAvailableOnly: data.dec(_f$showAvailableOnly),
       hiddenElements: data.dec(_f$hiddenElements),
+      selectByTag: data.dec(_f$selectByTag),
       hidden: data.dec(_f$hidden),
       description: data.dec(_f$description),
       width: data.dec(_f$width),

@@ -26,7 +26,6 @@ const tr_columns = "pages.chara_detail.columns";
 final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
   final labels = ref.watch(labelMapProvider);
   final strategies = labels["race_strategy.name"]!.indexed.toList();
-  final skillInfo = ref.watch(skillInfoProvider);
   final factorInfo = ref.watch(factorInfoProvider);
   final ratingStorages = ref.watch(charaDetailRecordRatingStorageDataProvider);
   final memoStorages = ref.watch(charaDetailRecordMemoStorageDataProvider);
@@ -171,13 +170,15 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       builderId: "aptitude_long_range",
     ),
     SkillColumnBuilder(title: "$tr_columns.skill.title".tr(), category: ColumnCategory.skill, parser: SkillParser()),
-    FilteredSkillColumnBuilder(
+    TagDrivenSkillColumnBuilder(
       title: "$tr_columns.skill.shortcuts.status_up.title".tr(),
       category: ColumnCategory.skill,
       parser: SkillParser(),
-      isFilterColumn: true,
+      type: ColumnBuilderType.filter,
       initialTags: {"skill_status_up"},
-      initialIds: skillInfo.where((e) => e.tags.contains("skill_status_up")).map((e) => e.sid).toSet(),
+      // Defined entirely by its tag and resolved live from the master; only the
+      // display group is editable (selection + mode hidden).
+      hiddenElements: {SkillDialogElements.selection, SkillDialogElements.mode},
       builderId: "skill_status_up",
     ),
     FilteredSkillColumnBuilder(
@@ -187,6 +188,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       isFilterColumn: true,
       initialIds: {179},
       builderId: "skill_consolidation",
+    ),
+    TagDrivenSkillColumnBuilder(
+      title: "$tr_columns.skill.tag_driven.title".tr(),
+      category: ColumnCategory.skill,
+      parser: SkillParser(),
+      builderId: "skill_tag_driven",
     ),
     FactorColumnBuilder(
       title: "$tr_columns.factor.title".tr(),
@@ -262,6 +269,12 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       initialIds: {142},
       initialStar: 1,
       builderId: "factor_long_range",
+    ),
+    TagDrivenFactorColumnBuilder(
+      title: "$tr_columns.factor.tag_driven.title".tr(),
+      category: ColumnCategory.factor,
+      parser: FactorSetParser(),
+      builderId: "factor_tag_driven",
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.fans.title".tr(),
