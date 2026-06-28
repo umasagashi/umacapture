@@ -359,6 +359,13 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   @override
   List<bool> evaluate(RefBase ref, List<FactorSet> values) {
     final resolved = _resolved(ref);
+    if (selectByTag && resolved.query.isEmpty && (predicate.factorTags.isNotEmpty || predicate.skillTags.isNotEmpty)) {
+      // Tags are selected but resolve to no factor in the current master (e.g. the
+      // "gold skill" tag, which has no inheritable factor): nothing can match, so
+      // every row is filtered out instead of falling through to apply()'s
+      // empty-query "Any".
+      return List<bool>.filled(values.length, false);
+    }
     return values.map((e) => resolved.apply(e)).toList();
   }
 
@@ -496,26 +503,6 @@ final _factorTagQueryProvider = Provider.family<Set<int>, String>((ref, key) {
 
 final _clonedSpecProvider = SpecProviderAccessor<FactorColumnSpec>();
 
-// For a tag-driven column, persists the currently selected factor/skill tags into
-// the spec. The query is not stored — it is resolved live from the tags at
-// evaluation time (see [FactorColumnSpec._resolved]). Reads both tag axes so either
-// selector can trigger it.
-void _applyTagDrivenTags(Ref ref, String specId) {
-  final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
-  if (!spec.selectByTag) {
-    return;
-  }
-  final factorTags = ref.read(_selectedFactorTagsProvider(specId));
-  final skillTags = ref.read(_selectedSkillTagsProvider(specId));
-  ref
-      .read(specCloneProvider(specId).notifier)
-      .update(
-        (s) => (s as FactorColumnSpec).copyWith(
-          predicate: s.predicate.copyWith(factorTags: factorTags, skillTags: skillTags),
-        ),
-      );
-}
-
 class _SelectedSkillTags extends TagSelectionNotifier {
   _SelectedSkillTags(this.specId);
 
@@ -530,7 +517,16 @@ class _SelectedSkillTags extends TagSelectionNotifier {
   @override
   void toggle(String tag, {bool? shouldExists}) {
     super.toggle(tag, shouldExists: shouldExists);
-    _applyTagDrivenTags(ref, specId);
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    if (!spec.selectByTag) {
+      return;
+    }
+    // Tag-driven column: persist the chosen skill tags into the spec. The query is
+    // not stored — it is resolved live from the tags at evaluation time (see
+    // [_resolved]). Only this axis is touched; the factor axis keeps its value.
+    ref
+        .read(specCloneProvider(specId).notifier)
+        .update((s) => (s as FactorColumnSpec).copyWith(predicate: s.predicate.copyWith(skillTags: state)));
   }
 }
 
@@ -552,7 +548,16 @@ class _SelectedFactorTags extends TagSelectionNotifier {
   @override
   void toggle(String tag, {bool? shouldExists}) {
     super.toggle(tag, shouldExists: shouldExists);
-    _applyTagDrivenTags(ref, specId);
+    final spec = ref.read(specCloneProvider(specId)) as FactorColumnSpec;
+    if (!spec.selectByTag) {
+      return;
+    }
+    // Tag-driven column: persist the chosen factor tags into the spec. The query is
+    // not stored — it is resolved live from the tags at evaluation time (see
+    // [_resolved]). Only this axis is touched; the skill axis keeps its value.
+    ref
+        .read(specCloneProvider(specId).notifier)
+        .update((s) => (s as FactorColumnSpec).copyWith(predicate: s.predicate.copyWith(factorTags: state)));
   }
 }
 
@@ -590,28 +595,45 @@ class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
   }
 
   Widget tagsWidget() {
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: NoteCard(
-        description: Text("$tr_factor.selection.tags.description".tr()),
+    final selectors = [
+      TagSelector(
+        candidateTagsProvider: factorTagProvider,
+        selectedTagsProvider: _selectedFactorTagsProvider(widget.specId),
+      ),
+      Row(
         children: [
-          TagSelector(
-            candidateTagsProvider: factorTagProvider,
-            selectedTagsProvider: _selectedFactorTagsProvider(widget.specId),
-          ),
-          Row(
-            children: [
-              const Expanded(child: Divider()),
-              Padding(padding: const EdgeInsets.all(8), child: Text("$tr_factor.selection.tags.skill_tags.label".tr())),
-              const Expanded(child: Divider()),
-            ],
-          ),
-          TagSelector(
-            candidateTagsProvider: skillTagProvider,
-            selectedTagsProvider: _selectedSkillTagsProvider(widget.specId),
-          ),
+          const Expanded(child: Divider()),
+          Padding(padding: const EdgeInsets.all(8), child: Text("$tr_factor.selection.tags.skill_tags.label".tr())),
+          const Expanded(child: Divider()),
         ],
       ),
+      TagSelector(
+        candidateTagsProvider: skillTagProvider,
+        selectedTagsProvider: _selectedSkillTagsProvider(widget.specId),
+      ),
+    ];
+    // A tag-driven column shows the chips without the NoteCard frame, and its tags
+    // define the column (so a dedicated description); a normal column keeps them
+    // inside the bordered note alongside the individual factor list.
+    if (_clonedSpecProvider.watch(ref, widget.specId).selectByTag) {
+      return Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text("$tr_factor.selection.tags.tag_driven_description".tr()),
+            ),
+            const SizedBox(height: 12),
+            ...selectors,
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: NoteCard(description: Text("$tr_factor.selection.tags.description".tr()), children: selectors),
     );
   }
 

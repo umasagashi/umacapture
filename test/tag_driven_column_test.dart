@@ -139,6 +139,99 @@ void main() {
     );
   });
 
+  test('factor column with a tag that resolves to no factor (e.g. gold skill) filters every row out', () {
+    // The "gold skill" case: a skill tag the user can pick, but no inheritable
+    // factor carries it, so the live query resolves to the empty set. An empty
+    // resolved query for a tag-driven column must match nothing — not fall through
+    // to apply()'s empty-query "Any", which would leave every row unfiltered.
+    final container = ProviderContainer.test(
+      overrides: [
+        factorInfoProvider.overrideWithValue([
+          _factorInfo(10, {'factor_status'}),
+          _factorInfo(30, {'factor_skill'}, skillInfo: _skillInfo(99, {'green'})),
+        ]),
+      ],
+    );
+    addTearDown(container.dispose);
+    final ref = container.read(_refBaseProvider);
+
+    final goldSpec = _tagFactorSpec(skillTags: {'gold'}); // no factor's linked skill is gold
+    expect(
+      goldSpec.evaluate(ref, [
+        FactorSet([Factor(10, 1)], [], []),
+        FactorSet([Factor(30, 1)], [], []),
+      ]),
+      [false, false],
+    );
+  });
+
+  test('skill column with a tag that resolves to no skill filters every row out', () {
+    final container = ProviderContainer.test(
+      overrides: [
+        skillInfoProvider.overrideWithValue([
+          _skillInfo(1, {'green'}),
+        ]),
+      ],
+    );
+    addTearDown(container.dispose);
+    final ref = container.read(_refBaseProvider);
+
+    final spec = _tagSkillSpec({'nonexistent'});
+    expect(
+      spec.evaluate(ref, [
+        [Skill(id: 1)],
+        [Skill(id: 1), Skill(id: 2)],
+      ]),
+      [false, false],
+    );
+  });
+
+  test('a tag-driven column with no tags selected stays "Any" (does not filter)', () {
+    // The empty-resolution guard fires only when tags ARE selected; a fresh
+    // tag-driven column with no tags behaves like a manual empty query (Any), so it
+    // does not hide rows merely for having been added.
+    final container = ProviderContainer.test(
+      overrides: [
+        factorInfoProvider.overrideWithValue([
+          _factorInfo(10, {'factor_status'}),
+        ]),
+      ],
+    );
+    addTearDown(container.dispose);
+    final ref = container.read(_refBaseProvider);
+
+    final spec = _tagFactorSpec(); // no tags selected
+    expect(
+      spec.evaluate(ref, [
+        FactorSet([Factor(10, 1)], [], []),
+      ]),
+      [true],
+    );
+  });
+
+  test('a tag-driven skill column with no tags selected stays "Any", matching factor', () {
+    // Skill now agrees with factor: an empty query is Any. A record even passes when
+    // it has no skill at all (previously the skill filter required >=1 skill).
+    final container = ProviderContainer.test(
+      overrides: [
+        skillInfoProvider.overrideWithValue([
+          _skillInfo(1, {'green'}),
+        ]),
+      ],
+    );
+    addTearDown(container.dispose);
+    final ref = container.read(_refBaseProvider);
+
+    final spec = _tagSkillSpec(const {}); // no tags selected
+    expect(
+      spec.evaluate(ref, [
+        [Skill(id: 1)],
+        <Skill>[],
+      ]),
+      [true, true],
+    );
+  });
+
   test('the green-skill preset builder produces a tag-driven, display-only column', () {
     final container = ProviderContainer.test();
     addTearDown(container.dispose);

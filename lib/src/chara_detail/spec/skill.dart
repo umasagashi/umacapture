@@ -82,6 +82,12 @@ class AggregateSkillPredicate with AggregateSkillPredicateMappable {
   }
 
   bool apply(List<Skill> value) {
+    if (query.isEmpty) {
+      // An empty query is "Any" (matches every record); whether the cell then shows
+      // anything is decided by the column's showAllWhenQueryIsEmpty, not here. This
+      // mirrors AggregateFactorSetPredicate.apply so skill and factor columns agree.
+      return true;
+    }
     final foundSkills = extract(value);
     if (query.length < 2) {
       return foundSkills.isNotEmpty;
@@ -239,14 +245,31 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
   @override
   List<bool> evaluate(RefBase ref, List<List<Skill>> values) {
     final resolved = _resolved(ref);
+    if (selectByTag && resolved.query.isEmpty && predicate.tags.isNotEmpty) {
+      // Tags are selected but resolve to no skill in the current master: nothing can
+      // match, so every row is filtered out instead of falling through to apply()'s
+      // empty-query "Any" (which would keep every record that has any skill at all).
+      return List<bool>.filled(values.length, false);
+    }
     return values.map((e) => resolved.apply(e)).toList();
+  }
+
+  /// Skills to display, honoring [showAllWhenQueryIsEmpty]: an empty query shows the
+  /// record's full skill list only when the flag is set (the plain skill column);
+  /// otherwise (e.g. a tag-driven column with no tag selected yet) it shows nothing,
+  /// mirroring [FactorColumnSpec._extract].
+  List<Skill> _extract(AggregateSkillPredicate predicate, List<Skill> value) {
+    if (predicate.query.isEmpty && !showAllWhenQueryIsEmpty) {
+      return [];
+    }
+    return predicate.extract(value);
   }
 
   @override
   TrinaCell plutoCell(RefBase ref, List<Skill> value) {
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final predicate = _resolved(ref);
-    final foundSkills = predicate.extract(value);
+    final foundSkills = _extract(predicate, value);
     final skillNames = foundSkills.map((e) => labels[e.id]).toList();
     if (predicate.notation.max == 0) {
       return TrinaCell(value: foundSkills.length.toString().padLeft(3, "0"))
