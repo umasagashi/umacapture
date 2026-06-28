@@ -38,7 +38,6 @@ class ParserMapper extends ClassMapperBase<Parser> {
       TrainedDateParserMapper.ensureInitialized();
       CapturedDateParserMapper.ensureInitialized();
       RaceWinningCountParserMapper.ensureInitialized();
-      RaceGradeWinningCountParserMapper.ensureInitialized();
       RecordTypeParserMapper.ensureInitialized();
       CampaignScenarioParserMapper.ensureInitialized();
       TraineeIdParserMapper.ensureInitialized();
@@ -1511,81 +1510,6 @@ mixin RaceWinningCountParserMappable {
   Map<String, dynamic> toMap() {
     return RaceWinningCountParserMapper.ensureInitialized()
         .encodeMap<RaceWinningCountParser>(this as RaceWinningCountParser);
-  }
-}
-
-class RaceGradeWinningCountParserMapper
-    extends SubClassMapperBase<RaceGradeWinningCountParser> {
-  RaceGradeWinningCountParserMapper._();
-
-  static RaceGradeWinningCountParserMapper? _instance;
-  static RaceGradeWinningCountParserMapper ensureInitialized() {
-    if (_instance == null) {
-      MapperContainer.globals.use(
-        _instance = RaceGradeWinningCountParserMapper._(),
-      );
-      ParserMapper.ensureInitialized().addSubMapper(_instance!);
-    }
-    return _instance!;
-  }
-
-  @override
-  final String id = 'RaceGradeWinningCountParser';
-
-  static String _$grade(RaceGradeWinningCountParser v) => v.grade;
-  static const Field<RaceGradeWinningCountParser, String> _f$grade = Field(
-    'grade',
-    _$grade,
-    opt: true,
-    def: "grade_g1",
-  );
-
-  @override
-  final MappableFields<RaceGradeWinningCountParser> fields = const {
-    #grade: _f$grade,
-  };
-
-  @override
-  final String discriminatorKey = 'type';
-  @override
-  final dynamic discriminatorValue = 'RaceGradeWinningCountParser';
-  @override
-  late final ClassMapperBase superMapper = ParserMapper.ensureInitialized();
-
-  @override
-  DecodingContext inherit(DecodingContext context) {
-    return context.inherit(args: () => []);
-  }
-
-  static RaceGradeWinningCountParser _instantiate(DecodingData data) {
-    return RaceGradeWinningCountParser(grade: data.dec(_f$grade));
-  }
-
-  @override
-  final Function instantiate = _instantiate;
-
-  static RaceGradeWinningCountParser fromMap(Map<String, dynamic> map) {
-    return ensureInitialized().decodeMap<RaceGradeWinningCountParser>(map);
-  }
-
-  static RaceGradeWinningCountParser fromJson(String json) {
-    return ensureInitialized().decodeJson<RaceGradeWinningCountParser>(json);
-  }
-}
-
-mixin RaceGradeWinningCountParserMappable {
-  String toJson() {
-    return RaceGradeWinningCountParserMapper.ensureInitialized()
-        .encodeJson<RaceGradeWinningCountParser>(
-          this as RaceGradeWinningCountParser,
-        );
-  }
-
-  Map<String, dynamic> toMap() {
-    return RaceGradeWinningCountParserMapper.ensureInitialized()
-        .encodeMap<RaceGradeWinningCountParser>(
-          this as RaceGradeWinningCountParser,
-        );
   }
 }
 

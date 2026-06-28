@@ -16,6 +16,7 @@ import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/preset.dart';
+import '/src/chara_detail/spec/race_grade.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
@@ -53,6 +54,7 @@ void initializeMappers() {
   // ColumnSpec fails with MapperException.missingConstructor('ColumnSpec').
   ColumnSpecMapper.ensureInitialized();
   RangedIntegerColumnSpecMapper.ensureInitialized();
+  RaceGradeWinningCountColumnSpecMapper.ensureInitialized();
   RangedLabelColumnSpecMapper.ensureInitialized();
   CharaRankColumnSpecMapper.ensureInitialized();
   SimpleLabelColumnSpecMapper.ensureInitialized();

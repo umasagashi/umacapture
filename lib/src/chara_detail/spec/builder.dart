@@ -12,6 +12,7 @@ import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/spec/race_grade.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
@@ -307,11 +308,10 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: RaceWinningCountParser(),
       cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
-    RangedIntegerColumnBuilder(
+    RaceGradeWinningCountColumnBuilder(
       title: "$tr_columns.race_winning_count_g1.title".tr(),
       category: ColumnCategory.race,
-      parser: RaceGradeWinningCountParser(),
-      cellAction: ColumnSpecCellAction.openCampaignPreview,
+      grade: "grade_g1",
     ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.record_type.title".tr(),

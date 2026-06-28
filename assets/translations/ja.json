@@ -386,6 +386,19 @@
                         "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
                     }
                 },
+                "race_grade": {
+                    "selection": {
+                        "label": "集計対象レース",
+                        "description": "選択したレースの勝利数のみを集計します。何も選択しない場合は対象グレードの全レースを集計します。",
+                        "all": "全レース",
+                        "count": "{count}レース"
+                    },
+                    "range": {
+                        "label": "範囲",
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
+                    }
+                },
                 "character": {
                     "selection": {
                         "label": "選択",

@@ -7,52 +7,37 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
-import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/spec/loader.dart';
+import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 
-part 'ranged_integer.mapper.dart';
+part 'race_grade.mapper.dart';
 
 // ignore: constant_identifier_names
-const tr_ranged_integer = "pages.chara_detail.column_predicate.ranged_integer";
+const tr_race_grade = "pages.chara_detail.column_predicate.race_grade";
 
 // Sentinel marking "argument not provided" in copyWith, so a description can be
 // explicitly cleared back to null (which `?? this` would never allow).
 const _unset = Object();
 
-@MappableClass()
-class IsInRangeIntegerPredicate with IsInRangeIntegerPredicateMappable {
-  final int? min;
-  final int? max;
+/// Counts wins among races of a given grade (e.g. G1), optionally narrowed to a
+/// hand-picked subset of those races.
+///
+/// The race grade is not part of a record; it is resolved from the
+/// `race_title_info.json` module (sid -> grade tags) via [raceGradeSidProvider],
+/// so the count follows game-data updates. [selection] holds the race title sids
+/// the user chose to count; an empty selection means "every race of [grade]".
+@MappableClass(discriminatorValue: 'RaceGradeWinningCountColumnSpec', ignoreNull: true)
+class RaceGradeWinningCountColumnSpec extends ColumnSpec<int> with RaceGradeWinningCountColumnSpecMappable {
+  /// The grade tag whose wins are counted (e.g. "grade_g1").
+  final String grade;
 
-  IsInRangeIntegerPredicate({this.min, this.max});
+  /// Race title sids to include in the count. Empty means every race of [grade].
+  final Set<int> selection;
 
-  bool apply(int value) {
-    return (min ?? value) <= value && value <= (max ?? value);
-  }
-
-  IsInRangeIntegerPredicate copyWith({int? min, int? max}) {
-    return IsInRangeIntegerPredicate(min: min ?? this.min, max: max ?? this.max);
-  }
-}
-
-class RangedIntegerCellData implements CellData {
-  final int value;
-
-  RangedIntegerCellData(this.value);
-
-  @override
-  String get csv => value.toString();
-
-  @override
-  CellSelectedCallback? get onSelected => null;
-}
-
-@MappableClass(discriminatorValue: 'RangedIntegerColumnSpec', ignoreNull: true)
-class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSpecMappable {
-  final Parser parser;
   final IsInRangeIntegerPredicate predicate;
 
   @override
@@ -60,9 +45,6 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
 
   @override
   final String title;
-
-  @override
-  final ColumnSpecCellAction cellAction;
 
   @override
   final bool hidden;
@@ -73,16 +55,19 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   @override
   final double? width;
 
-  RangedIntegerColumnSpec({
+  @override
+  ColumnSpecCellAction get cellAction => ColumnSpecCellAction.openCampaignPreview;
+
+  RaceGradeWinningCountColumnSpec({
     required this.id,
     required this.title,
-    required this.parser,
     required this.predicate,
-    ColumnSpecCellAction? cellAction,
+    this.grade = "grade_g1",
+    this.selection = const {},
     this.hidden = false,
     this.description,
     this.width,
-  }) : cellAction = cellAction ?? ColumnSpecCellAction.openSkillPreview;
+  });
 
   @override
   ColumnSpec withHidden(bool hidden) => copyWith(hidden: hidden);
@@ -97,32 +82,47 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
   bool get hasFilter => true;
 
   @override
-  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) => copyWith(predicate: IsInRangeIntegerPredicate());
+  ColumnSpec withFilterReset(ColumnSpec? defaultSpec) =>
+      copyWith(predicate: IsInRangeIntegerPredicate(), selection: const {});
 
-  RangedIntegerColumnSpec copyWith({
+  RaceGradeWinningCountColumnSpec copyWith({
     String? id,
     String? title,
-    Parser? parser,
+    String? grade,
+    Set<int>? selection,
     IsInRangeIntegerPredicate? predicate,
     bool? hidden,
     Object? description = _unset,
     Object? width = _unset,
   }) {
-    return RangedIntegerColumnSpec(
+    return RaceGradeWinningCountColumnSpec(
       id: id ?? this.id,
       title: title ?? this.title,
-      parser: parser ?? this.parser,
+      grade: grade ?? this.grade,
+      selection: selection ?? this.selection,
       predicate: predicate ?? this.predicate,
-      cellAction: cellAction,
       hidden: hidden ?? this.hidden,
       description: identical(description, _unset) ? this.description : description as String?,
       width: identical(width, _unset) ? this.width : width as double?,
     );
   }
 
+  /// Race title sids actually counted: the selected subset narrowed to [grade],
+  /// or every race of [grade] when nothing is selected. Intersecting with the
+  /// grade set keeps a stale selection (after a module update) from counting
+  /// races that are no longer of this grade.
+  Set<int> _targets(RefBase ref) {
+    final gradeSids = ref.read(raceGradeSidProvider(grade));
+    if (selection.isEmpty) {
+      return gradeSids;
+    }
+    return selection.intersection(gradeSids);
+  }
+
   @override
   List<int> parse(RefBase ref, List<CharaDetailRecord> records) {
-    return List<int>.from(records.map(parser.parse));
+    final targets = _targets(ref);
+    return records.map((r) => r.races.where((e) => e.won && targets.contains(e.title)).length).toList();
   }
 
   @override
@@ -156,10 +156,13 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
 
   @override
   String tooltip(RefBase ref) {
-    if (predicate.min == null && predicate.max == null) {
-      return "Any";
-    }
-    return "Range: [${predicate.min ?? "Any"}, ${predicate.max ?? "Any"}]";
+    final count = selection.isEmpty
+        ? "$tr_race_grade.selection.all".tr()
+        : "$tr_race_grade.selection.count".tr(namedArgs: {"count": selection.length.toString()});
+    final range = (predicate.min == null && predicate.max == null)
+        ? "Any"
+        : "[${predicate.min ?? "Any"}, ${predicate.max ?? "Any"}]";
+    return "$count\nRange: $range";
   }
 
   @override
@@ -167,16 +170,58 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
 
   @override
   Widget selector(ChangeNotifier onDecided) {
-    return RangedIntegerColumnSelector(specId: id, onDecided: onDecided);
+    return RaceGradeWinningCountColumnSelector(specId: id, onDecided: onDecided);
   }
 }
 
-final _clonedSpecProvider = SpecProviderAccessor<RangedIntegerColumnSpec>();
+final _clonedSpecProvider = SpecProviderAccessor<RaceGradeWinningCountColumnSpec>();
 
-class _RangedIntegerSelector extends ConsumerWidget {
+class _SelectionSelector extends ConsumerStatefulWidget {
   final String specId;
 
-  const _RangedIntegerSelector({required this.specId});
+  const _SelectionSelector({required this.specId});
+
+  @override
+  ConsumerState<ConsumerStatefulWidget> createState() => _SelectionSelectorState();
+}
+
+class _SelectionSelectorState extends ConsumerState<_SelectionSelector> {
+  String textQuery = "";
+
+  List<RaceTitleInfo> _watchCandidates() {
+    final spec = _clonedSpecProvider.watch(ref, widget.specId);
+    final candidates = ref.watch(raceTitleInfoProvider).where((e) => e.tags.contains(spec.grade));
+    final normalizedQuery = textQuery.toLowerCase().trim();
+    if (normalizedQuery.isEmpty) {
+      return candidates.toList();
+    }
+    return candidates.where((e) => e.names.any((name) => name.toLowerCase().contains(normalizedQuery))).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final spec = _clonedSpecProvider.watch(ref, widget.specId);
+    return FormGroup(
+      title: Text("$tr_race_grade.selection.label".tr()),
+      children: [
+        SelectorWidget<RaceTitleInfo>(
+          description: Text("$tr_race_grade.selection.description".tr()),
+          candidates: _watchCandidates(),
+          selected: spec.selection,
+          onSelected: (newSelected) {
+            _clonedSpecProvider.update(ref, widget.specId, (spec) => spec.copyWith(selection: newSelected));
+          },
+          onTextQueryChanged: (query) => setState(() => textQuery = query),
+        ),
+      ],
+    );
+  }
+}
+
+class _RangeSelector extends ConsumerWidget {
+  final String specId;
+
+  const _RangeSelector({required this.specId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -184,10 +229,10 @@ class _RangedIntegerSelector extends ConsumerWidget {
     final records = ref.watch(charaDetailRecordStorageProvider);
     final range = records.isEmpty ? Range<double>(min: 0, max: 0) : spec.parse(ref.base, records).range().toDouble();
     return FormGroup(
-      title: Text("$tr_ranged_integer.range.label".tr()),
-      description: Text("$tr_ranged_integer.range.description".tr()),
+      title: Text("$tr_race_grade.range.label".tr()),
+      description: Text("$tr_race_grade.range.description".tr()),
       children: [
-        if (range.min == range.max) NoteCard(description: Text("$tr_ranged_integer.range.empty_range_message".tr())),
+        if (range.min == range.max) NoteCard(description: Text("$tr_race_grade.range.empty_range_message".tr())),
         if (range.min != range.max)
           Padding(
             padding: const EdgeInsets.only(top: 48, left: 16, right: 16),
@@ -271,17 +316,19 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
   }
 }
 
-class RangedIntegerColumnSelector extends ConsumerWidget {
+class RaceGradeWinningCountColumnSelector extends ConsumerWidget {
   final String specId;
   final ChangeNotifier onDecided;
 
-  const RangedIntegerColumnSelector({super.key, required this.specId, required this.onDecided});
+  const RaceGradeWinningCountColumnSelector({super.key, required this.specId, required this.onDecided});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Column(
       children: [
-        _RangedIntegerSelector(specId: specId),
+        _SelectionSelector(specId: specId),
+        const SizedBox(height: 32),
+        _RangeSelector(specId: specId),
         const SizedBox(height: 32),
         _NotationSelector(specId: specId, onDecided: onDecided),
       ],
@@ -289,9 +336,8 @@ class RangedIntegerColumnSelector extends ConsumerWidget {
   }
 }
 
-class RangedIntegerColumnBuilder extends ColumnBuilder {
-  final Parser parser;
-  final ColumnSpecCellAction? cellAction;
+class RaceGradeWinningCountColumnBuilder extends ColumnBuilder {
+  final String grade;
 
   @override
   final String title;
@@ -299,15 +345,14 @@ class RangedIntegerColumnBuilder extends ColumnBuilder {
   @override
   final ColumnCategory category;
 
-  RangedIntegerColumnBuilder({required this.title, required this.category, required this.parser, this.cellAction});
+  RaceGradeWinningCountColumnBuilder({required this.title, required this.category, this.grade = "grade_g1"});
 
   @override
-  RangedIntegerColumnSpec build(RefBase ref) {
-    return RangedIntegerColumnSpec(
+  RaceGradeWinningCountColumnSpec build(RefBase ref) {
+    return RaceGradeWinningCountColumnSpec(
       id: const Uuid().v4(),
       title: title,
-      parser: parser,
-      cellAction: cellAction,
+      grade: grade,
       predicate: IsInRangeIntegerPredicate(),
     );
   }

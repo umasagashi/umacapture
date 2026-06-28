@@ -263,6 +263,8 @@ class RaceTitleInfo with RaceTitleInfoMappable {
   RaceTitleInfo(this.sid, this.sortKey, this.names, this.descriptions, this.tags);
 
   String get label => names.first;
+
+  String get tooltip => names.first;
 }
 
 @MappableEnum()
