@@ -12,9 +12,11 @@ import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
+import '/src/chara_detail/spec/race_grade.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
+import '/src/chara_detail/spec/relation_bonus.dart';
 import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
@@ -307,6 +309,11 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: RaceWinningCountParser(),
       cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
+    RaceGradeWinningCountColumnBuilder(
+      title: "$tr_columns.race_winning_count_g1.title".tr(),
+      category: ColumnCategory.race,
+      grade: "grade_g1",
+    ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.record_type.title".tr(),
       category: ColumnCategory.metadata,
@@ -332,6 +339,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
         rejects: strategies.where((e) => e.$1 != strategy.$1).map((e) => e.$1).toSet(),
         builderId: "race_strategy_${strategy.$1}",
       ),
+    RelationBonusColumnBuilder(title: "$tr_columns.relation_bonus.title".tr(), category: ColumnCategory.metadata),
     if (ratingStorages.isEmpty)
       RatingColumnBuilder(
         title: "$tr_columns.rating.title".tr(),

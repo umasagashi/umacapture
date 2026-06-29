@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
+import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -23,6 +24,11 @@ const tr_columns_family = "pages.chara_detail.columns.family_registration";
 // Sentinel marking "argument not provided" in copyWith, so a description can be
 // explicitly cleared back to null (which `?? this` would never allow).
 const _unset = Object();
+
+// Separator drawn between the always-shown six slot labels in the cell. Two
+// spaces (not the CSV "、") avoid a full-color comma standing out between dimmed
+// slots while keeping the labels visually separated.
+const _slotDisplaySeparator = "  ";
 
 /// Ancestor slots in display order: left parent, its two grandparents, then the
 /// right side. Enum names double as translation keys under
@@ -41,10 +47,15 @@ class RegisteredAncestor {
 /// whose ancestor record is present in [recordById], in display order.
 ///
 /// A slot counts as registered only when the linked record actually exists in
-/// storage, so every returned entry is a valid jump target; a stale link to a
-/// deleted record is treated as unregistered. When a parent is unregistered,
-/// its grandparent slots are unregistered too (they are only reachable through
-/// the parent record's own links).
+/// [recordById]; a stale link to a deleted record is treated as unregistered.
+/// When a parent is unregistered, its grandparent slots are unregistered too
+/// (they are only reachable through the parent record's own links).
+///
+/// Callers pass the union of the active and archive sets (see
+/// [allRecordsByIdProvider]) so an ancestor counts no matter which set it lives
+/// in. A registered entry is therefore not guaranteed to be a jump target in the
+/// table currently on screen (it may be in the other source); the jump handles
+/// that miss gracefully.
 List<RegisteredAncestor> resolveRegisteredAncestors(
   CharaDetailRecord record,
   Map<String, CharaDetailRecord> recordById,
@@ -99,6 +110,15 @@ String _formatPlainText(FamilyRegistrationStatus status) {
   return "$count${"$tr_columns_family.cell.slots_prefix".tr()}$slots${"$tr_columns_family.cell.slots_suffix".tr()}";
 }
 
+/// Width-measurement text: the cell always renders all six slot labels (linked
+/// or dimmed), so auto-fit must size to every label, not just the registered
+/// subset that [_formatPlainText] (the CSV/sort text) lists.
+String _measuredText(FamilyRegistrationStatus status) {
+  final slots = FamilySlot.values.map(_slotLabel).join(_slotDisplaySeparator);
+  final count = _countLabel(status.count);
+  return "$count${"$tr_columns_family.cell.slots_prefix".tr()}$slots${"$tr_columns_family.cell.slots_suffix".tr()}";
+}
+
 @MappableClass()
 class FamilyRegistrationPredicate with FamilyRegistrationPredicateMappable {
   final Set<int> rejects;
@@ -146,7 +166,7 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
   final double? width;
 
   @override
-  ColumnSpecCellAction? get cellAction => ColumnSpecCellAction.openFactorPreview;
+  ColumnSpecCellAction? get cellAction => ColumnSpecCellAction.openCampaignPreview;
 
   // Renders a fixed-size registration badge widget, not wrapping text.
   @override
@@ -196,7 +216,9 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
 
   @override
   List<FamilyRegistrationStatus> parse(RefBase ref, List<CharaDetailRecord> records) {
-    final recordById = {for (final record in records) record.id: record};
+    // Look ancestors up across both sets, so an ancestor in the archive (or, when
+    // viewing the archive, one in the active set) still counts as registered.
+    final recordById = ref.watch(allRecordsByIdProvider);
     return [for (final record in records) FamilyRegistrationStatus(resolveRegisteredAncestors(record, recordById))];
   }
 
@@ -212,6 +234,12 @@ class FamilyRegistrationColumnSpec extends ColumnSpec<FamilyRegistrationStatus>
     // string whose width matches the rendered cell.
     final text = _formatPlainText(value);
     return TrinaCell(value: text)..setUserData(FamilyRegistrationCellData(value, text));
+  }
+
+  @override
+  String measuredText(TrinaCell? cell, String formatted) {
+    final status = cell?.getUserData<FamilyRegistrationCellData>()?.status;
+    return status == null ? formatted : _measuredText(status);
   }
 
   @override
@@ -279,47 +307,43 @@ class _FamilyRegistrationCellWidget extends StatefulWidget {
 }
 
 class _FamilyRegistrationCellWidgetState extends State<_FamilyRegistrationCellWidget> {
-  List<TapGestureRecognizer> _recognizers = const [];
+  // One recognizer per slot, kept for the widget's lifetime. Each reads the
+  // current linked record id at tap time, so a status swap needs no rebuild and
+  // a tap on an unlinked slot simply does nothing.
+  late final Map<FamilySlot, TapGestureRecognizer> _recognizers;
 
   @override
   void initState() {
     super.initState();
-    _createRecognizers();
-  }
-
-  @override
-  void didUpdateWidget(covariant _FamilyRegistrationCellWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.status.registered.length != widget.status.registered.length) {
-      _disposeRecognizers();
-      _createRecognizers();
-    }
+    _recognizers = {
+      for (final slot in FamilySlot.values) slot: (TapGestureRecognizer()..onTap = () => _onSlotTap(slot)),
+    };
   }
 
   @override
   void dispose() {
-    _disposeRecognizers();
+    for (final recognizer in _recognizers.values) {
+      recognizer.dispose();
+    }
     super.dispose();
   }
 
-  void _createRecognizers() {
-    // onTap reads the current widget at tap time, so a same-length status swap
-    // in didUpdateWidget does not leave a stale record id captured here.
-    _recognizers = [
-      for (final index in widget.status.registered.length.range())
-        TapGestureRecognizer()..onTap = () => _jumpTo(widget.status.registered[index].recordId),
-    ];
+  Map<FamilySlot, String> _linkedBySlot() {
+    return {for (final ancestor in widget.status.registered) ancestor.slot: ancestor.recordId};
   }
 
-  void _disposeRecognizers() {
-    for (final recognizer in _recognizers) {
-      recognizer.dispose();
+  void _onSlotTap(FamilySlot slot) {
+    final recordId = _linkedBySlot()[slot];
+    if (recordId != null) {
+      _jumpTo(recordId);
     }
   }
 
   /// Makes the ancestor's row the current (selected) cell and scrolls it into
   /// view. The ancestor record exists in storage (otherwise it would not be a
-  /// link), so a missing row means it is hidden by the current column filters.
+  /// link), so a missing row means it is not in the table on screen: either
+  /// hidden by the current column filters, or in the other record source
+  /// (active vs archive). The toast covers both causes.
   void _jumpTo(String recordId) {
     final stateManager = widget.stateManager;
     final rows = stateManager.refRows;
@@ -336,30 +360,33 @@ class _FamilyRegistrationCellWidgetState extends State<_FamilyRegistrationCellWi
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final countText = _countLabel(widget.status.count);
-    if (widget.status.registered.isEmpty) {
-      return Text(
-        countText,
-        textAlign: TextAlign.center,
-        style: TextStyle(color: theme.disabledColor),
-      );
-    }
-    final separator = "$tr_columns_family.cell.slot_separator".tr();
+    final linked = _linkedBySlot();
+    const separator = _slotDisplaySeparator;
     final linkStyle = TextStyle(color: theme.colorScheme.primary);
+    // Unlinked slots stay visible but dimmed (and non-interactive), so all six
+    // positions read at a glance which ancestors are registered.
+    final unlinkedStyle = TextStyle(color: theme.disabledColor);
     final spans = <InlineSpan>[
-      TextSpan(text: "$countText${"$tr_columns_family.cell.slots_prefix".tr()}"),
-      for (final (index, ancestor) in widget.status.registered.indexed) ...[
+      TextSpan(text: "${_countLabel(widget.status.count)}${"$tr_columns_family.cell.slots_prefix".tr()}"),
+      for (final (index, slot) in FamilySlot.values.indexed) ...[
         if (index > 0) TextSpan(text: separator),
-        TextSpan(
-          text: _slotLabel(ancestor.slot),
-          style: linkStyle,
-          mouseCursor: SystemMouseCursors.click,
-          recognizer: _recognizers[index],
-        ),
+        if (linked.containsKey(slot))
+          TextSpan(
+            text: _slotLabel(slot),
+            style: linkStyle,
+            mouseCursor: SystemMouseCursors.click,
+            recognizer: _recognizers[slot],
+          )
+        else
+          TextSpan(text: _slotLabel(slot), style: unlinkedStyle),
       ],
       TextSpan(text: "$tr_columns_family.cell.slots_suffix".tr()),
     ];
-    return Text.rich(TextSpan(children: spans), overflow: TextOverflow.ellipsis);
+    return Text.rich(
+      TextSpan(children: spans),
+      textAlign: TextAlign.left,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 }
 

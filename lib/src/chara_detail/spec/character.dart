@@ -169,7 +169,7 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
           errorBuilder: (context, error, stackTrace) =>
               Icon(Symbols.hide_image_rounded, color: Theme.of(context).colorScheme.onSurfaceVariant),
         );
-        return record.isFriend ? _FriendMarkedIcon(icon: icon) : icon;
+        return record.isFriend ? FriendMarkedIcon(icon: icon) : icon;
       },
     )..setUserData(this);
   }
@@ -201,10 +201,10 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
 /// A trainee icon with a pink "rental" banner across its bottom edge, marking a
 /// friend's (practice-partner) record. The banner is overlaid at display time; the
 /// underlying `trainee.jpg` is never modified.
-class _FriendMarkedIcon extends StatelessWidget {
+class FriendMarkedIcon extends StatelessWidget {
   final Widget icon;
 
-  const _FriendMarkedIcon({required this.icon});
+  const FriendMarkedIcon({super.key, required this.icon});
 
   @override
   Widget build(BuildContext context) {

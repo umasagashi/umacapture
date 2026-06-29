@@ -189,17 +189,52 @@ class _StatisticGroup extends ConsumerWidget {
       children: [
         Text("$tr_dashboard.statistic.description".tr()),
         const SizedBox(height: 12),
-        StaggeredGrid.extent(
-          maxCrossAxisExtent: 300,
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          children: [
-            NumberOfRecordStatisticWidget.asTile(),
-            MaxEvaluationValueStatisticWidget.asTile(),
-            MonthlyFansStatisticWidget.asTile(),
-            CountSRankStatisticWidget.asTile(),
-            CountStrategyStatisticWidget.asTile(),
-          ],
+        // Fixed-size cells: constrain the grid's width to a whole number of cells
+        // so StaggeredGrid.extent renders each 1x1 tile at exactly [cellSize]
+        // (it always stretches tiles to fill the width it is given). Any leftover
+        // width becomes a right-side margin via the top-left alignment, instead of
+        // inflating the cells.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            const cellSize = 220.0;
+            const spacing = 16.0;
+            final available = constraints.maxWidth;
+            final columns = Math.max(1, ((available + spacing) / (cellSize + spacing)).floor());
+            final gridWidth = Math.min(available, columns * (cellSize + spacing) - spacing);
+            // Fill the full available width and left-align the fixed-width grid
+            // inside it. Without this the body block shrinks to the grid width and
+            // the card's (center-aligned) outer column would center the whole
+            // block; filling the width keeps it flush left with the description.
+            return Row(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: gridWidth,
+                  child: StaggeredGrid.extent(
+                    maxCrossAxisExtent: cellSize,
+                    mainAxisSpacing: spacing,
+                    crossAxisSpacing: spacing,
+                    children: [
+                      NumberOfRecordStatisticWidget.asTile(),
+                      CountStrategyStatisticWidget.asTile(),
+                      MonthlyFansStatisticWidget.asTile(),
+                      EvaluationTrendStatisticWidget.asTile(),
+                      EvaluationRankingStatisticWidget.asTile(),
+                      SkillCountRankingStatisticWidget.asTile(),
+                      FactorCountRankingStatisticWidget.asTile(),
+                      G1WinningRankingStatisticWidget.asTile(),
+                      MostFrequentCharacterStatisticWidget.asTile(),
+                      MostFrequentSkillStatisticWidget.asTile(),
+                      MostFrequentFactorStatisticWidget.asTile(),
+                      CountSRankStatisticWidget.asTile(),
+                      CountBlueFactorStatisticWidget.asTile(),
+                      CountRedFactorStatisticWidget.asTile(),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );

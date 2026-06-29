@@ -16,9 +16,11 @@ import '/src/chara_detail/spec/logic.dart';
 import '/src/chara_detail/spec/memo.dart';
 import '/src/chara_detail/spec/parser.dart';
 import '/src/chara_detail/spec/preset.dart';
+import '/src/chara_detail/spec/race_grade.dart';
 import '/src/chara_detail/spec/ranged_integer.dart';
 import '/src/chara_detail/spec/ranged_label.dart';
 import '/src/chara_detail/spec/rating.dart';
+import '/src/chara_detail/spec/relation_bonus.dart';
 import '/src/chara_detail/spec/script.dart';
 import '/src/chara_detail/spec/simple_label.dart';
 import '/src/chara_detail/spec/skill.dart';
@@ -53,6 +55,8 @@ void initializeMappers() {
   // ColumnSpec fails with MapperException.missingConstructor('ColumnSpec').
   ColumnSpecMapper.ensureInitialized();
   RangedIntegerColumnSpecMapper.ensureInitialized();
+  RaceGradeWinningCountColumnSpecMapper.ensureInitialized();
+  RelationBonusColumnSpecMapper.ensureInitialized();
   RangedLabelColumnSpecMapper.ensureInitialized();
   CharaRankColumnSpecMapper.ensureInitialized();
   SimpleLabelColumnSpecMapper.ensureInitialized();
@@ -78,6 +82,7 @@ void initializeMappers() {
   SkillInfoMapper.ensureInitialized();
   FactorInfoMapper.ensureInitialized();
   CharaCardInfoMapper.ensureInitialized();
+  RaceTitleInfoMapper.ensureInitialized();
   TagMapper.ensureInitialized();
   RatingDataMapper.ensureInitialized();
   MemoDataMapper.ensureInitialized();

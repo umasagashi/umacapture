@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/image_converter.dart';
 import '/src/chara_detail/inheritance.dart';
+import '/src/chara_detail/spec/loader.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
@@ -22,6 +23,10 @@ import '/src/gui/toast.dart';
 import '/src/preference/storage_box.dart';
 
 part 'storage.mapper.dart';
+
+// Grade tag whose shared wins feed the inheritance relation bonus (G1 only, per
+// the current game rule). Matches the literal used by the race-grade column.
+const _gradeG1 = "grade_g1";
 
 // Monotonic id so each duplicated-chara event yields a distinct StreamProvider value; the sound
 // listener uses ref.listen(), which would otherwise dedupe equal consecutive AsyncData and skip
@@ -317,7 +322,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     // Link this record to existing parents/children (in either the active or the
     // archive set) by matching factors and card, then persist any record.json
     // whose parent ids changed, routing each change back to its owning store.
-    final resolution = InheritanceResolver.resolveForNewRecord(record, existing);
+    final resolution = InheritanceResolver.resolveForNewRecord(record, existing, g1RaceSids: _g1RaceSids());
     final resolvedRecord = resolution.changed.firstWhereOrNull((e) => e.id == record.id) ?? record;
     final archiveIds = {for (final e in archiveRecords) e.id};
     final activeChildUpdates = <String, CharaDetailRecord>{};
@@ -351,30 +356,45 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
 
   /// Re-resolves parent/child links across every stored record (manual action).
   ///
-  /// Unlike the per-capture resolution, this is authoritative: it both sets and
-  /// clears links so the whole storage reflects the current matches. The active
-  /// and archive sets are resolved together, and each changed record is rewritten
-  /// to disk and republished in its owning store. Aborts with a warning if the
-  /// archive has not loaded (build() no longer awaits it), because clearing links
-  /// against a missing archive would destroy valid active->archive links.
+  /// Additive like the per-capture path: it only fills empty parent slots and
+  /// never clears a set link. The active and archive sets are resolved together,
+  /// and each changed record is rewritten to disk and republished in its owning
+  /// store. Aborts with a warning if the archive has not loaded (build() no longer
+  /// awaits it): the relation-bonus recompute walks archived ancestors, so running
+  /// it without the archive would tear down bonuses that depend on them.
   void resolveAllInheritance() {
-    // resolveAll is authoritative: it clears links that no longer resolve. If the
-    // archive failed to load (or is still building), treating it as empty would
-    // clear every active->archive link as unresolvable and rewrite those
-    // record.json files, destroying valid links. Abort instead of degrading; the
-    // capture-time add() path is additive and stays safe without this guard.
+    // Abort if the archive failed to load (or is still building). Links are never
+    // cleared (resolution is additive), but the relation-bonus recompute reads
+    // archived ancestors' race data; treating the archive as empty would drop
+    // every active->archive pair to zero and rewrite those bonuses downward.
     final archiveRecords = ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value;
     if (archiveRecords == null) {
       Toaster.show(ToastData.warning(description: "app.inheritance.archive_not_ready".tr()));
       return;
     }
-    final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords]);
+    final resolution = InheritanceResolver.resolveAll([..._records, ...archiveRecords], g1RaceSids: _g1RaceSids());
     final archiveIds = {for (final e in archiveRecords) e.id};
     _routeInheritanceChanges(resolution, archiveIds, (updated) {
       replaceBy(updated, id: updated.id);
     });
     forceRebuild();
     _surfaceInheritance(resolution, alwaysReport: true);
+  }
+
+  /// G1 race title sids for the relation-bonus computation, or an empty set when
+  /// the race-title module has not finished loading.
+  ///
+  /// Read through the loader's async state because [raceGradeSidProvider] (and
+  /// [raceTitleInfoProvider] underneath it) dereference `.value!` and throw
+  /// before the module resolves. An empty set tells the resolver to leave
+  /// [Metadata.relationBonus] untouched, so link resolution still runs at capture
+  /// time before the module is ready; the next full re-resolve fills the bonus in.
+  Set<int> _g1RaceSids() {
+    final loaded = ref.read(raceTitleInfoLoader).asData;
+    if (loaded == null) {
+      return const {};
+    }
+    return ref.read(raceGradeSidProvider(_gradeG1));
   }
 
   /// Routes each changed record to its owning store.
@@ -506,9 +526,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   void delete(String id) {
-    // Deleting a record does not clear other records' parentN links to it; the
-    // dangling id is harmless and is cleared on the next resolveAllInheritance
-    // (see InheritanceResolver).
+    // Deleting a record does not clear other records' parentN links to it.
+    // Inheritance resolution is additive and never clears links (see
+    // InheritanceResolver), so the dangling id persists, but it is harmless:
+    // relationBonus / resolveRegisteredAncestors resolve a missing id to null
+    // and it contributes nothing.
     final record = getBy(id: id);
     // Guard rather than assert: the record can vanish between a dialog opening
     // and its confirm (a background capture reload, or an archive of the same
@@ -726,6 +748,19 @@ final displayedRecordsProvider = Provider<List<CharaDetailRecord>>((ref) {
     case RecordSource.archive:
       return ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const [];
   }
+});
+
+/// Active and archive records merged into one id->record lookup, for ancestry
+/// resolution that must reach across both sets (an ancestor may live in either,
+/// regardless of which set the table currently displays).
+///
+/// Falls back to active-only while the archive is still loading (build() starts
+/// it without awaiting), so callers degrade gracefully; the lookup refreshes
+/// once the archive lands. Active wins on the (normally impossible) id clash.
+final allRecordsByIdProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
+  final active = ref.watch(charaDetailRecordStorageProvider);
+  final archive = ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+  return {for (final record in archive) record.id: record, for (final record in active) record.id: record};
 });
 
 /// The `read`-based counterpart of [displayedRecordsProvider] for a fixed

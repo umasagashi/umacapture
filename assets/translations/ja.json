@@ -386,6 +386,19 @@
                         "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
                     }
                 },
+                "race_grade": {
+                    "selection": {
+                        "label": "集計対象レース",
+                        "description": "選択したレースの勝利数のみを集計します。何も選択しない場合は対象グレードの全レースを集計します。",
+                        "all": "全レース",
+                        "count": "{count}レース"
+                    },
+                    "range": {
+                        "label": "範囲",
+                        "description": "範囲内（両端含む）のウマ娘がテーブルに表示されます。",
+                        "empty_range_message": "値が1パターンのため、フィルタは無効になっています。"
+                    }
+                },
                 "character": {
                     "selection": {
                         "label": "選択",
@@ -848,6 +861,9 @@
                 "race_winning_count": {
                     "title": "勝利数"
                 },
+                "race_winning_count_g1": {
+                    "title": "G1勝利数"
+                },
                 "record_type": {
                     "title": "育成種別",
                     "values": {
@@ -874,11 +890,19 @@
                         "slot_separator": "、"
                     },
                     "jump": {
-                        "not_found": "対象のレコードはフィルタ条件により非表示になっています。"
+                        "not_found": "対象のウマ娘が表示されていません。フィルタで非表示か、別のレコード（アーカイブ等）です。"
                     }
                 },
                 "race_strategy": {
                     "title": "作戦"
+                },
+                "relation_bonus": {
+                    "title": "重賞ボーナス",
+                    "cell": {
+                        "confirmed": "確定（祖先 {linked}/{total} リンク済み）",
+                        "incomplete": "未確定（祖先 {linked}/{total} リンク済み・値はさらに増える可能性があります）",
+                        "unlinked": "親がリンクされていないため値がありません"
+                    }
                 },
                 "rating": {
                     "title": "レーティング"
@@ -1404,20 +1428,45 @@
             }
         },
         "statistics": {
+            "category": {
+                "all": "全体",
+                "trained": "育成",
+                "inheritance": "継承",
+                "friend": "フレンド",
+                "user": "プレイヤー"
+            },
             "record_count": {
-                "title": "殿堂入り登録数",
-                "bottom": "全体"
+                "title": "殿堂入り登録数"
             },
             "evaluation_value": {
-                "title": "最高評価点",
-                "bottom": "全体"
+                "title": "評価点上位"
+            },
+            "count_skill": {
+                "title": "スキル数上位"
+            },
+            "count_factor": {
+                "title": "因子数上位"
+            },
+            "g1_winning_count": {
+                "title": "G1勝利数上位"
+            },
+            "frequent_character": {
+                "title": "最頻ウマ娘上位"
+            },
+            "frequent_skill": {
+                "title": "最頻スキル上位"
+            },
+            "frequent_factor": {
+                "title": "最頻因子上位"
             },
             "monthly_fans": {
-                "title": "月間ファン獲得数"
+                "title": "月間ファン獲得数（プレイヤーのみ）"
+            },
+            "evaluation_trend": {
+                "title": "評価点の推移（プレイヤーのみ）"
             },
             "count_s_rank": {
                 "title": "適性S保有数",
-                "bottom": "全体",
                 "aptitude": {
                     "short_range": "短距離",
                     "mile_range": "マイル",
@@ -1426,8 +1475,13 @@
                 }
             },
             "count_strategy": {
-                "title": "作戦採用率",
-                "bottom": "全体"
+                "title": "作戦採用率"
+            },
+            "count_blue_factor": {
+                "title": "青因子保有数"
+            },
+            "count_red_factor": {
+                "title": "赤因子保有数"
             }
         }
     },

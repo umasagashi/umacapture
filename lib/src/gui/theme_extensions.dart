@@ -149,19 +149,27 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
 class AppChartColors extends ThemeExtension<AppChartColors> {
   final List<Color> categories;
 
-  const AppChartColors({required this.categories});
+  /// Single-series color for monochrome charts (bar, line, scatter), where the
+  /// multi-hue [categories] palette would be meaningless.
+  final Color series;
 
-  factory AppChartColors.standard() =>
-      const AppChartColors(categories: [Color(0xFF0293EE), Color(0xFFF8B250), Color(0xFF845BEF), Color(0xFF13D38E)]);
+  const AppChartColors({required this.categories, required this.series});
+
+  factory AppChartColors.standard() => const AppChartColors(
+    categories: [Color(0xFF0293EE), Color(0xFFF8B250), Color(0xFF845BEF), Color(0xFF13D38E)],
+    series: Colors.cyan,
+  );
 
   @override
-  AppChartColors copyWith({List<Color>? categories}) => AppChartColors(categories: categories ?? this.categories);
+  AppChartColors copyWith({List<Color>? categories, Color? series}) =>
+      AppChartColors(categories: categories ?? this.categories, series: series ?? this.series);
 
   @override
   AppChartColors lerp(ThemeExtension<AppChartColors>? other, double t) {
     if (other is! AppChartColors || other.categories.length != categories.length) return this;
     return AppChartColors(
       categories: [for (var i = 0; i < categories.length; i++) Color.lerp(categories[i], other.categories[i], t)!],
+      series: Color.lerp(series, other.series, t)!,
     );
   }
 }
