@@ -221,7 +221,10 @@ class ErrorLogView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
+    // Scroll vertically: a stack trace is easily taller than the viewport, and
+    // the message/trace text wraps rather than overflowing horizontally.
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -231,7 +234,7 @@ class ErrorLogView extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
-          OutlinedButton.icon(
+          FilledButton.icon(
             onPressed: _copy,
             icon: const Icon(Symbols.content_copy_rounded, size: 18),
             label: Text("common.error_log.copy_tooltip".tr()),

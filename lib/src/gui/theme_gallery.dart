@@ -533,7 +533,7 @@ const Map<String, String> _roleUsages = {
   'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',
   'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules.',
   'outlineVariant':
-      'Faint outlines: the column-chip "settings group" frame and the inset per-row dividers in the column/table settings dialogs.',
+      'Faint outlines: the app-wide chip border (global chipTheme), the column-chip "settings group" frame, and the inset per-row dividers in the column/table settings dialogs.',
   'scrim': 'Dim backdrop behind modal dialogs (DialogLayer).',
   'onInverseSurface': 'Text on the inverse surface (column builder dialog).',
 };
