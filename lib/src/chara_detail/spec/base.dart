@@ -359,10 +359,11 @@ abstract class ColumnSpec<T> with ColumnSpecMappable<T> {
   /// width-measurement placeholder text. Defaults to true.
   bool get wrapsText => true;
 
-  /// The text the cell actually paints, used by the row-height pass to measure
-  /// wrapped height. Defaults to the trina-formatted cell value; specs whose
-  /// renderer substitutes text (e.g. memo's null placeholder) override this so
-  /// the measured height matches what is shown.
+  /// The text the cell actually paints, used by the row-height pass and the
+  /// column-width auto-fit to measure what is shown. Defaults to the
+  /// trina-formatted cell value; specs whose renderer substitutes text (e.g.
+  /// memo's null placeholder, the family-registration all-slots label) override
+  /// this so the measured size matches what is shown.
   String measuredText(TrinaCell? cell, String formatted) => formatted;
 
   /// Returns a copy of this spec with its [hidden] flag replaced. Every concrete,
@@ -1042,8 +1043,16 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     if (refRows.isEmpty) {
       return;
     }
-    final values = refRows.map((e) => column.formattedValueForDisplay(e.cells[column.field]?.value));
-    final cellWidth = values
+    final spec = column.getUserData<ColumnSpec>();
+    final texts = refRows.map((e) {
+      final cell = e.cells[column.field];
+      final formatted = column.formattedValueForDisplay(cell?.value);
+      // Measure what the cell actually paints, not just the raw value: e.g. the
+      // family-registration cell renders all six slot labels even though its
+      // value lists only the registered subset.
+      return spec?.measuredText(cell, formatted) ?? formatted;
+    });
+    final cellWidth = texts
         .toSet()
         .map((value) => _visualTextWidth(context, value, DefaultTextStyle.of(context).style))
         .max;
