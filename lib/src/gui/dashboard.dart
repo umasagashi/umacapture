@@ -206,6 +206,7 @@ class _StatisticGroup extends ConsumerWidget {
             // the card's (center-aligned) outer column would center the whole
             // block; filling the width keeps it flush left with the description.
             return Row(
+              mainAxisAlignment: MainAxisAlignment.start,
               children: [
                 SizedBox(
                   width: gridWidth,

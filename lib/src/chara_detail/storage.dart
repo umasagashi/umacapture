@@ -526,9 +526,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   }
 
   void delete(String id) {
-    // Deleting a record does not clear other records' parentN links to it; the
-    // dangling id is harmless and is cleared on the next resolveAllInheritance
-    // (see InheritanceResolver).
+    // Deleting a record does not clear other records' parentN links to it.
+    // Inheritance resolution is additive and never clears links (see
+    // InheritanceResolver), so the dangling id persists, but it is harmless:
+    // relationBonus / resolveRegisteredAncestors resolve a missing id to null
+    // and it contributes nothing.
     final record = getBy(id: id);
     // Guard rather than assert: the record can vanish between a dialog opening
     // and its confirm (a background capture reload, or an archive of the same

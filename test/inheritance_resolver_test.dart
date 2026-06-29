@@ -370,6 +370,33 @@ void main() {
       expect(updatedChild.metadata.relationBonus, isNull);
     });
 
+    test('is idempotent: re-resolving an already-resolved set changes nothing', () {
+      final child = makeRecord(
+        id: 'c',
+        card: 30,
+        parent1Card: 10,
+        parent1: [const Factor(1, 1)],
+        parent2Card: 20,
+        parent2: [const Factor(2, 2)],
+      );
+      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [_race(5)]);
+      final p2 = makeRecord(id: 'p2', card: 20, self: [const Factor(2, 2)], races: [_race(5)]);
+
+      // First pass links the lineage and writes the bonus; apply the changes
+      // back, then a second pass over the resolved set must be a no-op.
+      final first = InheritanceResolver.resolveAll([child, p1, p2], g1RaceSids: {5});
+      final byId = {
+        for (final record in [child, p1, p2]) record.id: record,
+      };
+      for (final record in first.changed) {
+        byId[record.id] = record;
+      }
+
+      final second = InheritanceResolver.resolveAll(byId.values.toList(), g1RaceSids: {5});
+
+      expect(second.changed, isEmpty);
+    });
+
     test('resolveForNewRecord refreshes a grandchild that newly reaches the record', () {
       // GC -> C is already linked; C -> N links only when N (the grandparent) is
       // captured. After that, GC's parent1xgrandparent pair (C x N, sharing G1

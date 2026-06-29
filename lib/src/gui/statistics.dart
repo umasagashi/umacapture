@@ -220,13 +220,22 @@ String _rankLabelOf(WidgetRef ref, CharaDetailRecord record) {
 const _rankingIconSize = 28.0;
 
 /// A trainee icon for a ranking row, adding the rental banner for friend records.
-Widget _rankingIcon(Widget icon, {required bool isFriend}) {
-  return isFriend
-      ? SizedBox.square(
-          dimension: _rankingIconSize,
-          child: FriendMarkedIcon(icon: icon),
-        )
-      : icon;
+class _RankingIcon extends StatelessWidget {
+  final Widget icon;
+  final bool isFriend;
+
+  const _RankingIcon({required this.icon, required this.isFriend});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isFriend) {
+      return icon;
+    }
+    return SizedBox.square(
+      dimension: _rankingIconSize,
+      child: FriendMarkedIcon(icon: icon),
+    );
+  }
 }
 
 /// One ranking row: rank, a content cell (trainee icon or item name), a value,
@@ -330,18 +339,22 @@ class _RankingStatisticWidgetState extends ConsumerState<_RankingStatisticWidget
           return Text("-", style: theme.textTheme.headlineLarge);
         }
         final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-        records.sort((a, b) => widget.valueOf(ref, b).compareTo(widget.valueOf(ref, a)));
-        final top = records.take(5).toList();
+        // Compute each record's value once (it reads providers and scans the
+        // record), then sort on the cached key, instead of recomputing it on
+        // every comparison.
+        final ranked = [for (final record in records) (record: record, value: widget.valueOf(ref, record))];
+        ranked.sort((a, b) => b.value.compareTo(a.value));
+        final top = ranked.take(5).toList();
         return _RankingTable([
           for (final entry in top.indexed)
             (
               rank: entry.$1 + 1,
-              content: _rankingIcon(
-                Image.file(storage.traineeIconPathOf(entry.$2).toFile(), height: _rankingIconSize),
-                isFriend: entry.$2.isFriend,
+              content: _RankingIcon(
+                icon: Image.file(storage.traineeIconPathOf(entry.$2.record).toFile(), height: _rankingIconSize),
+                isFriend: entry.$2.record.isFriend,
               ),
-              value: widget.valueOf(ref, entry.$2).toNumberString(),
-              secondary: widget.secondaryLabelOf?.call(ref, entry.$2),
+              value: entry.$2.value.toNumberString(),
+              secondary: widget.secondaryLabelOf?.call(ref, entry.$2.record),
             ),
         ]);
       },
@@ -451,8 +464,8 @@ class _MostFrequentCharacterStatisticWidgetState extends ConsumerState<MostFrequ
           for (final entry in top.indexed)
             (
               rank: entry.$1 + 1,
-              content: _rankingIcon(
-                Image.file(storage.traineeIconPathOf(entry.$2.first).toFile(), height: _rankingIconSize),
+              content: _RankingIcon(
+                icon: Image.file(storage.traineeIconPathOf(entry.$2.first).toFile(), height: _rankingIconSize),
                 isFriend: entry.$2.first.isFriend,
               ),
               value: entry.$2.length.toNumberString(),
@@ -866,7 +879,11 @@ class CountSRankChartData {
     "$tr_statistics.count_s_rank.aptitude.long_range".tr(),
   ];
 
-  CountSRankChartData(this.records);
+  late final List<int> counts;
+
+  CountSRankChartData(this.records) {
+    counts = parse();
+  }
 
   List<int> parse() {
     const targetRank = 7;
@@ -881,7 +898,7 @@ class CountSRankChartData {
     return counts;
   }
 
-  BarChart build(ThemeData theme) => _buildCountBarChart(theme, parse(), labels);
+  BarChart build(ThemeData theme) => _buildCountBarChart(theme, counts, labels);
 }
 
 class CountSRankStatisticWidget extends ConsumerStatefulWidget {
@@ -917,7 +934,7 @@ class _CountSRankStatisticWidgetState extends ConsumerState<CountSRankStatisticW
         final chart = CountSRankChartData(records);
         // Guard against an empty/all-active-less record set: `build` derives
         // `maxY` from `counts.max`, which is 0 here and yields a degenerate axis.
-        if (chart.parse().sum == 0) {
+        if (chart.counts.sum == 0) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
         return Padding(padding: const EdgeInsets.only(top: 36, bottom: 4), child: chart.build(theme));
@@ -1057,7 +1074,11 @@ class _FactorStarSumChartData {
   final List<CharaDetailRecord> records;
   final Set<int> ids;
 
-  _FactorStarSumChartData({required this.records, required this.ids});
+  late final List<int> counts;
+
+  _FactorStarSumChartData({required this.records, required this.ids}) {
+    counts = parse();
+  }
 
   List<int> parse() {
     final counts = List.filled(buckets.length, 0);
@@ -1076,7 +1097,7 @@ class _FactorStarSumChartData {
     return counts;
   }
 
-  BarChart build(ThemeData theme) => _buildCountBarChart(theme, parse(), const ["3", "4", "5", "6", "7", "8", "9"]);
+  BarChart build(ThemeData theme) => _buildCountBarChart(theme, counts, const ["3", "4", "5", "6", "7", "8", "9"]);
 }
 
 class _FactorStarSumStatisticWidget extends ConsumerStatefulWidget {
@@ -1106,7 +1127,7 @@ class _FactorStarSumStatisticWidgetState extends ConsumerState<_FactorStarSumSta
         final ids = ref.watch(factorInfoProvider).where((e) => e.tags.contains(widget.tag)).map((e) => e.sid).toSet();
         final records = ref.watch(charaDetailRecordStorageProvider).where(category.matches).toList();
         final chart = _FactorStarSumChartData(records: records, ids: ids);
-        if (chart.parse().sum == 0) {
+        if (chart.counts.sum == 0) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
         return Padding(padding: const EdgeInsets.only(top: 36, bottom: 4), child: chart.build(theme));
