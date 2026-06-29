@@ -291,10 +291,7 @@
                 "aptitude": "適性",
                 "skill": "スキル",
                 "factor": "因子",
-                "support_card": "サポートカード",
-                "family": "継承ウマ",
                 "campaign": "戦績",
-                "race": "出走履歴",
                 "metadata": "メタデータ",
                 "script": "スクリプト",
                 "logic": "論理"
@@ -1515,6 +1512,10 @@
     },
     "common": {
         "under_construction": "開発中",
-        "experimental_warning": "この機能は実験的です。保存した内容は今後のバージョンアップで利用できなくなる可能性があります。"
+        "experimental_warning": "この機能は実験的です。保存した内容は今後のバージョンアップで利用できなくなる可能性があります。",
+        "error_log": {
+            "copy_tooltip": "エラー内容をクリップボードにコピー",
+            "copied": "エラー内容をコピーしました。"
+        }
     }
 }

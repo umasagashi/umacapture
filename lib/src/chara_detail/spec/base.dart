@@ -111,20 +111,7 @@ class CellText extends ConsumerWidget {
   }
 }
 
-enum ColumnCategory {
-  trainee,
-  status,
-  aptitude,
-  skill,
-  factor,
-  supportCard,
-  family,
-  campaign,
-  race,
-  metadata,
-  script,
-  logic,
-}
+enum ColumnCategory { trainee, status, aptitude, skill, factor, campaign, metadata, script, logic }
 
 class LabelKeys {
   static String get aptitude => "aptitude.name";

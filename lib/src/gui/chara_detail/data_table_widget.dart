@@ -1504,23 +1504,8 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     );
   }
 
-  Widget error(Object? errorMessage, Object? stackTrace, ThemeData theme) {
-    return Center(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Text(
-            "$tr_chara_detail.loading_error".tr(),
-            style: TextStyle(color: theme.colorScheme.error),
-            textAlign: TextAlign.center,
-          ),
-          const Divider(),
-          Text(errorMessage.toString()),
-          const Divider(),
-          Text(stackTrace.toString()),
-        ],
-      ),
-    );
+  Widget error(Object? errorMessage, Object? stackTrace) {
+    return ErrorLogView(title: "$tr_chara_detail.loading_error".tr(), message: errorMessage, stackTrace: stackTrace);
   }
 
   Widget data(BuildContext context, WidgetRef ref) {
@@ -1536,7 +1521,6 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final loader = ref.watch(charaDetailInitialDataLoader);
     return loader.when(
       // A background reload of an upstream loader (path/module/record storage)
@@ -1546,7 +1530,7 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
       // spinner (no previous value to keep).
       skipLoadingOnReload: true,
       loading: () => loading(),
-      error: (errorMessage, stackTrace) => error(errorMessage, stackTrace, theme),
+      error: (errorMessage, stackTrace) => error(errorMessage, stackTrace),
       data: (_) => data(context, ref),
     );
   }

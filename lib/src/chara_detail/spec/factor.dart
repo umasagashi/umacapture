@@ -1011,9 +1011,18 @@ class TagDrivenFactorColumnBuilder extends ColumnBuilder {
   final ColumnCategory category;
 
   @override
+  final ColumnBuilderType type;
+
+  @override
   final String? builderId;
 
-  TagDrivenFactorColumnBuilder({required this.title, required this.category, required this.parser, this.builderId});
+  TagDrivenFactorColumnBuilder({
+    required this.title,
+    required this.category,
+    required this.parser,
+    this.builderId,
+    this.type = ColumnBuilderType.normal,
+  });
 
   @override
   ColumnSpec<FactorSet> build(RefBase ref) {
