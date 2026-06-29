@@ -25,8 +25,12 @@ final statisticsInitialLoader = FutureProvider((ref) async {
     return Future.wait([
       ref.watch(labelMapLoader.future),
       ref.watch(charaDetailRecordStorageLoaderProvider.future),
+      // factorInfoLoader internally awaits the skill-info module too, so this also
+      // satisfies skillInfoProvider for the most-frequent-skill tile.
       ref.watch(factorInfoLoader.future),
       ref.watch(charaRankBorderLoader.future),
+      // Race-title module backs the grade -> sid lookup the G1 winning-count tile reads.
+      ref.watch(raceTitleInfoLoader.future),
     ]);
   });
 });
@@ -186,14 +190,21 @@ class _NumberOfRecordStatisticWidgetState extends ConsumerState<NumberOfRecordSt
   }
 }
 
-int _evaluationValueOf(CharaDetailRecord record) => record.evaluationValue;
+int _evaluationValueOf(WidgetRef ref, CharaDetailRecord record) => record.evaluationValue;
 
-int _skillCountOf(CharaDetailRecord record) => record.skills.length;
+int _skillCountOf(WidgetRef ref, CharaDetailRecord record) => record.skills.length;
 
 /// Total factor count across the whole family, stars ignored and not deduplicated
 /// (the same factor in self and a parent counts twice).
-int _factorCountOf(CharaDetailRecord record) =>
+int _factorCountOf(WidgetRef ref, CharaDetailRecord record) =>
     record.factors.self.length + record.factors.parent1.length + record.factors.parent2.length;
+
+/// Number of G1 races this record won, resolved through the race-title module so
+/// the grade follows game-data updates (mirrors the G1 winning-count column).
+int _g1WinningCountOf(WidgetRef ref, CharaDetailRecord record) {
+  final targets = ref.watch(raceGradeSidProvider("grade_g1"));
+  return record.races.where((race) => race.won && targets.contains(race.title)).length;
+}
 
 /// Localized chara-rank label for a record's evaluation value, derived from the
 /// rank borders the same way as the chara-detail rank column.
@@ -204,73 +215,96 @@ String _rankLabelOf(WidgetRef ref, CharaDetailRecord record) {
   return labels[index < 0 ? borders.length : index];
 }
 
-/// One row of a ranking tile: rank, trainee icon (rental banner for friends),
-/// value, and an optional trailing label (e.g. the chara rank).
-class _RankingEntry extends StatelessWidget {
-  final int rank;
-  final Widget icon;
-  final bool isFriend;
-  final String valueLabel;
-  final String? secondaryLabel;
-  final double iconValueGap;
+/// Trainee-icon side for the top-N ranking rows. Sized to fit five entries in a
+/// single tile.
+const _rankingIconSize = 28.0;
 
-  const _RankingEntry({
-    required this.rank,
-    required this.icon,
-    required this.isFriend,
-    required this.valueLabel,
-    this.secondaryLabel,
-    this.iconValueGap = 10,
-  });
+/// A trainee icon for a ranking row, adding the rental banner for friend records.
+Widget _rankingIcon(Widget icon, {required bool isFriend}) {
+  return isFriend
+      ? SizedBox.square(
+          dimension: _rankingIconSize,
+          child: FriendMarkedIcon(icon: icon),
+        )
+      : icon;
+}
+
+/// One ranking row: rank, a content cell (trainee icon or item name), a value,
+/// and an optional trailing label (e.g. the chara rank).
+typedef _RankingRow = ({int rank, Widget content, String value, String? secondary});
+
+/// Centered ranking table: rank | content | value | optional secondary label.
+///
+/// Laid out as a [Table] so each column sizes to its widest cell: values of
+/// different digit counts line up on the right edge, and the content-to-value gap
+/// stays a fixed cell padding (not flexible space that grows with the tile). The
+/// whole block sizes to its content and is scaled down to fit short tiles, so it
+/// stays centered instead of stretching to the cell width. Shared by the icon
+/// rankings and the most-frequent skill/factor lists.
+class _RankingTable extends StatelessWidget {
+  static const _rankContentGap = 10.0;
+  static const _contentValueGap = 20.0;
+
+  final List<_RankingRow> rows;
+
+  /// Gap between the content (icon/name) and the value column. Defaults to the
+  /// icon-ranking spacing; the skill/factor name lists pass a tighter value.
+  final double contentValueGap;
+
+  const _RankingTable(this.rows, {this.contentValueGap = _contentValueGap});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
+    final hasSecondary = rows.any((row) => row.secondary != null);
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
         children: [
-          SizedBox(
-            width: 16,
-            child: Text("$rank", style: theme.textTheme.titleLarge, textAlign: TextAlign.center),
-          ),
-          const SizedBox(width: 4),
-          isFriend ? SizedBox.square(dimension: 42, child: FriendMarkedIcon(icon: icon)) : icon,
-          SizedBox(width: iconValueGap),
-          Expanded(
-            child: Text(valueLabel, style: theme.textTheme.titleLarge, textAlign: TextAlign.end),
-          ),
-          if (secondaryLabel != null) ...[
-            const SizedBox(width: 6),
-            Text(
-              secondaryLabel!,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          for (final row in rows)
+            TableRow(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 1),
+                  child: Text("${row.rank}", style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
+                ),
+                Padding(
+                  padding: EdgeInsets.only(left: _rankContentGap, right: contentValueGap),
+                  child: row.content,
+                ),
+                Text(row.value, style: theme.textTheme.titleMedium, textAlign: TextAlign.end),
+                if (hasSecondary)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Text(
+                      row.secondary ?? "",
+                      style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                  ),
+              ],
             ),
-          ],
         ],
       ),
     );
   }
 }
 
-/// Top-3 ranking tile shared by the evaluation / skill-count / factor-count tiles.
+/// Top-5 ranking tile shared by the evaluation / skill-count / factor-count tiles.
 class _RankingStatisticWidget extends ConsumerStatefulWidget {
   final String titleKey;
   final List<_RecordCategory> options;
-  final int Function(CharaDetailRecord) valueOf;
+  final int Function(WidgetRef, CharaDetailRecord) valueOf;
 
   /// Optional trailing label per record (e.g. the chara rank for evaluation).
   final String Function(WidgetRef, CharaDetailRecord)? secondaryLabelOf;
-
-  /// Gap between the trainee icon and the value column.
-  final double iconValueGap;
 
   const _RankingStatisticWidget({
     required this.titleKey,
     required this.options,
     required this.valueOf,
     this.secondaryLabelOf,
-    this.iconValueGap = 10,
   });
 
   @override
@@ -296,30 +330,20 @@ class _RankingStatisticWidgetState extends ConsumerState<_RankingStatisticWidget
           return Text("-", style: theme.textTheme.headlineLarge);
         }
         final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
-        records.sort((a, b) => widget.valueOf(b).compareTo(widget.valueOf(a)));
-        final top = records.take(3).toList();
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          // IntrinsicWidth sizes every row to the widest one, so the centered
-          // block keeps the right-aligned values lined up across rows.
-          child: IntrinsicWidth(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final entry in top.indexed)
-                  _RankingEntry(
-                    rank: entry.$1 + 1,
-                    icon: Image.file(storage.traineeIconPathOf(entry.$2).toFile(), height: 42),
-                    isFriend: entry.$2.isFriend,
-                    valueLabel: widget.valueOf(entry.$2).toNumberString(),
-                    secondaryLabel: widget.secondaryLabelOf?.call(ref, entry.$2),
-                    iconValueGap: widget.iconValueGap,
-                  ),
-              ],
+        records.sort((a, b) => widget.valueOf(ref, b).compareTo(widget.valueOf(ref, a)));
+        final top = records.take(5).toList();
+        return _RankingTable([
+          for (final entry in top.indexed)
+            (
+              rank: entry.$1 + 1,
+              content: _rankingIcon(
+                Image.file(storage.traineeIconPathOf(entry.$2).toFile(), height: _rankingIconSize),
+                isFriend: entry.$2.isFriend,
+              ),
+              value: widget.valueOf(ref, entry.$2).toNumberString(),
+              secondary: widget.secondaryLabelOf?.call(ref, entry.$2),
             ),
-          ),
-        );
+        ]);
       },
     );
   }
@@ -349,7 +373,6 @@ class SkillCountRankingStatisticWidget {
         titleKey: "$tr_statistics.count_skill.title",
         options: _RecordCategory.ownerWay,
         valueOf: _skillCountOf,
-        iconValueGap: 22,
       ),
     );
   }
@@ -364,7 +387,206 @@ class FactorCountRankingStatisticWidget {
         titleKey: "$tr_statistics.count_factor.title",
         options: _RecordCategory.ownerWay,
         valueOf: _factorCountOf,
-        iconValueGap: 22,
+      ),
+    );
+  }
+}
+
+class G1WinningRankingStatisticWidget {
+  static StaggeredGridTile asTile() {
+    return const StaggeredGridTile.count(
+      crossAxisCellCount: 1,
+      mainAxisCellCount: 1,
+      child: _RankingStatisticWidget(
+        titleKey: "$tr_statistics.g1_winning_count.title",
+        options: _RecordCategory.ownerWay,
+        valueOf: _g1WinningCountOf,
+      ),
+    );
+  }
+}
+
+/// Top-5 most frequently captured trainees (grouped by character identity, across
+/// outfits), each row showing a representative icon and the record count.
+class MostFrequentCharacterStatisticWidget extends ConsumerStatefulWidget {
+  const MostFrequentCharacterStatisticWidget({super.key});
+
+  static StaggeredGridTile asTile() {
+    return const StaggeredGridTile.count(
+      crossAxisCellCount: 1,
+      mainAxisCellCount: 1,
+      child: MostFrequentCharacterStatisticWidget(),
+    );
+  }
+
+  @override
+  ConsumerState<MostFrequentCharacterStatisticWidget> createState() => _MostFrequentCharacterStatisticWidgetState();
+}
+
+class _MostFrequentCharacterStatisticWidgetState extends ConsumerState<MostFrequentCharacterStatisticWidget> {
+  _RecordCategory category = _RecordCategory.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _StatisticTile(
+      title: Text("$tr_statistics.frequent_character.title".tr()),
+      bottom: _CategorySwitcher(
+        options: _RecordCategory.ownerWay,
+        selected: category,
+        onChanged: (value) => setState(() => category = value),
+      ),
+      builder: () {
+        final records = ref.watch(charaDetailRecordStorageProvider).where(category.matches).toList();
+        if (records.isEmpty) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
+        final storage = ref.read(charaDetailRecordStorageLoaderProvider.notifier);
+        // Group by character identity so different outfits of the same trainee
+        // count together; rank the groups by size and keep the top five.
+        final groups = records.groupListsBy((record) => record.trainee.character).values.toList();
+        groups.sort((a, b) => b.length.compareTo(a.length));
+        final top = groups.take(5).toList();
+        return _RankingTable([
+          for (final entry in top.indexed)
+            (
+              rank: entry.$1 + 1,
+              content: _rankingIcon(
+                Image.file(storage.traineeIconPathOf(entry.$2.first).toFile(), height: _rankingIconSize),
+                isFriend: entry.$2.first.isFriend,
+              ),
+              value: entry.$2.length.toNumberString(),
+              secondary: null,
+            ),
+        ]);
+      },
+    );
+  }
+}
+
+/// Top-N "most frequent" list shared by the skill and factor tiles: counts item
+/// occurrences across the selected records, then renders rank / name / count rows.
+class _FrequencyRankingStatisticWidget extends ConsumerStatefulWidget {
+  final String titleKey;
+  final int topCount;
+
+  /// Occurrence count keyed by item sid across the given records.
+  final Map<int, int> Function(List<CharaDetailRecord> records) countOf;
+
+  /// Resolves an item sid to its localized display name.
+  final String Function(WidgetRef ref, int sid) labelOf;
+
+  const _FrequencyRankingStatisticWidget({
+    required this.titleKey,
+    required this.topCount,
+    required this.countOf,
+    required this.labelOf,
+  });
+
+  @override
+  ConsumerState<_FrequencyRankingStatisticWidget> createState() => _FrequencyRankingStatisticWidgetState();
+}
+
+class _FrequencyRankingStatisticWidgetState extends ConsumerState<_FrequencyRankingStatisticWidget> {
+  _RecordCategory category = _RecordCategory.all;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _StatisticTile(
+      title: Text(widget.titleKey.tr()),
+      bottom: _CategorySwitcher(
+        options: _RecordCategory.ownerWay,
+        selected: category,
+        onChanged: (value) => setState(() => category = value),
+      ),
+      builder: () {
+        final records = ref.watch(charaDetailRecordStorageProvider).where(category.matches).toList();
+        final counts = widget.countOf(records);
+        if (counts.isEmpty) {
+          return Text("-", style: theme.textTheme.headlineLarge);
+        }
+        final top = counts.entries.sortedBy<num>((entry) => -entry.value).take(widget.topCount).toList();
+        return _RankingTable(contentValueGap: 12, [
+          for (final entry in top.indexed)
+            (
+              rank: entry.$1 + 1,
+              // Cap the name column so one long name does not shrink the whole
+              // table; anything past the cap is truncated with an ellipsis.
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 132),
+                child: Text(
+                  widget.labelOf(ref, entry.$2.key),
+                  style: theme.textTheme.titleMedium,
+                  maxLines: 1,
+                  softWrap: false,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              value: entry.$2.value.toNumberString(),
+              secondary: null,
+            ),
+        ]);
+      },
+    );
+  }
+}
+
+Map<int, int> _skillCounts(List<CharaDetailRecord> records) {
+  final counts = <int, int>{};
+  for (final record in records) {
+    for (final skill in record.skills) {
+      counts.update(skill.id, (value) => value + 1, ifAbsent: () => 1);
+    }
+  }
+  return counts;
+}
+
+/// Family-wide factor occurrences (self + both parents), stars ignored; the same
+/// factor in self and a parent counts twice, matching the factor-count ranking.
+Map<int, int> _factorCounts(List<CharaDetailRecord> records) {
+  final counts = <int, int>{};
+  for (final record in records) {
+    for (final factor in record.factors.flattened) {
+      counts.update(factor.id, (value) => value + 1, ifAbsent: () => 1);
+    }
+  }
+  return counts;
+}
+
+String _skillLabelOf(WidgetRef ref, int sid) {
+  return ref.watch(skillInfoProvider).firstWhereOrNull((info) => info.sid == sid)?.label ?? "?";
+}
+
+String _factorLabelOf(WidgetRef ref, int sid) {
+  return ref.watch(factorInfoProvider).firstWhereOrNull((info) => info.sid == sid)?.label ?? "?";
+}
+
+class MostFrequentSkillStatisticWidget {
+  static StaggeredGridTile asTile() {
+    return const StaggeredGridTile.count(
+      crossAxisCellCount: 1,
+      mainAxisCellCount: 1,
+      child: _FrequencyRankingStatisticWidget(
+        titleKey: "$tr_statistics.frequent_skill.title",
+        topCount: 5,
+        countOf: _skillCounts,
+        labelOf: _skillLabelOf,
+      ),
+    );
+  }
+}
+
+class MostFrequentFactorStatisticWidget {
+  static StaggeredGridTile asTile() {
+    return const StaggeredGridTile.count(
+      crossAxisCellCount: 1,
+      mainAxisCellCount: 1,
+      child: _FrequencyRankingStatisticWidget(
+        titleKey: "$tr_statistics.frequent_factor.title",
+        topCount: 5,
+        countOf: _factorCounts,
+        labelOf: _factorLabelOf,
       ),
     );
   }

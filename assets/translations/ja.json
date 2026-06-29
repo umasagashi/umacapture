@@ -1447,6 +1447,18 @@
             "count_factor": {
                 "title": "因子数上位"
             },
+            "g1_winning_count": {
+                "title": "G1勝利数上位"
+            },
+            "frequent_character": {
+                "title": "最頻ウマ娘上位"
+            },
+            "frequent_skill": {
+                "title": "最頻スキル上位"
+            },
+            "frequent_factor": {
+                "title": "最頻因子上位"
+            },
             "monthly_fans": {
                 "title": "月間ファン獲得数（プレイヤーのみ）"
             },
