@@ -196,6 +196,7 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.skill,
       parser: SkillParser(),
       builderId: "skill_tag_driven",
+      type: ColumnBuilderType.filter,
     ),
     FactorColumnBuilder(
       title: "$tr_columns.factor.title".tr(),
@@ -277,6 +278,20 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       category: ColumnCategory.factor,
       parser: FactorSetParser(),
       builderId: "factor_tag_driven",
+      type: ColumnBuilderType.filter,
+    ),
+    // Race results (formerly their own "race" group) are folded into campaign,
+    // listed before fans so the order reads winning counts -> fans.
+    RangedIntegerColumnBuilder(
+      title: "$tr_columns.race_winning_count.title".tr(),
+      category: ColumnCategory.campaign,
+      parser: RaceWinningCountParser(),
+      cellAction: ColumnSpecCellAction.openCampaignPreview,
+    ),
+    RaceGradeWinningCountColumnBuilder(
+      title: "$tr_columns.race_winning_count_g1.title".tr(),
+      category: ColumnCategory.campaign,
+      grade: "grade_g1",
     ),
     RangedIntegerColumnBuilder(
       title: "$tr_columns.fans.title".tr(),
@@ -302,17 +317,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       title: "$tr_columns.trained_date.title".tr(),
       category: ColumnCategory.campaign,
       parser: TrainedDateParser(),
-    ),
-    RangedIntegerColumnBuilder(
-      title: "$tr_columns.race_winning_count.title".tr(),
-      category: ColumnCategory.race,
-      parser: RaceWinningCountParser(),
-      cellAction: ColumnSpecCellAction.openCampaignPreview,
-    ),
-    RaceGradeWinningCountColumnBuilder(
-      title: "$tr_columns.race_winning_count_g1.title".tr(),
-      category: ColumnCategory.race,
-      grade: "grade_g1",
     ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.record_type.title".tr(),

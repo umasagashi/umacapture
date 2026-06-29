@@ -130,13 +130,24 @@ class ColumnBuilderDialog extends ConsumerWidget {
     return chip;
   }
 
-  Widget builderChipCategory(BuildContext context, WidgetRef ref, List<ColumnBuilder> targets) {
+  /// Categories whose chips are homogeneous enough that bulk-adding them all at
+  /// once is useful. Other categories (skills, factors, etc.) mix many unrelated
+  /// presets, so the "add all" shortcut is omitted there.
+  static const _addAllCategories = {ColumnCategory.trainee, ColumnCategory.status, ColumnCategory.aptitude};
+
+  Widget builderChipCategory(
+    BuildContext context,
+    WidgetRef ref,
+    ColumnCategory category,
+    List<ColumnBuilder> targets,
+  ) {
     final theme = Theme.of(context);
     final groups = targets.groupListsBy((e) => e.type);
     final normalBuilders = groups[ColumnBuilderType.normal] ?? [];
     final filterBuilders = groups[ColumnBuilderType.filter] ?? [];
     final addBuilders = groups[ColumnBuilderType.add] ?? [];
     final addAllTargets = normalBuilders.where((e) => e.includeInAddAll).toList();
+    final showAddAll = _addAllCategories.contains(category) && addAllTargets.length >= 2;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -145,7 +156,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
           runSpacing: 16,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (addAllTargets.length >= 2) addAllChipWidget(context, ref, addAllTargets),
+            if (showAddAll) addAllChipWidget(context, ref, addAllTargets),
             for (final builder in normalBuilders) builderChip(context, ref, builder),
           ],
         ),
@@ -231,7 +242,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
               Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 0), child: _HintLine(description)),
             Padding(
               padding: const EdgeInsets.all(16),
-              child: builderChipCategory(context, ref, buildersMap[cat] ?? []),
+              child: builderChipCategory(context, ref, cat, buildersMap[cat] ?? []),
             ),
           ],
         ],

@@ -507,24 +507,9 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
     );
   }
 
-  Widget error(Object? errorMessage, Object? stackTrace, ThemeData theme) {
+  Widget error(Object? errorMessage, Object? stackTrace) {
     return SingleTileWidget(
-      child: Center(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Text(
-              "$tr_capture.loading_error".tr(),
-              style: TextStyle(color: theme.colorScheme.error),
-              textAlign: TextAlign.center,
-            ),
-            const Divider(),
-            Text(errorMessage.toString()),
-            const Divider(),
-            Text(stackTrace.toString()),
-          ],
-        ),
-      ),
+      child: ErrorLogView(title: "$tr_capture.loading_error".tr(), message: errorMessage, stackTrace: stackTrace),
     );
   }
 
@@ -534,11 +519,10 @@ class _CapturePageLoaderLayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
     final loader = ref.watch(platformControllerLoader);
     return loader.when(
       loading: () => loading(),
-      error: (errorMessage, stackTrace) => error(errorMessage, stackTrace, theme),
+      error: (errorMessage, stackTrace) => error(errorMessage, stackTrace),
       data: (_) => data(context, ref),
     );
   }

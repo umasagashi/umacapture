@@ -144,7 +144,7 @@ class SidePreviewToggleButton extends ConsumerWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: IconButton(
-        icon: Icon(Symbols.dock_to_right_rounded, size: 22, fill: open ? 1 : 0),
+        icon: Icon(Symbols.dock_to_left_rounded, size: 22, fill: open ? 1 : 0),
         tooltip: "$tr_side_panel.toggle.${open ? "close" : "open"}_tooltip".tr(),
         onPressed: () => ref.read(sidePreviewProvider.notifier).set(open ? null : const SidePreviewState()),
         visualDensity: VisualDensity.compact,

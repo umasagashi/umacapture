@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
+import '/src/gui/toast.dart';
 
 class ListCard extends StatelessWidget {
   final String? title;
@@ -193,6 +194,52 @@ class ErrorMessageWidget extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// An in-app error display showing a [title], the error [message], and its
+/// [stackTrace], with a button that copies the full message + stack trace to the
+/// clipboard so users can paste it into a bug report.
+///
+/// Shared by the page loaders (capture, chara detail) so their error views — and
+/// the copy affordance — stay identical.
+class ErrorLogView extends StatelessWidget {
+  final String title;
+  final Object? message;
+  final Object? stackTrace;
+
+  const ErrorLogView({super.key, required this.title, required this.message, required this.stackTrace});
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: "$message\n\n$stackTrace"));
+    Toaster.show(ToastData.success(description: "common.error_log.copied".tr()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            title,
+            style: TextStyle(color: theme.colorScheme.error),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: _copy,
+            icon: const Icon(Symbols.content_copy_rounded, size: 18),
+            label: Text("common.error_log.copy_tooltip".tr()),
+          ),
+          const Divider(),
+          Text(message.toString()),
+          const Divider(),
+          Text(stackTrace.toString()),
         ],
       ),
     );

@@ -286,17 +286,18 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
         waitDuration: const Duration(milliseconds: 100),
         showDuration: Duration.zero,
       ),
-      // Chips are borderless app-wide and default to a single neutral tone
-      // (surfaceContainerHigh). `side` is forced off because FilterChip/
-      // ChoiceChip otherwise paint the Material 3 state-dependent outline
-      // (unselected), which overrides `shape.side`. Per-chip `backgroundColor` /
-      // `shape` still override these (e.g. primaryContainer action chips, the
-      // circular add button, selected filter chips).
+      // Chips carry a subtle outlineVariant border app-wide and default to a
+      // single neutral tone (surfaceContainerHigh). `side` is set explicitly
+      // because FilterChip/ChoiceChip otherwise paint the Material 3
+      // state-dependent outline (unselected), which overrides `shape.side`.
+      // Per-chip `backgroundColor` / `shape` still override these (e.g.
+      // primaryContainer action chips, the circular add button, selected filter
+      // chips).
       chipTheme: base.chipTheme.copyWith(
         labelStyle: modifyFontWeight(base.chipTheme.labelStyle, offset),
         backgroundColor: base.colorScheme.surfaceContainerHigh,
         selectedColor: base.colorScheme.primaryContainer,
-        side: BorderSide.none,
+        side: BorderSide(color: base.colorScheme.outlineVariant, width: 0.5),
         shape: const StadiumBorder(),
       ),
       // Cards sit on the base surface role app-wide; raised accents (e.g. the
