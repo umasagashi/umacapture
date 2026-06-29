@@ -750,6 +750,19 @@ final displayedRecordsProvider = Provider<List<CharaDetailRecord>>((ref) {
   }
 });
 
+/// Active and archive records merged into one id->record lookup, for ancestry
+/// resolution that must reach across both sets (an ancestor may live in either,
+/// regardless of which set the table currently displays).
+///
+/// Falls back to active-only while the archive is still loading (build() starts
+/// it without awaiting), so callers degrade gracefully; the lookup refreshes
+/// once the archive lands. Active wins on the (normally impossible) id clash.
+final allRecordsByIdProvider = Provider<Map<String, CharaDetailRecord>>((ref) {
+  final active = ref.watch(charaDetailRecordStorageProvider);
+  final archive = ref.watch(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+  return {for (final record in archive) record.id: record, for (final record in active) record.id: record};
+});
+
 /// The `read`-based counterpart of [displayedRecordsProvider] for a fixed
 /// [source].
 ///

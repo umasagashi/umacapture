@@ -31,18 +31,24 @@ const _unset = Object();
 
 // Mark prepended to an unconfirmed value: the lineage is incomplete (fewer than
 // all six ancestors are linked), so the true bonus is at least the shown number.
+// A space separates it from the number ("≧ 50").
 const _lowerBoundMark = "≧"; // ≧
 
 // Placeholder for a record that carries no stored bonus (no parent linked).
-const _unlinkedMark = "—"; // —
+const _unlinkedMark = "-";
+
+// Opacity applied to non-confirmed cells (unlinked placeholder and lower-bound
+// values), matching the dimmed placeholder used by the memo/rating columns.
+const _unconfirmedOpacity = 0.4;
 
 /// Per-record relation-bonus value paired with how complete its lineage is.
 ///
 /// [value] is the stored [Metadata.relationBonus] (null when no parent was ever
 /// linked / resolved). [linkedAncestors] is how many of the six ancestor slots
-/// currently resolve to a stored record; the bonus is only fully determined when
-/// all six are present, since a missing ancestor zeroes its pair and could only
-/// raise the total.
+/// resolve to a stored record across both the active and archive sets (see
+/// [allRecordsByIdProvider]); the bonus is only fully determined when all six are
+/// present, since a missing ancestor zeroes its pair and could only raise the
+/// total.
 class RelationBonusStatus {
   final int? value;
   final int linkedAncestors;
@@ -52,10 +58,14 @@ class RelationBonusStatus {
   /// Whether every ancestor that feeds the bonus is linked, so [value] is final.
   bool get isComplete => linkedAncestors >= FamilyRegistrationStatus.slotCount;
 
+  /// Whether a definite number is shown (a stored value with a complete lineage),
+  /// as opposed to the unlinked placeholder or a lower-bound estimate.
+  bool get isConfirmed => value != null && isComplete;
+
   /// Numeric value used for sorting and range filtering (unknown counts as 0).
   int get filterValue => value ?? 0;
 
-  /// Cell text: "—" when unknown, the number when confirmed, "≧n" when the
+  /// Cell text: "-" when unknown, the number when confirmed, "≧ n" when the
   /// lineage is incomplete and the true value could still be higher.
   String get label {
     final current = value;
@@ -63,7 +73,7 @@ class RelationBonusStatus {
       return _unlinkedMark;
     }
     final number = current.toNumberString();
-    return isComplete ? number : "$_lowerBoundMark$number";
+    return isComplete ? number : "$_lowerBoundMark $number";
   }
 }
 
@@ -97,8 +107,9 @@ String _cellTooltip(RelationBonusStatus status) {
 ///
 /// The bonus itself is not recomputed here; it shows [Metadata.relationBonus] as
 /// written by inheritance resolution. Completeness is derived live from the same
-/// ancestor links the family-registration column uses, so it tracks the current
-/// storage without persisting anything.
+/// ancestor links the family-registration column uses, resolved across both the
+/// active and archive sets (see [allRecordsByIdProvider]) so it matches the set
+/// resolution computed the bonus over — without persisting anything.
 @MappableClass(discriminatorValue: 'RelationBonusColumnSpec', ignoreNull: true)
 class RelationBonusColumnSpec extends ColumnSpec<RelationBonusStatus> with RelationBonusColumnSpecMappable {
   final IsInRangeIntegerPredicate predicate;
@@ -169,7 +180,11 @@ class RelationBonusColumnSpec extends ColumnSpec<RelationBonusStatus> with Relat
 
   @override
   List<RelationBonusStatus> parse(RefBase ref, List<CharaDetailRecord> records) {
-    final recordById = {for (final record in records) record.id: record};
+    // Count linked ancestors across both sets, so completeness matches the stored
+    // bonus (which inheritance resolution computes over active + archive). A
+    // displayed-set-only count would mark a fully-resolved value as a lower bound
+    // whenever an ancestor lives in the other source.
+    final recordById = ref.watch(allRecordsByIdProvider);
     return [
       for (final record in records)
         RelationBonusStatus(record.metadata.relationBonus, resolveRegisteredAncestors(record, recordById).length),
@@ -209,7 +224,13 @@ class RelationBonusColumnSpec extends ColumnSpec<RelationBonusStatus> with Relat
         final status = context.cell.getUserData<RelationBonusCellData>()!.status;
         return Tooltip(
           message: _cellTooltip(status),
-          child: CellText(status.label, textAlign: TextAlign.center),
+          // Dim the unlinked placeholder and lower-bound estimates so a confirmed
+          // value reads as the only definite number.
+          child: CellText(
+            status.label,
+            textAlign: TextAlign.center,
+            opacity: status.isConfirmed ? null : _unconfirmedOpacity,
+          ),
         );
       },
     )..setUserData(this);
