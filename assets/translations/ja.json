@@ -52,7 +52,8 @@
                 "capture_completed_message": "キャプチャに成功しました。ここをクリックすると管理画面に移動します。",
                 "error": {
                     "closed_before_completed": "[エラー] キャプチャ完了前に詳細画面をロストしました。",
-                    "duplicated_character": "[エラー] このウマ娘はすでにキャプチャ済みです。"
+                    "duplicated_character": "[エラー] このウマ娘はすでにキャプチャ済みです。",
+                    "duplicated_character_probe": "[ヒント] このウマ娘は恐らくキャプチャ済みです。キャプチャを継続したい場合はそのまま続けてください。"
                 },
                 "requirement": {
                     "window_size": {

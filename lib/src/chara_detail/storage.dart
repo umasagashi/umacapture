@@ -346,7 +346,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       return false;
     }
     _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
-    ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
+    // Distinct from add()'s "duplicated_character": this fires before scrolling on the looser
+    // leading-factor prefix match, so the message tells the user it is a preliminary check and that
+    // scrolling anyway re-runs the authoritative dedup (which can clear a rare false positive).
+    ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character_probe");
     return true;
   }
 
