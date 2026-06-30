@@ -297,9 +297,15 @@ class PlatformController {
                 .whereType<Map>()
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
+            // The threshold depends on the capture's record type; -1 (or any out-of-range value)
+            // from native maps to null, which falls back to the default (non-friend-standard) threshold.
+            final recordTypeRaw = data['record_type'];
+            final recordType = (recordTypeRaw is int && recordTypeRaw >= 0 && recordTypeRaw < RecordType.values.length)
+                ? RecordType.values[recordTypeRaw]
+                : null;
             final isDuplicate = _ref
                 .read(charaDetailRecordStorageLoaderProvider.notifier)
-                .reportDuplicateFromFactorProbe(probeSelf);
+                .reportDuplicateFromFactorProbe(probeSelf, recordType);
             if (!isDuplicate) {
               _scrollReadyEvent.add(_soundEventSequence++);
             }

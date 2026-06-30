@@ -1,7 +1,8 @@
 // Verifies the early duplicate probe's prefix-matching primitive on
 // CharaDetailRecord: leadingFactorProbeMatch counts the leading run of
-// self-factors (id and star) shared with a probe, and the factorProbeMatchThreshold
-// constant gates the duplicate decision the storage layer makes with that count.
+// self-factors (id and star) shared with a probe, and the per-record-type
+// factorProbeMatchThreshold gates the duplicate decision the storage layer
+// makes with that count.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/factor_probe_match_test.dart
 import 'package:flutter_test/flutter_test.dart';
@@ -97,29 +98,43 @@ void main() {
     });
   });
 
+  group('factorProbeMatchThreshold', () {
+    test('friendStandard uses the lower threshold', () {
+      expect(CharaDetailRecord.factorProbeMatchThreshold(RecordType.friendStandard), 10);
+    });
+
+    test('the other record types use the higher threshold', () {
+      for (final type in [RecordType.standard, RecordType.inheritanceOnly, RecordType.friendInheritance, null]) {
+        expect(CharaDetailRecord.factorProbeMatchThreshold(type), 14);
+      }
+    });
+  });
+
   group('factorProbeMatchThreshold gating', () {
     // The storage layer treats a record as a duplicate when the leading match
-    // reaches the threshold; document that boundary with the same expression.
+    // reaches the per-type threshold; document that boundary with the same expression.
     List<Factor> factors(int count) => [for (var i = 0; i < count; i++) Factor(i, i % 3)];
 
-    test('a leading run at the threshold counts as a duplicate', () {
-      final shared = factors(CharaDetailRecord.factorProbeMatchThreshold);
-      final record = makeRecord(self: [...shared, const Factor(999, 1)]);
+    for (final (type, threshold) in [(RecordType.friendStandard, 10), (RecordType.standard, 14)]) {
+      test('$type: a leading run at the threshold counts as a duplicate', () {
+        final shared = factors(threshold);
+        final record = makeRecord(self: [...shared, const Factor(999, 1)]);
 
-      final match = record.leadingFactorProbeMatch(shared);
-      expect(match, CharaDetailRecord.factorProbeMatchThreshold);
-      expect(match >= CharaDetailRecord.factorProbeMatchThreshold, isTrue);
-    });
+        final match = record.leadingFactorProbeMatch(shared);
+        expect(match, threshold);
+        expect(match >= CharaDetailRecord.factorProbeMatchThreshold(type), isTrue);
+      });
 
-    test('a leading run one short of the threshold is not a duplicate', () {
-      final shared = factors(CharaDetailRecord.factorProbeMatchThreshold - 1);
-      // Diverge right after the shared prefix so the run stops one short.
-      final record = makeRecord(self: [...shared, const Factor(999, 1)]);
-      final probe = [...shared, const Factor(998, 2)];
+      test('$type: a leading run one short of the threshold is not a duplicate', () {
+        final shared = factors(threshold - 1);
+        // Diverge right after the shared prefix so the run stops one short.
+        final record = makeRecord(self: [...shared, const Factor(999, 1)]);
+        final probe = [...shared, const Factor(998, 2)];
 
-      final match = record.leadingFactorProbeMatch(probe);
-      expect(match, CharaDetailRecord.factorProbeMatchThreshold - 1);
-      expect(match >= CharaDetailRecord.factorProbeMatchThreshold, isFalse);
-    });
+        final match = record.leadingFactorProbeMatch(probe);
+        expect(match, threshold - 1);
+        expect(match >= CharaDetailRecord.factorProbeMatchThreshold(type), isFalse);
+      });
+    }
   });
 }

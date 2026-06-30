@@ -440,12 +440,18 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   }
 
   /// Number of leading self-factors the probe and a stored record must agree on (id and star) for
-  /// the early duplicate check to fire. The factor tab shows ~16 self-factors before scrolling, all
-  /// read top-to-bottom / left-then-right exactly as the full pipeline reads [FactorSet.self], so a
-  /// recapture reproduces this many leading entries reliably. The threshold stays well below the
-  /// visible count so the bottom-most rows — which can be clipped or misrecognized on a single,
-  /// non-stitched frame — never affect the result, while remaining unique enough to avoid collisions.
-  static const int factorProbeMatchThreshold = 10;
+  /// the early duplicate check to fire, for a capture of the given record [type].
+  ///
+  /// The factors are read top-to-bottom / left-then-right exactly as the full pipeline reads
+  /// [FactorSet.self], so a recapture reproduces this many leading entries reliably. The threshold
+  /// stays below the count visible before scrolling so the bottom-most rows — which can be clipped or
+  /// misrecognized on a single, non-stitched frame — never affect the result, while remaining unique
+  /// enough to avoid collisions. [RecordType.friendStandard] uses a shifted factor-tab layout that
+  /// exposes fewer reliable rows, so it keeps a lower threshold; the other types show more rows and
+  /// use a higher, more collision-resistant one.
+  static int factorProbeMatchThreshold(RecordType? type) {
+    return type == RecordType.friendStandard ? 10 : 14;
+  }
 
   /// Length of the leading run of self-factors that exactly match [probeSelf] (id and star).
   ///

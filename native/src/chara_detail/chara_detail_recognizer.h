@@ -938,7 +938,7 @@ public:
         const event_util::Listener<RecordInfo> &on_update_requested,
         const event_util::Sender<RecordInfo> &on_update_completed,
         const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
-        const event_util::Sender<std::vector<record::Factor>> &on_factor_probe_completed,
+        const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
         const recognizer_config::CharaDetailRecognizerConfig &config)
         : trainer_id(trainer_id)
         , record_root_dir(record_root_dir)
@@ -975,7 +975,12 @@ public:
             self_factors.pop_back();
         }
 
-        on_factor_probe_completed->send(self_factors);
+        // Forward the record type so the Dart side can pick a per-type match threshold (the factor
+        // tab's visible-row count differs by type). -1 means "unknown", mapped to null on Dart.
+        const int record_type = raw_info.record_type.has_value()  //
+                                  ? static_cast<int>(raw_info.record_type.value())
+                                  : -1;
+        on_factor_probe_completed->send(self_factors, record_type);
     }
 
     void recognize(const RecordInfo &raw_info, bool isUpdateMode) const {
@@ -1090,7 +1095,7 @@ private:
     const event_util::Sender<RecordInfo> on_update_completed;
 
     const event_util::Listener<Frame, RecordInfo> on_factor_probe_ready;
-    const event_util::Sender<std::vector<record::Factor>> on_factor_probe_completed;
+    const event_util::Sender<std::vector<record::Factor>, int> on_factor_probe_completed;
 };
 
 }  // namespace uma::chara_detail

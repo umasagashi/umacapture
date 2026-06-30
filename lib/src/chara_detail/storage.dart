@@ -307,10 +307,11 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   ///
   /// Returns true and fires the duplicate notification (error sound + capture error) when
   /// [probeSelf] shares a long enough leading run of self-factors with any stored record (active or
-  /// archived) to clear [CharaDetailRecord.factorProbeMatchThreshold]. Fail-open: if storage is not
-  /// loaded yet or nothing matches it returns false, so the caller emits the normal scroll-ready
-  /// cue. This only notifies; the authoritative dedup still runs in [add] for the full record.
-  bool reportDuplicateFromFactorProbe(List<Factor> probeSelf) {
+  /// archived) to clear the match threshold for [recordType] (see
+  /// [CharaDetailRecord.factorProbeMatchThreshold]). Fail-open: if storage is not loaded yet or
+  /// nothing matches it returns false, so the caller emits the normal scroll-ready cue. This only
+  /// notifies; the authoritative dedup still runs in [add] for the full record.
+  bool reportDuplicateFromFactorProbe(List<Factor> probeSelf, RecordType? recordType) {
     if (probeSelf.isEmpty) {
       return false;
     }
@@ -321,6 +322,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     if (activeRecords == null) {
       return false;
     }
+    final threshold = CharaDetailRecord.factorProbeMatchThreshold(recordType);
     final archiveRecords =
         ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
     final existing = [...activeRecords, ...archiveRecords];
@@ -331,14 +333,14 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
       if (common > bestMatch) {
         bestMatch = common;
       }
-      if (common >= CharaDetailRecord.factorProbeMatchThreshold) {
+      if (common >= threshold) {
         duplicated = record;
         break;
       }
     }
     logger.i(
       "Factor probe: ${probeSelf.length} factors, best leading match "
-      "$bestMatch/${CharaDetailRecord.factorProbeMatchThreshold}, duplicate=${duplicated != null}",
+      "$bestMatch/$threshold, duplicate=${duplicated != null}",
     );
     if (duplicated == null) {
       return false;

@@ -136,8 +136,9 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto factor_probe_ready_connection = recognizer_runner->makeConnection<Frame, chara_detail::RecordInfo>();
 
     const auto factor_probe_completed_connection =
-        event_util::makeDirectConnection<std::vector<chara_detail::record::Factor>>();
-    factor_probe_completed_connection->listen([this](const auto &factors) { notifyFactorProbe(factors); });
+        event_util::makeDirectConnection<std::vector<chara_detail::record::Factor>, int>();
+    factor_probe_completed_connection->listen(
+        [this](const auto &factors, int record_type) { notifyFactorProbe(factors, record_type); });
 
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
