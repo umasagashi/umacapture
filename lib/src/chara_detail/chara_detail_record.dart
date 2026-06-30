@@ -461,11 +461,6 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     return common;
   }
 
-  /// Whether [probeSelf] matches this record under the early duplicate check.
-  bool matchesFactorProbe(List<Factor> probeSelf) {
-    return leadingFactorProbeMatch(probeSelf) >= factorProbeMatchThreshold;
-  }
-
   bool isObsoleted(ModuleVersion moduleVersion, bool includeCurrentVersion) {
     final recordVersion = metadata.recognizerVersion.toDateTime();
     final capturedDate = metadata.capturedDate.toDateTime();

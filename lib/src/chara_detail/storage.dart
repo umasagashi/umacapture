@@ -314,7 +314,10 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     if (probeSelf.isEmpty) {
       return false;
     }
-    final activeRecords = state.asData?.value;
+    // Match add()'s view of the active set: fold in any pending batch updates so the probe and the
+    // authoritative dedup agree. `_pendingRecords` already includes the published state when non-null
+    // (see add()); fall back to the published state, staying null (fail-open) until storage loads.
+    final activeRecords = _pendingRecords ?? state.asData?.value;
     if (activeRecords == null) {
       return false;
     }
