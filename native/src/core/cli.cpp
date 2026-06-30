@@ -79,6 +79,23 @@ void captureFromScreen() {
     }
 }
 
+void screenshotFromScreen(const std::filesystem::path &output_path) {
+    const auto recorder_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
+    const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
+    const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
+
+    const auto config = createConfig(false);
+    const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
+    window_recorder->setConfig(windows_config.window_recorder.value());
+
+    const auto error = window_recorder->takeScreenshot(output_path);
+    if (!error.empty()) {
+        throw std::runtime_error(error);
+    }
+    log_info("Screenshot saved to {}", output_path.string());
+}
+
 void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
@@ -169,6 +186,11 @@ int main(int argc, char **argv) {
 
         auto capture_command = command.add_subcommand("capture", "run capture mode");
 
+        auto screenshot_command =
+            command.add_subcommand("screenshot", "capture a single screenshot from the game window");
+        std::filesystem::path screenshot_output = "screenshot.png";
+        screenshot_command->add_option("--output", screenshot_output, "output image path");
+
         auto video_command = command.add_subcommand("video", "run capture mode from video");
         std::vector<std::filesystem::path> video_path_list;
         video_command->add_option("--video_path_list", video_path_list)->required();
@@ -207,6 +229,10 @@ int main(int argc, char **argv) {
 
         if (capture_command->parsed()) {
             uma::cli::captureFromScreen();
+        }
+
+        if (screenshot_command->parsed()) {
+            uma::cli::screenshotFromScreen(screenshot_output);
         }
 
         if (video_command->parsed()) {
