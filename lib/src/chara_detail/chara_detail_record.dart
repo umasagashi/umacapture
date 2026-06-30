@@ -439,6 +439,33 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     ].everyIn();
   }
 
+  /// Number of leading self-factors the probe and a stored record must agree on (id and star) for
+  /// the early duplicate check to fire. The factor tab shows ~16 self-factors before scrolling, all
+  /// read top-to-bottom / left-then-right exactly as the full pipeline reads [FactorSet.self], so a
+  /// recapture reproduces this many leading entries reliably. The threshold stays well below the
+  /// visible count so the bottom-most rows — which can be clipped or misrecognized on a single,
+  /// non-stitched frame — never affect the result, while remaining unique enough to avoid collisions.
+  static const int factorProbeMatchThreshold = 10;
+
+  /// Length of the leading run of self-factors that exactly match [probeSelf] (id and star).
+  ///
+  /// The early duplicate check recognizes only the self-factors visible on the factor tab before
+  /// scrolling; this counts how many of them line up with this record's own factors from the top.
+  int leadingFactorProbeMatch(List<Factor> probeSelf) {
+    final self = factors.self;
+    final limit = probeSelf.length < self.length ? probeSelf.length : self.length;
+    var common = 0;
+    while (common < limit && self[common] == probeSelf[common]) {
+      common++;
+    }
+    return common;
+  }
+
+  /// Whether [probeSelf] matches this record under the early duplicate check.
+  bool matchesFactorProbe(List<Factor> probeSelf) {
+    return leadingFactorProbeMatch(probeSelf) >= factorProbeMatchThreshold;
+  }
+
   bool isObsoleted(ModuleVersion moduleVersion, bool includeCurrentVersion) {
     final recordVersion = metadata.recognizerVersion.toDateTime();
     final capturedDate = metadata.capturedDate.toDateTime();

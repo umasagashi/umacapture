@@ -787,6 +787,7 @@ public:
         const event_util::Sender<int, double> &on_scroll_updated,
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
+        const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir)
         : on_updated(on_updated)
@@ -797,6 +798,7 @@ public:
         , on_scroll_updated(on_scroll_updated)
         , on_page_ready(on_page_ready)
         , on_completed(on_completed)
+        , on_factor_probe(on_factor_probe)
         , config(config)
         , scraping_root_dir(scraping_dir) {
         this->on_opened->listen([this](const auto &info) { build(info); });
@@ -840,10 +842,19 @@ public:
             on_scroll_ready->bindLeft(TabPage::SkillPage),
             on_scroll_updated->bindLeft(TabPage::SkillPage));
 
+        // The factor tab's scroll-ready does not notify the UI directly. Instead it triggers a
+        // duplicate probe on the current stable full frame: only after that probe reports "not a
+        // duplicate" does the UI emit the scroll-ready cue (synthesized on the Dart side). This
+        // local connection bridges the per-page scraper's argument-less scroll-ready to the probe,
+        // attaching the full-screen frame (the per-page scraper only sees the cropped scroll area).
+        factor_scroll_ready = event_util::makeDirectConnection<>();
+        factor_scroll_ready->listen([this]() {
+            on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
+        });
         factor_scraper = std::make_unique<scraper_impl::SceneScraper>(
             common,
             scraping_box->factor_box(),
-            on_scroll_ready->bindLeft(TabPage::FactorPage),
+            factor_scroll_ready,
             on_scroll_updated->bindLeft(TabPage::FactorPage));
 
         campaign_scraper = std::make_unique<scraper_impl::SceneScraper>(
@@ -870,6 +881,11 @@ public:
     void update(const Frame &frame, const SceneState &scene_state) {
         vlog_trace(state.tab_page);
 
+        // Keep the latest full-screen frame so the factor scroll-ready callback (which fires from
+        // deep inside the per-page scraper, where only the cropped scroll area is in scope) can hand
+        // the whole frame to the duplicate probe.
+        current_full_frame = frame;
+
         if (ready()) {  // After ready, do nothing until scene is closed.
             return;
         }
@@ -893,6 +909,7 @@ public:
         factor_scraper = nullptr;
         campaign_scraper = nullptr;
         base_frame_catcher = nullptr;
+        factor_scroll_ready = nullptr;
         scraping_box = nullptr;
         scraping_state = scraper_impl::Null;
     }
@@ -927,6 +944,7 @@ private:
     const event_util::Sender<int, double> on_scroll_updated;  // When user scrolling.
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
+    const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
@@ -934,6 +952,8 @@ private:
     minimal_uuid4::Generator uuid_generator;
 
     RecordInfo current_record_info = {};
+    Frame current_full_frame = {};
+    event_util::Connection<> factor_scroll_ready;
     std::unique_ptr<scraper_impl::SceneScraper> skill_scraper;
     std::unique_ptr<scraper_impl::SceneScraper> factor_scraper;
     std::unique_ptr<scraper_impl::SceneScraper> campaign_scraper;

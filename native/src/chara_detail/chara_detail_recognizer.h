@@ -338,6 +338,30 @@ public:
         record.trainee = recognizeTrainee(frame, record_info, scan_top, crop_info, history);
     }
 
+    // Recognizes only the trainee's own factors that are fully visible on a single, non-stitched
+    // factor-tab frame (no scrolling). Used by the early duplicate probe: the returned list is a
+    // prefix of the self-factors the full pipeline would read, which is enough to match a recapture.
+    [[nodiscard]] std::vector<record::Factor>
+    recognizeVisibleSelf(const Frame &frame, PredictionHistory &history) const {
+        const auto anchor = frame.anchor();
+
+        const auto top_banner_y = searchVertical(
+            frame,
+            config.bg_color,
+            {
+                anchor.absolute(config.left_rect).left(),
+                anchor.absolute(config.area).top(),
+            },
+            config.vertical_banner_upper_gap);
+        if (!top_banner_y) {
+            log_warning("Failed to find top banner of factor tab.");
+            return {};
+        }
+
+        double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+        return recognizeOne(frame, scan_top, history, /*bounded=*/true);
+    }
+
 private:
     [[nodiscard]] record::Character recognizeTrainee(
         const Frame &frame,
@@ -370,11 +394,22 @@ private:
         return character;
     }
 
+    // When [bounded] is set the scan stops before any row whose cell rect would fall outside the
+    // frame. The full pipeline runs on a stitched image tall enough to hold every row, so it leaves
+    // [bounded] false and the guard never fires. The early probe runs on a single, non-stitched
+    // frame where the bottom-most visible row is clipped; predicting it would crop past the image
+    // and abort OpenCV, so the probe sets [bounded] to stop at the last fully-visible row.
     [[nodiscard]] std::vector<record::Factor>
-    recognizeOne(const Frame &frame, double &scan_top, PredictionHistory &history) const {
+    recognizeOne(const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded = false) const {
         const auto anchor = frame.anchor();
         const auto left_rect = anchor.absolute(config.left_rect);
         const auto right_rect = anchor.absolute(config.right_rect);
+
+        const auto fits_frame = [&](const Rect<double> &cell, double top) {
+            const auto mapped = anchor.mapToFrame(cell + Point<double>{0, top});
+            return mapped.top() >= 0 && mapped.left() >= 0  //
+                && mapped.bottom() <= frame.height() && mapped.right() <= frame.width();
+        };
 
         std::vector<record::Factor> factors;
         for (;;) {
@@ -385,12 +420,18 @@ private:
             if (!left_column_y) {
                 break;
             }
+            if (bounded && !fits_frame(left_rect, left_column_y.value())) {
+                break;
+            }
             factors.push_back(predictFactor(frame, left_rect, left_column_y.value(), history));
             scan_top = left_column_y.value() + config.vertical_delta;
 
             // Find next row of RIGHT column.
             const auto right_column_y = findNext(frame, right_rect.topLeft().withY(current_scan_top));
             if (!right_column_y) {
+                break;
+            }
+            if (bounded && !fits_frame(right_rect, right_column_y.value())) {
                 break;
             }
             factors.push_back(predictFactor(frame, right_rect, right_column_y.value(), history));
@@ -896,6 +937,8 @@ public:
         const event_util::Sender<RecordInfo> &on_recognize_completed,
         const event_util::Listener<RecordInfo> &on_update_requested,
         const event_util::Sender<RecordInfo> &on_update_completed,
+        const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
+        const event_util::Sender<std::vector<record::Factor>> &on_factor_probe_completed,
         const recognizer_config::CharaDetailRecognizerConfig &config)
         : trainer_id(trainer_id)
         , record_root_dir(record_root_dir)
@@ -908,9 +951,31 @@ public:
         , on_recognize_ready(on_recognize_ready)
         , on_recognize_completed(on_recognize_completed)
         , on_update_requested(on_update_requested)
-        , on_update_completed(on_update_completed) {
+        , on_update_completed(on_update_completed)
+        , on_factor_probe_ready(on_factor_probe_ready)
+        , on_factor_probe_completed(on_factor_probe_completed) {
         this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
         this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
+        this->on_factor_probe_ready->listen([this](const auto &frame, const auto &info) { this->probe(frame, info); });
+    }
+
+    // Recognizes only the trainee's own factors visible on a single, non-stitched factor-tab frame
+    // (the stable frame captured at scroll-ready) so the duplicate check can run before scrolling.
+    // Reuses the same FactorTabRecognizer as the full pipeline, bounded to the visible rows; the
+    // result is a prefix of the self-factor list, matched against stored records on the Dart side.
+    void probe(const Frame &frame, const RecordInfo &raw_info) const {
+        vlog_debug(raw_info.record_id, raw_info.record_type.has_value());
+
+        recognizer_impl::PredictionHistory factor_tab_history;
+        auto self_factors = factor_tab_recognizer.recognizeVisibleSelf(frame, factor_tab_history);
+        // Drop the last recognized row: on a non-stitched live frame the bottom-most visible row can
+        // be clipped by the tab boundary, so its star rank is unreliable. The remaining prefix is still
+        // a strong signature and is matched against the leading self-factors of stored records.
+        if (!self_factors.empty()) {
+            self_factors.pop_back();
+        }
+
+        on_factor_probe_completed->send(self_factors);
     }
 
     void recognize(const RecordInfo &raw_info, bool isUpdateMode) const {
@@ -1023,6 +1088,9 @@ private:
 
     const event_util::Listener<RecordInfo> on_update_requested;
     const event_util::Sender<RecordInfo> on_update_completed;
+
+    const event_util::Listener<Frame, RecordInfo> on_factor_probe_ready;
+    const event_util::Sender<std::vector<record::Factor>> on_factor_probe_completed;
 };
 
 }  // namespace uma::chara_detail

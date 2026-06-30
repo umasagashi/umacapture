@@ -71,6 +71,10 @@ public:
 
     void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
 
+    void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors) {
+        notify(json_util::Json{{"type", "onFactorProbe"}, {"factors", factors}}.dump());
+    }
+
     void notifyCharaDetailStarted(chara_detail::record::RecordType record_type) {
         notify(json_util::Json{{"type", "onCharaDetailStarted"}, {"record_type", static_cast<int>(record_type)}}.dump());
     }

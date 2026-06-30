@@ -303,6 +303,48 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath(traineeIconFileName)));
   }
 
+  /// Early duplicate check driven by the factor-tab probe (before scrolling).
+  ///
+  /// Returns true and fires the duplicate notification (error sound + capture error) when
+  /// [probeSelf] shares a long enough leading run of self-factors with any stored record (active or
+  /// archived) to clear [CharaDetailRecord.factorProbeMatchThreshold]. Fail-open: if storage is not
+  /// loaded yet or nothing matches it returns false, so the caller emits the normal scroll-ready
+  /// cue. This only notifies; the authoritative dedup still runs in [add] for the full record.
+  bool reportDuplicateFromFactorProbe(List<Factor> probeSelf) {
+    if (probeSelf.isEmpty) {
+      return false;
+    }
+    final activeRecords = state.asData?.value;
+    if (activeRecords == null) {
+      return false;
+    }
+    final archiveRecords =
+        ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+    final existing = [...activeRecords, ...archiveRecords];
+    var bestMatch = 0;
+    CharaDetailRecord? duplicated;
+    for (final record in existing) {
+      final common = record.leadingFactorProbeMatch(probeSelf);
+      if (common > bestMatch) {
+        bestMatch = common;
+      }
+      if (common >= CharaDetailRecord.factorProbeMatchThreshold) {
+        duplicated = record;
+        break;
+      }
+    }
+    logger.i(
+      "Factor probe: ${probeSelf.length} factors, best leading match "
+      "$bestMatch/${CharaDetailRecord.factorProbeMatchThreshold}, duplicate=${duplicated != null}",
+    );
+    if (duplicated == null) {
+      return false;
+    }
+    _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
+    ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
+    return true;
+  }
+
   void add(CharaDetailRecord record) {
     final activeRecords = _records;
     // Consider archived records too, so a re-capture of an archived chara is
