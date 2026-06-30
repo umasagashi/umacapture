@@ -303,6 +303,56 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     return charaCardMap.map((k, v) => MapEntry(k, (rootDirectory / v.id).filePath(traineeIconFileName)));
   }
 
+  /// Early duplicate check driven by the factor-tab probe (before scrolling).
+  ///
+  /// Returns true and fires the duplicate notification (error sound + capture error) when
+  /// [probeSelf] shares a long enough leading run of self-factors with any stored record (active or
+  /// archived) to clear the match threshold for [recordType] (see
+  /// [CharaDetailRecord.factorProbeMatchThreshold]). Fail-open: if storage is not loaded yet or
+  /// nothing matches it returns false, so the caller emits the normal scroll-ready cue. This only
+  /// notifies; the authoritative dedup still runs in [add] for the full record.
+  bool reportDuplicateFromFactorProbe(List<Factor> probeSelf, RecordType? recordType) {
+    if (probeSelf.isEmpty) {
+      return false;
+    }
+    // Match add()'s view of the active set: fold in any pending batch updates so the probe and the
+    // authoritative dedup agree. `_pendingRecords` already includes the published state when non-null
+    // (see add()); fall back to the published state, staying null (fail-open) until storage loads.
+    final activeRecords = _pendingRecords ?? state.asData?.value;
+    if (activeRecords == null) {
+      return false;
+    }
+    final threshold = CharaDetailRecord.factorProbeMatchThreshold(recordType);
+    final archiveRecords =
+        ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
+    final existing = [...activeRecords, ...archiveRecords];
+    var bestMatch = 0;
+    CharaDetailRecord? duplicated;
+    for (final record in existing) {
+      final common = record.leadingFactorProbeMatch(probeSelf);
+      if (common > bestMatch) {
+        bestMatch = common;
+      }
+      if (common >= threshold) {
+        duplicated = record;
+        break;
+      }
+    }
+    logger.i(
+      "Factor probe: ${probeSelf.length} factors, best leading match "
+      "$bestMatch/$threshold, duplicate=${duplicated != null}",
+    );
+    if (duplicated == null) {
+      return false;
+    }
+    _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
+    // Distinct from add()'s "duplicated_character": this fires before scrolling on the looser
+    // leading-factor prefix match, so the message tells the user it is a preliminary check and that
+    // scrolling anyway re-runs the authoritative dedup (which can clear a rare false positive).
+    ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character_probe");
+    return true;
+  }
+
   void add(CharaDetailRecord record) {
     final activeRecords = _records;
     // Consider archived records too, so a re-capture of an archived chara is

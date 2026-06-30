@@ -284,6 +284,33 @@ class PlatformController {
         case 'onScrollReady':
           _scrollReadyEvent.add(_soundEventSequence++);
           break;
+        case 'onFactorProbe':
+          {
+            // Native deferred the factor-tab scroll-ready cue and instead sent the self-factors
+            // visible before scrolling. Run the early duplicate check: only emit the scroll-ready
+            // cue when it is not a duplicate; otherwise the storage layer raises the duplicate error.
+            final factorsRaw = data['factors'];
+            if (factorsRaw is! List) {
+              break;
+            }
+            final probeSelf = factorsRaw
+                .whereType<Map>()
+                .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
+                .toList();
+            // The threshold depends on the capture's record type; -1 (or any out-of-range value)
+            // from native maps to null, which falls back to the default (non-friend-standard) threshold.
+            final recordTypeRaw = data['record_type'];
+            final recordType = (recordTypeRaw is int && recordTypeRaw >= 0 && recordTypeRaw < RecordType.values.length)
+                ? RecordType.values[recordTypeRaw]
+                : null;
+            final isDuplicate = _ref
+                .read(charaDetailRecordStorageLoaderProvider.notifier)
+                .reportDuplicateFromFactorProbe(probeSelf, recordType);
+            if (!isDuplicate) {
+              _scrollReadyEvent.add(_soundEventSequence++);
+            }
+          }
+          break;
         case 'onScrollUpdated':
           {
             final index = data['index'] as int?;

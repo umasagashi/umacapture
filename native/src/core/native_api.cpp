@@ -127,6 +127,19 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         lap_time_buffer.clear();
     });
 
+    const auto recognizer_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::NoLimit, detach_callback, "recognizer");
+    event_runners->add(recognizer_runner);
+
+    // Early duplicate probe: the scraper sends the stable factor-tab frame here (recognizer runner),
+    // the recognizer runs only the self-factor recognition on it, and the result is forwarded to the UI.
+    const auto factor_probe_ready_connection = recognizer_runner->makeConnection<Frame, chara_detail::RecordInfo>();
+
+    const auto factor_probe_completed_connection =
+        event_util::makeDirectConnection<std::vector<chara_detail::record::Factor>, int>();
+    factor_probe_completed_connection->listen(
+        [this](const auto &factors, int record_type) { notifyFactorProbe(factors, record_type); });
+
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
@@ -138,12 +151,9 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         scroll_updated_connection,
         page_ready_connection,
         stitch_ready_connection,
+        factor_probe_ready_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir);
-
-    const auto recognizer_runner =
-        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::NoLimit, detach_callback, "recognizer");
-    event_runners->add(recognizer_runner);
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<chara_detail::RecordInfo>();
     on_recognize_ready = recognize_ready_connection;
@@ -177,6 +187,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         recognize_completed_connection,
         update_ready_connection,
         update_completed_connection,
+        factor_probe_ready_connection,
+        factor_probe_completed_connection,
         config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
 
     event_runners->start();

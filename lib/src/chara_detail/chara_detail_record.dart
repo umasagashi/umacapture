@@ -439,6 +439,34 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     ].everyIn();
   }
 
+  /// Number of leading self-factors the probe and a stored record must agree on (id and star) for
+  /// the early duplicate check to fire, for a capture of the given record [type].
+  ///
+  /// The factors are read top-to-bottom / left-then-right exactly as the full pipeline reads
+  /// [FactorSet.self], so a recapture reproduces this many leading entries reliably. The threshold
+  /// stays below the count visible before scrolling so the bottom-most rows — which can be clipped or
+  /// misrecognized on a single, non-stitched frame — never affect the result, while remaining unique
+  /// enough to avoid collisions. [RecordType.friendStandard] uses a shifted factor-tab layout that
+  /// exposes fewer reliable rows, so it keeps a lower threshold; the other types show more rows and
+  /// use a higher, more collision-resistant one.
+  static int factorProbeMatchThreshold(RecordType? type) {
+    return type == RecordType.friendStandard ? 10 : 14;
+  }
+
+  /// Length of the leading run of self-factors that exactly match [probeSelf] (id and star).
+  ///
+  /// The early duplicate check recognizes only the self-factors visible on the factor tab before
+  /// scrolling; this counts how many of them line up with this record's own factors from the top.
+  int leadingFactorProbeMatch(List<Factor> probeSelf) {
+    final self = factors.self;
+    final limit = probeSelf.length < self.length ? probeSelf.length : self.length;
+    var common = 0;
+    while (common < limit && self[common] == probeSelf[common]) {
+      common++;
+    }
+    return common;
+  }
+
   bool isObsoleted(ModuleVersion moduleVersion, bool includeCurrentVersion) {
     final recordVersion = metadata.recognizerVersion.toDateTime();
     final capturedDate = metadata.capturedDate.toDateTime();
