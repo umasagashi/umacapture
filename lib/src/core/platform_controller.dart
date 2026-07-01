@@ -63,7 +63,39 @@ class CharaDetailLink {
   CharaDetailLink({required this.id});
 }
 
+/// A single, mutually exclusive capture status derived from [CharaDetailCaptureState].
+///
+/// The capture tab presents each status on two axes -- what is happening now and what the user
+/// should do next -- so the UI must map every state to exactly one of these. Deriving them in one
+/// place (rather than each widget re-deciding from the raw fields) keeps the shown messages from
+/// contradicting one another.
+enum CharaDetailCaptureStatus {
+  /// Capturing, but no detail screen has been detected yet.
+  waitingForDetail,
+
+  /// Detail screen detected, nothing captured yet (safe to start or to switch characters).
+  detailReady,
+
+  /// Scroll capture in progress on at least one tab (not safe to switch until complete).
+  capturing,
+
+  /// Every tab captured; the record was saved.
+  succeeded,
+
+  /// The early duplicate probe suggests this character is likely already captured (a hint, not an error).
+  duplicateHint,
+
+  /// A completed capture was rejected because the character is already stored.
+  alreadyCaptured,
+
+  /// The capture failed (e.g. the detail screen was lost before completion).
+  failed,
+}
+
 class CharaDetailCaptureState {
+  /// Native tab index for the factor tab (skill=0, factor=1, campaign=2).
+  static const int factorTabIndex = 1;
+
   bool isCapturing;
 
   double skillTabProgress;
@@ -72,19 +104,43 @@ class CharaDetailCaptureState {
 
   double campaignTabProgress;
 
-  RecordType? recordType;
+  /// Whether a chara-detail screen is currently open (set from the native started/restarted events).
+  bool detailOpened;
 
   CharaDetailLink? link;
   String? error;
+
+  /// The id of the existing record this capture duplicates, when a duplicate was detected
+  /// (duplicated_character_probe / duplicated_character). Lets the UI focus that record in the table.
+  String? duplicateRecordId;
+
+  /// Whether the user has scrolled some tab past its first screen.
+  ///
+  /// A tab's first on-screen worth is captured the instant it settles (the same "first screen"
+  /// checkpoint the early duplicate probe fires on), so its progress is already nonzero before the
+  /// user scrolls. Raw progress therefore cannot tell "just opened" from "mid-scroll"; this flag,
+  /// set only once progress climbs past that baseline, can.
+  bool scrolled;
+
+  /// Whether the factor tab is currently displayed at its scroll-top checkpoint.
+  ///
+  /// This is the only safe point to switch characters mid-capture: native only watches for a switch
+  /// (re-capturing the new character's first frame) on the factor tab while it sits at the top
+  /// (Rule 3 content diff). On any other tab, or once the factor tab is scrolled, a switch is missed.
+  /// Set true by the factor probe; cleared as soon as any tab moves off that checkpoint.
+  bool factorAtTop;
 
   CharaDetailCaptureState({
     this.isCapturing = false,
     this.skillTabProgress = 0,
     this.factorTabProgress = 0,
     this.campaignTabProgress = 0,
-    this.recordType,
+    this.detailOpened = false,
     this.link,
     this.error,
+    this.duplicateRecordId,
+    this.scrolled = false,
+    this.factorAtTop = false,
   });
 
   CharaDetailCaptureState clone() {
@@ -93,9 +149,12 @@ class CharaDetailCaptureState {
       skillTabProgress: skillTabProgress,
       factorTabProgress: factorTabProgress,
       campaignTabProgress: campaignTabProgress,
-      recordType: recordType,
+      detailOpened: detailOpened,
       link: link,
       error: error,
+      duplicateRecordId: duplicateRecordId,
+      scrolled: scrolled,
+      factorAtTop: factorAtTop,
     );
   }
 
@@ -103,15 +162,35 @@ class CharaDetailCaptureState {
     return CharaDetailCaptureState();
   }
 
-  CharaDetailCaptureState started(RecordType recordType) {
+  CharaDetailCaptureState started() {
     final state = reset();
-    state.recordType = recordType;
+    state.detailOpened = true;
     return state;
   }
 
   CharaDetailCaptureState progress(int index, double progress) {
     final state = clone();
     state.isCapturing = true;
+    final previous = switch (index) {
+      0 => skillTabProgress,
+      1 => factorTabProgress,
+      2 => campaignTabProgress,
+      _ => 0.0,
+    };
+    // The first update for a tab is its first-screen baseline (0 -> baseline), which is not scrolling.
+    // Only a later increase past that baseline -- or the page completing -- means the user actually
+    // scrolled. (Mirrors the early duplicate probe, which treats the settled first screen, not raw
+    // progress, as the checkpoint.)
+    if (progress >= 1 || (previous > 0 && progress > previous)) {
+      state.scrolled = true;
+    }
+    // The factor tab leaves its top checkpoint on any update except the very 0 -> baseline latch: a
+    // real scroll, completion, or the Rule 1 re-zero (progress == 0). Any non-factor update means a
+    // different tab is now displayed. Only the factor probe (markFactorAtTop) ever sets this true.
+    final isFactorBaselineLatch = index == factorTabIndex && previous == 0 && progress > 0 && progress < 1;
+    if (!isFactorBaselineLatch) {
+      state.factorAtTop = false;
+    }
     switch (index) {
       case 0:
         state.skillTabProgress = progress;
@@ -126,37 +205,77 @@ class CharaDetailCaptureState {
     return state;
   }
 
+  /// Marks the factor tab as displayed at its scroll-top checkpoint (fired by the factor probe).
+  CharaDetailCaptureState markFactorAtTop() {
+    final state = clone();
+    state.factorAtTop = true;
+    return state;
+  }
+
   CharaDetailCaptureState success({required String id}) {
     final state = reset();
+    // Keep every tab pinned at 100% instead of clearing it, so the completed progress rings (and the
+    // "safe to switch" indicator alongside them) stay visible until the next character is opened.
+    state.skillTabProgress = 1;
+    state.factorTabProgress = 1;
+    state.campaignTabProgress = 1;
     state.link = CharaDetailLink(id: id);
     return state;
   }
 
-  CharaDetailCaptureState fail({required String message}) {
+  CharaDetailCaptureState fail({required String message, String? duplicateRecordId}) {
     final state = clone();
     state.error = message;
+    state.duplicateRecordId = duplicateRecordId;
     return state;
+  }
+
+  /// The single capture status this state represents.
+  ///
+  /// This is the one place that classifies the raw fields, so every message on the capture tab is
+  /// derived from the same decision instead of each widget re-deciding independently.
+  CharaDetailCaptureStatus get status {
+    final currentError = error;
+    // Confirmed duplicate and hard failures are terminal, regardless of progress.
+    if (currentError == "duplicated_character") {
+      return CharaDetailCaptureStatus.alreadyCaptured;
+    }
+    if (currentError != null && currentError != "duplicated_character_probe") {
+      return CharaDetailCaptureStatus.failed;
+    }
+    // Past here the only possible error is the non-fatal duplicate probe hint (or none).
+    if (link != null) {
+      return CharaDetailCaptureStatus.succeeded;
+    }
+    if (!detailOpened) {
+      return CharaDetailCaptureStatus.waitingForDetail;
+    }
+    // The probe hint only stands while the factor tab is still at its top checkpoint (where the hint
+    // fired). Once the user scrolls or navigates away, the lingering probe error is stale, so it
+    // degrades to the ordinary scrolled?capturing:detailReady phase.
+    if (currentError == "duplicated_character_probe" && factorAtTop) {
+      return CharaDetailCaptureStatus.duplicateHint;
+    }
+    if (scrolled) {
+      return CharaDetailCaptureStatus.capturing;
+    }
+    return CharaDetailCaptureStatus.detailReady;
   }
 
   /// Whether it is safe to navigate to an adjacent character without closing the detail screen.
   ///
-  /// A switch is only reliably handled at three points: nothing captured yet, every tab captured,
-  /// or the early duplicate check flagged the character. Returns null when no detail session is
-  /// active, so the UI shows no guidance.
-  bool? get switchSafety {
-    if (error != null) {
-      // The duplicate-probe hint is a safe switch point; any other error is a failure, not guidance.
-      return error == "duplicated_character_probe" ? true : null;
-    }
-    if (link != null) {
-      return true; // All tabs captured (success).
-    }
-    if (recordType == null) {
-      return null; // Detail screen not open.
-    }
-    // Freshly opened detail screen with nothing captured yet.
-    return skillTabProgress == 0 && factorTabProgress == 0 && campaignTabProgress == 0;
-  }
+  /// Native can only detect and re-capture a switch when the factor tab is at its top (Rule 3) or
+  /// every tab is complete (Rule 2); switching anywhere else loses the new character's first frame.
+  /// So a switch is safe only at [factorAtTop] (during capture) or after success. Returns null when
+  /// there is no meaningful guidance (no detail session, or a hard error surfaced separately).
+  bool? get switchSafety => switch (status) {
+    // succeeded and alreadyCaptured both mean every tab was captured, so a switch is detectable (Rule 2).
+    CharaDetailCaptureStatus.succeeded ||
+    CharaDetailCaptureStatus.alreadyCaptured ||
+    CharaDetailCaptureStatus.duplicateHint => true,
+    CharaDetailCaptureStatus.detailReady || CharaDetailCaptureStatus.capturing => factorAtTop,
+    _ => null,
+  };
 }
 
 class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> {
@@ -165,13 +284,16 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
 
   void reset() => state = state.reset();
 
-  void started(RecordType recordType) => state = state.started(recordType);
+  void started() => state = state.started();
 
   void progress(int index, double progress) => state = state.progress(index, progress);
 
+  void markFactorAtTop() => state = state.markFactorAtTop();
+
   void success(String id) => state = state.success(id: id);
 
-  void fail(String message) => state = state.fail(message: message);
+  void fail(String message, {String? duplicateRecordId}) =>
+      state = state.fail(message: message, duplicateRecordId: duplicateRecordId);
 }
 
 final charaDetailCaptureStateProvider = NotifierProvider<CharaDetailCaptureStateNotifier, CharaDetailCaptureState>(
@@ -336,6 +458,10 @@ class PlatformController {
                 .whereType<Map>()
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
+            // The probe only fires at the factor tab's top, so it marks the one safe point to switch
+            // characters mid-capture. Reassert this before the dedup break, so even a re-emitted probe
+            // (e.g. a settling frame after briefly leaving and returning) restores the "safe" state.
+            captureState.markFactorAtTop();
             // Native may re-emit the probe for the same character (e.g. a settling frame after a switch).
             // Skip an unchanged key so the duplicate check and its error cue fire at most once per character.
             if (_sameFactorKey(probeSelf, _lastProbeKey)) {
@@ -379,11 +505,7 @@ class PlatformController {
           // A restart is a mid-scene reset (native inferred a character switch and rebuilt the session
           // without the detail screen closing). The UI resets its capture progress exactly as on a fresh
           // open, and the probe key is cleared so the new character's early duplicate check runs.
-          final recordType = data['record_type'] as int;
-          if (recordType < 0 || recordType >= RecordType.values.length) {
-            throw RangeError.value(recordType, 'record_type');
-          }
-          captureState.started(RecordType.values[recordType]);
+          captureState.started();
           _lastProbeKey = null;
           break;
         case 'onCharaDetailFinished':
@@ -391,6 +513,13 @@ class PlatformController {
             _charaDetailRecordCapturedEvent.add(data['id']);
             captureState.success(data['id']);
           }
+          break;
+        case 'onCharaDetailClosed':
+          // The detail screen was closed. Drop the retained progress (a completed capture keeps its rings
+          // on screen until now) and return to waiting. For an incomplete close, the closed_before_completed
+          // error arrives right after this and re-establishes the failure state.
+          captureState.reset();
+          _lastProbeKey = null;
           break;
         case 'onCharaDetailUpdated':
           _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);

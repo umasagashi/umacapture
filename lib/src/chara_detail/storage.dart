@@ -349,7 +349,9 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     // Distinct from add()'s "duplicated_character": this fires before scrolling on the looser
     // leading-factor prefix match, so the message tells the user it is a preliminary check and that
     // scrolling anyway re-runs the authoritative dedup (which can clear a rare false positive).
-    ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character_probe");
+    ref
+        .read(charaDetailCaptureStateProvider.notifier)
+        .fail("duplicated_character_probe", duplicateRecordId: duplicated.id);
     return true;
   }
 
@@ -365,7 +367,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     if (duplicated != null && duplicated.id != record.id) {
       (rootDirectory / record.id).deleteSyncWithCheck(recursive: true);
       _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
-      ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character");
+      ref.read(charaDetailCaptureStateProvider.notifier).fail("duplicated_character", duplicateRecordId: duplicated.id);
       return;
     }
 
@@ -786,6 +788,11 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
 final charaDetailArchiveStorageLoaderProvider =
     AsyncNotifierProvider<CharaDetailArchiveStorage, List<CharaDetailRecord>>(CharaDetailArchiveStorage.new);
+
+/// A one-shot request to focus (highlight and scroll to) a record in the table, set to the record id
+/// to focus. The table consumes it once (on load or on change) and resets it to null. Used when the
+/// capture screen navigates to the table on a duplicate, to point at the existing record.
+final charaDetailFocusRecordProvider = settableNotifierProvider<String?>(null);
 
 /// The record list the table should display, following [recordSourceProvider].
 ///

@@ -8,8 +8,6 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 
 import '/src/app/route.dart';
-import '/src/chara_detail/chara_detail_record.dart';
-import '/src/chara_detail/spec/loader.dart' show tr_columns;
 import '/src/chara_detail/storage.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sentry_util.dart';
@@ -191,160 +189,162 @@ class _ScrollStateWidget extends ConsumerWidget {
 }
 
 class _CharaDetailStateWidget extends ConsumerWidget {
-  String _recordTypeName(RecordType type) {
-    return "$tr_columns.record_type.values.${type.translationKey}".tr();
-  }
-
-  Widget _buildRecordType(BuildContext context, RecordType recordType) {
+  // Flanks the progress row with a hint about switching to an adjacent character: outward-pointing
+  // "expand" arrows when it is safe, a "do not disturb" sign when it is not. [leading] selects the
+  // left vs right side; the left arrow is the right-pointing glyph mirrored so it points outward.
+  Widget _buildSwitchIndicator(BuildContext context, bool safe, {required bool leading}) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Center(
-        child: Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.secondaryContainer,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-          child: Text(
-            "$tr_capture.capture_control.record_type".tr(namedArgs: {"type": _recordTypeName(recordType)}),
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.onSecondaryContainer,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
+    final color = safe ? theme.semantic.success : theme.semantic.warning;
+    final icon = safe ? Symbols.expand_circle_right : Symbols.do_not_disturb_on;
+    // The arrows are only a status hint, not app buttons: the tooltip clarifies that switching is done
+    // with the game's own left/right buttons.
+    final message = safe
+        ? "$tr_capture.capture_control.switch_indicator.safe".tr()
+        : "$tr_capture.capture_control.switch_indicator.unsafe".tr();
+    final Widget iconWidget = Icon(icon, color: color, size: 28, fill: 1);
+    return Tooltip(
+      message: message,
+      child: (safe && leading) ? Transform.flip(flipX: true, child: iconWidget) : iconWidget,
     );
   }
 
-  Widget? _buildProgress(WidgetRef ref) {
+  Widget _buildProgress(BuildContext context, WidgetRef ref) {
     final state = ref.watch(charaDetailCaptureStateProvider);
+    // Within the states that show progress (detailReady / capturing / duplicateHint) switchSafety is
+    // always non-null; default defensively so an unexpected null reads as "not safe to switch".
+    final safe = state.switchSafety ?? false;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
+        _buildSwitchIndicator(context, safe, leading: true),
         _ScrollStateWidget(
           header: "$tr_capture.capture_control.progress.skill".tr(),
           progress: state.skillTabProgress,
-          disable: state.error != null,
+          disable: false,
         ),
         _ScrollStateWidget(
           header: "$tr_capture.capture_control.progress.factor".tr(),
           progress: state.factorTabProgress,
-          disable: state.error != null,
+          disable: false,
         ),
         _ScrollStateWidget(
           header: "$tr_capture.capture_control.progress.campaign".tr(),
           progress: state.campaignTabProgress,
-          disable: state.error != null,
+          disable: false,
         ),
+        _buildSwitchIndicator(context, safe, leading: false),
       ],
     );
   }
 
-  Widget? _buildError(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(charaDetailCaptureStateProvider);
+  // Resolves the current capture state to a single message on two axes: [status] (what is happening
+  // now) and [action] (what the user should do next, including whether switching characters is safe).
+  // Centralizing this here is what keeps the shown messages from contradicting one another.
+  _StatusMessage _resolveMessage(bool controllerAvailable, bool outerCapturing, CharaDetailCaptureState state) {
+    const base = "$tr_capture.capture_control.message";
+    if (!controllerAvailable) {
+      return _StatusMessage(_StatusTone.error, Symbols.block_rounded, "$base.load_error");
+    }
+    if (!outerCapturing) {
+      return _StatusMessage(_StatusTone.neutral, Symbols.pause_circle_rounded, "$base.stopped");
+    }
+    switch (state.status) {
+      case CharaDetailCaptureStatus.waitingForDetail:
+        return _StatusMessage(_StatusTone.info, Symbols.hourglass_empty_rounded, "$base.waiting_for_detail");
+      case CharaDetailCaptureStatus.detailReady:
+        return _StatusMessage(_StatusTone.info, Symbols.swipe_down_rounded, "$base.detail_ready");
+      case CharaDetailCaptureStatus.capturing:
+        return _StatusMessage(_StatusTone.info, Symbols.downloading_rounded, "$base.capturing");
+      case CharaDetailCaptureStatus.succeeded:
+        return _StatusMessage(_StatusTone.success, Symbols.check_circle_rounded, "$base.succeeded", tappable: true);
+      case CharaDetailCaptureStatus.duplicateHint:
+        return _StatusMessage(_StatusTone.hint, Symbols.lightbulb_rounded, "$base.duplicate_hint", tappable: true);
+      case CharaDetailCaptureStatus.alreadyCaptured:
+        return _StatusMessage(_StatusTone.neutral, Symbols.info_rounded, "$base.already_captured", tappable: true);
+      case CharaDetailCaptureStatus.failed:
+        // The status text is keyed by the error code, falling back to a generic line for any unknown code.
+        final code = state.error ?? "generic";
+        final statusKey = "$base.failed.status.$code";
+        final resolved = statusKey.tr();
+        final statusText = resolved == statusKey ? "$base.failed.status.generic".tr() : resolved;
+        return _StatusMessage.explicit(
+          _StatusTone.error,
+          Symbols.error_rounded,
+          statusText,
+          "$base.failed.action".tr(),
+        );
+    }
+  }
+
+  Color _toneColor(ThemeData theme, _StatusTone tone) => switch (tone) {
+    _StatusTone.neutral => theme.colorScheme.onSurfaceVariant,
+    _StatusTone.info => theme.semantic.info,
+    _StatusTone.success => theme.semantic.success,
+    _StatusTone.hint => theme.semantic.warning,
+    _StatusTone.error => theme.semantic.danger,
+  };
+
+  Widget _buildStatusBanner(
+    BuildContext context,
+    WidgetRef ref,
+    bool controllerAvailable,
+    bool outerCapturing,
+    CharaDetailCaptureState state,
+  ) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Flex(
-        direction: Axis.horizontal,
-        mainAxisAlignment: MainAxisAlignment.center,
+    final message = _resolveMessage(controllerAvailable, outerCapturing, state);
+    final accent = _toneColor(theme, message.tone);
+    final banner = Container(
+      width: double.infinity,
+      decoration: BoxDecoration(color: accent.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Flexible(
-            child: Container(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.errorContainer,
-                borderRadius: BorderRadius.circular(32),
-              ),
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                "$tr_capture.capture_control.error.${state.error!}".tr(),
-                style: TextStyle(fontWeight: FontWeight.bold, color: theme.colorScheme.onErrorContainer),
-              ),
+          Icon(message.icon, color: accent, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message.status,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+                if (message.action != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    message.action!,
+                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
       ),
     );
-  }
-
-  Widget? _buildLink(BuildContext context, WidgetRef ref) {
-    return TextButton(
-      child: Text("$tr_capture.capture_control.capture_completed_message".tr()),
-      onPressed: () {
-        AutoTabsRouter.of(context).navigate(const CharaDetailRoute());
-      },
-    );
-  }
-
-  Widget _buildSwitchGuide(BuildContext context, bool safe) {
-    final theme = Theme.of(context);
-    final color = safe ? theme.semantic.success : theme.semantic.warning;
-    final onAccent = theme.semantic.onAccent;
-    final text = safe
-        ? "$tr_capture.capture_control.switch_guide.safe".tr()
-        : "$tr_capture.capture_control.switch_guide.unsafe".tr();
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Center(
-        child: Container(
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(safe ? Symbols.swap_horiz_rounded : Symbols.warning_rounded, color: onAccent, size: 18),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  text,
-                  style: theme.textTheme.labelLarge?.copyWith(color: onAccent, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  String additionalInfoText(WidgetRef ref) {
-    // Watch every provider unconditionally so the watched set never changes
-    // between builds; branching below operates on the captured values.
-    final controllerAvailable = ref.watch(platformControllerProvider) != null;
-    final isCapturing = ref.watch(capturingStateProvider);
-    final captureState = ref.watch(charaDetailCaptureStateProvider);
-    if (!controllerAvailable) {
-      return "$tr_capture.capture_control.additional_info.not_available".tr();
-    }
-    if (!isCapturing) {
-      return "$tr_capture.capture_control.additional_info.start_capture".tr();
-    }
-    if (captureState.error != null) {
-      return "$tr_capture.capture_control.additional_info.error".tr();
-    }
-    if (!captureState.isCapturing) {
-      return "$tr_capture.capture_control.additional_info.show_chara_detail".tr();
-    }
-    if (captureState.link == null) {
-      return "$tr_capture.capture_control.additional_info.scroll".tr();
-    }
-    return "$tr_capture.capture_control.additional_info.unknown".tr();
-  }
-
-  Widget additionalInfoWidget(WidgetRef ref) {
-    return Flex(
-      direction: Axis.horizontal,
-      children: [
-        Flexible(
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Center(child: Text(additionalInfoText(ref))),
-          ),
-        ),
-      ],
-    );
+    // The success / duplicate messages double as a link to the record table. On a duplicate, request
+    // that the existing record be focused there (no-op if it is filtered out of the table).
+    final child = message.tappable
+        ? InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: () {
+              // Focus the record this banner points at: the existing duplicate, or the just-captured
+              // record on success. Both are in the table, so the table highlights and scrolls to it.
+              final focusId = state.duplicateRecordId ?? state.link?.id;
+              if (focusId != null) {
+                ref.read(charaDetailFocusRecordProvider.notifier).set(focusId);
+              }
+              AutoTabsRouter.of(context).navigate(const CharaDetailRoute());
+            },
+            child: banner,
+          )
+        : banner;
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: child);
   }
 
   // Cap the icon/label group to a readable width and center it, so the three progress indicators (3 x 100)
@@ -353,9 +353,24 @@ class _CharaDetailStateWidget extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final controllerAvailable = ref.watch(platformControllerProvider) != null;
+    final outerCapturing = ref.watch(capturingStateProvider);
     final state = ref.watch(charaDetailCaptureStateProvider);
-    final safety = state.switchSafety;
     const animationDuration = Duration(milliseconds: 100);
+
+    final status = state.status;
+    // The progress rings stay visible for every in-detail state and only disappear once the detail
+    // screen is closed (waitingForDetail) or lost mid-capture (failed). That keeps the completed rings
+    // and the "safe to switch" indicator on screen after success or an already-captured duplicate.
+    final detailActive =
+        controllerAvailable &&
+        outerCapturing &&
+        (status == CharaDetailCaptureStatus.detailReady ||
+            status == CharaDetailCaptureStatus.capturing ||
+            status == CharaDetailCaptureStatus.duplicateHint ||
+            status == CharaDetailCaptureStatus.succeeded ||
+            status == CharaDetailCaptureStatus.alreadyCaptured);
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: _detailsMaxWidth),
@@ -363,33 +378,35 @@ class _CharaDetailStateWidget extends ConsumerWidget {
           children: [
             AnimatedSwitcher(
               duration: animationDuration,
-              child: (state.isCapturing || state.error != null) ? _buildProgress(ref) : Container(),
+              child: detailActive ? _buildProgress(context, ref) : Container(),
             ),
-            AnimatedSwitcher(
-              duration: animationDuration,
-              child: (state.recordType != null && state.error == null)
-                  ? _buildRecordType(context, state.recordType!)
-                  : Container(),
-            ),
-            AnimatedSwitcher(
-              duration: animationDuration,
-              child: safety != null ? _buildSwitchGuide(context, safety) : Container(),
-            ),
-            AnimatedSwitcher(
-              duration: animationDuration,
-              child: state.error != null ? _buildError(context, ref) : Container(),
-            ),
-            AnimatedSwitcher(
-              duration: animationDuration,
-              child: (state.link != null && state.error == null) ? _buildLink(context, ref) : Container(),
-            ),
-            if (state.isCapturing || state.error != null || state.link != null) const Divider(),
-            additionalInfoWidget(ref),
+            _buildStatusBanner(context, ref, controllerAvailable, outerCapturing, state),
           ],
         ),
       ),
     );
   }
+}
+
+// A single capture-tab message on two axes plus its visual tone. Translation keys resolve lazily so
+// [_StatusMessage] can be built cheaply during the widget's status resolution.
+enum _StatusTone { neutral, info, success, hint, error }
+
+class _StatusMessage {
+  final _StatusTone tone;
+  final IconData icon;
+  final String status;
+  final String? action;
+  final bool tappable;
+
+  // Resolves "<base>.status" and "<base>.action" translation keys. Used for the states whose message
+  // is a fixed pair of lines.
+  _StatusMessage(this.tone, this.icon, String base, {this.tappable = false})
+    : status = "$base.status".tr(),
+      action = "$base.action".tr();
+
+  // Explicit text, for states (e.g. failures) whose status line is chosen at runtime.
+  _StatusMessage.explicit(this.tone, this.icon, this.status, this.action) : tappable = false;
 }
 
 enum _Requirement { good, unsure, insufficient }
