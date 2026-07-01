@@ -137,6 +137,26 @@ class CharaDetailCaptureState {
     state.error = message;
     return state;
   }
+
+  /// Whether it is safe to navigate to an adjacent character without closing the detail screen.
+  ///
+  /// A switch is only reliably handled at three points: nothing captured yet, every tab captured,
+  /// or the early duplicate check flagged the character. Returns null when no detail session is
+  /// active, so the UI shows no guidance.
+  bool? get switchSafety {
+    if (error != null) {
+      // The duplicate-probe hint is a safe switch point; any other error is a failure, not guidance.
+      return error == "duplicated_character_probe" ? true : null;
+    }
+    if (link != null) {
+      return true; // All tabs captured (success).
+    }
+    if (recordType == null) {
+      return null; // Detail screen not open.
+    }
+    // Freshly opened detail screen with nothing captured yet.
+    return skillTabProgress == 0 && factorTabProgress == 0 && campaignTabProgress == 0;
+  }
 }
 
 class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> {
@@ -245,6 +265,11 @@ class PlatformController {
 
   final Map<String, dynamic> nativeConfig;
 
+  // The self-factors from the most recent factor probe. Native re-probes whenever the factor-tab content
+  // changes (a character switch), but may emit the same probe more than once; comparing against this key
+  // suppresses a redundant duplicate check (and its error cue) for an unchanged character.
+  List<Factor>? _lastProbeKey;
+
   PlatformController(Ref ref, Map<String, dynamic> config)
     : _ref = ref,
       nativeConfig = config,
@@ -254,6 +279,19 @@ class PlatformController {
 
     // This is not required, but we will need storage later anyway, so start it up.
     ref.read(charaDetailRecordStorageLoaderProvider);
+  }
+
+  // Order-sensitive equality of two probe keys (factors are compared by value; their order is stable).
+  bool _sameFactorKey(List<Factor> a, List<Factor>? b) {
+    if (b == null || a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   void _handleMessage(String message) {
@@ -278,6 +316,7 @@ class PlatformController {
         case 'onCaptureStopped':
           _captureTriggeredEvent.add(false);
           captureState.reset();
+          _lastProbeKey = null;
           _ref.read(capturingFrameSizeProvider.notifier).set(null);
           _ref.read(capturingFrameRateProvider.notifier).set(null);
           break;
@@ -297,6 +336,12 @@ class PlatformController {
                 .whereType<Map>()
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
+            // Native may re-emit the probe for the same character (e.g. a settling frame after a switch).
+            // Skip an unchanged key so the duplicate check and its error cue fire at most once per character.
+            if (_sameFactorKey(probeSelf, _lastProbeKey)) {
+              break;
+            }
+            _lastProbeKey = probeSelf;
             // The threshold depends on the capture's record type; -1 (or any out-of-range value)
             // from native maps to null, which falls back to the default (non-friend-standard) threshold.
             final recordTypeRaw = data['record_type'];
@@ -330,11 +375,16 @@ class PlatformController {
           }
           break;
         case 'onCharaDetailStarted':
+        case 'onCharaDetailRestarted':
+          // A restart is a mid-scene reset (native inferred a character switch and rebuilt the session
+          // without the detail screen closing). The UI resets its capture progress exactly as on a fresh
+          // open, and the probe key is cleared so the new character's early duplicate check runs.
           final recordType = data['record_type'] as int;
           if (recordType < 0 || recordType >= RecordType.values.length) {
             throw RangeError.value(recordType, 'record_type');
           }
           captureState.started(RecordType.values[recordType]);
+          _lastProbeKey = null;
           break;
         case 'onCharaDetailFinished':
           if (data['success'] == true) {
