@@ -179,6 +179,59 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     return (sorted, sorted.indexWhere((r) => r.id == id));
   }
 
+  /// Highlights and scrolls to the record with [id] (e.g. the existing record a capture duplicates).
+  ///
+  /// Returns whether the request was handled: false only when the grid is not loaded yet (so the
+  /// caller keeps it pending for onLoaded). A record that is filtered out of the current view counts
+  /// as handled — there is simply nothing to focus.
+  bool _focusRecord(String id) {
+    if (!_loaded) {
+      return false;
+    }
+    // Sum the real heights of the scroll-body rows before the target to land exactly on its top edge.
+    // Rows are variable height here (a rowWrapper disables trina's fixed itemExtent), so a uniform
+    // rowTotalHeight * index lands mid-row and clips the target; frozen rows render outside the scroll
+    // body, so they must not count toward the offset.
+    final border = stateManager.configuration.style.cellHorizontalBorderWidth;
+    TrinaRow? target;
+    double offset = 0;
+    for (final row in stateManager.refRows) {
+      if (stateManager.recordIdOf(row) == id) {
+        target = row;
+        break;
+      }
+      if (row.frozen == TrinaRowFrozen.none) {
+        offset += (row.height ?? stateManager.rowHeight) + border;
+      }
+    }
+    if (target == null) {
+      return true; // filtered out of the current view; nothing to focus.
+    }
+    final record = target.getUserData<CharaDetailRecord>();
+    if (record != null) {
+      stateManager.restoreCurrentRecord(record, ignoreField: checkColumnField);
+      stateManager.notifyListeners();
+    }
+    // A frozen (pinned) target is already parked at the top, so only scroll for scroll-body rows.
+    if (target.frozen == TrinaRowFrozen.none) {
+      final vertical = stateManager.scroll.vertical;
+      if (vertical != null) {
+        // After layout so the scroll is attached; jumpTo settles any overshoot back to the end bound.
+        _afterFrame(() => vertical.jumpTo(offset));
+      }
+    }
+    return true;
+  }
+
+  /// Consumes a pending focus request (set when the capture screen navigates here on a duplicate),
+  /// resetting it to null once handled so it fires once and does not re-focus on later rebuilds.
+  void _consumeFocusRequest() {
+    final id = ref.read(charaDetailFocusRecordProvider);
+    if (id != null && _focusRecord(id)) {
+      ref.read(charaDetailFocusRecordProvider.notifier).set(null);
+    }
+  }
+
   /// Moves the grid's current record [delta] rows away in display order; the side
   /// preview panel follows it (it tracks the current record). Keeps the current
   /// column so the highlight stays in place.
@@ -711,6 +764,13 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // here on change.
     ref.listen(charaDetailRowHeightModeProvider, (_, _) => _afterFrame(_applyRowHeights));
     ref.listen(charaDetailMinRowLinesProvider, (_, _) => _afterFrame(_applyRowHeights));
+    // A focus request set while this table is already alive (e.g. from the capture screen on a
+    // duplicate). A request that arrives before load is picked up by onLoaded instead.
+    ref.listen(charaDetailFocusRecordProvider, (_, next) {
+      if (next != null) {
+        _consumeFocusRequest();
+      }
+    });
     // No source-switch listener needed: the panel tracks the grid's current record
     // and re-resolves it against the live sorted set each build, so a source switch
     // (the old record's id is absent from the new source) falls back to the empty
@@ -928,6 +988,9 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                     // Seed the side preview's record tracker from whatever is current
                     // after load (normally nothing, since auto-select is disabled).
                     _currentRecordId.value = event.stateManager.currentRecord?.id;
+                    // A focus request may have been set before the grid was ready (e.g. the capture
+                    // screen navigated here on a duplicate); apply it now that rows exist.
+                    _consumeFocusRequest();
                   },
                   // The side preview panel follows the grid's current record. This
                   // fires on every current-cell change — user taps and the
