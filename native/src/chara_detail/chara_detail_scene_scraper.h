@@ -862,7 +862,7 @@ public:
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
-        const event_util::Sender<record::RecordType> &on_restarted,
+        const event_util::Sender<> &on_restarted,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir)
         : on_updated(on_updated)
@@ -1026,7 +1026,7 @@ private:
     void resetSession(record::RecordType record_type) {
         release();
         buildSession(record_type);
-        on_restarted->send(current_record_info.record_type.value());
+        on_restarted->send();
     }
 
     std::unique_ptr<scraper_impl::SceneScraper>
@@ -1211,7 +1211,7 @@ private:
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
-    const event_util::Sender<record::RecordType> on_restarted;  // Mid-scene reset (inferred character switch).
+    const event_util::Sender<> on_restarted;  // Mid-scene reset (inferred character switch).
 
     // Top margin (fraction of the scroll track above the thumb) at or below which the content is treated as
     // scrolled to the very top. ~0 means flush with the top; the threshold tolerates a thin idle band. Verify

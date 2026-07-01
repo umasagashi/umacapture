@@ -51,7 +51,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto chara_detail_opened_connection = scraper_runner->makeConnection<chara_detail::SceneInfo>();
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>();
 
-    chara_detail_opened_connection->listen([this](const auto &info) { notifyCharaDetailStarted(info.record_type); });
+    chara_detail_opened_connection->listen([this](const auto &) { notifyCharaDetailStarted(); });
 
     {
         const auto scene_context = std::make_shared<chara_detail::CharaDetailSceneContext>(
@@ -107,8 +107,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     // Mid-scene reset: the scraper inferred a character switch from on-screen content and rebuilt the
     // session without the detail screen closing. Tell the UI to reset its capture progress.
-    const auto restarted_connection = event_util::makeDirectConnection<chara_detail::record::RecordType>();
-    restarted_connection->listen([this](auto record_type) { notifyCharaDetailRestarted(record_type); });
+    const auto restarted_connection = event_util::makeDirectConnection<>();
+    restarted_connection->listen([this]() { notifyCharaDetailRestarted(); });
 
     const auto stitch_ready_connection = stitcher_runner->makeConnection<chara_detail::RecordInfo>();
     on_stitch_ready = stitch_ready_connection;
@@ -128,6 +128,9 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     lap_discard_wrapper = event_util::makeDirectConnection<>();
     chara_detail_closed_connection->listen([this]() {
+        // Registered before the scraper's own on_closed listener, so for an incomplete close this fires
+        // ahead of the closed_before_completed error, letting that error win the final UI state.
+        notifyCharaDetailClosed();
         lap_discard_wrapper->send();
         lap_time_buffer.clear();
     });
