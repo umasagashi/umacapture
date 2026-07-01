@@ -278,6 +278,37 @@ class _CharaDetailStateWidget extends ConsumerWidget {
     );
   }
 
+  Widget _buildSwitchGuide(BuildContext context, bool safe) {
+    final theme = Theme.of(context);
+    final color = safe ? theme.semantic.success : theme.semantic.warning;
+    final onAccent = theme.semantic.onAccent;
+    final text = safe
+        ? "$tr_capture.capture_control.switch_guide.safe".tr()
+        : "$tr_capture.capture_control.switch_guide.unsafe".tr();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(16)),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(safe ? Symbols.swap_horiz_rounded : Symbols.warning_rounded, color: onAccent, size: 18),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  text,
+                  style: theme.textTheme.labelLarge?.copyWith(color: onAccent, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   String additionalInfoText(WidgetRef ref) {
     // Watch every provider unconditionally so the watched set never changes
     // between builds; branching below operates on the captured values.
@@ -319,6 +350,7 @@ class _CharaDetailStateWidget extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(charaDetailCaptureStateProvider);
+    final safety = state.switchSafety;
     const animationDuration = Duration(milliseconds: 100);
     return Column(
       children: [
@@ -331,6 +363,10 @@ class _CharaDetailStateWidget extends ConsumerWidget {
           child: (state.recordType != null && state.error == null)
               ? _buildRecordType(context, state.recordType!)
               : Container(),
+        ),
+        AnimatedSwitcher(
+          duration: animationDuration,
+          child: safety != null ? _buildSwitchGuide(context, safety) : Container(),
         ),
         AnimatedSwitcher(
           duration: animationDuration,
