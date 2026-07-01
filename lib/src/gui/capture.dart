@@ -145,12 +145,13 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
 class _ScrollStateWidget extends ConsumerWidget {
   final String header;
   final double progress;
-  final bool disable;
 
-  const _ScrollStateWidget({required this.header, required this.progress, required this.disable});
+  const _ScrollStateWidget({required this.header, required this.progress});
 
   Color _progressColor(AppSemanticColors semantic) {
-    if (disable) {
+    // A not-yet-started tab reads as muted (the ring shows no arc at 0%, but this keeps the token's
+    // documented "not started indicator" role); an in-progress tab is warning, a completed one success.
+    if (progress == 0) {
       return semantic.mutedIndicator;
     }
     if (progress == 1) {
@@ -217,20 +218,14 @@ class _CharaDetailStateWidget extends ConsumerWidget {
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
         _buildSwitchIndicator(context, safe, leading: true),
-        _ScrollStateWidget(
-          header: "$tr_capture.capture_control.progress.skill".tr(),
-          progress: state.skillTabProgress,
-          disable: false,
-        ),
+        _ScrollStateWidget(header: "$tr_capture.capture_control.progress.skill".tr(), progress: state.skillTabProgress),
         _ScrollStateWidget(
           header: "$tr_capture.capture_control.progress.factor".tr(),
           progress: state.factorTabProgress,
-          disable: false,
         ),
         _ScrollStateWidget(
           header: "$tr_capture.capture_control.progress.campaign".tr(),
           progress: state.campaignTabProgress,
-          disable: false,
         ),
         _buildSwitchIndicator(context, safe, leading: false),
       ],
