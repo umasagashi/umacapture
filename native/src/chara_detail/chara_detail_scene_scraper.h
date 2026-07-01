@@ -1148,14 +1148,20 @@ private:
             factor_change_pending_since = std::nullopt;
             return;
         }
-        // Average per-pixel colour difference (0-765) over the scroll area against the probed reference. This
-        // is resolution-independent: the same character at the top differs only by sub-pixel render/encode
-        // noise (a fraction of a level per pixel), while a switched character redraws the whole factor list
-        // (tens of levels per pixel). Thresholding the average cleanly separates the two.
+        // Average per-pixel colour difference (0-765) over the factor-list scroll area against the probed
+        // reference. Crop both frames to the scroll area first: the stationary rect is defined relative to
+        // that crop, so applying it to the full frame would instead diff nearly the whole screen -- including
+        // the header (portrait, name, tabs), which is identical when the switch is between two records of the
+        // same character. That dilution buried the signal (measured ~6 over the full frame vs ~11.6 over the
+        // scroll area, against a ~0 noise floor). The per-pixel minimum_color_threshold gate drops sub-pixel
+        // render/encode noise to zero, so the same character reads ~0 while a switched factor list reads well
+        // above the threshold. Resolution-independent (an average, not a sum).
+        const auto reference_area = factor_probe_reference.copy(active_common->scroll_area_rect);
+        const auto current_area = frame.copy(active_common->scroll_area_rect);
         const auto &diff_rect = active_common->scroll_area_stationary_rect;
         const auto difference =
-            frame.pixelDifference(factor_probe_reference, diff_rect, active_common->minimum_color_threshold);
-        const auto mapped = frame.anchor().mapToFrame(diff_rect);
+            current_area.pixelDifference(reference_area, diff_rect, active_common->minimum_color_threshold);
+        const auto mapped = current_area.anchor().mapToFrame(diff_rect);
         const double area = std::max(1, mapped.width() * mapped.height());
         const double average = static_cast<double>(difference) / area;
         if (average < kFactorChangeAverageThreshold) {
@@ -1215,9 +1221,11 @@ private:
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
     static constexpr uint64 kMonitorDwellMs = 250;
     // Average per-pixel colour difference over the factor scroll area, above which the content is treated as a
-    // different character rather than render noise. Same-character noise measures ~2; a switch redraws the whole
-    // list (tens per pixel). Calibrate against footage before finalizing.
-    static constexpr double kFactorChangeAverageThreshold = 20.0;
+    // different character rather than render noise. Measured on .notes/player_standard_factor_only_1.mp4 (a
+    // no-scroll switch between two records of the *same* character -- the hardest case, since the header and
+    // shared factor rows match): the same character reads 0.0 and the switch reads a tight ~11.6, so 6.0 sits
+    // roughly midway with wide margin on both sides. The 250ms dwell guards against any transient spike.
+    static constexpr double kFactorChangeAverageThreshold = 6.0;
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
