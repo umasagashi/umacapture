@@ -347,38 +347,47 @@ class _CharaDetailStateWidget extends ConsumerWidget {
     );
   }
 
+  // Cap the icon/label group to a readable width and center it, so the three progress indicators (3 x 100)
+  // do not spread across the full card on wide windows. It still shrinks below this on narrow windows.
+  static const _detailsMaxWidth = 480.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(charaDetailCaptureStateProvider);
     final safety = state.switchSafety;
     const animationDuration = Duration(milliseconds: 100);
-    return Column(
-      children: [
-        AnimatedSwitcher(
-          duration: animationDuration,
-          child: (state.isCapturing || state.error != null) ? _buildProgress(ref) : Container(),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: _detailsMaxWidth),
+        child: Column(
+          children: [
+            AnimatedSwitcher(
+              duration: animationDuration,
+              child: (state.isCapturing || state.error != null) ? _buildProgress(ref) : Container(),
+            ),
+            AnimatedSwitcher(
+              duration: animationDuration,
+              child: (state.recordType != null && state.error == null)
+                  ? _buildRecordType(context, state.recordType!)
+                  : Container(),
+            ),
+            AnimatedSwitcher(
+              duration: animationDuration,
+              child: safety != null ? _buildSwitchGuide(context, safety) : Container(),
+            ),
+            AnimatedSwitcher(
+              duration: animationDuration,
+              child: state.error != null ? _buildError(context, ref) : Container(),
+            ),
+            AnimatedSwitcher(
+              duration: animationDuration,
+              child: (state.link != null && state.error == null) ? _buildLink(context, ref) : Container(),
+            ),
+            if (state.isCapturing || state.error != null || state.link != null) const Divider(),
+            additionalInfoWidget(ref),
+          ],
         ),
-        AnimatedSwitcher(
-          duration: animationDuration,
-          child: (state.recordType != null && state.error == null)
-              ? _buildRecordType(context, state.recordType!)
-              : Container(),
-        ),
-        AnimatedSwitcher(
-          duration: animationDuration,
-          child: safety != null ? _buildSwitchGuide(context, safety) : Container(),
-        ),
-        AnimatedSwitcher(
-          duration: animationDuration,
-          child: state.error != null ? _buildError(context, ref) : Container(),
-        ),
-        AnimatedSwitcher(
-          duration: animationDuration,
-          child: (state.link != null && state.error == null) ? _buildLink(context, ref) : Container(),
-        ),
-        if (state.isCapturing || state.error != null || state.link != null) const Divider(),
-        additionalInfoWidget(ref),
-      ],
+      ),
     );
   }
 }
