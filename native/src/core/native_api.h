@@ -78,6 +78,13 @@ public:
     void notifyCharaDetailStarted(chara_detail::record::RecordType record_type) {
         notify(json_util::Json{{"type", "onCharaDetailStarted"}, {"record_type", static_cast<int>(record_type)}}.dump());
     }
+    // Mid-scene reset: the scraper discarded the current session (a character switch was inferred from
+    // on-screen content) and rebuilt with the given record type, without the detail screen closing. The
+    // UI must reset its capture progress just as it does for a fresh open.
+    void notifyCharaDetailRestarted(chara_detail::record::RecordType record_type) {
+        notify(
+            json_util::Json{{"type", "onCharaDetailRestarted"}, {"record_type", static_cast<int>(record_type)}}.dump());
+    }
     void notifyCharaDetailFinished(const chara_detail::RecordInfo &info, bool success) {
         notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", info.record_id}, {"success", success}}.dump());
     }

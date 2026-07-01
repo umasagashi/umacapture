@@ -48,6 +48,7 @@ struct SceneInfo {
 
 struct SceneState {
     TabPage tab_page;
+    record::RecordType record_type;
 };
 
 class CharaDetailSceneContext : public distributor::SceneContext {
@@ -92,7 +93,7 @@ public:
             // also makes the scraper's reference frame a settled, post-animation still instead of one captured
             // mid-animation.
             if (scene_active) {
-                on_scene_updated->send(input, {tab_page.value()});
+                on_scene_updated->send(input, {tab_page.value(), record_type.value()});
             }
         } else {
             // Any drop before commit resets the begin window; the same record_type must persist uninterrupted.

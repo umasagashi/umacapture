@@ -74,6 +74,18 @@ public:
         return 1.0 - margin->second;
     }
 
+    // Fraction of the scroll track above the thumb (distance from the top edge to the thumb's top). It is ~0
+    // when the content is scrolled to the very top and grows as the user scrolls down, independent of the
+    // thumb's length. Returns nullopt when no scrollbar is present (a short, non-scrollable page). Used to
+    // detect a completed tab snapping back to the top after a character switch.
+    [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const {
+        const auto margin = scanMargin(frame);
+        if (!margin) {
+            return std::nullopt;
+        }
+        return margin->first;
+    }
+
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const {
         const auto &from_line = findScrollbar(from.frame);
         const auto &to_line = findScrollbar(to.frame);
@@ -414,7 +426,11 @@ public:
         const record::RecordType &record_type,
         const std::filesystem::path &image_dir)
         : base_path(image_dir / path_config.base.filename())
+        , image_dir(image_dir)
         , record_type(record_type)
+        , skill_scans(skill_scans)
+        , factor_scans(factor_scans)
+        , campaign_scans(campaign_scans)
         , skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config.skill.stem()))
         , factor_box_(std::make_shared<PageScrapingBox>(factor_scans, image_dir / path_config.factor.stem()))
         , campaign_box_(std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config.campaign.stem())) {}
@@ -422,6 +438,23 @@ public:
     [[nodiscard]] std::shared_ptr<PageScrapingBox> skill_box() const { return skill_box_; }
     [[nodiscard]] std::shared_ptr<PageScrapingBox> factor_box() const { return factor_box_; }
     [[nodiscard]] std::shared_ptr<PageScrapingBox> campaign_box() const { return campaign_box_; }
+
+    // Discard and re-create a single tab's box, clearing its image directory so the fresh box numbers its
+    // scroll-area fragments from zero again (PageScrapingBox writes 0-based filenames; reusing the directory
+    // would let a stale fragment from the abandoned attempt survive and be picked up by the stitcher). The
+    // returned box must be rebound into the tab's SceneScraper by the caller.
+    std::shared_ptr<PageScrapingBox> resetSkillBox() {
+        skill_box_ = recreate(skill_scans, path_config.skill.stem());
+        return skill_box_;
+    }
+    std::shared_ptr<PageScrapingBox> resetFactorBox() {
+        factor_box_ = recreate(factor_scans, path_config.factor.stem());
+        return factor_box_;
+    }
+    std::shared_ptr<PageScrapingBox> resetCampaignBox() {
+        campaign_box_ = recreate(campaign_scans, path_config.campaign.stem());
+        return campaign_box_;
+    }
 
     void addBase(const Frame &frame) {
         assert_(!base_ready);
@@ -438,8 +471,19 @@ public:
     }
 
 private:
+    std::shared_ptr<PageScrapingBox> recreate(
+        const std::vector<scraper_config::ScanParameter> &scans, const std::filesystem::path &stem) const {
+        const auto tab_dir = image_dir / stem;
+        app::NativeApi::instance().rmdir(tab_dir);
+        return std::make_shared<PageScrapingBox>(scans, tab_dir);
+    }
+
     const std::filesystem::path base_path;
+    const std::filesystem::path image_dir;
     const record::RecordType record_type;
+    const std::vector<scraper_config::ScanParameter> skill_scans;
+    const std::vector<scraper_config::ScanParameter> factor_scans;
+    const std::vector<scraper_config::ScanParameter> campaign_scans;
 
     std::shared_ptr<PageScrapingBox> skill_box_;
     std::shared_ptr<PageScrapingBox> factor_box_;
@@ -496,6 +540,9 @@ public:
     virtual ~ScrapingInterpreter() = default;
     virtual void update(const Frame &frame) = 0;
     [[nodiscard]] virtual bool ready() const = 0;
+    // Whether this tab has committed real capture progress (past a fleeting glance), so that switching away
+    // from it before completion should discard the partial attempt.
+    [[nodiscard]] virtual bool started() const = 0;
 };
 
 enum ReadyState {
@@ -513,6 +560,7 @@ public:
 
     void update(const Frame &frame) override {
         assert_(state == Updatable);
+        has_updated = true;
         if (readyAfterUpdate(stationary_catcher, frame)) {
             scraping_box->setScrollArea(stationary_catcher.fullSizeFrame());
             state = Ready;
@@ -521,10 +569,13 @@ public:
 
     [[nodiscard]] inline bool ready() const override { return state == Ready; }
 
+    [[nodiscard]] inline bool started() const override { return has_updated; }
+
 private:
     std::shared_ptr<PageScrapingBox> scraping_box;
     StationaryFrameCatcher stationary_catcher;
     ReadyState state = Updatable;
+    bool has_updated = false;
 };
 
 class ScrollableScrapingInterpreter : public ScrapingInterpreter {
@@ -556,6 +607,11 @@ public:
     }
 
     [[nodiscard]] inline bool ready() const override { return state == Ready; }
+
+    // Progress here means the tab reached scroll-ready and latched its first scroll-area fragment. A brief
+    // glance that never settles into a stationary frame never sets is_scrolling, so it is not "started" and
+    // switching away from it discards nothing.
+    [[nodiscard]] inline bool started() const override { return is_scrolling; }
 
 private:
     void updateBefore(const Frame &frame) {
@@ -651,6 +707,22 @@ public:
 
     [[nodiscard]] inline bool ready() const { return state == Ready; }
 
+    // Whether this tab committed real scroll-capture progress (see ScrapingInterpreter::started). False until
+    // the tab has been displayed at least once (scroll_area_scraper is built lazily on the first frame).
+    [[nodiscard]] inline bool started() const {
+        return scroll_area_scraper != nullptr && scroll_area_scraper->started();
+    }
+
+    // Fraction of the scroll track above the thumb for this tab's scroll area, or nullopt when the tab has not
+    // been built yet or has no scrollbar. ~0 means scrolled to the very top. Safe to call in any state (it does
+    // not mutate), unlike update()/the tab scraper accessor which assert Updatable.
+    [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const {
+        if (scroll_bar_estimator == nullptr) {
+            return std::nullopt;
+        }
+        return scroll_bar_estimator->topMargin(frame.copy(config.scroll_area_rect));
+    }
+
 private:
     void build(const Frame &frame) {
         assert_(state == Null);
@@ -658,8 +730,9 @@ private:
         const auto initial_frame = frame.view(config.scroll_area_rect);
         log_debug("{}, {}", initial_frame.size().width(), initial_frame.size().height());
 
-        const auto scroll_bar_offset_estimator =
-            ScrollBarOffsetEstimator(config.scroll_bar_bg_color, config.scroll_bar_scan_line);
+        scroll_bar_estimator =
+            std::make_unique<ScrollBarOffsetEstimator>(config.scroll_bar_bg_color, config.scroll_bar_scan_line);
+        const auto &scroll_bar_offset_estimator = *scroll_bar_estimator;
 
         const auto stationary_catcher = StationaryFrameCatcher(
             config.stationary_time_threshold,
@@ -703,6 +776,7 @@ private:
 
     std::unique_ptr<StationaryFrameCatcher> tab_button_catcher;
     std::unique_ptr<ScrapingInterpreter> scroll_area_scraper;
+    std::unique_ptr<ScrollBarOffsetEstimator> scroll_bar_estimator;
     std::shared_ptr<PageScrapingBox> scraping_box;
     ReadyState state = Null;
 };
@@ -788,6 +862,7 @@ public:
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
+        const event_util::Sender<record::RecordType> &on_restarted,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir)
         : on_updated(on_updated)
@@ -799,6 +874,7 @@ public:
         , on_page_ready(on_page_ready)
         , on_completed(on_completed)
         , on_factor_probe(on_factor_probe)
+        , on_restarted(on_restarted)
         , config(config)
         , scraping_root_dir(scraping_dir) {
         this->on_opened->listen([this](const auto &info) { build(info); });
@@ -812,65 +888,58 @@ public:
         });
     }
 
-    void build(const SceneInfo &info) {
-        vlog_trace(info.record_type);
+    void build(const SceneInfo &info) { buildSession(info.record_type); }
+
+    void buildSession(record::RecordType record_type) {
+        vlog_trace(record_type);
         assert_(scraping_state == scraper_impl::Null);
+        resetMonitors();
 
         current_record_info = {
             uuid_generator.uuid4().str(),
-            info.record_type,
+            record_type,
         };
 
         // The "register practice partner" button that shifts the tab bar and scroll area down
         // appears only on a friend's FULL training record; a friend's inheritance-only record
         // has no such button and keeps the standard layout. So the shifted coordinate set
         // applies to that one case (friend and not inheritance-only), not to every friend record.
-        const bool uses_friend_layout =
-            record::isFriend(info.record_type) && !record::isInheritanceOnly(info.record_type);
-        const auto &common = uses_friend_layout ? config.friend_common : config.common;
+        const bool uses_friend_layout = record::isFriend(record_type) && !record::isInheritanceOnly(record_type);
+        active_common = uses_friend_layout ? &config.friend_common : &config.common;
 
         scraping_box = std::make_shared<scraper_impl::SceneScrapingBox>(
             config.skill_scans,
             config.factor_scans,
             config.campaign_scans,
-            info.record_type,
+            record_type,
             scraping_root_dir / current_record_info.record_id);
-
-        skill_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            common,
-            scraping_box->skill_box(),
-            on_scroll_ready->bindLeft(TabPage::SkillPage),
-            on_scroll_updated->bindLeft(TabPage::SkillPage));
 
         // The factor tab's scroll-ready does not notify the UI directly. Instead it triggers a
         // duplicate probe on the current stable full frame: only after that probe reports "not a
         // duplicate" does the UI emit the scroll-ready cue (synthesized on the Dart side). This
         // local connection bridges the per-page scraper's argument-less scroll-ready to the probe,
         // attaching the full-screen frame (the per-page scraper only sees the cropped scroll area).
+        // The probed frame also becomes the reference the continuous factor monitor diffs against to
+        // spot a later character switch on the factor tab.
         factor_scroll_ready = event_util::makeDirectConnection<>();
         factor_scroll_ready->listen([this]() {
+            factor_probe_reference = current_full_frame;
+            factor_change_pending_since = std::nullopt;
             on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
         });
-        factor_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            common,
-            scraping_box->factor_box(),
-            factor_scroll_ready,
-            on_scroll_updated->bindLeft(TabPage::FactorPage));
 
-        campaign_scraper = std::make_unique<scraper_impl::SceneScraper>(
-            common,
-            scraping_box->campaign_box(),
-            on_scroll_ready->bindLeft(TabPage::CampaignPage),
-            on_scroll_updated->bindLeft(TabPage::CampaignPage));
+        skill_scraper = makeTabScraper(TabPage::SkillPage, scraping_box->skill_box());
+        factor_scraper = makeTabScraper(TabPage::FactorPage, scraping_box->factor_box());
+        campaign_scraper = makeTabScraper(TabPage::CampaignPage, scraping_box->campaign_box());
 
         base_frame_catcher = std::make_unique<scraper_impl::BaseFrameCatcher>(
             scraper_impl::StationaryFrameCatcher{
-                common.stationary_time_threshold,
-                common.minimum_color_threshold,
-                common.stationary_color_threshold,
-                common.base_image_stationary_rect,
+                active_common->stationary_time_threshold,
+                active_common->minimum_color_threshold,
+                active_common->stationary_color_threshold,
+                active_common->base_image_stationary_rect,
             },
-            common.base_image_rect,
+            active_common->base_image_rect,
             config.header_scan_line,
             config.header_color_range,
             config.header_visible_time_threshold);
@@ -879,26 +948,60 @@ public:
     }
 
     void update(const Frame &frame, const SceneState &scene_state) {
-        vlog_trace(state.tab_page);
+        vlog_trace(scene_state.tab_page);
 
         // Keep the latest full-screen frame so the factor scroll-ready callback (which fires from
         // deep inside the per-page scraper, where only the cropped scroll area is in scope) can hand
         // the whole frame to the duplicate probe.
         current_full_frame = frame;
 
-        if (ready()) {  // After ready, do nothing until scene is closed.
+        const auto tab_page = scene_state.tab_page;
+
+        // A character switch that changes the record layout (e.g. own <-> friend) must rebuild with the
+        // new layout's coordinates. Debounced so a transient misread during the switch animation cannot
+        // trigger a spurious reset.
+        if (handleRecordTypeChange(scene_state.record_type, frame.timestamp())) {
             return;
         }
 
-        const auto tab_scraper = tabScraper(scene_state.tab_page);
-        if (updateUntilReady(tab_scraper, frame)) {
-            on_page_ready->send(scene_state.tab_page);
-            checkForCompleted();
+        // Rule 2: a completed tab scrolled back to the top is the observable proxy for a character switch
+        // (the switch snaps the visible tab to the top). Discarding a captured tab cascades into a full
+        // reset. Checked before the ready() short-circuit and via a const accessor so it never trips the
+        // Updatable assert on tabScraper().
+        if (tab_completed[tab_page] && detectCompletedTabAtTop(tab_page, frame)) {
+            log_debug("completed tab {} scrolled to top -> reset session", static_cast<int>(tab_page));
+            resetSession(scene_state.record_type);
+            return;
+        }
+
+        // Rule 1: leaving a tab whose capture is still in progress discards just that tab (no cascade).
+        handleTabSwitchInProgress(tab_page);
+        last_active_tab = tab_page;
+
+        if (ready()) {  // Session complete; only a Rule 2 reset (handled above) can restart it.
+            return;
+        }
+
+        if (!tab_completed[tab_page]) {
+            const auto tab_scraper = tabScraper(tab_page);
+            if (updateUntilReady(tab_scraper, frame)) {
+                tab_completed[tab_page] = true;
+                on_page_ready->send(tab_page);
+                checkForCompleted();
+            }
         }
 
         if (updateUntilReady(base_frame_catcher, frame)) {
             scraping_box->addBase(base_frame_catcher->frame());
             checkForCompleted();
+        }
+
+        // Rule 3: on the factor tab, keep watching for a character switch before the tab is captured. The
+        // one-shot scroll-ready probe only fires once, so a switch made without scrolling would otherwise
+        // go unnoticed; a content change at the top means a new character and triggers a full reset (whose
+        // fresh session re-probes the new character).
+        if (tab_page == TabPage::FactorPage && !tab_completed[TabPage::FactorPage]) {
+            maybeResetOnFactorChange(frame, scene_state.record_type);
         }
 
         log_trace("delay={}", chrono_util::to_timestamp(chrono_util::local_now()) - frame.timestamp());
@@ -911,18 +1014,175 @@ public:
         base_frame_catcher = nullptr;
         factor_scroll_ready = nullptr;
         scraping_box = nullptr;
+        active_common = nullptr;
         scraping_state = scraper_impl::Null;
+        resetMonitors();
     }
 
 private:
-    [[nodiscard]] scraper_impl::SceneScraper *tabScraper(TabPage tab_page) const {
-        assert_(scraping_state == scraper_impl::Updatable);
+    // Discard the current session and start a fresh one with the given record type, without the detail
+    // screen closing. Used when a character switch is inferred from on-screen content. The restart is
+    // surfaced to the UI so it resets its capture progress just as on a fresh open.
+    void resetSession(record::RecordType record_type) {
+        release();
+        buildSession(record_type);
+        on_restarted->send(current_record_info.record_type.value());
+    }
+
+    std::unique_ptr<scraper_impl::SceneScraper>
+    makeTabScraper(TabPage tab_page, const std::shared_ptr<scraper_impl::PageScrapingBox> &box) {
+        assert_(active_common != nullptr);
+        switch (tab_page) {
+            case TabPage::SkillPage:
+                return std::make_unique<scraper_impl::SceneScraper>(
+                    *active_common, box, on_scroll_ready->bindLeft(TabPage::SkillPage),
+                    on_scroll_updated->bindLeft(TabPage::SkillPage));
+            case TabPage::FactorPage:
+                return std::make_unique<scraper_impl::SceneScraper>(
+                    *active_common, box, factor_scroll_ready, on_scroll_updated->bindLeft(TabPage::FactorPage));
+            case TabPage::CampaignPage:
+                return std::make_unique<scraper_impl::SceneScraper>(
+                    *active_common, box, on_scroll_ready->bindLeft(TabPage::CampaignPage),
+                    on_scroll_updated->bindLeft(TabPage::CampaignPage));
+            default: throw std::invalid_argument("Unknown tab page.");
+        }
+    }
+
+    [[nodiscard]] scraper_impl::SceneScraper *scraperOf(TabPage tab_page) const {
         switch (tab_page) {
             case TabPage::SkillPage: return skill_scraper.get();
             case TabPage::FactorPage: return factor_scraper.get();
             case TabPage::CampaignPage: return campaign_scraper.get();
             default: throw std::invalid_argument("Unknown tab page.");
         }
+    }
+
+    [[nodiscard]] scraper_impl::SceneScraper *tabScraper(TabPage tab_page) const {
+        assert_(scraping_state == scraper_impl::Updatable);
+        return scraperOf(tab_page);
+    }
+
+    // True once the given record type has been reported continuously for the debounce window; performs the
+    // reset and returns true so the caller stops processing the current (mid-switch) frame.
+    [[nodiscard]] bool handleRecordTypeChange(record::RecordType record_type, uint64 timestamp) {
+        if (record_type == current_record_info.record_type) {
+            type_pending_since = std::nullopt;
+            return false;
+        }
+        if (!type_pending_since || type_pending_value != record_type) {
+            type_pending_since = timestamp;
+            type_pending_value = record_type;
+            return false;
+        }
+        if (chrono_util::monotonicElapsed(timestamp, type_pending_since.value()) < kMonitorDwellMs) {
+            return false;
+        }
+        log_debug("record type changed -> reset session");
+        resetSession(record_type);
+        return true;
+    }
+
+    // True when the current tab's scroll bar has sat at the very top for the debounce window. A completed
+    // tab normally rests at the bottom, so this only becomes true after a switch (or a deliberate scroll
+    // back up), both of which the spec discards.
+    [[nodiscard]] bool detectCompletedTabAtTop(TabPage tab_page, const Frame &frame) {
+        const auto *scraper = scraperOf(tab_page);
+        const auto top_margin = scraper == nullptr ? std::nullopt : scraper->topMargin(frame);
+        const bool at_top = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
+        if (!at_top) {
+            top_pending_since = std::nullopt;
+            return false;
+        }
+        const uint64 timestamp = frame.timestamp();
+        if (!top_pending_since || top_pending_tab != tab_page) {
+            top_pending_since = timestamp;
+            top_pending_tab = tab_page;
+            return false;
+        }
+        return chrono_util::monotonicElapsed(timestamp, top_pending_since.value()) >= kMonitorDwellMs;
+    }
+
+    void handleTabSwitchInProgress(TabPage tab_page) {
+        if (!last_active_tab || last_active_tab.value() == tab_page || ready()) {
+            return;
+        }
+        const auto previous = last_active_tab.value();
+        auto *scraper = scraperOf(previous);
+        if (scraper == nullptr || scraper->ready() || !scraper->started()) {
+            return;  // Nothing captured on the tab we left, or it was already complete.
+        }
+        log_debug("in-progress tab {} abandoned -> discard", static_cast<int>(previous));
+        rebuildTab(previous);
+    }
+
+    void rebuildTab(TabPage tab_page) {
+        switch (tab_page) {
+            case TabPage::SkillPage:
+                skill_scraper = makeTabScraper(TabPage::SkillPage, scraping_box->resetSkillBox());
+                break;
+            case TabPage::FactorPage:
+                factor_probe_reference = {};
+                factor_change_pending_since = std::nullopt;
+                factor_scraper = makeTabScraper(TabPage::FactorPage, scraping_box->resetFactorBox());
+                break;
+            case TabPage::CampaignPage:
+                campaign_scraper = makeTabScraper(TabPage::CampaignPage, scraping_box->resetCampaignBox());
+                break;
+            default: throw std::invalid_argument("Unknown tab page.");
+        }
+        tab_completed[tab_page] = false;
+        on_scroll_updated->send(tab_page, 0.0);  // Zero the tab's progress in the UI.
+    }
+
+    // On the factor tab, diff the current stable top-of-page against the last probed reference. A large,
+    // sustained change while at the top means the displayed character switched, so reset (the fresh session
+    // re-probes). Reuses the stationary rect and its calibrated color thresholds as the change metric.
+    void maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type) {
+        if (factor_probe_reference.empty() || active_common == nullptr) {
+            factor_change_pending_since = std::nullopt;
+            return;
+        }
+        const auto top_margin = factor_scraper->topMargin(frame);
+        const bool at_top = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
+        if (!at_top || factor_probe_reference.size() != frame.size()) {
+            factor_change_pending_since = std::nullopt;
+            return;
+        }
+        // Average per-pixel colour difference (0-765) over the scroll area against the probed reference. This
+        // is resolution-independent: the same character at the top differs only by sub-pixel render/encode
+        // noise (a fraction of a level per pixel), while a switched character redraws the whole factor list
+        // (tens of levels per pixel). Thresholding the average cleanly separates the two.
+        const auto &diff_rect = active_common->scroll_area_stationary_rect;
+        const auto difference =
+            frame.pixelDifference(factor_probe_reference, diff_rect, active_common->minimum_color_threshold);
+        const auto mapped = frame.anchor().mapToFrame(diff_rect);
+        const double area = std::max(1, mapped.width() * mapped.height());
+        const double average = static_cast<double>(difference) / area;
+        if (average < kFactorChangeAverageThreshold) {
+            factor_change_pending_since = std::nullopt;  // Same character still shown (only render noise).
+            return;
+        }
+        const uint64 timestamp = frame.timestamp();
+        if (!factor_change_pending_since) {
+            factor_change_pending_since = timestamp;
+            return;
+        }
+        if (chrono_util::monotonicElapsed(timestamp, factor_change_pending_since.value()) < kMonitorDwellMs) {
+            return;
+        }
+        log_debug("factor content changed at top -> reset session (avg={:.2f})", average);
+        resetSession(record_type);
+    }
+
+    void resetMonitors() {
+        tab_completed.fill(false);
+        last_active_tab = std::nullopt;
+        top_pending_since = std::nullopt;
+        top_pending_tab = std::nullopt;
+        type_pending_since = std::nullopt;
+        type_pending_value = std::nullopt;
+        factor_change_pending_since = std::nullopt;
+        factor_probe_reference = {};
     }
 
     [[nodiscard]] bool ready() const { return scraping_state == scraper_impl::Ready; }
@@ -945,6 +1205,19 @@ private:
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
+    const event_util::Sender<record::RecordType> on_restarted;  // Mid-scene reset (inferred character switch).
+
+    // Top margin (fraction of the scroll track above the thumb) at or below which the content is treated as
+    // scrolled to the very top. ~0 means flush with the top; the threshold tolerates a thin idle band. Verify
+    // against footage (.notes/player_standard_sequential.mp4) when calibrating.
+    static constexpr double kTopMarginThreshold = 0.03;
+    // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
+    // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
+    static constexpr uint64 kMonitorDwellMs = 250;
+    // Average per-pixel colour difference over the factor scroll area, above which the content is treated as a
+    // different character rather than render noise. Same-character noise measures ~2; a switch redraws the whole
+    // list (tens per pixel). Calibrate against footage before finalizing.
+    static constexpr double kFactorChangeAverageThreshold = 20.0;
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
@@ -954,12 +1227,23 @@ private:
     RecordInfo current_record_info = {};
     Frame current_full_frame = {};
     event_util::Connection<> factor_scroll_ready;
+    const scraper_config::SceneScraperConfig *active_common = nullptr;
     std::unique_ptr<scraper_impl::SceneScraper> skill_scraper;
     std::unique_ptr<scraper_impl::SceneScraper> factor_scraper;
     std::unique_ptr<scraper_impl::SceneScraper> campaign_scraper;
     std::unique_ptr<scraper_impl::BaseFrameCatcher> base_frame_catcher;
     std::shared_ptr<scraper_impl::SceneScrapingBox> scraping_box;
     scraper_impl::ReadyState scraping_state = scraper_impl::Null;
+
+    // Switch-detection bookkeeping. Indexed by TabPage.
+    std::array<bool, kAllTabPages.size()> tab_completed{};
+    std::optional<TabPage> last_active_tab;
+    std::optional<uint64> top_pending_since;
+    std::optional<TabPage> top_pending_tab;
+    std::optional<uint64> type_pending_since;
+    std::optional<record::RecordType> type_pending_value;
+    std::optional<uint64> factor_change_pending_since;
+    Frame factor_probe_reference = {};
 };
 
 }  // namespace uma::chara_detail

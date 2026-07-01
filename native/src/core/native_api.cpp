@@ -105,6 +105,11 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
+    // Mid-scene reset: the scraper inferred a character switch from on-screen content and rebuilt the
+    // session without the detail screen closing. Tell the UI to reset its capture progress.
+    const auto restarted_connection = event_util::makeDirectConnection<chara_detail::record::RecordType>();
+    restarted_connection->listen([this](auto record_type) { notifyCharaDetailRestarted(record_type); });
+
     const auto stitch_ready_connection = stitcher_runner->makeConnection<chara_detail::RecordInfo>();
     on_stitch_ready = stitch_ready_connection;
 
@@ -152,6 +157,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,
+        restarted_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir);
 
