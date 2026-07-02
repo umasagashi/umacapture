@@ -1171,23 +1171,21 @@ private:
             factor_change_pending_since = std::nullopt;
             return;
         }
-        // Average per-pixel colour difference (0-765) over the factor-list scroll area against the probed
-        // reference. Crop both frames to the scroll area first: the stationary rect is defined relative to
-        // that crop, so applying it to the full frame would instead diff nearly the whole screen -- including
-        // the header (portrait, name, tabs), which is identical when the switch is between two records of the
-        // same character. That dilution buried the signal (measured ~6 over the full frame vs ~11.6 over the
-        // scroll area, against a ~0 noise floor). The per-pixel minimum_color_threshold gate drops sub-pixel
-        // render/encode noise to zero, so the same character reads ~0 while a switched factor list reads well
-        // above the threshold. Resolution-independent (an average, not a sum).
+        // Fraction of the factor-list scroll area whose pixels changed vs the probed reference. Crop both
+        // frames to the scroll area first: the stationary rect is defined relative to that crop, so applying
+        // it to the full frame would instead diff nearly the whole screen -- including the header (portrait,
+        // name, tabs), which is identical when the switch is between two records of the same character. That
+        // dilution buries the signal.
+        //
+        // We count *how many* pixels changed (ratio), not *how much* (the old average). A real character
+        // switch changes a broad, contiguous area of the list, so its ratio is high; video codec noise is
+        // sparse and stays low even when a few artifacts spike in magnitude. The per-pixel X gate drops
+        // sub-threshold render/encode noise, so the same character reads ~0. Resolution-independent.
         const auto reference_area = factor_probe_reference.copy(active_common->scroll_area_rect);
         const auto current_area = frame.copy(active_common->scroll_area_rect);
         const auto &diff_rect = active_common->scroll_area_stationary_rect;
-        const auto difference =
-            current_area.pixelDifference(reference_area, diff_rect, active_common->minimum_color_threshold);
-        const auto mapped = current_area.anchor().mapToFrame(diff_rect);
-        const double area = std::max(1, mapped.width() * mapped.height());
-        const double average = static_cast<double>(difference) / area;
-        if (average < kFactorChangeAverageThreshold) {
+        const double ratio = current_area.diffStats(reference_area, diff_rect, kFactorChangePixelDiffThreshold).ratio();
+        if (ratio < kFactorChangeRatioThreshold) {
             factor_change_pending_since = std::nullopt;  // Same character still shown (only render noise).
             return;
         }
@@ -1199,7 +1197,7 @@ private:
         if (chrono_util::monotonicElapsed(timestamp, factor_change_pending_since.value()) < kMonitorDwellMs) {
             return;
         }
-        log_debug("factor content changed at top -> reset session (avg={:.2f})", average);
+        log_debug("factor content changed at top -> reset session (ratio={:.4f})", ratio);
         resetSession(record_type);
     }
 
@@ -1245,12 +1243,18 @@ private:
     // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
     static constexpr uint64 kMonitorDwellMs = 250;
-    // Average per-pixel colour difference over the factor scroll area, above which the content is treated as a
-    // different character rather than render noise. Measured on .notes/player_standard_factor_only_1.mp4 (a
-    // no-scroll switch between two records of the *same* character -- the hardest case, since the header and
-    // shared factor rows match): the same character reads 0.0 and the switch reads a tight ~11.6, so 6.0 sits
-    // roughly midway with wide margin on both sides. The 250ms dwell guards against any transient spike.
-    static constexpr double kFactorChangeAverageThreshold = 6.0;
+    // A pixel counts as "changed" when its per-pixel BGR difference (0-765) exceeds this. Set above the video
+    // codec's per-pixel noise so scattered compression artifacts are not counted; live capture has ~no noise,
+    // so the exact value matters only for video sources. Lower it to register subtler switches (fewer/smaller
+    // differing factors), leaning on the ratio threshold below to reject the extra noise that admits.
+    static constexpr int kFactorChangePixelDiffThreshold = 5;
+    // Fraction of the factor scroll area that must be "changed" (per X above) to treat the content as a
+    // different character rather than noise. Counting *how many* pixels changed (a broad, contiguous area on a
+    // real switch) instead of *how much* (a magnitude average a few large-delta pixels could dominate) is far
+    // more robust to the spikes video sources inject. The 250ms dwell guards transient spikes. Calibrated on
+    // .notes/player_standard_factor_only_1.mp4 (a no-scroll same-character switch, the hardest case): with
+    // X=5 the idle codec noise peaks at ~0.6% while the switch reads ~6.3%, so 1% sits well between them.
+    static constexpr double kFactorChangeRatioThreshold = 0.01;
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
