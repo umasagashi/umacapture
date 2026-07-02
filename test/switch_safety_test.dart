@@ -7,6 +7,10 @@
 // once the factor tab is scrolled, loses the new character's first frame. So a switch is safe only at
 // the factor-tab top (factorAtTop) or after success.
 //
+// The scroll position (at top vs scrolled) is a single fact reported by native via the scroll-position
+// event (scrollPosition), kept separate from capture progress (the ring value set by progress()). Both
+// "capturing" and "safe to switch" derive from that one fact, so they can never disagree.
+//
 // Run: .fvm/flutter_sdk/bin/flutter test test/switch_safety_test.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
@@ -17,19 +21,19 @@ void main() {
       expect(CharaDetailCaptureState().switchSafety, isNull);
     });
 
-    test('is unsafe on a non-factor tab, even at its first screen', () {
+    test('is unsafe on a non-factor tab, even at its top', () {
       // Skill is the default tab on open; it is not monitored for switches, so switching is unsafe.
-      final state = CharaDetailCaptureState(detailOpened: true, skillTabProgress: 0.4);
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 0, atTop: true);
       expect(state.switchSafety, isFalse);
     });
 
     test('is safe at the factor-tab top', () {
-      final state = CharaDetailCaptureState(detailOpened: true, factorTabProgress: 0.4, factorAtTop: true);
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, atTop: true);
       expect(state.switchSafety, isTrue);
     });
 
-    test('is unsafe once the factor tab is scrolled past its first screen', () {
-      final state = CharaDetailCaptureState(detailOpened: true, factorTabProgress: 0.4, scrolled: true);
+    test('is unsafe once the factor tab is scrolled off its top', () {
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, atTop: false);
       expect(state.switchSafety, isFalse);
     });
 
@@ -39,7 +43,8 @@ void main() {
         skillTabProgress: 1,
         factorTabProgress: 1,
         campaignTabProgress: 0,
-        scrolled: true,
+        currentTab: 2,
+        atTop: false,
       );
       expect(state.switchSafety, isFalse);
     });
@@ -50,13 +55,15 @@ void main() {
     });
 
     test('is safe when the duplicate probe flagged the character at the factor top', () {
-      final state = CharaDetailCaptureState(detailOpened: true, factorAtTop: true)
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, atTop: true)
         ..error = 'duplicated_character_probe';
       expect(state.switchSafety, isTrue);
     });
 
     test('is unsafe when a lingering duplicate probe is no longer at the factor top', () {
-      final state = CharaDetailCaptureState(detailOpened: true)..error = 'duplicated_character_probe';
+      // Moved to another tab at its top: not the factor top, so the stale probe gives no safe switch.
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 0, atTop: true)
+        ..error = 'duplicated_character_probe';
       expect(state.switchSafety, isFalse);
     });
 
@@ -71,52 +78,55 @@ void main() {
       expect(CharaDetailCaptureState().status, CharaDetailCaptureStatus.waitingForDetail);
     });
 
-    test('is detailReady when the screen is open but nothing is captured', () {
+    test('is detailReady when the screen is open and the tab is at its top', () {
       final state = CharaDetailCaptureState(detailOpened: true);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
     });
 
-    test('a factor baseline update alone is detailReady but not yet a safe switch point', () {
-      // The 0 -> baseline latch is not scrolling, but the probe has not marked the top yet.
+    test('a factor progress update alone does not mark the factor top', () {
+      // Progress and scroll position are independent: a ring update on the factor tab does not, by
+      // itself, place the current tab at the factor top -- that needs the scroll-position event.
       final state = CharaDetailCaptureState().started().progress(1, 0.3);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
       expect(state.switchSafety, isFalse);
     });
 
-    test('the factor probe marks the top as a safe switch point', () {
-      final state = CharaDetailCaptureState().started().progress(1, 0.3).markFactorAtTop();
+    test('the scroll-position event marks the factor top as a safe switch point', () {
+      final state = CharaDetailCaptureState().started().scrollPosition(1, true);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
       expect(state.switchSafety, isTrue);
     });
 
-    test('scrolling the factor tab past its first screen clears the safe top (capturing)', () {
-      final state = CharaDetailCaptureState().started().progress(1, 0.3).markFactorAtTop().progress(1, 0.6);
+    test('scrolling the factor tab off its top switches to capturing in one step', () {
+      final state = CharaDetailCaptureState().started().scrollPosition(1, true).scrollPosition(1, false);
       expect(state.factorAtTop, isFalse);
       expect(state.status, CharaDetailCaptureStatus.capturing);
       expect(state.switchSafety, isFalse);
     });
 
-    test('completing the factor tab clears the safe top', () {
-      final state = CharaDetailCaptureState().started().progress(1, 0.3).markFactorAtTop().progress(1, 1);
-      expect(state.factorAtTop, isFalse);
+    test('progress does not change the scroll position (kept independent)', () {
+      // Completing the factor tab (a progress update) must not flip the at-top fact on its own.
+      final state = CharaDetailCaptureState().started().scrollPosition(1, true).progress(1, 1);
+      expect(state.factorAtTop, isTrue);
+      expect(state.status, CharaDetailCaptureStatus.detailReady);
+    });
+
+    test('is capturing while the current tab is scrolled', () {
+      final state = CharaDetailCaptureState().started().scrollPosition(0, false).progress(0, 1);
       expect(state.status, CharaDetailCaptureStatus.capturing);
     });
 
-    test('is capturing once a page completes but others remain', () {
-      final state = CharaDetailCaptureState().started().progress(0, 1);
-      expect(state.status, CharaDetailCaptureStatus.capturing);
-    });
-
-    test('a factor-top switch stays safe even after another tab was scrolled', () {
-      // Scroll skill, then move to the factor tab and settle at its top: the factor top can detect
-      // the switch, so it is safe despite the earlier scroll (status is capturing, safety is true).
+    test('returning to the factor top is a safe switch point even after another tab was scrolled', () {
+      // Scroll skill, then move to the factor tab and settle at its top. Per the two-state model the
+      // current tab is now at its top, so the banner is detailReady and switching is safe, while the
+      // skill ring keeps its progress.
       final state = CharaDetailCaptureState()
           .started()
-          .progress(0, 0.3)
+          .scrollPosition(0, false)
           .progress(0, 0.6)
-          .progress(1, 0.4)
-          .markFactorAtTop();
-      expect(state.status, CharaDetailCaptureStatus.capturing);
+          .scrollPosition(1, true);
+      expect(state.skillTabProgress, 0.6);
+      expect(state.status, CharaDetailCaptureStatus.detailReady);
       expect(state.switchSafety, isTrue);
     });
 
@@ -135,23 +145,24 @@ void main() {
     });
 
     test('is duplicateHint for the duplicate probe while at the factor top', () {
-      final state = CharaDetailCaptureState(detailOpened: true, factorAtTop: true)
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, atTop: true)
         ..error = 'duplicated_character_probe';
       expect(state.status, CharaDetailCaptureStatus.duplicateHint);
     });
 
-    test('a lingering duplicate probe re-zeroed off the factor top degrades to detailReady', () {
-      // Scenario E: the probe fired at the factor top (baseline 0.3), then leaving the tab re-zeros it
-      // via Rule 1 (onScrollUpdated index 1, progress 0). The stale probe error must not stay a hint.
-      final state = CharaDetailCaptureState(detailOpened: true, factorTabProgress: 0.3, factorAtTop: true)
+    test('a lingering duplicate probe left off the factor top degrades to detailReady', () {
+      // The probe fired at the factor top, then the user navigated to another tab (still at its top).
+      // The stale probe error must not stay a hint once the factor top is no longer displayed.
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, atTop: true)
         ..error = 'duplicated_character_probe';
-      final after = state.progress(1, 0);
+      final after = state.scrollPosition(0, true);
       expect(after.factorAtTop, isFalse);
       expect(after.status, CharaDetailCaptureStatus.detailReady);
     });
 
-    test('downgrades the duplicate probe to capturing once the user keeps scrolling', () {
-      final state = CharaDetailCaptureState(detailOpened: true, scrolled: true)..error = 'duplicated_character_probe';
+    test('downgrades the duplicate probe to capturing once the user scrolls', () {
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, atTop: false)
+        ..error = 'duplicated_character_probe';
       expect(state.status, CharaDetailCaptureStatus.capturing);
     });
 

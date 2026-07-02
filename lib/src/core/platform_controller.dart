@@ -114,21 +114,15 @@ class CharaDetailCaptureState {
   /// (duplicated_character_probe / duplicated_character). Lets the UI focus that record in the table.
   String? duplicateRecordId;
 
-  /// Whether the user has scrolled some tab past its first screen.
-  ///
-  /// A tab's first on-screen worth is captured the instant it settles (the same "first screen"
-  /// checkpoint the early duplicate probe fires on), so its progress is already nonzero before the
-  /// user scrolls. Raw progress therefore cannot tell "just opened" from "mid-scroll"; this flag,
-  /// set only once progress climbs past that baseline, can.
-  bool scrolled;
+  /// The tab currently displayed (skill=0, factor=1, campaign=2), from the native scroll-position event.
+  int currentTab;
 
-  /// Whether the factor tab is currently displayed at its scroll-top checkpoint.
+  /// Whether the current tab is at its scroll-top, from the native scroll-position event.
   ///
-  /// This is the only safe point to switch characters mid-capture: native only watches for a switch
-  /// (re-capturing the new character's first frame) on the factor tab while it sits at the top
-  /// (Rule 3 content diff). On any other tab, or once the factor tab is scrolled, a switch is missed.
-  /// Set true by the factor probe; cleared as soon as any tab moves off that checkpoint.
-  bool factorAtTop;
+  /// This is the single authoritative scroll-position fact. Native reports it directly rather than the
+  /// UI inferring it from capture-progress deltas, so "capturing" (scrolled) and "safe to switch" (factor
+  /// tab at top) are both derived from it and can never disagree. A non-scrollable tab counts as at top.
+  bool atTop;
 
   CharaDetailCaptureState({
     this.isCapturing = false,
@@ -139,8 +133,8 @@ class CharaDetailCaptureState {
     this.link,
     this.error,
     this.duplicateRecordId,
-    this.scrolled = false,
-    this.factorAtTop = false,
+    this.currentTab = 0,
+    this.atTop = true,
   });
 
   CharaDetailCaptureState clone() {
@@ -153,8 +147,8 @@ class CharaDetailCaptureState {
       link: link,
       error: error,
       duplicateRecordId: duplicateRecordId,
-      scrolled: scrolled,
-      factorAtTop: factorAtTop,
+      currentTab: currentTab,
+      atTop: atTop,
     );
   }
 
@@ -171,26 +165,9 @@ class CharaDetailCaptureState {
   CharaDetailCaptureState progress(int index, double progress) {
     final state = clone();
     state.isCapturing = true;
-    final previous = switch (index) {
-      0 => skillTabProgress,
-      1 => factorTabProgress,
-      2 => campaignTabProgress,
-      _ => 0.0,
-    };
-    // The first update for a tab is its first-screen baseline (0 -> baseline), which is not scrolling.
-    // Only a later increase past that baseline -- or the page completing -- means the user actually
-    // scrolled. (Mirrors the early duplicate probe, which treats the settled first screen, not raw
-    // progress, as the checkpoint.)
-    if (progress >= 1 || (previous > 0 && progress > previous)) {
-      state.scrolled = true;
-    }
-    // The factor tab leaves its top checkpoint on any update except the very 0 -> baseline latch: a
-    // real scroll, completion, or the Rule 1 re-zero (progress == 0). Any non-factor update means a
-    // different tab is now displayed. Only the factor probe (markFactorAtTop) ever sets this true.
-    final isFactorBaselineLatch = index == factorTabIndex && previous == 0 && progress > 0 && progress < 1;
-    if (!isFactorBaselineLatch) {
-      state.factorAtTop = false;
-    }
+    // Progress is purely the ring value (how much of the tab has been captured). Scroll position -- whether
+    // the tab is at its top -- is a separate fact reported by the native scroll-position event, so it is not
+    // inferred from progress deltas here.
     switch (index) {
       case 0:
         state.skillTabProgress = progress;
@@ -205,10 +182,11 @@ class CharaDetailCaptureState {
     return state;
   }
 
-  /// Marks the factor tab as displayed at its scroll-top checkpoint (fired by the factor probe).
-  CharaDetailCaptureState markFactorAtTop() {
+  /// Records the current tab and whether it is at its scroll-top, from the native scroll-position event.
+  CharaDetailCaptureState scrollPosition(int index, bool atTop) {
     final state = clone();
-    state.factorAtTop = true;
+    state.currentTab = index;
+    state.atTop = atTop;
     return state;
   }
 
@@ -250,17 +228,24 @@ class CharaDetailCaptureState {
     if (!detailOpened) {
       return CharaDetailCaptureStatus.waitingForDetail;
     }
-    // The probe hint only stands while the factor tab is still at its top checkpoint (where the hint
-    // fired). Once the user scrolls or navigates away, the lingering probe error is stale, so it
-    // degrades to the ordinary scrolled?capturing:detailReady phase.
+    // The probe hint only stands while the factor tab is still at its top (where the hint fired). Once the
+    // user scrolls or navigates to another tab, factorAtTop is false and the stale hint degrades to the
+    // ordinary phase below.
     if (currentError == "duplicated_character_probe" && factorAtTop) {
       return CharaDetailCaptureStatus.duplicateHint;
     }
-    if (scrolled) {
+    // Two states only: the current tab is either at its top (detailReady, and switchable when it is the
+    // factor tab) or scrolled (capturing). There is no intermediate, because both derive from the same
+    // atTop fact rather than from two independent heuristics.
+    if (!atTop) {
       return CharaDetailCaptureStatus.capturing;
     }
     return CharaDetailCaptureStatus.detailReady;
   }
+
+  /// Whether the factor tab is currently displayed at its scroll-top -- the one point mid-capture where a
+  /// character switch is detectable (Rule 3). Derived from the single (currentTab, atTop) fact.
+  bool get factorAtTop => atTop && currentTab == factorTabIndex;
 
   /// Whether it is safe to navigate to an adjacent character without closing the detail screen.
   ///
@@ -288,7 +273,7 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
 
   void progress(int index, double progress) => state = state.progress(index, progress);
 
-  void markFactorAtTop() => state = state.markFactorAtTop();
+  void scrollPosition(int index, bool atTop) => state = state.scrollPosition(index, atTop);
 
   void success(String id) => state = state.success(id: id);
 
@@ -459,9 +444,10 @@ class PlatformController {
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
             // The probe only fires at the factor tab's top, so it marks the one safe point to switch
-            // characters mid-capture. Reassert this before the dedup break, so even a re-emitted probe
-            // (e.g. a settling frame after briefly leaving and returning) restores the "safe" state.
-            captureState.markFactorAtTop();
+            // characters mid-capture. Reassert the factor-at-top position before the dedup break, so even
+            // a re-emitted probe (e.g. a settling frame after briefly leaving and returning) -- and any
+            // ordering ahead of the scroll-position event -- restores the "safe" state.
+            captureState.scrollPosition(CharaDetailCaptureState.factorTabIndex, true);
             // Native may re-emit the probe for the same character (e.g. a settling frame after a switch).
             // Skip an unchanged key so the duplicate check and its error cue fire at most once per character.
             if (_sameFactorKey(probeSelf, _lastProbeKey)) {
@@ -488,6 +474,15 @@ class PlatformController {
             final progress = (data['progress'] as num?)?.toDouble();
             if (index != null && progress != null) {
               captureState.progress(index, progress);
+            }
+          }
+          break;
+        case 'onScrollPosition':
+          {
+            final index = data['index'] as int?;
+            final atTop = data['at_top'] as bool?;
+            if (index != null && atTop != null) {
+              captureState.scrollPosition(index, atTop);
             }
           }
           break;

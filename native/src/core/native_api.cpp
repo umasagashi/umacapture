@@ -102,6 +102,9 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto scroll_updated_connection = event_util::makeDirectConnection<int, double>();
     scroll_updated_connection->listen([this](int index, double progress) { notifyScrollUpdated(index, progress); });
 
+    const auto scroll_position_connection = event_util::makeDirectConnection<int, bool>();
+    scroll_position_connection->listen([this](int index, bool at_top) { notifyScrollPosition(index, at_top); });
+
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
@@ -157,6 +160,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         closed_before_completed_connection,
         scroll_ready_connection,
         scroll_updated_connection,
+        scroll_position_connection,
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,

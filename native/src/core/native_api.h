@@ -69,6 +69,10 @@ public:
         notify(json_util::Json{{"type", "onScrollUpdated"}, {"index", index}, {"progress", progress}}.dump());
     }
 
+    void notifyScrollPosition(int index, bool at_top) {
+        notify(json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"at_top", at_top}}.dump());
+    }
+
     void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
 
     void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {

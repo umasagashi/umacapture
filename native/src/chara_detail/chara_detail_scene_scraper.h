@@ -859,6 +859,7 @@ public:
         const event_util::Sender<RecordInfo> &on_closed_before_completed,
         const event_util::Sender<int> &on_scroll_ready,
         const event_util::Sender<int, double> &on_scroll_updated,
+        const event_util::Sender<int, bool> &on_scroll_position,
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
@@ -871,6 +872,7 @@ public:
         , on_closed_before_completed(on_closed_before_completed)
         , on_scroll_ready(on_scroll_ready)
         , on_scroll_updated(on_scroll_updated)
+        , on_scroll_position(on_scroll_position)
         , on_page_ready(on_page_ready)
         , on_completed(on_completed)
         , on_factor_probe(on_factor_probe)
@@ -977,6 +979,11 @@ public:
         // Rule 1: leaving a tab whose capture is still in progress discards just that tab (no cascade).
         handleTabSwitchInProgress(tab_page);
         last_active_tab = tab_page;
+
+        // Surface the current tab's scroll position (at the top vs scrolled) to the UI. This is the single
+        // authoritative fact the capture tab derives both "capturing" and "can switch characters" from,
+        // instead of inferring scroll position from capture-progress deltas.
+        notifyScrollPositionIfChanged(tab_page, frame);
 
         if (ready()) {  // Session complete; only a Rule 2 reset (handled above) can restart it.
             return;
@@ -1102,6 +1109,22 @@ private:
         return chrono_util::monotonicElapsed(timestamp, top_pending_since.value()) >= kMonitorDwellMs;
     }
 
+    // Emit the current tab's at-top position to the UI, edge-triggered so a stationary tab does not spam the
+    // channel every frame. "At top" reuses the same top-margin threshold as the switch-detection rules; a tab
+    // with no scrollbar (a short, non-scrollable page) or one not yet built counts as at the top, since there
+    // is nothing to scroll away from.
+    void notifyScrollPositionIfChanged(TabPage tab_page, const Frame &frame) {
+        const auto *scraper = scraperOf(tab_page);
+        const auto top_margin = scraper == nullptr ? std::nullopt : scraper->topMargin(frame);
+        const bool at_top = !top_margin.has_value() || top_margin.value() <= kTopMarginThreshold;
+        if (last_scroll_position_emitted && last_scroll_position_emitted->first == tab_page
+            && last_scroll_position_emitted->second == at_top) {
+            return;
+        }
+        last_scroll_position_emitted = std::make_pair(tab_page, at_top);
+        on_scroll_position->send(static_cast<int>(tab_page), at_top);
+    }
+
     void handleTabSwitchInProgress(TabPage tab_page) {
         if (!last_active_tab || last_active_tab.value() == tab_page || ready()) {
             return;
@@ -1189,6 +1212,7 @@ private:
         type_pending_value = std::nullopt;
         factor_change_pending_since = std::nullopt;
         factor_probe_reference = {};
+        last_scroll_position_emitted = std::nullopt;
     }
 
     [[nodiscard]] bool ready() const { return scraping_state == scraper_impl::Ready; }
@@ -1208,6 +1232,7 @@ private:
     const event_util::Sender<RecordInfo> on_closed_before_completed;
     const event_util::Sender<int> on_scroll_ready;  // When user can start scrolling.
     const event_util::Sender<int, double> on_scroll_updated;  // When user scrolling.
+    const event_util::Sender<int, bool> on_scroll_position;  // Current tab's at-top position (edge-triggered).
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
@@ -1252,6 +1277,7 @@ private:
     std::optional<record::RecordType> type_pending_value;
     std::optional<uint64> factor_change_pending_since;
     Frame factor_probe_reference = {};
+    std::optional<std::pair<TabPage, bool>> last_scroll_position_emitted;
 };
 
 }  // namespace uma::chara_detail

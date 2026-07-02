@@ -214,21 +214,27 @@ class _CharaDetailStateWidget extends ConsumerWidget {
     // Within the states that show progress (detailReady / capturing / duplicateHint) switchSafety is
     // always non-null; default defensively so an unexpected null reads as "not safe to switch".
     final safe = state.switchSafety ?? false;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _buildSwitchIndicator(context, safe, leading: true),
-        _ScrollStateWidget(header: "$tr_capture.capture_control.progress.skill".tr(), progress: state.skillTabProgress),
-        _ScrollStateWidget(
-          header: "$tr_capture.capture_control.progress.factor".tr(),
-          progress: state.factorTabProgress,
-        ),
-        _ScrollStateWidget(
-          header: "$tr_capture.capture_control.progress.campaign".tr(),
-          progress: state.campaignTabProgress,
-        ),
-        _buildSwitchIndicator(context, safe, leading: false),
-      ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          _buildSwitchIndicator(context, safe, leading: true),
+          _ScrollStateWidget(
+            header: "$tr_capture.capture_control.progress.skill".tr(),
+            progress: state.skillTabProgress,
+          ),
+          _ScrollStateWidget(
+            header: "$tr_capture.capture_control.progress.factor".tr(),
+            progress: state.factorTabProgress,
+          ),
+          _ScrollStateWidget(
+            header: "$tr_capture.capture_control.progress.campaign".tr(),
+            progress: state.campaignTabProgress,
+          ),
+          _buildSwitchIndicator(context, safe, leading: false),
+        ],
+      ),
     );
   }
 
@@ -247,7 +253,17 @@ class _CharaDetailStateWidget extends ConsumerWidget {
       case CharaDetailCaptureStatus.waitingForDetail:
         return _StatusMessage(_StatusTone.info, Symbols.hourglass_empty_rounded, "$base.waiting_for_detail");
       case CharaDetailCaptureStatus.detailReady:
-        return _StatusMessage(_StatusTone.info, Symbols.swipe_down_rounded, "$base.detail_ready");
+        // The action line depends on whether the user can switch characters right now: switching is only
+        // detectable at the factor-tab top (switchSafety), so guide toward it when it is not yet reached.
+        final actionKey = (state.switchSafety ?? false)
+            ? "$base.detail_ready.action.switchable"
+            : "$base.detail_ready.action.not_switchable";
+        return _StatusMessage.explicit(
+          _StatusTone.info,
+          Symbols.swipe_down_rounded,
+          "$base.detail_ready.status".tr(),
+          actionKey.tr(),
+        );
       case CharaDetailCaptureStatus.capturing:
         return _StatusMessage(_StatusTone.info, Symbols.downloading_rounded, "$base.capturing");
       case CharaDetailCaptureStatus.succeeded:
