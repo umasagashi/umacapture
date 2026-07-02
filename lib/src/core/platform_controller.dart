@@ -96,8 +96,6 @@ class CharaDetailCaptureState {
   /// Native tab index for the factor tab (skill=0, factor=1, campaign=2).
   static const int factorTabIndex = 1;
 
-  bool isCapturing;
-
   double skillTabProgress;
 
   double factorTabProgress;
@@ -125,7 +123,6 @@ class CharaDetailCaptureState {
   bool atTop;
 
   CharaDetailCaptureState({
-    this.isCapturing = false,
     this.skillTabProgress = 0,
     this.factorTabProgress = 0,
     this.campaignTabProgress = 0,
@@ -139,7 +136,6 @@ class CharaDetailCaptureState {
 
   CharaDetailCaptureState clone() {
     return CharaDetailCaptureState(
-      isCapturing: isCapturing,
       skillTabProgress: skillTabProgress,
       factorTabProgress: factorTabProgress,
       campaignTabProgress: campaignTabProgress,
@@ -164,7 +160,6 @@ class CharaDetailCaptureState {
 
   CharaDetailCaptureState progress(int index, double progress) {
     final state = clone();
-    state.isCapturing = true;
     // Progress is purely the ring value (how much of the tab has been captured). Scroll position -- whether
     // the tab is at its top -- is a separate fact reported by the native scroll-position event, so it is not
     // inferred from progress deltas here.
