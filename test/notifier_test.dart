@@ -13,23 +13,21 @@ void main() {
     final notifier = container.read(charaDetailCaptureStateProvider.notifier);
 
     // Initial state.
-    expect(container.read(charaDetailCaptureStateProvider).isCapturing, isFalse);
+    expect(container.read(charaDetailCaptureStateProvider).skillTabProgress, 0.0);
 
-    // progress() flips isCapturing and records per-tab progress.
+    // progress() records per-tab progress.
     notifier.progress(0, 0.5);
     var state = container.read(charaDetailCaptureStateProvider);
-    expect(state.isCapturing, isTrue);
     expect(state.skillTabProgress, 0.5);
 
     notifier.progress(1, 1.0);
     expect(container.read(charaDetailCaptureStateProvider).factorTabProgress, 1.0);
 
-    // success() resets progress and exposes the new link.
+    // success() exposes the new link and pins every tab at 100% (the completed rings stay visible).
     notifier.success('rec-1');
     state = container.read(charaDetailCaptureStateProvider);
     expect(state.link?.id, 'rec-1');
-    expect(state.isCapturing, isFalse);
-    expect(state.skillTabProgress, 0.0);
+    expect(state.skillTabProgress, 1.0);
 
     // fail() keeps the current state but records the error message.
     notifier.fail('boom');
@@ -38,7 +36,6 @@ void main() {
     // reset() returns to a clean state.
     notifier.reset();
     final reset = container.read(charaDetailCaptureStateProvider);
-    expect(reset.isCapturing, isFalse);
     expect(reset.error, isNull);
     expect(reset.link, isNull);
   });

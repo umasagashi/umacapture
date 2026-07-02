@@ -69,18 +69,27 @@ public:
         notify(json_util::Json{{"type", "onScrollUpdated"}, {"index", index}, {"progress", progress}}.dump());
     }
 
+    void notifyScrollPosition(int index, bool at_top) {
+        notify(json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"at_top", at_top}}.dump());
+    }
+
     void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
 
     void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {
         notify(json_util::Json{{"type", "onFactorProbe"}, {"factors", factors}, {"record_type", record_type}}.dump());
     }
 
-    void notifyCharaDetailStarted(chara_detail::record::RecordType record_type) {
-        notify(json_util::Json{{"type", "onCharaDetailStarted"}, {"record_type", static_cast<int>(record_type)}}.dump());
-    }
+    void notifyCharaDetailStarted() { notify(json_util::Json{{"type", "onCharaDetailStarted"}}.dump()); }
+    // Mid-scene reset: the scraper discarded the current session (a character switch was inferred from
+    // on-screen content) and rebuilt it, without the detail screen closing. The UI must reset its capture
+    // progress just as it does for a fresh open.
+    void notifyCharaDetailRestarted() { notify(json_util::Json{{"type", "onCharaDetailRestarted"}}.dump()); }
     void notifyCharaDetailFinished(const chara_detail::RecordInfo &info, bool success) {
         notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", info.record_id}, {"success", success}}.dump());
     }
+    // The detail screen was closed. The UI returns to waiting for the next detail screen (a completed
+    // capture leaves its progress on screen until this fires; an incomplete one also emits an error).
+    void notifyCharaDetailClosed() { notify(json_util::Json{{"type", "onCharaDetailClosed"}}.dump()); }
 
     void updateRecord(const chara_detail::RecordInfo &info) const;
     void notifyCharaDetailUpdated(const chara_detail::RecordInfo &info) {
