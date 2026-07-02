@@ -326,6 +326,35 @@ public:
         return total;
     }
 
+    // Per-pixel difference statistics over `rect`, gated at `threshold`: a pixel is "changed" when its
+    // per-pixel BGR difference (0-765) exceeds the threshold. Reports how *many* pixels changed (ratio),
+    // so a caller can key off a broad-area change rather than a magnitude sum that a few large-delta
+    // pixels can dominate.
+    struct DiffStats {
+        uint64 changed = 0;  // pixels whose per-pixel diff exceeds the threshold
+        uint64 total = 0;  // pixels examined
+
+        // Fraction of examined pixels that changed (0-1).
+        [[nodiscard]] double ratio() const { return total == 0 ? 0.0 : static_cast<double>(changed) / total; }
+    };
+
+    [[nodiscard]] DiffStats diffStats(const Frame &other, const Rect<double> &rect, int threshold) const {
+        if (this->size() != other.size()) {
+            throw std::invalid_argument("diffStats: frame sizes do not match");
+        }
+        const auto &mapped_rect = rect.empty() ? this->rect() : anchor_.mapToFrame(rect);
+        DiffStats stats;
+        for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
+            for (int x = mapped_rect.left(); x < mapped_rect.right(); x++) {
+                stats.total++;
+                if (bgrAt(x, y).difference(other.bgrAt(x, y)) > threshold) {
+                    stats.changed++;
+                }
+            }
+        }
+        return stats;
+    }
+
     [[nodiscard]] inline Color colorAt(const Point<double> &point) const {
         const auto &p = anchor_.mapToFrame(point);
         return colorAt(p.x(), p.y());
