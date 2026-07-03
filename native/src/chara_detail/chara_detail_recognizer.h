@@ -336,8 +336,6 @@ private:
     recognizer::Model<IndexPrediction> campaign_field_model;
     recognizer::Model<IndexPrediction> fans_value_model;
     recognizer::Model<IndexPrediction> scenario_model;
-    recognizer::Model<IndexPrediction> foreign_aptitude_model;
-    recognizer::Model<IndexPrediction> uaf_wins_model;
     recognizer::Model<DateTimePrediction> trained_date_model;
 };
 

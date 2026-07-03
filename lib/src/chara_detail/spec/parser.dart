@@ -132,12 +132,6 @@ class FansParser extends Parser<int> with FansParserMappable {
   int parse(CharaDetailRecord record) => record.fans;
 }
 
-@MappableClass(discriminatorValue: 'ForeignAptitudeParser')
-class ForeignAptitudeParser extends Parser<int> with ForeignAptitudeParserMappable {
-  @override
-  int parse(CharaDetailRecord record) => record.foreignAptitude ?? 0;
-}
-
 @MappableClass(discriminatorValue: 'TrainedDateParser')
 class TrainedDateParser extends Parser<DateTime> with TrainedDateParserMappable {
   @override

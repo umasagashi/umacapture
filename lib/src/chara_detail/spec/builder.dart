@@ -299,13 +299,6 @@ final columnBuilderProvider = Provider<List<ColumnBuilder>>((ref) {
       parser: FansParser(),
       cellAction: ColumnSpecCellAction.openCampaignPreview,
     ),
-    // TODO: Scenario-dependent fields are temporarily disabled due to their lack of practical use.
-    // RangedIntegerColumnBuilder(
-    //   title: "$tr_columns.foreign_aptitude.title".tr(),
-    //   category: ColumnCategory.campaign,
-    //   parser: ForeignAptitudeParser(),
-    //   cellAction: ColumnSpecCellAction.openCampaignPreview,
-    // ),
     SimpleLabelColumnBuilder(
       title: "$tr_columns.campaign_scenario.title".tr(),
       category: ColumnCategory.campaign,

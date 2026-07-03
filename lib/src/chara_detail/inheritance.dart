@@ -366,8 +366,6 @@ class InheritanceResolver {
       record.family,
       record.fans,
       record.scenario,
-      record.foreignAptitude,
-      record.uafWins,
       record.trainedDate,
       record.races,
     );

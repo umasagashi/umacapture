@@ -439,8 +439,6 @@ CampaignRecordRecognizer::CampaignRecordRecognizer(
     , campaign_field_model(module_root_dir / config.campaign_field.module_path, "campaign_field")
     , fans_value_model(module_root_dir / config.fans_value.module_path, "fans_value")
     , scenario_model(module_root_dir / config.scenario.module_path, "scenario")
-    , foreign_aptitude_model(module_root_dir / config.foreign_aptitude.module_path, "foreign_aptitude")
-    , uaf_wins_model(module_root_dir / config.uaf_wins.module_path, "uaf_wins")
     , trained_date_model(module_root_dir / config.trained_date.module_path, "trained_date") {}
 
 void CampaignRecordRecognizer::recognize(
