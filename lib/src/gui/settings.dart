@@ -340,7 +340,9 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
   }
 
   void _test() {
-    ref.read(soundEffectProvider(_type).future).then((effect) => effect.play());
+    // load()/play() already log their own failures; swallow here only to avoid an unhandled async
+    // error if the future rejects (e.g. the player was superseded mid-load, or setup threw).
+    ref.read(soundEffectProvider(_type).future).then((effect) => effect.play()).catchError((_) {});
   }
 
   @override
