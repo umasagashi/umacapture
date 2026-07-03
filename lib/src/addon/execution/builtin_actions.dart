@@ -232,19 +232,20 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     argumentLabelKey: "$_trBuiltin.play_sound_argument",
     argumentUsesPlaceholders: false,
     argumentOptions: const [
-      BuiltinArgumentOption("attention_normal", "$_trBuiltin.options.sound_attention_normal"),
-      BuiltinArgumentOption("attention_weak", "$_trBuiltin.options.sound_attention_weak"),
+      BuiltinArgumentOption("success", "$_trBuiltin.options.sound_success"),
+      BuiltinArgumentOption("standby", "$_trBuiltin.options.sound_standby"),
       BuiltinArgumentOption("error", "$_trBuiltin.options.sound_error"),
     ],
-    defaultArgument: "attention_normal",
+    defaultArgument: "success",
     run: (ref, payload, argument, secondaryArgument) async {
-      final type = switch ((argument ?? "attention_normal").trim()) {
-        "attention_weak" => SoundType.attentionWeak,
+      // Accept the pre-rename argument strings ("attention_weak"/"attention_normal") as aliases so
+      // addon definitions authored before the role rename keep working.
+      final type = switch ((argument ?? "success").trim()) {
+        "standby" || "attention_weak" => SoundType.standby,
         "error" => SoundType.error,
-        _ => SoundType.attentionNormal,
+        _ => SoundType.success,
       };
-      final effect = await ref.read(soundEffectProvider(type).future);
-      await effect.play();
+      await ref.read(soundEffectProvider(type).future).playSafely();
     },
   ),
 };

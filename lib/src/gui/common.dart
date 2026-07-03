@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:feedback_sentry/feedback_sentry.dart';
 import 'package:flutter/foundation.dart';
@@ -381,6 +383,70 @@ class Disabled extends StatelessWidget {
     } else {
       return wrappedChild();
     }
+  }
+}
+
+/// A single-line [Text] that truncates from the front, keeping the end of the string visible.
+///
+/// Flutter's [TextOverflow.ellipsis] only truncates the tail, so a long file path would hide its
+/// file name. This measures the available width with a [TextPainter] and prepends [ellipsis] to the
+/// longest fitting suffix, left-aligned. Wrap in a [Tooltip] to still expose the full string.
+class StartEllipsisText extends StatelessWidget {
+  const StartEllipsisText(this.text, {super.key, this.style, this.ellipsis = '…'});
+
+  final String text;
+  final TextStyle? style;
+  final String ellipsis;
+
+  @override
+  Widget build(BuildContext context) {
+    final textScaler = MediaQuery.textScalerOf(context);
+    // Measure with the same style Text renders with: it merges any explicit style onto the ambient
+    // DefaultTextStyle. Skipping this merge would mismeasure whenever style is null or partial.
+    final effectiveStyle = DefaultTextStyle.of(context).style.merge(style);
+    final textDirection = Directionality.maybeOf(context) ?? ui.TextDirection.ltr;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth;
+        if (!maxWidth.isFinite || text.isEmpty) {
+          return Text(text, style: effectiveStyle, maxLines: 1, softWrap: false);
+        }
+        double widthOf(String value) {
+          final painter = TextPainter(
+            text: TextSpan(style: effectiveStyle, text: value),
+            textDirection: textDirection,
+            textScaler: textScaler,
+            maxLines: 1,
+          )..layout();
+          final width = painter.width;
+          painter.dispose();
+          return width;
+        }
+
+        if (widthOf(text) <= maxWidth) {
+          return Text(text, style: effectiveStyle, maxLines: 1, softWrap: false);
+        }
+        // Binary search for the smallest suffix start such that "…suffix" fits: a later start means
+        // a shorter suffix, which is narrower and therefore more likely to fit.
+        var lo = 0;
+        var hi = text.length;
+        while (lo < hi) {
+          final mid = (lo + hi) >> 1;
+          if (widthOf('$ellipsis${text.substring(mid)}') <= maxWidth) {
+            hi = mid;
+          } else {
+            lo = mid + 1;
+          }
+        }
+        return Text(
+          '$ellipsis${text.substring(lo)}',
+          style: effectiveStyle,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.clip,
+        );
+      },
+    );
   }
 }
 
