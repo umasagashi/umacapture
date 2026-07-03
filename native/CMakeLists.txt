@@ -19,6 +19,7 @@ set(
         src/core/cli.cpp
         src/core/native_api.cpp
         src/chara_detail/chara_detail_recognizer.cpp
+        src/chara_detail/chara_detail_scene_context.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
         src/chara_detail/chara_detail_scene_stitcher.cpp
         src/condition/serializer.cpp
