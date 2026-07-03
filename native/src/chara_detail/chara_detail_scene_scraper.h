@@ -484,18 +484,26 @@ private:
     // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
     static constexpr uint64 kMonitorDwellMs = 250;
-    // A pixel counts as "changed" when its per-pixel BGR difference (0-765) exceeds this. Set above the video
-    // codec's per-pixel noise so scattered compression artifacts are not counted; live capture has ~no noise,
-    // so the exact value matters only for video sources. Lower it to register subtler switches (fewer/smaller
-    // differing factors), leaning on the ratio threshold below to reject the extra noise that admits.
-    static constexpr int kFactorChangePixelDiffThreshold = 5;
+    // A pixel counts as "changed" when its per-pixel BGR difference (0-765) exceeds this. The dominant
+    // same-character noise is anti-aliasing / video-codec shimmer along text, star and icon edges -- broadly
+    // scattered but LOW magnitude. Measured per-pixel-diff sweeps on two clips (373k-pixel region): that
+    // shimmer is entirely below magnitude ~10-12 (a same-character frame reading 1.06% at X=5 collapses to
+    // 0.04% at X=8 and 0% at X=12), whereas a real switch changes text glyphs -- high contrast, high magnitude
+    // -- and barely moves (6.59% at X=5 -> 5.70% at X=15, ~87% retained). 15 sits just above the shimmer
+    // ceiling, so raising the gate here (not the ratio below) is what suppresses the noise while keeping a real
+    // switch intact -- including a similar-factor switch, whose smaller but still-high-magnitude text change
+    // survives the gate where equal-ratio edge noise does not.
+    static constexpr int kFactorChangePixelDiffThreshold = 15;
     // Fraction of the factor scroll area that must be "changed" (per X above) to treat the content as a
     // different character rather than noise. Counting *how many* pixels changed (a broad, contiguous area on a
     // real switch) instead of *how much* (a magnitude average a few large-delta pixels could dominate) is far
-    // more robust to the spikes video sources inject. The 250ms dwell guards transient spikes. Calibrated on
-    // .notes/player_standard_factor_only_1.mp4 (a no-scroll same-character switch, the hardest case): with
-    // X=5 the idle codec noise peaks at ~0.6% while the switch reads ~6.3%, so 1% sits well between them.
-    static constexpr double kFactorChangeRatioThreshold = 0.01;
+    // more robust to the spikes video sources inject. The 250ms dwell guards transient spikes. With X=15 the
+    // only same-character residual is a moving mouse cursor (high contrast, so it survives the gate, but tiny:
+    // ~0.10% of the region), while a real switch reads ~5.7%. 0.5% sits above that ~0.10% cursor floor yet well
+    // below a real switch, low enough to also catch a weak (few-row / similar-factor) change that the old 1%
+    // could miss. Verified end-to-end: .notes/player_standard.mp4 (same character) no longer resets, while the
+    // .notes/player_standard_factor_only_1.mp4 switch still does.
+    static constexpr double kFactorChangeRatioThreshold = 0.005;
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
