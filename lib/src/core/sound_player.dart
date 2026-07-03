@@ -24,10 +24,12 @@ final soundSettingProvider = NotifierProvider.family<SoundSettingNotifier, Sound
 
 final soundEffectProvider = FutureProvider.family<SoundEffect, SoundType>((ref, type) async {
   final setting = ref.watch(soundSettingProvider(type));
-  final effect = await SoundEffect.load(setting, type);
   // The player is recreated whenever the setting changes (e.g. dragging the volume slider), so
-  // release the superseded native player instead of leaking it.
-  ref.onDispose(effect.dispose);
+  // release the superseded native player instead of leaking it. Register disposal synchronously
+  // (before the await) so a setting change mid-load cannot leave the loaded player unreleased.
+  SoundEffect? effect;
+  ref.onDispose(() => effect?.dispose());
+  effect = await SoundEffect.load(setting, type);
   return effect;
 });
 

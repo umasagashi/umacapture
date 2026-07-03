@@ -1,5 +1,4 @@
 import 'package:auto_route/auto_route.dart';
-import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -310,12 +309,12 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
   SoundType get _type => widget.type;
 
   Future<void> _pickFile() async {
-    final result = await FilePicker.pickFiles(
+    final file = await FilePicker.pickFile(
       dialogTitle: "$tr_sound.picker_title".tr(),
       type: FileType.custom,
       allowedExtensions: const ["wav", "mp3"],
     );
-    final path = result?.files.singleOrNull?.path;
+    final path = file?.path;
     if (path == null) return;
     ref.read(soundSettingProvider(_type).notifier).setCustomFile(path);
   }

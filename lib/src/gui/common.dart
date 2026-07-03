@@ -414,7 +414,9 @@ class StartEllipsisText extends StatelessWidget {
             textScaler: textScaler,
             maxLines: 1,
           )..layout();
-          return painter.width;
+          final width = painter.width;
+          painter.dispose();
+          return width;
         }
 
         if (widthOf(text) <= maxWidth) {
