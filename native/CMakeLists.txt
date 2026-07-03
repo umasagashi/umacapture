@@ -84,3 +84,67 @@ add_custom_command(
         ${ONNX_DIR}/lib/onnxruntime.dll
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
+
+# ---------------------------------------------------------------------------
+# Unit tests (doctest, vendored header-only under vendor/doctest).
+#
+# Configure/build:  cmake --build <build-dir> --target umacapture_tests
+# Run:              ctest --test-dir <build-dir> --output-on-failure
+#                   (or run the umacapture_tests executable directly)
+#
+# The test target deliberately links only the pure-logic sources it needs
+# (currently the condition serializer, which pulls in OpenCV via cv/frame.h but
+# not ONNX/WinRT). Add new pure-logic .cpp files and their tests here as the
+# header/.cpp split progresses.
+# ---------------------------------------------------------------------------
+enable_testing()
+
+set(
+        TEST_SOURCE_FILES
+        test/test_main.cpp
+        test/condition/test_serializer.cpp
+        test/condition/test_condition.cpp
+        src/condition/serializer.cpp
+)
+
+add_executable(umacapture_tests ${TEST_SOURCE_FILES})
+
+target_compile_options(
+        umacapture_tests PRIVATE
+        /wd4068
+        /wd4819
+        /wd4996
+        /wd5285    # doctest specializes std::tuple, which MSVC flags under N5014; harmless here.
+        /bigobj
+)
+
+target_compile_definitions(
+        umacapture_tests PRIVATE
+        USE_CUSTOM_ASSERT
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+        _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+)
+
+target_include_directories(
+        umacapture_tests PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${CMAKE_CURRENT_LIST_DIR}/vendor"
+        "${CMAKE_CURRENT_LIST_DIR}/../windows"
+        "${OpenCV_INCLUDE_DIRS}"
+)
+
+target_link_libraries(
+        umacapture_tests PRIVATE
+        "${OpenCV_LIBS}"
+)
+
+add_test(NAME umacapture_tests COMMAND umacapture_tests)
+
+add_custom_command(
+        TARGET umacapture_tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
+        $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
+        $<TARGET_FILE_DIR:umacapture_tests>
+)
