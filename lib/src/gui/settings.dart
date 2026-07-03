@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '/const.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/clipboard_alt.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/sound_player.dart';
 import '/src/core/utils.dart';
@@ -23,6 +24,7 @@ import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_dialog.dart';
 import '/src/gui/storage_settings.dart';
+import '/src/gui/theme_extensions.dart';
 import '/src/gui/theme_gallery.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
@@ -306,7 +308,25 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
   /// the audio player) is only committed once, on drag end.
   double? _dragVolume;
 
+  /// Cache for [_isMissing]: the last custom path checked and whether it was absent.
+  String? _checkedPath;
+  bool _fileMissing = false;
+
   SoundType get _type => widget.type;
+
+  /// Whether [setting] points at a custom file that no longer exists on disk.
+  ///
+  /// The player silently falls back to the default clip in that case, so the UI would otherwise
+  /// keep showing a path that never plays. Memoized on the path so dragging the volume slider
+  /// (which rebuilds every frame) does not trigger a filesystem stat per frame.
+  bool _isMissing(SoundSetting setting) {
+    if (!setting.isCustom) return false;
+    if (setting.path != _checkedPath) {
+      _checkedPath = setting.path;
+      _fileMissing = !FilePath(setting.path).existsSync();
+    }
+    return _fileMissing;
+  }
 
   Future<void> _pickFile() async {
     final file = await FilePicker.pickFile(
@@ -331,12 +351,23 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
     final labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
 
     final title = Text("$tr_sound.type.${_type.name.snakeCase}".tr(), style: theme.textTheme.titleMedium);
+    final missing = _isMissing(setting);
+    final pathStyle = missing ? labelStyle?.copyWith(color: theme.semantic.warning) : labelStyle;
     final sourceLabel = setting.isCustom
         ? Tooltip(
             // A full path rarely fits, so ellipsize from the front to keep the file name visible;
-            // the tooltip shows the whole path on hover.
-            message: setting.path,
-            child: StartEllipsisText(setting.path, style: labelStyle),
+            // the tooltip shows the whole path on hover. When the file is gone, flag it so the user
+            // knows the default clip is playing instead.
+            message: missing ? "${"$tr_sound.missing_tooltip".tr()}\n${setting.path}" : setting.path,
+            child: Row(
+              children: [
+                if (missing) ...[
+                  Icon(Symbols.warning_rounded, size: 14, color: theme.semantic.warning),
+                  const SizedBox(width: 4),
+                ],
+                Expanded(child: StartEllipsisText(setting.path, style: pathStyle)),
+              ],
+            ),
           )
         : Text("$tr_sound.source.default".tr(), style: labelStyle);
 

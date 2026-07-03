@@ -1345,7 +1345,8 @@
                 },
                 "test_tooltip": "試聴",
                 "pick_tooltip": "音声ファイルを選択（wav / mp3）",
-                "reset_tooltip": "デフォルトに戻す"
+                "reset_tooltip": "デフォルトに戻す",
+                "missing_tooltip": "ファイルが見つかりません（デフォルト音を再生します）"
             },
             "system": {
                 "title": "システム設定",

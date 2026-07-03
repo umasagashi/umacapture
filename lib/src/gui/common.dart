@@ -401,16 +401,20 @@ class StartEllipsisText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final textScaler = MediaQuery.textScalerOf(context);
+    // Measure with the same style Text renders with: it merges any explicit style onto the ambient
+    // DefaultTextStyle. Skipping this merge would mismeasure whenever style is null or partial.
+    final effectiveStyle = DefaultTextStyle.of(context).style.merge(style);
+    final textDirection = Directionality.maybeOf(context) ?? ui.TextDirection.ltr;
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxWidth = constraints.maxWidth;
         if (!maxWidth.isFinite || text.isEmpty) {
-          return Text(text, style: style, maxLines: 1, softWrap: false);
+          return Text(text, style: effectiveStyle, maxLines: 1, softWrap: false);
         }
         double widthOf(String value) {
           final painter = TextPainter(
-            text: TextSpan(style: style, text: value),
-            textDirection: ui.TextDirection.ltr,
+            text: TextSpan(style: effectiveStyle, text: value),
+            textDirection: textDirection,
             textScaler: textScaler,
             maxLines: 1,
           )..layout();
@@ -420,7 +424,7 @@ class StartEllipsisText extends StatelessWidget {
         }
 
         if (widthOf(text) <= maxWidth) {
-          return Text(text, style: style, maxLines: 1, softWrap: false);
+          return Text(text, style: effectiveStyle, maxLines: 1, softWrap: false);
         }
         // Binary search for the smallest suffix start such that "…suffix" fits: a later start means
         // a shorter suffix, which is narrower and therefore more likely to fit.
@@ -436,7 +440,7 @@ class StartEllipsisText extends StatelessWidget {
         }
         return Text(
           '$ellipsis${text.substring(lo)}',
-          style: style,
+          style: effectiveStyle,
           maxLines: 1,
           softWrap: false,
           overflow: TextOverflow.clip,
