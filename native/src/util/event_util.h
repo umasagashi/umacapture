@@ -159,9 +159,9 @@ public:
         const std::shared_ptr<EventProcessorInterface> &processor,
         const std::function<void()> &detach,
         const std::string &name)
-        : processor(processor)
-        , detach(detach)
-        , name(name) {}
+        : name(name)
+        , processor(processor)
+        , detach(detach) {}
 
     ~EventRunnerThread() override { join(); }
 
@@ -208,10 +208,10 @@ class SingleThreadMultiEventRunnerImpl : public EventRunnerInterface {
 public:
     SingleThreadMultiEventRunnerImpl(
         QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name)
-        : queue_limit_mode(queue_limit_mode)
-        , notifier(std::make_shared<QueuedConnectionImpl<int>>(QueueLimitMode::NoLimit))
+        : notifier(std::make_shared<QueuedConnectionImpl<int>>(QueueLimitMode::NoLimit))
         , finalizer(finalizer)
-        , name(name) {
+        , name(name)
+        , queue_limit_mode(queue_limit_mode) {
         notifier->listen([this](const int &index) {
             assert_(isRunning());
             processors[index]->processOne();

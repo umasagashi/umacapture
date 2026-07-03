@@ -89,14 +89,7 @@ std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::scanMargin(co
 }
 
 ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
-    : trust_ratio(config.trust_ratio)
-    , horizontal_threshold(config.horizontal_threshold)
-    , minimum_overlap_score(config.minimum_overlap_score)
-    , minimum_overlap_height(config.minimum_overlap_height)
-    , overlap_downscale(config.overlap_downscale)
-    , minimum_key_points(config.minimum_key_points)
-    , vertical_threshold(config.vertical_threshold)
-    , detector(
+    : detector(
           cv::AKAZE::create(
               cv::AKAZE::DESCRIPTOR_MLDB_UPRIGHT,
               0,
@@ -107,7 +100,14 @@ ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &con
               cv::KAZE::DIFF_PM_G2))
     , matcher(
           cv::makePtr<cv::FlannBasedMatcher>(
-              cv::makePtr<cv::flann::LshIndexParams>(config.table_number, config.key_size, config.probe_level))) {}
+              cv::makePtr<cv::flann::LshIndexParams>(config.table_number, config.key_size, config.probe_level)))
+    , trust_ratio(config.trust_ratio)
+    , horizontal_threshold(config.horizontal_threshold)
+    , minimum_overlap_score(config.minimum_overlap_score)
+    , minimum_overlap_height(config.minimum_overlap_height)
+    , overlap_downscale(config.overlap_downscale)
+    , minimum_key_points(config.minimum_key_points)
+    , vertical_threshold(config.vertical_threshold) {}
 
 ImageOffsetEstimator::ImageOffsetEstimator()
     : ImageOffsetEstimator(ImageOffsetEstimatorConfig()) {}
@@ -438,13 +438,13 @@ ScrollableScrapingInterpreter::ScrollableScrapingInterpreter(
     double minimum_scroll_threshold,
     const event_util::Sender<> &on_scroll_ready,
     const event_util::Sender<double> &on_scroll_updated)
-    : offset_estimator(offset_estimator)
-    , stationary_catcher(stationary_catcher)
-    , scraping_box(scraping_box)
+    : on_scroll_ready(on_scroll_ready)
+    , on_scroll_updated(on_scroll_updated)
+    , offset_estimator(offset_estimator)
     , initial_scroll(initial_scroll_threshold)
     , minimum_scroll(minimum_scroll_threshold)
-    , on_scroll_ready(on_scroll_ready)
-    , on_scroll_updated(on_scroll_updated) {}
+    , scraping_box(scraping_box)
+    , stationary_catcher(stationary_catcher) {}
 
 void ScrollableScrapingInterpreter::update(const Frame &frame) {
     assert_(state == Updatable);
@@ -668,8 +668,8 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const scraper_config::CharaDetailSceneScraperConfig &config,
     const std::filesystem::path &scraping_dir,
     const io_util::DirectoryHooks &directory_hooks)
-    : on_updated(on_updated)
-    , on_opened(on_opened)
+    : on_opened(on_opened)
+    , on_updated(on_updated)
     , on_closed(on_closed)
     , on_closed_before_completed(on_closed_before_completed)
     , on_scroll_ready(on_scroll_ready)
