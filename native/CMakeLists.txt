@@ -133,6 +133,14 @@ target_compile_definitions(
         WINVER=0x0A00
         _WIN32_WINNT=0x0A00
         _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+        # The <algorithm>/<string> vectorized search helpers (__std_find_end_1,
+        # __std_find_not_ch_1, __std_find_last_not_ch_pos_1) live in the separately-compiled STL and are
+        # only pulled in from the C++ runtime import lib. This minimal test target links just OpenCV's
+        # opencv_world (built with an older toolset), so those symbols go unresolved at link time
+        # (LNK2019). The cli/app targets avoid it by also linking onnxruntime/windowsapp. Disabling the
+        # vectorized codepaths makes the test TUs use the header-inline scalar fallback instead, which is
+        # behaviourally identical and needs no runtime symbol. Scoped to the test binary only.
+        _USE_STD_VECTOR_ALGORITHMS=0
 )
 
 target_include_directories(
