@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
@@ -49,24 +50,43 @@ public:
         notify(json_util::Json{{"type", "onScreenshotTaken"}, {"path", path}, {"result", resultCode}}.dump());
     }
 
+    // The producer entry points below (called from the FFI/Dart thread) copy the target sender out under
+    // pipeline_mutex, then send() on the local copy outside the lock. The shared_ptr copy keeps the
+    // connection alive even if teardown() nulls the member concurrently, and sending outside the lock avoids
+    // deadlocking teardown when a Block-mode queue is full. See updateFrame() for the same pattern.
     void stitch(const chara_detail::RecordInfo &info) const {
-        if (!isRunning()) {
-            return;
+        event_util::Sender<chara_detail::RecordInfo> sender;
+        {
+            std::lock_guard<std::mutex> lock(pipeline_mutex);
+            if (!isRunningLocked()) {
+                return;
+            }
+            sender = on_stitch_ready;
         }
-        on_stitch_ready->send(info);
+        sender->send(info);
     }
 
     void recognize(const chara_detail::RecordInfo &info) const {
-        if (!isRunning()) {
-            return;
+        event_util::Sender<chara_detail::RecordInfo> sender;
+        {
+            std::lock_guard<std::mutex> lock(pipeline_mutex);
+            if (!isRunningLocked()) {
+                return;
+            }
+            sender = on_recognize_ready;
         }
-        on_recognize_ready->send(info);
+        sender->send(info);
     }
     void recognize(const std::string &record_id) const {
-        if (!isRunning()) {
-            return;
+        event_util::Sender<chara_detail::RecordInfo> sender;
+        {
+            std::lock_guard<std::mutex> lock(pipeline_mutex);
+            if (!isRunningLocked()) {
+                return;
+            }
+            sender = on_recognize_ready;
         }
-        on_recognize_ready->send({record_id, std::nullopt});
+        sender->send({record_id, std::nullopt});
     }
 
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
@@ -129,8 +149,14 @@ public:
 
     void setLoggingCallback(const std::function<MessageCallback> &method) { logging_callback = method; }
     void log(const std::string &message) {
-        // Do not use logger here.
-        logging_callback(message);
+        // Never throw: invoked from a spdlog sink (CallbackSink::sink_it_) on arbitrary worker threads, where
+        // an escaping exception would terminate the process. Do not route through the logger here (it would
+        // recurse back into this sink).
+        try {
+            logging_callback(message);
+        } catch (...) {
+            // Swallow: there is no safe logging channel from inside the log sink.
+        }
     }
 
 private:
@@ -140,7 +166,11 @@ private:
 
     // Tears down the whole pipeline, tolerating partial initialization. Shared by joinEventLoop() and the
     // startEventLoop() failure path so a throw mid-construction never leaves a half-built event loop behind.
-    void teardown();
+    // Assumes pipeline_mutex is already held by the caller.
+    void teardownLocked();
+
+    // Running check without taking pipeline_mutex, for callers that already hold it.
+    [[nodiscard]] bool isRunningLocked() const;
 
     void notify(const std::string &message) {
         log_trace(message);
@@ -154,6 +184,11 @@ private:
     std::function<VoidCallback> detach_callback = []() {};
     std::function<PathCallback> mkdir_callback = [](const auto &path) { std::filesystem::create_directories(path); };
     std::function<PathCallback> rmdir_callback = [](const auto &path) { std::filesystem::remove_all(path); };
+
+    // Serializes pipeline lifecycle (startPipeline/teardownLocked) against the producer entry points
+    // (updateFrame/stitch/recognize/updateRecord). Producers copy the sender they need out under this lock,
+    // then send() outside it. mutable so the const producer methods can lock it.
+    mutable std::mutex pipeline_mutex;
 
     // debug interface
     event_util::Sender<chara_detail::RecordInfo> on_stitch_ready;

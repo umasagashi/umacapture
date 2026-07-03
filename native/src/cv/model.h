@@ -49,6 +49,13 @@ struct Prediction {
         if (index < 0 || static_cast<size_t>(index) >= data.size()) {
             throw std::out_of_range("Prediction::at: index out of range");
         }
+        // The return below dereferences element [0] even on the check=false path, so an empty tensor (a model
+        // swapped for one whose output N has no elements) would read out of bounds. Reject that regardless of
+        // check; the vector-output (count > 1) rejection stays gated behind check.
+        const auto element_count = data[index].GetTensorTypeAndShapeInfo().GetElementCount();
+        if (element_count < 1) {
+            throw std::out_of_range("Prediction::at: empty tensor output");
+        }
         if (check) {
             auto type_info = data[index].GetTensorTypeAndShapeInfo();
             auto element_type = type_info.GetElementType();
@@ -59,7 +66,7 @@ struct Prediction {
                 throw std::invalid_argument(stream.str());
             }
 
-            if (data[index].GetTensorTypeAndShapeInfo().GetElementCount() != 1) {
+            if (element_count != 1) {
                 throw std::invalid_argument("Vector output is not supported.");
             }
         }

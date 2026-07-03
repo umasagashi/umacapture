@@ -30,6 +30,15 @@ public:
 
     ~FrameStallWatchdog() override { join(); }
 
+    // Re-baseline the last-frame timestamp before launching the poll thread. The watchdog is constructed
+    // during pipeline startup but started only after every runner spins up; a slow cold start (loading ONNX
+    // models) between construction and here could otherwise exceed the timeout and fire a spurious stall
+    // before the first real frame arrives. Hides ThreadBase::start() (called on the concrete type).
+    void start() {
+        last_frame.store(std::chrono::steady_clock::now(), std::memory_order_relaxed);
+        thread_util::ThreadBase::start();
+    }
+
     // Called from the capture thread for every delivered frame.
     void notifyFrame() { last_frame.store(std::chrono::steady_clock::now(), std::memory_order_relaxed); }
 

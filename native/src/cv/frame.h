@@ -157,7 +157,11 @@ private:
         , intersection_(intersection)
         , offset_h()
         , offset_v() {
-        const double scale = 1. / unit_size;
+        // A degenerate frame (the default/empty sentinel Frame, or a momentary 0-width capture) yields
+        // unit_size == 0. Guard the reciprocal so the offset arrays stay finite (0) instead of inf/NaN; any
+        // later coordinate math on such an anchor then trips the real bounds checks in bgrAt/view (a clean
+        // throw) rather than feeding NaN into std::lround (undefined behavior).
+        const double scale = unit_size > 0 ? 1. / unit_size : 0.;
         offset_h[ScreenStart] = 0.0;
         offset_h[ScreenLogicalEnd] = scale * frame_size.width();
         offset_h[ScreenPixelEnd] = scale * (frame_size.width() - 1);
@@ -373,16 +377,23 @@ public:
 
     [[nodiscard]] inline Frame clone() const { return {image.clone(), timestamp_, anchor_}; }
 
+    // In-place mutator: writes through the shared cv::Mat buffer. Every Frame copy is a shallow Mat share,
+    // so this is used deliberately to write to a parent through a view (e.g. canvas.view(rect).fill(...)).
+    // The flip side is that mutating a Frame handed to another thread would race that consumer; keeping a
+    // Frame owned (or cloned) before enqueuing it is the caller's responsibility.
     void fill(const Rect<double> &rect, const Color &color) {
         const auto &r = anchor_.mapToFrame(rect);
         cv::rectangle(image, r.toCVRect(), color.toCVScalar(), cv::FILLED);
     }
 
+    // In-place mutator; see fill() for the shared-buffer ownership contract.
     void paste(const Rect<double> &rect, const Frame &source) {
         const auto &dest_rect = anchor_.mapToFrame(rect);
         cv::Mat mat;
         if (dest_rect.size() == source.size()) {
-            mat = source.image;
+            // Same-size fast path shares the source header. If the source aliases THIS image's allocation, a
+            // copyTo between overlapping regions of one buffer is undefined; clone the source in that case.
+            mat = (source.image.u == image.u) ? source.image.clone() : source.image;
         } else {
             cv::resize(source.image, mat, dest_rect.size().toCVSize(), 0, 0, cv::INTER_LINEAR);
         }

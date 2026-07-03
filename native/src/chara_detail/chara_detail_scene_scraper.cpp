@@ -498,12 +498,17 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
         return;
     }
 
-    const auto position = offset_estimator.position(previous_descriptor);
+    scraping_box->addScrollArea(frame, std::lround(offset.value()));
+
+    // Report the position of the fragment just latched (current), not the previous one. position() reads only
+    // the frame's scrollbar margin (independent of scroll_bar_length), so it is valid on current_fragment.
+    // Emitting here also covers the final/bottom position before scrollAreaReady() returns, so the UI progress
+    // reaches 100% for the tab instead of stalling one fragment short.
+    const auto position = offset_estimator.position(current_fragment);
     if (position) {
         on_scroll_updated->send(position.value());
     }
 
-    scraping_box->addScrollArea(frame, std::lround(offset.value()));
     if (scraping_box->scrollAreaReady()) {
         state = Ready;
         return;

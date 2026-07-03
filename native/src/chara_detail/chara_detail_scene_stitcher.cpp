@@ -10,6 +10,25 @@
 
 namespace uma::chara_detail {
 
+namespace {
+
+// Reads an image and validates it up front, mirroring Frame::open. cv::imread returns an empty Mat on a
+// missing/corrupt file, and IMREAD_UNCHANGED (-1) decodes an alpha PNG to CV_8UC4 or a grayscale one to
+// CV_8UC1; wrapping either in a Frame only asserts (a no-op in release), which later misreads via bgrAt's
+// 3-byte stride or throws deep inside cv::resize. Fail legibly here instead.
+cv::Mat readImageBGR(const std::filesystem::path &path) {
+    cv::Mat image = cv::imread(path.string(), -1);
+    if (image.empty()) {
+        throw std::runtime_error("failed to read image: " + path.string());
+    }
+    if (image.type() != CV_8UC3) {
+        throw std::runtime_error("image must be CV_8UC3: " + path.string());
+    }
+    return image;
+}
+
+}  // namespace
+
 namespace stitcher_impl {
 
 cv::Mat ScrollAreaStitcher::stitch(const std::filesystem::path &input_dir) const {
@@ -22,11 +41,7 @@ cv::Mat ScrollAreaStitcher::stitch(const std::filesystem::path &input_dir) const
     std::vector<cv::Mat> images;
     images.reserve(paths.size());
     for (const auto &path : paths) {
-        cv::Mat image = cv::imread(path.string(), -1);
-        if (image.empty()) {
-            throw std::runtime_error("ScrollAreaStitcher::stitch: failed to read image: " + path.string());
-        }
-        images.push_back(image);
+        images.push_back(readImageBGR(path));
     }
     cv::Mat stitched;
     cv::vconcat(images, stitched);
@@ -69,15 +84,11 @@ void CharaDetailSceneStitcher::stitch(const RecordInfo &info) const {
 
     vlog_debug(input_dir.string(), output_dir.string());
 
-    // A missing or partially-written base.png decodes to an empty Mat; wrapping it in a Frame and then
-    // calling anchor()/size()/view() on it misbehaves deep inside OpenCV. Validate up front so the failure
-    // is legible, mirroring ScrollAreaStitcher::stitch above.
+    // A missing/partially-written or non-CV_8UC3 base.png decodes to an empty or wrong-channel Mat; wrapping
+    // it in a Frame and then calling anchor()/size()/view()/bgrAt() on it misbehaves deep inside OpenCV.
+    // readImageBGR validates up front so the failure is legible.
     const auto base_path = input_dir / path_config.base.filename();
-    cv::Mat base_mat = cv::imread(base_path.string(), -1);
-    if (base_mat.empty()) {
-        throw std::runtime_error("CharaDetailSceneStitcher::stitch: failed to read base image: " + base_path.string());
-    }
-    Frame base_image(base_mat);
+    Frame base_image(readImageBGR(base_path));
 
     stitchTab(base_image, input_dir / path_config.skill.stem(), output_dir, path_config.skill);
     stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor);
@@ -148,7 +159,7 @@ void CharaDetailSceneStitcher::stitchTab(
     // Paste tab.
     // TODO: When the tab button image does not exist, it should be fetched from another record.
     if (const auto tab_path = input_dir / path_config.tab_button.filename(); std::filesystem::exists(tab_path)) {
-        canvas.paste(config.tab_button_rect, Frame::fixed(cv::imread(tab_path.string(), -1)));
+        canvas.paste(config.tab_button_rect, Frame::fixed(readImageBGR(tab_path)));
     }
 
     // Fill stains in base_image.

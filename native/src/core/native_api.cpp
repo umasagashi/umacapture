@@ -20,20 +20,29 @@ NativeApi::~NativeApi() {
 }
 
 void NativeApi::startEventLoop(const std::string &native_config) {
-    vlog_debug(native_config.length(), isRunning());
-    if (isRunning()) {
-        // TODO: Should be rebuilt when config is changed.
-        return;
-    }
+    std::string start_error;
+    {
+        std::lock_guard<std::mutex> lock(pipeline_mutex);
+        vlog_debug(native_config.length(), isRunningLocked());
+        if (isRunningLocked()) {
+            // TODO: Should be rebuilt when config is changed.
+            return;
+        }
 
-    try {
-        startPipeline(native_config);
-    } catch (const std::exception &e) {
-        // Any failure while building the pipeline (config parse, model load, ...) is reported to the Dart
-        // side as an error instead of escaping across the FFI boundary; partial state is rolled back first.
-        log_error("startEventLoop failed: {}", e.what());
-        teardown();
-        notifyError(e.what());
+        try {
+            startPipeline(native_config);
+        } catch (const std::exception &e) {
+            // Any failure while building the pipeline (config parse, model load, ...) is reported to the Dart
+            // side as an error instead of escaping across the FFI boundary; partial state is rolled back first.
+            log_error("startEventLoop failed: {}", e.what());
+            teardownLocked();
+            start_error = e.what();
+        }
+    }
+    // notifyError routes to the Dart callback; call it after releasing the lock so a re-entrant FFI call
+    // from that callback cannot deadlock on pipeline_mutex.
+    if (!start_error.empty()) {
+        notifyError(start_error);
     }
 }
 
@@ -233,14 +242,15 @@ void NativeApi::startPipeline(const std::string &native_config) {
 }
 
 void NativeApi::joinEventLoop() {
-    vlog_debug(isRunning());
-    if (!isRunning()) {
+    std::lock_guard<std::mutex> lock(pipeline_mutex);
+    vlog_debug(isRunningLocked());
+    if (!isRunningLocked()) {
         return;
     }
-    teardown();
+    teardownLocked();
 }
 
-void NativeApi::teardown() {
+void NativeApi::teardownLocked() {
     // Stop the watchdog before the runners so it cannot post an idle event onto a runner being torn down.
     // Every step is null-tolerant so this can also unwind a pipeline that failed partway through startPipeline.
     if (frame_stall_watchdog != nullptr) {
@@ -266,21 +276,36 @@ void NativeApi::teardown() {
 }
 
 bool NativeApi::isRunning() const {
+    std::lock_guard<std::mutex> lock(pipeline_mutex);
+    return isRunningLocked();
+}
+
+bool NativeApi::isRunningLocked() const {
     return event_runners && event_runners->isRunning();
 }
 
 void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) {
-    // A frame can arrive before startEventLoop or after joinEventLoop (senders are null then); ignore it
-    // rather than dereferencing an empty sender.
-    if (!isRunning()) {
-        return;
-    }
-    try {
-        on_frame_captured->send(frame);
+    // A frame can arrive before startEventLoop or after joinEventLoop, and can race teardown() on the capture
+    // thread (which is not one of the joined event runners). Copy the sender out under the lock so it stays
+    // alive across the send even if teardown() nulls the member, and notify the watchdog (a non-blocking
+    // atomic store) while holding the lock so it cannot be destroyed underneath us. The send itself runs
+    // outside the lock: in Block (video) mode it can wait on a full queue, which must not stall teardown.
+    event_util::Sender<Frame> sender;
+    {
+        std::lock_guard<std::mutex> lock(pipeline_mutex);
+        if (!isRunningLocked()) {
+            return;
+        }
+        sender = on_frame_captured;
         if (frame_stall_watchdog != nullptr) {
             frame_stall_watchdog->notifyFrame();
         }
-        const auto &now = std::chrono::steady_clock::now();
+    }
+    try {
+        sender->send(frame);
+        // last_size_reported is touched only from the capture thread, so it needs no lock; the size report
+        // notify runs outside the lock like the send.
+        const auto now = std::chrono::steady_clock::now();
         if (now - last_size_reported > report_interval) {
             notifyFrameSizeReported(original_size);
             last_size_reported = now;
@@ -292,11 +317,16 @@ void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) 
 }
 
 void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
-    if (!isRunning()) {
-        return;
+    event_util::Sender<chara_detail::RecordInfo> sender;
+    {
+        std::lock_guard<std::mutex> lock(pipeline_mutex);
+        if (!isRunningLocked()) {
+            return;
+        }
+        sender = on_update_ready;
     }
     try {
-        on_update_ready->send(info);
+        sender->send(info);
     } catch (const std::exception &e) {
         // updateRecord is const, so it cannot route through the (non-const) notify path; log only.
         log_error("updateRecord failed: {}", e.what());
