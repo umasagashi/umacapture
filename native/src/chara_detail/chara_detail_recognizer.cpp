@@ -219,6 +219,11 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     character.character = icon.chara;
     character.card = icon.card;
     character.rank = rank;
+    // Deliberately leave character.record_type unset. The trainee's authoritative record type is the
+    // scene-context-derived value stored in metadata.record_type (resolved by branch name, see
+    // CharaDetailSceneContext), which is more reliable than the per-icon model head (Chara::record_type,
+    // model output 8). Family members have no scene context, so FamilyTreeRecognizer::makeCharacter uses
+    // that per-icon head instead.
     return character;
 }
 
