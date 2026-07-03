@@ -236,11 +236,13 @@ std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from,
 }
 
 PageScrapingBox::PageScrapingBox(
-    const std::vector<scraper_config::ScanParameter> &scan_parameters, const std::filesystem::path &image_dir)
+    const std::vector<scraper_config::ScanParameter> &scan_parameters,
+    const std::filesystem::path &image_dir,
+    const io_util::DirectoryHooks &directory_hooks)
     : scan_parameters(scan_parameters)
     , image_dir(image_dir) {
     current_scan = this->scan_parameters.begin();
-    app::NativeApi::instance().mkdir(image_dir);
+    directory_hooks.mkdir(image_dir);
 }
 
 void PageScrapingBox::addTabButton(const Frame &frame) {
@@ -311,16 +313,19 @@ SceneScrapingBox::SceneScrapingBox(
     const std::vector<scraper_config::ScanParameter> &factor_scans,
     const std::vector<scraper_config::ScanParameter> &campaign_scans,
     const record::RecordType &record_type,
-    const std::filesystem::path &image_dir)
+    const std::filesystem::path &image_dir,
+    const io_util::DirectoryHooks &directory_hooks)
     : base_path(image_dir / path_config.base.filename())
     , image_dir(image_dir)
     , record_type(record_type)
     , skill_scans(skill_scans)
     , factor_scans(factor_scans)
     , campaign_scans(campaign_scans)
-    , skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config.skill.stem()))
-    , factor_box_(std::make_shared<PageScrapingBox>(factor_scans, image_dir / path_config.factor.stem()))
-    , campaign_box_(std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config.campaign.stem())) {}
+    , directory_hooks(directory_hooks)
+    , skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config.skill.stem(), directory_hooks))
+    , factor_box_(std::make_shared<PageScrapingBox>(factor_scans, image_dir / path_config.factor.stem(), directory_hooks))
+    , campaign_box_(
+          std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config.campaign.stem(), directory_hooks)) {}
 
 std::shared_ptr<PageScrapingBox> SceneScrapingBox::skill_box() const {
     return skill_box_;
@@ -362,8 +367,8 @@ bool SceneScrapingBox::ready() const {
 std::shared_ptr<PageScrapingBox> SceneScrapingBox::recreate(
     const std::vector<scraper_config::ScanParameter> &scans, const std::filesystem::path &stem) const {
     const auto tab_dir = image_dir / stem;
-    app::NativeApi::instance().rmdir(tab_dir);
-    return std::make_shared<PageScrapingBox>(scans, tab_dir);
+    directory_hooks.rmdir(tab_dir);
+    return std::make_shared<PageScrapingBox>(scans, tab_dir, directory_hooks);
 }
 
 StationaryFrameCatcher::StationaryFrameCatcher(
@@ -659,7 +664,8 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
     const event_util::Sender<> &on_restarted,
     const scraper_config::CharaDetailSceneScraperConfig &config,
-    const std::filesystem::path &scraping_dir)
+    const std::filesystem::path &scraping_dir,
+    const io_util::DirectoryHooks &directory_hooks)
     : on_updated(on_updated)
     , on_opened(on_opened)
     , on_closed(on_closed)
@@ -672,7 +678,8 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     , on_factor_probe(on_factor_probe)
     , on_restarted(on_restarted)
     , config(config)
-    , scraping_root_dir(scraping_dir) {
+    , scraping_root_dir(scraping_dir)
+    , directory_hooks(directory_hooks) {
     this->on_opened->listen([this](const auto &info) { build(info); });
     this->on_updated->listen([this](const auto &frame, const auto &state) { update(frame, state); });
     this->on_closed->listen([this]() {
@@ -710,7 +717,8 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         config.factor_scans,
         config.campaign_scans,
         record_type,
-        scraping_root_dir / current_record_info.record_id);
+        scraping_root_dir / current_record_info.record_id,
+        directory_hooks);
 
     // The factor tab's scroll-ready does not notify the UI directly. Instead it triggers a
     // duplicate probe on the current stable full frame: only after that probe reports "not a

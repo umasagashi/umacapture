@@ -106,17 +106,11 @@ public:
 
     void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }
 
+    // The mkdir/rmdir callbacks let the Dart side route directory operations through platform-specific
+    // storage. They are read into an io_util::DirectoryHooks in startEventLoop and injected into the
+    // pipeline components, so those components stay decoupled from this singleton (and unit-testable).
     void setMkdirCallback(const std::function<PathCallback> &method) { mkdir_callback = method; }
-    void mkdir(const std::filesystem::path &path) const {
-        log_debug(path.string());
-        mkdir_callback(path);
-    }
-
     void setRmdirCallback(const std::function<PathCallback> &method) { rmdir_callback = method; }
-    void rmdir(const std::filesystem::path &path) const {
-        log_debug(path.string());
-        rmdir_callback(path);
-    }
 
     void setLoggingCallback(const std::function<MessageCallback> &method) { logging_callback = method; }
     void log(const std::string &message) {

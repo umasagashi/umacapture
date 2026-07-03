@@ -153,6 +153,11 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
+    // Route directory create/remove through the (possibly Dart-provided) callbacks so the pipeline
+    // components stay decoupled from this singleton and can be unit-tested with fakes. Captured by value
+    // here; the callbacks are set once at startup before the event loop starts.
+    const io_util::DirectoryHooks directory_hooks{mkdir_callback, rmdir_callback};
+
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         lap_time_wrapper,
@@ -166,7 +171,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         factor_probe_ready_connection,
         restarted_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
-        scraping_dir);
+        scraping_dir,
+        directory_hooks);
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<chara_detail::RecordInfo>();
     on_recognize_ready = recognize_ready_connection;
@@ -183,7 +189,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         stitch_ready_connection,
         recognize_ready_connection,
         config_json["chara_detail"]["scene_stitcher"]
-            .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>());
+            .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>(),
+        directory_hooks);
 
     const auto recognize_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
     recognize_completed_connection->listen(

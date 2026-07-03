@@ -13,7 +13,6 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic pop
 
-#include "core/native_api.h"
 #include "cv/frame.h"
 #include "types/shape.h"
 #include "util/event_util.h"
@@ -61,7 +60,6 @@ public:
             last_ts = std::max(last_ts, ts);
             const auto captured_frame = Frame{mat, static_cast<uint64>(std::llround(ts + head_ts))};
             const auto cropped_frame = crop(captured_frame);
-            // save(i, cropped_frame);
             on_frame_captured->send(cropped_frame, captured_frame.size());
         }
         return last_ts;
@@ -74,14 +72,6 @@ private:
         } else {
             return frame.clone();
         }
-    }
-
-    void save(const int index, const Frame &frame) const {
-        std::ostringstream stream;
-        stream << "./temp/source_frames/" << std::setw(5) << std::setfill('0') << index << "_" << frame.timestamp()
-               << ".png";
-        app::NativeApi::instance().mkdir("./temp/source_frames");
-        frame.save(stream.str());
     }
 
     const event_util::Sender<Frame, Size<int>> on_frame_captured{};

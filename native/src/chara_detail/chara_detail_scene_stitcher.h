@@ -11,6 +11,7 @@
 #include "chara_detail/chara_detail_config.h"
 #include "chara_detail/record_info.h"
 #include "util/event_util.h"
+#include "util/misc.h"
 
 namespace uma {
 // Used only by const reference in CharaDetailSceneStitcher::stitchTab; the full definition
@@ -39,7 +40,8 @@ public:
         const std::filesystem::path &stitching_dir,
         const event_util::Listener<RecordInfo> &on_stitch_ready,
         const event_util::Sender<RecordInfo> &on_stitch_completed,
-        const stitcher_config::CharaDetailSceneStitcherConfig &config);
+        const stitcher_config::CharaDetailSceneStitcherConfig &config,
+        const io_util::DirectoryHooks &directory_hooks);
 
     void stitch(const RecordInfo &info) const;
 
@@ -56,6 +58,7 @@ private:
     const std::filesystem::path scraping_root_dir;
     const std::filesystem::path stitching_root_dir;
     const stitcher_impl::ScrollAreaStitcher scroll_area_stitcher;
+    const io_util::DirectoryHooks directory_hooks;
 
     const event_util::Listener<RecordInfo> on_stitch_ready;
     const event_util::Sender<RecordInfo> on_stitch_completed;

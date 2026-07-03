@@ -14,8 +14,10 @@
 
 #include "chara_detail/chara_detail_config.h"
 #include "chara_detail/chara_detail_scene_context.h"
-#include "core/native_api.h"
+#include "chara_detail/record_info.h"
+#include "util/event_util.h"
 #include "util/logger_util.h"
+#include "util/misc.h"
 
 namespace uma::chara_detail {
 
@@ -147,7 +149,9 @@ private:
 class PageScrapingBox {
 public:
     PageScrapingBox(
-        const std::vector<scraper_config::ScanParameter> &scan_parameters, const std::filesystem::path &image_dir);
+        const std::vector<scraper_config::ScanParameter> &scan_parameters,
+        const std::filesystem::path &image_dir,
+        const io_util::DirectoryHooks &directory_hooks);
 
     void addTabButton(const Frame &frame);
 
@@ -181,7 +185,8 @@ public:
         const std::vector<scraper_config::ScanParameter> &factor_scans,
         const std::vector<scraper_config::ScanParameter> &campaign_scans,
         const record::RecordType &record_type,
-        const std::filesystem::path &image_dir);
+        const std::filesystem::path &image_dir,
+        const io_util::DirectoryHooks &directory_hooks);
 
     [[nodiscard]] std::shared_ptr<PageScrapingBox> skill_box() const;
     [[nodiscard]] std::shared_ptr<PageScrapingBox> factor_box() const;
@@ -209,6 +214,7 @@ private:
     const std::vector<scraper_config::ScanParameter> skill_scans;
     const std::vector<scraper_config::ScanParameter> factor_scans;
     const std::vector<scraper_config::ScanParameter> campaign_scans;
+    const io_util::DirectoryHooks directory_hooks;
 
     std::shared_ptr<PageScrapingBox> skill_box_;
     std::shared_ptr<PageScrapingBox> factor_box_;
@@ -404,7 +410,8 @@ public:
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
         const event_util::Sender<> &on_restarted,
         const scraper_config::CharaDetailSceneScraperConfig &config,
-        const std::filesystem::path &scraping_dir);
+        const std::filesystem::path &scraping_dir,
+        const io_util::DirectoryHooks &directory_hooks);
 
     void build(const SceneInfo &info);
 
@@ -492,6 +499,7 @@ private:
 
     const scraper_config::CharaDetailSceneScraperConfig config;
     const std::filesystem::path scraping_root_dir;
+    const io_util::DirectoryHooks directory_hooks;
 
     minimal_uuid4::Generator uuid_generator;
 

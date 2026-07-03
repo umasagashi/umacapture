@@ -114,7 +114,9 @@ set(
         test/test_main.cpp
         test/condition/test_serializer.cpp
         test/condition/test_condition.cpp
+        test/chara_detail/test_scraping_box.cpp
         src/condition/serializer.cpp
+        src/chara_detail/chara_detail_scene_scraper.cpp
 )
 
 add_executable(umacapture_tests ${TEST_SOURCE_FILES})

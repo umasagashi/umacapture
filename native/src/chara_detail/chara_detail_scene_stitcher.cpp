@@ -4,7 +4,6 @@
 
 #include "chara_detail/chara_detail_config.h"
 #include "chara_detail/record_info.h"
-#include "core/native_api.h"
 #include "cv/frame.h"
 #include "util/logger_util.h"
 #include "util/stds.h"
@@ -53,10 +52,12 @@ CharaDetailSceneStitcher::CharaDetailSceneStitcher(
     const std::filesystem::path &stitching_dir,
     const event_util::Listener<RecordInfo> &on_stitch_ready,
     const event_util::Sender<RecordInfo> &on_stitch_completed,
-    const stitcher_config::CharaDetailSceneStitcherConfig &config)
+    const stitcher_config::CharaDetailSceneStitcherConfig &config,
+    const io_util::DirectoryHooks &directory_hooks)
     : config(config)
     , scraping_root_dir(scraping_dir)
     , stitching_root_dir(stitching_dir)
+    , directory_hooks(directory_hooks)
     , on_stitch_ready(on_stitch_ready)
     , on_stitch_completed(on_stitch_completed) {
     on_stitch_ready->listen([this](const auto &info) { stitch(info); });
@@ -82,7 +83,7 @@ void CharaDetailSceneStitcher::stitch(const RecordInfo &info) const {
     stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor);
     stitchTab(base_image, input_dir / path_config.campaign.stem(), output_dir, path_config.campaign);
 
-    app::NativeApi::instance().rmdir(input_dir);
+    directory_hooks.rmdir(input_dir);
     on_stitch_completed->send(info);
 }
 
@@ -156,7 +157,7 @@ void CharaDetailSceneStitcher::stitchTab(
     canvas.fill(config.scroll_area_lower_fill_rect, background_color);
 
     // Save stitched image and anchor info.
-    app::NativeApi::instance().mkdir(output_dir);
+    directory_hooks.mkdir(output_dir);
     canvas.dump(output_dir / path_entry.filename());
 }
 
