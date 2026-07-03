@@ -243,8 +243,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
         "error" => SoundType.error,
         _ => SoundType.attentionNormal,
       };
-      final effect = await ref.read(soundEffectProvider(type).future);
-      await effect.play();
+      await ref.read(soundEffectProvider(type).future).playSafely();
     },
   ),
 };

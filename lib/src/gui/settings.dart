@@ -304,10 +304,6 @@ class _SoundSettingTile extends ConsumerStatefulWidget {
 }
 
 class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
-  /// Slider position while the user is dragging. Kept local so the persisted volume (which reloads
-  /// the audio player) is only committed once, on drag end.
-  double? _dragVolume;
-
   /// Cache for [_isMissing]: the last custom path checked and whether it was absent.
   String? _checkedPath;
   bool _fileMissing = false;
@@ -317,8 +313,8 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
   /// Whether [setting] points at a custom file that no longer exists on disk.
   ///
   /// The player silently falls back to the default clip in that case, so the UI would otherwise
-  /// keep showing a path that never plays. Memoized on the path so dragging the volume slider
-  /// (which rebuilds every frame) does not trigger a filesystem stat per frame.
+  /// keep showing a path that never plays. Memoized on the path so a rebuild does not trigger a
+  /// filesystem stat every time.
   bool _isMissing(SoundSetting setting) {
     if (!setting.isCustom) return false;
     if (setting.path != _checkedPath) {
@@ -339,11 +335,7 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
     ref.read(soundSettingProvider(_type).notifier).setCustomFile(path);
   }
 
-  void _test() {
-    // load()/play() already log their own failures; swallow here only to avoid an unhandled async
-    // error if the future rejects (e.g. the player was superseded mid-load, or setup threw).
-    ref.read(soundEffectProvider(_type).future).then((effect) => effect.play()).catchError((_) {});
-  }
+  void _test() => ref.read(soundEffectProvider(_type).future).playSafely();
 
   @override
   Widget build(BuildContext context) {
@@ -374,16 +366,6 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
         : Text("$tr_sound.source.default".tr(), style: labelStyle);
 
     final volumeIcon = Icon(Symbols.volume_up_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant);
-    // Shared across both layouts (only one branch builds per frame): fixed-width when it sits beside
-    // the path, and Expanded when it owns its own row.
-    final slider = Slider(
-      value: _dragVolume ?? setting.volume,
-      onChanged: (value) => setState(() => _dragVolume = value),
-      onChangeEnd: (value) {
-        notifier.setVolume(value);
-        setState(() => _dragVolume = null);
-      },
-    );
     final testButton = IconButton(
       tooltip: "$tr_sound.test_tooltip".tr(),
       icon: const Icon(Symbols.play_arrow_rounded),
@@ -413,12 +395,51 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [title, sourceLabel]),
           ),
           volumeIcon,
-          SizedBox(width: 200, child: slider),
+          SizedBox(
+            width: 200,
+            child: _VolumeSlider(volume: setting.volume, onChangeEnd: notifier.setVolume),
+          ),
           testButton,
           pickButton,
           resetButton,
         ],
       ),
+    );
+  }
+}
+
+/// A volume slider that commits to the notifier only on drag end.
+///
+/// Isolated so dragging (which rebuilds every frame) does not rebuild the surrounding tile — in
+/// particular the front-ellipsized path label, whose [TextPainter] measurement would otherwise
+/// re-run per frame.
+class _VolumeSlider extends StatefulWidget {
+  const _VolumeSlider({required this.volume, required this.onChangeEnd});
+
+  /// The persisted volume; shown whenever the user is not mid-drag.
+  final double volume;
+
+  /// Commits the released volume to the notifier (reloads the audio player).
+  final ValueChanged<double> onChangeEnd;
+
+  @override
+  State<_VolumeSlider> createState() => _VolumeSliderState();
+}
+
+class _VolumeSliderState extends State<_VolumeSlider> {
+  /// Slider position while the user is dragging. Kept local so the persisted volume (which reloads
+  /// the audio player) is only committed once, on drag end.
+  double? _dragVolume;
+
+  @override
+  Widget build(BuildContext context) {
+    return Slider(
+      value: _dragVolume ?? widget.volume,
+      onChanged: (value) => setState(() => _dragVolume = value),
+      onChangeEnd: (value) {
+        widget.onChangeEnd(value);
+        setState(() => _dragVolume = null);
+      },
     );
   }
 }

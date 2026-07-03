@@ -174,3 +174,18 @@ class SoundEffect {
   /// Releases the underlying native player. Safe to call once the effect is no longer needed.
   Future<void> dispose() => _player.dispose();
 }
+
+extension SoundEffectPlayback on Future<SoundEffect> {
+  /// Awaits this effect and plays it, tolerating a rejected future.
+  ///
+  /// The effect future rejects when a setting change supersedes an in-flight load
+  /// (see [soundEffectProvider]); [SoundEffect.load] and [SoundEffect.play] already
+  /// log genuine failures, so both are swallowed here to keep every fire-and-forget
+  /// call site free of unhandled async errors.
+  Future<void> playSafely() async {
+    try {
+      final effect = await this;
+      await effect.play();
+    } catch (_) {}
+  }
+}
