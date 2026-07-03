@@ -304,24 +304,33 @@ class _SoundSettingTile extends ConsumerStatefulWidget {
 }
 
 class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
-  /// Cache for [_isMissing]: the last custom path checked and whether it was absent.
-  String? _checkedPath;
+  /// Whether the current custom file is absent on disk. Kept out of [build] so the filesystem
+  /// stat runs only when the tile is created or the path changes, not on every rebuild.
   bool _fileMissing = false;
 
   SoundType get _type => widget.type;
 
+  @override
+  void initState() {
+    super.initState();
+    // Seed the initial state synchronously so the first frame reflects reality: the tile is
+    // recreated whenever the settings page is opened, so this also re-checks on each open.
+    _fileMissing = _statMissing(ref.read(soundSettingProvider(_type)));
+  }
+
   /// Whether [setting] points at a custom file that no longer exists on disk.
   ///
   /// The player silently falls back to the default clip in that case, so the UI would otherwise
-  /// keep showing a path that never plays. Memoized on the path so a rebuild does not trigger a
-  /// filesystem stat every time.
-  bool _isMissing(SoundSetting setting) {
-    if (!setting.isCustom) return false;
-    if (setting.path != _checkedPath) {
-      _checkedPath = setting.path;
-      _fileMissing = !FilePath(setting.path).existsSync();
+  /// keep showing a path that never plays.
+  bool _statMissing(SoundSetting setting) => setting.isCustom && !FilePath(setting.path).existsSync();
+
+  /// Re-stats the custom file and updates [_fileMissing] if it changed. Called from a listener,
+  /// so [setState] is safe here (unlike during [initState]).
+  void _recheckMissing(SoundSetting setting) {
+    final missing = _statMissing(setting);
+    if (missing != _fileMissing && mounted) {
+      setState(() => _fileMissing = missing);
     }
-    return _fileMissing;
   }
 
   Future<void> _pickFile() async {
@@ -340,12 +349,16 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Re-check existence only when the path or source actually changes, not on volume-slider commits.
+    ref.listen(soundSettingProvider(_type), (prev, next) {
+      if (prev?.path != next.path || prev?.source != next.source) _recheckMissing(next);
+    });
     final setting = ref.watch(soundSettingProvider(_type));
     final notifier = ref.read(soundSettingProvider(_type).notifier);
     final labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
 
     final title = Text("$tr_sound.type.${_type.name.snakeCase}".tr(), style: theme.textTheme.titleMedium);
-    final missing = _isMissing(setting);
+    final missing = _fileMissing;
     final pathStyle = missing ? labelStyle?.copyWith(color: theme.semantic.warning) : labelStyle;
     final sourceLabel = setting.isCustom
         ? Tooltip(
