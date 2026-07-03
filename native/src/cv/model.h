@@ -43,6 +43,12 @@ struct Prediction {
 
     template<typename T>
     [[nodiscard]] const T &at(int index, bool check = true) const {
+        // Real bounds check (not a Debug-only assert): the return below dereferences data[index] even when
+        // check is false, so an out-of-range index (e.g. a model swapped for one with fewer outputs) would be
+        // undefined behavior in release. Throwing degrades to a dropped record via the recognizer try/catch.
+        if (index < 0 || static_cast<size_t>(index) >= data.size()) {
+            throw std::out_of_range("Prediction::at: index out of range");
+        }
         if (check) {
             auto type_info = data[index].GetTensorTypeAndShapeInfo();
             auto element_type = type_info.GetElementType();

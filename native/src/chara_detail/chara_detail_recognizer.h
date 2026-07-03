@@ -101,6 +101,13 @@ struct RacePlacePrediction : public recognizer::Prediction {
 struct DateTimePrediction : public recognizer::Prediction {
     [[nodiscard]] std::string result() const {
         const auto short_str = std::to_string(at<int64_t>(0));
+        // Expect exactly YYYYMMDD (8 digits). A misrecognition that stringifies to fewer digits would make
+        // substr(6) throw std::out_of_range, which the recognizer's per-record try/catch turns into a dropped
+        // record. Degrade only the date field instead: return the raw value so the record survives.
+        if (short_str.size() != 8) {
+            log_warning("DateTimePrediction: unexpected date value '{}'", short_str);
+            return short_str;
+        }
         return short_str.substr(0, 4) + "/" + short_str.substr(4, 2) + "/" + short_str.substr(6);
     }
 
