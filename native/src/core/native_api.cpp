@@ -255,26 +255,4 @@ void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
     on_update_ready->send(info);
 }
 
-[[maybe_unused]] void NativeApi::_dummyForSuppressingUnusedWarning() {
-    log_fatal("Do not use this method.");
-    NativeApi::instance();
-    startEventLoop({});
-    joinEventLoop();
-    updateFrame({}, {0, 0});
-    setNotifyCallback({});
-    setDetachCallback({});
-    setMkdirCallback({});
-    setRmdirCallback({});
-    setLoggingCallback({});
-    notifyCaptureStarted();
-    notifyCaptureStopped();
-    updateRecord({});
-    notifyScreenshotTaken({}, {});
-    std::cout << (frame_distributor == nullptr);
-    std::cout << (chara_detail_scene_scraper == nullptr);
-    std::cout << (chara_detail_scene_stitcher == nullptr);
-    std::cout << (chara_detail_recognizer == nullptr);
-    std::cout << (on_recognize_ready == nullptr);
-}
-
 }  // namespace uma::app

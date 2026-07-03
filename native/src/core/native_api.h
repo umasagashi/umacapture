@@ -158,8 +158,6 @@ private:
     std::list<std::chrono::steady_clock::time_point> lap_time_buffer;
 
 public:
-    [[maybe_unused]] void _dummyForSuppressingUnusedWarning();
-
     static NativeApi &instance() {
         static NativeApi app;
         return app;

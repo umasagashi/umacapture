@@ -39,8 +39,14 @@ target_compile_options(
         /we4062    # Treat "enumerator not handled in switch (no default)" as an error, so a
                    # default-less switch over an enum must stay exhaustive (e.g. recordTypeTag,
                    # tabPageTag). Not /we4061, which also fires when a default IS present.
-        /bigobj
 )
+
+# cli.cpp is the only TU that still needs /bigobj: it includes the tool/builder/* headers, which
+# instantiate the full condition/builder template set in a single translation unit and overflow the
+# COFF section limit. The recognition-pipeline sources no longer need it now that their
+# implementations live in their own .cpp files (previously they were compiled inline into
+# native_api.cpp's TU), so scope the flag to this one file instead of the whole target.
+set_source_files_properties(src/core/cli.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
 
 target_compile_definitions(
         ${PROJECT_NAME} PRIVATE
@@ -119,7 +125,6 @@ target_compile_options(
         /wd4819
         /wd4996
         /wd5285    # doctest specializes std::tuple, which MSVC flags under N5014; harmless here.
-        /bigobj
 )
 
 target_compile_definitions(
