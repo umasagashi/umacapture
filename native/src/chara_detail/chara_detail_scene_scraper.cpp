@@ -251,7 +251,11 @@ void PageScrapingBox::addTabButton(const Frame &frame) {
 
 void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     assert_(current_scan != scan_parameters.end());
-    assert_(1.0 <= offset_pixels && offset_pixels <= frame.height());
+    assert_(1 <= offset_pixels && offset_pixels <= frame.height());
+    // assert_ is a no-op in Release; clamp for real so an out-of-range offset (estimator returning
+    // > height, or rounding to <= 0 under the minimum_scroll gate) cannot drive frame.view() out of
+    // bounds. A degenerate 1px / full-height slice is safe; an out-of-bounds read is not.
+    offset_pixels = std::clamp(offset_pixels, 1, frame.height());
 
     const auto &anchor = frame.anchor();
     const Point<int> &top_left = {0, frame.height() - offset_pixels};

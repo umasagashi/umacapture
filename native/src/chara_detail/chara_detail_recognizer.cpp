@@ -18,23 +18,22 @@ namespace {
     const double max_length,
     const bool reversed = false) {
     const auto &frame_anchor = frame.anchor();
-    // The scan point can map at or past the frame edge (e.g. a scan_top near the bottom); clamp the start so the
-    // first isIn() does not index out of bounds in release, where bgrAt only asserts.
-    const auto scan_start_pixels = std::clamp(frame_anchor.mapToFrame(scan_start_left).y(), 0, frame.height() - 1);
+    // The scan point can map at or past the frame edge (e.g. a scan_top near the bottom, or an X near the
+    // right edge on a narrower-than-expected frame); clamp BOTH axes so the first isIn() does not index out
+    // of bounds in release, where bgrAt only asserts (and, unlike view(), does not throw). The h-anchor is
+    // fully resolved by this mapToFrame, so a ScreenStart-anchored rebuild below maps to the same pixel.
+    const auto start_pixels = frame_anchor.mapToFrame(scan_start_left);
+    const int scan_x_pixels = std::clamp(start_pixels.x(), 0, frame.width() - 1);
+    const int scan_start_pixels = std::clamp(start_pixels.y(), 0, frame.height() - 1);
     const auto scan_length_pixels = frame_anchor.scaleToPixels(max_length);
 
     const int direction = reversed ? -1 : 1;
     const auto scan_end_pixels = std::clamp(scan_start_pixels + direction * scan_length_pixels, 0, frame.height());
 
     for (int y = scan_start_pixels; reversed ? (y >= scan_end_pixels) : (y < scan_end_pixels); y += direction) {
-        const auto scaled_y = frame_anchor.scaleFromPixels(y);
-        const auto scan_point = Point<double>{
-            scan_start_left.x(),
-            scaled_y,
-            {scan_start_left.anchor().h(), ScreenStart},
-        };
+        const auto scan_point = frame_anchor.mapFromFrame(Point<int>{scan_x_pixels, y});
         if (!frame.isIn(bg_color, scan_point)) {
-            return scaled_y;
+            return scan_point.y();
         }
     }
     return std::nullopt;
@@ -747,7 +746,15 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         auto record_info = raw_info;
 
         if (!record_info.record_type.has_value()) {
-            assert_(std::filesystem::exists(record_path));
+            // assert_ is a no-op in Release; check for real. Without the existing record.json the record_type
+            // cannot be recovered, so skip this record explicitly instead of falling through to json_util::read
+            // and dropping it via an exception that reads as accidental.
+            if (!std::filesystem::exists(record_path)) {
+                log_warning(
+                    "recognize: record.json not found, cannot resolve record_type; skipping id={}",
+                    raw_info.record_id);
+                return;
+            }
             const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
             record_info.record_type = old_record.metadata.record_type.value_or(record::RecordType::Standard);
         }
