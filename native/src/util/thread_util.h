@@ -3,6 +3,7 @@
 #include <atomic>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -15,15 +16,18 @@ namespace uma::thread_util {
 class ThreadBase {
 public:
     ThreadBase()
-        : is_running(false)
-        , thread(nullptr) {}
+        : thread(nullptr)
+        , is_running(false) {}
 
     virtual ~ThreadBase() {
         log_debug("");
         assert_(!isRunning());  // Call the join before deleting.
     }
 
+    // start()/join() serialize on lifecycle_mutex so the non-atomic `thread` pointer is never read
+    // while another caller is assigning it. isRunning() reads the atomic flag directly and needs no lock.
     void start() {
+        std::lock_guard<std::mutex> lock(lifecycle_mutex);
         if (is_running.load()) {
             return;
         }
@@ -32,6 +36,7 @@ public:
     }
 
     void join() {
+        std::lock_guard<std::mutex> lock(lifecycle_mutex);
         if (!is_running.load()) {
             return;
         }
@@ -46,6 +51,7 @@ protected:
     virtual void run() = 0;
 
 private:
+    std::mutex lifecycle_mutex;
     std::unique_ptr<std::thread> thread;
     std::atomic_bool is_running;
 };

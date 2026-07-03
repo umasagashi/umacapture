@@ -3,9 +3,16 @@
 #include <experimental_onnxruntime_cxx_api.h>
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 
+#include "cv/frame.h"
+#include "types/shape.h"
 #include "util/logger_util.h"
 
 namespace uma::recognizer {
@@ -68,6 +75,9 @@ public:
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
     }
 
+    // `const` reflects logical constness (the model configuration is unchanged), but this runs ONNX
+    // inference which mutates hidden session state and is NOT thread-safe. Call it from a single thread
+    // only (the recognizer drives all inference from its own event-runner thread).
     PredictionType predict(const Frame &frame) const {
         cv::Mat image;
         cv::resize(frame.data(), image, input_size.toCVSize(), 0, 0, cv::INTER_LINEAR);

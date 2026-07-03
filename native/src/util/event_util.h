@@ -114,7 +114,11 @@ public:
             }
         }
 
-        // TODO: This should be synchronized.
+        // eventpp's EventQueue is internally synchronized, so enqueue() and the notifier's own enqueue are
+        // each thread-safe on their own. The check-then-act above (ready() -> enqueue) is only consulted for
+        // Discard/Block connections, and those are driven by a single producer per connection in practice
+        // (on_frame_captured from the recorder thread, the scraper connections from the distributor thread),
+        // so the stale-size window never races. NoLimit connections skip the size check entirely.
         connection.enqueue(0, args...);
         if (notifier != nullptr) {
             notifier->send(id);

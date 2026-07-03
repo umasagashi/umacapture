@@ -68,7 +68,15 @@ void CharaDetailSceneStitcher::stitch(const RecordInfo &info) const {
 
     vlog_debug(input_dir.string(), output_dir.string());
 
-    Frame base_image(cv::imread((input_dir / path_config.base.filename()).string(), -1));
+    // A missing or partially-written base.png decodes to an empty Mat; wrapping it in a Frame and then
+    // calling anchor()/size()/view() on it misbehaves deep inside OpenCV. Validate up front so the failure
+    // is legible, mirroring ScrollAreaStitcher::stitch above.
+    const auto base_path = input_dir / path_config.base.filename();
+    cv::Mat base_mat = cv::imread(base_path.string(), -1);
+    if (base_mat.empty()) {
+        throw std::runtime_error("CharaDetailSceneStitcher::stitch: failed to read base image: " + base_path.string());
+    }
+    Frame base_image(base_mat);
 
     stitchTab(base_image, input_dir / path_config.skill.stem(), output_dir, path_config.skill);
     stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor);

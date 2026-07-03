@@ -1,5 +1,6 @@
 #include "chara_detail/chara_detail_recognizer.h"
 
+#include <exception>
 #include <map>
 
 #include "util/logger_util.h"
@@ -569,7 +570,6 @@ void RaceRecordRecognizer::recognize(
         // However, the edges are rounded, which can result in inaccurate results.
         const auto approx_bottom =
             findNextGap(frame, approx_scan_offset + Point<double>{0.0, block_top.value()}, area_bottom);
-        assert_(approx_bottom.has_value());
         if (!approx_bottom) {
             log_warning("Failed to find approximate bottom of race block.");
             break;
@@ -710,114 +710,129 @@ CharaDetailRecognizer::CharaDetailRecognizer(
 void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info) const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value());
 
-    recognizer_impl::PredictionHistory factor_tab_history;
-    auto self_factors = factor_tab_recognizer.recognizeVisibleSelf(frame, factor_tab_history);
-    // Drop the last recognized row: on a non-stitched live frame the bottom-most visible row can
-    // be clipped by the tab boundary, so its star rank is unreliable. The remaining prefix is still
-    // a strong signature and is matched against the leading self-factors of stored records.
-    if (!self_factors.empty()) {
-        self_factors.pop_back();
-    }
+    // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
+    // An exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
+    // Contain it so a single bad probe frame cannot take down the process.
+    try {
+        recognizer_impl::PredictionHistory factor_tab_history;
+        auto self_factors = factor_tab_recognizer.recognizeVisibleSelf(frame, factor_tab_history);
+        // Drop the last recognized row: on a non-stitched live frame the bottom-most visible row can
+        // be clipped by the tab boundary, so its star rank is unreliable. The remaining prefix is still
+        // a strong signature and is matched against the leading self-factors of stored records.
+        if (!self_factors.empty()) {
+            self_factors.pop_back();
+        }
 
-    // Forward the record type so the Dart side can pick a per-type match threshold (the factor
-    // tab's visible-row count differs by type). -1 means "unknown", mapped to null on Dart.
-    const int record_type = raw_info.record_type.has_value()  //
-                              ? static_cast<int>(raw_info.record_type.value())
-                              : -1;
-    on_factor_probe_completed->send(self_factors, record_type);
+        // Forward the record type so the Dart side can pick a per-type match threshold (the factor
+        // tab's visible-row count differs by type). -1 means "unknown", mapped to null on Dart.
+        const int record_type = raw_info.record_type.has_value()  //
+                                  ? static_cast<int>(raw_info.record_type.value())
+                                  : -1;
+        on_factor_probe_completed->send(self_factors, record_type);
+    } catch (const std::exception &e) {
+        log_error("probe failed for record_id={}: {}", raw_info.record_id, e.what());
+    }
 }
 
 void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateMode) const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value(), isUpdateMode);
 
-    const auto record_dir = record_root_dir / raw_info.record_id;
-    const auto record_path = record_dir / "record.json";
-    auto record_info = raw_info;
+    // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
+    // Frame::open / json_util::read/write / copy_file all throw on a missing or corrupt record file, and an
+    // exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
+    // Contain it so one unreadable record cannot take down the process; the next queued record still runs.
+    try {
+        const auto record_dir = record_root_dir / raw_info.record_id;
+        const auto record_path = record_dir / "record.json";
+        auto record_info = raw_info;
 
-    if (!record_info.record_type.has_value()) {
-        assert_(std::filesystem::exists(record_path));
-        const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
-        record_info.record_type = old_record.metadata.record_type.value_or(record::RecordType::Standard);
-    }
+        if (!record_info.record_type.has_value()) {
+            assert_(std::filesystem::exists(record_path));
+            const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
+            record_info.record_type = old_record.metadata.record_type.value_or(record::RecordType::Standard);
+        }
 
-    const auto &skill_frame = Frame::open(record_dir / "skill.png");
-    const auto &factor_frame = Frame::open(record_dir / "factor.png");
-    const auto &campaign_frame = Frame::open(record_dir / "campaign.png");
+        const auto &skill_frame = Frame::open(record_dir / "skill.png");
+        const auto &factor_frame = Frame::open(record_dir / "factor.png");
+        const auto &campaign_frame = Frame::open(record_dir / "campaign.png");
 
-    recognizer_impl::PredictionHistory status_header_history;
-    recognizer_impl::PredictionHistory skill_tab_history;
-    recognizer_impl::PredictionHistory factor_tab_history;
-    recognizer_impl::PredictionHistory campaign_tab_history;
+        recognizer_impl::PredictionHistory status_header_history;
+        recognizer_impl::PredictionHistory skill_tab_history;
+        recognizer_impl::PredictionHistory factor_tab_history;
+        recognizer_impl::PredictionHistory campaign_tab_history;
 
-    recognizer_impl::CropInfo crop_info{};
+        recognizer_impl::CropInfo crop_info{};
 
-    auto started = std::chrono::steady_clock::now();
+        auto started = std::chrono::steady_clock::now();
 
-    const auto now = chrono_util::local_now();
-    const auto utc_now = chrono_util::to_datetime_string(now);
-    const auto timestamp = chrono_util::to_timestamp(now);
+        const auto now = chrono_util::local_now();
+        const auto utc_now = chrono_util::to_datetime_string(now);
+        const auto timestamp = chrono_util::to_timestamp(now);
 
-    record::CharaDetailRecord record{};
+        record::CharaDetailRecord record{};
 
-    status_header_recognizer.recognize(skill_frame, record_info, record, status_header_history);
-    skill_tab_recognizer.recognize(skill_frame, record_info, record, skill_tab_history);
-    factor_tab_recognizer.recognize(factor_frame, record_info, record, crop_info, factor_tab_history);
-    campaign_tab_recognizer.recognize(campaign_frame, record, campaign_tab_history);
+        status_header_recognizer.recognize(skill_frame, record_info, record, status_header_history);
+        skill_tab_recognizer.recognize(skill_frame, record_info, record, skill_tab_history);
+        factor_tab_recognizer.recognize(factor_frame, record_info, record, crop_info, factor_tab_history);
+        campaign_tab_recognizer.recognize(campaign_frame, record, campaign_tab_history);
 
-    const auto version_info =
-        json_util::read(module_root_dir / "version_info.json").get<recognizer_impl::VersionInfo>();
+        const auto version_info =
+            json_util::read(module_root_dir / "version_info.json").get<recognizer_impl::VersionInfo>();
 
-    if (isUpdateMode) {
-        const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
-        record.metadata = old_record.metadata;
-        record.metadata.recognizer_version = version_info.recognizer_version;
+        if (isUpdateMode) {
+            const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
+            record.metadata = old_record.metadata;
+            record.metadata.recognizer_version = version_info.recognizer_version;
 
-        std::filesystem::copy_file(
-            record_path,
-            record_dir / ("record_" + std::to_string(timestamp) + ".json"),
-            std::filesystem::copy_options::overwrite_existing);
-    } else {
-        // A friend's record has no recoverable owner trainer id, so attribute it to the
-        // unknown-owner sentinel instead of the capturing player's id.
-        const auto &owner_trainer_id =
-            record::isFriend(record_info.record_type.value()) ? record::kUnknownTrainerId : trainer_id;
-        record.metadata = {
-            version_info.format_version,
-            version_info.region,
-            {record_info.record_id},
-            owner_trainer_id,
-            utc_now,
-            version_info.recognizer_version,
-            "active",
-            (!record.races.empty() ? record.races.front().strategy : 0),
-            std::nullopt,
-            record_info.record_type,
-        };
-    }
+            std::filesystem::copy_file(
+                record_path,
+                record_dir / ("record_" + std::to_string(timestamp) + ".json"),
+                std::filesystem::copy_options::overwrite_existing);
+        } else {
+            // A friend's record has no recoverable owner trainer id, so attribute it to the
+            // unknown-owner sentinel instead of the capturing player's id.
+            const auto &owner_trainer_id =
+                record::isFriend(record_info.record_type.value()) ? record::kUnknownTrainerId : trainer_id;
+            record.metadata = {
+                version_info.format_version,
+                version_info.region,
+                {record_info.record_id},
+                owner_trainer_id,
+                utc_now,
+                version_info.recognizer_version,
+                "active",
+                (!record.races.empty() ? record.races.front().strategy : 0),
+                std::nullopt,
+                record_info.record_type,
+            };
+        }
 
-    auto elapsed =
-        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
-    vlog_debug(elapsed);
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+        vlog_debug(elapsed);
 
-    json_util::write(record_path, record, 4);
+        json_util::write(record_path, record, 4);
 
-    json_util::write(
-        record_dir / "prediction.json",
-        {
-            {"status_header", status_header_history.toJson()},
-            {"skill_tab", skill_tab_history.toJson()},
-            {"factor_tab", factor_tab_history.toJson()},
-            {"campaign_tab", campaign_tab_history.toJson()},
-        },
-        4);
+        json_util::write(
+            record_dir / "prediction.json",
+            {
+                {"status_header", status_header_history.toJson()},
+                {"skill_tab", skill_tab_history.toJson()},
+                {"factor_tab", factor_tab_history.toJson()},
+                {"campaign_tab", campaign_tab_history.toJson()},
+            },
+            4);
 
-    factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
-        .save(record_dir / "trainee.jpg");
+        factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
+            .save(record_dir / "trainee.jpg");
 
-    if (isUpdateMode) {
-        on_update_completed->send(record_info);
-    } else {
-        on_recognize_completed->send(record_info);
+        if (isUpdateMode) {
+            on_update_completed->send(record_info);
+        } else {
+            on_recognize_completed->send(record_info);
+        }
+    } catch (const std::exception &e) {
+        log_error("recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode, e.what());
     }
 }
 

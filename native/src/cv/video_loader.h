@@ -1,9 +1,23 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+#include <filesystem>
+#include <iomanip>
+#include <optional>
+#include <sstream>
+#include <vector>
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic pop
+
+#include "core/native_api.h"
+#include "cv/frame.h"
+#include "types/shape.h"
+#include "util/event_util.h"
+#include "util/logger_util.h"
 
 namespace uma::video {
 
