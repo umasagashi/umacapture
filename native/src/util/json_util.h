@@ -38,7 +38,7 @@ struct adl_serializer<std::unique_ptr<T>> {
         }
     }
 
-    static void from_json(json &j, const std::unique_ptr<T> &opt) {
+    static void from_json(const json &j, std::unique_ptr<T> &opt) {
         if (j.is_null()) {
             opt = nullptr;
         } else {
