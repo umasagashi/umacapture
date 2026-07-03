@@ -51,7 +51,10 @@ struct CharaPrediction : public recognizer::Prediction {
 
     [[nodiscard]] bool rental() const { return at<int64_t>(6); }
 
-    [[nodiscard]] bool recordType() const { return at<int64_t>(6); }
+    // record_type_index (output 8), not rental_index (output 6): the model has a dedicated record-type
+    // head with values 0-3 (see record::RecordType). Read it as int, not bool, so a FriendStandard/
+    // FriendInheritance value (>= 2) is not truncated to 1.
+    [[nodiscard]] int recordType() const { return static_cast<int>(at<int64_t>(8)); }
 
     [[nodiscard]] Chara result() const {
         return {
@@ -63,7 +66,9 @@ struct CharaPrediction : public recognizer::Prediction {
         };
     }
 
-    [[nodiscard]] auto confidence() const { return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7)}); }
+    [[nodiscard]] auto confidence() const {
+        return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7), at<float>(9)});
+    }
 
     [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
 };
