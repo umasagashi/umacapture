@@ -380,7 +380,9 @@ StationaryFrameCatcher::StationaryFrameCatcher(
 
 void StationaryFrameCatcher::update(const Frame &frame) {
     if (previous_frame.empty()) {
-        previous_frame = frame;
+        // Frame copy is a shallow cv::Mat header copy; clone so the retained previous frame owns its pixels
+        // and cannot be mutated by a capture source that reuses its frame buffer.
+        previous_frame = frame.clone();
         return;
     }
 
@@ -391,7 +393,7 @@ void StationaryFrameCatcher::update(const Frame &frame) {
     } else {
         first_timestamp = std::nullopt;
     }
-    previous_frame = frame;
+    previous_frame = frame.clone();
 }
 
 bool StationaryFrameCatcher::ready() const {

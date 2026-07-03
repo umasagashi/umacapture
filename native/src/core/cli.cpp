@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <stdexcept>
 
 #include <CLI11/CLI11.hpp>
 #include <minimal_uuid4/minimal_uuid4.h>
@@ -30,7 +31,11 @@ void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJs
 
     json_util::Json reconstructed_json = toJson(fromJson(json_util::Json::parse(io_util::read(path))));
     log_debug(reconstructed_json.dump(2));
-    assert_(json == reconstructed_json);
+    // Fail loudly (even in release) if the serializer round-trip drifts, so `build` never writes a config
+    // that cannot be read back into an identical object.
+    if (json != reconstructed_json) {
+        throw std::runtime_error("buildJson round-trip mismatch: " + path.generic_string());
+    }
 }
 
 json_util::Json createConfig(bool video_mode) {

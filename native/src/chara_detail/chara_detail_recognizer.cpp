@@ -270,10 +270,15 @@ std::optional<double> FactorTabRecognizer::findNext(const Frame &frame, const Po
 
 record::Factor FactorTabRecognizer::predictFactor(
     const Frame &frame, const Rect<double> &rect, double top, PredictionHistory &history) const {
-    assert_(config.factor_rank.rect.topLeft().anchor() == ScreenStart);
-    assert_(config.factor_rank.rect.bottomRight().anchor() == ScreenStart);
-    assert_(rect.topLeft().anchor() == ScreenStart);
-    assert_(rect.bottomRight().anchor() == ScreenStart);
+    // The offset math below only holds for ScreenStart-anchored rects. This is a structural invariant of the
+    // parsed config, so a violation is a real check (not a Debug-only assert): it is caught by the recognizer's
+    // per-record try/catch and degrades to a dropped record plus a log entry.
+    if (!(config.factor_rank.rect.topLeft().anchor() == ScreenStart)
+        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart)
+        || !(rect.topLeft().anchor() == ScreenStart)
+        || !(rect.bottomRight().anchor() == ScreenStart)) {
+        throw std::logic_error("predictFactor requires ScreenStart-anchored rects");
+    }
 
     const auto factor_id = predict(factor_model, frame, rect + Point<double>{0, top}, history);
 

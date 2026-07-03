@@ -120,7 +120,16 @@ private:
                 if (!found.has_value()) {
                     found = values[i];
                 } else {
-                    assert_(false);
+                    // A simultaneous match beyond the documented enum-order overlap means a discrimination
+                    // assumption broke. Keep first-match, but surface it once in release logs (not only in a
+                    // Debug assert) so the breakage is observable in the field.
+                    if (!simultaneous_match_warned_) {
+                        simultaneous_match_warned_ = true;
+                        log_warning(
+                            "firstMet: multiple branches matched simultaneously ({} and {})",
+                            static_cast<int>(found.value()),
+                            static_cast<int>(values[i]));
+                    }
                 }
             }
         }
@@ -148,6 +157,7 @@ private:
     std::optional<uint64> scene_end_pending_since;
     bool scene_active = false;
     bool met_ = false;
+    mutable bool simultaneous_match_warned_ = false;
 };
 
 }  // namespace uma::chara_detail

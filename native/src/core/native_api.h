@@ -49,10 +49,25 @@ public:
         notify(json_util::Json{{"type", "onScreenshotTaken"}, {"path", path}, {"result", resultCode}}.dump());
     }
 
-    void stitch(const chara_detail::RecordInfo &info) const { on_stitch_ready->send(info); }
+    void stitch(const chara_detail::RecordInfo &info) const {
+        if (!isRunning()) {
+            return;
+        }
+        on_stitch_ready->send(info);
+    }
 
-    void recognize(const chara_detail::RecordInfo &info) const { on_recognize_ready->send(info); }
-    void recognize(const std::string &record_id) const { on_recognize_ready->send({record_id, std::nullopt}); }
+    void recognize(const chara_detail::RecordInfo &info) const {
+        if (!isRunning()) {
+            return;
+        }
+        on_recognize_ready->send(info);
+    }
+    void recognize(const std::string &record_id) const {
+        if (!isRunning()) {
+            return;
+        }
+        on_recognize_ready->send({record_id, std::nullopt});
+    }
 
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
 
@@ -119,12 +134,22 @@ public:
     }
 
 private:
+    // Builds and starts the whole pipeline. May throw (config parse, model load, ...); startEventLoop wraps
+    // it so those failures are reported to Dart via notifyError instead of escaping the FFI boundary.
+    void startPipeline(const std::string &native_config);
+
+    // Tears down the whole pipeline, tolerating partial initialization. Shared by joinEventLoop() and the
+    // startEventLoop() failure path so a throw mid-construction never leaves a half-built event loop behind.
+    void teardown();
+
     void notify(const std::string &message) {
         log_trace(message);
         notify_callback(message);
     }
 
-    std::function<MessageCallback> notify_callback = [](const auto &) { throw std::logic_error("Not Assigned."); };
+    // Must never throw: notify() runs on worker threads, where an escaping exception would terminate the
+    // process. An unassigned callback logs instead of throwing.
+    std::function<MessageCallback> notify_callback = [](const auto &) { log_error("notify_callback not assigned"); };
     std::function<MessageCallback> logging_callback = [](const auto &message) { std::cout << message << std::flush; };
     std::function<VoidCallback> detach_callback = []() {};
     std::function<PathCallback> mkdir_callback = [](const auto &path) { std::filesystem::create_directories(path); };

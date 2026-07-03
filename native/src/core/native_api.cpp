@@ -13,9 +13,10 @@ namespace uma::app {
 NativeApi::NativeApi() = default;  // Do not use Native::instance() in this constructor.
 
 NativeApi::~NativeApi() {
-    // TODO: The event loop must be joined before this instance is deleted.
-    //  Otherwise, for some reason, memory management will not work properly.
-    assert_(!isRunning());
+    // The event loop must be joined before this instance is destroyed; otherwise the worker threads may
+    // still reference this singleton (a function-local static) as it is torn down at process exit.
+    // joinEventLoop() is idempotent (no-op when not running), so this is safe even after an explicit join.
+    joinEventLoop();
 }
 
 void NativeApi::startEventLoop(const std::string &native_config) {
@@ -25,6 +26,18 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         return;
     }
 
+    try {
+        startPipeline(native_config);
+    } catch (const std::exception &e) {
+        // Any failure while building the pipeline (config parse, model load, ...) is reported to the Dart
+        // side as an error instead of escaping across the FFI boundary; partial state is rolled back first.
+        log_error("startEventLoop failed: {}", e.what());
+        teardown();
+        notifyError(e.what());
+    }
+}
+
+void NativeApi::startPipeline(const std::string &native_config) {
     const auto config_json = json_util::Json::parse(native_config);
     const bool video_mode = config_json["video_mode"].get<bool>();
     vlog_debug(video_mode);
@@ -224,21 +237,32 @@ void NativeApi::joinEventLoop() {
     if (!isRunning()) {
         return;
     }
+    teardown();
+}
 
+void NativeApi::teardown() {
     // Stop the watchdog before the runners so it cannot post an idle event onto a runner being torn down.
+    // Every step is null-tolerant so this can also unwind a pipeline that failed partway through startPipeline.
     if (frame_stall_watchdog != nullptr) {
         frame_stall_watchdog->join();
         frame_stall_watchdog = nullptr;
     }
 
-    assert_(event_runners != nullptr);
-    event_runners->join();
-    event_runners = nullptr;
+    if (event_runners != nullptr) {
+        event_runners->join();
+        event_runners = nullptr;
+    }
 
     frame_distributor = nullptr;
     chara_detail_scene_scraper = nullptr;
     chara_detail_scene_stitcher = nullptr;
     chara_detail_recognizer = nullptr;
+
+    // Drop the senders so a frame/record delivered after teardown cannot dereference a stale connection.
+    on_frame_captured = nullptr;
+    on_stitch_ready = nullptr;
+    on_recognize_ready = nullptr;
+    on_update_ready = nullptr;
 }
 
 bool NativeApi::isRunning() const {
@@ -246,20 +270,37 @@ bool NativeApi::isRunning() const {
 }
 
 void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) {
-    on_frame_captured->send(frame);
-    if (frame_stall_watchdog != nullptr) {
-        frame_stall_watchdog->notifyFrame();
+    // A frame can arrive before startEventLoop or after joinEventLoop (senders are null then); ignore it
+    // rather than dereferencing an empty sender.
+    if (!isRunning()) {
+        return;
     }
-    const auto &now = std::chrono::steady_clock::now();
-    if (now - last_size_reported > report_interval) {
-        notifyFrameSizeReported(original_size);
-        last_size_reported = now;
+    try {
+        on_frame_captured->send(frame);
+        if (frame_stall_watchdog != nullptr) {
+            frame_stall_watchdog->notifyFrame();
+        }
+        const auto &now = std::chrono::steady_clock::now();
+        if (now - last_size_reported > report_interval) {
+            notifyFrameSizeReported(original_size);
+            last_size_reported = now;
+        }
+    } catch (const std::exception &e) {
+        log_error("updateFrame failed: {}", e.what());
+        notifyError(e.what());
     }
 }
 
 void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
-    assert_(isRunning());
-    on_update_ready->send(info);
+    if (!isRunning()) {
+        return;
+    }
+    try {
+        on_update_ready->send(info);
+    } catch (const std::exception &e) {
+        // updateRecord is const, so it cannot route through the (non-const) notify path; log only.
+        log_error("updateRecord failed: {}", e.what());
+    }
 }
 
 }  // namespace uma::app

@@ -28,6 +28,8 @@ public:
         , on_stalled(on_stalled)
         , last_frame(std::chrono::steady_clock::now()) {}
 
+    ~FrameStallWatchdog() override { join(); }
+
     // Called from the capture thread for every delivered frame.
     void notifyFrame() { last_frame.store(std::chrono::steady_clock::now(), std::memory_order_relaxed); }
 
@@ -43,7 +45,14 @@ protected:
                 // Fire once per stall; rearm only after frames resume, so the callback is not spammed every poll.
                 if (!stalled) {
                     stalled = true;
-                    on_stalled();
+                    // The callback must not escape this worker thread, or it would terminate the process.
+                    try {
+                        on_stalled();
+                    } catch (const std::exception &e) {
+                        log_error("frame stall watchdog callback threw: {}", e.what());
+                    } catch (...) {
+                        log_error("frame stall watchdog callback threw an unknown exception");
+                    }
                 }
             } else {
                 stalled = false;

@@ -389,7 +389,13 @@ public:
         mat.copyTo(image(dest_rect.toCVRect()));
     }
 
-    void save(const std::filesystem::path &path) const { cv::imwrite(path.generic_string(), image); }
+    void save(const std::filesystem::path &path) const {
+        // cv::imwrite returns false (without throwing) on failure. Fail fast at the write site so a missing
+        // fragment is reported here, not later on another thread when the stitcher tries to read it back.
+        if (!cv::imwrite(path.generic_string(), image)) {
+            throw std::runtime_error("failed to write image: " + path.generic_string());
+        }
+    }
 
     void dump(const std::filesystem::path &path) const {
         save(path);
@@ -410,14 +416,20 @@ private:
     [[nodiscard]] inline Color colorAt(int x, int y) const { return bgrAt(x, y).toColor(); }
 
     [[nodiscard]] inline const BGR &bgrAt(int x, int y) const {
-        assert_(0 <= y && y < image.size().height);
-        assert_(0 <= x && x < image.size().width);
+        // Real bounds check (not a Debug-only assert): an out-of-range access is undefined behavior in
+        // release. Throwing degrades to a dropped record via the recognizer/scraper try/catch.
+        if (y < 0 || y >= image.rows || x < 0 || x >= image.cols) {
+            throw std::out_of_range("Frame::bgrAt out of bounds");
+        }
         return image.ptr<BGR>(y)[x];
     }
 
     [[nodiscard]] inline Frame view(int x, int y, int width, int height) const {
-        assert_(0 <= y && (y + height) <= image.size().height);
-        assert_(0 <= x && (x + width) <= image.size().width);
+        // Real bounds check (not a Debug-only assert): a ROI past the image edge is undefined behavior in
+        // release. Throwing degrades to a dropped record via the recognizer/scraper try/catch.
+        if (x < 0 || y < 0 || width < 0 || height < 0 || (x + width) > image.cols || (y + height) > image.rows) {
+            throw std::out_of_range("Frame::view out of bounds");
+        }
         return fixed(image({x, y, width, height}), timestamp_);
     }
 

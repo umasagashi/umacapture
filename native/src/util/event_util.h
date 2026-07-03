@@ -163,13 +163,23 @@ public:
         , detach(detach)
         , name(name) {}
 
+    ~EventRunnerThread() override { join(); }
+
 protected:
     void run() override {
         log_debug("start {}", name);
 
         while (isRunning()) {
             processor->waitFor(loopTimeoutMilliseconds);
-            processor->processIf([&]() { return isRunning(); });
+            // A listener throwing (e.g. a recognizer failure) must not escape this worker thread, or it
+            // would terminate the process. Log the offending event and keep the runner alive.
+            try {
+                processor->processIf([&]() { return isRunning(); });
+            } catch (const std::exception &e) {
+                log_error("event runner '{}' listener threw: {}", name, e.what());
+            } catch (...) {
+                log_error("event runner '{}' listener threw an unknown exception", name);
+            }
         }
 
         if (detach) {
