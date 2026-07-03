@@ -1,5 +1,7 @@
 import 'package:auto_route/auto_route.dart';
+import 'package:collection/collection.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +15,7 @@ import '/const.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/sound_player.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/app_widget.dart';
@@ -27,6 +30,9 @@ import '/src/preference/privacy_setting.dart';
 
 // ignore: constant_identifier_names
 const tr_settings = "pages.settings";
+
+// ignore: constant_identifier_names
+const tr_sound = "$tr_settings.sound";
 
 class ToggleButtonWidget<T> extends ConsumerWidget {
   final String title;
@@ -270,6 +276,121 @@ class CaptureSettingsGroup extends ConsumerWidget {
   }
 }
 
+/// Settings for the notification sounds, letting the user swap each built-in clip for a custom
+/// audio file and adjust its volume.
+class SoundSettingsGroup extends ConsumerWidget {
+  const SoundSettingsGroup({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListCard(
+      title: "$tr_sound.title".tr(),
+      padding: EdgeInsets.zero,
+      children: [for (final type in SoundType.values) _SoundSettingTile(type: type)],
+    );
+  }
+}
+
+/// A single notification sound row: name, current source, volume slider, and the pick/test/reset
+/// actions.
+class _SoundSettingTile extends ConsumerStatefulWidget {
+  final SoundType type;
+
+  const _SoundSettingTile({required this.type});
+
+  @override
+  ConsumerState<_SoundSettingTile> createState() => _SoundSettingTileState();
+}
+
+class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
+  /// Slider position while the user is dragging. Kept local so the persisted volume (which reloads
+  /// the audio player) is only committed once, on drag end.
+  double? _dragVolume;
+
+  SoundType get _type => widget.type;
+
+  Future<void> _pickFile() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: "$tr_sound.picker_title".tr(),
+      type: FileType.custom,
+      allowedExtensions: const ["wav", "mp3"],
+    );
+    final path = result?.files.singleOrNull?.path;
+    if (path == null) return;
+    ref.read(soundSettingProvider(_type).notifier).setCustomFile(path);
+  }
+
+  void _test() {
+    ref.read(soundEffectProvider(_type).future).then((effect) => effect.play());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final setting = ref.watch(soundSettingProvider(_type));
+    final notifier = ref.read(soundSettingProvider(_type).notifier);
+    final labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+
+    final title = Text("$tr_sound.type.${_type.name.snakeCase}".tr(), style: theme.textTheme.titleMedium);
+    final sourceLabel = setting.isCustom
+        ? Tooltip(
+            // A full path rarely fits, so ellipsize from the front to keep the file name visible;
+            // the tooltip shows the whole path on hover.
+            message: setting.path,
+            child: StartEllipsisText(setting.path, style: labelStyle),
+          )
+        : Text("$tr_sound.source.default".tr(), style: labelStyle);
+
+    final volumeIcon = Icon(Symbols.volume_up_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant);
+    // Shared across both layouts (only one branch builds per frame): fixed-width when it sits beside
+    // the path, and Expanded when it owns its own row.
+    final slider = Slider(
+      value: _dragVolume ?? setting.volume,
+      onChanged: (value) => setState(() => _dragVolume = value),
+      onChangeEnd: (value) {
+        notifier.setVolume(value);
+        setState(() => _dragVolume = null);
+      },
+    );
+    final testButton = IconButton(
+      tooltip: "$tr_sound.test_tooltip".tr(),
+      icon: const Icon(Symbols.play_arrow_rounded),
+      onPressed: _test,
+    );
+    final pickButton = IconButton(
+      tooltip: "$tr_sound.pick_tooltip".tr(),
+      icon: const Icon(Symbols.folder_open_rounded),
+      onPressed: _pickFile,
+    );
+    // Reset is available whenever anything differs from the default: a custom clip or a tweaked
+    // volume (even on the default clip).
+    final canReset = setting.isCustom || setting.volume != SoundSetting.defaultValueOf(_type).volume;
+    final resetButton = IconButton(
+      tooltip: "$tr_sound.reset_tooltip".tr(),
+      icon: const Icon(Symbols.settings_backup_restore_rounded),
+      onPressed: canReset ? notifier.resetToDefault : null,
+    );
+
+    // Single row at any width: the path column takes the leftover space and ellipsizes (from the
+    // front, so the file name stays visible) rather than reflowing the controls.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [title, sourceLabel]),
+          ),
+          volumeIcon,
+          SizedBox(width: 200, child: slider),
+          testButton,
+          pickButton,
+          resetButton,
+        ],
+      ),
+    );
+  }
+}
+
 class SystemGroup extends ConsumerWidget {
   const SystemGroup({super.key});
 
@@ -497,6 +618,7 @@ class SettingsPage extends ConsumerWidget {
       children: [
         const StyleSettingsGroup(),
         const CaptureSettingsGroup(),
+        const SoundSettingsGroup(),
         const SystemGroup(),
         const PrivacySettingsGroup(),
         const AboutGroup(),

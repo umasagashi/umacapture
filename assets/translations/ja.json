@@ -1332,6 +1332,21 @@
                     "disabled_tooltip": "キャプチャ中は変更できません"
                 }
             },
+            "sound": {
+                "title": "サウンド設定",
+                "picker_title": "通知音に使う音声ファイルを選択",
+                "source": {
+                    "default": "デフォルト"
+                },
+                "type": {
+                    "attention_weak": "通知音（弱）",
+                    "attention_normal": "通知音（強）",
+                    "error": "エラー音"
+                },
+                "test_tooltip": "試聴",
+                "pick_tooltip": "音声ファイルを選択（wav / mp3）",
+                "reset_tooltip": "デフォルトに戻す"
+            },
             "system": {
                 "title": "システム設定",
                 "clipboard_paste_image_mode": {
