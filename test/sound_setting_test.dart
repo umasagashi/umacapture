@@ -55,8 +55,8 @@ void main() {
   group('SoundSettingNotifier', () {
     test('reads the bundled default when nothing is persisted', () {
       final container = ProviderContainer.test();
-      final setting = container.read(soundSettingProvider(SoundType.attentionWeak));
-      expect(setting.path, 'sound/attention_weak.wav');
+      final setting = container.read(soundSettingProvider(SoundType.standby));
+      expect(setting.path, 'sound/standby.wav');
       expect(setting.source, SoundSource.asset);
       expect(setting.volume, 0.5);
       expect(setting.isCustom, isFalse);

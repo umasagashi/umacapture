@@ -56,8 +56,8 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
 
   @override
   Widget build(BuildContext context) {
-    _listenForPlaySound(scrollReadyEventProvider, SoundType.attentionWeak);
-    _listenForPlaySound(pageReadyEventProvider, SoundType.attentionNormal);
+    _listenForPlaySound(scrollReadyEventProvider, SoundType.standby);
+    _listenForPlaySound(pageReadyEventProvider, SoundType.success);
     _listenForPlaySound(errorEventProvider, SoundType.error);
     _listenForPlaySound(duplicatedCharaEventProvider, SoundType.error);
 

@@ -7,7 +7,7 @@ import 'package:recase/recase.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
-enum SoundType { attentionWeak, attentionNormal, error }
+enum SoundType { standby, success, error }
 
 /// Where a notification sound's audio data comes from.
 enum SoundSource {
