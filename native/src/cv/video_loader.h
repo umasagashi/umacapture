@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <iomanip>
 #include <optional>
 #include <sstream>
+#include <utility>
 #include <vector>
 
 #pragma clang diagnostic push
@@ -22,10 +24,16 @@ namespace uma::video {
 
 class VideoLoader {
 public:
+    // Given a decoded frame's size, return the normalized crop rect to apply, or nullopt for no crop. This
+    // mirrors how live capture picks a crop profile from the window aspect ratio (see windows_config::
+    // matchCropProfile), so a landscape recording is cropped to the content region and a portrait one is not,
+    // without a manual toggle.
+    using CropSelector = std::function<std::optional<Rect<double>>(const Size<int> &)>;
+
     explicit VideoLoader(
-        const event_util::Sender<Frame, Size<int>> &on_frame_captured, const std::optional<Rect<double>> &crop_rect)
+        const event_util::Sender<Frame, Size<int>> &on_frame_captured, CropSelector crop_selector)
         : on_frame_captured(on_frame_captured)
-        , crop_rect(crop_rect) {
+        , crop_selector(std::move(crop_selector)) {
         std::filesystem::create_directories("./temp");
     }
 
@@ -46,6 +54,11 @@ public:
         }
         vlog_debug("VideoCapture successfully opened.");
 
+        // Resolve the crop once, from the first frame's dimensions (constant within a clip), the same way live
+        // capture selects a crop profile from the window aspect ratio.
+        std::optional<Rect<double>> crop_rect;
+        bool crop_resolved = false;
+
         int64 last_ts = 0;
         for (int i = 0;; i++) {
             cv::Mat mat;
@@ -62,14 +75,19 @@ public:
 
             last_ts = std::max(last_ts, ts);
             const auto captured_frame = Frame{mat, static_cast<uint64>(std::llround(last_ts + head_ts))};
-            const auto cropped_frame = crop(captured_frame);
+            if (!crop_resolved) {
+                crop_rect = crop_selector ? crop_selector(captured_frame.size()) : std::nullopt;
+                crop_resolved = true;
+                vlog_info(crop_rect.has_value());
+            }
+            const auto cropped_frame = crop(captured_frame, crop_rect);
             on_frame_captured->send(cropped_frame, captured_frame.size());
         }
         return last_ts;
     }
 
 private:
-    [[nodiscard]] Frame crop(const Frame &frame) const {
+    [[nodiscard]] Frame crop(const Frame &frame, const std::optional<Rect<double>> &crop_rect) const {
         if (crop_rect.has_value()) {
             return frame.view(crop_rect.value()).clone();
         } else {
@@ -78,7 +96,7 @@ private:
     }
 
     const event_util::Sender<Frame, Size<int>> on_frame_captured{};
-    const std::optional<Rect<double>> crop_rect;
+    const CropSelector crop_selector;
 };
 
 }  // namespace uma::video

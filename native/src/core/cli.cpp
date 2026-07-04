@@ -162,13 +162,19 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
 
     const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
 
-    // const auto crop_rect =
-    //     windows_config.window_recorder->crop_profiles.value()[0].crop_rect;  // For horizontal screen.
-    const std::optional<Rect<double>> crop_rect = {};  // For vertical screen.
+    // Pick the crop the way live capture does, per clip: match each clip's frame aspect ratio against the
+    // configured crop_profiles. A landscape game recording matches a profile and is cropped to the vertical
+    // content region; a portrait phone recording matches nothing and is used uncropped. This replaces the old
+    // manual horizontal/vertical toggle.
+    const auto crop_profiles = windows_config.window_recorder.value().crop_profiles.value_or(
+        std::vector<windows::windows_config::CropProfile>{});
 
     recorder_runner->start();
 
-    auto video = video::VideoLoader(connection, crop_rect);
+    auto video = video::VideoLoader(connection, [crop_profiles](const Size<int> &size) -> std::optional<Rect<double>> {
+        const auto profile = windows::windows_config::matchCropProfile(crop_profiles, size);
+        return profile.has_value() ? profile->crop_rect : std::nullopt;
+    });
     video.runBatch(video_path_list);
 
     runUntilIdleThenJoin(api, monitor);
