@@ -81,8 +81,19 @@ void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJs
     }
 }
 
-json_util::Json createConfig(bool video_mode) {
-    const std::filesystem::path config_dir = "../../assets/config";
+// Directory inputs the pipeline needs, defaulting to the historical cwd-relative paths so the
+// interactive subcommands keep working unchanged. The one-shot subcommands (video/stitch/recognize)
+// expose these as CLI options so a test harness can point them at absolute paths and an isolated
+// output dir, making a run independent of the working directory.
+struct PipelinePaths {
+    std::filesystem::path assets_dir = "../../assets/config";
+    std::filesystem::path modules_dir = "../../sandbox/modules";
+    // Root under which the run writes temp/ (scraped fragments) and storage/ (finished records).
+    std::filesystem::path output_dir = ".";
+};
+
+json_util::Json createConfig(bool video_mode, const PipelinePaths &paths = {}) {
+    const std::filesystem::path &config_dir = paths.assets_dir;
     return {
         {"chara_detail",
          {
@@ -95,9 +106,9 @@ json_util::Json createConfig(bool video_mode) {
         {"video_mode", video_mode},
         {"directory",
          {
-             {"temp_dir", (std::filesystem::current_path() / "temp").string()},
-             {"storage_dir", (std::filesystem::current_path() / "storage").string()},
-             {"modules_dir", "../../sandbox/modules"},
+             {"temp_dir", (paths.output_dir / "temp").string()},
+             {"storage_dir", (paths.output_dir / "storage").string()},
+             {"modules_dir", paths.modules_dir.string()},
          }},
         {"trainer_id", minimal_uuid4::Generator().uuid4().str()},
     };
@@ -144,7 +155,7 @@ void screenshotFromScreen(const std::filesystem::path &output_path) {
     log_info("Screenshot saved to {}", output_path.string());
 }
 
-void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list) {
+void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list, const PipelinePaths &paths) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
@@ -157,7 +168,7 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
     });
     connection->listen([&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
 
-    const auto config = createConfig(true);
+    const auto config = createConfig(true, paths);
     api.startEventLoop(config.dump());
 
     const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
@@ -180,7 +191,7 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
     runUntilIdleThenJoin(api, monitor);
 }
 
-void stitchFromImages(const std::string &id) {
+void stitchFromImages(const std::string &id, const PipelinePaths &paths) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
@@ -191,7 +202,7 @@ void stitchFromImages(const std::string &id) {
         log_debug("CLI: {}", message);
     });
 
-    const auto config = createConfig(true);
+    const auto config = createConfig(true, paths);
     api.startEventLoop(config.dump());
 
     recorder_runner->start();
@@ -201,7 +212,7 @@ void stitchFromImages(const std::string &id) {
     runUntilIdleThenJoin(api, monitor);
 }
 
-void recognizeFromImages(const std::vector<std::string> &id_list) {
+void recognizeFromImages(const std::vector<std::string> &id_list, const PipelinePaths &paths) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
@@ -212,7 +223,7 @@ void recognizeFromImages(const std::vector<std::string> &id_list) {
         log_debug("CLI: {}", message);
     });
 
-    const auto config = createConfig(true);
+    const auto config = createConfig(true, paths);
     api.startEventLoop(config.dump());
 
     recorder_runner->start();
@@ -245,17 +256,32 @@ int main(int argc, char **argv) {
         std::filesystem::path screenshot_output = "screenshot.png";
         screenshot_command->add_option("--output", screenshot_output, "output image path");
 
+        // Directory options shared by the one-shot subcommands. Defaults reproduce the historical
+        // cwd-relative behavior; a test harness overrides them with absolute paths and an isolated
+        // output dir so a run is independent of the working directory.
+        const auto addPipelinePathOptions = [](CLI::App *sub, uma::cli::PipelinePaths &paths) {
+            sub->add_option("--assets_dir", paths.assets_dir, "config assets dir (default ../../assets/config)");
+            sub->add_option("--modules_dir", paths.modules_dir, "ONNX modules dir (default ../../sandbox/modules)");
+            sub->add_option("--output_dir", paths.output_dir, "root for temp/ and storage/ (default .)");
+        };
+
         auto video_command = command.add_subcommand("video", "run capture mode from video");
         std::vector<std::filesystem::path> video_path_list;
         video_command->add_option("--video_path_list", video_path_list)->required();
+        uma::cli::PipelinePaths video_paths;
+        addPipelinePathOptions(video_command, video_paths);
 
         auto stitch_command = command.add_subcommand("stitch", "run capture mode from scraped images");
         std::string stitch_id;
         stitch_command->add_option("--id", stitch_id)->required();
+        uma::cli::PipelinePaths stitch_paths;
+        addPipelinePathOptions(stitch_command, stitch_paths);
 
         auto recognize_command = command.add_subcommand("recognize", "run recognizer mode from stitched images");
         std::vector<std::string> recognize_id_list;
         recognize_command->add_option("--id", recognize_id_list)->required();
+        uma::cli::PipelinePaths recognize_paths;
+        addPipelinePathOptions(recognize_command, recognize_paths);
 
         CLI11_PARSE(command, argc, argv)
 
@@ -298,15 +324,15 @@ int main(int argc, char **argv) {
         }
 
         if (video_command->parsed()) {
-            uma::cli::captureFromVideo(video_path_list);
+            uma::cli::captureFromVideo(video_path_list, video_paths);
         }
 
         if (stitch_command->parsed()) {
-            uma::cli::stitchFromImages(stitch_id);
+            uma::cli::stitchFromImages(stitch_id, stitch_paths);
         }
 
         if (recognize_command->parsed()) {
-            uma::cli::recognizeFromImages(recognize_id_list);
+            uma::cli::recognizeFromImages(recognize_id_list, recognize_paths);
         }
     } catch (std::exception &e) {
         // Set a failure code and fall through instead of exit(1) so normal unwinding runs and the cleanup

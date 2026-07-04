@@ -11,6 +11,9 @@ set(OpenCV_DLL_NAME "opencv_world")
 set(OpenCV_DLL_PREFIX "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_DLL_NAME}${OpenCV_VERSION}")
 set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
 set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
+# OpenCV decodes video through this FFmpeg plugin DLL; the `video` subcommand fails to open a clip
+# without it next to the exe. Copied by the POST_BUILD step below so `video` works from the build dir.
+set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/opencv_videoio_ffmpeg${OpenCV_VERSION}_64.dll")
 
 set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/onnxruntime")
 
@@ -94,6 +97,13 @@ add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
         copy
         ${ONNX_DIR}/lib/onnxruntime.dll
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+)
+
+add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        ${OpenCV_FFMPEG_DLL}
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
 
@@ -198,6 +208,33 @@ target_link_libraries(
 )
 
 add_test(NAME umacapture_tests COMMAND umacapture_tests)
+
+# ---------------------------------------------------------------------------
+# Integration (golden) test -- drives the real umacapture_cli over recorded clips
+# and diffs the recognized record.json against committed goldens. Unlike the unit
+# tests above, this exercises the full ONNX/WinRT/FFmpeg pipeline, so it depends on
+# local-only assets (the .notes clips and sandbox/modules ONNX models, neither of
+# which is committed). The harness self-skips (exit 77) when those inputs are
+# absent, so a fresh checkout / CI reports it Skipped rather than Failed.
+#
+# Prefer running this against a RELEASE cli: in a Debug build the pipeline's
+# assert_ is live and a violated invariant pops an abort/retry/ignore dialog that
+# blocks an unattended run. See test/README.md.
+# ---------------------------------------------------------------------------
+find_program(UV_EXECUTABLE uv)
+if(UV_EXECUTABLE)
+    add_test(
+            NAME integration_golden
+            COMMAND ${UV_EXECUTABLE} run "${CMAKE_CURRENT_LIST_DIR}/test/integration/run.py"
+            --cli $<TARGET_FILE:${PROJECT_NAME}>
+            --data-dir "${CMAKE_CURRENT_LIST_DIR}/../.notes"
+            --assets-dir "${CMAKE_CURRENT_LIST_DIR}/../assets/config"
+            --modules-dir "${CMAKE_CURRENT_LIST_DIR}/../sandbox/modules"
+    )
+    set_tests_properties(integration_golden PROPERTIES SKIP_RETURN_CODE 77)
+else()
+    message(STATUS "uv not found on PATH; the integration_golden ctest is not registered.")
+endif()
 
 add_custom_command(
         TARGET umacapture_tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E

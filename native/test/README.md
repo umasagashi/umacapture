@@ -146,3 +146,53 @@ OpenCppCoverage --sources native\src --excluded_sources native\vendor ^
 substrings, so vendored headers and the test TUs are excluded), and the HTML
 report lands in `cmake-build-debug\coverage\index.html`. Use it to spot logic in
 the linked `.cpp`s that no test reaches.
+
+## Integration tests (golden)
+
+The unit tests above deliberately stop at the ONNX/WinRT boundary. The
+integration test in [`integration/`](integration) closes the other end: it drives
+the real `umacapture_cli video` over recorded clips and diffs the recognized
+`record.json` set against committed goldens, catching regressions in the full
+scrape → stitch → recognize pipeline that no unit test can see.
+
+Because it runs the real recognizer, it depends on **local-only assets** that are
+not in git:
+
+- the input clips under `.notes/` (`player_standard.mp4`, …), and
+- the ONNX models under `sandbox/modules/`.
+
+The goldens themselves (`integration/golden/*.json`) **are** committed — they are
+the regression baseline, small deterministic JSON, not screenshots or models. Only
+`record.json`'s three non-deterministic `metadata` fields (`record_id`,
+`trainer_id`, `captured_date`) are stripped before comparison; everything else is a
+deterministic function of the clip and the model set. The cases are listed in
+[`integration/cases.json`](integration/cases.json); a clip that isn't present
+locally is skipped, so the manifest may name more clips than any one machine has.
+
+The harness [`integration/run.py`](integration/run.py) is standard-library-only and
+run via `uv run`. Point `--cli` at a **Release** build: in a Debug build the
+pipeline's `assert_` is live and a violated invariant pops an abort/retry/ignore
+dialog that blocks an unattended run.
+
+```bash
+# Regenerate goldens after an intended model/pipeline change (review the diff!):
+uv run native/test/integration/run.py --update-golden \
+  --cli native/cmake-build-release/umacapture_cli.exe
+
+# Verify against the committed goldens:
+uv run native/test/integration/run.py \
+  --cli native/cmake-build-release/umacapture_cli.exe
+```
+
+It exits non-zero on any mismatch, and exits `77` when every case was skipped
+(no local inputs). CMake registers it as the `integration_golden` ctest (guarded on
+`uv` being on `PATH`) with `SKIP_RETURN_CODE 77`, so `ctest` reports it **Skipped**
+— not Failed — on a fresh checkout / CI:
+
+```bash
+ctest --test-dir cmake-build-release -R integration_golden --output-on-failure
+```
+
+Regenerated goldens are tied to the `sandbox/modules` model version. When the
+models change, rerun `--update-golden`, eyeball the diff, and commit the updated
+goldens alongside the model change.
