@@ -90,7 +90,6 @@ private:
             left_rect,
             right_rect,
             0.9852 - 0.9111,
-            0.9019 - 0.8278,
             0.0555,
             0.0481 + 0.0056,
             0.0129,
@@ -150,17 +149,6 @@ private:
                 Rect<double>{{0.5278, icon_top, {IS, SS}}, {0.6222, icon_bottom, {IS, SS}}},
                 Rect<double>{{0.6815, icon_top, {IS, SS}}, {0.7759, icon_bottom, {IS, SS}}},
                 Rect<double>{{0.8352, icon_top, {IS, SS}}, {0.9296, icon_bottom, {IS, SS}}},
-            },
-            {
-                getModulePath("support_card_level"),
-                {
-                    Rect<double>{{0.1463, label_top, {IS, SS}}, {0.1741, label_bottom, {IS, SS}}},
-                    Rect<double>{{0.3000, label_top, {IS, SS}}, {0.3278, label_bottom, {IS, SS}}},
-                    Rect<double>{{0.4537, label_top, {IS, SS}}, {0.4815, label_bottom, {IS, SS}}},
-                    Rect<double>{{0.6074, label_top, {IS, SS}}, {0.6352, label_bottom, {IS, SS}}},
-                    Rect<double>{{0.7593, label_top, {IS, SS}}, {0.7870, label_bottom, {IS, SS}}},
-                    Rect<double>{{0.9130, label_top_friend, {IS, SS}}, {0.9407, label_bottom_friend, {IS, SS}}},
-                },
             },
             {
                 getModulePath("support_card_rank"),
@@ -294,7 +282,6 @@ private:
             Point<double>{0.2537, 0.0000, {IS, SS}},
             Point<double>{0.2833, 0.0000, {IS, SS}},
             1.0037 - 0.9593,
-            0.0407,
             {
                 getModulePath("campaign_field"),
                 Rect<double>{{0.0741, 0.003, {IS, SS}}, {0.2519, 0.003 + 0.0278, {IS, SS}}},
@@ -306,14 +293,6 @@ private:
             {
                 getModulePath("scenario"),
                 Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.7648, 0.0278, {IS, SS}}},
-            },
-            {
-                getModulePath("foreign_aptitude"),
-                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.4093, 0.0278, {IS, SS}}},
-            },
-            {
-                getModulePath("uaf_wins"),
-                Rect<double>{{0.2926, 0.0, {IS, SS}}, {0.4407, 0.0278, {IS, SS}}},
             },
             {
                 getModulePath("trained_date"),

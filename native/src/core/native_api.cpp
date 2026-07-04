@@ -6,6 +6,7 @@
 #include "util/logger_util.h"
 #include "util/misc.h"
 
+#include "frame_rate.h"
 #include "native_api.h"
 
 namespace uma::app {
@@ -13,18 +14,43 @@ namespace uma::app {
 NativeApi::NativeApi() = default;  // Do not use Native::instance() in this constructor.
 
 NativeApi::~NativeApi() {
-    // TODO: The event loop must be joined before this instance is deleted.
-    //  Otherwise, for some reason, memory management will not work properly.
-    assert_(!isRunning());
+    // The event loop must be joined before this instance is destroyed; otherwise the worker threads may
+    // still reference this singleton (a function-local static) as it is torn down at process exit.
+    // joinEventLoop() is idempotent (no-op when not running), so this is safe even after an explicit join.
+    joinEventLoop();
 }
 
 void NativeApi::startEventLoop(const std::string &native_config) {
-    vlog_debug(native_config.length(), isRunning());
-    if (isRunning()) {
-        // TODO: Should be rebuilt when config is changed.
-        return;
-    }
+    std::string start_error;
+    {
+        std::lock_guard<std::mutex> lock(pipeline_mutex);
+        vlog_debug(native_config.length(), isRunningLocked());
+        if (isRunningLocked()) {
+            // TODO: Should be rebuilt when config is changed. Until then a start while already running is a
+            // silent no-op that discards the new config; warn so the discarded config is at least visible.
+            log_warning(
+                "startEventLoop called while already running; ignoring the request and keeping the current config");
+            return;
+        }
 
+        try {
+            startPipeline(native_config);
+        } catch (const std::exception &e) {
+            // Any failure while building the pipeline (config parse, model load, ...) is reported to the Dart
+            // side as an error instead of escaping across the FFI boundary; partial state is rolled back first.
+            log_error("startEventLoop failed: {}", e.what());
+            teardownLocked();
+            start_error = e.what();
+        }
+    }
+    // notifyError routes to the Dart callback; call it after releasing the lock so a re-entrant FFI call
+    // from that callback cannot deadlock on pipeline_mutex.
+    if (!start_error.empty()) {
+        notifyError(start_error);
+    }
+}
+
+void NativeApi::startPipeline(const std::string &native_config) {
     const auto config_json = json_util::Json::parse(native_config);
     const bool video_mode = config_json["video_mode"].get<bool>();
     vlog_debug(video_mode);
@@ -66,8 +92,7 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             std::vector<std::shared_ptr<distributor::SceneContext>>{
                 scene_context,
             },
-            frame_captured_connection,
-            nullptr);
+            frame_captured_connection);
     }
 
     // Live capture only: close an open scene when frames stop arriving. The scene-end debounce keys off frame
@@ -122,9 +147,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         const auto &now = std::chrono::steady_clock::now();
         lap_time_buffer.push_back(now);
         if ((now - lap_time_buffer.front()) > report_interval) {
-            notifyFrameRateReported(
-                static_cast<double>(chrono_util::ms(report_interval) * lap_time_buffer.size())
-                / static_cast<double>(chrono_util::ms(lap_time_buffer.back() - lap_time_buffer.front())));
+            notifyFrameRateReported(frameRate(
+                report_interval, lap_time_buffer.size(), lap_time_buffer.back() - lap_time_buffer.front()));
             lap_time_buffer.clear();
         }
     });
@@ -153,6 +177,11 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
+    // Route directory create/remove through the (possibly Dart-provided) callbacks so the pipeline
+    // components stay decoupled from this singleton and can be unit-tested with fakes. Captured by value
+    // here; the callbacks are set once at startup before the event loop starts.
+    const io_util::DirectoryHooks directory_hooks{mkdir_callback, rmdir_callback};
+
     chara_detail_scene_scraper = std::make_unique<chara_detail::CharaDetailSceneScraper>(
         chara_detail_opened_connection,
         lap_time_wrapper,
@@ -166,7 +195,8 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         factor_probe_ready_connection,
         restarted_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
-        scraping_dir);
+        scraping_dir,
+        directory_hooks);
 
     const auto recognize_ready_connection = recognizer_runner->makeConnection<chara_detail::RecordInfo>();
     on_recognize_ready = recognize_ready_connection;
@@ -177,13 +207,23 @@ void NativeApi::startEventLoop(const std::string &native_config) {
     const auto stitcher_dir =
         json_util::decodePath(config_json["directory"]["storage_dir"]) / "chara_detail" / "active";
 
+    // Stitching failed partway (a corrupt/partial fragment): the record can never be recognized, so surface a
+    // terminal failure just like closed_before_completed instead of leaving the UI waiting forever.
+    const auto stitch_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    stitch_failed_connection->listen([this](const auto &info) {
+        notifyCharaDetailFinished(info, false);
+        notifyError("stitch_failed");
+    });
+
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
         stitcher_dir,
         stitch_ready_connection,
         recognize_ready_connection,
+        stitch_failed_connection,
         config_json["chara_detail"]["scene_stitcher"]
-            .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>());
+            .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>(),
+        directory_hooks);
 
     const auto recognize_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
     recognize_completed_connection->listen(
@@ -213,68 +253,105 @@ void NativeApi::startEventLoop(const std::string &native_config) {
 }
 
 void NativeApi::joinEventLoop() {
-    vlog_debug(isRunning());
-    if (!isRunning()) {
+    std::lock_guard<std::mutex> lock(pipeline_mutex);
+    if (!isRunningLocked()) {
+        // Nothing to tear down. Deliberately log nothing on this path: joinEventLoop() also runs from
+        // ~NativeApi at process exit (atexit), by which point spdlog's default logger may already be
+        // destroyed -- logging here would dereference freed logger state and crash. The real teardown path
+        // below only runs while the pipeline is live, i.e. while the logger is still alive.
         return;
     }
+    vlog_debug(isRunningLocked());
+    teardownLocked();
+}
 
+void NativeApi::teardownLocked() {
     // Stop the watchdog before the runners so it cannot post an idle event onto a runner being torn down.
+    // Every step is null-tolerant so this can also unwind a pipeline that failed partway through startPipeline.
     if (frame_stall_watchdog != nullptr) {
         frame_stall_watchdog->join();
         frame_stall_watchdog = nullptr;
     }
 
-    assert_(event_runners != nullptr);
-    event_runners->join();
-    event_runners = nullptr;
+    if (event_runners != nullptr) {
+        event_runners->join();
+        event_runners = nullptr;
+    }
 
     frame_distributor = nullptr;
     chara_detail_scene_scraper = nullptr;
     chara_detail_scene_stitcher = nullptr;
     chara_detail_recognizer = nullptr;
+
+    // Drop the senders so a frame/record delivered after teardown cannot dereference a stale connection.
+    on_frame_captured = nullptr;
+    on_stitch_ready = nullptr;
+    on_recognize_ready = nullptr;
+    on_update_ready = nullptr;
 }
 
 bool NativeApi::isRunning() const {
+    std::lock_guard<std::mutex> lock(pipeline_mutex);
+    return isRunningLocked();
+}
+
+bool NativeApi::isRunningLocked() const {
     return event_runners && event_runners->isRunning();
 }
 
 void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) {
-    on_frame_captured->send(frame);
-    if (frame_stall_watchdog != nullptr) {
-        frame_stall_watchdog->notifyFrame();
+    // A frame can arrive before startEventLoop or after joinEventLoop, and can race teardown() on the capture
+    // thread (which is not one of the joined event runners). Copy the sender out under the lock so it stays
+    // alive across the send even if teardown() nulls the member, and notify the watchdog (a non-blocking
+    // atomic store) while holding the lock so it cannot be destroyed underneath us. The send itself runs
+    // outside the lock: in Block (video) mode it can wait on a full queue, which must not stall teardown.
+    event_util::Sender<Frame> sender;
+    {
+        std::lock_guard<std::mutex> lock(pipeline_mutex);
+        if (!isRunningLocked()) {
+            return;
+        }
+        sender = on_frame_captured;
+        if (frame_stall_watchdog != nullptr) {
+            frame_stall_watchdog->notifyFrame();
+        }
     }
-    const auto &now = std::chrono::steady_clock::now();
-    if (now - last_size_reported > report_interval) {
-        notifyFrameSizeReported(original_size);
-        last_size_reported = now;
+    try {
+        // Forward the captured frame without cloning by design: every consumer treats it as read-only (or
+        // clones before mutating), and the capture producers hand over a freshly allocated buffer per frame,
+        // so the shallow Mat share is safe. See the Frame class doc for the full ownership contract. Do not
+        // add a clone() here to "be safe" -- it would be pure overhead unless the producer contract changes.
+        sender->send(frame);
+        // last_size_reported is touched only from the capture thread, so it needs no lock; the size report
+        // notify runs outside the lock like the send.
+        const auto now = std::chrono::steady_clock::now();
+        if (now - last_size_reported > report_interval) {
+            notifyFrameSizeReported(original_size);
+            last_size_reported = now;
+        }
+    } catch (const std::exception &e) {
+        log_error("updateFrame failed: {}", e.what());
+        notifyError(e.what());
     }
 }
 
 void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
-    assert_(isRunning());
-    on_update_ready->send(info);
-}
-
-[[maybe_unused]] void NativeApi::_dummyForSuppressingUnusedWarning() {
-    log_fatal("Do not use this method.");
-    NativeApi::instance();
-    startEventLoop({});
-    joinEventLoop();
-    updateFrame({}, {0, 0});
-    setNotifyCallback({});
-    setDetachCallback({});
-    setMkdirCallback({});
-    setRmdirCallback({});
-    setLoggingCallback({});
-    notifyCaptureStarted();
-    notifyCaptureStopped();
-    updateRecord({});
-    notifyScreenshotTaken({}, {});
-    std::cout << (frame_distributor == nullptr);
-    std::cout << (chara_detail_scene_scraper == nullptr);
-    std::cout << (chara_detail_scene_stitcher == nullptr);
-    std::cout << (chara_detail_recognizer == nullptr);
-    std::cout << (on_recognize_ready == nullptr);
+    event_util::Sender<chara_detail::RecordInfo> sender;
+    {
+        std::lock_guard<std::mutex> lock(pipeline_mutex);
+        if (!isRunningLocked()) {
+            return;
+        }
+        sender = on_update_ready;
+    }
+    try {
+        sender->send(info);
+    } catch (const std::exception &e) {
+        // Surface the failure to Dart (notify() is const-callable via the mutable callback member) so the UI
+        // does not wait forever for a completion that will never arrive.
+        log_error("updateRecord failed: {}", e.what());
+        notifyError(std::string("updateRecord failed: ") + e.what());
+    }
 }
 
 }  // namespace uma::app

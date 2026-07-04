@@ -464,7 +464,6 @@
       }
     },
     "vertical_delta": 0.07409999999999994,
-    "vertical_margin": 0.07410000000000005,
     "vertical_banner_upper_gap": 0.0555,
     "vertical_banner_bottom_delta": 0.0537,
     "vertical_factor_gap": 0.0129,
@@ -712,119 +711,6 @@
           }
         }
       ],
-      "level": {
-        "module_path": "support_card_level/prediction.onnx",
-        "rects": [
-          {
-            "top_left": {
-              "x": 0.1463,
-              "y": 0.15189999999999992,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            },
-            "bottom_right": {
-              "x": 0.1741,
-              "y": 0.17039999999999988,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            }
-          },
-          {
-            "top_left": {
-              "x": 0.3,
-              "y": 0.15189999999999992,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            },
-            "bottom_right": {
-              "x": 0.3278,
-              "y": 0.17039999999999988,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            }
-          },
-          {
-            "top_left": {
-              "x": 0.4537,
-              "y": 0.15189999999999992,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            },
-            "bottom_right": {
-              "x": 0.4815,
-              "y": 0.17039999999999988,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            }
-          },
-          {
-            "top_left": {
-              "x": 0.6074,
-              "y": 0.15189999999999992,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            },
-            "bottom_right": {
-              "x": 0.6352,
-              "y": 0.17039999999999988,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            }
-          },
-          {
-            "top_left": {
-              "x": 0.7593,
-              "y": 0.15189999999999992,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            },
-            "bottom_right": {
-              "x": 0.787,
-              "y": 0.17039999999999988,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            }
-          },
-          {
-            "top_left": {
-              "x": 0.913,
-              "y": 0.1277999999999999,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            },
-            "bottom_right": {
-              "x": 0.9407,
-              "y": 0.14629999999999987,
-              "anchor": {
-                "h": "IntersectStart",
-                "v": "ScreenStart"
-              }
-            }
-          }
-        ]
-      },
       "rank": {
         "module_path": "support_card_rank/prediction.onnx",
         "rects": [
@@ -1455,7 +1341,6 @@
         }
       },
       "vertical_gap": 0.044399999999999995,
-      "vertical_gap_limit": 0.0407,
       "campaign_field": {
         "module_path": "campaign_field/prediction.onnx",
         "rect": {
@@ -1511,48 +1396,6 @@
           },
           "bottom_right": {
             "x": 0.7648,
-            "y": 0.0278,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        }
-      },
-      "foreign_aptitude": {
-        "module_path": "foreign_aptitude/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.2926,
-            "y": 0.0,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.4093,
-            "y": 0.0278,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          }
-        }
-      },
-      "uaf_wins": {
-        "module_path": "uaf_wins/prediction.onnx",
-        "rect": {
-          "top_left": {
-            "x": 0.2926,
-            "y": 0.0,
-            "anchor": {
-              "h": "IntersectStart",
-              "v": "ScreenStart"
-            }
-          },
-          "bottom_right": {
-            "x": 0.4407,
             "y": 0.0278,
             "anchor": {
               "h": "IntersectStart",

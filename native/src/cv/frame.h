@@ -1,8 +1,12 @@
 #pragma once
 
+#include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
@@ -18,7 +22,9 @@
 
 namespace uma {
 
-namespace {
+// Internal frame helpers. A named namespace (not an anonymous one) avoids giving every translation unit its
+// own internal-linkage copy of these -- and, for BGR, its own distinct type -- when frame.h is included widely.
+namespace frame_impl {
 
 struct BGR {
     uchar b;
@@ -52,14 +58,14 @@ private:
         , r(r) {}
 };
 
-Range<BGR> asBGRRange(const Range<Color> &color_range) {
+inline Range<BGR> asBGRRange(const Range<Color> &color_range) {
     return {
         BGR::clampFrom(color_range.min()),
         BGR::clampFrom(color_range.max()),
     };
 }
 
-std::vector<double> linspace(double start, double end, int num) {
+inline std::vector<double> linspace(double start, double end, int num) {
     assert_(num >= 2);
     // Backstop for release builds where assert_ is a no-op: num < 2 divides by zero and writes items[-1].
     if (num < 2) {
@@ -74,7 +80,9 @@ std::vector<double> linspace(double start, double end, int num) {
     return items;
 }
 
-}  // namespace
+}  // namespace frame_impl
+
+using namespace frame_impl;
 
 class FrameAnchor {
 public:
@@ -148,16 +156,17 @@ public:
 
     [[nodiscard]] inline Rect<int> intersection() const { return intersection_; }
 
-    //    [[nodiscard]] static Size<int> baseSize() { return base_size; }
-    //    static void setBaseSize(const Size<int> &size) { base_size = size; }
-
 private:
     FrameAnchor(const Size<int> frame_size, const Rect<int> &intersection)
         : unit_size(intersection.width())
         , intersection_(intersection)
         , offset_h()
         , offset_v() {
-        const double scale = 1. / unit_size;
+        // A degenerate frame (the default/empty sentinel Frame, or a momentary 0-width capture) yields
+        // unit_size == 0. Guard the reciprocal so the offset arrays stay finite (0) instead of inf/NaN; any
+        // later coordinate math on such an anchor then trips the real bounds checks in bgrAt/view (a clean
+        // throw) rather than feeding NaN into std::lround (undefined behavior).
+        const double scale = unit_size > 0 ? 1. / unit_size : 0.;
         offset_h[ScreenStart] = 0.0;
         offset_h[ScreenLogicalEnd] = scale * frame_size.width();
         offset_h[ScreenPixelEnd] = scale * (frame_size.width() - 1);
@@ -188,6 +197,14 @@ struct FrameInfo {
     EXTENDED_JSON_TYPE_NDC(FrameInfo, intersection);
 };
 
+// A thin handle over a reference-counted cv::Mat. Copying a Frame is shallow: copies share the same pixel
+// buffer (only the header/anchor are duplicated), which is why frames flow cheaply through the event queues
+// across threads. Two ownership rules keep that sharing safe:
+//   - Treat a Frame received from another thread as read-only. To modify it, clone() first (clone-on-write);
+//     the in-place mutators (fill/paste) write through the shared buffer and would race other consumers.
+//   - A producer that enqueues a Frame into the pipeline must hand over an independently owned buffer that
+//     nothing else will overwrite. The live-capture producers satisfy this by allocating a fresh cv::Mat per
+//     frame (cvtColor/resize outputs), so NativeApi::updateFrame forwards without cloning by design.
 class Frame {
 public:
     Frame()
@@ -225,19 +242,32 @@ public:
         return stretched(image, 1, screen_size);
     }
 
+    // Reads and validates a CV_8UC3 image from disk, reading the file bytes via an fstream (which opens the
+    // wide path on Windows) and decoding in memory, so non-ASCII paths that cv::imread would mangle work.
+    // cv::imdecode returns an empty Mat on a missing/corrupt file, and IMREAD_UNCHANGED decodes an alpha PNG
+    // to CV_8UC4 or a grayscale one to CV_8UC1; the Frame ctor only asserts (a no-op in release), so fail
+    // legibly here instead of constructing a Frame over an empty or wrong-channel Mat.
+    [[nodiscard]] inline static cv::Mat decodeBgr(const std::filesystem::path &path) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Frame::decodeBgr: failed to open: " + path.generic_string());
+        }
+        const std::vector<uchar> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const cv::Mat image = cv::imdecode(buffer, cv::IMREAD_UNCHANGED);
+        if (image.empty()) {
+            throw std::runtime_error("Frame::decodeBgr: failed to decode image: " + path.generic_string());
+        }
+        if (image.type() != CV_8UC3) {
+            throw std::runtime_error("Frame::decodeBgr: image must be CV_8UC3: " + path.generic_string());
+        }
+        return image;
+    }
+
     inline static Frame open(const std::filesystem::path &path) {
         std::filesystem::path info_path = path;
         info_path.replace_extension(".json");
         const auto frame_info = json_util::read(info_path);
-        const auto image = cv::imread(path.string(), -1);
-        // cv::imread returns an empty Mat on a missing or corrupt file; the Frame ctor only asserts (a no-op in
-        // release), so surface the I/O failure explicitly instead of constructing a Frame over an empty Mat.
-        if (image.empty()) {
-            throw std::runtime_error("Frame::open: failed to read image: " + path.string());
-        }
-        if (image.type() != CV_8UC3) {
-            throw std::runtime_error("Frame::open: image must be CV_8UC3: " + path.string());
-        }
+        const auto image = decodeBgr(path);
         return {image, 1, FrameAnchor::fixed(image.size(), frame_info["intersection"].get<Rect<int>>())};
     }
 
@@ -305,13 +335,19 @@ public:
         return length;
     }
 
+    // Precondition: `other` shares this frame's anchor family (same construction path), so `rect` maps to the
+    // same pixels in both. In general anchor is NOT a pure function of pixel size -- fixed()/stretched() frames
+    // of equal size can have different anchors -- so the size check below is a proxy, not a full guarantee. It
+    // holds because every caller diffs two live-capture frames (both intersect()-anchored), where equal size
+    // does imply an equal anchor. Do not pass a mix of construction paths (e.g. a fixed()-derived stitched
+    // frame against a live one): it would silently compare mismatched regions.
     [[nodiscard]] uint64 pixelDifference(const Frame &other, const Rect<double> &rect, int ignore_threshold) const {
         // Both frames are indexed over the same rect; a size mismatch (e.g. a capture resolution change between
         // frames) would read out of bounds on the smaller image in release, where the assert is compiled out.
         if (this->size() != other.size()) {
             throw std::invalid_argument("pixelDifference: frame sizes do not match");
         }
-        const auto &mapped_rect = rect.empty() ? this->rect() : anchor_.mapToFrame(rect);
+        const auto mapped_rect = clampedMappedRect(rect);
         uint64 total = 0;
         for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
             for (int x = mapped_rect.left(); x < mapped_rect.right(); x++) {
@@ -338,11 +374,13 @@ public:
         [[nodiscard]] double ratio() const { return total == 0 ? 0.0 : static_cast<double>(changed) / total; }
     };
 
+    // Same anchor-family precondition as pixelDifference: the size check is a proxy that holds only because
+    // callers diff two live-capture (intersect()-anchored) frames. See pixelDifference above.
     [[nodiscard]] DiffStats diffStats(const Frame &other, const Rect<double> &rect, int threshold) const {
         if (this->size() != other.size()) {
             throw std::invalid_argument("diffStats: frame sizes do not match");
         }
-        const auto &mapped_rect = rect.empty() ? this->rect() : anchor_.mapToFrame(rect);
+        const auto mapped_rect = clampedMappedRect(rect);
         DiffStats stats;
         for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
             for (int x = mapped_rect.left(); x < mapped_rect.right(); x++) {
@@ -373,23 +411,55 @@ public:
 
     [[nodiscard]] inline Frame clone() const { return {image.clone(), timestamp_, anchor_}; }
 
+    // In-place mutator: writes through the shared cv::Mat buffer. Used deliberately to write to a parent
+    // through a view (e.g. canvas.view(rect).fill(...)). See the class doc for the shared-buffer ownership
+    // contract (clone before mutating a Frame that another thread may be reading).
     void fill(const Rect<double> &rect, const Color &color) {
         const auto &r = anchor_.mapToFrame(rect);
         cv::rectangle(image, r.toCVRect(), color.toCVScalar(), cv::FILLED);
     }
 
+    // In-place mutator; see fill() for the shared-buffer ownership contract.
     void paste(const Rect<double> &rect, const Frame &source) {
         const auto &dest_rect = anchor_.mapToFrame(rect);
+        // Real bounds check (mirrors view()): image(cvRect) with a ROI past the edge, or a negative-size rect,
+        // throws a raw cv::Exception. Throw std::out_of_range instead so it degrades via the same path as
+        // bgrAt/view (a dropped record through the recognizer/scraper try/catch).
+        if (dest_rect.left() < 0 || dest_rect.top() < 0 || dest_rect.width() < 0 || dest_rect.height() < 0
+            || dest_rect.right() > image.cols || dest_rect.bottom() > image.rows) {
+            throw std::out_of_range("Frame::paste out of bounds");
+        }
         cv::Mat mat;
         if (dest_rect.size() == source.size()) {
-            mat = source.image;
+            // Same-size fast path shares the source header. If the source aliases THIS image's allocation, a
+            // copyTo between overlapping regions of one buffer is undefined; clone the source in that case.
+            mat = (source.image.u == image.u) ? source.image.clone() : source.image;
         } else {
             cv::resize(source.image, mat, dest_rect.size().toCVSize(), 0, 0, cv::INTER_LINEAR);
         }
         mat.copyTo(image(dest_rect.toCVRect()));
     }
 
-    void save(const std::filesystem::path &path) const { cv::imwrite(path.generic_string(), image); }
+    void save(const std::filesystem::path &path) const {
+        // Encode in memory (format chosen by the extension) and write the bytes via an fstream (which opens the
+        // wide path on Windows), so non-ASCII paths that cv::imwrite would mangle work. cv::imencode returns
+        // false (without throwing) on an unknown format, and the fstream surfaces write failures; fail fast at
+        // the write site so a missing fragment is reported here, not later on another thread when the stitcher
+        // tries to read it back.
+        std::vector<uchar> buffer;
+        if (!cv::imencode(path.extension().string(), image, buffer)) {
+            throw std::runtime_error("failed to encode image: " + path.generic_string());
+        }
+        std::ofstream file(path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("failed to open image for write: " + path.generic_string());
+        }
+        file.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+        file.flush();
+        if (!file) {
+            throw std::runtime_error("failed to write image: " + path.generic_string());
+        }
+    }
 
     void dump(const std::filesystem::path &path) const {
         save(path);
@@ -410,15 +480,36 @@ private:
     [[nodiscard]] inline Color colorAt(int x, int y) const { return bgrAt(x, y).toColor(); }
 
     [[nodiscard]] inline const BGR &bgrAt(int x, int y) const {
-        assert_(0 <= y && y < image.size().height);
-        assert_(0 <= x && x < image.size().width);
+        // Real bounds check (not a Debug-only assert): an out-of-range access is undefined behavior in
+        // release. Throwing degrades to a dropped record via the recognizer/scraper try/catch.
+        if (y < 0 || y >= image.rows || x < 0 || x >= image.cols) {
+            throw std::out_of_range("Frame::bgrAt out of bounds");
+        }
         return image.ptr<BGR>(y)[x];
     }
 
     [[nodiscard]] inline Frame view(int x, int y, int width, int height) const {
-        assert_(0 <= y && (y + height) <= image.size().height);
-        assert_(0 <= x && (x + width) <= image.size().width);
+        // Real bounds check (not a Debug-only assert): a ROI past the image edge is undefined behavior in
+        // release. Throwing degrades to a dropped record via the recognizer/scraper try/catch.
+        if (x < 0 || y < 0 || width < 0 || height < 0 || (x + width) > image.cols || (y + height) > image.rows) {
+            throw std::out_of_range("Frame::view out of bounds");
+        }
         return fixed(image({x, y, width, height}), timestamp_);
+    }
+
+    // Maps `rect` (normalized coordinates) to frame pixels and clips it to the image bounds. An empty rect
+    // means "the whole frame". Used by the area metrics (pixelDifference/diffStats): a rect that reaches past
+    // the frame edge should clip to the valid region, not throw mid-loop through bgrAt.
+    [[nodiscard]] inline Rect<int> clampedMappedRect(const Rect<double> &rect) const {
+        if (rect.empty()) {
+            return this->rect();
+        }
+        const auto &mapped = anchor_.mapToFrame(rect);
+        const int left = std::clamp(mapped.left(), 0, image.cols);
+        const int top = std::clamp(mapped.top(), 0, image.rows);
+        const int right = std::clamp(mapped.right(), left, image.cols);
+        const int bottom = std::clamp(mapped.bottom(), top, image.rows);
+        return {{left, top}, Point<int>{right, bottom}};
     }
 
     cv::Mat image;

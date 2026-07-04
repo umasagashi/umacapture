@@ -1281,18 +1281,6 @@ class CharaDetailRecordMapper extends ClassMapperBase<CharaDetailRecord> {
     'scenario',
     _$scenario,
   );
-  static int? _$foreignAptitude(CharaDetailRecord v) => v.foreignAptitude;
-  static const Field<CharaDetailRecord, int> _f$foreignAptitude = Field(
-    'foreignAptitude',
-    _$foreignAptitude,
-    key: r'foreign_aptitude',
-  );
-  static int? _$uafWins(CharaDetailRecord v) => v.uafWins;
-  static const Field<CharaDetailRecord, int> _f$uafWins = Field(
-    'uafWins',
-    _$uafWins,
-    key: r'uaf_wins',
-  );
   static String _$trainedDate(CharaDetailRecord v) => v.trainedDate;
   static const Field<CharaDetailRecord, String> _f$trainedDate = Field(
     'trainedDate',
@@ -1318,8 +1306,6 @@ class CharaDetailRecordMapper extends ClassMapperBase<CharaDetailRecord> {
     #family: _f$family,
     #fans: _f$fans,
     #scenario: _f$scenario,
-    #foreignAptitude: _f$foreignAptitude,
-    #uafWins: _f$uafWins,
     #trainedDate: _f$trainedDate,
     #races: _f$races,
   };
@@ -1339,8 +1325,6 @@ class CharaDetailRecordMapper extends ClassMapperBase<CharaDetailRecord> {
       data.dec(_f$family),
       data.dec(_f$fans),
       data.dec(_f$scenario),
-      data.dec(_f$foreignAptitude),
-      data.dec(_f$uafWins),
       data.dec(_f$trainedDate),
       data.dec(_f$races),
     );

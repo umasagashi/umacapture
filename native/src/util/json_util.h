@@ -1,7 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -38,7 +42,7 @@ struct adl_serializer<std::unique_ptr<T>> {
         }
     }
 
-    static void from_json(json &j, const std::unique_ptr<T> &opt) {
+    static void from_json(const json &j, std::unique_ptr<T> &opt) {
         if (j.is_null()) {
             opt = nullptr;
         } else {
@@ -148,8 +152,11 @@ T extended_from_json(const Json &json, const std::string &key, nlohmann::detail:
 }
 
 inline std::string trim(const std::string &key) {
-    const auto &begin = key.find_first_not_of('_');
-    const auto &end = key.find_last_not_of('_');
+    const auto begin = key.find_first_not_of('_');
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const auto end = key.find_last_not_of('_');
     return key.substr(begin, end - begin + 1);
 }
 
@@ -158,15 +165,6 @@ inline std::string trim(const std::string &key) {
 #define INTERNAL_EXTENDED_JSON_FROM_NDC(v1) \
     uma::json_util::extended_from_json(json, uma::json_util::trim(#v1), uma::json_util::AsType<decltype(v1)>()),
 #define INTERNAL_EXTENDED_JSON_ENUM(v1) {v1, #v1},
-
-// A serializer for default constructible types.
-//#define EXTENDED_JSON_TYPE(Type, ...) \
-//    friend void to_json(uma::json_util::Json &json, const Type &obj) { \
-//        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_TO, __VA_ARGS__)) \
-//    } \
-//    friend void from_json(const uma::json_util::Json &json, Type &obj) { \
-//        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_FROM, __VA_ARGS__)) \
-//    }
 
 // A serializer for default constructible types with no parameters to store.
 #define EXTENDED_JSON_TYPE_NO_ARGS_DC(Type, ...) \
@@ -186,6 +184,31 @@ inline std::string trim(const std::string &key) {
 #define EXTENDED_JSON_TYPE_ENUM(Type, ...) \
     NLOHMANN_JSON_SERIALIZE_ENUM( \
         Type, {NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_ENUM, __VA_ARGS__))})
+
+// Like EXTENDED_JSON_TYPE_ENUM, but from_json throws on an unknown name instead of the stock
+// NLOHMANN_JSON_SERIALIZE_ENUM behavior of silently mapping it to the first enumerator. Use for load-bearing
+// enums (record.json / config) where a silent remap to the first value is data corruption, not a default.
+#define EXTENDED_JSON_TYPE_ENUM_STRICT(Type, ...) \
+    template<typename BasicJsonType> \
+    inline void to_json(BasicJsonType &j, const Type &e) { \
+        static const std::pair<Type, BasicJsonType> m[] = { \
+            NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_ENUM, __VA_ARGS__))}; \
+        const auto it = std::find_if(std::begin(m), std::end(m), [&e](const auto &pair) { return pair.first == e; }); \
+        if (it == std::end(m)) { \
+            throw std::invalid_argument("unknown enum value for " #Type); \
+        } \
+        j = it->second; \
+    } \
+    template<typename BasicJsonType> \
+    inline void from_json(const BasicJsonType &j, Type &e) { \
+        static const std::pair<Type, BasicJsonType> m[] = { \
+            NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_ENUM, __VA_ARGS__))}; \
+        const auto it = std::find_if(std::begin(m), std::end(m), [&j](const auto &pair) { return pair.second == j; }); \
+        if (it == std::end(m)) { \
+            throw std::invalid_argument("unknown enum name for " #Type ": " + j.dump()); \
+        } \
+        e = it->first; \
+    }
 
 // A helper to make a serializable object streamable.
 #define EXTENDED_JSON_TYPE_PRINTABLE(Type) \

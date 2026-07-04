@@ -34,7 +34,6 @@ class ParserMapper extends ClassMapperBase<Parser> {
       SkillParserMapper.ensureInitialized();
       FactorSetParserMapper.ensureInitialized();
       FansParserMapper.ensureInitialized();
-      ForeignAptitudeParserMapper.ensureInitialized();
       TrainedDateParserMapper.ensureInitialized();
       CapturedDateParserMapper.ensureInitialized();
       RaceWinningCountParserMapper.ensureInitialized();
@@ -1276,65 +1275,6 @@ mixin FansParserMappable {
     return FansParserMapper.ensureInitialized().encodeMap<FansParser>(
       this as FansParser,
     );
-  }
-}
-
-class ForeignAptitudeParserMapper
-    extends SubClassMapperBase<ForeignAptitudeParser> {
-  ForeignAptitudeParserMapper._();
-
-  static ForeignAptitudeParserMapper? _instance;
-  static ForeignAptitudeParserMapper ensureInitialized() {
-    if (_instance == null) {
-      MapperContainer.globals.use(_instance = ForeignAptitudeParserMapper._());
-      ParserMapper.ensureInitialized().addSubMapper(_instance!);
-    }
-    return _instance!;
-  }
-
-  @override
-  final String id = 'ForeignAptitudeParser';
-
-  @override
-  final MappableFields<ForeignAptitudeParser> fields = const {};
-
-  @override
-  final String discriminatorKey = 'type';
-  @override
-  final dynamic discriminatorValue = 'ForeignAptitudeParser';
-  @override
-  late final ClassMapperBase superMapper = ParserMapper.ensureInitialized();
-
-  @override
-  DecodingContext inherit(DecodingContext context) {
-    return context.inherit(args: () => []);
-  }
-
-  static ForeignAptitudeParser _instantiate(DecodingData data) {
-    return ForeignAptitudeParser();
-  }
-
-  @override
-  final Function instantiate = _instantiate;
-
-  static ForeignAptitudeParser fromMap(Map<String, dynamic> map) {
-    return ensureInitialized().decodeMap<ForeignAptitudeParser>(map);
-  }
-
-  static ForeignAptitudeParser fromJson(String json) {
-    return ensureInitialized().decodeJson<ForeignAptitudeParser>(json);
-  }
-}
-
-mixin ForeignAptitudeParserMappable {
-  String toJson() {
-    return ForeignAptitudeParserMapper.ensureInitialized()
-        .encodeJson<ForeignAptitudeParser>(this as ForeignAptitudeParser);
-  }
-
-  Map<String, dynamic> toMap() {
-    return ForeignAptitudeParserMapper.ensureInitialized()
-        .encodeMap<ForeignAptitudeParser>(this as ForeignAptitudeParser);
   }
 }
 

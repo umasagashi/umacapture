@@ -6,6 +6,7 @@
 #include <functional>
 #include <thread>
 
+#include "util/logger_util.h"
 #include "util/thread_util.h"
 
 namespace uma::distributor {
@@ -28,8 +29,37 @@ public:
         , on_stalled(on_stalled)
         , last_frame(std::chrono::steady_clock::now()) {}
 
+    ~FrameStallWatchdog() override { join(); }
+
+    // Re-baseline the last-frame timestamp before launching the poll thread. The watchdog is constructed
+    // during pipeline startup but started only after every runner spins up; a slow cold start (loading ONNX
+    // models) between construction and here could otherwise exceed the timeout and fire a spurious stall
+    // before the first real frame arrives. Hides ThreadBase::start() (called on the concrete type).
+    void start() {
+        last_frame.store(std::chrono::steady_clock::now(), std::memory_order_relaxed);
+        thread_util::ThreadBase::start();
+    }
+
     // Called from the capture thread for every delivered frame.
     void notifyFrame() { last_frame.store(std::chrono::steady_clock::now(), std::memory_order_relaxed); }
+
+    // Pure stall-decision: given the gap since the last frame, decide whether the callback should fire
+    // now, updating the fire-once latch `stalled` in place. Fires only on the transition into a stalled
+    // state and rearms once frames resume (a sub-timeout gap), so the callback is not spammed every poll.
+    // Extracted static and parameterized so the debounce logic is unit-testable without a running thread
+    // or the real steady_clock; run() feeds it the live elapsed time.
+    static bool shouldFire(std::chrono::steady_clock::duration elapsed, std::chrono::milliseconds timeout,
+        bool &stalled) {
+        if (elapsed >= timeout) {
+            if (!stalled) {
+                stalled = true;
+                return true;
+            }
+            return false;
+        }
+        stalled = false;
+        return false;
+    }
 
 protected:
     void run() override {
@@ -39,14 +69,15 @@ protected:
                 break;
             }
             const auto elapsed = std::chrono::steady_clock::now() - last_frame.load(std::memory_order_relaxed);
-            if (elapsed >= timeout) {
-                // Fire once per stall; rearm only after frames resume, so the callback is not spammed every poll.
-                if (!stalled) {
-                    stalled = true;
+            if (shouldFire(elapsed, timeout, stalled)) {
+                // The callback must not escape this worker thread, or it would terminate the process.
+                try {
                     on_stalled();
+                } catch (const std::exception &e) {
+                    log_error("frame stall watchdog callback threw: {}", e.what());
+                } catch (...) {
+                    log_error("frame stall watchdog callback threw an unknown exception");
                 }
-            } else {
-                stalled = false;
             }
         }
     }

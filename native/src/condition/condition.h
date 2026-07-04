@@ -21,7 +21,6 @@ public:
 
     [[maybe_unused]] [[nodiscard]] virtual std::string typeName() const = 0;
 
-    // static Condition<InputType> *fromJson(const json_util::Json &j);
     [[nodiscard]] virtual json_util::Json toJson() const = 0;
 };
 

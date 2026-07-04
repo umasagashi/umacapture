@@ -51,6 +51,23 @@ struct CropProfile {
     EXTENDED_JSON_TYPE_NDC(CropProfile, window_aspect_ratio, client_aspect_ratio, crop_rect);
 };
 
+// Select the crop profile whose window_aspect_ratio range contains the given size's aspect ratio, or nullopt
+// if none matches. Shared by the live WindowCapturer and the offline VideoLoader so both pick the same profile
+// (a landscape game window vs. a portrait phone recording) from the frame dimensions alone.
+[[nodiscard]] inline std::optional<CropProfile> matchCropProfile(
+    const std::vector<CropProfile> &profiles, const Size<int> &size) {
+    if (size.height() <= 0) {
+        return {};
+    }
+    const double ratio = static_cast<double>(size.width()) / size.height();
+    for (const auto &profile : profiles) {
+        if (profile.window_aspect_ratio && profile.window_aspect_ratio->contains(ratio)) {
+            return profile;
+        }
+    }
+    return {};
+}
+
 }  // namespace windows_config
 
 namespace windows_impl {
@@ -117,6 +134,9 @@ public:
             image = resized;
         }
 
+        // `image` is a freshly allocated cv::Mat every call (the cvtColor output in captureRegion, or the
+        // resize output above), never a reused buffer. The pipeline relies on this: NativeApi::updateFrame
+        // forwards the Frame downstream without cloning (see the Frame class doc ownership contract).
         return {image, chrono_util::to_timestamp(chrono_util::local_now())};
     }
 
@@ -304,13 +324,7 @@ private:
     }
 
     std::optional<windows_config::CropProfile> findMatchingCropProfile(const Rect<int> &client_rect) const {
-        const double ratio = static_cast<double>(client_rect.width()) / client_rect.height();
-        for (const auto &profile : crop_profiles) {
-            if (profile.window_aspect_ratio->contains(ratio)) {
-                return profile;
-            }
-        }
-        return {};
+        return windows_config::matchCropProfile(crop_profiles, client_rect.size());
     }
 
     WindowInfo findTargetWindow() {

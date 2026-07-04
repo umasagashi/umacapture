@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #include <opencv2/opencv.hpp>
@@ -79,7 +82,7 @@ enum LayoutAnchor {
     IntersectLogicalEnd,
     IntersectPixelEnd,
 };
-EXTENDED_JSON_TYPE_ENUM(
+EXTENDED_JSON_TYPE_ENUM_STRICT(
     LayoutAnchor, ScreenStart, ScreenLogicalEnd, ScreenPixelEnd, IntersectStart, IntersectLogicalEnd, IntersectPixelEnd)
 
 class Anchor {
@@ -204,8 +207,6 @@ public:
     [[nodiscard]] inline T pointAt(double ratio) const { return (p2_ - p1_) * ratio + p1_; }
 
     [[nodiscard]] inline double length() const { return std::abs(p2_ - p1_); }
-
-    //    [[nodiscard]] inline Line1D<T> reversed() const { return {p2_, p1_}; }
 
     inline Line1D<T> operator-(const Line1D<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
 

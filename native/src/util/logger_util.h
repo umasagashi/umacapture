@@ -28,34 +28,8 @@ protected:
 using CallbackSinkMt = CallbackSink<std::mutex>;
 using CallbackSinkSt = CallbackSink<spdlog::details::null_mutex>;
 
-inline void init() {
-    const auto logger_name = "uma::log";
-
-#if defined(__ANDROID__)
-    spdlog::sinks_init_list sinks = {
-        std::make_shared<spdlog::sinks::android_sink_mt>("native"),
-    };
-    spdlog::set_default_logger(std::make_shared<spdlog::logger>(logger_name, sinks));
-    spdlog::set_pattern("%^%L%$ %T.%f [%t] [%!:%#] %v");
-#elif defined(__APPLE__)
-    spdlog::sinks_init_list sinks = {
-        std::make_shared<CallbackSinkMt>(),
-    };
-    spdlog::set_default_logger(std::make_shared<spdlog::logger>(logger_name, sinks));
-    spdlog::set_pattern("[%n] %^%L%$ %T.%f [%t] [%!:%#] %v");
-#else
-    spdlog::sinks_init_list sinks = {
-        std::make_shared<spdlog::sinks::stdout_color_sink_mt>(),
-//        std::make_shared<spdlog::sinks::basic_file_sink_mt>("./sandbox/log.txt", true),  // TODO: Path.
-    };
-    spdlog::set_default_logger(std::make_shared<spdlog::logger>(logger_name, sinks));
-    spdlog::set_pattern("%^%L%$ %T.%f [%t] [%!:%#] %v");
-    spdlog::flush_on(spdlog::level::warn);
-    spdlog::flush_every(std::chrono::seconds(5));
-#endif
-
-    spdlog::set_level(spdlog::level::trace);  // Do not change this. Change the macro defined on top.
-}
+// Configures the default spdlog logger (sinks, pattern, level). Defined in logger_util.cpp.
+void init();
 
 }  // namespace uma::logger_util
 

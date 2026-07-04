@@ -1,0 +1,16 @@
+{
+  "comment": [
+    "Integration golden cases for native/test/integration/run.py.",
+    "Each case runs `umacapture_cli video` over `video` (resolved under --data-dir, default .notes)",
+    "and compares the recognized record.json set against `golden`.",
+    "Videos live under .notes/ and are NOT committed; goldens ARE committed (regression baseline).",
+    "A case whose video is absent is skipped, so this manifest may list more clips than any one",
+    "machine has locally. Add a case here + regenerate its golden with run.py --update-golden."
+  ],
+  "cases": [
+    { "name": "player_standard", "video": "player_standard.mp4", "golden": "golden/player_standard.json" },
+    { "name": "player_inheritance", "video": "player_inheritance.mp4", "golden": "golden/player_inheritance.json" },
+    { "name": "friend_standard", "video": "friend_standard.mp4", "golden": "golden/friend_standard.json" },
+    { "name": "friend_inheritance", "video": "friend_inheritance.mp4", "golden": "golden/friend_inheritance.json" }
+  ]
+}

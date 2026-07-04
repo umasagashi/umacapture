@@ -1,5 +1,9 @@
 #pragma once
 
+namespace uma {
+class Frame;
+}  // namespace uma
+
 namespace uma::distributor {
 
 class SceneContext {

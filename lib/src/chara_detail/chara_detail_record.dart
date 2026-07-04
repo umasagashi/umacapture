@@ -319,8 +319,9 @@ class RecordQuarantined extends RecordLoadResult {
 const traineeIconFileName = "trainee.jpg";
 
 // ignoreNull keeps persisted record.json byte-compatible with the native writer,
-// which omits empty optionals. Without it, toMap() emits "foreign_aptitude": null
-// / "uaf_wins": null, which the native recognizer cannot read back on re-recognize.
+// which omits empty optionals. Without it, toMap() would emit optional fields as
+// explicit nulls (e.g. "relation_bonus": null), which the native recognizer cannot
+// read back on re-recognize.
 @MappableClass(caseStyle: CaseStyle.snakeCase, ignoreNull: true)
 class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   final Metadata metadata;
@@ -335,8 +336,6 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   final Family family;
   final int fans;
   final Scenario scenario;
-  final int? foreignAptitude;
-  final int? uafWins;
   final String trainedDate;
   final List<Race> races;
 
@@ -352,8 +351,6 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     this.family,
     this.fans,
     this.scenario,
-    this.foreignAptitude,
-    this.uafWins,
     this.trainedDate,
     this.races,
   );
@@ -371,8 +368,6 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     family,
     fans,
     scenario,
-    foreignAptitude,
-    uafWins,
     trainedDate,
     races,
   ];

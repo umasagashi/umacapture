@@ -59,8 +59,6 @@ CharaDetailRecord makeRecord({
     Family(_parent(parent1Card), _parent(parent2Card)),
     0,
     const Scenario(0),
-    null,
-    null,
     '2026/01/01',
     races,
   );
@@ -226,17 +224,16 @@ void main() {
 
   // The native recognizer reads a persisted record.json back on re-recognition
   // and throws on an explicit "key": null (it only tolerates a missing key), so
-  // toMap() must omit, not null-emit, empty optionals. Guards CharaDetailRecord's
-  // ignoreNull annotation against a regression that would crash the native side.
+  // toMap() must omit, not null-emit, empty optionals. Guards the ignoreNull
+  // annotation (here on the nested Metadata) against a regression that would crash
+  // the native side; relationBonus is the sole null optional in this record.
   test('toMap omits null optionals instead of emitting explicit null', () {
     final record = makeRecord(id: 'r', card: 10);
-    expect(record.foreignAptitude, isNull);
-    expect(record.uafWins, isNull);
+    expect(record.metadata.relationBonus, isNull);
 
-    final map = record.toMap();
+    final metadataMap = record.toMap()['metadata'] as Map<String, dynamic>;
 
-    expect(map.containsKey('foreign_aptitude'), isFalse);
-    expect(map.containsKey('uaf_wins'), isFalse);
+    expect(metadataMap.containsKey('relation_bonus'), isFalse);
   });
 
   group('relationBonus', () {

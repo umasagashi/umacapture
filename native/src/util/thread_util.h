@@ -3,6 +3,7 @@
 #include <atomic>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <thread>
 #include <utility>
@@ -15,29 +16,55 @@ namespace uma::thread_util {
 class ThreadBase {
 public:
     ThreadBase()
-        : is_running(false)
-        , thread(nullptr) {}
+        : thread(nullptr)
+        , is_running(false) {}
 
     virtual ~ThreadBase() {
         log_debug("");
+        // Derived classes MUST join() in their own destructor while their members are still alive; run()
+        // may reference them. The assert surfaces a missing join early in debug. The join below is only a
+        // release backstop: if a subclass forgot to join, joining here (after its members are gone) risks a
+        // UAF in run(), but that is strictly better than the std::terminate a still-joinable std::thread
+        // causes at destruction. No-op when the derived class already joined (is_running is false).
         assert_(!isRunning());  // Call the join before deleting.
+        join();
     }
 
+    // start()/join() serialize on lifecycle_mutex so the non-atomic `thread` pointer is never read
+    // while another caller is assigning it. isRunning() reads the atomic flag directly and needs no lock.
     void start() {
+        std::lock_guard<std::mutex> lock(lifecycle_mutex);
         if (is_running.load()) {
             return;
         }
+        // is_running must be true before run() can observe it: run() loops on while (isRunning()), so setting
+        // the flag after the thread starts would let it exit immediately. But if make_unique/thread creation
+        // throws (thread exhaustion, bad_alloc), roll the flag back so `thread` stays null and is_running
+        // stays false in sync -- otherwise a later join() would pass its guard and null-deref thread->join().
         is_running.store(true);
-        thread = std::make_unique<std::thread>([this]() { run(); });
+        try {
+            thread = std::make_unique<std::thread>([this]() { run(); });
+        } catch (...) {
+            is_running.store(false);
+            throw;
+        }
     }
 
     void join() {
-        if (!is_running.load()) {
-            return;
+        // Move the thread object out under the lock, then join outside it. Holding lifecycle_mutex across the
+        // blocking join() would deadlock if run() (or anything it calls synchronously) ever touched a
+        // lifecycle method; run() must never do so, but keeping the join lock-free removes the footgun and
+        // still serializes the `thread` pointer read/write against start().
+        std::unique_ptr<std::thread> joining;
+        {
+            std::lock_guard<std::mutex> lock(lifecycle_mutex);
+            if (!is_running.load()) {
+                return;
+            }
+            is_running.store(false);
+            joining = std::move(thread);
         }
-        is_running.store(false);
-        thread->join();
-        thread = nullptr;
+        joining->join();
     }
 
     bool isRunning() const { return is_running.load(); }
@@ -46,6 +73,7 @@ protected:
     virtual void run() = 0;
 
 private:
+    std::mutex lifecycle_mutex;
     std::unique_ptr<std::thread> thread;
     std::atomic_bool is_running;
 };

@@ -3,9 +3,18 @@
 #include <experimental_onnxruntime_cxx_api.h>
 #include <filesystem>
 #include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 #include <opencv2/opencv.hpp>
 
+#include "cv/frame.h"
+#include "cv/predictor.h"
+#include "types/shape.h"
 #include "util/logger_util.h"
 
 namespace uma::recognizer {
@@ -29,13 +38,34 @@ bool is_same(ONNXTensorElementDataType type) {
     }
 }
 
+// A single ONNX Runtime environment shared across every Model. Ort::Env is intended to be a per-process
+// singleton (it owns the shared logging/threading state); one env per model wastes those resources. The
+// function-local static is destroyed at process exit, after every Model's Session, so it outlives them.
+inline Ort::Env &shared_env() {
+    static Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "umacapture"};
+    return env;
+}
+
 }  // namespace recognizer_impl
 
 struct Prediction {
-    const std::vector<Ort::Value> data;
+    std::vector<Ort::Value> data;
 
     template<typename T>
     [[nodiscard]] const T &at(int index, bool check = true) const {
+        // Real bounds check (not a Debug-only assert): the return below dereferences data[index] even when
+        // check is false, so an out-of-range index (e.g. a model swapped for one with fewer outputs) would be
+        // undefined behavior in release. Throwing degrades to a dropped record via the recognizer try/catch.
+        if (index < 0 || static_cast<size_t>(index) >= data.size()) {
+            throw std::out_of_range("Prediction::at: index out of range");
+        }
+        // The return below dereferences element [0] even on the check=false path, so an empty tensor (a model
+        // swapped for one whose output N has no elements) would read out of bounds. Reject that regardless of
+        // check; the vector-output (count > 1) rejection stays gated behind check.
+        const auto element_count = data[index].GetTensorTypeAndShapeInfo().GetElementCount();
+        if (element_count < 1) {
+            throw std::out_of_range("Prediction::at: empty tensor output");
+        }
         if (check) {
             auto type_info = data[index].GetTensorTypeAndShapeInfo();
             auto element_type = type_info.GetElementType();
@@ -46,7 +76,7 @@ struct Prediction {
                 throw std::invalid_argument(stream.str());
             }
 
-            if (data[index].GetTensorTypeAndShapeInfo().GetElementCount() != 1) {
+            if (element_count != 1) {
                 throw std::invalid_argument("Vector output is not supported.");
             }
         }
@@ -56,21 +86,60 @@ struct Prediction {
 };
 
 template<typename PredictionType>
-class Model {
+class Model : public Predictor<decltype(std::declval<PredictionType>().result())> {
 public:
+    using Result = decltype(std::declval<PredictionType>().result());
+
     [[maybe_unused]] Model(const std::filesystem::path &path, const std::string &name)
         : model_name(name)
         , input_size(-1, -1) {
         log_debug("Load model from {}", std::filesystem::absolute(path).string());
         std::filesystem::path::string_type path_str = path;
-        prediction = std::make_unique<Ort::Experimental::Session>(env, path_str, session_options);
-        const auto input_shape = prediction->GetInputShapes()[0];
+        prediction =
+            std::make_unique<Ort::Experimental::Session>(recognizer_impl::shared_env(), path_str, session_options);
+        const auto input_shapes = prediction->GetInputShapes();
+        if (input_shapes.empty() || input_shapes[0].size() < 3) {
+            throw std::runtime_error("Model " + name + ": unexpected input shape rank");
+        }
+        const auto &input_shape = input_shapes[0];
+        // A model exported with dynamic H/W axes reports -1 here; that would make input_size negative and
+        // surface only later as an opaque cv::resize assertion in predict(). Reject it at load time.
+        if (input_shape[1] <= 0 || input_shape[2] <= 0) {
+            throw std::runtime_error("Model " + name + ": dynamic or invalid input H/W");
+        }
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
+
+        // A model swapped for one with fewer output heads than PredictionType reads would surface only later as
+        // a per-record out_of_range in Prediction::at (index out of range), silently dropping every record via
+        // the recognizer's try/catch. Reject the mismatch at load time so it reads as a config error instead.
+        const auto output_count = prediction->GetOutputNames().size();
+        if (output_count < PredictionType::kOutputCount) {
+            throw std::runtime_error(
+                "Model " + name + ": expected at least " + std::to_string(PredictionType::kOutputCount)
+                + " outputs, got " + std::to_string(output_count));
+        }
     }
 
-    PredictionType predict(const Frame &frame) const {
+    // `const` reflects logical constness (the model configuration is unchanged), but this runs ONNX
+    // inference which mutates hidden session state and is NOT thread-safe. Call it from a single thread
+    // only (the recognizer drives all inference from its own event-runner thread). Decodes the raw
+    // Prediction into a Predicted<Result> here so callers (the recognizer) never touch Ort::Value.
+    [[nodiscard]] Predicted<Result> predict(const Frame &frame) const override {
+        const auto raw = runInference(frame);
+        return {raw.result(), raw.confidence(), raw.toJson()};
+    }
+
+    [[nodiscard]] const std::string &name() const override { return model_name; }
+
+private:
+    [[nodiscard]] PredictionType runInference(const Frame &frame) const {
         cv::Mat image;
         cv::resize(frame.data(), image, input_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
+
+        // CreateTensor below wraps image.data without copying and reads image.total()*channels contiguous
+        // bytes, which assumes a continuous buffer. resize into a fresh Mat always yields one; assert the
+        // invariant so a future change that feeds a non-continuous buffer here is caught in debug.
+        assert_(image.isContinuous());
 
         const std::vector<int64_t> input_shape = {1, image.rows, image.cols, image.channels()};
         std::vector<Ort::Value> input_tensors;
@@ -80,11 +149,7 @@ public:
         return {prediction->Run(prediction->GetInputNames(), input_tensors, prediction->GetOutputNames())};
     }
 
-    [[nodiscard]] const std::string &name() const { return model_name; }
-
-private:
     const std::string model_name;
-    Ort::Env env;
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Experimental::Session> prediction;
     Size<int> input_size;

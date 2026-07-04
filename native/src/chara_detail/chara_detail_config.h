@@ -197,7 +197,6 @@ struct FactorTabConfig {
     Rect<double> left_rect;
     Rect<double> right_rect;
     double vertical_delta;
-    double vertical_margin;
     double vertical_banner_upper_gap;
     double vertical_banner_bottom_delta;
     double vertical_factor_gap;
@@ -214,20 +213,12 @@ struct FactorTabConfig {
         left_rect,
         right_rect,
         vertical_delta,
-        vertical_margin,
         vertical_banner_upper_gap,
         vertical_banner_bottom_delta,
         vertical_factor_gap,
         vertical_chara_gap,
         factor_rank,
         trainee_icon);
-};
-
-struct SupportCardLevelConfig {
-    std::string module_path;
-    std::array<Rect<double>, 6> rects;
-
-    EXTENDED_JSON_TYPE_NDC(SupportCardLevelConfig, module_path, rects);
 };
 
 struct SupportCardRankConfig {
@@ -241,11 +232,10 @@ struct SupportCardConfig {
     std::string module_path;
     Point<double> scan_point;
     std::array<Rect<double>, 6> rects;
-    SupportCardLevelConfig level;
     SupportCardRankConfig rank;
     double vertical_delta;
 
-    EXTENDED_JSON_TYPE_NDC(SupportCardConfig, module_path, scan_point, rects, level, rank, vertical_delta);
+    EXTENDED_JSON_TYPE_NDC(SupportCardConfig, module_path, scan_point, rects, rank, vertical_delta);
 };
 
 struct IconSetConfig {
@@ -295,12 +285,9 @@ struct CampaignRecordConfig {
     Point<double> scan_point;
     Point<double> bg_scan_point;
     double vertical_gap;
-    double vertical_gap_limit;
     BasicModuleConfig campaign_field;
     BasicModuleConfig fans_value;
     BasicModuleConfig scenario;
-    BasicModuleConfig foreign_aptitude;
-    BasicModuleConfig uaf_wins;
     BasicModuleConfig trained_date;
     double vertical_delta;
 
@@ -309,12 +296,9 @@ struct CampaignRecordConfig {
         scan_point,
         bg_scan_point,
         vertical_gap,
-        vertical_gap_limit,
         campaign_field,
         fans_value,
         scenario,
-        foreign_aptitude,
-        uaf_wins,
         trained_date,
         vertical_delta);
 };

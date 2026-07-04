@@ -39,8 +39,6 @@ CharaDetailRecord makeRecord({required String id, String? parent1Id, String? par
     Family(_parent(0), _parent(0)),
     0,
     const Scenario(0),
-    null,
-    null,
     '2026/01/01',
     const <Race>[],
   );

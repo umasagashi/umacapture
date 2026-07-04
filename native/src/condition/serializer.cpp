@@ -44,7 +44,7 @@ ConditionBase conditionFromJson(const json_util::Json &json) {
         log_trace(" - skipping builder: {}", builder.typeName());
     }
     log_error("Unknown type: {}", type);
-    throw std::invalid_argument(type);
+    throw std::invalid_argument("Unknown condition type: " + type);
 }
 
 std::vector<ConditionBase> conditionArrayFromJson(const json_util::Json &j) {

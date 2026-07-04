@@ -27,8 +27,8 @@ public:
     using state_type = StateType;
 
     PlainCondition(const RuleType &rule, const std::optional<std::string> &name)
-        : rule(rule)
-        , condition_name(name) {}
+        : condition_name(name)
+        , rule(rule) {}
 
     explicit PlainCondition(const RuleType &rule)
         : rule(rule) {}
@@ -41,7 +41,9 @@ public:
         return (tag == condition_name) ? this : nullptr;
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new PlainCondition<InputType, RuleType, StateType>{
@@ -77,9 +79,9 @@ public:
         const RuleType &rule,
         const std::shared_ptr<Condition<InputType>> &child,
         const std::optional<std::string> &name)
-        : rule(rule)
-        , child(child)
-        , condition_name(name) {}
+        : condition_name(name)
+        , rule(rule)
+        , child(child) {}
 
     NestedCondition(const RuleType &rule, const std::shared_ptr<Condition<InputType>> &child)
         : rule(rule)
@@ -100,7 +102,9 @@ public:
         return (name == condition_name) ? this : child->findByTag(name);
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new NestedCondition<InputType, RuleType, StateType>{
@@ -138,14 +142,14 @@ public:
         const RuleType &rule,
         const std::vector<std::shared_ptr<Condition<InputType>>> &children,
         const std::optional<std::string> &name)
-        : rule(rule)
-        , children(children)
-        , condition_name(name) {}
+        : condition_name(name)
+        , rule(rule)
+        , children(children) {}
 
     ParallelCondition(const RuleType &rule, const std::vector<std::shared_ptr<Condition<InputType>>> &children)
-        : rule(rule)
-        , children(children)
-        , condition_name(std::nullopt) {}
+        : condition_name(std::nullopt)
+        , rule(rule)
+        , children(children) {}
 
     void update(const InputType &input) override {
         stds::for_each(children, [&](const auto &item) { item->update(input); });
@@ -169,7 +173,9 @@ public:
             .value_or(nullptr);
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new ParallelCondition<InputType, RuleType, StateType>{
@@ -204,8 +210,8 @@ public:
     using state_type = StateType;
 
     NullaryCondition(const RuleType &rule, const std::optional<std::string> &name)
-        : rule(rule)
-        , condition_name(name) {}
+        : condition_name(name)
+        , rule(rule) {}
 
     explicit NullaryCondition(const RuleType &rule)
         : rule(rule) {}
@@ -221,7 +227,9 @@ public:
         return (tag == condition_name) ? this : nullptr;
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new NullaryCondition<InputType, RuleType, StateType>{

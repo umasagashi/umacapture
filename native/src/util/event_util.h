@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include <eventpp/eventdispatcher.h>
@@ -114,7 +116,11 @@ public:
             }
         }
 
-        // TODO: This should be synchronized.
+        // eventpp's EventQueue is internally synchronized, so enqueue() and the notifier's own enqueue are
+        // each thread-safe on their own. The check-then-act above (ready() -> enqueue) is only consulted for
+        // Discard/Block connections, and those are driven by a single producer per connection in practice
+        // (on_frame_captured from the recorder thread, the scraper connections from the distributor thread),
+        // so the stale-size window never races. NoLimit connections skip the size check entirely.
         connection.enqueue(0, args...);
         if (notifier != nullptr) {
             notifier->send(id);
@@ -128,7 +134,10 @@ public:
     void processIf(const std::function<bool()> &predicate) override { connection.processIf(predicate); }
 
     void processOne() override {
+        // Normally the notifier fires processOne() right after an enqueue, so the first attempt succeeds. Yield
+        // on the empty-queue path (e.g. a spurious notify) so this cannot become a tight CPU spin.
         while (!connection.processOne()) {
+            std::this_thread::yield();
         }
     }
 
@@ -155,9 +164,11 @@ public:
         const std::shared_ptr<EventProcessorInterface> &processor,
         const std::function<void()> &detach,
         const std::string &name)
-        : processor(processor)
-        , detach(detach)
-        , name(name) {}
+        : name(name)
+        , processor(processor)
+        , detach(detach) {}
+
+    ~EventRunnerThread() override { join(); }
 
 protected:
     void run() override {
@@ -165,7 +176,15 @@ protected:
 
         while (isRunning()) {
             processor->waitFor(loopTimeoutMilliseconds);
-            processor->processIf([&]() { return isRunning(); });
+            // A listener throwing (e.g. a recognizer failure) must not escape this worker thread, or it
+            // would terminate the process. Log the offending event and keep the runner alive.
+            try {
+                processor->processIf([&]() { return isRunning(); });
+            } catch (const std::exception &e) {
+                log_error("event runner '{}' listener threw: {}", name, e.what());
+            } catch (...) {
+                log_error("event runner '{}' listener threw an unknown exception", name);
+            }
         }
 
         if (detach) {
@@ -194,10 +213,10 @@ class SingleThreadMultiEventRunnerImpl : public EventRunnerInterface {
 public:
     SingleThreadMultiEventRunnerImpl(
         QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name)
-        : queue_limit_mode(queue_limit_mode)
-        , notifier(std::make_shared<QueuedConnectionImpl<int>>(QueueLimitMode::NoLimit))
+        : notifier(std::make_shared<QueuedConnectionImpl<int>>(QueueLimitMode::NoLimit))
         , finalizer(finalizer)
-        , name(name) {
+        , name(name)
+        , queue_limit_mode(queue_limit_mode) {
         notifier->listen([this](const int &index) {
             assert_(isRunning());
             processors[index]->processOne();
@@ -207,6 +226,12 @@ public:
     template<typename... Args>
     std::shared_ptr<ConnectionInterface<Args...>> makeConnection() {
         assert_(!isRunning());
+        // Enforced in release too, not just via the assert: the runner thread indexes `processors` by the
+        // connection's stored index, so emplacing after start() could reallocate the vector under a concurrent
+        // read (UAF). All connections must be created during pipeline construction, before start().
+        if (isRunning()) {
+            throw std::logic_error("SingleThreadMultiEventRunner::makeConnection called after start()");
+        }
         auto connection = std::make_shared<QueuedConnectionImpl<Args...>>(
             queue_limit_mode, notifier, static_cast<int>(processors.size()));
         processors.emplace_back(connection);
@@ -247,6 +272,11 @@ public:
 
     void add(const std::shared_ptr<EventRunnerInterface> &runner) {
         assert_(!isRunning());
+        // Enforced in release too: start() iterates `runners`, so adding one after start() would race that
+        // read. All runners must be added during pipeline construction, before start().
+        if (isRunning()) {
+            throw std::logic_error("EventRunnerController::add called after start()");
+        }
         runners.emplace_back(runner);
     }
 
