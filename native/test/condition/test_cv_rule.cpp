@@ -18,22 +18,13 @@
 
 #include "condition/cv_rule.h"
 #include "cv/frame.h"
+#include "util/cv_test_helpers.h"
 
 namespace uma {
 namespace {
 
-// A solid CV_8UC3 image of the given RGB color (OpenCV stores BGR, hence the reordered Scalar).
-cv::Mat solid(int size, const Color &color) {
-    return cv::Mat(size, size, CV_8UC3, cv::Scalar(color.b(), color.g(), color.r()));
-}
-
-// A square image split into a black left region [0, boundary) and a white right region [boundary, size).
-// The vertical boundary lets a horizontal line measure a colored run whose length is set by `boundary`.
-cv::Mat splitH(int size, int boundary) {
-    cv::Mat image(size, size, CV_8UC3, cv::Scalar(0, 0, 0));
-    image(cv::Rect(boundary, 0, size - boundary, size)).setTo(cv::Scalar(255, 255, 255));
-    return image;
-}
+using testutil::solid;
+using testutil::splitH;
 
 TEST_CASE("PointColor is met only when the sampled pixel is in range") {
     const Frame frame = Frame::fixed(solid(100, Color(100, 100, 100)));

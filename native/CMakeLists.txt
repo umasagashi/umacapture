@@ -19,6 +19,7 @@ set(
         src/core/cli.cpp
         src/core/native_api.cpp
         src/chara_detail/chara_detail_recognizer.cpp
+        src/chara_detail/chara_detail_search_helpers.cpp
         src/chara_detail/chara_detail_scene_context.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
         src/chara_detail/chara_detail_scene_stitcher.cpp
@@ -117,17 +118,25 @@ set(
         test/condition/test_cv_rule.cpp
         test/chara_detail/test_scraping_box.cpp
         test/chara_detail/test_scene_context.cpp
+        test/chara_detail/test_scene_stitcher.cpp
+        test/chara_detail/test_scraper_estimators.cpp
+        test/chara_detail/test_search_helpers.cpp
+        test/chara_detail/test_record.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp
         test/types/test_shape.cpp
         test/util/test_misc.cpp
         test/util/test_stds.cpp
         test/util/test_json_util.cpp
+        test/util/test_event_util.cpp
         test/cv/test_frame.cpp
         test/cv/test_frame_distributor.cpp
+        test/cv/test_frame_stall_watchdog.cpp
         src/condition/serializer.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
         src/chara_detail/chara_detail_scene_context.cpp
+        src/chara_detail/chara_detail_scene_stitcher.cpp
+        src/chara_detail/chara_detail_search_helpers.cpp
 )
 
 add_executable(umacapture_tests ${TEST_SOURCE_FILES})
@@ -159,6 +168,7 @@ target_compile_definitions(
 target_include_directories(
         umacapture_tests PRIVATE
         "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${CMAKE_CURRENT_LIST_DIR}/test"
         "${CMAKE_CURRENT_LIST_DIR}/vendor"
         "${CMAKE_CURRENT_LIST_DIR}/../windows"
         "${OpenCV_INCLUDE_DIRS}"

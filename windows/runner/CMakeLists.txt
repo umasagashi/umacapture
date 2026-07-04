@@ -25,6 +25,7 @@ set(
         "runner.exe.manifest"
         "${NATIVE_EXTENSION_DIR}/src/core/native_api.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_recognizer.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_search_helpers.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_scene_context.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_scene_scraper.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_scene_stitcher.cpp"

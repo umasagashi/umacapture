@@ -20,14 +20,12 @@
 #pragma clang diagnostic pop
 
 #include "cv/frame.h"
+#include "util/cv_test_helpers.h"
 
 namespace uma {
 namespace {
 
-// A solid CV_8UC3 image of the given RGB color (OpenCV stores BGR, hence the reordered Scalar).
-cv::Mat solid(int width, int height, const Color &color) {
-    return cv::Mat(height, width, CV_8UC3, cv::Scalar(color.b(), color.g(), color.r()));
-}
+using testutil::solid;
 
 void checkColor(const Color &actual, int r, int g, int b) {
     CHECK(actual.r() == r);

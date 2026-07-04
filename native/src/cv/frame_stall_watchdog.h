@@ -43,6 +43,24 @@ public:
     // Called from the capture thread for every delivered frame.
     void notifyFrame() { last_frame.store(std::chrono::steady_clock::now(), std::memory_order_relaxed); }
 
+    // Pure stall-decision: given the gap since the last frame, decide whether the callback should fire
+    // now, updating the fire-once latch `stalled` in place. Fires only on the transition into a stalled
+    // state and rearms once frames resume (a sub-timeout gap), so the callback is not spammed every poll.
+    // Extracted static and parameterized so the debounce logic is unit-testable without a running thread
+    // or the real steady_clock; run() feeds it the live elapsed time.
+    static bool shouldFire(std::chrono::steady_clock::duration elapsed, std::chrono::milliseconds timeout,
+        bool &stalled) {
+        if (elapsed >= timeout) {
+            if (!stalled) {
+                stalled = true;
+                return true;
+            }
+            return false;
+        }
+        stalled = false;
+        return false;
+    }
+
 protected:
     void run() override {
         while (isRunning()) {
@@ -51,21 +69,15 @@ protected:
                 break;
             }
             const auto elapsed = std::chrono::steady_clock::now() - last_frame.load(std::memory_order_relaxed);
-            if (elapsed >= timeout) {
-                // Fire once per stall; rearm only after frames resume, so the callback is not spammed every poll.
-                if (!stalled) {
-                    stalled = true;
-                    // The callback must not escape this worker thread, or it would terminate the process.
-                    try {
-                        on_stalled();
-                    } catch (const std::exception &e) {
-                        log_error("frame stall watchdog callback threw: {}", e.what());
-                    } catch (...) {
-                        log_error("frame stall watchdog callback threw an unknown exception");
-                    }
+            if (shouldFire(elapsed, timeout, stalled)) {
+                // The callback must not escape this worker thread, or it would terminate the process.
+                try {
+                    on_stalled();
+                } catch (const std::exception &e) {
+                    log_error("frame stall watchdog callback threw: {}", e.what());
+                } catch (...) {
+                    log_error("frame stall watchdog callback threw an unknown exception");
                 }
-            } else {
-                stalled = false;
             }
         }
     }
