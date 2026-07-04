@@ -193,6 +193,10 @@ double ImageOffsetEstimator::overlapScore(const cv::Mat &from_frame, const cv::M
     }
     const int height = from_frame.rows;
     const long overlap_height = height - offset_pixels;
+    // overlap_height is a row count, but the threshold multiplies `cols` deliberately: minimum_overlap_height
+    // is a fraction of the frame WIDTH (the project's length unit -- see the config field doc), not of height.
+    // This is meaningful only while the scroll-area crop stays taller than minimum_overlap_height * cols, which
+    // holds for the configured crop (0.05 * width against a crop taller than that).
     if (offset_pixels <= 0 || overlap_height < minimum_overlap_height * from_frame.cols) {
         return 0.0;
     }

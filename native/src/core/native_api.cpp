@@ -25,7 +25,10 @@ void NativeApi::startEventLoop(const std::string &native_config) {
         std::lock_guard<std::mutex> lock(pipeline_mutex);
         vlog_debug(native_config.length(), isRunningLocked());
         if (isRunningLocked()) {
-            // TODO: Should be rebuilt when config is changed.
+            // TODO: Should be rebuilt when config is changed. Until then a start while already running is a
+            // silent no-op that discards the new config; warn so the discarded config is at least visible.
+            log_warning(
+                "startEventLoop called while already running; ignoring the request and keeping the current config");
             return;
         }
 
@@ -332,8 +335,10 @@ void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
     try {
         sender->send(info);
     } catch (const std::exception &e) {
-        // updateRecord is const, so it cannot route through the (non-const) notify path; log only.
+        // Surface the failure to Dart (notify() is const-callable via the mutable callback member) so the UI
+        // does not wait forever for a completion that will never arrive.
         log_error("updateRecord failed: {}", e.what());
+        notifyError(std::string("updateRecord failed: ") + e.what());
     }
 }
 

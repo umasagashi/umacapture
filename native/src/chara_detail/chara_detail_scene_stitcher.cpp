@@ -105,15 +105,16 @@ void CharaDetailSceneStitcher::stitchTab(
     const PathEntry &path_entry) const {
     const auto scroll_area_window_size = base_image.anchor().mapToFrame(config.scroll_area_rect).size();
 
-    // For record types other than Standard, unnecessary tabs may be left empty.
-    auto scroll_area = Frame::fixed(
-        std::filesystem::is_empty(input_dir) ? createDummyImage(scroll_area_window_size)
-                                             : scroll_area_stitcher.stitch(input_dir));
+    // For record types other than Standard, unnecessary tabs may be left empty -- and PageScrapingBox only
+    // creates the directories it actually writes to, so an unscraped tab's input_dir may not exist at all.
+    // std::filesystem::is_empty throws if the path is missing, so check existence first (a missing dir is
+    // treated as empty, falling back to the dummy image) rather than letting the throw escape the stitcher
+    // runner and terminate the process.
+    const bool has_content = std::filesystem::exists(input_dir) && !std::filesystem::is_empty(input_dir);
+    auto scroll_area =
+        Frame::fixed(has_content ? scroll_area_stitcher.stitch(input_dir) : createDummyImage(scroll_area_window_size));
 
-    // Stitch scroll area.
-    // auto scroll_area = Frame::fixed(scroll_area_stitcher.stitch(input_dir));
     const auto background_color = scroll_area.colorAt({0.5, 0.0, {ScreenStart, ScreenPixelEnd}});
-    // const auto background_color = Color{255, 0, 0};
 
     // Fill scroll bar.
     scroll_area.fill(config.scroll_bar_fill_rect, background_color);

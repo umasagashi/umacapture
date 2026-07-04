@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <filesystem>
 #include <stdexcept>
 #include <utility>
@@ -323,7 +324,7 @@ public:
         if (this->size() != other.size()) {
             throw std::invalid_argument("pixelDifference: frame sizes do not match");
         }
-        const auto &mapped_rect = rect.empty() ? this->rect() : anchor_.mapToFrame(rect);
+        const auto mapped_rect = clampedMappedRect(rect);
         uint64 total = 0;
         for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
             for (int x = mapped_rect.left(); x < mapped_rect.right(); x++) {
@@ -354,7 +355,7 @@ public:
         if (this->size() != other.size()) {
             throw std::invalid_argument("diffStats: frame sizes do not match");
         }
-        const auto &mapped_rect = rect.empty() ? this->rect() : anchor_.mapToFrame(rect);
+        const auto mapped_rect = clampedMappedRect(rect);
         DiffStats stats;
         for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
             for (int x = mapped_rect.left(); x < mapped_rect.right(); x++) {
@@ -396,6 +397,13 @@ public:
     // In-place mutator; see fill() for the shared-buffer ownership contract.
     void paste(const Rect<double> &rect, const Frame &source) {
         const auto &dest_rect = anchor_.mapToFrame(rect);
+        // Real bounds check (mirrors view()): image(cvRect) with a ROI past the edge, or a negative-size rect,
+        // throws a raw cv::Exception. Throw std::out_of_range instead so it degrades via the same path as
+        // bgrAt/view (a dropped record through the recognizer/scraper try/catch).
+        if (dest_rect.left() < 0 || dest_rect.top() < 0 || dest_rect.width() < 0 || dest_rect.height() < 0
+            || dest_rect.right() > image.cols || dest_rect.bottom() > image.rows) {
+            throw std::out_of_range("Frame::paste out of bounds");
+        }
         cv::Mat mat;
         if (dest_rect.size() == source.size()) {
             // Same-size fast path shares the source header. If the source aliases THIS image's allocation, a
@@ -449,6 +457,21 @@ private:
             throw std::out_of_range("Frame::view out of bounds");
         }
         return fixed(image({x, y, width, height}), timestamp_);
+    }
+
+    // Maps `rect` (normalized coordinates) to frame pixels and clips it to the image bounds. An empty rect
+    // means "the whole frame". Used by the area metrics (pixelDifference/diffStats): a rect that reaches past
+    // the frame edge should clip to the valid region, not throw mid-loop through bgrAt.
+    [[nodiscard]] inline Rect<int> clampedMappedRect(const Rect<double> &rect) const {
+        if (rect.empty()) {
+            return this->rect();
+        }
+        const auto &mapped = anchor_.mapToFrame(rect);
+        const int left = std::clamp(mapped.left(), 0, image.cols);
+        const int top = std::clamp(mapped.top(), 0, image.rows);
+        const int right = std::clamp(mapped.right(), left, image.cols);
+        const int bottom = std::clamp(mapped.bottom(), top, image.rows);
+        return {{left, top}, Point<int>{right, bottom}};
     }
 
     cv::Mat image;

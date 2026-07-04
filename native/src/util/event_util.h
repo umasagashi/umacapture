@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdexcept>
+#include <thread>
 #include <utility>
 
 #include <eventpp/eventdispatcher.h>
@@ -132,7 +134,10 @@ public:
     void processIf(const std::function<bool()> &predicate) override { connection.processIf(predicate); }
 
     void processOne() override {
+        // Normally the notifier fires processOne() right after an enqueue, so the first attempt succeeds. Yield
+        // on the empty-queue path (e.g. a spurious notify) so this cannot become a tight CPU spin.
         while (!connection.processOne()) {
+            std::this_thread::yield();
         }
     }
 
@@ -221,6 +226,12 @@ public:
     template<typename... Args>
     std::shared_ptr<ConnectionInterface<Args...>> makeConnection() {
         assert_(!isRunning());
+        // Enforced in release too, not just via the assert: the runner thread indexes `processors` by the
+        // connection's stored index, so emplacing after start() could reallocate the vector under a concurrent
+        // read (UAF). All connections must be created during pipeline construction, before start().
+        if (isRunning()) {
+            throw std::logic_error("SingleThreadMultiEventRunner::makeConnection called after start()");
+        }
         auto connection = std::make_shared<QueuedConnectionImpl<Args...>>(
             queue_limit_mode, notifier, static_cast<int>(processors.size()));
         processors.emplace_back(connection);
@@ -261,6 +272,11 @@ public:
 
     void add(const std::shared_ptr<EventRunnerInterface> &runner) {
         assert_(!isRunning());
+        // Enforced in release too: start() iterates `runners`, so adding one after start() would race that
+        // read. All runners must be added during pipeline construction, before start().
+        if (isRunning()) {
+            throw std::logic_error("EventRunnerController::add called after start()");
+        }
         runners.emplace_back(runner);
     }
 

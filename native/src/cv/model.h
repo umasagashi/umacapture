@@ -108,6 +108,11 @@ public:
         cv::Mat image;
         cv::resize(frame.data(), image, input_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
 
+        // CreateTensor below wraps image.data without copying and reads image.total()*channels contiguous
+        // bytes, which assumes a continuous buffer. resize into a fresh Mat always yields one; assert the
+        // invariant so a future change that feeds a non-continuous buffer here is caught in debug.
+        assert_(image.isContinuous());
+
         const std::vector<int64_t> input_shape = {1, image.rows, image.cols, image.channels()};
         std::vector<Ort::Value> input_tensors;
         input_tensors.emplace_back(

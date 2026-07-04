@@ -63,13 +63,14 @@ public:
             }
             sender = on_stitch_ready;
         }
-        // These const producers cannot route through the (non-const) notify path, so a throw from send()
-        // (e.g. bad_alloc from enqueue) is logged only. Guarding it keeps the exception from escaping across
-        // the C ABI, matching updateFrame()/updateRecord().
+        // A throw from send() (e.g. bad_alloc from enqueue) must not escape across the C ABI. Guard it and
+        // surface the failure to Dart via notifyError so the UI does not wait forever for a completion that
+        // will never arrive; notify() is const-callable because the callback member is mutable.
         try {
             sender->send(info);
         } catch (const std::exception &e) {
             log_error("stitch failed: {}", e.what());
+            notifyError(std::string("stitch failed: ") + e.what());
         }
     }
 
@@ -86,6 +87,7 @@ public:
             sender->send(info);
         } catch (const std::exception &e) {
             log_error("recognize failed: {}", e.what());
+            notifyError(std::string("recognize failed: ") + e.what());
         }
     }
     void recognize(const std::string &record_id) const {
@@ -101,12 +103,16 @@ public:
             sender->send({record_id, std::nullopt});
         } catch (const std::exception &e) {
             log_error("recognize failed: {}", e.what());
+            notifyError(std::string("recognize failed: ") + e.what());
         }
     }
 
-    void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
+    void setNotifyCallback(const std::function<MessageCallback> &method) {
+        assert_(!isRunning());
+        notify_callback = method;
+    }
 
-    void notifyError(const std::string &message) {
+    void notifyError(const std::string &message) const {
         notify(json_util::Json{{"type", "onError"}, {"message", message}}.dump());
     }
 
@@ -154,16 +160,28 @@ public:
         notify(json_util::Json{{"type", "onFrameSizeReported"}, {"size", size}}.dump());
     }
 
-    void setDetachCallback(const std::function<VoidCallback> &method) { detach_callback = method; }
+    void setDetachCallback(const std::function<VoidCallback> &method) {
+        assert_(!isRunning());
+        detach_callback = method;
+    }
 
     // The mkdir/rmdir callbacks let the Dart side route directory operations through platform-specific
     // storage. They are read into an io_util::DirectoryHooks in startEventLoop and injected into the
     // pipeline components, so those components stay decoupled from this singleton (and unit-testable).
-    void setMkdirCallback(const std::function<PathCallback> &method) { mkdir_callback = method; }
-    void setRmdirCallback(const std::function<PathCallback> &method) { rmdir_callback = method; }
+    void setMkdirCallback(const std::function<PathCallback> &method) {
+        assert_(!isRunning());
+        mkdir_callback = method;
+    }
+    void setRmdirCallback(const std::function<PathCallback> &method) {
+        assert_(!isRunning());
+        rmdir_callback = method;
+    }
 
-    void setLoggingCallback(const std::function<MessageCallback> &method) { logging_callback = method; }
-    void log(const std::string &message) {
+    void setLoggingCallback(const std::function<MessageCallback> &method) {
+        assert_(!isRunning());
+        logging_callback = method;
+    }
+    void log(const std::string &message) const {
         // Never throw: invoked from a spdlog sink (CallbackSink::sink_it_) on arbitrary worker threads, where
         // an escaping exception would terminate the process. Do not route through the logger here (it would
         // recurse back into this sink).
@@ -187,7 +205,7 @@ private:
     // Running check without taking pipeline_mutex, for callers that already hold it.
     [[nodiscard]] bool isRunningLocked() const;
 
-    void notify(const std::string &message) {
+    void notify(const std::string &message) const {
         log_trace(message);
         // Never throw: notify() runs on worker threads and FFI method handlers, where an escaping exception
         // would cross the C ABI into Dart/JVM and terminate the process. The assigned callback (channel->notify
@@ -199,10 +217,13 @@ private:
         }
     }
 
-    // Must never throw: notify() runs on worker threads, where an escaping exception would terminate the
-    // process. An unassigned callback logs instead of throwing.
-    std::function<MessageCallback> notify_callback = [](const auto &) { log_error("notify_callback not assigned"); };
-    std::function<MessageCallback> logging_callback = [](const auto &message) { std::cout << message << std::flush; };
+    // Set once before startEventLoop and never mutated afterward: notify()/log() read these on worker threads
+    // with no synchronization, so re-assigning them while the pipeline runs would be a torn read (the setters
+    // assert !isRunning() to enforce this in Debug). notify_callback/logging_callback are mutable so the const
+    // notify()/log() paths (e.g. notifyError from the const stitch/recognize producers) can invoke them.
+    // An unassigned notify_callback logs instead of throwing.
+    mutable std::function<MessageCallback> notify_callback = [](const auto &) { log_error("notify_callback not assigned"); };
+    mutable std::function<MessageCallback> logging_callback = [](const auto &message) { std::cout << message << std::flush; };
     std::function<VoidCallback> detach_callback = []() {};
     std::function<PathCallback> mkdir_callback = [](const auto &path) { std::filesystem::create_directories(path); };
     std::function<PathCallback> rmdir_callback = [](const auto &path) { std::filesystem::remove_all(path); };

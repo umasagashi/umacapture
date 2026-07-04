@@ -51,13 +51,20 @@ public:
     }
 
     void join() {
-        std::lock_guard<std::mutex> lock(lifecycle_mutex);
-        if (!is_running.load()) {
-            return;
+        // Move the thread object out under the lock, then join outside it. Holding lifecycle_mutex across the
+        // blocking join() would deadlock if run() (or anything it calls synchronously) ever touched a
+        // lifecycle method; run() must never do so, but keeping the join lock-free removes the footgun and
+        // still serializes the `thread` pointer read/write against start().
+        std::unique_ptr<std::thread> joining;
+        {
+            std::lock_guard<std::mutex> lock(lifecycle_mutex);
+            if (!is_running.load()) {
+                return;
+            }
+            is_running.store(false);
+            joining = std::move(thread);
         }
-        is_running.store(false);
-        thread->join();
-        thread = nullptr;
+        joining->join();
     }
 
     bool isRunning() const { return is_running.load(); }
