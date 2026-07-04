@@ -115,6 +115,13 @@ set(
         test/condition/test_serializer.cpp
         test/condition/test_condition.cpp
         test/chara_detail/test_scraping_box.cpp
+        test/types/test_range.cpp
+        test/types/test_color.cpp
+        test/types/test_shape.cpp
+        test/util/test_misc.cpp
+        test/util/test_stds.cpp
+        test/util/test_json_util.cpp
+        test/cv/test_frame.cpp
         src/condition/serializer.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
 )

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>  // _wassert, used by the assert_ macro below
 #include <chrono>
 #include <ctime>
 #include <filesystem>
