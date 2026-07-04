@@ -98,6 +98,12 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   out of `native_api.h` so the contract is testable without linking the
   ONNX/WinRT-heavy `native_api.cpp`); each builder's exact `type` tag and keys are
   asserted against a raw-JSON expectation, order-independently.
+- `core/test_frame_rate.cpp` — the pure `frameRate` helper in
+  `src/core/frame_rate.h` (split out of NativeApi's lap-time listener for the same
+  reason as `native_api_messages.h`): the `count * report_interval / span` ratio
+  (a full window reads back as the sample count, a doubled span halves it, a
+  non-1000 ms window scales), the empty-sample zero, and the division guard against
+  a zero or backward-clock (negative) span.
 - `util/test_thread_util.cpp` — the `thread_util` concurrency primitives:
   `ThreadBase` start/stop, the idempotent `start()` (no second thread) and `join()`
   (safe before start and on repeat), and `Timer`'s expire vs. `cancel()` latch
@@ -153,10 +159,13 @@ POST_BUILD step copies the matching `opencv_world455[d].dll` next to it.
 
 ## Coverage
 
-Coverage is measured locally with [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage)
-(gcov/lcov do not apply to MSVC). It is not wired into CMake or CI; run it on the
-built Debug binary. Install it once (e.g. `choco install opencppcoverage`), then
-from the `native/` directory:
+Coverage is measured with [OpenCppCoverage](https://github.com/OpenCppCoverage/OpenCppCoverage)
+(gcov/lcov do not apply to MSVC). It is not wired into CMake, but the CI
+`native-tests` job (`.github/workflows/ci.yml`) runs it after `ctest` and uploads
+the HTML + Cobertura report as the `native-coverage` artifact on every PR — a
+non-gating, always-on view of which linked `.cpp` lines no test reaches. To run it
+locally on the built Debug binary, install it once (e.g.
+`choco install opencppcoverage`), then from the `native/` directory:
 
 ```bat
 OpenCppCoverage --sources native\src --excluded_sources native\vendor ^

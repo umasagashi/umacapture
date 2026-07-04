@@ -143,6 +143,7 @@ set(
         test/chara_detail/test_family_tree_recognizer.cpp
         test/chara_detail/test_config.cpp
         test/core/test_native_api_messages.cpp
+        test/core/test_frame_rate.cpp
         test/util/test_thread_util.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp

@@ -6,6 +6,7 @@
 #include "util/logger_util.h"
 #include "util/misc.h"
 
+#include "frame_rate.h"
 #include "native_api.h"
 
 namespace uma::app {
@@ -146,9 +147,8 @@ void NativeApi::startPipeline(const std::string &native_config) {
         const auto &now = std::chrono::steady_clock::now();
         lap_time_buffer.push_back(now);
         if ((now - lap_time_buffer.front()) > report_interval) {
-            notifyFrameRateReported(
-                static_cast<double>(chrono_util::ms(report_interval) * lap_time_buffer.size())
-                / static_cast<double>(chrono_util::ms(lap_time_buffer.back() - lap_time_buffer.front())));
+            notifyFrameRateReported(frameRate(
+                report_interval, lap_time_buffer.size(), lap_time_buffer.back() - lap_time_buffer.front()));
             lap_time_buffer.clear();
         }
     });
