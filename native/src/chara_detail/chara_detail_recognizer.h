@@ -137,6 +137,13 @@ public:
     [[maybe_unused]] StatusHeaderRecognizer(
         const std::filesystem::path &module_root_dir, const recognizer_config::StatusHeaderConfig &config);
 
+    // Injection ctor for unit tests; see FactorTabRecognizer's for the rationale.
+    StatusHeaderRecognizer(
+        const recognizer_config::StatusHeaderConfig &config,
+        std::unique_ptr<const recognizer::Predictor<int>> evaluation_value_model,
+        std::unique_ptr<const recognizer::Predictor<int>> status_value_model,
+        std::unique_ptr<const recognizer::Predictor<int>> aptitude_model);
+
     void recognize(
         const Frame &frame,
         const RecordInfo &record_info,
@@ -155,6 +162,12 @@ class SkillTabRecognizer {
 public:
     [[maybe_unused]] SkillTabRecognizer(
         const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config);
+
+    // Injection ctor for unit tests; see FactorTabRecognizer's for the rationale.
+    SkillTabRecognizer(
+        const recognizer_config::SkillTabConfig &config,
+        std::unique_ptr<const recognizer::Predictor<int>> skill_model,
+        std::unique_ptr<const recognizer::Predictor<int>> skill_level_model);
 
     void recognize(
         const Frame &frame,
@@ -239,6 +252,13 @@ public:
         const recognizer_config::SupportCardConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config);
 
+    // Injection ctor for unit tests; see FactorTabRecognizer's for the rationale.
+    SupportCardRecognizer(
+        const recognizer_config::SupportCardConfig &config,
+        const recognizer_config::CampaignTabCommonConfig &common_config,
+        std::unique_ptr<const recognizer::Predictor<int>> support_card_model,
+        std::unique_ptr<const recognizer::Predictor<int>> support_card_rank_model);
+
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const;
 
@@ -256,6 +276,13 @@ public:
         const std::filesystem::path &module_root_dir,
         const recognizer_config::FamilyTreeConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config);
+
+    // Injection ctor for unit tests; see FactorTabRecognizer's for the rationale.
+    FamilyTreeRecognizer(
+        const recognizer_config::FamilyTreeConfig &config,
+        const recognizer_config::CampaignTabCommonConfig &common_config,
+        std::unique_ptr<const recognizer::Predictor<Chara>> character_model,
+        std::unique_ptr<const recognizer::Predictor<int>> character_rank_model);
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const;
@@ -332,7 +359,7 @@ private:
 // Named holder for the six predictors of one race-block variant, passed to RaceRecordRecognizer's injection
 // ctor. Named fields (not a positional ctor) are deliberate: `place` is a Predictor<RacePlace> while the
 // other five are Predictor<int>, so a positional list would let two int-typed slots be transposed silently.
-// It is a plain aggregate so tests can populate it with designated initializers.
+// It is a plain aggregate so tests can populate its named fields directly.
 struct RaceBlockPredictors {
     std::unique_ptr<const recognizer::Predictor<int>> title;
     std::unique_ptr<const recognizer::Predictor<RacePlace>> place;

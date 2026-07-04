@@ -126,6 +126,10 @@ set(
         test/chara_detail/test_race_recognizer.cpp
         test/chara_detail/test_campaign_recognizer.cpp
         test/chara_detail/test_factor_recognizer.cpp
+        test/chara_detail/test_status_header_recognizer.cpp
+        test/chara_detail/test_skill_tab_recognizer.cpp
+        test/chara_detail/test_support_card_recognizer.cpp
+        test/chara_detail/test_family_tree_recognizer.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp
         test/types/test_shape.cpp

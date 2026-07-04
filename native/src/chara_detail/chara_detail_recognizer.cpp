@@ -29,6 +29,17 @@ json_util::Json PredictionHistory::toJson() const {
 
 // StatusHeaderRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
+StatusHeaderRecognizer::StatusHeaderRecognizer(
+    const recognizer_config::StatusHeaderConfig &config,
+    std::unique_ptr<const recognizer::Predictor<int>> evaluation_value_model,
+    std::unique_ptr<const recognizer::Predictor<int>> status_value_model,
+    std::unique_ptr<const recognizer::Predictor<int>> aptitude_model)
+    : config(config)
+    , evaluation_value_model(std::move(evaluation_value_model))
+    , status_value_model(std::move(status_value_model))
+    , aptitude_model(std::move(aptitude_model)) {
+}
+
 void StatusHeaderRecognizer::recognize(
     const Frame &frame,
     const RecordInfo &record_info,
@@ -42,6 +53,15 @@ void StatusHeaderRecognizer::recognize(
 }
 
 // SkillTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+
+SkillTabRecognizer::SkillTabRecognizer(
+    const recognizer_config::SkillTabConfig &config,
+    std::unique_ptr<const recognizer::Predictor<int>> skill_model,
+    std::unique_ptr<const recognizer::Predictor<int>> skill_level_model)
+    : config(config)
+    , skill_model(std::move(skill_model))
+    , skill_level_model(std::move(skill_level_model)) {
+}
 
 void SkillTabRecognizer::recognize(
     const Frame &frame,
@@ -280,6 +300,17 @@ record::Factor FactorTabRecognizer::predictFactor(
 
 // SupportCardRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
+SupportCardRecognizer::SupportCardRecognizer(
+    const recognizer_config::SupportCardConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config,
+    std::unique_ptr<const recognizer::Predictor<int>> support_card_model,
+    std::unique_ptr<const recognizer::Predictor<int>> support_card_rank_model)
+    : config(config)
+    , common_config(common_config)
+    , support_card_model(std::move(support_card_model))
+    , support_card_rank_model(std::move(support_card_rank_model)) {
+}
+
 void SupportCardRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
     const auto card_top = searchVertical(
@@ -323,6 +354,17 @@ void SupportCardRecognizer::recognize(
 }
 
 // FamilyTreeRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+
+FamilyTreeRecognizer::FamilyTreeRecognizer(
+    const recognizer_config::FamilyTreeConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config,
+    std::unique_ptr<const recognizer::Predictor<Chara>> character_model,
+    std::unique_ptr<const recognizer::Predictor<int>> character_rank_model)
+    : config(config)
+    , common_config(common_config)
+    , character_model(std::move(character_model))
+    , character_rank_model(std::move(character_rank_model)) {
+}
 
 void FamilyTreeRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
