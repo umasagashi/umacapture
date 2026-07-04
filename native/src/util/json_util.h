@@ -148,8 +148,11 @@ T extended_from_json(const Json &json, const std::string &key, nlohmann::detail:
 }
 
 inline std::string trim(const std::string &key) {
-    const auto &begin = key.find_first_not_of('_');
-    const auto &end = key.find_last_not_of('_');
+    const auto begin = key.find_first_not_of('_');
+    if (begin == std::string::npos) {
+        return {};
+    }
+    const auto end = key.find_last_not_of('_');
     return key.substr(begin, end - begin + 1);
 }
 

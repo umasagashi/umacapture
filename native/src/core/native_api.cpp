@@ -302,6 +302,10 @@ void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) 
         }
     }
     try {
+        // Forward the captured frame without cloning by design: every consumer treats it as read-only (or
+        // clones before mutating), and the capture producers hand over a freshly allocated buffer per frame,
+        // so the shallow Mat share is safe. See the Frame class doc for the full ownership contract. Do not
+        // add a clone() here to "be safe" -- it would be pure overhead unless the producer contract changes.
         sender->send(frame);
         // last_size_reported is touched only from the capture thread, so it needs no lock; the size report
         // notify runs outside the lock like the send.

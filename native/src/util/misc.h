@@ -7,6 +7,7 @@
 #include <functional>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 
 namespace uma::chrono_util {
 
@@ -58,16 +59,24 @@ namespace uma::io_util {
 
 inline std::string read(const std::filesystem::path &path) {
     std::ifstream file(path);
+    if (!file) {
+        throw std::runtime_error("io_util::read: failed to open: " + path.string());
+    }
     std::ostringstream buffer;
     buffer << file.rdbuf();
     return buffer.str();
 }
 
 inline void write(const std::filesystem::path &path, const std::string &text) {
-    std::ofstream file;
-    file.open(path, std::ios::out);
+    std::ofstream file(path, std::ios::out);
+    if (!file) {
+        throw std::runtime_error("io_util::write: failed to open: " + path.string());
+    }
     file << text;
-    file.close();
+    file.flush();
+    if (!file) {
+        throw std::runtime_error("io_util::write: failed to write: " + path.string());
+    }
 }
 
 // Injectable directory-creation / removal operations. The Dart side overrides these so directory

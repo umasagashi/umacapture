@@ -69,7 +69,7 @@ inline bool starts_with(const std::string &subject, const std::string &query) {
 
 template<size_t start, size_t end, typename T, size_t in_n>
 inline auto slice(const std::array<T, in_n> &array) {
-    static_assert((end - start) <= in_n);
+    static_assert(start <= end && end <= in_n, "slice out of range");
     std::array<T, end - start> out;
     std::copy(array.cbegin() + start, array.cbegin() + end, out.begin());
     return out;

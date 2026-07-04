@@ -181,6 +181,9 @@ JNIEXPORT void JNICALL Java_com_umasagashi_umacapture_ScreenCaptureService_updat
     }
     cv::resize(raw_mat, buffer_mat, scaled_size, 0, 0, cv::INTER_LINEAR);
 
+    // `mat` is a freshly allocated cv::Mat every call, so the Frame handed downstream owns an independent
+    // buffer (the static buffer_mat is only the cvtColor input and never reaches the pipeline). updateFrame
+    // forwards without cloning, relying on this per-frame allocation; see the Frame class doc for the contract.
     auto mat = cv::Mat(scaled_size, CV_8UC3);
     cv::cvtColor(buffer_mat, mat, cv::COLOR_RGBA2BGR);
     uma::app::NativeApi::instance().updateFrame(mat,

@@ -95,6 +95,10 @@ void SkillTabRecognizer::recognize(
         {
             const Point<double> current_column_offset = {0.0, left_column_y.value()};
             const int skill_id = predict(skill_model, frame, left_rect + current_column_offset, history);
+            // Only the very first entry (the top-left skill, recognized before any other) carries a level:
+            // on this screen a skill level is displayed for the trainee's own headline skill alone, so the
+            // skill-level model is run only for it. Every later skill (left or right column) is stored
+            // without a level. The `skills.empty()` gate expresses "this is that first entry".
             if (!skills.empty()) {
                 skills.push_back({skill_id});
             } else {
@@ -470,15 +474,18 @@ void CampaignRecordRecognizer::recognize(
             continue;  // Unknown (not yet supported) class.
         }
         float &best_confidence = predicted_field_confidences[field_class];
-        if (best_confidence > 0) {
-            // This should not happen, but fields added for the new scenario may be incorrectly recognized as existing ones.
-            log_warning("Field {} found multiple times.", field_class);
-        }
+        const bool seen_before = best_confidence > 0;
         if (best_confidence >= confidence) {
             // If the previous prediction has higher confidence, use that one.
             // If the new prediction has higher confidence, allow it to overwrite the previous one.
             // This does not guarantee that incorrect fields will always be overwritten.
             continue;
+        }
+        if (seen_before) {
+            // A field recognized more than once, now being overwritten by a higher-confidence detection:
+            // fields added for a new scenario may be misrecognized as an existing class. Log only on the
+            // actual overwrite, not on every rescan, to avoid spamming the log on legitimate captures.
+            log_warning("Field {} found multiple times.", field_class);
         }
         best_confidence = confidence;
 

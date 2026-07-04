@@ -36,10 +36,18 @@ bool is_same(ONNXTensorElementDataType type) {
     }
 }
 
+// A single ONNX Runtime environment shared across every Model. Ort::Env is intended to be a per-process
+// singleton (it owns the shared logging/threading state); one env per model wastes those resources. The
+// function-local static is destroyed at process exit, after every Model's Session, so it outlives them.
+inline Ort::Env &shared_env() {
+    static Ort::Env env{ORT_LOGGING_LEVEL_WARNING, "umacapture"};
+    return env;
+}
+
 }  // namespace recognizer_impl
 
 struct Prediction {
-    const std::vector<Ort::Value> data;
+    std::vector<Ort::Value> data;
 
     template<typename T>
     [[nodiscard]] const T &at(int index, bool check = true) const {
@@ -83,8 +91,13 @@ public:
         , input_size(-1, -1) {
         log_debug("Load model from {}", std::filesystem::absolute(path).string());
         std::filesystem::path::string_type path_str = path;
-        prediction = std::make_unique<Ort::Experimental::Session>(env, path_str, session_options);
-        const auto input_shape = prediction->GetInputShapes()[0];
+        prediction =
+            std::make_unique<Ort::Experimental::Session>(recognizer_impl::shared_env(), path_str, session_options);
+        const auto input_shapes = prediction->GetInputShapes();
+        if (input_shapes.empty() || input_shapes[0].size() < 3) {
+            throw std::runtime_error("Model " + name + ": unexpected input shape rank");
+        }
+        const auto &input_shape = input_shapes[0];
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
     }
 
@@ -107,7 +120,6 @@ public:
 
 private:
     const std::string model_name;
-    Ort::Env env;
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Experimental::Session> prediction;
     Size<int> input_size;

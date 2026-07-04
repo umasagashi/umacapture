@@ -192,6 +192,14 @@ struct FrameInfo {
     EXTENDED_JSON_TYPE_NDC(FrameInfo, intersection);
 };
 
+// A thin handle over a reference-counted cv::Mat. Copying a Frame is shallow: copies share the same pixel
+// buffer (only the header/anchor are duplicated), which is why frames flow cheaply through the event queues
+// across threads. Two ownership rules keep that sharing safe:
+//   - Treat a Frame received from another thread as read-only. To modify it, clone() first (clone-on-write);
+//     the in-place mutators (fill/paste) write through the shared buffer and would race other consumers.
+//   - A producer that enqueues a Frame into the pipeline must hand over an independently owned buffer that
+//     nothing else will overwrite. The live-capture producers satisfy this by allocating a fresh cv::Mat per
+//     frame (cvtColor/resize outputs), so NativeApi::updateFrame forwards without cloning by design.
 class Frame {
 public:
     Frame()
@@ -377,10 +385,9 @@ public:
 
     [[nodiscard]] inline Frame clone() const { return {image.clone(), timestamp_, anchor_}; }
 
-    // In-place mutator: writes through the shared cv::Mat buffer. Every Frame copy is a shallow Mat share,
-    // so this is used deliberately to write to a parent through a view (e.g. canvas.view(rect).fill(...)).
-    // The flip side is that mutating a Frame handed to another thread would race that consumer; keeping a
-    // Frame owned (or cloned) before enqueuing it is the caller's responsibility.
+    // In-place mutator: writes through the shared cv::Mat buffer. Used deliberately to write to a parent
+    // through a view (e.g. canvas.view(rect).fill(...)). See the class doc for the shared-buffer ownership
+    // contract (clone before mutating a Frame that another thread may be reading).
     void fill(const Rect<double> &rect, const Color &color) {
         const auto &r = anchor_.mapToFrame(rect);
         cv::rectangle(image, r.toCVRect(), color.toCVScalar(), cv::FILLED);

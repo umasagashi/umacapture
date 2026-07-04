@@ -51,7 +51,14 @@ public:
 class Stable : public Rule<bool, state::TimestampState> {
 public:
     explicit Stable(int threshold)
-        : threshold(threshold) {}
+        : threshold(threshold) {
+        // Deserialized via EXTENDED_JSON_TYPE_NDC, which constructs through this ctor, so this also rejects
+        // a negative threshold from JSON. A negative value would wrap in the static_cast<uint64_t> compare
+        // below and never fire, silently preventing scene detection.
+        if (threshold < 0) {
+            throw std::invalid_argument("Stable threshold must be non-negative");
+        }
+    }
 
     [[nodiscard]] bool met(const bool &parent, state::TimestampState &state) const override {
         // Debounce in video time: state.now is the current frame's timestamp, written by the owning

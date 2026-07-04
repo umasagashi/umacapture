@@ -52,13 +52,16 @@ public:
             if (!cap.read(mat) || mat.empty()) {
                 break;
             }
+            // Some containers/codecs report POS_MSEC == 0 mid-stream. Do not treat that as end-of-stream
+            // (the read failure above is the only terminal condition); instead clamp the per-frame timestamp
+            // to be monotonic so a spurious 0 cannot rewind the downstream debounce.
             const auto ts = std::llround(cap.get(cv::CAP_PROP_POS_MSEC));
             if (i != 0 && ts <= 0) {
-                break;
+                vlog_debug(i, ts);
             }
 
             last_ts = std::max(last_ts, ts);
-            const auto captured_frame = Frame{mat, static_cast<uint64>(std::llround(ts + head_ts))};
+            const auto captured_frame = Frame{mat, static_cast<uint64>(std::llround(last_ts + head_ts))};
             const auto cropped_frame = crop(captured_frame);
             on_frame_captured->send(cropped_frame, captured_frame.size());
         }

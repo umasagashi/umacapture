@@ -63,7 +63,14 @@ public:
             }
             sender = on_stitch_ready;
         }
-        sender->send(info);
+        // These const producers cannot route through the (non-const) notify path, so a throw from send()
+        // (e.g. bad_alloc from enqueue) is logged only. Guarding it keeps the exception from escaping across
+        // the C ABI, matching updateFrame()/updateRecord().
+        try {
+            sender->send(info);
+        } catch (const std::exception &e) {
+            log_error("stitch failed: {}", e.what());
+        }
     }
 
     void recognize(const chara_detail::RecordInfo &info) const {
@@ -75,7 +82,11 @@ public:
             }
             sender = on_recognize_ready;
         }
-        sender->send(info);
+        try {
+            sender->send(info);
+        } catch (const std::exception &e) {
+            log_error("recognize failed: {}", e.what());
+        }
     }
     void recognize(const std::string &record_id) const {
         event_util::Sender<chara_detail::RecordInfo> sender;
@@ -86,7 +97,11 @@ public:
             }
             sender = on_recognize_ready;
         }
-        sender->send({record_id, std::nullopt});
+        try {
+            sender->send({record_id, std::nullopt});
+        } catch (const std::exception &e) {
+            log_error("recognize failed: {}", e.what());
+        }
     }
 
     void setNotifyCallback(const std::function<MessageCallback> &method) { notify_callback = method; }
@@ -174,7 +189,14 @@ private:
 
     void notify(const std::string &message) {
         log_trace(message);
-        notify_callback(message);
+        // Never throw: notify() runs on worker threads and FFI method handlers, where an escaping exception
+        // would cross the C ABI into Dart/JVM and terminate the process. The assigned callback (channel->notify
+        // on Windows, JNI on Android) can throw, so guard it just like log() does.
+        try {
+            notify_callback(message);
+        } catch (...) {
+            log_error("notify_callback threw; swallowing to keep the exception off the FFI boundary");
+        }
     }
 
     // Must never throw: notify() runs on worker threads, where an escaping exception would terminate the

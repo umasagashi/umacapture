@@ -186,6 +186,11 @@ void ImageOffsetEstimator::detectKeyPoints(FrameDescriptor &descriptor) const {
 }
 
 double ImageOffsetEstimator::overlapScore(const cv::Mat &from_frame, const cv::Mat &to_frame, long offset_pixels) const {
+    if (from_frame.size() != to_frame.size()) {
+        // Resolution changed mid-scroll. rowRange/matchTemplate below would throw on mismatched sizes and the
+        // runner would swallow it, stalling the tab. Report no overlap evidence (reject the offset) instead.
+        return 0.0;
+    }
     const int height = from_frame.rows;
     const long overlap_height = height - offset_pixels;
     if (offset_pixels <= 0 || overlap_height < minimum_overlap_height * from_frame.cols) {

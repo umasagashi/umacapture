@@ -117,6 +117,9 @@ public:
             image = resized;
         }
 
+        // `image` is a freshly allocated cv::Mat every call (the cvtColor output in captureRegion, or the
+        // resize output above), never a reused buffer. The pipeline relies on this: NativeApi::updateFrame
+        // forwards the Frame downstream without cloning (see the Frame class doc ownership contract).
         return {image, chrono_util::to_timestamp(chrono_util::local_now())};
     }
 
