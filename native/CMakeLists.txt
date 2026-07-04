@@ -130,6 +130,7 @@ set(
         test/chara_detail/test_scraping_box.cpp
         test/chara_detail/test_scene_context.cpp
         test/chara_detail/test_scene_stitcher.cpp
+        test/chara_detail/test_scene_scraper.cpp
         test/chara_detail/test_scraper_estimators.cpp
         test/chara_detail/test_search_helpers.cpp
         test/chara_detail/test_record.cpp

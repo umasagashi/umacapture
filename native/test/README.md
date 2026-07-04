@@ -40,12 +40,30 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   delegation and its short-circuit before the image matcher, `ImageOffsetEstimator`'s
   no-keypoints guard, and `StationaryFrameCatcher` latch/reset/self-heal keyed on
   frame timestamps. Driven by hand-built `CV_8UC3` mats.
+- `chara_detail/test_scene_scraper.cpp` — `BaseFrameCatcher`, the base-image gate
+  layered on top of `StationaryFrameCatcher`: readiness needs both the base region
+  stationary AND the green title-bar banner visible on the header scan line for a
+  threshold ("snackbar cleared"), the visible-since window restarts when the header
+  drops, a backward (non-monotonic) frame timestamp cannot clear the snackbar early
+  via unsigned wrap, and once ready a later frame is ignored so the latched image
+  survives. Driven by solid `CV_8UC3` frames (simultaneously stationary and in/out of
+  the header range). The full `CharaDetailSceneScraper` session state machine (the
+  3-rule reset/debounce logic) needs a calibrated config and real frames and is left
+  to the CLI/integration harness.
 - `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical` (split
   out of the ONNX-linked recognizer TU into `chara_detail_search_helpers.{h,cpp}`):
   downward/upward run scanning, the `max_length` cap, the all-background nullopt, and
   the out-of-bounds start clamp, against hand-built mats.
 - `chara_detail/test_record.cpp` — the `RecordType` axis predicates
-  (`isInheritanceOnly` / `isFriend`); pure enum logic.
+  (`isInheritanceOnly` / `isFriend`; pure enum logic) plus the JSON serialization
+  contract of the `CharaDetailRecord` tree: a fully populated record survives
+  `get`→`to_json`→`get`→`to_json` unchanged and preserves nested values, each optional
+  round-trips in both the engaged (value written) and disengaged (key omitted, not
+  null) states — including an explicit `null` decoding to `nullopt` — and `RecordType`
+  serializes by name with the `_STRICT` variant rejecting an unknown name instead of
+  silently mapping it to the first enumerator. This is the same wire contract the
+  golden integration test covers end to end, pinned here as a CI-runnable guard that
+  needs no clips or ONNX models.
 - `cv/test_frame_distributor.cpp` — the `FrameDistributor` fan-out: every frame
   and every `onIdle` signal reaching each registered scene context, verified
   through a fake `SceneContext`.
@@ -65,7 +83,11 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   components, anchor preservation).
 - `util/` — `test_misc.cpp` (the `monotonicElapsed` clock-skew guard),
   `test_stds.cpp` (vacuous-truth `all_of`/`any_of`, `starts_with`,
-  `find_transformed_if`, `slice`), and `test_json_util.cpp` (`trim`).
+  `find_transformed_if`, `slice`), and `test_json_util.cpp` (`trim`, plus the
+  `optional_*`/`extended_*` field read/write templates the `EXTENDED_JSON_TYPE_NDC`
+  macro expands to — the omit-a-disengaged-optional vs write-a-value asymmetry, a
+  missing or explicitly-null key both decoding to `nullopt`, the non-optional path
+  throwing on a missing key, and `decodePath`'s UTF-8 `u8path` conversion).
 - `cv/test_frame.cpp` — the `Frame` numeric core: `BGR::difference`, `linspace`,
   `FrameAnchor` coordinate round-trips (incl. the zero-size degenerate guard),
   `colorAt`, line sampling (`isIn`/`isAllIn`/`lengthIn`), and the area diff
