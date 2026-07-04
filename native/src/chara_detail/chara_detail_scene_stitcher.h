@@ -40,6 +40,7 @@ public:
         const std::filesystem::path &stitching_dir,
         const event_util::Listener<RecordInfo> &on_stitch_ready,
         const event_util::Sender<RecordInfo> &on_stitch_completed,
+        const event_util::Sender<RecordInfo> &on_stitch_failed,
         const stitcher_config::CharaDetailSceneStitcherConfig &config,
         const io_util::DirectoryHooks &directory_hooks);
 
@@ -62,6 +63,7 @@ private:
 
     const event_util::Listener<RecordInfo> on_stitch_ready;
     const event_util::Sender<RecordInfo> on_stitch_completed;
+    const event_util::Sender<RecordInfo> on_stitch_failed;
 };
 
 }  // namespace uma::chara_detail

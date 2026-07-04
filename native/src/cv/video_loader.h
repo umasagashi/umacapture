@@ -68,6 +68,12 @@ public:
             // Some containers/codecs report POS_MSEC == 0 mid-stream. Do not treat that as end-of-stream
             // (the read failure above is the only terminal condition); instead clamp the per-frame timestamp
             // to be monotonic so a spurious 0 cannot rewind the downstream debounce.
+            //
+            // This assumes the source reports a genuinely (weakly) increasing POS_MSEC. A pathological clip
+            // whose every frame reports 0 is NOT supported: the clamp would collapse all its timestamps to
+            // head_ts, so the scene-end debounce (which advances on timestamp deltas) never progresses within
+            // the clip. Such clips are not used here; supporting them would need a synthetic per-frame stride
+            // derived from CAP_PROP_FPS.
             const auto ts = std::llround(cap.get(cv::CAP_PROP_POS_MSEC));
             if (i != 0 && ts <= 0) {
                 vlog_debug(i, ts);

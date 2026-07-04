@@ -322,6 +322,12 @@ public:
         return length;
     }
 
+    // Precondition: `other` shares this frame's anchor family (same construction path), so `rect` maps to the
+    // same pixels in both. In general anchor is NOT a pure function of pixel size -- fixed()/stretched() frames
+    // of equal size can have different anchors -- so the size check below is a proxy, not a full guarantee. It
+    // holds because every caller diffs two live-capture frames (both intersect()-anchored), where equal size
+    // does imply an equal anchor. Do not pass a mix of construction paths (e.g. a fixed()-derived stitched
+    // frame against a live one): it would silently compare mismatched regions.
     [[nodiscard]] uint64 pixelDifference(const Frame &other, const Rect<double> &rect, int ignore_threshold) const {
         // Both frames are indexed over the same rect; a size mismatch (e.g. a capture resolution change between
         // frames) would read out of bounds on the smaller image in release, where the assert is compiled out.
@@ -355,6 +361,8 @@ public:
         [[nodiscard]] double ratio() const { return total == 0 ? 0.0 : static_cast<double>(changed) / total; }
     };
 
+    // Same anchor-family precondition as pixelDifference: the size check is a proxy that holds only because
+    // callers diff two live-capture (intersect()-anchored) frames. See pixelDifference above.
     [[nodiscard]] DiffStats diffStats(const Frame &other, const Rect<double> &rect, int threshold) const {
         if (this->size() != other.size()) {
             throw std::invalid_argument("diffStats: frame sizes do not match");

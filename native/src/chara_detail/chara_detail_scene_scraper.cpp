@@ -47,6 +47,13 @@ std::optional<double> ScrollBarOffsetEstimator::topMargin(const Frame &frame) co
 }
 
 std::optional<double> ScrollBarOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
+    // A resolution change mid-scroll would mix from.frame.height() (new-frame pixels) with a scroll_bar_length
+    // latched at the old scale below, yielding a wrong pixel offset. Bail before touching the latch so it is not
+    // polluted with a cross-scale max. (!= is not auto-generated for value types here; use !(==).)
+    if (!(from.frame.size() == to.frame.size())) {
+        return std::nullopt;
+    }
+
     const auto &from_line = findScrollbar(from.frame);
     const auto &to_line = findScrollbar(to.frame);
     if (!from_line || !to_line) {
@@ -275,6 +282,13 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     // > height, or rounding to <= 0 under the minimum_scroll gate) cannot drive frame.view() out of
     // bounds. A degenerate 1px / full-height slice is safe; an out-of-bounds read is not.
     offset_pixels = std::clamp(offset_pixels, 1, frame.height());
+
+    // assert_ above is a no-op in Release; guard for real. The loop below dereferences current_scan before it
+    // checks current_scan != end(), so an empty scan_parameters (a page configured with no scans) would read a
+    // past-the-end iterator. Nothing to accumulate in that case.
+    if (current_scan == scan_parameters.end()) {
+        return;
+    }
 
     const auto &anchor = frame.anchor();
     const Point<int> &top_left = {0, frame.height() - offset_pixels};

@@ -34,6 +34,9 @@ struct VersionInfo {
 };
 
 struct IndexPrediction : public recognizer::Prediction {
+    // Highest output index this type reads, plus one; validated against the loaded model in Model's ctor.
+    static constexpr size_t kOutputCount = 2;
+
     [[nodiscard]] int result() const { return static_cast<int>(at<int64_t>(0)); }
 
     [[nodiscard]] auto confidence() const { return at<float>(1); }
@@ -52,6 +55,10 @@ struct Chara {
 };
 
 struct CharaPrediction : public recognizer::Prediction {
+    // Reads outputs 0..9 (record-type head at 8, its confidence at 9); validated in Model's ctor so a model
+    // with fewer heads fails loudly at load instead of dropping every record via a per-call out_of_range.
+    static constexpr size_t kOutputCount = 10;
+
     [[nodiscard]] int icon() const { return static_cast<int>(at<int64_t>(0)); }
 
     [[nodiscard]] int chara() const { return static_cast<int>(at<int64_t>(2)); }
@@ -92,6 +99,9 @@ struct RacePlace {
 };
 
 struct RacePlacePrediction : public recognizer::Prediction {
+    // Reads outputs 0..7; validated against the loaded model in Model's ctor.
+    static constexpr size_t kOutputCount = 8;
+
     [[nodiscard]] int place() const { return static_cast<int>(at<int64_t>(0)); }
 
     [[nodiscard]] int ground() const { return static_cast<int>(at<int64_t>(2)); }
@@ -108,6 +118,9 @@ struct RacePlacePrediction : public recognizer::Prediction {
 };
 
 struct DateTimePrediction : public recognizer::Prediction {
+    // Reads outputs 0 and 1; validated against the loaded model in Model's ctor.
+    static constexpr size_t kOutputCount = 2;
+
     [[nodiscard]] std::string result() const {
         const auto short_str = std::to_string(at<int64_t>(0));
         // Expect exactly YYYYMMDD (8 digits). A misrecognition that stringifies to fewer digits would make

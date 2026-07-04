@@ -67,6 +67,7 @@ CharaDetailSceneStitcher::CharaDetailSceneStitcher(
     const std::filesystem::path &stitching_dir,
     const event_util::Listener<RecordInfo> &on_stitch_ready,
     const event_util::Sender<RecordInfo> &on_stitch_completed,
+    const event_util::Sender<RecordInfo> &on_stitch_failed,
     const stitcher_config::CharaDetailSceneStitcherConfig &config,
     const io_util::DirectoryHooks &directory_hooks)
     : config(config)
@@ -74,7 +75,8 @@ CharaDetailSceneStitcher::CharaDetailSceneStitcher(
     , stitching_root_dir(stitching_dir)
     , directory_hooks(directory_hooks)
     , on_stitch_ready(on_stitch_ready)
-    , on_stitch_completed(on_stitch_completed) {
+    , on_stitch_completed(on_stitch_completed)
+    , on_stitch_failed(on_stitch_failed) {
     on_stitch_ready->listen([this](const auto &info) { stitch(info); });
 }
 
@@ -84,18 +86,33 @@ void CharaDetailSceneStitcher::stitch(const RecordInfo &info) const {
 
     vlog_debug(input_dir.string(), output_dir.string());
 
-    // A missing/partially-written or non-CV_8UC3 base.png decodes to an empty or wrong-channel Mat; wrapping
-    // it in a Frame and then calling anchor()/size()/view()/bgrAt() on it misbehaves deep inside OpenCV.
-    // readImageBGR validates up front so the failure is legible.
-    const auto base_path = input_dir / path_config.base.filename();
-    Frame base_image(readImageBGR(base_path));
+    try {
+        // A missing/partially-written or non-CV_8UC3 base.png decodes to an empty or wrong-channel Mat; wrapping
+        // it in a Frame and then calling anchor()/size()/view()/bgrAt() on it misbehaves deep inside OpenCV.
+        // readImageBGR validates up front so the failure is legible.
+        const auto base_path = input_dir / path_config.base.filename();
+        Frame base_image(readImageBGR(base_path));
 
-    stitchTab(base_image, input_dir / path_config.skill.stem(), output_dir, path_config.skill);
-    stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor);
-    stitchTab(base_image, input_dir / path_config.campaign.stem(), output_dir, path_config.campaign);
+        stitchTab(base_image, input_dir / path_config.skill.stem(), output_dir, path_config.skill);
+        stitchTab(base_image, input_dir / path_config.factor.stem(), output_dir, path_config.factor);
+        stitchTab(base_image, input_dir / path_config.campaign.stem(), output_dir, path_config.campaign);
 
-    directory_hooks.rmdir(input_dir);
-    on_stitch_completed->send(info);
+        directory_hooks.rmdir(input_dir);
+        on_stitch_completed->send(info);
+    } catch (const std::exception &e) {
+        // A tab throwing partway leaves output_dir with a half-written record that later reads as complete, and
+        // the runner would otherwise just log and drop the exception -- the recognizer never runs and the UI
+        // waits forever for onCharaDetailFinished. Remove the partial output (input_dir is kept for diagnosis)
+        // and surface a terminal failure. rmdir is best-effort; do not let it mask the original error.
+        log_error("stitch failed for record_id={}: {}", info.record_id, e.what());
+        try {
+            directory_hooks.rmdir(output_dir);
+        } catch (const std::exception &cleanup_error) {
+            log_error("stitch failed to clean up partial output for record_id={}: {}", info.record_id,
+                cleanup_error.what());
+        }
+        on_stitch_failed->send(info);
+    }
 }
 
 void CharaDetailSceneStitcher::stitchTab(

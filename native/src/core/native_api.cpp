@@ -207,11 +207,20 @@ void NativeApi::startPipeline(const std::string &native_config) {
     const auto stitcher_dir =
         json_util::decodePath(config_json["directory"]["storage_dir"]) / "chara_detail" / "active";
 
+    // Stitching failed partway (a corrupt/partial fragment): the record can never be recognized, so surface a
+    // terminal failure just like closed_before_completed instead of leaving the UI waiting forever.
+    const auto stitch_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    stitch_failed_connection->listen([this](const auto &info) {
+        notifyCharaDetailFinished(info, false);
+        notifyError("stitch_failed");
+    });
+
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
         stitcher_dir,
         stitch_ready_connection,
         recognize_ready_connection,
+        stitch_failed_connection,
         config_json["chara_detail"]["scene_stitcher"]
             .get<chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>(),
         directory_hooks);

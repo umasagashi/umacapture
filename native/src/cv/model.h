@@ -104,6 +104,16 @@ public:
             throw std::runtime_error("Model " + name + ": dynamic or invalid input H/W");
         }
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
+
+        // A model swapped for one with fewer output heads than PredictionType reads would surface only later as
+        // a per-record out_of_range in Prediction::at (index out of range), silently dropping every record via
+        // the recognizer's try/catch. Reject the mismatch at load time so it reads as a config error instead.
+        const auto output_count = prediction->GetOutputNames().size();
+        if (output_count < PredictionType::kOutputCount) {
+            throw std::runtime_error(
+                "Model " + name + ": expected at least " + std::to_string(PredictionType::kOutputCount)
+                + " outputs, got " + std::to_string(output_count));
+        }
     }
 
     // `const` reflects logical constness (the model configuration is unchanged), but this runs ONNX

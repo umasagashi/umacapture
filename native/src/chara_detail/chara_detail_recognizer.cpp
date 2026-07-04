@@ -761,6 +761,17 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         const auto record_path = record_dir / "record.json";
         auto record_info = raw_info;
 
+        // Load the existing record.json at most once and reuse it: both the record_type recovery below and the
+        // update-mode metadata copy read the same file. Reading twice wastes a full decode and could observe two
+        // different states if a writer raced between the reads.
+        std::optional<record::CharaDetailRecord> cached_old_record;
+        const auto loadOldRecord = [&]() -> const record::CharaDetailRecord & {
+            if (!cached_old_record) {
+                cached_old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
+            }
+            return *cached_old_record;
+        };
+
         if (!record_info.record_type.has_value()) {
             // assert_ is a no-op in Release; check for real. Without the existing record.json the record_type
             // cannot be recovered, so skip this record explicitly instead of falling through to json_util::read
@@ -771,8 +782,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
                     raw_info.record_id);
                 return;
             }
-            const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
-            record_info.record_type = old_record.metadata.record_type.value_or(record::RecordType::Standard);
+            record_info.record_type = loadOldRecord().metadata.record_type.value_or(record::RecordType::Standard);
         }
 
         const auto &skill_frame = Frame::open(record_dir / "skill.png");
@@ -803,8 +813,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             json_util::read(module_root_dir / "version_info.json").get<recognizer_impl::VersionInfo>();
 
         if (isUpdateMode) {
-            const auto old_record = json_util::read(record_path).get<record::CharaDetailRecord>();
-            record.metadata = old_record.metadata;
+            record.metadata = loadOldRecord().metadata;
             record.metadata.recognizer_version = version_info.recognizer_version;
 
             std::filesystem::copy_file(

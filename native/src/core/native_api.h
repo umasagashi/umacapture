@@ -21,6 +21,7 @@
 #include "cv/frame_stall_watchdog.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
+#include "util/logger_util.h"
 
 namespace uma::chara_detail {
 class CharaDetailSceneScraper;
@@ -108,7 +109,12 @@ public:
     }
 
     void setNotifyCallback(const std::function<MessageCallback> &method) {
-        assert_(!isRunning());
+        // Enforce for real (assert_ is a no-op in Release): notify_callback is read unsynchronized from worker
+        // threads via notify(), so overwriting it after start() is a torn-read data race. Ignore the late set.
+        if (isRunning()) {
+            log_warning("setNotifyCallback called while the event loop is running; ignoring");
+            return;
+        }
         notify_callback = method;
     }
 
@@ -161,7 +167,10 @@ public:
     }
 
     void setDetachCallback(const std::function<VoidCallback> &method) {
-        assert_(!isRunning());
+        if (isRunning()) {
+            log_warning("setDetachCallback called while the event loop is running; ignoring");
+            return;
+        }
         detach_callback = method;
     }
 
@@ -169,16 +178,25 @@ public:
     // storage. They are read into an io_util::DirectoryHooks in startEventLoop and injected into the
     // pipeline components, so those components stay decoupled from this singleton (and unit-testable).
     void setMkdirCallback(const std::function<PathCallback> &method) {
-        assert_(!isRunning());
+        if (isRunning()) {
+            log_warning("setMkdirCallback called while the event loop is running; ignoring");
+            return;
+        }
         mkdir_callback = method;
     }
     void setRmdirCallback(const std::function<PathCallback> &method) {
-        assert_(!isRunning());
+        if (isRunning()) {
+            log_warning("setRmdirCallback called while the event loop is running; ignoring");
+            return;
+        }
         rmdir_callback = method;
     }
 
     void setLoggingCallback(const std::function<MessageCallback> &method) {
-        assert_(!isRunning());
+        if (isRunning()) {
+            log_warning("setLoggingCallback called while the event loop is running; ignoring");
+            return;
+        }
         logging_callback = method;
     }
     void log(const std::string &message) const {
