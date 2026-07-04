@@ -1,0 +1,144 @@
+name: CI
+
+# Runs the native C++ (doctest) suite and the Flutter unit/widget suite on every
+# PR to develop and on pushes to develop. Both jobs run on GitHub-hosted
+# windows-2022: the native tests need MSVC (and a downloaded OpenCV, see below), and
+# the app is Windows-only.
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+
+# One in-flight run per ref; a new push cancels the previous run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-tests:
+    name: Native C++ tests (doctest)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # Puts cl.exe / the MSVC toolchain on PATH for every later step (exported via
+      # GITHUB_ENV).
+      - name: Set up MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # OpenCV 4.5.5 (vc15) is a gitignored, manually-placed third-party dependency
+      # (windows/.gitignore) that native/CMakeLists.txt references at
+      # windows/opencv/build. Restore it from cache, or download the official prebuilt
+      # and extract it into windows/ on a cache miss -- the same layout a local dev
+      # places by hand. onnxruntime/clip are deliberately NOT provisioned: the
+      # umacapture_tests target links only OpenCV (the cli/app targets that need ONNX
+      # are never built here).
+      - name: Cache OpenCV 4.5.5
+        id: cache-opencv
+        uses: actions/cache@v4
+        with:
+          path: windows/opencv
+          key: opencv-4.5.5-vc14_vc15
+
+      - name: Download OpenCV 4.5.5
+        if: steps.cache-opencv.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          curl.exe -L -o "$env:RUNNER_TEMP\opencv.exe" https://github.com/opencv/opencv/releases/download/4.5.5/opencv-4.5.5-vc14_vc15.exe
+          # The self-extracting archive holds a top-level opencv/ (build/ + sources/);
+          # extracting into windows/ yields the windows/opencv/build CMake expects.
+          7z x "$env:RUNNER_TEMP\opencv.exe" -o"windows" -y
+          # The test build needs only build/; drop sources/ to keep the cache lean.
+          Remove-Item -Recurse -Force "windows\opencv\sources" -ErrorAction SilentlyContinue
+
+      # Ninja + Debug are required (see native/test/README.md); asserts are live in Debug.
+      - name: Configure (CMake + Ninja, Debug)
+        run: cmake -G Ninja -S native -B native/cmake-build-tests -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build umacapture_tests
+        run: cmake --build native/cmake-build-tests --target umacapture_tests
+
+      # integration_golden self-skips (exit 77) without the local-only clips/models, so ctest
+      # reports it Skipped rather than Failed. ctest counts the doctest binary as one test, so
+      # its output hides the doctest case count on success -- the next step surfaces it.
+      - name: Run ctest
+        run: ctest --test-dir native/cmake-build-tests --output-on-failure
+
+      # ctest is the gate; this re-runs the binary only to echo doctest's own summary
+      # (the "test cases: N | N passed" line) into the log, filtered so the tests'
+      # intentional error-path spdlog lines don't look like real failures.
+      - name: Report doctest case count
+        shell: pwsh
+        run: |
+          & native\cmake-build-tests\umacapture_tests.exe 2>&1 |
+            Select-String -Pattern 'test cases:|assertions:|Status:'
+
+      # ---- P2: coverage visibility (non-gating) ----
+      - name: Install OpenCppCoverage
+        run: choco install opencppcoverage -y
+
+      # Re-runs the Debug test binary under instrumentation and exports HTML + Cobertura.
+      # --sources native\src keeps the report to backend code (substring match excludes
+      # vendored headers and the test TUs). Uses the full exe path because choco's PATH
+      # update is not visible to this step.
+      - name: Measure coverage
+        run: >
+          & "C:\Program Files\OpenCppCoverage\OpenCppCoverage.exe"
+          --sources native\src
+          --excluded_sources native\vendor
+          --export_type cobertura:native\coverage\coverage.xml
+          --export_type html:native\coverage\html
+          -- native\cmake-build-tests\umacapture_tests.exe
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-coverage
+          path: native/coverage
+          if-no-files-found: warn
+
+  flutter-tests:
+    name: Flutter unit/widget tests
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK
+      # directly. Keep this version in sync with .fvmrc (currently 3.44.4).
+      - name: Set up Flutter 3.44.4
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      # --force-jit is required in this repo (a transitive native build hook is
+      # incompatible with build_runner's default AOT). Generated outputs are committed;
+      # regenerating here also catches a stale/forgotten regeneration.
+      #
+      # The build filter restricts codegen to the lib/ and test/ outputs (mappers,
+      # routes) that the tests compile against, and skips DistributionInfoBuilder --
+      # its release-only license/version assets scan the gitignored
+      # windows/{opencv,onnxruntime,clip} dirs, which are not provisioned in this job.
+      - name: Code generation (build_runner)
+        run: dart run build_runner build --force-jit --build-filter "lib/**" --build-filter "test/**"
+
+      # --no-fatal-infos keeps errors and warnings fatal but tolerates pre-existing
+      # info-level lints (e.g. annotate_overrides) that also exist on develop.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Format check
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
+      # is intentionally excluded.
+      - name: Run tests
+        run: flutter test test
