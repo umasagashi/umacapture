@@ -5,8 +5,8 @@ description: >-
   standalone CLI (umacapture_cli) from the command line, without CLion. Sets up
   the MSVC toolchain via vcvars64, configures CMake with Ninja (Debug/Release),
   runs the build / capture / video / stitch / recognize subcommands, explains the
-  spdlog output and the event-loop subcommands that never self-exit, and steps
-  through the binary with the cdb command-line debugger. Use when the user wants
+  spdlog output and which subcommands self-terminate vs. run a live event loop,
+  and steps through the binary with the cdb command-line debugger. Use when the user wants
   to build, rebuild, run, inspect logs from, or debug the native CLI, regenerate
   the assets/config/*.json scene definitions, or test capture/recognition logic
   outside the Flutter app.
@@ -135,13 +135,22 @@ umacapture_cli.exe build --assets_dir .\smoke_assets
 > place.** Only do that when you intend to regenerate them (see the `build`
 > section below); for a smoke test write to a throwaway dir as shown.
 
-### Only `build` self-terminates; the rest run an event loop forever
+### Self-termination: only `capture` runs forever; the rest exit on their own
 
-`capture` / `video` / `stitch` / `recognize` all start `NativeApi`'s event loop
-and then spin in `while (api.isRunning()) sleep(...)`, which does **not** exit on
-its own even after the work is done. Run them in the background, watch for the
-output artifact (below), then kill the process (`Stop-Process -Name
-umacapture_cli -Force`). Only `build` returns on completion.
+`build` returns as soon as it finishes. `stitch` / `recognize` / `video` start
+`NativeApi`'s event loop, submit their work, then wait until the pipeline goes
+quiet — no notification for ~10s, an idle-grace window in `runUntilIdleThenJoin`
+(`src/core/cli.cpp`) — and then join the event loop and **exit on their own with
+code 0**. No need to watch for an artifact and kill them; just wait (a one-shot
+`recognize` typically exits ~10–13s after the work completes). Only `capture`
+(live screen capture) runs indefinitely and must be stopped with Ctrl-C /
+`Stop-Process -Name umacapture_cli -Force`.
+
+Because these now exit gracefully, they run full teardown — the event-loop join
+plus the `NativeApi` atexit destructor — a path that force-killing them never
+exercised. If you change shutdown/teardown or logging, run one to completion and
+confirm exit code 0 (this path previously crashed at exit by logging through an
+already-dropped spdlog logger; fixed in `NativeApi::joinEventLoop`).
 
 ### `build` subcommand — regenerating scene config
 
@@ -178,11 +187,10 @@ The fix is the toggle already present in `captureFromVideo`: comment out the
 = {};  // For vertical screen.`, then incrementally rebuild. A successful run
 logs `{"type":"onCharaDetailFinished",...,"success":true}` and writes
 `record.json` + `prediction.json` + `skill/factor/campaign.png` + `trainee.jpg`
-under `<build-dir>/storage/chara_detail/active/<uuid>/`. Watch for that artifact
-(or the `onCharaDetailFinished` log line) as the completion signal, per the
-event-loop note above. A clip that ends with the character-detail screen being
-closed drives `api.isRunning()` to false, so the process may exit on its own;
-a clip that cuts off mid-scene will not — kill it once the artifact appears.
+under `<build-dir>/storage/chara_detail/active/<uuid>/`. The `onCharaDetailFinished`
+log line (or that artifact) marks a completed record. The `video` run then
+self-terminates once the pipeline drains (see the self-termination note above),
+whether or not the clip ends with the detail screen closing — no manual kill needed.
 
 ### Test inputs (from the old CLion run configurations)
 
@@ -229,10 +237,12 @@ what bites when you kill an event-loop subcommand. On Windows:
   rebuild — the comment on line 3 marks the intended toggle. The runtime level
   (`set_level(trace)`) is already permissive, so the macro is the only gate.
 - **Buffering gotcha:** `flush_on(warn)` + `flush_every(5s)`. WARN and above
-  flush immediately; DEBUG/INFO can sit in the buffer up to 5 seconds. Since the
-  event-loop subcommands are killed rather than exited, **the last few seconds of
-  buffered DEBUG/INFO can be lost** when you `Stop-Process`. If you need the tail,
-  log at WARN or wait for a flush before killing.
+  flush immediately; DEBUG/INFO can sit in the buffer up to 5 seconds. This bites
+  the one subcommand you still kill, `capture`: **the last few seconds of buffered
+  DEBUG/INFO can be lost** when you `Stop-Process` it. `stitch` / `recognize` /
+  `video` now exit gracefully, so their final `spdlog::drop_all()` flushes the
+  tail. If you need the tail of a killed `capture`, log at WARN or wait for a
+  flush before killing.
 
 ## Debugging
 
@@ -277,8 +287,9 @@ Two things to get right:
   follow the exe path normally.
 
 Scripted example — set a breakpoint, run to it, dump a source-line stack, then
-quit. Targets the self-terminating `build` subcommand (the event-loop subcommands
-never exit, so under cdb you just break, inspect, and `q` to stop):
+quit. Targets the self-terminating `build` subcommand (`capture` never exits, so
+under cdb you just break, inspect, and `q` to stop; `stitch` / `recognize` /
+`video` now drain and exit on their own after their idle-grace window):
 
 ```bat
 cd /d C:\Projects\umacapture\native\cmake-build-debug
