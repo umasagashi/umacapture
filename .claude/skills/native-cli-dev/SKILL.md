@@ -171,20 +171,27 @@ step does **not** copy. For the `video` subcommand, copy it manually from
 `windows/opencv/build/x64/vc15/bin/opencv_videoio_ffmpeg455_64.dll` into the
 build dir (alongside the exe). The other subcommands don't need it.
 
-### `video` subcommand: horizontal vs. vertical crop
+### `video` subcommand: automatic horizontal vs. vertical crop
 
-`captureFromVideo` (`src/core/cli.cpp`) hard-codes the **horizontal-screen** crop
-(`crop_profiles[0].crop_rect`, a 16:9 landscape profile) and applies it to every
-frame. The `sandbox/*.mp4` clips are horizontal recordings, so the default works.
+`captureFromVideo` (`src/core/cli.cpp`) selects the crop **automatically per clip**,
+the same way live `capture` does: it matches the clip's frame aspect ratio against
+the configured `crop_profiles` (`windows_config::matchCropProfile`,
+`windows/runner/window_capturer.h`). No manual edit or rebuild is needed to switch
+between recording orientations.
 
-A **vertical-screen** recording (a 9:16 phone capture, e.g. 736×1308 — already
-the bare intersection with no horizontal padding) must use the **no-crop** path
-instead. The horizontal `crop_rect` maps to pixels outside such a frame, so
-OpenCV aborts on the first frame with an ROI assertion
-(`Mat::Mat ... 0 <= roi.x && ... roi.x + roi.width <= m.cols`, `matrix.cpp`).
-The fix is the toggle already present in `captureFromVideo`: comment out the
-`crop_profiles[0]` line and enable `const std::optional<Rect<double>> crop_rect
-= {};  // For vertical screen.`, then incrementally rebuild. A successful run
+- A **horizontal-screen** recording (16:9, aspect in the profile's
+  `window_aspect_ratio` range ≈1.66–1.88) matches `crop_profiles[0]` and is cropped
+  to the vertical content region.
+- A **vertical-screen** recording (a 9:16 phone capture, e.g. 736×1308 — already
+  the bare intersection with no horizontal padding) matches no profile and is used
+  **uncropped**.
+
+`VideoLoader::run` logs the decision as `crop_rect.has_value()=<bool>` on the first
+frame of each clip. This replaces the old hand-edited toggle; because the crop is
+chosen by aspect ratio, the old failure mode of applying a horizontal `crop_rect`
+to a vertical frame (an OpenCV ROI abort,
+`Mat::Mat ... 0 <= roi.x && ... roi.x + roi.width <= m.cols`) can no longer happen.
+A successful run
 logs `{"type":"onCharaDetailFinished",...,"success":true}` and writes
 `record.json` + `prediction.json` + `skill/factor/campaign.png` + `trainee.jpg`
 under `<build-dir>/storage/chara_detail/active/<uuid>/`. The `onCharaDetailFinished`
