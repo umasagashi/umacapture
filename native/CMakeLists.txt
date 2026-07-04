@@ -114,7 +114,9 @@ set(
         test/test_main.cpp
         test/condition/test_serializer.cpp
         test/condition/test_condition.cpp
+        test/condition/test_cv_rule.cpp
         test/chara_detail/test_scraping_box.cpp
+        test/chara_detail/test_scene_context.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp
         test/types/test_shape.cpp
@@ -122,8 +124,10 @@ set(
         test/util/test_stds.cpp
         test/util/test_json_util.cpp
         test/cv/test_frame.cpp
+        test/cv/test_frame_distributor.cpp
         src/condition/serializer.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
+        src/chara_detail/chara_detail_scene_context.cpp
 )
 
 add_executable(umacapture_tests ${TEST_SOURCE_FILES})
