@@ -2,8 +2,11 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
@@ -153,9 +156,6 @@ public:
 
     [[nodiscard]] inline Rect<int> intersection() const { return intersection_; }
 
-    //    [[nodiscard]] static Size<int> baseSize() { return base_size; }
-    //    static void setBaseSize(const Size<int> &size) { base_size = size; }
-
 private:
     FrameAnchor(const Size<int> frame_size, const Rect<int> &intersection)
         : unit_size(intersection.width())
@@ -242,19 +242,32 @@ public:
         return stretched(image, 1, screen_size);
     }
 
+    // Reads and validates a CV_8UC3 image from disk, reading the file bytes via an fstream (which opens the
+    // wide path on Windows) and decoding in memory, so non-ASCII paths that cv::imread would mangle work.
+    // cv::imdecode returns an empty Mat on a missing/corrupt file, and IMREAD_UNCHANGED decodes an alpha PNG
+    // to CV_8UC4 or a grayscale one to CV_8UC1; the Frame ctor only asserts (a no-op in release), so fail
+    // legibly here instead of constructing a Frame over an empty or wrong-channel Mat.
+    [[nodiscard]] inline static cv::Mat decodeBgr(const std::filesystem::path &path) {
+        std::ifstream file(path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("Frame::decodeBgr: failed to open: " + path.generic_string());
+        }
+        const std::vector<uchar> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        const cv::Mat image = cv::imdecode(buffer, cv::IMREAD_UNCHANGED);
+        if (image.empty()) {
+            throw std::runtime_error("Frame::decodeBgr: failed to decode image: " + path.generic_string());
+        }
+        if (image.type() != CV_8UC3) {
+            throw std::runtime_error("Frame::decodeBgr: image must be CV_8UC3: " + path.generic_string());
+        }
+        return image;
+    }
+
     inline static Frame open(const std::filesystem::path &path) {
         std::filesystem::path info_path = path;
         info_path.replace_extension(".json");
         const auto frame_info = json_util::read(info_path);
-        const auto image = cv::imread(path.string(), -1);
-        // cv::imread returns an empty Mat on a missing or corrupt file; the Frame ctor only asserts (a no-op in
-        // release), so surface the I/O failure explicitly instead of constructing a Frame over an empty Mat.
-        if (image.empty()) {
-            throw std::runtime_error("Frame::open: failed to read image: " + path.string());
-        }
-        if (image.type() != CV_8UC3) {
-            throw std::runtime_error("Frame::open: image must be CV_8UC3: " + path.string());
-        }
+        const auto image = decodeBgr(path);
         return {image, 1, FrameAnchor::fixed(image.size(), frame_info["intersection"].get<Rect<int>>())};
     }
 
@@ -428,9 +441,22 @@ public:
     }
 
     void save(const std::filesystem::path &path) const {
-        // cv::imwrite returns false (without throwing) on failure. Fail fast at the write site so a missing
-        // fragment is reported here, not later on another thread when the stitcher tries to read it back.
-        if (!cv::imwrite(path.generic_string(), image)) {
+        // Encode in memory (format chosen by the extension) and write the bytes via an fstream (which opens the
+        // wide path on Windows), so non-ASCII paths that cv::imwrite would mangle work. cv::imencode returns
+        // false (without throwing) on an unknown format, and the fstream surfaces write failures; fail fast at
+        // the write site so a missing fragment is reported here, not later on another thread when the stitcher
+        // tries to read it back.
+        std::vector<uchar> buffer;
+        if (!cv::imencode(path.extension().string(), image, buffer)) {
+            throw std::runtime_error("failed to encode image: " + path.generic_string());
+        }
+        std::ofstream file(path, std::ios::binary);
+        if (!file) {
+            throw std::runtime_error("failed to open image for write: " + path.generic_string());
+        }
+        file.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
+        file.flush();
+        if (!file) {
             throw std::runtime_error("failed to write image: " + path.generic_string());
         }
     }

@@ -99,6 +99,8 @@ public:
             state.length = std::nullopt;
             return false;
         }
+        // lengthIn samples the line on a fixed grid, so identical pixels yield a bit-identical ratio; exact
+        // equality here means "the measured length did not change since the previous frame".
         const bool met_ = length == state.length;
         state.length = length;
         return met_;

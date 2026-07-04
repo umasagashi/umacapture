@@ -12,19 +12,12 @@ namespace uma::chara_detail {
 
 namespace {
 
-// Reads an image and validates it up front, mirroring Frame::open. cv::imread returns an empty Mat on a
-// missing/corrupt file, and IMREAD_UNCHANGED (-1) decodes an alpha PNG to CV_8UC4 or a grayscale one to
-// CV_8UC1; wrapping either in a Frame only asserts (a no-op in release), which later misreads via bgrAt's
-// 3-byte stride or throws deep inside cv::resize. Fail legibly here instead.
+// Reads and validates a CV_8UC3 image up front by delegating to Frame::decodeBgr, which reads the file bytes
+// via a wide-path-safe fstream and rejects a missing/corrupt file or a non-3-channel decode (an alpha PNG
+// decodes to CV_8UC4, a grayscale one to CV_8UC1). Wrapping either in a Frame only asserts (a no-op in
+// release), which later misreads via bgrAt's 3-byte stride or throws deep inside cv::resize; fail legibly here.
 cv::Mat readImageBGR(const std::filesystem::path &path) {
-    cv::Mat image = cv::imread(path.string(), -1);
-    if (image.empty()) {
-        throw std::runtime_error("failed to read image: " + path.string());
-    }
-    if (image.type() != CV_8UC3) {
-        throw std::runtime_error("image must be CV_8UC3: " + path.string());
-    }
-    return image;
+    return Frame::decodeBgr(path);
 }
 
 }  // namespace

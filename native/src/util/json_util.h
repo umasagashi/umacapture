@@ -166,15 +166,6 @@ inline std::string trim(const std::string &key) {
     uma::json_util::extended_from_json(json, uma::json_util::trim(#v1), uma::json_util::AsType<decltype(v1)>()),
 #define INTERNAL_EXTENDED_JSON_ENUM(v1) {v1, #v1},
 
-// A serializer for default constructible types.
-//#define EXTENDED_JSON_TYPE(Type, ...) \
-//    friend void to_json(uma::json_util::Json &json, const Type &obj) { \
-//        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_TO, __VA_ARGS__)) \
-//    } \
-//    friend void from_json(const uma::json_util::Json &json, Type &obj) { \
-//        NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_FROM, __VA_ARGS__)) \
-//    }
-
 // A serializer for default constructible types with no parameters to store.
 #define EXTENDED_JSON_TYPE_NO_ARGS_DC(Type, ...) \
     friend void to_json(uma::json_util::Json &json, const Type &obj) {} \

@@ -208,8 +208,6 @@ public:
 
     [[nodiscard]] inline double length() const { return std::abs(p2_ - p1_); }
 
-    //    [[nodiscard]] inline Line1D<T> reversed() const { return {p2_, p1_}; }
-
     inline Line1D<T> operator-(const Line1D<T> &other) const { return {p1_ - other.p1_, p2_ - other.p2_}; }
 
     EXTENDED_JSON_TYPE_NDC(Line1D<T>, p1_, p2_);

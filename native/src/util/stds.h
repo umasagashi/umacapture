@@ -75,7 +75,7 @@ inline void sort(Container &container) {
 }
 
 inline bool starts_with(const std::string &subject, const std::string &query) {
-    return subject.substr(0, query.length()) == query;
+    return subject.rfind(query, 0) == 0;  // prefix check without allocating a temporary substring
 }
 
 template<size_t start, size_t end, typename T, size_t in_n>
