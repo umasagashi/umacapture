@@ -116,6 +116,14 @@ std::optional<double> ImageOffsetEstimator::estimate(FrameDescriptor &from, Fram
     detectKeyPoints(from);
     detectKeyPoints(to);
 
+    // A near-uniform fragment yields zero AKAZE keypoints and an empty descriptor Mat; FLANN's knnMatch
+    // can throw on empty/too-small train or query sets. k=2 needs at least two train rows. Bail early with
+    // the same "unreliable -> nullopt" semantics as the minimum_key_points guard below.
+    if (from.descriptors.empty() || to.descriptors.empty() || from.descriptors.rows < 2
+        || to.descriptors.rows < 2) {
+        return std::nullopt;
+    }
+
     std::vector<std::vector<cv::DMatch>> matches;
     matcher->knnMatch(from.descriptors, to.descriptors, matches, 2);
 
@@ -416,7 +424,16 @@ void StationaryFrameCatcher::update(const Frame &frame) {
 }
 
 bool StationaryFrameCatcher::ready() const {
-    return first_timestamp.has_value() && (previous_frame.timestamp() - first_timestamp.value()) > stationary_time;
+    // Use monotonicElapsed rather than a raw unsigned subtraction: system_clock frame timestamps can step
+    // backward in live capture, and a backward jump would wrap the subtraction and report the frame
+    // stationary instantly (latching a frame captured mid-animation). monotonicElapsed takes `since` by
+    // reference to restart the window, so pass a local copy (this const check must not mutate first_timestamp;
+    // a backward jump simply yields zero elapsed here, i.e. "not ready yet").
+    if (!first_timestamp.has_value()) {
+        return false;
+    }
+    uint64 since = first_timestamp.value();
+    return chrono_util::monotonicElapsed(previous_frame.timestamp(), since) > stationary_time;
 }
 
 Frame StationaryFrameCatcher::fullSizeFrame() const {
@@ -755,7 +772,10 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
     // spot a later character switch on the factor tab.
     factor_scroll_ready = event_util::makeDirectConnection<>();
     factor_scroll_ready->listen([this]() {
-        factor_probe_reference = current_full_frame;
+        // Retained across many later frames and diffed in maybeResetOnFactorChange; a shallow Frame copy
+        // would share pixels with a capture source that reuses its buffer, so clone to own the pixels
+        // (same hazard StationaryFrameCatcher::update guards against).
+        factor_probe_reference = current_full_frame.clone();
         factor_change_pending_since = std::nullopt;
         on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
     });

@@ -98,6 +98,11 @@ public:
             throw std::runtime_error("Model " + name + ": unexpected input shape rank");
         }
         const auto &input_shape = input_shapes[0];
+        // A model exported with dynamic H/W axes reports -1 here; that would make input_size negative and
+        // surface only later as an opaque cv::resize assertion in predict(). Reject it at load time.
+        if (input_shape[1] <= 0 || input_shape[2] <= 0) {
+            throw std::runtime_error("Model " + name + ": dynamic or invalid input H/W");
+        }
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
     }
 

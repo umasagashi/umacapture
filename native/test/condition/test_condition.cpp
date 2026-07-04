@@ -75,5 +75,67 @@ TEST_CASE("findByTag locates a nested condition by name") {
     CHECK(root->findByTag("missing") == nullptr);
 }
 
+// rule::Stable is the load-bearing debounce behind scene detection. It is exercised here at the rule level
+// (driving state.now directly, exactly as NestedCondition::update does via state::setFrameTimestamp) so the
+// threshold / reset / backward-clock semantics are pinned independently of any frame plumbing.
+
+TEST_CASE("stable fires only after the threshold elapses in video time") {
+    const rule::Stable stable{100};
+    state::TimestampState st{};
+
+    // First true starts the debounce window; nothing fires yet.
+    st.now = 1000;
+    CHECK_FALSE(stable.met(true, st));
+
+    // Exactly at the threshold is not enough (the compare is strictly greater-than).
+    st.now = 1100;
+    CHECK_FALSE(stable.met(true, st));
+
+    // One tick past the threshold fires.
+    st.now = 1101;
+    CHECK(stable.met(true, st));
+}
+
+TEST_CASE("stable restarts its window when the parent goes false") {
+    const rule::Stable stable{100};
+    state::TimestampState st{};
+
+    st.now = 1000;
+    CHECK_FALSE(stable.met(true, st));
+    st.now = 1200;
+    CHECK(stable.met(true, st));  // elapsed 200 > 100
+
+    // Parent drops: the window resets.
+    st.now = 1300;
+    CHECK_FALSE(stable.met(false, st));
+
+    // Parent true again: the debounce starts over from this frame (1350), so an immediate check must not fire.
+    st.now = 1350;
+    CHECK_FALSE(stable.met(true, st));  // elapsed 0 at restart
+    st.now = 1400;
+    CHECK_FALSE(stable.met(true, st));  // elapsed 50 from the restart
+    st.now = 1500;
+    CHECK(stable.met(true, st));  // elapsed 150 from the restart
+}
+
+TEST_CASE("stable does not fire instantly when the clock steps backward") {
+    const rule::Stable stable{100};
+    state::TimestampState st{};
+
+    st.now = 5000;
+    CHECK_FALSE(stable.met(true, st));  // window starts at 5000
+
+    // Clock steps backward below `since`: monotonicElapsed restarts the window rather than wrapping the
+    // unsigned subtraction to a huge elapsed, so this must not fire.
+    st.now = 1000;
+    CHECK_FALSE(stable.met(true, st));
+
+    // From the restarted window at 1000, the threshold must elapse again before firing.
+    st.now = 1050;
+    CHECK_FALSE(stable.met(true, st));
+    st.now = 1200;
+    CHECK(stable.met(true, st));
+}
+
 }  // namespace
 }  // namespace uma::condition

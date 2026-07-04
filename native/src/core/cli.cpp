@@ -265,20 +265,28 @@ int main(int argc, char **argv) {
                 [](const auto &obj) { return obj->toJson(); },
                 [](const auto &json) { return uma::condition::serializer::conditionFromJson(json); });
 
+            // fromJson deserializes back into the config struct (not an identity passthrough), so the
+            // round-trip check in buildJson actually exercises the config serializer and can catch drift.
             uma::cli::buildJson<uma::tool::CharaDetailSceneScraperBuilder>(
                 assets_dir / "chara_detail" / "scene_scraper.json",
                 [](const auto &obj) { return obj; },
-                [](const auto &json) { return json; });
+                [](const auto &json) {
+                    return json.template get<uma::chara_detail::scraper_config::CharaDetailSceneScraperConfig>();
+                });
 
             uma::cli::buildJson<uma::tool::CharaDetailSceneStitcherBuilder>(
                 assets_dir / "chara_detail" / "scene_stitcher.json",
                 [](const auto &obj) { return obj; },
-                [](const auto &json) { return json; });
+                [](const auto &json) {
+                    return json.template get<uma::chara_detail::stitcher_config::CharaDetailSceneStitcherConfig>();
+                });
 
             uma::cli::buildJson<uma::tool::CharaDetailRecognizerBuilder>(
                 assets_dir / "chara_detail" / "recognizer.json",
                 [](const auto &obj) { return obj; },
-                [](const auto &json) { return json; });
+                [](const auto &json) {
+                    return json.template get<uma::chara_detail::recognizer_config::CharaDetailRecognizerConfig>();
+                });
         }
 
         if (capture_command->parsed()) {
