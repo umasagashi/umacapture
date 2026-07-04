@@ -19,6 +19,7 @@ set(
         src/core/cli.cpp
         src/core/native_api.cpp
         src/chara_detail/chara_detail_recognizer.cpp
+        src/chara_detail/chara_detail_recognizer_models.cpp
         src/chara_detail/chara_detail_search_helpers.cpp
         src/chara_detail/chara_detail_scene_context.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
@@ -122,6 +123,9 @@ set(
         test/chara_detail/test_scraper_estimators.cpp
         test/chara_detail/test_search_helpers.cpp
         test/chara_detail/test_record.cpp
+        test/chara_detail/test_race_recognizer.cpp
+        test/chara_detail/test_campaign_recognizer.cpp
+        test/chara_detail/test_factor_recognizer.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp
         test/types/test_shape.cpp
@@ -137,6 +141,10 @@ set(
         src/chara_detail/chara_detail_scene_context.cpp
         src/chara_detail/chara_detail_scene_stitcher.cpp
         src/chara_detail/chara_detail_search_helpers.cpp
+        # ONNX-free half of the recognizer TU split (its production ctors, which name recognizer::Model, live
+        # in chara_detail_recognizer_models.cpp and are deliberately NOT linked here). This lets the scan logic
+        # be tested against fake predictors without onnxruntime; the ONNX include dir/lib below are omitted.
+        src/chara_detail/chara_detail_recognizer.cpp
 )
 
 add_executable(umacapture_tests ${TEST_SOURCE_FILES})

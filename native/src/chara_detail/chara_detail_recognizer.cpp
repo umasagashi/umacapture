@@ -1,8 +1,19 @@
 #include "chara_detail/chara_detail_recognizer.h"
 
+// INVARIANT (see native/CMakeLists.txt and the TU-split note in chara_detail_recognizer_models.cpp): this
+// translation unit must stay ONNX-free so it links into BOTH the app target and the onnxruntime-less
+// umacapture_tests target. It must NEVER name recognizer::Model or include cv/model.h -- every ONNX model
+// construction lives in chara_detail_recognizer_models.cpp. Only the injection ctors (which take pre-built
+// Predictors) and the recognize()/scan methods live here. The tripwire below fails the build loudly if the
+// onnxruntime header leaks in transitively.
+#ifdef ORT_API_VERSION
+#error "chara_detail_recognizer.cpp must stay ONNX-free; the onnxruntime header leaked in (see the TU-split note)."
+#endif
+
 #include <chrono>
 #include <exception>
 #include <map>
+#include <utility>
 
 #include "chara_detail/chara_detail_search_helpers.h"
 #include "util/logger_util.h"
@@ -16,12 +27,7 @@ json_util::Json PredictionHistory::toJson() const {
     return records;
 }
 
-StatusHeaderRecognizer::StatusHeaderRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::StatusHeaderConfig &config)
-    : config(config)
-    , evaluation_value_model(module_root_dir / config.evaluation.module_path, "evaluation_value")
-    , status_value_model(module_root_dir / config.status.module_path, "status_value")
-    , aptitude_model(module_root_dir / config.aptitude.module_path, "aptitude") {}
+// StatusHeaderRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 void StatusHeaderRecognizer::recognize(
     const Frame &frame,
@@ -29,17 +35,13 @@ void StatusHeaderRecognizer::recognize(
     record::CharaDetailRecord &record,
     PredictionHistory &history) const {
     if (!record::isInheritanceOnly(record_info.record_type.value())) {
-        record.evaluation_value = predict(evaluation_value_model, frame, config.evaluation.rect, history);
-        record.status = predict(status_value_model, frame, config.status.rects, history);
+        record.evaluation_value = predict(*evaluation_value_model, frame, config.evaluation.rect, history);
+        record.status = predict(*status_value_model, frame, config.status.rects, history);
     }
-    record.aptitudes = predict(aptitude_model, frame, config.aptitude.rects, history);
+    record.aptitudes = predict(*aptitude_model, frame, config.aptitude.rects, history);
 }
 
-SkillTabRecognizer::SkillTabRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config)
-    : config(config)
-    , skill_model(module_root_dir / config.module_path, "skill")
-    , skill_level_model(module_root_dir / config.skill_level.module_path, "skill_level") {}
+// SkillTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 void SkillTabRecognizer::recognize(
     const Frame &frame,
@@ -64,7 +66,7 @@ void SkillTabRecognizer::recognize(
         }
         {
             const Point<double> current_column_offset = {0.0, left_column_y.value()};
-            const int skill_id = predict(skill_model, frame, left_rect + current_column_offset, history);
+            const int skill_id = predict(*skill_model, frame, left_rect + current_column_offset, history);
             // Only the very first entry (the top-left skill, recognized before any other) carries a level:
             // on this screen a skill level is displayed for the trainee's own headline skill alone, so the
             // skill-level model is run only for it. Every later skill (left or right column) is stored
@@ -73,7 +75,7 @@ void SkillTabRecognizer::recognize(
                 skills.push_back({skill_id});
             } else {
                 const int skill_level = predict(
-                    skill_level_model,
+                    *skill_level_model,
                     frame,
                     anchor.absolute(config.skill_level.rect) + current_column_offset,
                     history);
@@ -88,7 +90,7 @@ void SkillTabRecognizer::recognize(
         }
         {
             const Point<double> current_column_offset = {0.0, right_column_y.value()};
-            const int skill_id = predict(skill_model, frame, right_rect + current_column_offset, history);
+            const int skill_id = predict(*skill_model, frame, right_rect + current_column_offset, history);
             skills.push_back({skill_id});
         }
 
@@ -101,13 +103,20 @@ std::optional<double> SkillTabRecognizer::findNext(const Frame &frame, const Poi
     return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_gap);
 }
 
+// FactorTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+
 FactorTabRecognizer::FactorTabRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
+    const recognizer_config::FactorTabConfig &config,
+    std::unique_ptr<const recognizer::Predictor<int>> factor_model,
+    std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model,
+    std::unique_ptr<const recognizer::Predictor<Chara>> character_model,
+    std::unique_ptr<const recognizer::Predictor<int>> character_rank_model)
     : config(config)
-    , factor_model(module_root_dir / config.module_path, "factor")
-    , factor_rank_model(module_root_dir / config.factor_rank.module_path, "factor_rank")
-    , character_model(module_root_dir / config.trainee_icon.icon.module_path, "character")
-    , character_rank_model(module_root_dir / config.trainee_icon.rank.module_path, "character_rank") {}
+    , factor_model(std::move(factor_model))
+    , factor_rank_model(std::move(factor_rank_model))
+    , character_model(std::move(character_model))
+    , character_rank_model(std::move(character_rank_model)) {
+}
 
 void FactorTabRecognizer::recognize(
     const Frame &frame,
@@ -180,10 +189,10 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     const auto reference_offset = Point<double>{0, reference_top.value()};
     const auto chara_rect = anchor.absolute(config.trainee_icon.icon.rect) + reference_offset;
     const auto rank_rect = anchor.absolute(config.trainee_icon.rank.rect) + reference_offset;
-    const auto icon = predict(character_model, frame, chara_rect, history);
+    const auto icon = predict(*character_model, frame, chara_rect, history);
 
     const auto rank = !record::isInheritanceOnly(record_info.record_type.value())
-                        ? predict(character_rank_model, frame, rank_rect, history)
+                        ? predict(*character_rank_model, frame, rank_rect, history)
                         : 0;
 
     crop_info.trainee_icon = chara_rect;
@@ -201,8 +210,8 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     return character;
 }
 
-std::vector<record::Factor>
-FactorTabRecognizer::recognizeOne(const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded) const {
+std::vector<record::Factor> FactorTabRecognizer::recognizeOne(
+    const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded) const {
     const auto anchor = frame.anchor();
     const auto left_rect = anchor.absolute(config.left_rect);
     const auto right_rect = anchor.absolute(config.right_rect);
@@ -253,16 +262,15 @@ record::Factor FactorTabRecognizer::predictFactor(
     // parsed config, so a violation is a real check (not a Debug-only assert): it is caught by the recognizer's
     // per-record try/catch and degrades to a dropped record plus a log entry.
     if (!(config.factor_rank.rect.topLeft().anchor() == ScreenStart)
-        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart)
-        || !(rect.topLeft().anchor() == ScreenStart)
+        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart) || !(rect.topLeft().anchor() == ScreenStart)
         || !(rect.bottomRight().anchor() == ScreenStart)) {
         throw std::logic_error("predictFactor requires ScreenStart-anchored rects");
     }
 
-    const auto factor_id = predict(factor_model, frame, rect + Point<double>{0, top}, history);
+    const auto factor_id = predict(*factor_model, frame, rect + Point<double>{0, top}, history);
 
     const auto factor_rank =
-        predict(factor_rank_model, frame, config.factor_rank.rect + Point<double>{rect.left(), top}, history);
+        predict(*factor_rank_model, frame, config.factor_rank.rect + Point<double>{rect.left(), top}, history);
 
     return {
         factor_id,
@@ -270,14 +278,7 @@ record::Factor FactorTabRecognizer::predictFactor(
     };
 }
 
-SupportCardRecognizer::SupportCardRecognizer(
-    const std::filesystem::path &module_root_dir,
-    const recognizer_config::SupportCardConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
-    : config(config)
-    , common_config(common_config)
-    , support_card_model(module_root_dir / config.module_path, "support_card")
-    , support_card_rank_model(module_root_dir / config.rank.module_path, "support_card_rank") {}
+// SupportCardRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 void SupportCardRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -300,8 +301,8 @@ void SupportCardRecognizer::recognize(
     const auto rank_rects = stds::transformed_inplace<std::array<Rect<double>, 6>>(
         config.rank.rects, [&](const auto &r) { return anchor.absolute(r) + top_offset; });
 
-    const auto id = predict(support_card_model, frame, id_rects, history);
-    const auto rank = predict(support_card_rank_model, frame, rank_rects, history);
+    const auto id = predict(*support_card_model, frame, id_rects, history);
+    const auto rank = predict(*support_card_rank_model, frame, rank_rects, history);
 
     std::array<record::SupportCard, 6> support_cards{};
     for (size_t i = 0; i < support_cards.size(); i++) {
@@ -321,14 +322,7 @@ void SupportCardRecognizer::recognize(
     scan_top = card_top.value() + config.vertical_delta;
 }
 
-FamilyTreeRecognizer::FamilyTreeRecognizer(
-    const std::filesystem::path &module_root_dir,
-    const recognizer_config::FamilyTreeConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
-    : config(config)
-    , common_config(common_config)
-    , character_model(module_root_dir / config.module.chara, "character")
-    , character_rank_model(module_root_dir / config.module.rank, "character_rank") {}
+// FamilyTreeRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 void FamilyTreeRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -386,8 +380,8 @@ record::Parent FamilyTreeRecognizer::recognizeParent(
     const auto &mapped_rank_rects = stds::transformed_inplace<std::array<Rect<double>, 3>>(
         rank_rects, [&](const auto &r) { return anchor.absolute(r) + top_offset; });
 
-    const auto &icon = predict(character_model, frame, mapped_icon_rects, history);
-    const auto &rank = predict(character_rank_model, frame, mapped_rank_rects, history);
+    const auto &icon = predict(*character_model, frame, mapped_icon_rects, history);
+    const auto &rank = predict(*character_rank_model, frame, mapped_rank_rects, history);
 
     record::Parent parent{};
     parent.self = makeCharacter(icon[0], rank[0]);
@@ -409,16 +403,22 @@ record::Character FamilyTreeRecognizer::makeCharacter(const Chara &chara, int ra
     return character;
 }
 
+// CampaignRecordRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+
 CampaignRecordRecognizer::CampaignRecordRecognizer(
-    const std::filesystem::path &module_root_dir,
     const recognizer_config::CampaignRecordConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
+    const recognizer_config::CampaignTabCommonConfig &common_config,
+    std::unique_ptr<const recognizer::Predictor<int>> campaign_field_model,
+    std::unique_ptr<const recognizer::Predictor<int>> fans_value_model,
+    std::unique_ptr<const recognizer::Predictor<int>> scenario_model,
+    std::unique_ptr<const recognizer::Predictor<std::string>> trained_date_model)
     : config(config)
     , common_config(common_config)
-    , campaign_field_model(module_root_dir / config.campaign_field.module_path, "campaign_field")
-    , fans_value_model(module_root_dir / config.fans_value.module_path, "fans_value")
-    , scenario_model(module_root_dir / config.scenario.module_path, "scenario")
-    , trained_date_model(module_root_dir / config.trained_date.module_path, "trained_date") {}
+    , campaign_field_model(std::move(campaign_field_model))
+    , fans_value_model(std::move(fans_value_model))
+    , scenario_model(std::move(scenario_model))
+    , trained_date_model(std::move(trained_date_model)) {
+}
 
 void CampaignRecordRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -477,22 +477,23 @@ void CampaignRecordRecognizer::recognize(
 
 std::pair<int, float> CampaignRecordRecognizer::predictFieldClass(
     const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
-    return predictWithConfidence(campaign_field_model, frame, anchor.absolute(config.campaign_field.rect) + pos, history);
+    return predictWithConfidence(
+        *campaign_field_model, frame, anchor.absolute(config.campaign_field.rect) + pos, history);
 }
 
 int CampaignRecordRecognizer::predictFans(
     const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
-    return predict(fans_value_model, frame, anchor.absolute(config.fans_value.rect) + pos, history);
+    return predict(*fans_value_model, frame, anchor.absolute(config.fans_value.rect) + pos, history);
 }
 
 record::Scenario CampaignRecordRecognizer::predictScenario(
     const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
-    return {predict(scenario_model, frame, anchor.absolute(config.scenario.rect) + pos, history)};
+    return {predict(*scenario_model, frame, anchor.absolute(config.scenario.rect) + pos, history)};
 }
 
 std::string CampaignRecordRecognizer::predictTrainedDate(
     const Frame &frame, const FrameAnchor &anchor, const Point<double> &pos, PredictionHistory &history) const {
-    return predict(trained_date_model, frame, anchor.absolute(config.trained_date.rect) + pos, history);
+    return predict(*trained_date_model, frame, anchor.absolute(config.trained_date.rect) + pos, history);
 }
 
 std::vector<double> CampaignRecordRecognizer::findAll(
@@ -515,24 +516,28 @@ std::optional<double> CampaignRecordRecognizer::findNext(
     return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
 }
 
-RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(
-    const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config)
-    : title(module_root_dir / block_config.title.module_path, "race_title")
-    // race_place has 1line and 2line variations, but since there's no need to distinguish the output, name can be the same.
-    , place(module_root_dir / block_config.place.module_path, "race_place")
-    , weather(module_root_dir / block_config.weather.module_path, "race_weather")
-    , strategy(module_root_dir / block_config.strategy.module_path, "race_strategy")
-    , turn(module_root_dir / block_config.turn.module_path, "race_turn")
-    , position(module_root_dir / block_config.position.module_path, "race_position") {}
+// RaceRecordRecognizer: production ctors (for the recognizer and its RaceBlockModelSet) live in
+// chara_detail_recognizer_models.cpp.
+
+RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(RaceBlockPredictors predictors)
+    : title(std::move(predictors.title))
+    , place(std::move(predictors.place))
+    , weather(std::move(predictors.weather))
+    , strategy(std::move(predictors.strategy))
+    , turn(std::move(predictors.turn))
+    , position(std::move(predictors.position)) {
+}
 
 RaceRecordRecognizer::RaceRecordRecognizer(
-    const std::filesystem::path &module_root_dir,
     const recognizer_config::RaceConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
+    const recognizer_config::CampaignTabCommonConfig &common_config,
+    RaceBlockPredictors models_1line,
+    RaceBlockPredictors models_2line)
     : config(config)
     , common_config(common_config)
-    , models_1line(module_root_dir, config.block_1line_config)
-    , models_2line(module_root_dir, config.block_2line_config) {}
+    , models_1line(std::move(models_1line))
+    , models_2line(std::move(models_2line)) {
+}
 
 void RaceRecordRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -585,13 +590,13 @@ void RaceRecordRecognizer::recognize(
     record.races = races;
 }
 
-std::optional<double> RaceRecordRecognizer::findNextBlock(
-    const Frame &frame, const Point<double> &scan_top_left, const double bottom) const {
+std::optional<double>
+RaceRecordRecognizer::findNextBlock(const Frame &frame, const Point<double> &scan_top_left, const double bottom) const {
     return searchVertical(frame, common_config.strict_bg_color, scan_top_left, bottom - scan_top_left.y());
 }
 
-std::optional<double> RaceRecordRecognizer::findNextGap(
-    const Frame &frame, const Point<double> &scan_top_left, const double bottom) const {
+std::optional<double>
+RaceRecordRecognizer::findNextGap(const Frame &frame, const Point<double> &scan_top_left, const double bottom) const {
     return searchVertical(frame, common_config.block_bg_color, scan_top_left, bottom - scan_top_left.y());
 }
 
@@ -614,26 +619,26 @@ record::Race RaceRecordRecognizer::recognizeRace(
 
     // Offset from the top of the block.
     race.title =
-        predict(block_models.title, frame, anchor.absolute(block_config.title.rect) + block_top_offset, history);
+        predict(*block_models.title, frame, anchor.absolute(block_config.title.rect) + block_top_offset, history);
     race.weather =
-        predict(block_models.weather, frame, anchor.absolute(block_config.weather.rect) + block_top_offset, history);
+        predict(*block_models.weather, frame, anchor.absolute(block_config.weather.rect) + block_top_offset, history);
 
     const auto &place =
-        predict(block_models.place, frame, anchor.absolute(block_config.place.rect) + block_top_offset, history);
+        predict(*block_models.place, frame, anchor.absolute(block_config.place.rect) + block_top_offset, history);
     race.place = place.place;
     race.ground = place.ground;
     race.distance = place.distance;
     race.variation = place.variation;
 
     // Offset from the bottom of the block.
-    race.strategy =
-        predict(block_models.strategy, frame, anchor.absolute(block_config.strategy.rect) + block_bottom_offset, history);
+    race.strategy = predict(
+        *block_models.strategy, frame, anchor.absolute(block_config.strategy.rect) + block_bottom_offset, history);
     race.turn =
-        predict(block_models.turn, frame, anchor.absolute(block_config.turn.rect) + block_bottom_offset, history);
+        predict(*block_models.turn, frame, anchor.absolute(block_config.turn.rect) + block_bottom_offset, history);
 
     // Offset from the vertical-center of the block.
     race.position = predict(
-                        block_models.position,
+                        *block_models.position,
                         frame,
                         anchor.absolute(block_config.position.rect) + block_center_offset,
                         history)
@@ -642,13 +647,7 @@ record::Race RaceRecordRecognizer::recognizeRace(
     return race;
 }
 
-CampaignTabRecognizer::CampaignTabRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::CampaignTabConfig &config)
-    : config(config)
-    , support_card_recognizer(module_root_dir, config.support_card, config.common)
-    , family_tree_recognizer(module_root_dir, config.family_tree, config.common)
-    , campaign_record_recognizer(module_root_dir, config.campaign_record, config.common)
-    , race_record_recognizer(module_root_dir, config.race, config.common) {}
+// CampaignTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 void CampaignTabRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
@@ -661,35 +660,7 @@ void CampaignTabRecognizer::recognize(
 
 }  // namespace recognizer_impl
 
-CharaDetailRecognizer::CharaDetailRecognizer(
-    const std::string &trainer_id,
-    const std::filesystem::path &record_root_dir,
-    const std::filesystem::path &module_root_dir,
-    const event_util::Listener<RecordInfo> &on_recognize_ready,
-    const event_util::Sender<RecordInfo> &on_recognize_completed,
-    const event_util::Listener<RecordInfo> &on_update_requested,
-    const event_util::Sender<RecordInfo> &on_update_completed,
-    const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
-    const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
-    const recognizer_config::CharaDetailRecognizerConfig &config)
-    : trainer_id(trainer_id)
-    , record_root_dir(record_root_dir)
-    , module_root_dir(module_root_dir)
-    , config(config)
-    , status_header_recognizer(module_root_dir, config.status_header)
-    , skill_tab_recognizer(module_root_dir, config.skill_tab)
-    , factor_tab_recognizer(module_root_dir, config.factor_tab)
-    , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
-    , on_recognize_ready(on_recognize_ready)
-    , on_recognize_completed(on_recognize_completed)
-    , on_update_requested(on_update_requested)
-    , on_update_completed(on_update_completed)
-    , on_factor_probe_ready(on_factor_probe_ready)
-    , on_factor_probe_completed(on_factor_probe_completed) {
-    this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
-    this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
-    this->on_factor_probe_ready->listen([this](const auto &frame, const auto &info) { this->probe(frame, info); });
-}
+// CharaDetailRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info) const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value());
@@ -747,8 +718,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             // and dropping it via an exception that reads as accidental.
             if (!std::filesystem::exists(record_path)) {
                 log_warning(
-                    "recognize: record.json not found, cannot resolve record_type; skipping id={}",
-                    raw_info.record_id);
+                    "recognize: record.json not found, cannot resolve record_type; skipping id={}", raw_info.record_id);
                 return;
             }
             record_info.record_type = loadOldRecord().metadata.record_type.value_or(record::RecordType::Standard);
@@ -842,7 +812,8 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             on_recognize_completed->send(record_info);
         }
     } catch (const std::exception &e) {
-        log_error("recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode, e.what());
+        log_error(
+            "recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode, e.what());
     }
 }
 

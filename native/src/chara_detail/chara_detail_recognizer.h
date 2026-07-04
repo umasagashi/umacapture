@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -17,8 +18,9 @@
 #include "chara_detail/chara_detail_scene_context.h"
 #include "chara_detail/record_info.h"
 #include "cv/frame.h"
-#include "cv/model.h"
+#include "cv/predictor.h"
 #include "util/event_util.h"
+#include "util/logger_util.h"
 #include "util/misc.h"
 
 namespace uma::chara_detail {
@@ -33,17 +35,8 @@ struct VersionInfo {
     EXTENDED_JSON_TYPE_NDC(VersionInfo, format_version, region, recognizer_version);
 };
 
-struct IndexPrediction : public recognizer::Prediction {
-    // Highest output index this type reads, plus one; validated against the loaded model in Model's ctor.
-    static constexpr size_t kOutputCount = 2;
-
-    [[nodiscard]] int result() const { return static_cast<int>(at<int64_t>(0)); }
-
-    [[nodiscard]] auto confidence() const { return at<float>(1); }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
-};
-
+// The recognized value of a Chara/CharaRank prediction. Kept here (ONNX-free) because it is the Result type
+// of Predictor<Chara>; the ONNX-backed CharaPrediction that produces it lives in recognizer_prediction.h.
 struct Chara {
     int icon;
     int chara;
@@ -54,41 +47,8 @@ struct Chara {
     EXTENDED_JSON_TYPE_NDC(Chara, icon, chara, card, rental, record_type);
 };
 
-struct CharaPrediction : public recognizer::Prediction {
-    // Reads outputs 0..9 (record-type head at 8, its confidence at 9); validated in Model's ctor so a model
-    // with fewer heads fails loudly at load instead of dropping every record via a per-call out_of_range.
-    static constexpr size_t kOutputCount = 10;
-
-    [[nodiscard]] int icon() const { return static_cast<int>(at<int64_t>(0)); }
-
-    [[nodiscard]] int chara() const { return static_cast<int>(at<int64_t>(2)); }
-
-    [[nodiscard]] int card() const { return static_cast<int>(at<int64_t>(4)); }
-
-    [[nodiscard]] bool rental() const { return at<int64_t>(6); }
-
-    // record_type_index (output 8), not rental_index (output 6): the model has a dedicated record-type
-    // head with values 0-3 (see record::RecordType). Read it as int, not bool, so a FriendStandard/
-    // FriendInheritance value (>= 2) is not truncated to 1.
-    [[nodiscard]] int recordType() const { return static_cast<int>(at<int64_t>(8)); }
-
-    [[nodiscard]] Chara result() const {
-        return {
-            icon(),
-            chara(),
-            card(),
-            rental(),
-            recordType(),
-        };
-    }
-
-    [[nodiscard]] auto confidence() const {
-        return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7), at<float>(9)});
-    }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
-};
-
+// The recognized value of a RacePlace prediction. Kept here (ONNX-free) as the Result type of
+// Predictor<RacePlace>; the ONNX-backed RacePlacePrediction lives in recognizer_prediction.h.
 struct RacePlace {
     int place;
     int ground;
@@ -98,49 +58,26 @@ struct RacePlace {
     EXTENDED_JSON_TYPE_NDC(RacePlace, place, ground, distance, variation);
 };
 
-struct RacePlacePrediction : public recognizer::Prediction {
-    // Reads outputs 0..7; validated against the loaded model in Model's ctor.
-    static constexpr size_t kOutputCount = 8;
-
-    [[nodiscard]] int place() const { return static_cast<int>(at<int64_t>(0)); }
-
-    [[nodiscard]] int ground() const { return static_cast<int>(at<int64_t>(2)); }
-
-    [[nodiscard]] int distance() const { return static_cast<int>(at<int64_t>(4)); }
-
-    [[nodiscard]] int variation() const { return static_cast<int>(at<int64_t>(6)); }
-
-    [[nodiscard]] RacePlace result() const { return {place(), ground(), distance(), variation()}; }
-
-    [[nodiscard]] auto confidence() const { return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7)}); }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
-};
-
-struct DateTimePrediction : public recognizer::Prediction {
-    // Reads outputs 0 and 1; validated against the loaded model in Model's ctor.
-    static constexpr size_t kOutputCount = 2;
-
-    [[nodiscard]] std::string result() const {
-        const auto short_str = std::to_string(at<int64_t>(0));
-        // Expect exactly YYYYMMDD (8 digits). A misrecognition that stringifies to fewer digits would make
-        // substr(6) throw std::out_of_range, which the recognizer's per-record try/catch turns into a dropped
-        // record. A negative value stringifies to a leading '-' (e.g. "-1234567" is 8 chars), which would pass
-        // a bare length check and slice the sign into the year. Require exactly 8 digits; degrade only the
-        // date field otherwise: return the raw value so the record survives.
-        const bool all_digits =
-            std::all_of(short_str.begin(), short_str.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
-        if (short_str.size() != 8 || !all_digits) {
-            log_warning("DateTimePrediction: unexpected date value '{}'", short_str);
-            return short_str;
-        }
-        return short_str.substr(0, 4) + "/" + short_str.substr(4, 2) + "/" + short_str.substr(6);
+// Formats a raw YYYYMMDD integer as "YYYY/MM/DD", degrading to the raw stringified value on any malformed
+// input. Extracted from DateTimePrediction::result() (recognizer_prediction.h) so this pure string logic
+// (which carries the edge-case fixes below) can be unit-tested without the ONNX-backed Prediction that
+// supplies the integer.
+//
+// Expect exactly YYYYMMDD (8 digits). A misrecognition that stringifies to fewer digits would make substr(6)
+// throw std::out_of_range, which the recognizer's per-record try/catch turns into a dropped record. A
+// negative value stringifies to a leading '-' (e.g. "-1234567" is 8 chars), which would pass a bare length
+// check and slice the sign into the year. Require exactly 8 digits; degrade only the date field otherwise:
+// return the raw value so the record survives.
+[[nodiscard]] inline std::string formatTrainedDate(int64_t value) {
+    const auto short_str = std::to_string(value);
+    const bool all_digits =
+        std::all_of(short_str.begin(), short_str.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+    if (short_str.size() != 8 || !all_digits) {
+        log_warning("DateTimePrediction: unexpected date value '{}'", short_str);
+        return short_str;
     }
-
-    [[nodiscard]] auto confidence() const { return at<float>(1); }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
-};
+    return short_str.substr(0, 4) + "/" + short_str.substr(4, 2) + "/" + short_str.substr(6);
+}
 
 struct PredictionRecord {
     std::string model;
@@ -162,33 +99,33 @@ private:
     std::vector<PredictionRecord> records;
 };
 
-template<typename PredictionType>
+template<typename Result>
 inline auto predictWithConfidence(
-    const recognizer::Model<PredictionType> &model,
+    const recognizer::Predictor<Result> &model,
     const Frame &frame,
     const Rect<double> &position,
     PredictionHistory &history) {
-    const auto &predicted = model.predict(frame.view(position));
-    history.add(model.name(), frame.anchor().mapToFrame(position), predicted.toJson());
-    return std::make_pair(predicted.result(), predicted.confidence());
+    const auto predicted = model.predict(frame.view(position));
+    history.add(model.name(), frame.anchor().mapToFrame(position), predicted.json);
+    return std::make_pair(predicted.result, predicted.confidence);
 }
 
-template<typename PredictionType>
+template<typename Result>
 inline auto predict(
-    const recognizer::Model<PredictionType> &model,
+    const recognizer::Predictor<Result> &model,
     const Frame &frame,
     const Rect<double> &position,
     PredictionHistory &history) {
     return predictWithConfidence(model, frame, position, history).first;
 }
 
-template<typename PredictionType, size_t n>
+template<typename Result, size_t n>
 inline auto predict(
-    const recognizer::Model<PredictionType> &model,
+    const recognizer::Predictor<Result> &model,
     const Frame &frame,
     const std::array<Rect<double>, n> &positions,
     PredictionHistory &history) {
-    std::array<decltype(PredictionType().result()), n> values = {};
+    std::array<Result, n> values = {};
     for (size_t i = 0; i < n; i++) {
         values[i] = predict(model, frame, positions[i], history);
     }
@@ -209,9 +146,9 @@ public:
 private:
     const recognizer_config::StatusHeaderConfig config;
 
-    recognizer::Model<IndexPrediction> evaluation_value_model;
-    recognizer::Model<IndexPrediction> status_value_model;
-    recognizer::Model<IndexPrediction> aptitude_model;
+    std::unique_ptr<const recognizer::Predictor<int>> evaluation_value_model;
+    std::unique_ptr<const recognizer::Predictor<int>> status_value_model;
+    std::unique_ptr<const recognizer::Predictor<int>> aptitude_model;
 };
 
 class SkillTabRecognizer {
@@ -230,8 +167,8 @@ private:
 
     const recognizer_config::SkillTabConfig config;
 
-    recognizer::Model<IndexPrediction> skill_model;
-    recognizer::Model<IndexPrediction> skill_level_model;
+    std::unique_ptr<const recognizer::Predictor<int>> skill_model;
+    std::unique_ptr<const recognizer::Predictor<int>> skill_level_model;
 };
 
 struct CropInfo {
@@ -243,6 +180,16 @@ public:
     [[maybe_unused]] FactorTabRecognizer(
         const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config);
 
+    // Injection ctor: takes pre-built predictors instead of loading ONNX models from disk, so the scan
+    // logic can be unit-tested against fakes. The production ctor above lives in the ONNX-linked
+    // recognizer_models.cpp; this one and all recognize()/scan methods live in the ONNX-free recognizer.cpp.
+    FactorTabRecognizer(
+        const recognizer_config::FactorTabConfig &config,
+        std::unique_ptr<const recognizer::Predictor<int>> factor_model,
+        std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model,
+        std::unique_ptr<const recognizer::Predictor<Chara>> character_model,
+        std::unique_ptr<const recognizer::Predictor<int>> character_rank_model);
+
     void recognize(
         const Frame &frame,
         const RecordInfo &record_info,
@@ -253,7 +200,8 @@ public:
     // Recognizes only the trainee's own factors that are fully visible on a single, non-stitched
     // factor-tab frame (no scrolling). Used by the early duplicate probe: the returned list is a
     // prefix of the self-factors the full pipeline would read, which is enough to match a recapture.
-    [[nodiscard]] std::vector<record::Factor> recognizeVisibleSelf(const Frame &frame, PredictionHistory &history) const;
+    [[nodiscard]] std::vector<record::Factor>
+    recognizeVisibleSelf(const Frame &frame, PredictionHistory &history) const;
 
 private:
     [[nodiscard]] record::Character recognizeTrainee(
@@ -278,10 +226,10 @@ private:
 
     const recognizer_config::FactorTabConfig config;
 
-    recognizer::Model<IndexPrediction> factor_model;
-    recognizer::Model<IndexPrediction> factor_rank_model;
-    recognizer::Model<CharaPrediction> character_model;
-    recognizer::Model<IndexPrediction> character_rank_model;
+    std::unique_ptr<const recognizer::Predictor<int>> factor_model;
+    std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model;
+    std::unique_ptr<const recognizer::Predictor<Chara>> character_model;
+    std::unique_ptr<const recognizer::Predictor<int>> character_rank_model;
 };
 
 class SupportCardRecognizer {
@@ -298,8 +246,8 @@ private:
     const recognizer_config::SupportCardConfig config;
     const recognizer_config::CampaignTabCommonConfig common_config;
 
-    recognizer::Model<IndexPrediction> support_card_model;
-    recognizer::Model<IndexPrediction> support_card_rank_model;
+    std::unique_ptr<const recognizer::Predictor<int>> support_card_model;
+    std::unique_ptr<const recognizer::Predictor<int>> support_card_rank_model;
 };
 
 class FamilyTreeRecognizer {
@@ -330,8 +278,8 @@ private:
     const recognizer_config::FamilyTreeConfig config;
     const recognizer_config::CampaignTabCommonConfig common_config;
 
-    recognizer::Model<CharaPrediction> character_model;
-    recognizer::Model<IndexPrediction> character_rank_model;
+    std::unique_ptr<const recognizer::Predictor<Chara>> character_model;
+    std::unique_ptr<const recognizer::Predictor<int>> character_rank_model;
 };
 
 class CampaignRecordRecognizer {
@@ -340,6 +288,15 @@ public:
         const std::filesystem::path &module_root_dir,
         const recognizer_config::CampaignRecordConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config);
+
+    // Injection ctor for unit tests; see FactorTabRecognizer's for the rationale.
+    CampaignRecordRecognizer(
+        const recognizer_config::CampaignRecordConfig &config,
+        const recognizer_config::CampaignTabCommonConfig &common_config,
+        std::unique_ptr<const recognizer::Predictor<int>> campaign_field_model,
+        std::unique_ptr<const recognizer::Predictor<int>> fans_value_model,
+        std::unique_ptr<const recognizer::Predictor<int>> scenario_model,
+        std::unique_ptr<const recognizer::Predictor<std::string>> trained_date_model);
 
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const;
@@ -366,10 +323,23 @@ private:
     const recognizer_config::CampaignRecordConfig config;
     const recognizer_config::CampaignTabCommonConfig common_config;
 
-    recognizer::Model<IndexPrediction> campaign_field_model;
-    recognizer::Model<IndexPrediction> fans_value_model;
-    recognizer::Model<IndexPrediction> scenario_model;
-    recognizer::Model<DateTimePrediction> trained_date_model;
+    std::unique_ptr<const recognizer::Predictor<int>> campaign_field_model;
+    std::unique_ptr<const recognizer::Predictor<int>> fans_value_model;
+    std::unique_ptr<const recognizer::Predictor<int>> scenario_model;
+    std::unique_ptr<const recognizer::Predictor<std::string>> trained_date_model;
+};
+
+// Named holder for the six predictors of one race-block variant, passed to RaceRecordRecognizer's injection
+// ctor. Named fields (not a positional ctor) are deliberate: `place` is a Predictor<RacePlace> while the
+// other five are Predictor<int>, so a positional list would let two int-typed slots be transposed silently.
+// It is a plain aggregate so tests can populate it with designated initializers.
+struct RaceBlockPredictors {
+    std::unique_ptr<const recognizer::Predictor<int>> title;
+    std::unique_ptr<const recognizer::Predictor<RacePlace>> place;
+    std::unique_ptr<const recognizer::Predictor<int>> weather;
+    std::unique_ptr<const recognizer::Predictor<int>> strategy;
+    std::unique_ptr<const recognizer::Predictor<int>> turn;
+    std::unique_ptr<const recognizer::Predictor<int>> position;
 };
 
 class RaceRecordRecognizer {
@@ -379,6 +349,14 @@ public:
         const recognizer_config::RaceConfig &config,
         const recognizer_config::CampaignTabCommonConfig &common_config);
 
+    // Injection ctor for unit tests; see FactorTabRecognizer's for the rationale. The two block variants are
+    // supplied as named holders rather than 12 positional predictors (see RaceBlockPredictors).
+    RaceRecordRecognizer(
+        const recognizer_config::RaceConfig &config,
+        const recognizer_config::CampaignTabCommonConfig &common_config,
+        RaceBlockPredictors models_1line,
+        RaceBlockPredictors models_2line);
+
     void recognize(
         const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const;
 
@@ -387,12 +365,14 @@ private:
         RaceBlockModelSet(
             const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config);
 
-        recognizer::Model<IndexPrediction> title;
-        recognizer::Model<RacePlacePrediction> place;
-        recognizer::Model<IndexPrediction> weather;
-        recognizer::Model<IndexPrediction> strategy;
-        recognizer::Model<IndexPrediction> turn;
-        recognizer::Model<IndexPrediction> position;
+        explicit RaceBlockModelSet(RaceBlockPredictors predictors);
+
+        std::unique_ptr<const recognizer::Predictor<int>> title;
+        std::unique_ptr<const recognizer::Predictor<RacePlace>> place;
+        std::unique_ptr<const recognizer::Predictor<int>> weather;
+        std::unique_ptr<const recognizer::Predictor<int>> strategy;
+        std::unique_ptr<const recognizer::Predictor<int>> turn;
+        std::unique_ptr<const recognizer::Predictor<int>> position;
     };
 
     [[nodiscard]] std::optional<double>

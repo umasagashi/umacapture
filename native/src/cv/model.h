@@ -7,11 +7,13 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
 
 #include "cv/frame.h"
+#include "cv/predictor.h"
 #include "types/shape.h"
 #include "util/logger_util.h"
 
@@ -84,8 +86,10 @@ struct Prediction {
 };
 
 template<typename PredictionType>
-class Model {
+class Model : public Predictor<decltype(std::declval<PredictionType>().result())> {
 public:
+    using Result = decltype(std::declval<PredictionType>().result());
+
     [[maybe_unused]] Model(const std::filesystem::path &path, const std::string &name)
         : model_name(name)
         , input_size(-1, -1) {
@@ -118,8 +122,17 @@ public:
 
     // `const` reflects logical constness (the model configuration is unchanged), but this runs ONNX
     // inference which mutates hidden session state and is NOT thread-safe. Call it from a single thread
-    // only (the recognizer drives all inference from its own event-runner thread).
-    PredictionType predict(const Frame &frame) const {
+    // only (the recognizer drives all inference from its own event-runner thread). Decodes the raw
+    // Prediction into a Predicted<Result> here so callers (the recognizer) never touch Ort::Value.
+    [[nodiscard]] Predicted<Result> predict(const Frame &frame) const override {
+        const auto raw = runInference(frame);
+        return {raw.result(), raw.confidence(), raw.toJson()};
+    }
+
+    [[nodiscard]] const std::string &name() const override { return model_name; }
+
+private:
+    [[nodiscard]] PredictionType runInference(const Frame &frame) const {
         cv::Mat image;
         cv::resize(frame.data(), image, input_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
 
@@ -136,9 +149,6 @@ public:
         return {prediction->Run(prediction->GetInputNames(), input_tensors, prediction->GetOutputNames())};
     }
 
-    [[nodiscard]] const std::string &name() const { return model_name; }
-
-private:
     const std::string model_name;
     Ort::SessionOptions session_options;
     std::unique_ptr<Ort::Experimental::Session> prediction;
