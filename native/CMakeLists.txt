@@ -130,6 +130,9 @@ set(
         test/chara_detail/test_skill_tab_recognizer.cpp
         test/chara_detail/test_support_card_recognizer.cpp
         test/chara_detail/test_family_tree_recognizer.cpp
+        test/chara_detail/test_config.cpp
+        test/core/test_native_api_messages.cpp
+        test/util/test_thread_util.cpp
         test/types/test_range.cpp
         test/types/test_color.cpp
         test/types/test_shape.cpp
@@ -175,6 +178,9 @@ target_compile_definitions(
         # vectorized codepaths makes the test TUs use the header-inline scalar fallback instead, which is
         # behaviourally identical and needs no runtime symbol. Scoped to the test binary only.
         _USE_STD_VECTOR_ALGORITHMS=0
+        # Absolute path to the repo-committed config assets, so test/chara_detail/test_config.cpp can
+        # characterization-test the real shipped config without depending on the working directory.
+        TEST_ASSET_CONFIG_DIR="${CMAKE_CURRENT_LIST_DIR}/../assets/config"
 )
 
 target_include_directories(

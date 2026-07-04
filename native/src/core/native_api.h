@@ -16,6 +16,7 @@
 #pragma clang diagnostic pop
 
 #include "chara_detail/record_info.h"
+#include "core/native_api_messages.h"
 #include "cv/frame.h"
 #include "cv/frame_distributor.h"
 #include "cv/frame_stall_watchdog.h"
@@ -48,7 +49,7 @@ public:
     void updateFrame(const Frame &frame, const Size<int> &original_size);
 
     void notifyScreenshotTaken(const std::string &path, const std::string &resultCode) {
-        notify(json_util::Json{{"type", "onScreenshotTaken"}, {"path", path}, {"result", resultCode}}.dump());
+        notify(messages::screenshotTaken(path, resultCode));
     }
 
     // The producer entry points below (called from the FFI/Dart thread) copy the target sender out under
@@ -118,53 +119,43 @@ public:
         notify_callback = method;
     }
 
-    void notifyError(const std::string &message) const {
-        notify(json_util::Json{{"type", "onError"}, {"message", message}}.dump());
-    }
+    void notifyError(const std::string &message) const { notify(messages::error(message)); }
 
-    void notifyCaptureStarted() { notify(json_util::Json{{"type", "onCaptureStarted"}}.dump()); }
-    void notifyCaptureStopped() { notify(json_util::Json{{"type", "onCaptureStopped"}}.dump()); }
+    void notifyCaptureStarted() { notify(messages::captureStarted()); }
+    void notifyCaptureStopped() { notify(messages::captureStopped()); }
 
-    void notifyScrollReady(int index) { notify(json_util::Json{{"type", "onScrollReady"}, {"index", index}}.dump()); }
+    void notifyScrollReady(int index) { notify(messages::scrollReady(index)); }
 
-    void notifyScrollUpdated(int index, double progress) {
-        notify(json_util::Json{{"type", "onScrollUpdated"}, {"index", index}, {"progress", progress}}.dump());
-    }
+    void notifyScrollUpdated(int index, double progress) { notify(messages::scrollUpdated(index, progress)); }
 
-    void notifyScrollPosition(int index, bool at_top) {
-        notify(json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"at_top", at_top}}.dump());
-    }
+    void notifyScrollPosition(int index, bool at_top) { notify(messages::scrollPosition(index, at_top)); }
 
-    void notifyPageReady(int index) { notify(json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump()); }
+    void notifyPageReady(int index) { notify(messages::pageReady(index)); }
 
     void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {
-        notify(json_util::Json{{"type", "onFactorProbe"}, {"factors", factors}, {"record_type", record_type}}.dump());
+        notify(messages::factorProbe(factors, record_type));
     }
 
-    void notifyCharaDetailStarted() { notify(json_util::Json{{"type", "onCharaDetailStarted"}}.dump()); }
+    void notifyCharaDetailStarted() { notify(messages::charaDetailStarted()); }
     // Mid-scene reset: the scraper discarded the current session (a character switch was inferred from
     // on-screen content) and rebuilt it, without the detail screen closing. The UI must reset its capture
     // progress just as it does for a fresh open.
-    void notifyCharaDetailRestarted() { notify(json_util::Json{{"type", "onCharaDetailRestarted"}}.dump()); }
+    void notifyCharaDetailRestarted() { notify(messages::charaDetailRestarted()); }
     void notifyCharaDetailFinished(const chara_detail::RecordInfo &info, bool success) {
-        notify(json_util::Json{{"type", "onCharaDetailFinished"}, {"id", info.record_id}, {"success", success}}.dump());
+        notify(messages::charaDetailFinished(info.record_id, success));
     }
     // The detail screen was closed. The UI returns to waiting for the next detail screen (a completed
     // capture leaves its progress on screen until this fires; an incomplete one also emits an error).
-    void notifyCharaDetailClosed() { notify(json_util::Json{{"type", "onCharaDetailClosed"}}.dump()); }
+    void notifyCharaDetailClosed() { notify(messages::charaDetailClosed()); }
 
     void updateRecord(const chara_detail::RecordInfo &info) const;
     void notifyCharaDetailUpdated(const chara_detail::RecordInfo &info) {
-        notify(json_util::Json{{"type", "onCharaDetailUpdated"}, {"id", info.record_id}}.dump());
+        notify(messages::charaDetailUpdated(info.record_id));
     }
 
-    void notifyFrameRateReported(double fps) {
-        notify(json_util::Json{{"type", "onFrameRateReported"}, {"fps", fps}}.dump());
-    }
+    void notifyFrameRateReported(double fps) { notify(messages::frameRateReported(fps)); }
 
-    void notifyFrameSizeReported(const Size<int> &size) {
-        notify(json_util::Json{{"type", "onFrameSizeReported"}, {"size", size}}.dump());
-    }
+    void notifyFrameSizeReported(const Size<int> &size) { notify(messages::frameSizeReported(size)); }
 
     void setDetachCallback(const std::function<VoidCallback> &method) {
         if (isRunning()) {

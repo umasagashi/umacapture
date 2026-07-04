@@ -70,6 +70,26 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   `FrameAnchor` coordinate round-trips (incl. the zero-size degenerate guard),
   `colorAt`, line sampling (`isIn`/`isAllIn`/`lengthIn`), and the area diff
   metrics (`pixelDifference`/`diffStats`), driven by hand-built `CV_8UC3` mats.
+- `core/test_native_api_messages.cpp` — the notification wire contract. The
+  `notify*` JSON payloads NativeApi pushes to Dart are built by the pure
+  `uma::app::messages` free functions in `src/core/native_api_messages.h` (split
+  out of `native_api.h` so the contract is testable without linking the
+  ONNX/WinRT-heavy `native_api.cpp`); each builder's exact `type` tag and keys are
+  asserted against a raw-JSON expectation, order-independently.
+- `util/test_thread_util.cpp` — the `thread_util` concurrency primitives:
+  `ThreadBase` start/stop, the idempotent `start()` (no second thread) and `join()`
+  (safe before start and on repeat), and `Timer`'s expire vs. `cancel()` latch
+  (`on_expired`/`on_canceled` exclusivity, the `hasExpired()` state, and a
+  null `on_canceled`), driven on real threads with short real-time waits.
+- `chara_detail/test_config.cpp` — characterization round-trip of the shipped
+  chara-detail config: `CharaDetailSceneScraperConfig` / `…SceneStitcherConfig` /
+  `…RecognizerConfig` (via `EXTENDED_JSON_TYPE_NDC`) and the `scene_context.json`
+  condition tree parse stably (`get`→`to_json`→`get`→`to_json` is idempotent), plus
+  a missing-key rejection. Unlike the other tests this reads the repo-committed
+  config JSON under `assets/config/chara_detail` via the `TEST_ASSET_CONFIG_DIR`
+  compile definition CMake injects — a deliberate, narrow exception to the "no game
+  assets" scope below (those files are small versioned config, not screenshots or
+  ONNX models, and are themselves the contract under test).
 
 The hand-built mat builders shared across the pixel-level tests (`solid`,
 `splitH`, `splitV`) live in [`util/cv_test_helpers.h`](util/cv_test_helpers.h)
