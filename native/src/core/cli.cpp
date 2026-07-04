@@ -295,11 +295,18 @@ int main(int argc, char **argv) {
             uma::cli::recognizeFromImages(recognize_id_list);
         }
     } catch (std::exception &e) {
-        // Set a failure code and fall through instead of exit(1): returning unwinds the subcommand's stack so
-        // its local runners/recorder are destroyed (and joined), and spdlog::drop_all() still runs below.
+        // Set a failure code and fall through instead of exit(1) so normal unwinding runs and the cleanup
+        // below still executes.
         std::cerr << e.what() << std::endl;
         rc = 1;
     }
+
+    // A subcommand can throw after startEventLoop() has started the pipeline (e.g. VideoLoader failing to open
+    // a file), leaving the event loop running. Join it here, while spdlog is still alive, so its teardown
+    // logging is safe -- and before drop_all(), so the ~NativeApi atexit join finds nothing to do and never
+    // logs through an already-destroyed logger (which would crash). No-op when nothing was started (e.g.
+    // `build`) or when the subcommand already joined (stitch/recognize/video on success).
+    uma::app::NativeApi::instance().joinEventLoop();
 
     spdlog::drop_all();
     return rc;
