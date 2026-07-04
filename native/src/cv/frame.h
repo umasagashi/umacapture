@@ -19,7 +19,9 @@
 
 namespace uma {
 
-namespace {
+// Internal frame helpers. A named namespace (not an anonymous one) avoids giving every translation unit its
+// own internal-linkage copy of these -- and, for BGR, its own distinct type -- when frame.h is included widely.
+namespace frame_impl {
 
 struct BGR {
     uchar b;
@@ -53,14 +55,14 @@ private:
         , r(r) {}
 };
 
-Range<BGR> asBGRRange(const Range<Color> &color_range) {
+inline Range<BGR> asBGRRange(const Range<Color> &color_range) {
     return {
         BGR::clampFrom(color_range.min()),
         BGR::clampFrom(color_range.max()),
     };
 }
 
-std::vector<double> linspace(double start, double end, int num) {
+inline std::vector<double> linspace(double start, double end, int num) {
     assert_(num >= 2);
     // Backstop for release builds where assert_ is a no-op: num < 2 divides by zero and writes items[-1].
     if (num < 2) {
@@ -75,7 +77,9 @@ std::vector<double> linspace(double start, double end, int num) {
     return items;
 }
 
-}  // namespace
+}  // namespace frame_impl
+
+using namespace frame_impl;
 
 class FrameAnchor {
 public:

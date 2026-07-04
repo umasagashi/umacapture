@@ -334,7 +334,7 @@ void SupportCardRecognizer::recognize(
     const auto rank = predict(support_card_rank_model, frame, rank_rects, history);
 
     std::array<record::SupportCard, 6> support_cards{};
-    for (int i = 0; i < support_cards.size(); i++) {
+    for (size_t i = 0; i < support_cards.size(); i++) {
         // Card levels no longer exist in the game.
         // Until the record field is deleted, fill it with a dummy value.
         constexpr auto level = 0;
@@ -833,8 +833,6 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
         vlog_debug(elapsed);
 
-        json_util::write(record_path, record, 4);
-
         json_util::write(
             record_dir / "prediction.json",
             {
@@ -845,8 +843,19 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
             },
             4);
 
-        factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
-            .save(record_dir / "trainee.jpg");
+        // recognizeTrainee leaves crop_info.trainee_icon empty when the reference point is not found; a
+        // degenerate rect would make view() throw OOB and drop the whole (otherwise valid) record below.
+        if (!crop_info.trainee_icon.empty()) {
+            factor_frame.view(crop_info.trainee_icon.margined(0.0037, 0.0120, 0.0037, 0.0018))
+                .save(record_dir / "trainee.jpg");
+        } else {
+            log_warning("trainee icon crop is empty; skipping trainee.jpg for record_id={}", raw_info.record_id);
+        }
+
+        // Write record.json last so its presence implies the sidecars (prediction.json, trainee.jpg) are
+        // already on disk. Writing it first would leave a valid record.json without its sidecars on any throw
+        // in between, which the loader treats as a decode failure and deletes.
+        json_util::write(record_path, record, 4);
 
         if (isUpdateMode) {
             on_update_completed->send(record_info);

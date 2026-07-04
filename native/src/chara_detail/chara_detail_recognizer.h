@@ -163,7 +163,7 @@ inline auto predict(
     const std::array<Rect<double>, n> &positions,
     PredictionHistory &history) {
     std::array<decltype(PredictionType().result()), n> values = {};
-    for (int i = 0; i < n; i++) {
+    for (size_t i = 0; i < n; i++) {
         values[i] = predict(model, frame, positions[i], history);
     }
     return values;

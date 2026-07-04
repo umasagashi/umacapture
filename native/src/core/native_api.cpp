@@ -91,8 +91,7 @@ void NativeApi::startPipeline(const std::string &native_config) {
             std::vector<std::shared_ptr<distributor::SceneContext>>{
                 scene_context,
             },
-            frame_captured_connection,
-            nullptr);
+            frame_captured_connection);
     }
 
     // Live capture only: close an open scene when frames stop arriving. The scene-end debounce keys off frame
@@ -246,10 +245,14 @@ void NativeApi::startPipeline(const std::string &native_config) {
 
 void NativeApi::joinEventLoop() {
     std::lock_guard<std::mutex> lock(pipeline_mutex);
-    vlog_debug(isRunningLocked());
     if (!isRunningLocked()) {
+        // Nothing to tear down. Deliberately log nothing on this path: joinEventLoop() also runs from
+        // ~NativeApi at process exit (atexit), by which point spdlog's default logger may already be
+        // destroyed -- logging here would dereference freed logger state and crash. The real teardown path
+        // below only runs while the pipeline is live, i.e. while the logger is still alive.
         return;
     }
+    vlog_debug(isRunningLocked());
     teardownLocked();
 }
 

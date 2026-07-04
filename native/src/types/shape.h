@@ -79,7 +79,7 @@ enum LayoutAnchor {
     IntersectLogicalEnd,
     IntersectPixelEnd,
 };
-EXTENDED_JSON_TYPE_ENUM(
+EXTENDED_JSON_TYPE_ENUM_STRICT(
     LayoutAnchor, ScreenStart, ScreenLogicalEnd, ScreenPixelEnd, IntersectStart, IntersectLogicalEnd, IntersectPixelEnd)
 
 class Anchor {

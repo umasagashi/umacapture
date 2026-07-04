@@ -1,7 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <memory>
 #include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
 
 #include <nlohmann/json.hpp>
 
@@ -189,6 +193,31 @@ inline std::string trim(const std::string &key) {
 #define EXTENDED_JSON_TYPE_ENUM(Type, ...) \
     NLOHMANN_JSON_SERIALIZE_ENUM( \
         Type, {NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_ENUM, __VA_ARGS__))})
+
+// Like EXTENDED_JSON_TYPE_ENUM, but from_json throws on an unknown name instead of the stock
+// NLOHMANN_JSON_SERIALIZE_ENUM behavior of silently mapping it to the first enumerator. Use for load-bearing
+// enums (record.json / config) where a silent remap to the first value is data corruption, not a default.
+#define EXTENDED_JSON_TYPE_ENUM_STRICT(Type, ...) \
+    template<typename BasicJsonType> \
+    inline void to_json(BasicJsonType &j, const Type &e) { \
+        static const std::pair<Type, BasicJsonType> m[] = { \
+            NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_ENUM, __VA_ARGS__))}; \
+        const auto it = std::find_if(std::begin(m), std::end(m), [&e](const auto &pair) { return pair.first == e; }); \
+        if (it == std::end(m)) { \
+            throw std::invalid_argument("unknown enum value for " #Type); \
+        } \
+        j = it->second; \
+    } \
+    template<typename BasicJsonType> \
+    inline void from_json(const BasicJsonType &j, Type &e) { \
+        static const std::pair<Type, BasicJsonType> m[] = { \
+            NLOHMANN_JSON_EXPAND(NLOHMANN_JSON_PASTE(INTERNAL_EXTENDED_JSON_ENUM, __VA_ARGS__))}; \
+        const auto it = std::find_if(std::begin(m), std::end(m), [&j](const auto &pair) { return pair.second == j; }); \
+        if (it == std::end(m)) { \
+            throw std::invalid_argument("unknown enum name for " #Type ": " + j.dump()); \
+        } \
+        e = it->first; \
+    }
 
 // A helper to make a serializable object streamable.
 #define EXTENDED_JSON_TYPE_PRINTABLE(Type) \

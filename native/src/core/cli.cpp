@@ -1,7 +1,10 @@
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
+#include <thread>
 
 #include <CLI11/CLI11.hpp>
 #include <minimal_uuid4/minimal_uuid4.h>
@@ -20,6 +23,46 @@
 #include "util/misc.h"
 
 namespace uma::cli {
+
+namespace {
+
+// Tracks the wall-clock time of the most recent notify message from the pipeline. The one-shot subcommands
+// (stitch/recognize/video) have no single "batch complete" signal to wait on -- video's record count is
+// unknown up front and a silently-failing recognize emits no completion -- so they instead run until the
+// pipeline goes quiet.
+struct ActivityMonitor {
+    mutable std::mutex mutex;
+    std::chrono::steady_clock::time_point last_activity = std::chrono::steady_clock::now();
+
+    void touch() {
+        std::lock_guard<std::mutex> lock(mutex);
+        last_activity = std::chrono::steady_clock::now();
+    }
+
+    [[nodiscard]] std::chrono::steady_clock::duration idleFor() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        return std::chrono::steady_clock::now() - last_activity;
+    }
+};
+
+// Run until the pipeline stops emitting notifications for kIdleGrace, then join the event loop so the process
+// can exit. kIdleGrace must exceed the longest quiet gap during real processing, which is dominated by a
+// single record's recognize pass; 10s is comfortably above that while keeping shutdown snappy.
+void runUntilIdleThenJoin(app::NativeApi &api, ActivityMonitor &monitor) {
+    constexpr auto kIdleGrace = std::chrono::seconds(10);
+    // Reset the baseline so a slow pipeline start (e.g. model load with no notifications) cannot be mistaken
+    // for an idle pipeline before the submitted work has had a chance to run.
+    monitor.touch();
+    while (api.isRunning()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (monitor.idleFor() > kIdleGrace) {
+            api.joinEventLoop();
+            break;
+        }
+    }
+}
+
+}  // namespace
 
 template<typename T, typename ToJson, typename FromJson>
 void buildJson(const std::filesystem::path &path, ToJson toJson, FromJson fromJson) {
@@ -106,8 +149,12 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
 
+    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
+    api.setNotifyCallback([&monitor](const auto &message) {
+        monitor.touch();
+        log_debug("CLI: {}", message);
+    });
     connection->listen([&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
 
     const auto config = createConfig(true);
@@ -124,17 +171,19 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list)
     auto video = video::VideoLoader(connection, crop_rect);
     video.runBatch(video_path_list);
 
-    while (api.isRunning()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    runUntilIdleThenJoin(api, monitor);
 }
 
 void stitchFromImages(const std::string &id) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
+    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
+    api.setNotifyCallback([&monitor](const auto &message) {
+        monitor.touch();
+        log_debug("CLI: {}", message);
+    });
 
     const auto config = createConfig(true);
     api.startEventLoop(config.dump());
@@ -143,17 +192,19 @@ void stitchFromImages(const std::string &id) {
 
     api.stitch({id, chara_detail::record::RecordType::Standard});
 
-    while (api.isRunning()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    runUntilIdleThenJoin(api, monitor);
 }
 
 void recognizeFromImages(const std::vector<std::string> &id_list) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
+    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
+    api.setNotifyCallback([&monitor](const auto &message) {
+        monitor.touch();
+        log_debug("CLI: {}", message);
+    });
 
     const auto config = createConfig(true);
     api.startEventLoop(config.dump());
@@ -164,9 +215,7 @@ void recognizeFromImages(const std::vector<std::string> &id_list) {
         api.recognize(id);
     }
 
-    while (api.isRunning()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+    runUntilIdleThenJoin(api, monitor);
 }
 
 }  // namespace uma::cli
@@ -174,6 +223,7 @@ void recognizeFromImages(const std::vector<std::string> &id_list) {
 int main(int argc, char **argv) {
     uma::logger_util::init();
 
+    int rc = 0;
     try {
         CLI::App command{"App description"};
         command.require_subcommand(1);
@@ -245,10 +295,12 @@ int main(int argc, char **argv) {
             uma::cli::recognizeFromImages(recognize_id_list);
         }
     } catch (std::exception &e) {
+        // Set a failure code and fall through instead of exit(1): returning unwinds the subcommand's stack so
+        // its local runners/recorder are destroyed (and joined), and spdlog::drop_all() still runs below.
         std::cerr << e.what() << std::endl;
-        exit(1);
+        rc = 1;
     }
 
     spdlog::drop_all();
-    return 0;
+    return rc;
 }

@@ -23,7 +23,7 @@ enum RecordType {
     FriendStandard = 2,
     FriendInheritance = 3,
 };
-EXTENDED_JSON_TYPE_ENUM(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
+EXTENDED_JSON_TYPE_ENUM_STRICT(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
 
 // Stable tag for each record-type branch in the scene-context condition tree. The builder names each
 // branch with this tag and the scene context resolves the active type by looking the tag up and

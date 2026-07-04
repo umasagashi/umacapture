@@ -11,7 +11,7 @@ bool closeEnough(const std::vector<double> &a, const std::vector<double> &b, dou
         return false;
     }
 
-    for (int i = 0; i < a.size(); i++) {
+    for (size_t i = 0; i < a.size(); i++) {
         if (std::abs(a[i] - b[i]) > threshold) {
             return false;
         }
