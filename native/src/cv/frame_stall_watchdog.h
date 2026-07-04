@@ -6,6 +6,7 @@
 #include <functional>
 #include <thread>
 
+#include "util/logger_util.h"
 #include "util/thread_util.h"
 
 namespace uma::distributor {

@@ -1,5 +1,14 @@
 #pragma once
 
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <filesystem>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -103,8 +112,12 @@ struct DateTimePrediction : public recognizer::Prediction {
         const auto short_str = std::to_string(at<int64_t>(0));
         // Expect exactly YYYYMMDD (8 digits). A misrecognition that stringifies to fewer digits would make
         // substr(6) throw std::out_of_range, which the recognizer's per-record try/catch turns into a dropped
-        // record. Degrade only the date field instead: return the raw value so the record survives.
-        if (short_str.size() != 8) {
+        // record. A negative value stringifies to a leading '-' (e.g. "-1234567" is 8 chars), which would pass
+        // a bare length check and slice the sign into the year. Require exactly 8 digits; degrade only the
+        // date field otherwise: return the raw value so the record survives.
+        const bool all_digits =
+            std::all_of(short_str.begin(), short_str.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
+        if (short_str.size() != 8 || !all_digits) {
             log_warning("DateTimePrediction: unexpected date value '{}'", short_str);
             return short_str;
         }

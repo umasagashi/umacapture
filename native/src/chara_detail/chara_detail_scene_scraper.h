@@ -1,9 +1,13 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
 
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"

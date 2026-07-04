@@ -41,7 +41,9 @@ public:
         return (tag == condition_name) ? this : nullptr;
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new PlainCondition<InputType, RuleType, StateType>{
@@ -100,7 +102,9 @@ public:
         return (name == condition_name) ? this : child->findByTag(name);
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new NestedCondition<InputType, RuleType, StateType>{
@@ -169,7 +173,9 @@ public:
             .value_or(nullptr);
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new ParallelCondition<InputType, RuleType, StateType>{
@@ -221,7 +227,9 @@ public:
         return (tag == condition_name) ? this : nullptr;
     }
 
-    [[nodiscard]] std::string typeName() const { return typeNameOf<decltype(*this), InputType, RuleType, StateType>(); }
+    [[nodiscard]] std::string typeName() const override {
+        return typeNameOf<decltype(*this), InputType, RuleType, StateType>();
+    }
 
     static Condition<InputType> *fromJson(const json_util::Json &json) {
         return new NullaryCondition<InputType, RuleType, StateType>{

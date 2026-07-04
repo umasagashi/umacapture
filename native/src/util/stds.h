@@ -21,6 +21,10 @@ inline OutContainer transformed(const InContainer &container, Function func) {
     return out;
 }
 
+// Transforms into a fixed-size, default-sized OutContainer by writing straight through out.begin().
+// OutContainer MUST already hold room for container.size() elements on default construction (e.g.
+// std::array<T, N>); passing a resizable container such as std::vector default-constructs it empty and
+// writes out of bounds. Use transformed() (which uses back_inserter) for resizable outputs.
 template<typename OutContainer, typename InContainer, typename Function>
 inline OutContainer transformed_inplace(const InContainer &container, Function func) {
     OutContainer out;

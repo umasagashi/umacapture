@@ -1,5 +1,6 @@
 #include "chara_detail/chara_detail_recognizer.h"
 
+#include <chrono>
 #include <exception>
 #include <map>
 

@@ -233,7 +233,8 @@ private:
     // then send() outside it. mutable so the const producer methods can lock it.
     mutable std::mutex pipeline_mutex;
 
-    // debug interface
+    // Senders into the recognizer/stitcher runners, driven by the public entry points (stitch/recognize/
+    // updateRecord). Copied out under pipeline_mutex before send(), and nulled by teardownLocked().
     event_util::Sender<chara_detail::RecordInfo> on_stitch_ready;
     event_util::Sender<chara_detail::RecordInfo> on_recognize_ready;
 

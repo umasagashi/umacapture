@@ -1,5 +1,8 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
+
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
 #include <opencv2/opencv.hpp>

@@ -382,15 +382,25 @@ std::shared_ptr<PageScrapingBox> SceneScrapingBox::recreate(
 
 StationaryFrameCatcher::StationaryFrameCatcher(
     uint64 stationary_time, int minimum_color, uint64 stationary_color, const Rect<double> &rect)
-    : stationary_time(stationary_time)
+    : target_rect(rect)
+    , stationary_time(stationary_time)
     , minimum_color(minimum_color)
-    , stationary_color(stationary_color)
-    , target_rect(rect) {}
+    , stationary_color(stationary_color) {}
 
 void StationaryFrameCatcher::update(const Frame &frame) {
     if (previous_frame.empty()) {
         // Frame copy is a shallow cv::Mat header copy; clone so the retained previous frame owns its pixels
         // and cannot be mutated by a capture source that reuses its frame buffer.
+        previous_frame = frame.clone();
+        return;
+    }
+
+    if (previous_frame.size() != frame.size()) {
+        // A capture resolution change makes pixelDifference throw on the size mismatch (see frame.h). Letting
+        // that throw unwind would leave previous_frame stuck at the old size, so it would rethrow on every
+        // later frame and never detect stationarity again. Match the other size-sensitive paths: treat the
+        // mismatch as non-stationary and re-baseline to the new size so the catcher self-heals.
+        first_timestamp = std::nullopt;
         previous_frame = frame.clone();
         return;
     }
