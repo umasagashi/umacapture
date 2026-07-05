@@ -40,13 +40,15 @@ and uses WinRT screen capture). Generator is **Ninja**, compiler is **MSVC
 - **ONNX Runtime 1.11.1** at `windows/onnxruntime` (headers in `include/`,
   `onnxruntime.lib`/`.dll` in `lib/`).
 
-These dependency dirs are **gitignored** (`windows/.gitignore` excludes `/opencv/`,
-`/onnxruntime/`, `/clip/`) and placed manually on each machine -- they are not in
-the repo. A fresh checkout must supply them before the native build can configure
+These two dependency dirs are **gitignored** (`windows/.gitignore` excludes
+`/opencv/`, `/onnxruntime/`) because they are large prebuilt binaries. Provision
+them into the layout above by running `uv run tool/fetch_deps.py` (downloads the
+official prebuilts, hash-verified) -- see the **native-deps-setup** skill for
+details. A fresh checkout must do this before the native build can configure
 (OpenCV is the hard requirement: `find_package(OpenCV REQUIRED)`; onnxruntime is
-only linked by the cli/app targets, not `umacapture_tests`). CI reproduces this by
-downloading the official OpenCV prebuilt into `windows/opencv` (see
-`.github/workflows/ci.yml`).
+only linked by the cli/app targets, not `umacapture_tests`). The third native
+dependency, `windows/clip`, is committed to the repo, so no fetch is needed. CI
+provisions OpenCV with the same script (see `.github/workflows/ci.yml`).
 
 ## Key fact: the MSVC environment is mandatory
 

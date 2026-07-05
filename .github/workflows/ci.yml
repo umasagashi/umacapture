@@ -31,11 +31,11 @@ jobs:
 
       # OpenCV 4.5.5 (vc15) is a gitignored, manually-placed third-party dependency
       # (windows/.gitignore) that native/CMakeLists.txt references at
-      # windows/opencv/build. Restore it from cache, or download the official prebuilt
-      # and extract it into windows/ on a cache miss -- the same layout a local dev
-      # places by hand. onnxruntime/clip are deliberately NOT provisioned: the
-      # umacapture_tests target links only OpenCV (the cli/app targets that need ONNX
-      # are never built here).
+      # windows/opencv/build. Restore it from cache, or provision it on a cache miss
+      # with the same tool/fetch_deps.py a local dev runs -- one source of truth for
+      # the pinned URL + SHA-256 (no inline download logic to drift). onnxruntime/clip
+      # are deliberately NOT provisioned: the umacapture_tests target links only OpenCV
+      # (the cli/app targets that need ONNX are never built here).
       - name: Cache OpenCV 4.5.5
         id: cache-opencv
         uses: actions/cache@v4
@@ -43,16 +43,14 @@ jobs:
           path: windows/opencv
           key: opencv-4.5.5-vc14_vc15
 
-      - name: Download OpenCV 4.5.5
+      # uv runs tool/fetch_deps.py (stdlib-only); only needed on a cache miss.
+      - name: Set up uv
         if: steps.cache-opencv.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          curl.exe -L -o "$env:RUNNER_TEMP\opencv.exe" https://github.com/opencv/opencv/releases/download/4.5.5/opencv-4.5.5-vc14_vc15.exe
-          # The self-extracting archive holds a top-level opencv/ (build/ + sources/);
-          # extracting into windows/ yields the windows/opencv/build CMake expects.
-          7z x "$env:RUNNER_TEMP\opencv.exe" -o"windows" -y
-          # The test build needs only build/; drop sources/ to keep the cache lean.
-          Remove-Item -Recurse -Force "windows\opencv\sources" -ErrorAction SilentlyContinue
+        uses: astral-sh/setup-uv@v6
+
+      - name: Provision OpenCV 4.5.5
+        if: steps.cache-opencv.outputs.cache-hit != 'true'
+        run: uv run tool/fetch_deps.py --only opencv
 
       # Ninja + Debug are required (see native/test/README.md); asserts are live in Debug.
       - name: Configure (CMake + Ninja, Debug)
