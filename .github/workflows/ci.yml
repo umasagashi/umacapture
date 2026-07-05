@@ -126,6 +126,11 @@ jobs:
 
       # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK
       # directly. Keep this version in sync with .fvmrc (currently 3.44.4).
+      #
+      # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the
+      # cache trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more
+      # than restoring the pub cache -- a ~50 s net regression. The Windows tar/zstd
+      # extraction is slow, but re-downloading every package is slower.
       - name: Set up Flutter 3.44.4
         uses: subosito/flutter-action@v2
         with:
@@ -135,6 +140,21 @@ jobs:
 
       - name: Resolve dependencies
         run: flutter pub get
+
+      # Persist build_runner's incremental state (.dart_tool/build holds the asset graph
+      # of input content digests) so codegen only regenerates changed outputs instead of
+      # rebuilding from scratch every run. Correctness is preserved regardless of what is
+      # restored: build_runner re-validates every tracked input by digest on each run, and
+      # discards the whole graph on a builder/dependency/SDK version change. The key busts
+      # on pubspec.lock/build.yaml changes as a belt-and-suspenders; restore-keys keeps the
+      # incremental benefit across unrelated commits.
+      - name: Cache build_runner
+        uses: actions/cache@v4
+        with:
+          path: .dart_tool/build
+          key: build-runner-${{ runner.os }}-${{ hashFiles('pubspec.lock', 'build.yaml') }}
+          restore-keys: |
+            build-runner-${{ runner.os }}-
 
       # --force-jit is required in this repo (a transitive native build hook is
       # incompatible with build_runner's default AOT). Generated outputs are committed;
@@ -156,15 +176,12 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib test
 
       # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
-      # is intentionally excluded. --coverage emits coverage/lcov.info for visibility
-      # (mirrors the native OpenCppCoverage artifact); no threshold is enforced yet.
+      # is intentionally excluded. Coverage is deliberately not collected here: --coverage
+      # roughly doubles the wall-clock (VM-service instrumentation) for a report that has no
+      # enforced threshold and only served as a visibility artifact.
+      # -j 4 raises the suite-level parallelism from the default (cores/2 = 2 on the
+      # 4-vCPU Windows runner); flutter's own issue tracker reports the speedup plateaus
+      # around 4. --reporter github emits GitHub Actions annotations for failures and a
+      # more compact log.
       - name: Run tests
-        run: flutter test --coverage test
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-coverage
-          path: coverage
-          if-no-files-found: warn
+        run: flutter test -j 4 --reporter github test
