@@ -126,12 +126,18 @@ jobs:
 
       # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK
       # directly. Keep this version in sync with .fvmrc (currently 3.44.4).
+      #
+      # cache is disabled on purpose: on the Windows runner, restoring the cached SDK
+      # (~1.8 GB) and pub cache (~0.26 GB) is dominated by tar/zstd extraction of many
+      # small files (~100 s total), which was slower than letting flutter-action fetch
+      # the release archive and running a cold `pub get`. Re-evaluate if the cold path
+      # regresses.
       - name: Set up Flutter 3.44.4
         uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.4
           channel: stable
-          cache: true
+          cache: false
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -156,15 +162,8 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib test
 
       # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
-      # is intentionally excluded. --coverage emits coverage/lcov.info for visibility
-      # (mirrors the native OpenCppCoverage artifact); no threshold is enforced yet.
+      # is intentionally excluded. Coverage is deliberately not collected here: --coverage
+      # roughly doubles the wall-clock (VM-service instrumentation) for a report that has no
+      # enforced threshold and only served as a visibility artifact.
       - name: Run tests
-        run: flutter test --coverage test
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: flutter-coverage
-          path: coverage
-          if-no-files-found: warn
+        run: flutter test test
