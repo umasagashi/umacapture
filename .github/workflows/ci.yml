@@ -76,9 +76,26 @@ jobs:
           & native\cmake-build-tests\umacapture_tests.exe 2>&1 |
             Select-String -Pattern 'test cases:|assertions:|Status:'
 
-      # ---- P2: coverage visibility (non-gating) ----
+      # ---- P2: coverage visibility ----
+      # The chocolatey community feed intermittently 504s, and `choco install`
+      # exits 0 even when it fetched 0 packages, so a transient outage would
+      # otherwise sail past this step and only surface as a confusing "exe not
+      # found" in "Measure coverage". Retry until the binary actually exists, and
+      # fail loudly if it never appears -- coverage is never silently skipped: a
+      # persistent feed outage gates the job (red) rather than passing green.
       - name: Install OpenCppCoverage
-        run: choco install opencppcoverage -y
+        shell: pwsh
+        run: |
+          $exe = "C:\Program Files\OpenCppCoverage\OpenCppCoverage.exe"
+          foreach ($attempt in 1..5) {
+            Write-Host "Installing OpenCppCoverage (attempt $attempt/5)..."
+            choco install opencppcoverage -y --no-progress
+            if (Test-Path $exe) { exit 0 }
+            Write-Warning "OpenCppCoverage not present after attempt $attempt (chocolatey feed may be flaky); retrying in 30s..."
+            Start-Sleep -Seconds 30
+          }
+          Write-Error "OpenCppCoverage could not be installed after 5 attempts; failing so coverage is not silently skipped."
+          exit 1
 
       # Re-runs the Debug test binary under instrumentation and exports HTML + Cobertura.
       # --sources native\src keeps the report to backend code (substring match excludes
@@ -139,6 +156,15 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib test
 
       # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
-      # is intentionally excluded.
+      # is intentionally excluded. --coverage emits coverage/lcov.info for visibility
+      # (mirrors the native OpenCppCoverage artifact); no threshold is enforced yet.
       - name: Run tests
-        run: flutter test test
+        run: flutter test --coverage test
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-coverage
+          path: coverage
+          if-no-files-found: warn

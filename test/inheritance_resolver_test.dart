@@ -12,57 +12,7 @@ import 'package:umacapture/src/chara_detail/inheritance.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
-Character _chara(int card) => Character(0, 0, card, 0);
-
-Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
-
-// A win (position 1) of race title [title]; other race fields are irrelevant to
-// the relation-bonus computation. Pass won: false for a non-winning entry.
-Race _race(int title, {bool won = true}) => Race(title, 0, 0, 0, 0, 0, 0, 0, won ? 1 : 2);
-
-// Builds a record carrying only the fields the resolver reads (card, factors,
-// family parent cards, record-id links, races); everything else is dummy.
-CharaDetailRecord makeRecord({
-  required String id,
-  required int card,
-  List<Factor> self = const [],
-  int parent1Card = 0,
-  List<Factor> parent1 = const [],
-  int parent2Card = 0,
-  List<Factor> parent2 = const [],
-  String? parent1Id,
-  String? parent2Id,
-  int? relationBonus,
-  List<Race> races = const [],
-}) {
-  final metadata = Metadata(
-    '1.0.0',
-    'JPN',
-    RecordId(id, parent1Id, parent2Id),
-    'trainer',
-    '2026-01-01T00:00:00+0900',
-    '2026-01-01T00:00:00+0900',
-    RecordStage.active,
-    0,
-    relationBonus,
-    RecordType.standard,
-  );
-  return CharaDetailRecord(
-    metadata,
-    _chara(card),
-    0,
-    const CharacterStatus(0, 0, 0, 0, 0),
-    const AptitudeSet(GroundAptitude(0, 0), DistanceAptitude(0, 0, 0, 0), StyleAptitude(0, 0, 0, 0)),
-    const <Skill>[],
-    FactorSet(self, parent1, parent2),
-    const <SupportCard>[],
-    Family(_parent(parent1Card), _parent(parent2Card)),
-    0,
-    const Scenario(0),
-    '2026/01/01',
-    races,
-  );
-}
+import 'support/records.dart';
 
 // Assembles a record-by-id lookup, as the resolver builds internally.
 Map<String, CharaDetailRecord> _byId(List<CharaDetailRecord> records) {
@@ -246,22 +196,22 @@ void main() {
     CharaDetailRecord parent2({required List<Race> races}) =>
         makeRecord(id: 'p2', card: 3, parent1Id: 'gp21', parent2Id: 'gp22', races: races);
     CharaDetailRecord grandparent(String id, int card, List<int> wins) =>
-        makeRecord(id: id, card: card, races: [for (final title in wins) _race(title)]);
+        makeRecord(id: id, card: card, races: [for (final title in wins) race(title)]);
 
     test('scores the five pairs independently and multiplies the total by three', () {
       // Designed so each pair contributes a distinct count: A=1, B=2, C=3, D=4,
       // E=5 -> (1+2+3+4+5)*3 = 45. Trainee races overlap the ancestors yet must
       // not change the result (the trainee is not a member of any pair).
       final records = [
-        trainee(traineeRaces: [_race(1), _race(2), _race(11)]),
+        trainee(traineeRaces: [race(1), race(2), race(11)]),
         parent1(
           races: [
-            for (final t in [1, 2, 3, 4, 5, 6]) _race(t),
+            for (final t in [1, 2, 3, 4, 5, 6]) race(t),
           ],
         ),
         parent2(
           races: [
-            for (final t in [1, 11, 12, 13, 14, 15, 16, 17]) _race(t),
+            for (final t in [1, 11, 12, 13, 14, 15, 16, 17]) race(t),
           ],
         ),
         grandparent('gp11', 4, [2, 3]),
@@ -279,8 +229,8 @@ void main() {
     test('counts only G1 titles, ignoring shared non-graded wins', () {
       final records = [
         makeRecord(id: 't', card: 1, parent1Id: 'p1', parent2Id: 'p2'),
-        makeRecord(id: 'p1', card: 2, races: [_race(5), _race(99)]),
-        makeRecord(id: 'p2', card: 3, races: [_race(5), _race(99)]),
+        makeRecord(id: 'p1', card: 2, races: [race(5), race(99)]),
+        makeRecord(id: 'p2', card: 3, races: [race(5), race(99)]),
       ];
 
       // Only title 5 is G1, so the parent1xparent2 pair scores 1 -> bonus 3; the
@@ -293,8 +243,8 @@ void main() {
     test('counts a shared race once even if won more than once', () {
       final records = [
         makeRecord(id: 't', card: 1, parent1Id: 'p1', parent2Id: 'p2'),
-        makeRecord(id: 'p1', card: 2, races: [_race(5), _race(5)]),
-        makeRecord(id: 'p2', card: 3, races: [_race(5)]),
+        makeRecord(id: 'p1', card: 2, races: [race(5), race(5)]),
+        makeRecord(id: 'p2', card: 3, races: [race(5)]),
       ];
 
       final bonus = InheritanceResolver.relationBonus(records.first, _byId(records), {5});
@@ -305,8 +255,8 @@ void main() {
     test('a non-winning entry of a shared title does not count', () {
       final records = [
         makeRecord(id: 't', card: 1, parent1Id: 'p1', parent2Id: 'p2'),
-        makeRecord(id: 'p1', card: 2, races: [_race(5)]),
-        makeRecord(id: 'p2', card: 3, races: [_race(5, won: false)]),
+        makeRecord(id: 'p1', card: 2, races: [race(5)]),
+        makeRecord(id: 'p2', card: 3, races: [race(5, won: false)]),
       ];
 
       final bonus = InheritanceResolver.relationBonus(records.first, _byId(records), {5});
@@ -319,8 +269,8 @@ void main() {
       // leaving just A = parent1xparent2 = {5} -> bonus 3.
       final records = [
         makeRecord(id: 't', card: 1, parent1Id: 'p1', parent2Id: 'p2'),
-        makeRecord(id: 'p1', card: 2, parent1Id: 'gp11', races: [_race(5)]),
-        makeRecord(id: 'p2', card: 3, races: [_race(5)]),
+        makeRecord(id: 'p1', card: 2, parent1Id: 'gp11', races: [race(5)]),
+        makeRecord(id: 'p2', card: 3, races: [race(5)]),
       ];
 
       final bonus = InheritanceResolver.relationBonus(records.first, _byId(records), {5});
@@ -329,7 +279,7 @@ void main() {
     });
 
     test('returns null when the record has no linked parent', () {
-      final record = makeRecord(id: 't', card: 1, races: [_race(5)]);
+      final record = makeRecord(id: 't', card: 1, races: [race(5)]);
 
       expect(InheritanceResolver.relationBonus(record, _byId([record]), {5}), isNull);
     });
@@ -345,8 +295,8 @@ void main() {
         parent2Card: 20,
         parent2: [const Factor(2, 2)],
       );
-      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [_race(5)]);
-      final p2 = makeRecord(id: 'p2', card: 20, self: [const Factor(2, 2)], races: [_race(5)]);
+      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [race(5)]);
+      final p2 = makeRecord(id: 'p2', card: 20, self: [const Factor(2, 2)], races: [race(5)]);
 
       final result = InheritanceResolver.resolveAll([child, p1, p2], g1RaceSids: {5});
 
@@ -358,7 +308,7 @@ void main() {
 
     test('resolveAll leaves the bonus untouched without a G1 set', () {
       final child = makeRecord(id: 'c', card: 30, parent1Card: 10, parent1: [const Factor(1, 1)]);
-      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [_race(5)]);
+      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [race(5)]);
 
       final result = InheritanceResolver.resolveAll([child, p1]);
 
@@ -376,8 +326,8 @@ void main() {
         parent2Card: 20,
         parent2: [const Factor(2, 2)],
       );
-      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [_race(5)]);
-      final p2 = makeRecord(id: 'p2', card: 20, self: [const Factor(2, 2)], races: [_race(5)]);
+      final p1 = makeRecord(id: 'p1', card: 10, self: [const Factor(1, 1)], races: [race(5)]);
+      final p2 = makeRecord(id: 'p2', card: 20, self: [const Factor(2, 2)], races: [race(5)]);
 
       // First pass links the lineage and writes the bonus; apply the changes
       // back, then a second pass over the resolved set must be a no-op.
@@ -399,14 +349,14 @@ void main() {
       // captured. After that, GC's parent1xgrandparent pair (C x N, sharing G1
       // title 5) scores 1, so GC's bonus changes from 0 to 3 even though GC's own
       // links never change.
-      final newGrandparent = makeRecord(id: 'n', card: 10, self: [const Factor(1, 1)], races: [_race(5)]);
+      final newGrandparent = makeRecord(id: 'n', card: 10, self: [const Factor(1, 1)], races: [race(5)]);
       final child = makeRecord(
         id: 'c',
         card: 20,
         self: [const Factor(2, 2)],
         parent1Card: 10,
         parent1: [const Factor(1, 1)],
-        races: [_race(5)],
+        races: [race(5)],
       );
       final grandchild = makeRecord(
         id: 'gc',
@@ -427,8 +377,8 @@ void main() {
     });
 
     test('resolveForNewRecord does not write a bonus without a G1 set', () {
-      final child = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: [const Factor(1, 1)], races: [_race(5)]);
-      final parent = makeRecord(id: 'p', card: 10, self: [const Factor(1, 1)], races: [_race(5)]);
+      final child = makeRecord(id: 'c', card: 20, parent1Card: 10, parent1: [const Factor(1, 1)], races: [race(5)]);
+      final parent = makeRecord(id: 'p', card: 10, self: [const Factor(1, 1)], races: [race(5)]);
 
       final updated = InheritanceResolver.resolveForNewRecord(child, [parent]).changed.single;
 

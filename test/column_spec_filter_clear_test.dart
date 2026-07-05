@@ -15,10 +15,8 @@ import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/chara_detail/spec/simple_label.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
-import 'package:umacapture/src/core/utils.dart';
 
-/// Exposes a [RefBase] so `builderSpecOf` (which takes one) can run in tests.
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/riverpod.dart';
 
 void main() {
   setUpAll(initializeMappers);
@@ -42,7 +40,7 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       // A column created from that preset, but with the filter edited away.
       final spec = RangedLabelColumnSpec(
@@ -84,7 +82,7 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final spec = FactorColumnSpec(
         id: 'id-2',
@@ -101,7 +99,7 @@ void main() {
     test('an unknown builderId falls back to accept-all', () {
       final container = ProviderContainer.test(overrides: [columnBuilderProvider.overrideWithValue([])]);
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final spec = RangedLabelColumnSpec(
         id: 'id-3',
@@ -122,7 +120,7 @@ void main() {
     test('a column with builderId=null resets to accept-all', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final spec = SimpleLabelColumnSpec(
         id: 'id-4',

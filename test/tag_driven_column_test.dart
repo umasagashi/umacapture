@@ -11,10 +11,8 @@ import 'package:umacapture/src/chara_detail/spec/factor.dart';
 import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/skill.dart';
-import 'package:umacapture/src/core/utils.dart';
 
-// Exposes a [RefBase] so the spec's evaluate (which takes one) can run in tests.
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/riverpod.dart';
 
 SkillInfo _skillInfo(int sid, Set<String> tags) => SkillInfo(sid, sid, ['skill$sid'], ['desc$sid'], tags);
 
@@ -62,7 +60,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     final spec = _tagSkillSpec({'green'});
     final results = spec.evaluate(ref, [
@@ -90,7 +88,7 @@ void main() {
       ],
     );
     addTearDown(before.dispose);
-    expect(spec.evaluate(before.read(_refBaseProvider), values), [false]);
+    expect(spec.evaluate(before.read(refBaseProvider), values), [false]);
 
     // Same spec, updated master where skill 3 has gained the green tag.
     final after = ProviderContainer.test(
@@ -102,7 +100,7 @@ void main() {
       ],
     );
     addTearDown(after.dispose);
-    expect(spec.evaluate(after.read(_refBaseProvider), values), [true]);
+    expect(spec.evaluate(after.read(refBaseProvider), values), [true]);
   });
 
   test('factor column resolves both tag axes (factor tag AND linked skill tag) from the master', () {
@@ -116,7 +114,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     // Factor-tag axis only.
     final statusSpec = _tagFactorSpec(factorTags: {'factor_status'});
@@ -153,7 +151,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     final goldSpec = _tagFactorSpec(skillTags: {'gold'}); // no factor's linked skill is gold
     expect(
@@ -174,7 +172,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     final spec = _tagSkillSpec({'nonexistent'});
     expect(
@@ -198,7 +196,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     final spec = _tagFactorSpec(); // no tags selected
     expect(
@@ -220,7 +218,7 @@ void main() {
       ],
     );
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     final spec = _tagSkillSpec(const {}); // no tags selected
     expect(
@@ -235,7 +233,7 @@ void main() {
   test('the green-skill preset builder produces a tag-driven, display-only column', () {
     final container = ProviderContainer.test();
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     final builder = TagDrivenSkillColumnBuilder(
       title: '緑スキル',
@@ -259,7 +257,7 @@ void main() {
   test('resetting a legacy frozen green-skill column migrates it to tag-driven', () {
     final container = ProviderContainer.test();
     addTearDown(container.dispose);
-    final ref = container.read(_refBaseProvider);
+    final ref = container.read(refBaseProvider);
 
     // A column as persisted by the old preset: frozen ids, selectByTag = false.
     final legacy = SkillColumnSpec(
