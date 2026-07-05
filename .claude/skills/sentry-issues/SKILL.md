@@ -61,8 +61,9 @@ command line and shell history.
 - If the file is missing or empty, ask the user to create one: Sentry → Settings →
   Auth Tokens, scopes `event:read` + `project:read` (add `org:read` only if you
   need org-wide queries). Read-only is enough for everything in this skill.
-- Uploading debug symbols (see below) needs a *different*, write-capable token —
-  out of scope here.
+- Uploading debug symbols (the `release` skill's Phase 2) needs `project:write`.
+  The token in `~/.sentry_token` already carries it, so the same file works for
+  both reading issues here and uploading PDBs there — no separate token needed.
 
 ## Quick start — use the helper script
 
@@ -118,13 +119,18 @@ The `--query` value is standard Sentry issue search:
 - **Native crashes** (`platform: native`, `mechanism: minidump`, e.g. an
   `EXCEPTION_ACCESS_VIOLATION`) arrive as raw addresses. Only OS modules
   (`ntdll`, `USER32`, `dxgi`, …) resolve to names automatically via Microsoft's
-  public symbol server; `umacapture.exe` and `flutter_windows.dll` frames stay as
-  `?` because **their debug symbols (PDBs) were never uploaded to Sentry**. You
-  can still read the surrounding OS frames to infer *what* the app was doing
-  (e.g. window teardown, graphics release), but not the exact app function.
-  Symbolicating app frames would require uploading the matching build's PDBs via
-  `sentry-cli debug-files upload` — there is currently no such step in the release
-  pipeline, and it's only worth setting up if native crashes become frequent.
+  public symbol server. As of the PDB-upload change, **`umacapture.exe` and
+  `flutter_windows.dll` frames also symbolicate — but only for builds released
+  after that change**. The `release` skill's Phase 2 now uploads both PDBs
+  (`sentry-cli debug-files upload`), and `windows/runner/CMakeLists.txt` emits a
+  `/DEBUG` PDB with a matching CodeView debug-id for the runner + native C++
+  backend. Builds from **before** the change (e.g. 0.1.0 and earlier) carry no
+  debug-id in the exe at all, so their native app frames can never be
+  symbolicated retroactively — no PDB will ever match them. Third-party DLLs
+  (`opencv_world455.dll`, `onnxruntime.dll`) ship without PDBs and stay `?` on
+  every build. For those pre-change or third-party frames, read the surrounding
+  OS frames to infer *what* the app was doing (window teardown, graphics
+  release), not the exact function.
 
 **Version tagging is consistent.** Both the Dart side (`assets/version_info.json`)
 and the native side (`windows/runner/Runner.rc` `FLUTTER_VERSION`) derive from the

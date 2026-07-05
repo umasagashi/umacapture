@@ -1,0 +1,7 @@
+# sentry-cli defaults for uploading debug symbols (PDBs) after a release build.
+# Non-secret coordinates only; the auth token is supplied via the
+# SENTRY_AUTH_TOKEN environment variable, never stored here.
+[defaults]
+url=https://sentry.io/
+org=umasagashi
+project=umacapture-release

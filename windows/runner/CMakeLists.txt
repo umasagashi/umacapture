@@ -41,6 +41,21 @@ message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy 
 
 apply_standard_settings(${BINARY_NAME})
 
+# Emit debug symbols (a .pdb) for optimized builds so native crashes reported to
+# Sentry can be symbolicated. The native C++ backend is compiled straight into
+# this executable (see SOURCE_FILES above), so umacapture.pdb covers both the
+# runner and the recognition code. Without /DEBUG the exe carries no CodeView
+# debug-id, and Sentry has nothing to match an uploaded pdb against. /OPT:REF and
+# /OPT:ICF restore the size optimizations that /DEBUG otherwise turns off.
+set(RELEASE_OR_PROFILE "$<OR:$<CONFIG:Release>,$<CONFIG:Profile>>")
+target_compile_options(${BINARY_NAME} PRIVATE "$<${RELEASE_OR_PROFILE}:/Zi>")
+target_link_options(
+        ${BINARY_NAME} PRIVATE
+        "$<${RELEASE_OR_PROFILE}:/DEBUG>"
+        "$<${RELEASE_OR_PROFILE}:/OPT:REF>"
+        "$<${RELEASE_OR_PROFILE}:/OPT:ICF>"
+)
+
 target_compile_definitions(
         ${BINARY_NAME} PRIVATE
         NOMINMAX
