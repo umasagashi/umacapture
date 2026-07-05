@@ -86,6 +86,7 @@ struct CharaDetailSceneScraperConfig {
     std::vector<ScanParameter> skill_scans;
     std::vector<ScanParameter> factor_scans;
     std::vector<ScanParameter> campaign_scans;
+    ScanParameter factor_end_green;
     Line<double> header_scan_line;
     Range<Color> header_color_range;
     uint64 header_visible_time_threshold;
@@ -97,6 +98,7 @@ struct CharaDetailSceneScraperConfig {
         skill_scans,
         factor_scans,
         campaign_scans,
+        factor_end_green,
         header_scan_line,
         header_color_range,
         header_visible_time_threshold);

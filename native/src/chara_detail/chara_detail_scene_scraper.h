@@ -155,7 +155,8 @@ public:
     PageScrapingBox(
         const std::vector<scraper_config::ScanParameter> &scan_parameters,
         const std::filesystem::path &image_dir,
-        const io_util::DirectoryHooks &directory_hooks);
+        const io_util::DirectoryHooks &directory_hooks,
+        std::optional<scraper_config::ScanParameter> end_green = std::nullopt);
 
     void addTabButton(const Frame &frame);
 
@@ -180,6 +181,13 @@ private:
     int image_count = 0;
 
     bool tab_button_ready = false;
+
+    // Optional secondary terminator (factor box only): a green end-bar scan evaluated in parallel
+    // with the gray scan_parameters sequence. When its run reaches end_green->length, the scroll
+    // area is treated as ready even though the gray sequence has not been fully consumed.
+    const std::optional<scraper_config::ScanParameter> end_green;
+    int end_green_length_pixels = 0;
+    bool end_green_fired = false;
 };
 
 class SceneScrapingBox {
@@ -188,6 +196,7 @@ public:
         const std::vector<scraper_config::ScanParameter> &skill_scans,
         const std::vector<scraper_config::ScanParameter> &factor_scans,
         const std::vector<scraper_config::ScanParameter> &campaign_scans,
+        const scraper_config::ScanParameter &factor_end_green,
         const record::RecordType &record_type,
         const std::filesystem::path &image_dir,
         const io_util::DirectoryHooks &directory_hooks);
@@ -210,7 +219,9 @@ public:
 
 private:
     std::shared_ptr<PageScrapingBox> recreate(
-        const std::vector<scraper_config::ScanParameter> &scans, const std::filesystem::path &stem) const;
+        const std::vector<scraper_config::ScanParameter> &scans,
+        const std::filesystem::path &stem,
+        std::optional<scraper_config::ScanParameter> end_green = std::nullopt) const;
 
     const std::filesystem::path base_path;
     const std::filesystem::path image_dir;
@@ -218,6 +229,7 @@ private:
     const std::vector<scraper_config::ScanParameter> skill_scans;
     const std::vector<scraper_config::ScanParameter> factor_scans;
     const std::vector<scraper_config::ScanParameter> campaign_scans;
+    const scraper_config::ScanParameter factor_end_green;
     const io_util::DirectoryHooks directory_hooks;
 
     std::shared_ptr<PageScrapingBox> skill_box_;

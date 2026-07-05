@@ -262,9 +262,11 @@ std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from,
 PageScrapingBox::PageScrapingBox(
     const std::vector<scraper_config::ScanParameter> &scan_parameters,
     const std::filesystem::path &image_dir,
-    const io_util::DirectoryHooks &directory_hooks)
-    : scan_parameters(scan_parameters)
-    , image_dir(image_dir) {
+    const io_util::DirectoryHooks &directory_hooks,
+    std::optional<scraper_config::ScanParameter> end_green)
+    : image_dir(image_dir)
+    , scan_parameters(scan_parameters)
+    , end_green(end_green) {
     current_scan = this->scan_parameters.begin();
     directory_hooks.mkdir(image_dir);
 }
@@ -296,6 +298,23 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
 
     for (int y_pixels = top_left.y(); y_pixels < frame.height(); y_pixels++) {
         const double scaled_y = anchor.scaleFromPixels(y_pixels);
+
+        // P2 green end-bar terminator (factor box only), armed only after scan0 is consumed so the
+        // top-of-list "因子" green header cannot trigger it. Fires independently of the gray sequence.
+        if (end_green && current_scan != scan_parameters.begin()) {
+            if (frame.isIn(end_green->color_range, {end_green->x, scaled_y})) {
+                if (++end_green_length_pixels >= anchor.expand({0., end_green->length}).y()) {
+                    end_green_fired = true;
+                    if (const Rect<double> rect = {scaled_top_left, Point<double>{1., scaled_y}}; !rect.empty()) {
+                        saveIncremental(frame.view(rect));
+                    }
+                    return;
+                }
+            } else {
+                end_green_length_pixels = 0;
+            }
+        }
+
         if (!frame.isIn(current_scan->color_range, {current_scan->x, scaled_y})) {
             current_length_pixels = 0;
             continue;
@@ -328,7 +347,7 @@ void PageScrapingBox::setScrollArea(const Frame &frame) {
 }
 
 bool PageScrapingBox::scrollAreaReady() const {
-    return image_count > 0 && current_scan == scan_parameters.end();
+    return image_count > 0 && (current_scan == scan_parameters.end() || end_green_fired);
 }
 
 bool PageScrapingBox::ready() const {
@@ -343,6 +362,7 @@ SceneScrapingBox::SceneScrapingBox(
     const std::vector<scraper_config::ScanParameter> &skill_scans,
     const std::vector<scraper_config::ScanParameter> &factor_scans,
     const std::vector<scraper_config::ScanParameter> &campaign_scans,
+    const scraper_config::ScanParameter &factor_end_green,
     const record::RecordType &record_type,
     const std::filesystem::path &image_dir,
     const io_util::DirectoryHooks &directory_hooks)
@@ -352,9 +372,11 @@ SceneScrapingBox::SceneScrapingBox(
     , skill_scans(skill_scans)
     , factor_scans(factor_scans)
     , campaign_scans(campaign_scans)
+    , factor_end_green(factor_end_green)
     , directory_hooks(directory_hooks)
     , skill_box_(std::make_shared<PageScrapingBox>(skill_scans, image_dir / path_config.skill.stem(), directory_hooks))
-    , factor_box_(std::make_shared<PageScrapingBox>(factor_scans, image_dir / path_config.factor.stem(), directory_hooks))
+    , factor_box_(std::make_shared<PageScrapingBox>(
+          factor_scans, image_dir / path_config.factor.stem(), directory_hooks, factor_end_green))
     , campaign_box_(
           std::make_shared<PageScrapingBox>(campaign_scans, image_dir / path_config.campaign.stem(), directory_hooks)) {}
 
@@ -373,7 +395,7 @@ std::shared_ptr<PageScrapingBox> SceneScrapingBox::resetSkillBox() {
     return skill_box_;
 }
 std::shared_ptr<PageScrapingBox> SceneScrapingBox::resetFactorBox() {
-    factor_box_ = recreate(factor_scans, path_config.factor.stem());
+    factor_box_ = recreate(factor_scans, path_config.factor.stem(), factor_end_green);
     return factor_box_;
 }
 std::shared_ptr<PageScrapingBox> SceneScrapingBox::resetCampaignBox() {
@@ -396,10 +418,12 @@ bool SceneScrapingBox::ready() const {
 }
 
 std::shared_ptr<PageScrapingBox> SceneScrapingBox::recreate(
-    const std::vector<scraper_config::ScanParameter> &scans, const std::filesystem::path &stem) const {
+    const std::vector<scraper_config::ScanParameter> &scans,
+    const std::filesystem::path &stem,
+    std::optional<scraper_config::ScanParameter> end_green) const {
     const auto tab_dir = image_dir / stem;
     directory_hooks.rmdir(tab_dir);
-    return std::make_shared<PageScrapingBox>(scans, tab_dir, directory_hooks);
+    return std::make_shared<PageScrapingBox>(scans, tab_dir, directory_hooks, end_green);
 }
 
 StationaryFrameCatcher::StationaryFrameCatcher(
@@ -773,6 +797,7 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         config.skill_scans,
         config.factor_scans,
         config.campaign_scans,
+        config.factor_end_green,
         record_type,
         scraping_root_dir / current_record_info.record_id,
         directory_hooks);
