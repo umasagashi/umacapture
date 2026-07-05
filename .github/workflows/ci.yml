@@ -179,5 +179,9 @@ jobs:
       # is intentionally excluded. Coverage is deliberately not collected here: --coverage
       # roughly doubles the wall-clock (VM-service instrumentation) for a report that has no
       # enforced threshold and only served as a visibility artifact.
+      # -j 4 raises the suite-level parallelism from the default (cores/2 = 2 on the
+      # 4-vCPU Windows runner); flutter's own issue tracker reports the speedup plateaus
+      # around 4. --reporter github emits GitHub Actions annotations for failures and a
+      # more compact log.
       - name: Run tests
-        run: flutter test test
+        run: flutter test -j 4 --reporter github test
