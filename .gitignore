@@ -67,3 +67,6 @@ lib/*.g.dart
 
 # Local working notes (kept out of version control)
 .notes/
+
+# Flutter test coverage output
+coverage/

@@ -156,6 +156,15 @@ jobs:
         run: dart format --output=none --set-exit-if-changed lib test
 
       # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
-      # is intentionally excluded.
+      # is intentionally excluded. --coverage emits coverage/lcov.info for visibility
+      # (mirrors the native OpenCppCoverage artifact); no threshold is enforced yet.
       - name: Run tests
-        run: flutter test test
+        run: flutter test --coverage test
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-coverage
+          path: coverage
+          if-no-files-found: warn
