@@ -11,6 +11,7 @@
     { "name": "player_standard", "video": "player_standard.mp4", "golden": "golden/player_standard.json" },
     { "name": "player_inheritance", "video": "player_inheritance.mp4", "golden": "golden/player_inheritance.json" },
     { "name": "friend_standard", "video": "friend_standard.mp4", "golden": "golden/friend_standard.json" },
-    { "name": "friend_inheritance", "video": "friend_inheritance.mp4", "golden": "golden/friend_inheritance.json" }
+    { "name": "friend_inheritance", "video": "friend_inheritance.mp4", "golden": "golden/friend_inheritance.json" },
+    { "name": "player_standard_scrollbar_change", "video": "player_standard_scrollbar_change.mp4", "golden": "golden/player_standard_scrollbar_change.json" }
   ]
 }

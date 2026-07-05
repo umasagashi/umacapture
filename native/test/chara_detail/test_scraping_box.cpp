@@ -18,6 +18,11 @@
 namespace uma::chara_detail {
 namespace {
 
+// A placeholder factor-end-green terminator. These directory-lifecycle tests never run the green
+// scan, but SceneScrapingBox now takes a ScanParameter by value and Range<Color> has no default
+// constructor, so it cannot be brace-value-initialized with {}.
+const scraper_config::ScanParameter kNoFactorEndGreen{0.0, 0.0, {Color(0, 0, 0), Color(0, 0, 0)}};
+
 // Records the paths passed to the injected directory hooks, without touching the filesystem.
 struct HookRecorder {
     std::vector<std::filesystem::path> made;
@@ -46,7 +51,8 @@ TEST_CASE("SceneScrapingBox creates one directory per tab") {
     HookRecorder recorder;
     const std::filesystem::path root = "unit_test_scene_box";
 
-    scraper_impl::SceneScrapingBox box({}, {}, {}, record::RecordType::Standard, root, recorder.hooks());
+    scraper_impl::SceneScrapingBox box(
+        {}, {}, {}, kNoFactorEndGreen, record::RecordType::Standard, root, recorder.hooks());
 
     CHECK(recorder.made.size() == 3);
     CHECK(recorder.made[0] == root / path_config.skill.stem());
@@ -60,7 +66,8 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
     const std::filesystem::path root = "unit_test_scene_box";
     const std::filesystem::path factor_dir = root / path_config.factor.stem();
 
-    scraper_impl::SceneScrapingBox box({}, {}, {}, record::RecordType::Standard, root, recorder.hooks());
+    scraper_impl::SceneScrapingBox box(
+        {}, {}, {}, kNoFactorEndGreen, record::RecordType::Standard, root, recorder.hooks());
     recorder.made.clear();
 
     box.resetFactorBox();

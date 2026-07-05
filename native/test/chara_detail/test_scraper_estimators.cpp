@@ -77,6 +77,39 @@ TEST_CASE("ScrollBarOffsetEstimator estimates a nonzero pixel offset between two
     CHECK(*offset != doctest::Approx(0.0));
 }
 
+TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess is zero for identical frames and positive scrolling down") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine);
+    const Frame a = scrollbarFrame(100, 40, 60);
+    const Frame b = scrollbarFrame(100, 55, 75);  // thumb lower (scrolled down), same length
+
+    const auto same = estimator.scrollOffsetGuess(a, a);
+    REQUIRE(same.has_value());
+    CHECK(*same == doctest::Approx(0.0));
+
+    const auto down = estimator.scrollOffsetGuess(a, b);
+    REQUIRE(down.has_value());
+    CHECK(*down > 0.0);  // scrolling down => positive content offset
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess works across a thumb-length change") {
+    // The point of this guess: unlike estimate()'s shared-length delta, it stays valid when the thumb
+    // re-scales (content lazily appended), because each frame contributes its OWN thumb length.
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine);
+    const Frame before = scrollbarFrame(100, 60, 90);  // long thumb near the bottom (small content)
+    const Frame after = scrollbarFrame(100, 40, 55);  // shorter thumb, lifted up (content grew)
+
+    CHECK(estimator.scrollOffsetGuess(before, after).has_value());  // does not choke on differing lengths
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess returns nullopt without a scrollbar") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine);
+    const Frame bar = scrollbarFrame(100, 40, 60);
+    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
+
+    CHECK_FALSE(estimator.scrollOffsetGuess(bar, uniform).has_value());
+    CHECK_FALSE(estimator.scrollOffsetGuess(uniform, bar).has_value());
+}
+
 TEST_CASE("ScrollBarOffsetEstimator rejects a size change between frames") {
     const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine);
     FrameDescriptor from{scrollbarFrame(100, 40, 60)};
