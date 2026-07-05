@@ -127,17 +127,16 @@ jobs:
       # .fvm/ is gitignored, so CI cannot use the FVM path. Install the same pinned SDK
       # directly. Keep this version in sync with .fvmrc (currently 3.44.4).
       #
-      # cache is disabled on purpose: on the Windows runner, restoring the cached SDK
-      # (~1.8 GB) and pub cache (~0.26 GB) is dominated by tar/zstd extraction of many
-      # small files (~100 s total), which was slower than letting flutter-action fetch
-      # the release archive and running a cold `pub get`. Re-evaluate if the cold path
-      # regresses.
+      # cache stays enabled: `cache: false` was measured (PR #125) and lost. Skipping the
+      # cache trimmed SDK setup by ~24 s but forced a cold `pub get` that cost ~73 s more
+      # than restoring the pub cache -- a ~50 s net regression. The Windows tar/zstd
+      # extraction is slow, but re-downloading every package is slower.
       - name: Set up Flutter 3.44.4
         uses: subosito/flutter-action@v2
         with:
           flutter-version: 3.44.4
           channel: stable
-          cache: false
+          cache: true
 
       - name: Resolve dependencies
         run: flutter pub get
