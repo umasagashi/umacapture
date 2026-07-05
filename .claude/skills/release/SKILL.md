@@ -89,6 +89,20 @@ resolves to the FVM default (3.44.0), but verify rather than assume.
    flutter_distributor, e.g. 0.6.6). Do not reactivate on every run — only when
    the probe fails. The published executable is `flutter_distributor:main`.
 
+5. **`sentry-cli` and a Sentry auth token are available** (needed by the symbol
+   upload in Phase 2, step 8.5). The upload lets Sentry symbolicate native
+   Windows crashes; skipping it only means that release's native crashes stay as
+   raw addresses, so it is not release-blocking, but do it whenever possible.
+   ```bash
+   sentry-cli --version || npm install -g @sentry/cli
+   [ -n "$(tr -d ' \t\r\n' < ~/.sentry_token)" ] && echo "sentry token present" || echo "MISSING"
+   ```
+   The read token at `~/.sentry_token` already carries `project:write`, so the
+   same file the `sentry-issues` skill reads is sufficient — no separate token is
+   needed. Org/project defaults come from the committed `.sentryclirc`
+   (`umasagashi` / `umacapture-release`); the token is passed via the
+   `SENTRY_AUTH_TOKEN` env var, never on the command line.
+
 ## Phase 1 — version bump + codegen + commit/push
 
 1. Pick the new version with the user (semver, e.g. `0.0.11`; no leading `v`).
@@ -152,6 +166,29 @@ release the publisher creates attaches to the pushed `v<version>` tag.
    ```
    This builds `dist/umacapture-v<version>-windows.exe` and `.zip`, then creates
    (or reuses) the `v<version>` GitHub **pre-release** and uploads both as assets.
+
+   flutter_distributor runs `flutter build windows --release` internally, so the
+   fresh, matching PDBs are now sitting in `build/windows/x64/runner/Release/`.
+   Do step 8.5 **before** anything cleans `build/` — the debug-ids must match the
+   exe that was just packaged, and they cannot be regenerated later.
+
+8.5. Upload debug symbols so Sentry can symbolicate this build's native crashes.
+   Two files matter: `umacapture.pdb` (covers the runner **and** the native C++
+   backend, which is linked straight into the exe) and the engine's
+   `flutter_windows.dll.pdb` (already in the FVM SDK cache — no download). Third-
+   party DLLs (`opencv_world455.dll`, `onnxruntime.dll`) ship without PDBs and
+   stay unsymbolicated; that is expected.
+   ```bash
+   export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"
+   ENGINE_PDB=".fvm/flutter_sdk/bin/cache/artifacts/engine/windows-x64-release/flutter_windows.dll.pdb"
+   sentry-cli debug-files upload --include-sources \
+     build/windows/x64/runner/Release/umacapture.pdb "$ENGINE_PDB"
+   ```
+   Expect `UPLOADED` lines for both debug-ids (source warnings about oversized
+   Windows SDK headers are harmless). Verify the exe carries a matching debug-id
+   with `sentry-cli debug-files check build/windows/x64/runner/Release/umacapture.exe`
+   — if the Debug ID is absent, the `/DEBUG` link flags in
+   `windows/runner/CMakeLists.txt` regressed and symbols will never match.
 9. Attach `version_info.json` as a release asset. flutter_distributor only
    uploads the packaged exe/zip, so add this lightweight file separately (it lets
    a client read the published version without downloading a build). `--clobber`
