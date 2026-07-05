@@ -19,6 +19,12 @@ bool closeEnough(const std::vector<double> &a, const std::vector<double> &b, dou
     return true;
 }
 
+// Bottom margin kept below the last factor when cropping the terminating factor fragment, as a fraction of
+// the frame width (the project's length unit). The scan's color run that follows the last factor starts a
+// few px below its stars; a small margin below that leaves a clean, constant gap -- matching the normal
+// (no inheritance history) look and independent of the green 継承履歴 header that may follow.
+constexpr double kFactorEndBottomMargin = 0.01;
+
 }  // namespace
 
 ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
@@ -93,6 +99,32 @@ std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::scanMargin(co
         return std::nullopt;  // Bar not found.
     }
     return std::make_pair(upper_margin.value(), lower_margin.value());
+}
+
+std::optional<double> ScrollBarOffsetEstimator::scrollOffsetGuess(const Frame &from, const Frame &to) const {
+    const auto from_margin = scanMargin(from);
+    const auto to_margin = scanMargin(to);
+    if (!from_margin || !to_margin) {
+        return std::nullopt;
+    }
+    // Absolute scroll offset (content px from the top) implied by one frame's scrollbar geometry, using
+    // THAT frame's own thumb length -- unlike estimate()'s shared-length delta, this stays correct
+    // across a thumb-length change. Derivation: total content = V/f, scrollable range = V(1/f - 1),
+    // scrolled fraction = upper/(upper+lower); their product simplifies to V*upper/f.
+    const auto absolute_offset = [](const Frame &frame,
+                                    const std::pair<double, double> &margin) -> std::optional<double> {
+        const double thumb_length = 1.0 - margin.first - margin.second;
+        if (thumb_length <= 0.0) {
+            return std::nullopt;
+        }
+        return static_cast<double>(frame.height()) * margin.first / thumb_length;
+    };
+    const auto from_offset = absolute_offset(from, from_margin.value());
+    const auto to_offset = absolute_offset(to, to_margin.value());
+    if (!from_offset || !to_offset) {
+        return std::nullopt;
+    }
+    return to_offset.value() - from_offset.value();
 }
 
 ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
@@ -259,6 +291,22 @@ std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from,
     return image_offset_estimator.estimate(from, to, guess.value());
 }
 
+std::optional<double>
+ScrollAreaOffsetEstimator::estimateAcrossRescale(FrameDescriptor &from, FrameDescriptor &to) const {
+    // Fallback for when estimate()'s shared-length guess fails: match the two frames at a guess computed
+    // from each frame's OWN thumb length, which stays valid across a thumb-length change (the game lazily
+    // re-scales the factor thumb when it appends inheritance history). The image matcher validates the
+    // result, so a wrong guess (e.g. an unrelated content change) simply yields nullopt.
+    if (!(from.frame.size() == to.frame.size())) {
+        return std::nullopt;  // resolution change; estimate() already rejected it -- do not recover here.
+    }
+    const auto guess = scroll_bar_offset_estimator.scrollOffsetGuess(from.frame, to.frame);
+    if (!guess) {
+        return std::nullopt;
+    }
+    return image_offset_estimator.estimate(from, to, guess.value());
+}
+
 PageScrapingBox::PageScrapingBox(
     const std::vector<scraper_config::ScanParameter> &scan_parameters,
     const std::filesystem::path &image_dir,
@@ -295,6 +343,10 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     const auto &anchor = frame.anchor();
     const Point<int> &top_left = {0, frame.height() - offset_pixels};
     const Point<double> &scaled_top_left = anchor.mapFromFrame(top_left);
+    // Default the run-start to this strip's top: a color run already in progress from a prior strip has its
+    // true start in an already-saved fragment, so treat it as starting at the boundary. This keeps
+    // factorEndCropY referencing only coordinates within the current frame.
+    current_run_start_scaled = scaled_top_left.y();
 
     for (int y_pixels = top_left.y(); y_pixels < frame.height(); y_pixels++) {
         const double scaled_y = anchor.scaleFromPixels(y_pixels);
@@ -305,7 +357,8 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
             if (frame.isIn(end_green->color_range, {end_green->x, scaled_y})) {
                 if (++end_green_length_pixels >= anchor.expand({0., end_green->length}).y()) {
                     end_green_fired = true;
-                    if (const Rect<double> rect = {scaled_top_left, Point<double>{1., scaled_y}}; !rect.empty()) {
+                    const double crop_y = factorEndCropY(scaled_top_left.y(), scaled_y);
+                    if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
                         saveIncremental(frame.view(rect));
                     }
                     return;
@@ -319,6 +372,9 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
             current_length_pixels = 0;
             continue;
         }
+        if (current_length_pixels == 0) {
+            current_run_start_scaled = scaled_y;  // start of this color run
+        }
         const int length_pixels = anchor.expand({0., current_scan->length}).y();
         if (++current_length_pixels < length_pixels) {
             continue;
@@ -327,12 +383,19 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
         if (++current_scan != scan_parameters.end()) {
             continue;
         }
-        if (const Rect<double> rect = {scaled_top_left, Point<double>{1., scaled_y}}; !rect.empty()) {
+        // The factor box crops a fixed margin below the last factor (see factorEndCropY) so its bottom
+        // margin is constant with or without inheritance history; other boxes crop at the scan point.
+        const double crop_y = end_green ? factorEndCropY(scaled_top_left.y(), scaled_y) : scaled_y;
+        if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
             saveIncremental(frame.view(rect));
         }
         return;
     }
     saveIncremental(frame.view({scaled_top_left, anchor.mapFromFrame(frame.rect().bottomRight())}));
+}
+
+double PageScrapingBox::factorEndCropY(double scaled_top, double terminator_scaled_y) const {
+    return std::clamp(current_run_start_scaled + kFactorEndBottomMargin, scaled_top, terminator_scaled_y);
 }
 
 void PageScrapingBox::addScrollArea(const Frame &frame) {
@@ -567,7 +630,20 @@ void ScrollableScrapingInterpreter::startScrolling(const Frame &valid_frame) {
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     FrameDescriptor current_fragment = {frame};
-    const auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
+    auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
+    if (!offset.has_value()) {
+        // The shared-length scroll-bar guess in estimate() breaks when the game lazily re-scales the
+        // thumb (factor inheritance history appended mid-scroll): the guess becomes inconsistent with
+        // the pixels, the image match rejects it, and the reference would freeze -- stalling the tab.
+        // Recover with a guess computed from each frame's OWN thumb length, which stays valid across the
+        // re-scale. If the frames still match we keep the true offset and capture the fragment normally
+        // (no skipped content), instead of stalling; if they do not match this stays nullopt exactly as
+        // before. Resetting scroll_bar_length lets the next estimate re-latch at the new thumb length.
+        offset = offset_estimator.estimateAcrossRescale(previous_descriptor, current_fragment);
+        if (offset.has_value()) {
+            current_fragment.scroll_bar_length = 0.0;
+        }
+    }
     if (offset.value_or(-1.0) <= minimum_scroll) {
         return;
     }

@@ -67,6 +67,12 @@ public:
 
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
 
+    // Content-pixel scroll offset between two frames, computed from each frame's OWN thumb length, so it
+    // stays correct across a thumb-length change (unlike estimate()'s shared-length delta). Used as the
+    // recovery guess when estimate() fails because the game lazily re-scaled the thumb (factor
+    // inheritance history appended mid-scroll). nullopt when either frame has no scrollbar.
+    [[nodiscard]] std::optional<double> scrollOffsetGuess(const Frame &from, const Frame &to) const;
+
 private:
     [[nodiscard]] std::optional<Line1D<double>> findScrollbar(const Frame &frame) const;
 
@@ -145,6 +151,11 @@ public:
 
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
 
+    // Recovery estimate for when estimate() fails because the thumb re-scaled (factor inheritance
+    // history appended mid-scroll): matches the two frames at scrollOffsetGuess, a guess valid across a
+    // thumb-length change. Returns the image-verified offset, or nullopt if the frames do not match.
+    [[nodiscard]] std::optional<double> estimateAcrossRescale(FrameDescriptor &from, FrameDescriptor &to) const;
+
 private:
     const ScrollBarOffsetEstimator scroll_bar_offset_estimator;
     const ImageOffsetEstimator image_offset_estimator;
@@ -173,11 +184,21 @@ public:
 private:
     void saveIncremental(const Frame &frame);
 
+    // Scaled y at which the terminating fragment should be cropped for the factor box: a fixed margin below
+    // current_run_start_scaled (the bottom of the last factor). Clamped within [scaled_top, terminator] so
+    // the rect stays valid; the caller skips an empty one. Keeps the bottom margin constant regardless of
+    // whether inheritance history follows the list.
+    [[nodiscard]] double factorEndCropY(double scaled_top, double terminator_scaled_y) const;
+
     const std::filesystem::path image_dir;
     const std::vector<scraper_config::ScanParameter> scan_parameters;
 
     std::vector<scraper_config::ScanParameter>::const_iterator current_scan;
     int current_length_pixels = 0;
+    // Scaled y where the current scan's run of matching color began (its 0->1 transition), reset to the
+    // strip top each frame. For the factor box the run that follows the last factor is the page-background
+    // gap just below it, so this marks the bottom of the last factor.
+    double current_run_start_scaled = 0.0;
     int image_count = 0;
 
     bool tab_button_ready = false;
