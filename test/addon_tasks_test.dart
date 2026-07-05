@@ -4,7 +4,6 @@
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/addon_tasks_test.dart
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -26,9 +25,8 @@ import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/utils.dart';
 
-/// Exposes a [RefBase] from a container so runners that take a RefBase can be
-/// called in tests (mirrors test/addon_execution_test.dart).
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/records.dart';
+import 'support/riverpod.dart';
 
 /// A controllable [ActionRunner] for execution-controller tests: it never starts
 /// real work; the test drives its progress and completion explicitly.
@@ -87,18 +85,6 @@ class _FakeRecordStorage extends CharaDetailRecordStorage {
 
   @override
   Future<List<CharaDetailRecord>> build() async => preloaded;
-}
-
-/// A copy of the fixture record with its id and captured date replaced, so a
-/// test can hold multiple distinct records.
-CharaDetailRecord _recordVariant(String id, String capturedDate) {
-  final map = (jsonDecode(File('test/fixtures/chara_detail_record.json').readAsStringSync()) as Map)
-      .cast<String, dynamic>();
-  final metadata = (map['metadata'] as Map).cast<String, dynamic>();
-  (metadata['record_id'] as Map)['self'] = id;
-  metadata['captured_date'] = capturedDate;
-  map['metadata'] = metadata;
-  return CharaDetailRecordMapper.fromMap(map);
 }
 
 void main() {
@@ -230,7 +216,7 @@ void main() {
 
     setUp(() {
       container = ProviderContainer.test();
-      ref = container.read(_refBaseProvider);
+      ref = container.read(refBaseProvider);
     });
     tearDown(() => container.dispose());
 
@@ -275,7 +261,7 @@ void main() {
 
       final handle = const BuiltinRunner(
         BuiltinAction(actionKey: 'stuck_timeout'),
-      ).start(timedContainer.read(_refBaseProvider), const {});
+      ).start(timedContainer.read(refBaseProvider), const {});
       final result = await handle.result;
       expect(result.status, ExecutionStatus.timeout);
     });
@@ -543,8 +529,8 @@ void main() {
     });
 
     test('runManual supplies the latest record by captured date', () async {
-      final older = _recordVariant('rec-old', '2026-01-01T10:00:00+0900');
-      final newest = _recordVariant('rec-new', '2026-06-01T10:00:00+0900');
+      final older = recordFromFixture('rec-old', '2026-01-01T10:00:00+0900');
+      final newest = recordFromFixture('rec-new', '2026-06-01T10:00:00+0900');
       // Insertion order is deliberately not capture order: startup load order is
       // filesystem-dependent, so the pick must go by captured date.
       final h = harness(records: [newest, older]);

@@ -2,22 +2,27 @@
 // its StorageEntry from storageBoxProvider inside build() and persists via set().
 // Verifies the read -> mutate -> persist round-trip through the Hive settings box.
 // Run: .fvm/flutter_sdk/bin/flutter test test/settings_notifier_test.dart
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/preference/notifier.dart';
+
+import 'support/hive.dart';
 
 // Mirrors the real settings providers (e.g. fontBoldSettingProvider) without
 // depending on their concrete keys/defaults.
 final _flagProvider = BooleanNotifierProvider(() => BooleanNotifier(entryKey: 'test_flag', defaultValue: false));
 
 void main() {
+  late Future<void> Function() closeHive;
+
   setUpAll(() async {
-    Hive.init(Directory.systemTemp.createTempSync('umacapture_settings_test').path);
     // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
-    await Hive.openBox('settings');
+    closeHive = await initHiveForTest(['settings']);
+  });
+
+  tearDownAll(() async {
+    await closeHive();
   });
 
   setUp(() async {

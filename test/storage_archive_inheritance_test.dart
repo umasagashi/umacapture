@@ -20,48 +20,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
-Character _chara(int card) => Character(0, 0, card, 0);
-
-Parent _parent(int card) => Parent(_chara(card), _chara(0), _chara(0), null);
-
-// Builds a record carrying only the fields dedup and the resolver read; the rest
-// is dummy. Mirrors the helper in inheritance_resolver_test.dart.
-CharaDetailRecord makeRecord({
-  required String id,
-  required int card,
-  List<Factor> self = const [],
-  int parent1Card = 0,
-  List<Factor> parent1 = const [],
-  String? parent1Id,
-}) {
-  final metadata = Metadata(
-    '1.0.0',
-    'JPN',
-    RecordId(id, parent1Id, null),
-    'trainer',
-    '2026-01-01T00:00:00+0900',
-    '2026-01-01T00:00:00+0900',
-    RecordStage.active,
-    0,
-    null,
-    RecordType.standard,
-  );
-  return CharaDetailRecord(
-    metadata,
-    _chara(card),
-    0,
-    const CharacterStatus(0, 0, 0, 0, 0),
-    const AptitudeSet(GroundAptitude(0, 0), DistanceAptitude(0, 0, 0, 0), StyleAptitude(0, 0, 0, 0)),
-    const <Skill>[],
-    FactorSet(self, parent1, const []),
-    const <SupportCard>[],
-    Family(_parent(parent1Card), _parent(0)),
-    0,
-    const Scenario(0),
-    '2026/01/01',
-    const <Race>[],
-  );
-}
+import 'support/records.dart';
 
 void main() {
   setUpAll(initializeMappers);

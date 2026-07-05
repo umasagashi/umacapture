@@ -14,9 +14,8 @@ import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/chara_detail/spec/relation_bonus.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
-import 'package:umacapture/src/core/utils.dart';
 
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/riverpod.dart';
 
 Character _chara(int card) => Character(0, 0, card, 0);
 
@@ -113,7 +112,7 @@ void main() {
     test('an open range accepts every value', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final result = makeSpec().evaluate(ref, const [
         RelationBonusStatus(null, 0),
@@ -126,7 +125,7 @@ void main() {
     test('a bounded range filters on filterValue, inclusive of both ends', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final spec = makeSpec(predicate: IsInRangeIntegerPredicate(min: 50, max: 100));
       final result = spec.evaluate(ref, const [
@@ -149,7 +148,7 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final statuses = makeSpec().parse(ref, [record]);
 

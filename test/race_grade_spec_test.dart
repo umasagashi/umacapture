@@ -13,11 +13,10 @@ import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/race_grade.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
-import 'package:umacapture/src/core/utils.dart';
+
+import 'support/riverpod.dart';
 
 const _grade = 'grade_g1';
-
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
 
 Character _chara(int card) => Character(0, 0, card, 0);
 
@@ -80,7 +79,7 @@ RaceGradeWinningCountColumnSpec makeSpec({
 List<int> parseWith(RaceGradeWinningCountColumnSpec spec, Set<int> gradeSids, List<CharaDetailRecord> records) {
   final container = ProviderContainer.test(overrides: [raceGradeSidProvider(_grade).overrideWithValue(gradeSids)]);
   addTearDown(container.dispose);
-  return spec.parse(container.read(_refBaseProvider), records);
+  return spec.parse(container.read(refBaseProvider), records);
 }
 
 void main() {
@@ -136,14 +135,14 @@ void main() {
     test('an open range accepts every count', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
       expect(makeSpec().evaluate(ref, [0, 1, 10]), [isTrue, isTrue, isTrue]);
     });
 
     test('a bounded range filters counts, inclusive of both ends', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
       final spec = makeSpec(predicate: IsInRangeIntegerPredicate(min: 2, max: 5));
       expect(spec.evaluate(ref, [1, 2, 5, 6]), [isFalse, isTrue, isTrue, isFalse]);
     });

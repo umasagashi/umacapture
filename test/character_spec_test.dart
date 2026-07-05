@@ -10,9 +10,8 @@ import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/character.dart';
 import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
-import 'package:umacapture/src/core/utils.dart';
 
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/riverpod.dart';
 
 CharacterCardColumnSpec makeSpec({
   CharacterCardPredicate? predicate,
@@ -58,7 +57,7 @@ void main() {
     test('applies the predicate to each value in order', () {
       final container = ProviderContainer.test();
       addTearDown(container.dispose);
-      final ref = container.read(_refBaseProvider);
+      final ref = container.read(refBaseProvider);
 
       final spec = makeSpec(predicate: CharacterCardPredicate(rejects: {100}));
       expect(spec.evaluate(ref, [100, 200, 100, 300]), [isFalse, isTrue, isFalse, isTrue]);

@@ -23,9 +23,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
-/// Exposes a [RefBase] from a container so `enrichPayload`/`resolveRecordById`
-/// (which take a RefBase, not a ProviderContainer) can be called in tests.
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/riverpod.dart';
 
 void main() {
   setUpAll(initializeMappers);
@@ -453,7 +451,7 @@ void main() {
       File('${dir.path}/record.json').writeAsStringSync(fixtureJson);
     }
 
-    RefBase refOf(ProviderContainer container) => container.read(_refBaseProvider);
+    RefBase refOf(ProviderContainer container) => container.read(refBaseProvider);
 
     test('adds the modules_dir placeholder for any trigger, even without a record_id', () {
       final container = ProviderContainer.test(overrides: [pathInfoProvider.overrideWithValue(pathInfo())]);

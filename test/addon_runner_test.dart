@@ -18,9 +18,7 @@ import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/gui/addon.dart' show formatHistoryTimestamp;
 import 'package:umacapture/src/gui/addon/task_dialog.dart';
 
-/// Exposes a [RefBase] so the runners (which take one) can be called in tests.
-/// Both runners ignore it for these cases, but the signature requires it.
-final _refBaseProvider = Provider<RefBase>((ref) => ref.base);
+import 'support/riverpod.dart';
 
 void main() {
   group('WebhookRunner.start', () {
@@ -35,7 +33,7 @@ void main() {
       port = server.port;
       server.listen((request) => handler(request));
       container = ProviderContainer.test();
-      ref = container.read(_refBaseProvider);
+      ref = container.read(refBaseProvider);
     });
 
     tearDown(() async {
@@ -196,7 +194,7 @@ void main() {
 
     setUp(() {
       container = ProviderContainer.test();
-      ref = container.read(_refBaseProvider);
+      ref = container.read(refBaseProvider);
     });
     tearDown(() => container.dispose());
 
