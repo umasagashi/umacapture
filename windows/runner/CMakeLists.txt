@@ -41,6 +41,11 @@ message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy 
 
 apply_standard_settings(${BINARY_NAME})
 
+# The native backend sources above pull in spdlog, whose bundled {fmt} 12.x hard-requires
+# /utf-8 on MSVC (static_assert in fmt/base.h). Scoped to this target (not the plugins) so it
+# only touches the ASCII-only runner + native code. See native/vendor/spdlog/VENDORED.md.
+target_compile_options(${BINARY_NAME} PRIVATE /utf-8)
+
 # Emit debug symbols (a .pdb) for optimized builds so native crashes reported to
 # Sentry can be symbolicated. The native C++ backend is compiled straight into
 # this executable (see SOURCE_FILES above), so umacapture.pdb covers both the

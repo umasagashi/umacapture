@@ -16,12 +16,6 @@
 
 #include "callbacklist.h"
 
-#include <string>
-#include <functional>
-#include <type_traits>
-#include <mutex>
-#include <memory>
-
 namespace eventpp {
 
 namespace internal_ {
@@ -172,6 +166,16 @@ public:
 		const CallbackList_ * callableList = doFindCallableList(event);
 		if(callableList) {
 			return ! callableList->empty();
+		}
+
+		return false;
+	}
+
+	bool ownsHandle(const Event & event, const Handle & handle) const
+	{
+		const CallbackList_ * callableList = doFindCallableList(event);
+		if(callableList) {
+			return callableList->ownsHandle(handle);
 		}
 
 		return false;

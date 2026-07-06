@@ -16,21 +16,21 @@
 
 #include "../eventpolicies.h"
 
-#include <memory>
 #include <vector>
+#include <algorithm>
 
 namespace eventpp {
 
 namespace internal_ {
 
-template <typename Item, typename Handle>
-bool removeHandleFromScopedRemoverItemList(std::vector<Item> & itemList, Handle & handle, std::mutex & mutex)
+template <typename Item, typename Handle, typename Mutex>
+bool removeHandleFromScopedRemoverItemList(std::vector<Item> & itemList, Handle & handle, Mutex & mutex)
 {
 	if(! handle) {
 		return false;
 	}
 	auto handlePointer = handle.lock();
-	std::unique_lock<std::mutex> lock(mutex);
+	std::unique_lock<Mutex> lock(mutex);
 	auto it = std::find_if(itemList.begin(), itemList.end(), [&handlePointer](Item & item) {
 		return item.handle && item.handle.lock() == handlePointer;
 	});
@@ -104,15 +104,15 @@ public:
 			}
 		}
 		
-		std::unique_lock<std::mutex> lock(itemListMutex);
+		std::unique_lock<typename DispatcherType::Mutex> lock(itemListMutex);
 		itemList.clear();
 	}
 	
-	void setDispatcher(DispatcherType & dispatcher)
+	void setDispatcher(DispatcherType & dispatcher_)
 	{
-		if(this->dispatcher != &dispatcher) {
+		if(this->dispatcher != &dispatcher_) {
 			reset();
-			this->dispatcher = &dispatcher;
+			this->dispatcher = &dispatcher_;
 		}
 	}
 	
@@ -128,7 +128,7 @@ public:
 		};
 
 		{
-			std::unique_lock<std::mutex> lock(itemListMutex);
+			std::unique_lock<typename DispatcherType::Mutex> lock(itemListMutex);
 			itemList.push_back(item);
 		}
 
@@ -147,7 +147,7 @@ public:
 		};
 		
 		{
-			std::unique_lock<std::mutex> lock(itemListMutex);
+			std::unique_lock<typename DispatcherType::Mutex> lock(itemListMutex);
 			itemList.push_back(item);
 		}
 		
@@ -167,7 +167,7 @@ public:
 		};
 		
 		{
-			std::unique_lock<std::mutex> lock(itemListMutex);
+			std::unique_lock<typename DispatcherType::Mutex> lock(itemListMutex);
 			itemList.push_back(item);
 		}
 		
@@ -245,15 +245,15 @@ public:
 			}
 		}
 
-		std::unique_lock<std::mutex> lock(itemListMutex);
+		std::unique_lock<typename CallbackListType::Mutex> lock(itemListMutex);
 		itemList.clear();
 	}
 	
-	void setCallbackList(CallbackListType & callbackList)
+	void setCallbackList(CallbackListType & callbackList_)
 	{
-		if(this->callbackList != &callbackList) {
+		if(this->callbackList != &callbackList_) {
 			reset();
-			this->callbackList = &callbackList;
+			this->callbackList = &callbackList_;
 		}
 	}
 	
@@ -267,7 +267,7 @@ public:
 		};
 
 		{
-			std::unique_lock<std::mutex> lock(itemListMutex);
+			std::unique_lock<typename CallbackListType::Mutex> lock(itemListMutex);
 			itemList.push_back(item);
 		}
 
@@ -284,7 +284,7 @@ public:
 		};
 
 		{
-			std::unique_lock<std::mutex> lock(itemListMutex);
+			std::unique_lock<typename CallbackListType::Mutex> lock(itemListMutex);
 			itemList.push_back(item);
 		}
 
@@ -302,7 +302,7 @@ public:
 		};
 
 		{
-			std::unique_lock<std::mutex> lock(itemListMutex);
+			std::unique_lock<typename CallbackListType::Mutex> lock(itemListMutex);
 			itemList.push_back(item);
 		}
 

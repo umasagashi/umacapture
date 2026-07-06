@@ -38,12 +38,14 @@ struct Uuid {
     uint64_t high;
 
     [[nodiscard]] std::string hex() const {
-        return (std::ostringstream() << std::hex << std::setfill('0') << std::setw(16) << low << high).str();
+        std::ostringstream stream;
+        stream << std::hex << std::setfill('0') << std::setw(16) << low << high;
+        return stream.str();
     }
 
     [[nodiscard]] std::string str() const {
         constexpr char s = '-';
-        const auto &h = hex();
+        const std::string &h = hex();
         return h.substr(0, 8) + s + h.substr(8, 4) + s + h.substr(12, 4) + s + h.substr(16, 4) + s + h.substr(20);
     }
 
