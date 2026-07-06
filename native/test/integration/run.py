@@ -140,8 +140,12 @@ def main() -> int:
     args = parser.parse_args()
 
     if not args.cli.exists():
-        print(f"error: cli not found: {args.cli}", file=sys.stderr)
-        return 2
+        # The cli is a local-only build artifact: CI (and any checkout that builds only
+        # umacapture_tests) deliberately doesn't build it, since it links onnxruntime and
+        # needs the uncommitted models/clips to run. Treat its absence like any other absent
+        # input -- skip (exit 77) so ctest reports Skipped rather than Failed.
+        print(f"SKIP: cli not built: {args.cli}", file=sys.stderr)
+        return SKIP_EXIT_CODE
 
     manifest = json.loads(args.cases.read_text(encoding="utf-8"))
     cases = manifest["cases"]

@@ -63,9 +63,12 @@ jobs:
       - name: Build umacapture_tests
         run: cmake --build native/cmake-build-tests --target umacapture_tests
 
-      # integration_golden self-skips (exit 77) without the local-only clips/models, so ctest
-      # reports it Skipped rather than Failed. ctest counts the doctest binary as one test, so
-      # its output hides the doctest case count on success -- the next step surfaces it.
+      # integration_golden self-skips (exit 77) here: we build only umacapture_tests, not the
+      # ONNX-linked cli it drives, and the local-only clips/models are absent too -- so ctest
+      # reports it Skipped rather than Failed. (uv is on PATH from the fetch step above, which is
+      # what registers this test; the run.py harness handles the missing cli.) ctest counts the
+      # doctest binary as one test, so its output hides the doctest case count on success -- the
+      # next step surfaces it.
       - name: Run ctest
         run: ctest --test-dir native/cmake-build-tests --output-on-failure
 
