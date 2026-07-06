@@ -43,7 +43,7 @@ and uses WinRT screen capture). Generator is **Ninja**, compiler is **MSVC
 These two dependency dirs are **gitignored** (`windows/.gitignore` excludes
 `/opencv/`, `/onnxruntime/`) because they are large prebuilt binaries. Provision
 them into the layout above by running `uv run tool/fetch_deps.py` (downloads the
-official prebuilts, hash-verified) -- see the **native-deps-setup** skill for
+official prebuilts, hash-verified) -- see the **project-setup** skill for
 details. A fresh checkout must do this before the native build can configure
 (OpenCV is the hard requirement: `find_package(OpenCV REQUIRED)`; onnxruntime is
 only linked by the cli/app targets, not `umacapture_tests`). The third native

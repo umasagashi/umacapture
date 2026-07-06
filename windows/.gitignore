@@ -20,7 +20,7 @@ x86/
 cmake-build-*/
 
 # 3rd party library files. Provisioned by tool/fetch_deps.py (see the
-# native-deps-setup skill); large prebuilt binaries kept out of git.
+# project-setup skill); large prebuilt binaries kept out of git.
 # clip is committed to the repo (pure MIT source, no binaries) and is not listed here.
 /opencv/
 /onnxruntime/

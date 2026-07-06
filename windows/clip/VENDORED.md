@@ -10,7 +10,7 @@ The C++ backend builds it from source via `add_subdirectory(clip)` in
 [`../CMakeLists.txt`](../CMakeLists.txt), so it is pure source (no binaries) and
 small enough to commit directly — unlike the OpenCV / ONNX Runtime prebuilts,
 which are gitignored and provisioned by `tool/fetch_deps.py` (see the
-`native-deps-setup` skill).
+`project-setup` skill).
 
 ## Provenance
 

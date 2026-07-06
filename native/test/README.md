@@ -146,7 +146,7 @@ progresses, add each newly split `.cpp` and its tests here.
 
 The build is Windows + MSVC only (same toolchain as `umacapture_cli`). The
 `umacapture_tests` target links OpenCV, so a fresh checkout must first provision
-it with `uv run tool/fetch_deps.py --only opencv` (see the `native-deps-setup`
+it with `uv run tool/fetch_deps.py --only opencv` (see the `project-setup`
 skill). From a shell where `vcvars64.bat` has been sourced:
 
 ```bat
