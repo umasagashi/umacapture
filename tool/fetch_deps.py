@@ -16,9 +16,22 @@ copied in by hand:
 
 This script downloads each artifact from its official URL, verifies it against a
 pinned SHA-256, and extracts it into the exact layout CMake expects -- the same
-tree a contributor used to place manually. Nothing is pruned, so the result is
-byte-identical to a plain official extraction; the pinned hashes below double as
-the authoritative record of *which* build is vendored.
+tree a contributor used to place manually. By default nothing is pruned, so the
+result is byte-identical to a plain official extraction; the SHA-256 is checked
+on the downloaded archive (before extraction), so it stays the authoritative
+record of *which* build is vendored regardless of any later pruning.
+
+``--slim`` additionally drops the parts of each prebuilt this project never links or
+ships -- everything it removes is third-party debug symbols or bindings/tools/sources
+we never touch, so the linked/shipped tree is unchanged. For OpenCV (~915 MB -> ~230 MB):
+the source tree, the Java and Python bindings, OpenCV's own debug symbols (``.pdb`` --
+never symbolicated here, Sentry covers only ``umacapture.pdb``), the bundled sample
+``.exe`` tools, the cascade/license ``etc/`` tree, and the duplicate top-level FFmpeg
+plugin (the copy CMake loads lives under ``x64/vc16/bin``). For ONNX Runtime
+(~402 MB -> ~16 MB): its own ``.pdb`` debug symbols. CI passes ``--slim`` to keep its
+cache lean (today it provisions only OpenCV); local devs omit it so a full official
+tree is available for release builds. See ``OPENCV_SLIM_PRUNE_*`` / ``ONNX_SLIM_PRUNE_*``
+below for the exact sets.
 
 The third dependency, ``windows/clip``, is committed to the repository (pure MIT
 source, no binaries) and is therefore not fetched here.
@@ -28,6 +41,7 @@ Run it via ``uv run`` (this repo invokes Python through ``uv``, never bare
 
     uv run tool/fetch_deps.py                 # both deps (skips ones already present)
     uv run tool/fetch_deps.py --only opencv   # just OpenCV (what CI provisions)
+    uv run tool/fetch_deps.py --only opencv --slim  # + prune unused OpenCV parts (CI)
     uv run tool/fetch_deps.py --force         # re-fetch even if already present
 
 To bump a dependency version, change its ``*_URL`` and ``*_SHA256`` constants (and
@@ -70,6 +84,30 @@ ONNX_HEADERS = {
         "7f5cf1653e7379f7107ce0148d28499240ac89cf728aa6ac47ffd33a1a888600",
     ),
 }
+
+
+# Parts of the OpenCV prebuilt this project never links or ships, removed by
+# ``--slim`` (see the module docstring). Paths are relative to ``windows/opencv``.
+# A missing entry is skipped, so a layout shift in a future OpenCV bump degrades to
+# "kept" rather than erroring -- ``--slim`` only ever shrinks, never breaks, a build.
+OPENCV_SLIM_PRUNE_DIRS = (
+    "sources",  # full source tree (the only part the old CI dropped)
+    "build/java",  # JNI bindings
+    "build/python",  # Python bindings
+    "build/etc",  # haarcascades / lbpcascades / third-party licenses
+    "build/bin",  # duplicate FFmpeg plugin; the loaded copy lives under x64/*/bin
+)
+
+# Glob patterns (relative to ``windows/opencv``) for individual files to drop. The
+# ``x64/*/`` wildcard spans the runtime folder (e.g. ``vc16``) so no version is baked in.
+OPENCV_SLIM_PRUNE_GLOBS = (
+    "build/x64/*/bin/*.pdb",  # OpenCV's own debug symbols (never symbolicated here)
+    "build/x64/*/bin/*.exe",  # bundled sample tools (opencv_version, annotation, ...)
+)
+
+# The ONNX Runtime equivalent (paths relative to ``windows/onnxruntime``): its own debug
+# symbols, never symbolicated here, and ~384 MB -- dwarfing the 15 MB DLL they pair with.
+ONNX_SLIM_PRUNE_GLOBS = ("lib/*.pdb",)
 
 
 def log(message: str) -> None:
@@ -128,6 +166,30 @@ def extract_opencv(exe: Path, target: Path) -> None:
         subprocess.run([str(exe), f"-o{out_dir}", "-y"], check=True)
 
 
+def _tree_size(path: Path) -> int:
+    """Total size in bytes of ``path`` (a file, or a directory walked recursively)."""
+    if path.is_file():
+        return path.stat().st_size
+    return sum(child.stat().st_size for child in path.rglob("*") if child.is_file())
+
+
+def prune_tree(target: Path, dirs: tuple[str, ...], globs: tuple[str, ...]) -> None:
+    """Remove ``dirs`` and ``globs``-matched files under ``target`` (see the ``*_SLIM_*`` sets)."""
+    removed = 0
+    for relative in dirs:
+        path = target / relative
+        if path.exists():
+            removed += _tree_size(path)
+            shutil.rmtree(path)
+            log(f"pruned {relative}")
+    for pattern in globs:
+        for path in target.glob(pattern):
+            removed += path.stat().st_size
+            path.unlink()
+            log(f"pruned {path.relative_to(target).as_posix()}")
+    log(f"slim: removed ~{removed // (1024 * 1024)} MB")
+
+
 def extract_onnxruntime(zip_path: Path, target: Path) -> None:
     """Extract the ONNX Runtime zip so ``include/`` and ``lib/`` land directly in ``target``."""
     import zipfile
@@ -159,7 +221,7 @@ def _prepare_target(target: Path, force: bool) -> bool:
     return True
 
 
-def fetch_opencv(force: bool) -> None:
+def fetch_opencv(force: bool, slim: bool) -> None:
     """Provision windows/opencv."""
     if sys.platform != "win32":
         raise SystemExit("OpenCV is a Windows self-extracting .exe; run this on Windows to provision it.")
@@ -170,10 +232,12 @@ def fetch_opencv(force: bool) -> None:
         exe = Path(tmp) / "opencv.exe"
         download_verified(OPENCV_URL, exe, OPENCV_SHA256)
         extract_opencv(exe, target)
+    if slim:
+        prune_tree(target, OPENCV_SLIM_PRUNE_DIRS, OPENCV_SLIM_PRUNE_GLOBS)
     log(f"provisioned {target.relative_to(REPO_ROOT)}")
 
 
-def fetch_onnxruntime(force: bool) -> None:
+def fetch_onnxruntime(force: bool, slim: bool) -> None:
     """Provision windows/onnxruntime (release zip + experimental headers)."""
     target = WINDOWS_DIR / "onnxruntime"
     if not _prepare_target(target, force):
@@ -183,6 +247,8 @@ def fetch_onnxruntime(force: bool) -> None:
         download_verified(ONNX_URL, zip_path, ONNX_SHA256)
         extract_onnxruntime(zip_path, target)
     place_onnx_headers(target / "include")
+    if slim:
+        prune_tree(target, (), ONNX_SLIM_PRUNE_GLOBS)
     log(f"provisioned {target.relative_to(REPO_ROOT)}")
 
 
@@ -199,12 +265,17 @@ def main() -> None:
         action="store_true",
         help="re-fetch even if the target directory already exists",
     )
+    parser.add_argument(
+        "--slim",
+        action="store_true",
+        help="prune unused third-party parts (OpenCV ~915->230 MB, ONNX ~402->16 MB); used by CI",
+    )
     args = parser.parse_args()
 
     if args.only in ("opencv", "all"):
-        fetch_opencv(args.force)
+        fetch_opencv(args.force, args.slim)
     if args.only in ("onnxruntime", "all"):
-        fetch_onnxruntime(args.force)
+        fetch_onnxruntime(args.force, args.slim)
 
 
 if __name__ == "__main__":
