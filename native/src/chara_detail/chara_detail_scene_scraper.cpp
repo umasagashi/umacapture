@@ -351,23 +351,10 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     for (int y_pixels = top_left.y(); y_pixels < frame.height(); y_pixels++) {
         const double scaled_y = anchor.scaleFromPixels(y_pixels);
 
-        // P2 green end-bar terminator (factor box only), armed only after scan0 is consumed so the
-        // top-of-list "因子" green header cannot trigger it. Fires independently of the gray sequence.
-        if (end_green && current_scan != scan_parameters.begin()) {
-            if (frame.isIn(end_green->color_range, {end_green->x, scaled_y})) {
-                if (++end_green_length_pixels >= anchor.expand({0., end_green->length}).y()) {
-                    end_green_fired = true;
-                    const double crop_y = factorEndCropY(scaled_top_left.y(), scaled_y);
-                    if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
-                        saveIncremental(frame.view(rect));
-                    }
-                    return;
-                }
-            } else {
-                end_green_length_pixels = 0;
-            }
-        }
-
+        // The green "継承履歴" end-bar terminator is NOT detected here: it lazily renders in-place within
+        // already-scanned empty space, so a scanner that only sees each new bottom strip catches at most a
+        // few px of it. It is handled instead by probeGreenTerminator(), a per-frame presence check that
+        // scans the whole (lower) scroll area independently of strip latching.
         if (!frame.isIn(current_scan->color_range, {current_scan->x, scaled_y})) {
             current_length_pixels = 0;
             continue;
@@ -396,6 +383,34 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
 
 double PageScrapingBox::factorEndCropY(double scaled_top, double terminator_scaled_y) const {
     return std::clamp(current_run_start_scaled + kFactorEndBottomMargin, scaled_top, terminator_scaled_y);
+}
+
+bool PageScrapingBox::probeGreenTerminator(const Frame &frame) {
+    // Detect the green "継承履歴" terminator bar by PRESENCE in the current frame, independent of
+    // scroll-strip latching. The bar lazily renders in-place (24 px at once) within already-scanned empty
+    // space, so the strip scanner in addScrollArea only ever catches a fraction of it; a whole-region scan
+    // sees the full bar for the ~1 s it stays visible. Armed only after scan0 is consumed (same guard the
+    // in-loop scan used) so the top-of-list "因子" green header cannot trigger it; scanning only the lower
+    // half keeps that guard intact under per-frame scanning (the terminator is always near the list end,
+    // the top header in the upper half).
+    if (!end_green || current_scan == scan_parameters.begin() || image_count == 0) {
+        return false;
+    }
+    const auto &anchor = frame.anchor();
+    const int required_pixels = anchor.expand({0., end_green->length}).y();
+    int run_pixels = 0;
+    for (int y_pixels = frame.height() / 2; y_pixels < frame.height(); y_pixels++) {
+        const double scaled_y = anchor.scaleFromPixels(y_pixels);
+        if (frame.isIn(end_green->color_range, {end_green->x, scaled_y})) {
+            if (++run_pixels >= required_pixels) {
+                end_green_fired = true;
+                return true;
+            }
+        } else {
+            run_pixels = 0;
+        }
+    }
+    return false;
 }
 
 void PageScrapingBox::addScrollArea(const Frame &frame) {
@@ -629,6 +644,14 @@ void ScrollableScrapingInterpreter::startScrolling(const Frame &valid_frame) {
 }
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
+    // Check the green terminator every frame, BEFORE the minimum_scroll gate below. The bar can pop in
+    // while the content is effectively stationary (a scrollbar re-scale, not a real scroll), so the offset
+    // stays under minimum_scroll and no strip is latched -- exactly the case the old in-loop scan missed.
+    if (scraping_box->probeGreenTerminator(frame)) {
+        state = Ready;
+        return;
+    }
+
     FrameDescriptor current_fragment = {frame};
     auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
     if (!offset.has_value()) {

@@ -177,6 +177,11 @@ public:
 
     void setScrollArea(const Frame &frame);
 
+    // Presence check for the green "継承履歴" terminator bar, run once per frame independently of scroll
+    // strips (see the definition for why the strip scanner cannot see the lazily-rendered bar). Sets
+    // end_green_fired and returns true once a green run of end_green->length is present in the lower half.
+    bool probeGreenTerminator(const Frame &frame);
+
     [[nodiscard]] bool scrollAreaReady() const;
 
     [[nodiscard]] bool ready() const;
@@ -203,11 +208,10 @@ private:
 
     bool tab_button_ready = false;
 
-    // Optional secondary terminator (factor box only): a green end-bar scan evaluated in parallel
-    // with the gray scan_parameters sequence. When its run reaches end_green->length, the scroll
-    // area is treated as ready even though the gray sequence has not been fully consumed.
+    // Optional secondary terminator (factor box only): a green end-bar. Detected by probeGreenTerminator()
+    // as a presence check over the lower scroll area, independently of the gray scan_parameters sequence.
+    // When it fires, the scroll area is treated as ready even though the gray sequence is not fully consumed.
     const std::optional<scraper_config::ScanParameter> end_green;
-    int end_green_length_pixels = 0;
     bool end_green_fired = false;
 };
 
