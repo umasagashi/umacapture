@@ -29,30 +29,32 @@ jobs:
         with:
           arch: x64
 
-      # OpenCV 4.5.5 (vc15) is a gitignored, manually-placed third-party dependency
+      # OpenCV 4.13.0 (vc16) is a gitignored, manually-placed third-party dependency
       # (windows/.gitignore) that native/CMakeLists.txt references at
-      # windows/opencv/build. Restore it from cache, or download the official prebuilt
-      # and extract it into windows/ on a cache miss -- the same layout a local dev
-      # places by hand. onnxruntime/clip are deliberately NOT provisioned: the
-      # umacapture_tests target links only OpenCV (the cli/app targets that need ONNX
-      # are never built here).
-      - name: Cache OpenCV 4.5.5
+      # windows/opencv/build. Restore it from cache, or provision it on a cache miss
+      # with the same tool/fetch_deps.py a local dev runs -- one source of truth for
+      # the pinned URL + SHA-256 (no inline download logic to drift). onnxruntime/clip
+      # are deliberately NOT provisioned: the umacapture_tests target links only OpenCV
+      # (the cli/app targets that need ONNX are never built here). The cache key pins
+      # the version, so bumping OpenCV in fetch_deps.py must bump the key here too.
+      # --slim (below) prunes the ~915 MB tree to ~230 MB before it is cached, keeping the
+      # OpenCV parts umacapture_tests actually links (Debug DLL + import libs + headers);
+      # the "-slim" key suffix keeps that pruned layout from colliding with a full-tree cache.
+      - name: Cache OpenCV 4.13.0
         id: cache-opencv
         uses: actions/cache@v4
         with:
           path: windows/opencv
-          key: opencv-4.5.5-vc14_vc15
+          key: opencv-4.13.0-windows-slim
 
-      - name: Download OpenCV 4.5.5
+      # uv runs tool/fetch_deps.py (stdlib-only); only needed on a cache miss.
+      - name: Set up uv
         if: steps.cache-opencv.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          curl.exe -L -o "$env:RUNNER_TEMP\opencv.exe" https://github.com/opencv/opencv/releases/download/4.5.5/opencv-4.5.5-vc14_vc15.exe
-          # The self-extracting archive holds a top-level opencv/ (build/ + sources/);
-          # extracting into windows/ yields the windows/opencv/build CMake expects.
-          7z x "$env:RUNNER_TEMP\opencv.exe" -o"windows" -y
-          # The test build needs only build/; drop sources/ to keep the cache lean.
-          Remove-Item -Recurse -Force "windows\opencv\sources" -ErrorAction SilentlyContinue
+        uses: astral-sh/setup-uv@v6
+
+      - name: Provision OpenCV 4.13.0
+        if: steps.cache-opencv.outputs.cache-hit != 'true'
+        run: uv run tool/fetch_deps.py --only opencv --slim
 
       # Ninja + Debug are required (see native/test/README.md); asserts are live in Debug.
       - name: Configure (CMake + Ninja, Debug)
@@ -61,9 +63,12 @@ jobs:
       - name: Build umacapture_tests
         run: cmake --build native/cmake-build-tests --target umacapture_tests
 
-      # integration_golden self-skips (exit 77) without the local-only clips/models, so ctest
-      # reports it Skipped rather than Failed. ctest counts the doctest binary as one test, so
-      # its output hides the doctest case count on success -- the next step surfaces it.
+      # integration_golden self-skips (exit 77) here: we build only umacapture_tests, not the
+      # ONNX-linked cli it drives, and the local-only clips/models are absent too -- so ctest
+      # reports it Skipped rather than Failed. (uv is on PATH from the fetch step above, which is
+      # what registers this test; the run.py harness handles the missing cli.) ctest counts the
+      # doctest binary as one test, so its output hides the doctest case count on success -- the
+      # next step surfaces it.
       - name: Run ctest
         run: ctest --test-dir native/cmake-build-tests --output-on-failure
 

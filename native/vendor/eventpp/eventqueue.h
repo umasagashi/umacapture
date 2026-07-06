@@ -17,12 +17,8 @@
 #include "eventdispatcher.h"
 #include "internal/eventqueue_i.h"
 
-#include <list>
 #include <tuple>
 #include <chrono>
-#include <mutex>
-#include <array>
-#include <cassert>
 
 namespace eventpp {
 
@@ -90,7 +86,7 @@ private:
 	};
 
 	using BufferedItemList = typename SelectQueueList<
-		BufferedItem<QueuedEvent_>,
+		BufferedItem<QueuedEvent_>, 
 		Policies_,
 		HasTemplateQueueList<Policies_>::value
 	>::Type;
@@ -151,7 +147,7 @@ public:
 		super::operator = (other);
 		return *this;
 	}
-
+	
 	EventQueueBase & operator = (EventQueueBase && other) noexcept
 	{
 		super::operator = (std::move(other));
@@ -159,7 +155,7 @@ public:
 	}
 
 	template <typename ...A>
-	auto enqueue(A ...args) -> typename std::enable_if<sizeof...(A) == sizeof...(Args), void>::type
+	auto enqueue(A && ...args) -> typename std::enable_if<sizeof...(A) == sizeof...(Args), void>::type
 	{
 		static_assert(super::ArgumentPassingMode::canIncludeEventType, "Enqueuing arguments count doesn't match required (Event type should be included).");
 
@@ -176,7 +172,7 @@ public:
 	}
 
 	template <typename T, typename ...A>
-	auto enqueue(T && first, A ...args) -> typename std::enable_if<sizeof...(A) == sizeof...(Args), void>::type
+	auto enqueue(T && first, A && ...args) -> typename std::enable_if<sizeof...(A) == sizeof...(Args), void>::type
 	{
 		static_assert(super::ArgumentPassingMode::canExcludeEventType, "Enqueuing arguments count doesn't match required (Event type should NOT be included).");
 
@@ -197,6 +193,20 @@ public:
 		return queueList.empty() && (queueEmptyCounter.load(std::memory_order_acquire) == 0);
 	}
 
+	/**
+	 * NOTE: This method was added for umacapture (local patch, not in upstream eventpp).
+	 * Returns the number of queued-but-unprocessed events, used by the backpressure check
+	 * in uma::event_util. Locks queueListMutex (which is mutable) so the read does not race
+	 * the splice in enqueue()/processOne()/processIf(); reading the live queue keeps the
+	 * count exception-safe. See native/vendor/eventpp/VENDORED.md.
+	 * This patch does not belong to the original rights holders, but I do not claim any rights.
+	 */
+	size_t size() const
+	{
+		std::lock_guard<Mutex> queueListLock(queueListMutex);
+		return queueList.size();
+	}
+	
 	void clearEvents()
 	{
 		if(! queueList.empty()) {
@@ -243,11 +253,11 @@ public:
 
 				std::lock_guard<Mutex> queueListLock(freeListMutex);
 				freeList.splice(freeList.end(), tempList);
-
+				
 				return true;
 			}
 		}
-
+		
 		return false;
 	}
 
@@ -277,11 +287,11 @@ public:
 
 				std::lock_guard<Mutex> queueListLock(freeListMutex);
 				freeList.splice(freeList.end(), tempList);
-
+				
 				return true;
 			}
 		}
-
+		
 		return false;
 	}
 
@@ -313,7 +323,7 @@ public:
 							typename MakeIndexSequence<sizeof...(Args)>::Type()
 						);
 						it->clear();
-
+						
 						auto tempIt = it;
 						++it;
 						idleList.splice(idleList.end(), tempList, tempIt);
@@ -331,15 +341,15 @@ public:
 				if(! idleList.empty()) {
 					std::lock_guard<Mutex> queueListLock(freeListMutex);
 					freeList.splice(freeList.end(), idleList);
-
+					
 					return true;
 				}
 			}
 		}
-
+		
 		return false;
 	}
-
+	
 	template <typename Predictor>
 	bool processUntil(Predictor && predictor)
 	{
@@ -371,7 +381,7 @@ public:
 							typename MakeIndexSequence<sizeof...(Args)>::Type()
 						);
 						it->clear();
-
+						
 						auto tempIt = it;
 						++it;
 						idleList.splice(idleList.end(), tempList, tempIt);
@@ -386,15 +396,15 @@ public:
 				if(! idleList.empty()) {
 					std::lock_guard<Mutex> queueListLock(freeListMutex);
 					freeList.splice(freeList.end(), idleList);
-
+					
 					return true;
 				}
 			}
 		}
-
+		
 		return false;
 	}
-
+	
 	void wait() const
 	{
 		std::unique_lock<Mutex> queueListLock(queueListMutex);
@@ -428,7 +438,7 @@ public:
 	{
 		if(! queueList.empty()) {
 			std::lock_guard<Mutex> queueListLock(queueListMutex);
-
+			
 			if(! queueList.empty()) {
 				*queuedEvent = queueList.front().get();
 				return true;
@@ -465,15 +475,6 @@ public:
 		return false;
 	}
 
-    /**
-     * NOTE: This method was added for umacapture.
-     * This patch is not belong to the original rights holders, but I do not claim any rights.
-     */
-    size_t size() const
-    {
-        return queueList.size();
-    }
-
 protected:
 	bool doCanProcess() const
 	{
@@ -496,7 +497,7 @@ protected:
 	{
 		return doInvokeFuncWithQueuedEventHelper(std::forward<F>(func), std::get<Indexes>(item.arguments)...);
 	}
-
+	
 	template <typename F>
 	auto doInvokeFuncWithQueuedEventHelper(F && func, Args ...args) const
 		-> typename std::enable_if<! CanInvoke<F>::value, bool>::type

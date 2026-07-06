@@ -144,8 +144,10 @@ progresses, add each newly split `.cpp` and its tests here.
 
 ## Build & run
 
-The build is Windows + MSVC only (same toolchain as `umacapture_cli`). From a
-shell where `vcvars64.bat` has been sourced:
+The build is Windows + MSVC only (same toolchain as `umacapture_cli`). The
+`umacapture_tests` target links OpenCV, so a fresh checkout must first provision
+it with `uv run tool/fetch_deps.py --only opencv` (see the `project-setup`
+skill). From a shell where `vcvars64.bat` has been sourced:
 
 ```bat
 cmake -G Ninja -S . -B cmake-build-debug -DCMAKE_BUILD_TYPE=Debug
@@ -155,7 +157,7 @@ ctest --test-dir cmake-build-debug --output-on-failure
 
 The binary can also be run directly (`cmake-build-debug/umacapture_tests.exe`);
 it accepts the standard doctest flags (`--help`, `--test-case=...`, etc.). A
-POST_BUILD step copies the matching `opencv_world455[d].dll` next to it.
+POST_BUILD step copies the matching `opencv_world4130[d].dll` next to it.
 
 ## Coverage
 

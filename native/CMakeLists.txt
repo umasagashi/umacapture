@@ -3,10 +3,16 @@ project(umacapture_cli)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# spdlog's bundled {fmt} 12.x hard-requires /utf-8 on MSVC (a static_assert in fmt/base.h:
+# "Unicode support requires compiling with /utf-8"). The native sources are ASCII-only, so
+# this is safe, and it also makes narrow string literals genuine UTF-8. Applied globally so
+# it reaches every target that pulls in spdlog.
+add_compile_options(/utf-8)
+
 set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/opencv/build")
-set(OpenCV_VERSION "455")
+set(OpenCV_VERSION "4130")
 set(OpenCV_ARCH "x64")
-set(OpenCV_RUNTIME "vc15")
+set(OpenCV_RUNTIME "vc16")
 set(OpenCV_DLL_NAME "opencv_world")
 set(OpenCV_DLL_PREFIX "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_DLL_NAME}${OpenCV_VERSION}")
 set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")

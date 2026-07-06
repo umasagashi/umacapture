@@ -15,14 +15,10 @@
 #define CALLBACKLIST_H_588722158669
 
 #include "eventpolicies.h"
-#include "internal/typeutil_i.h"
 
-#include <atomic>
-#include <condition_variable>
 #include <functional>
-#include <memory>
 #include <mutex>
-#include <utility>
+#include <cassert>
 
 namespace eventpp {
 
@@ -212,6 +208,9 @@ public:
 
 	Handle insert(const Callback & callback, const Handle & before)
 	{
+		// Disable this assertion because it's too slow in debug mode.
+		//assert(before.expired() || ownsHandle(before));
+
 		NodePtr beforeNode = before.lock();
 		if(beforeNode) {
 			NodePtr node(doAllocateNode(callback));
@@ -228,11 +227,32 @@ public:
 
 	bool remove(const Handle & handle)
 	{
+		// Disable this assertion because it's too slow in debug mode.
+		//assert(handle.expired() || ownsHandle(handle));
+
+		// It looks like the lock can be put inside the `if` below,
+		// but that doesn't work in multi-threading and cause related unit tests fail.
 		std::lock_guard<Mutex> lockGuard(mutex);
+
 		auto node = handle.lock();
 		if(node) {
 			doFreeNode(node);
 			return true;
+		}
+
+		return false;
+	}
+
+	bool ownsHandle(const Handle & handle) const
+	{
+		std::lock_guard<Mutex> lockGuard(mutex);
+
+		auto node = handle.lock();
+		if(node) {
+			while(node->previous) {
+				node = node->previous;
+			}
+			return node == head;
 		}
 
 		return false;

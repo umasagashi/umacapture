@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 3.14)
 project(runner LANGUAGES CXX)
 
 set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../opencv/build")
-set(OpenCV_VERSION "455")
+set(OpenCV_VERSION "4130")
 set(OpenCV_ARCH "x64")
-set(OpenCV_RUNTIME "vc15")
+set(OpenCV_RUNTIME "vc16")
 set(OpenCV_DLL_NAME "opencv_world")
 set(OpenCV_DLL_PREFIX "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_DLL_NAME}${OpenCV_VERSION}")
 set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
@@ -40,6 +40,11 @@ find_package(OpenCV REQUIRED)
 message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")
 
 apply_standard_settings(${BINARY_NAME})
+
+# The native backend sources above pull in spdlog, whose bundled {fmt} 12.x hard-requires
+# /utf-8 on MSVC (static_assert in fmt/base.h). Scoped to this target (not the plugins) so it
+# only touches the ASCII-only runner + native code. See native/vendor/spdlog/VENDORED.md.
+target_compile_options(${BINARY_NAME} PRIVATE /utf-8)
 
 # Emit debug symbols (a .pdb) for optimized builds so native crashes reported to
 # Sentry can be symbolicated. The native C++ backend is compiled straight into

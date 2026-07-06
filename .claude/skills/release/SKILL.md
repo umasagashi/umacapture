@@ -176,7 +176,7 @@ release the publisher creates attaches to the pushed `v<version>` tag.
    Two files matter: `umacapture.pdb` (covers the runner **and** the native C++
    backend, which is linked straight into the exe) and the engine's
    `flutter_windows.dll.pdb` (already in the FVM SDK cache — no download). Third-
-   party DLLs (`opencv_world455.dll`, `onnxruntime.dll`) ship without PDBs and
+   party DLLs (`opencv_world4130.dll`, `onnxruntime.dll`) ship without PDBs and
    stay unsymbolicated; that is expected.
    ```bash
    export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"
@@ -217,3 +217,9 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 - `dist/` is gitignored; build artifacts are never committed.
 - Generated assets are pinned to `eol=lf` in `.gitattributes`, so codegen
   produces no EOL-only churn — do not renormalize.
+- **`flutter_distributor` shells out to `flutter build windows`.** If that fails at
+  INSTALL with `file cannot create directory: C:/Program Files/umacapture` (a stale
+  CMakeCache from an interrupted first configure — e.g. a GitHub timeout while
+  fetching sentry-native), it is not a permission problem: `rm -rf build/windows` and
+  rebuild uninterrupted. See the **project-setup** skill's Notes/gotchas for the full
+  mechanism.

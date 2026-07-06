@@ -127,7 +127,7 @@ The `--query` value is standard Sentry issue search:
   backend. Builds from **before** the change (e.g. 0.1.0 and earlier) carry no
   debug-id in the exe at all, so their native app frames can never be
   symbolicated retroactively — no PDB will ever match them. Third-party DLLs
-  (`opencv_world455.dll`, `onnxruntime.dll`) ship without PDBs and stay `?` on
+  (`opencv_world4130.dll`, `onnxruntime.dll`) ship without PDBs and stay `?` on
   every build. For those pre-change or third-party frames, read the surrounding
   OS frames to infer *what* the app was doing (window teardown, graphics
   release), not the exact function.
