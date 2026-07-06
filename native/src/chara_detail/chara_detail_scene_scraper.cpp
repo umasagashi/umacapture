@@ -364,7 +364,7 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
 
         // The green "継承履歴" end-bar terminator is NOT detected here: it lazily renders in-place within
         // already-scanned empty space, so a scanner that only sees each new bottom strip catches at most a
-        // few px of it. It is handled instead by probeGreenTerminator(), a per-frame presence check that
+        // few px of it. It is handled instead by detectGreenTerminator(), a per-frame presence check that
         // scans the whole (lower) scroll area independently of strip latching.
         if (!frame.isIn(current_scan->color_range, {current_scan->x, scaled_y})) {
             current_length_pixels = 0;
@@ -384,7 +384,7 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
         // Gray-sequence completion (reached only with enough inheritance history to accumulate the gray
         // tail): the factor box crops a fixed margin below the last factor (see factorEndCropY) instead of
         // at the scan point, keeping the bottom margin constant across long histories. Short histories
-        // terminate via probeGreenTerminator() instead, which does not pass through here.
+        // terminate via detectGreenTerminator() instead, which does not pass through here.
         const double crop_y = end_green ? factorEndCropY(current_run_start_scaled, scaled_top_left.y(), scaled_y) : scaled_y;
         if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
             saveIncremental(frame.view(rect));
@@ -398,7 +398,7 @@ double PageScrapingBox::factorEndCropY(double run_start_scaled, double scaled_to
     return std::clamp(run_start_scaled + kFactorEndBottomMargin, scaled_top, terminator_scaled_y);
 }
 
-bool PageScrapingBox::probeGreenTerminator(const Frame &frame, int offset_pixels) {
+bool PageScrapingBox::detectGreenTerminator(const Frame &frame, int offset_pixels) {
     // Detect the green "継承履歴" terminator bar by PRESENCE in the current frame, independent of
     // scroll-strip latching. The bar lazily renders in-place (24 px at once) within already-scanned empty
     // space, so the strip scanner in addScrollArea only ever catches a fraction of it; scanning a region
@@ -753,7 +753,7 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     // stationary (a scrollbar re-scale, not a real scroll), so the offset stays under minimum_scroll and
     // no strip is latched -- exactly the case a latch-coupled scan misses. Skip frames with no usable
     // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
-    if (offset.has_value() && scraping_box->probeGreenTerminator(frame, std::lround(offset.value()))) {
+    if (offset.has_value() && scraping_box->detectGreenTerminator(frame, std::lround(offset.value()))) {
         // Crop the saved fragments to the same bottom line the gray-completion path uses, so the trailing
         // background below the last factor is a fixed margin regardless of which terminator ended the tab.
         // The last fragment otherwise runs to the frame bottom (addScrollArea's fallback save), leaving a

@@ -87,11 +87,11 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
     CHECK(recorder.made.front() == factor_dir);
 }
 
-// --- probeGreenTerminator: presence detection of the green "継承履歴" end-bar ---------------------
+// --- detectGreenTerminator: presence detection of the green "継承履歴" end-bar ---------------------
 //
 // The green terminator lazily renders in-place (24 px at once) within already-scanned empty space, so
 // the strip scanner in addScrollArea only ever catches a fraction of it and short-history factor lists
-// never complete (closed_before_completed). probeGreenTerminator detects it by PRESENCE over a region
+// never complete (closed_before_completed). detectGreenTerminator detects it by PRESENCE over a region
 // anchored to the scroll frontier -- [height - offset - K, height], K = the gray-tail scan's length --
 // independent of scroll strips. These tests use a 100 px frame where the terminator length (0.05)
 // resolves to a 5 px required run and K (the absent scan's length, 0.2) resolves to 20 px.
@@ -130,17 +130,17 @@ void armBox(scraper_impl::PageScrapingBox &box) {
 // With offset = 10 and K = 20, the anchored scan region is [100 - 10 - 20, 100] = [70, 100].
 constexpr int kOffset = 10;
 
-TEST_CASE("probeGreenTerminator does not fire before scan0 is consumed (not armed)") {
+TEST_CASE("detectGreenTerminator does not fire before scan0 is consumed (not armed)") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
         {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_unarmed"), recorder.hooks(), kGreenTerminator);
 
     // current_scan is still at begin() and image_count == 0: a green bar must not complete the tab.
-    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(72, 10), kOffset));
+    CHECK_FALSE(box.detectGreenTerminator(greenBarFrame(72, 10), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
 
-TEST_CASE("probeGreenTerminator fires on a green run above the new strip but within the back-scan") {
+TEST_CASE("detectGreenTerminator fires on a green run above the new strip but within the back-scan") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
         {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_backscan"), recorder.hooks(), kGreenTerminator);
@@ -148,11 +148,11 @@ TEST_CASE("probeGreenTerminator fires on a green run above the new strip but wit
 
     // Green at rows [72, 82): above the new strip [height - offset, height] = [90, 100] (so the strip
     // scanner would miss it), yet within the frontier back-scan [70, 100]. This is the fix's core case.
-    CHECK(box.probeGreenTerminator(greenBarFrame(72, 10), kOffset));
+    CHECK(box.detectGreenTerminator(greenBarFrame(72, 10), kOffset));
     CHECK(box.scrollAreaReady());
 }
 
-TEST_CASE("probeGreenTerminator ignores a green run above the back-scan region (top 因子 header guard)") {
+TEST_CASE("detectGreenTerminator ignores a green run above the back-scan region (top 因子 header guard)") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
         {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_above"), recorder.hooks(), kGreenTerminator);
@@ -160,18 +160,18 @@ TEST_CASE("probeGreenTerminator ignores a green run above the back-scan region (
 
     // A green bar above the region [70, 100] (like the top-of-list "因子" header, far from the frontier)
     // must not fire.
-    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(30, 20), kOffset));
+    CHECK_FALSE(box.detectGreenTerminator(greenBarFrame(30, 20), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
 
-TEST_CASE("probeGreenTerminator ignores a green run shorter than the required length") {
+TEST_CASE("detectGreenTerminator ignores a green run shorter than the required length") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
         {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_short"), recorder.hooks(), kGreenTerminator);
     armBox(box);
 
     // 3 px < the 5 px required run.
-    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(72, 3), kOffset));
+    CHECK_FALSE(box.detectGreenTerminator(greenBarFrame(72, 3), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
 
@@ -218,7 +218,7 @@ TEST_CASE("trimScrollAreaToFactorEnd crops the green-terminated tab to the last 
 
     // Last factor bottom 70, gap [70, 74), anti-alias [74, 76), green bar [76, 81). offset 10 -> frontier 90.
     const Frame probe = factorEndFrame(70, 4);
-    REQUIRE(box.probeGreenTerminator(probe, 10));
+    REQUIRE(box.detectGreenTerminator(probe, 10));
     box.trimScrollAreaToFactorEnd(probe, 10);
 
     // The scan skips the bar edge and walks the gap to the last factor (70); crop = 70 + margin (2 px) = 72.
@@ -235,7 +235,7 @@ TEST_CASE("trimScrollAreaToFactorEnd leaves fragments untouched when nothing ove
 
     // Crop line at/above the frontier: last factor 69 + margin 2 = 71 >= frontier 70 (offset 30) -> trim <= 0.
     const Frame probe = factorEndFrame(69, 4);  // gap [69, 73), anti-alias [73, 75), green [75, 80)
-    REQUIRE(box.probeGreenTerminator(probe, 30));
+    REQUIRE(box.detectGreenTerminator(probe, 30));
     box.trimScrollAreaToFactorEnd(probe, 30);
 
     const cv::Mat kept = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
@@ -252,7 +252,7 @@ TEST_CASE("trimScrollAreaToFactorEnd peels whole fragments when the trim exceeds
     // Last factor 64, gap [64, 68), anti-alias [68, 70), green [70, 75); offset 10 -> frontier 90 -> crop 66
     // -> trim 24.
     const Frame probe = factorEndFrame(64, 4);
-    REQUIRE(box.probeGreenTerminator(probe, 10));
+    REQUIRE(box.detectGreenTerminator(probe, 10));
     box.trimScrollAreaToFactorEnd(probe, 10);
 
     // trim 24 > fragment1 (20 px): fragment1 removed, remaining 4 px trimmed off fragment0 (100 -> 96).

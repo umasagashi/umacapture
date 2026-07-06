@@ -182,10 +182,10 @@ public:
     // region anchored to the scroll frontier (height - offset_pixels) extended back by the gray-tail
     // threshold, which structurally bounds it to the last factor's neighbourhood. Sets end_green_fired and
     // returns true once a green run of end_green->length is present there.
-    bool probeGreenTerminator(const Frame &frame, int offset_pixels);
+    bool detectGreenTerminator(const Frame &frame, int offset_pixels);
 
     // Crop the saved factor fragments to the same bottom line the gray-completion path uses, once the green
-    // terminator has fired. probeGreenTerminator only marks readiness; the last saved fragment still runs
+    // terminator has fired. detectGreenTerminator only marks readiness; the last saved fragment still runs
     // down to the frame bottom (the fallback save in addScrollArea), leaving a variable amount of trailing
     // background below the last factor. This scans up from the recorded green-bar top to the last factor's
     // bottom and trims the fragment stack to factorEndCropY(that), so the bottom margin is identical to the
@@ -220,12 +220,12 @@ private:
 
     bool tab_button_ready = false;
 
-    // Optional secondary terminator (factor box only): a green end-bar. Detected by probeGreenTerminator()
+    // Optional secondary terminator (factor box only): a green end-bar. Detected by detectGreenTerminator()
     // as a presence check over the lower scroll area, independently of the gray scan_parameters sequence.
     // When it fires, the scroll area is treated as ready even though the gray sequence is not fully consumed.
     const std::optional<scraper_config::ScanParameter> end_green;
     bool end_green_fired = false;
-    // Top y (frame pixels) of the green run that fired probeGreenTerminator, or -1 if it has not fired.
+    // Top y (frame pixels) of the green run that fired detectGreenTerminator, or -1 if it has not fired.
     // trimScrollAreaToFactorEnd scans up from here to locate the last factor and crop the fragment stack.
     int green_terminator_top_pixels = -1;
 };
