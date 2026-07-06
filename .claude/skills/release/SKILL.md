@@ -217,3 +217,9 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 - `dist/` is gitignored; build artifacts are never committed.
 - Generated assets are pinned to `eol=lf` in `.gitattributes`, so codegen
   produces no EOL-only churn — do not renormalize.
+- **`flutter_distributor` shells out to `flutter build windows`.** If that fails at
+  INSTALL with `file cannot create directory: C:/Program Files/umacapture` (a stale
+  CMakeCache from an interrupted first configure — e.g. a GitHub timeout while
+  fetching sentry-native), it is not a permission problem: `rm -rf build/windows` and
+  rebuild uninterrupted. See the **project-setup** skill's Notes/gotchas for the full
+  mechanism.

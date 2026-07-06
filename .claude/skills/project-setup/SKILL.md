@@ -199,3 +199,23 @@ For the standalone native C++ CLI / doctest suite (a separate CMake project unde
   it can't read the gitignored `.fvm/`.
 - **Order matters** for step 6: `pub get` before `build_runner`, and the native deps
   (step 4) before any `flutter build windows` / native CMake configure.
+- **`flutter build windows` fails at INSTALL with `file cannot create directory:
+  C:/Program Files/umacapture. Maybe need administrative privileges` → stale
+  CMakeCache, not a real permission problem.** The bundle install prefix is set
+  *only* by the `if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)` block in
+  `windows/CMakeLists.txt` (flutter_tools never passes `-DCMAKE_INSTALL_PREFIX`),
+  and that flag is true *only on a build tree's first configure*. `sentry_flutter`
+  runs `FetchContent_MakeAvailable(sentry-native)` at **configure** time (before that
+  block), so if the first configure aborts there — commonly a GitHub timeout while
+  cloning sentry-native's submodules, ending in `Unable to generate build files` —
+  CMake has already cached the default prefix `C:/Program Files/umacapture`. Any
+  later reconfigure then sees the prefix as already-set and skips the override,
+  leaving it wrong; INSTALL then tries to write to `C:/Program Files`.
+  **Fix:** don't retry over the poisoned cache — deleting only
+  `build/windows/x64/_deps` is not enough. `rm -rf build/windows` and rebuild
+  uninterrupted. A clean configure yields `CMAKE_INSTALL_PREFIX =
+  $<TARGET_FILE_DIR:umacapture>` and INSTALL populates `runner/Release/data/`
+  (`app.so`, `flutter_assets`, `icudtl.dat`). The app enforces a single instance via
+  the named mutex `umacapture_mutex` (`windows/runner/main.cpp`), so a second launch
+  while one is running exits immediately with `EXIT_FAILURE` and an empty log — not a
+  crash.
