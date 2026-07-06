@@ -175,5 +175,91 @@ TEST_CASE("probeGreenTerminator ignores a green run shorter than the required le
     CHECK_FALSE(box.scrollAreaReady());
 }
 
+// --- trimScrollAreaToFactorEnd: unify the factor-end crop across both terminator paths -----------------
+//
+// The gray-completion path crops the terminating fragment a fixed margin below the last factor
+// (factorEndCropY). The green terminator path used to leave the last fragment running to the frame bottom,
+// so the trailing background below the last factor was variable. trimScrollAreaToFactorEnd scans up from the
+// recorded green-bar top to the last factor and trims the fragment stack to the same crop line, so the
+// bottom margin matches regardless of which terminator ended the tab.
+//
+// Fixture: kArmScan (consumed on arm) matches solid kArmGray; the back scan kGapScan matches the page
+// background gap. Because kArmGray is not in the gap range, arm frames keep the box armed while a probe
+// frame's gap region is recognized as the space below the last factor. On a 100 px frame the margin (0.0217)
+// is 2 px, the probe back-scan K (0.2) is 20 px, and the factor search span (0.08) is 8 px -- so the fixed
+// factor-to-bar distance below must stay under 8 px.
+const Color kArmGray{130, 130, 130};
+const scraper_config::ScanParameter kArmScan{0.5, 0.02, {Color(120, 120, 120), Color(140, 140, 140)}};
+const scraper_config::ScanParameter kGapScan{0.5, 0.2, {Color(233, 233, 233), Color(253, 253, 253)}};
+const scraper_config::ScanParameter kGreenEnd{0.6017, 0.05, {Color(83, 177, 0), Color(173, 255, 65)}};
+
+// A 100 px frame reproducing the real column structure above the green bar (top -> bottom): factor fill,
+// the fixed background gap, a 2 px anti-aliased bar edge (neither background nor cleanly green, so the scan
+// must skip it), then the 5 px green bar. Returns the frame; the bar top is factor_bottom + gap_height + 2.
+Frame factorEndFrame(int factor_bottom, int gap_height) {
+    const int green_top = factor_bottom + gap_height + 2;
+    cv::Mat mat = testutil::solid(100, Color(255, 255, 255));
+    mat(cv::Rect(0, 0, 100, factor_bottom)).setTo(cv::Scalar(200, 200, 200));                       // factor
+    mat(cv::Rect(0, factor_bottom, 100, gap_height)).setTo(cv::Scalar(243, 243, 243));              // gap bg
+    mat(cv::Rect(0, factor_bottom + gap_height, 100, 2)).setTo(cv::Scalar(180, 240, 220));          // anti-alias
+    mat(cv::Rect(0, green_top, 100, 5)).setTo(cv::Scalar(20, 222, 128));                            // green bar
+    return Frame::fixed(mat);
+}
+
+void armFactorBox(scraper_impl::PageScrapingBox &box) {
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)));  // consume kArmScan; kGapScan stays parked
+}
+
+TEST_CASE("trimScrollAreaToFactorEnd crops the green-terminated tab to the last factor plus the fixed margin") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_factor_end_crop");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);  // fragment 00000 = 100 px
+
+    // Last factor bottom 70, gap [70, 74), anti-alias [74, 76), green bar [76, 81). offset 10 -> frontier 90.
+    const Frame probe = factorEndFrame(70, 4);
+    REQUIRE(box.probeGreenTerminator(probe, 10));
+    box.trimScrollAreaToFactorEnd(probe, 10);
+
+    // The scan skips the bar edge and walks the gap to the last factor (70); crop = 70 + margin (2 px) = 72.
+    // The fragment bottom sat at the frontier (90), so 90 - 72 = 18 rows are trimmed: 100 -> 82.
+    const cv::Mat cropped = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(cropped.rows == 82);
+}
+
+TEST_CASE("trimScrollAreaToFactorEnd leaves fragments untouched when nothing overshoots the crop line") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_factor_end_noop");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);
+
+    // Crop line at/above the frontier: last factor 69 + margin 2 = 71 >= frontier 70 (offset 30) -> trim <= 0.
+    const Frame probe = factorEndFrame(69, 4);  // gap [69, 73), anti-alias [73, 75), green [75, 80)
+    REQUIRE(box.probeGreenTerminator(probe, 30));
+    box.trimScrollAreaToFactorEnd(probe, 30);
+
+    const cv::Mat kept = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(kept.rows == 100);
+}
+
+TEST_CASE("trimScrollAreaToFactorEnd peels whole fragments when the trim exceeds the last one") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_factor_end_spill");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);  // fragment 00000 = 100 px
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 20);  // fragment 00001 = 20 px strip
+
+    // Last factor 64, gap [64, 68), anti-alias [68, 70), green [70, 75); offset 10 -> frontier 90 -> crop 66
+    // -> trim 24.
+    const Frame probe = factorEndFrame(64, 4);
+    REQUIRE(box.probeGreenTerminator(probe, 10));
+    box.trimScrollAreaToFactorEnd(probe, 10);
+
+    // trim 24 > fragment1 (20 px): fragment1 removed, remaining 4 px trimmed off fragment0 (100 -> 96).
+    CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(1, 5).filename()));
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 96);
+}
+
 }  // namespace
 }  // namespace uma::chara_detail

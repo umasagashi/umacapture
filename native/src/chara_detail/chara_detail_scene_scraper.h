@@ -184,6 +184,15 @@ public:
     // returns true once a green run of end_green->length is present there.
     bool probeGreenTerminator(const Frame &frame, int offset_pixels);
 
+    // Crop the saved factor fragments to the same bottom line the gray-completion path uses, once the green
+    // terminator has fired. probeGreenTerminator only marks readiness; the last saved fragment still runs
+    // down to the frame bottom (the fallback save in addScrollArea), leaving a variable amount of trailing
+    // background below the last factor. This scans up from the recorded green-bar top to the last factor's
+    // bottom and trims the fragment stack to factorEndCropY(that), so the bottom margin is identical to the
+    // gray-completion path regardless of which terminator ends the tab. A no-op unless the green terminator
+    // fired and the saved content overshoots the crop line.
+    void trimScrollAreaToFactorEnd(const Frame &frame, int offset_pixels);
+
     [[nodiscard]] bool scrollAreaReady() const;
 
     [[nodiscard]] bool ready() const;
@@ -192,10 +201,11 @@ private:
     void saveIncremental(const Frame &frame);
 
     // Scaled y at which the terminating fragment should be cropped for the factor box: a fixed margin below
-    // current_run_start_scaled (the bottom of the last factor). Clamped within [scaled_top, terminator] so
-    // the rect stays valid; the caller skips an empty one. Keeps the bottom margin constant regardless of
-    // whether inheritance history follows the list.
-    [[nodiscard]] double factorEndCropY(double scaled_top, double terminator_scaled_y) const;
+    // run_start_scaled (the bottom of the last factor). Clamped within [scaled_top, terminator] so the rect
+    // stays valid; the caller skips an empty one. Keeps the bottom margin constant regardless of whether
+    // inheritance history follows the list. Both terminator paths (gray-sequence completion and the green
+    // end-bar) feed their own last-factor-bottom through this one function so they crop to the same line.
+    [[nodiscard]] double factorEndCropY(double run_start_scaled, double scaled_top, double terminator_scaled_y) const;
 
     const std::filesystem::path image_dir;
     const std::vector<scraper_config::ScanParameter> scan_parameters;
@@ -215,6 +225,9 @@ private:
     // When it fires, the scroll area is treated as ready even though the gray sequence is not fully consumed.
     const std::optional<scraper_config::ScanParameter> end_green;
     bool end_green_fired = false;
+    // Top y (frame pixels) of the green run that fired probeGreenTerminator, or -1 if it has not fired.
+    // trimScrollAreaToFactorEnd scans up from here to locate the last factor and crop the fragment stack.
+    int green_terminator_top_pixels = -1;
 };
 
 class SceneScrapingBox {
