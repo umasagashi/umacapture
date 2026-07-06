@@ -1,9 +1,10 @@
 ---
 name: project-setup
 description: >-
-  Bring a fresh umacapture clone to a buildable state end to end: install the
-  external toolchain (FVM-pinned Flutter 3.44.4, uv, Visual Studio 2022 C++,
-  optional 7-Zip), provision the gitignored Windows native dependencies via
+  Bring a fresh umacapture clone to a buildable state end to end: check for the
+  required external toolchain (FVM-pinned Flutter 3.44.4, uv, Visual Studio 2022
+  C++, optional 7-Zip) -- never installing host-level tools unprompted, only with
+  the user's approval -- provision the gitignored Windows native dependencies via
   tool/fetch_deps.py, enable the git hooks and blame-ignore config, resolve Dart
   packages, and run build_runner codegen. Use when someone is setting up the
   project for the first time, asks "how do I get this building", hits a
@@ -23,6 +24,28 @@ skill, and `native/test/README.md`.
 The app is **Windows-only** (WinRT screen capture, MSVC-linked native backend), so
 setup targets a Windows dev box.
 
+> ## ⚠️ Never install host-level tools unprompted
+>
+> The [Prerequisites](#prerequisites-external-tools) below live **outside this
+> project** — system-wide packages and global SDK caches on the user's machine.
+> **Do not install, upgrade, or modify any of them on your own initiative**, and
+> **never run a system package manager** (winget, choco, scoop, `npm -g`, `pip
+> install`, `dart pub global activate`, an installer `.exe`, etc.) to satisfy them.
+>
+> Instead, for each prerequisite:
+>
+> 1. **Check whether it is already present** (e.g. `command -v fvm`, `command -v
+>    uv`, `where cl` / `vswhere`).
+> 2. If it is missing, **stop and either (a) explain to the user exactly what needs
+>    installing and how, or (b) ask for explicit approval before running anything
+>    that touches the host.** Prefer explaining; get approval before acting.
+>
+> Only the **project-scoped** steps are safe to run without asking: `git config`
+> **on this repo**, `tool/fetch_deps.py` (writes only into `windows/`), `pub get`,
+> and `build_runner`. Note that even `fvm install` (step 1) and `uv run` (step 4)
+> download into **global caches outside the repo** (`~/fvm`, uv's toolchain cache);
+> if the user is sensitive to that, surface it before running them too.
+
 ## Quick sequence
 
 From the repo root, in order (details for each below):
@@ -40,7 +63,9 @@ Then verify with a build (see [Verify](#verify)).
 
 ## Prerequisites (external tools)
 
-Install these once on the machine; they are not vendored in the repo:
+These are host-level tools, not vendored in the repo. **Per the warning above,
+check whether each is already installed; if one is missing, explain it to the user
+or get approval before installing anything — do not install them unprompted.**
 
 | Tool | Why | Notes |
 |---|---|---|
