@@ -385,21 +385,29 @@ double PageScrapingBox::factorEndCropY(double scaled_top, double terminator_scal
     return std::clamp(current_run_start_scaled + kFactorEndBottomMargin, scaled_top, terminator_scaled_y);
 }
 
-bool PageScrapingBox::probeGreenTerminator(const Frame &frame) {
+bool PageScrapingBox::probeGreenTerminator(const Frame &frame, int offset_pixels) {
     // Detect the green "継承履歴" terminator bar by PRESENCE in the current frame, independent of
     // scroll-strip latching. The bar lazily renders in-place (24 px at once) within already-scanned empty
-    // space, so the strip scanner in addScrollArea only ever catches a fraction of it; a whole-region scan
-    // sees the full bar for the ~1 s it stays visible. Armed only after scan0 is consumed (same guard the
-    // in-loop scan used) so the top-of-list "因子" green header cannot trigger it; scanning only the lower
-    // half keeps that guard intact under per-frame scanning (the terminator is always near the list end,
-    // the top header in the upper half).
+    // space, so the strip scanner in addScrollArea only ever catches a fraction of it; scanning a region
+    // anchored to the scroll frontier sees the full bar for the ~1 s it stays visible.
+    //
+    // Region: [height - offset_pixels - K, height]. offset_pixels marks the scroll frontier (the boundary
+    // between already-scanned and newly revealed content). We have not terminated, so the background-gray
+    // gap accumulated above the frontier is < K (the gray-tail threshold = the terminating scan's length);
+    // hence the last factor -- and the green bar just below it -- lies within K of the frontier, while the
+    // top-of-list "因子" green header is all the captured factors away (>> K). Scanning back exactly K thus
+    // catches the terminator and structurally excludes the top header, without a frame region or scrollbar
+    // position. back() is that terminating gray gap for the factor box (the only box with end_green);
+    // reaching this line implies current_scan != begin(), so scan_parameters is non-empty.
     if (!end_green || current_scan == scan_parameters.begin() || image_count == 0) {
         return false;
     }
     const auto &anchor = frame.anchor();
     const int required_pixels = anchor.expand({0., end_green->length}).y();
+    const int back_pixels = anchor.expand({0., scan_parameters.back().length}).y();
+    const int y_from = std::clamp(frame.height() - offset_pixels - back_pixels, 0, frame.height());
     int run_pixels = 0;
-    for (int y_pixels = frame.height() / 2; y_pixels < frame.height(); y_pixels++) {
+    for (int y_pixels = y_from; y_pixels < frame.height(); y_pixels++) {
         const double scaled_y = anchor.scaleFromPixels(y_pixels);
         if (frame.isIn(end_green->color_range, {end_green->x, scaled_y})) {
             if (++run_pixels >= required_pixels) {
@@ -644,14 +652,6 @@ void ScrollableScrapingInterpreter::startScrolling(const Frame &valid_frame) {
 }
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
-    // Check the green terminator every frame, BEFORE the minimum_scroll gate below. The bar can pop in
-    // while the content is effectively stationary (a scrollbar re-scale, not a real scroll), so the offset
-    // stays under minimum_scroll and no strip is latched -- exactly the case the old in-loop scan missed.
-    if (scraping_box->probeGreenTerminator(frame)) {
-        state = Ready;
-        return;
-    }
-
     FrameDescriptor current_fragment = {frame};
     auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
     if (!offset.has_value()) {
@@ -667,6 +667,17 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
             current_fragment.scroll_bar_length = 0.0;
         }
     }
+
+    // Check the green terminator every frame, anchored to the scroll frontier (height - offset), BEFORE
+    // the minimum_scroll gate below. The bar can pop in in-place while the content is effectively
+    // stationary (a scrollbar re-scale, not a real scroll), so the offset stays under minimum_scroll and
+    // no strip is latched -- exactly the case a latch-coupled scan misses. Skip frames with no usable
+    // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
+    if (offset.has_value() && scraping_box->probeGreenTerminator(frame, std::lround(offset.value()))) {
+        state = Ready;
+        return;
+    }
+
     if (offset.value_or(-1.0) <= minimum_scroll) {
         return;
     }

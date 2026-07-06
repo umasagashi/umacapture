@@ -91,9 +91,10 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
 //
 // The green terminator lazily renders in-place (24 px at once) within already-scanned empty space, so
 // the strip scanner in addScrollArea only ever catches a fraction of it and short-history factor lists
-// never complete (closed_before_completed). probeGreenTerminator detects it by PRESENCE over the lower
-// half of the current frame, independent of scroll strips. These tests use a 100 px frame where the
-// terminator length (0.05) resolves to a 5 px required run.
+// never complete (closed_before_completed). probeGreenTerminator detects it by PRESENCE over a region
+// anchored to the scroll frontier -- [height - offset - K, height], K = the gray-tail scan's length --
+// independent of scroll strips. These tests use a 100 px frame where the terminator length (0.05)
+// resolves to a 5 px required run and K (the absent scan's length, 0.2) resolves to 20 px.
 
 // A fresh, empty temp directory for boxes whose addScrollArea writes real fragment files. Reused, cleared.
 std::filesystem::path freshTempDir(const std::string &name) {
@@ -105,9 +106,10 @@ std::filesystem::path freshTempDir(const std::string &name) {
 
 const Color kGray{130, 130, 130};
 const scraper_config::ScanParameter kGrayScan0{0.5, 0.02, {Color(120, 120, 120), Color(140, 140, 140)}};
-// A never-matched second scan keeps current_scan parked past begin() (armed) but short of end(): so
-// scrollAreaReady() can only become true via the green terminator, not via the gray sequence.
-const scraper_config::ScanParameter kAbsentScan1{0.5, 0.02, {Color(0, 0, 200), Color(0, 0, 255)}};
+// The terminating (last) scan. Its color is never matched, so it keeps current_scan parked past begin()
+// (armed) but short of end() -- scrollAreaReady() can only become true via the green terminator, not the
+// gray sequence. Its length (0.2 -> 20 px) is also the probe's back-scan distance K.
+const scraper_config::ScanParameter kAbsentScan1{0.5, 0.2, {Color(0, 0, 200), Color(0, 0, 255)}};
 // Same green range as the real factorEndGreen (colorRange({128,222,20}, 45)), length 0.05 -> 5 px on 100.
 const scraper_config::ScanParameter kGreenTerminator{0.6017, 0.05, {Color(83, 177, 0), Color(173, 255, 65)}};
 
@@ -125,34 +127,40 @@ void armBox(scraper_impl::PageScrapingBox &box) {
     box.addScrollArea(Frame::fixed(testutil::solid(100, kGray)));
 }
 
+// With offset = 10 and K = 20, the anchored scan region is [100 - 10 - 20, 100] = [70, 100].
+constexpr int kOffset = 10;
+
 TEST_CASE("probeGreenTerminator does not fire before scan0 is consumed (not armed)") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
         {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_unarmed"), recorder.hooks(), kGreenTerminator);
 
     // current_scan is still at begin() and image_count == 0: a green bar must not complete the tab.
-    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(60, 10)));
+    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(72, 10), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
 
-TEST_CASE("probeGreenTerminator fires on a green run in the lower half once armed") {
+TEST_CASE("probeGreenTerminator fires on a green run above the new strip but within the back-scan") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
-        {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_lower"), recorder.hooks(), kGreenTerminator);
+        {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_backscan"), recorder.hooks(), kGreenTerminator);
     armBox(box);
 
-    CHECK(box.probeGreenTerminator(greenBarFrame(60, 10)));
+    // Green at rows [72, 82): above the new strip [height - offset, height] = [90, 100] (so the strip
+    // scanner would miss it), yet within the frontier back-scan [70, 100]. This is the fix's core case.
+    CHECK(box.probeGreenTerminator(greenBarFrame(72, 10), kOffset));
     CHECK(box.scrollAreaReady());
 }
 
-TEST_CASE("probeGreenTerminator ignores a green run in the upper half (top 因子 header guard)") {
+TEST_CASE("probeGreenTerminator ignores a green run above the back-scan region (top 因子 header guard)") {
     HookRecorder recorder;
     scraper_impl::PageScrapingBox box(
-        {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_upper"), recorder.hooks(), kGreenTerminator);
+        {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_above"), recorder.hooks(), kGreenTerminator);
     armBox(box);
 
-    // A green bar entirely above the mid-line (like the top-of-list "因子" header) must not fire.
-    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(20, 20)));
+    // A green bar above the region [70, 100] (like the top-of-list "因子" header, far from the frontier)
+    // must not fire.
+    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(30, 20), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
 
@@ -163,7 +171,7 @@ TEST_CASE("probeGreenTerminator ignores a green run shorter than the required le
     armBox(box);
 
     // 3 px < the 5 px required run.
-    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(60, 3)));
+    CHECK_FALSE(box.probeGreenTerminator(greenBarFrame(72, 3), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
 

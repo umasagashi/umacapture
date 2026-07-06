@@ -178,9 +178,11 @@ public:
     void setScrollArea(const Frame &frame);
 
     // Presence check for the green "継承履歴" terminator bar, run once per frame independently of scroll
-    // strips (see the definition for why the strip scanner cannot see the lazily-rendered bar). Sets
-    // end_green_fired and returns true once a green run of end_green->length is present in the lower half.
-    bool probeGreenTerminator(const Frame &frame);
+    // strips (see the definition for why the strip scanner cannot see the lazily-rendered bar). Scans a
+    // region anchored to the scroll frontier (height - offset_pixels) extended back by the gray-tail
+    // threshold, which structurally bounds it to the last factor's neighbourhood. Sets end_green_fired and
+    // returns true once a green run of end_green->length is present there.
+    bool probeGreenTerminator(const Frame &frame, int offset_pixels);
 
     [[nodiscard]] bool scrollAreaReady() const;
 
