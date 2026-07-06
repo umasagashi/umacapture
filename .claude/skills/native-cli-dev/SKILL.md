@@ -35,9 +35,9 @@ and uses WinRT screen capture). Generator is **Ninja**, compiler is **MSVC
   `cl.exe`, and VS ships both `cmake` and `ninja` under
   `Common7\IDE\CommonExtensions\Microsoft\CMake\`. (A system CMake at
   `C:\Program Files\CMake` also works once `cl`/`ninja` are on PATH.)
-- **OpenCV 4.5.5** prebuilt at `windows/opencv/build` (referenced absolutely by
+- **OpenCV 4.13.0** prebuilt at `windows/opencv/build` (referenced absolutely by
   `CMakeLists.txt` via `OpenCV_DIR`).
-- **ONNX Runtime 1.11.1** at `windows/onnxruntime` (headers in `include/`,
+- **ONNX Runtime 1.27.0** at `windows/onnxruntime` (headers in `include/`,
   `onnxruntime.lib`/`.dll` in `lib/`).
 
 These two dependency dirs are **gitignored** (`windows/.gitignore` excludes
@@ -106,7 +106,7 @@ Notes:
   longer matches the vcvars environment). Configure a new dir instead. (You can
   still *run* the pre-built exe that already sits in a CLion dir — see the
   `recognize`/`stitch` test-input note — just don't reconfigure/rebuild into it.)
-- A `POST_BUILD` step auto-copies the matching `opencv_world455[d].dll` and
+- A `POST_BUILD` step auto-copies the matching `opencv_world4130[d].dll` and
   `onnxruntime.dll` next to the exe, so the exe runs from its own build dir
   without PATH changes.
 - Incremental rebuilds: re-run only `cmake --build <dir>` (still inside vcvars).
@@ -174,9 +174,9 @@ depend on the working directory, unlike the event-loop subcommands.
 
 ### `video` subcommand needs the FFmpeg DLL
 
-OpenCV decodes video via `opencv_videoio_ffmpeg455_64.dll`, which the POST_BUILD
+OpenCV decodes video via `opencv_videoio_ffmpeg4130_64.dll`, which the POST_BUILD
 step does **not** copy. For the `video` subcommand, copy it manually from
-`windows/opencv/build/x64/vc15/bin/opencv_videoio_ffmpeg455_64.dll` into the
+`windows/opencv/build/x64/vc16/bin/opencv_videoio_ffmpeg4130_64.dll` into the
 build dir (alongside the exe). The other subcommands don't need it.
 
 ### `video` subcommand: automatic horizontal vs. vertical crop
@@ -280,7 +280,7 @@ A Debug build differs from Release in three ways that matter:
   subcommand's round-trip assertion, and every internal `assert_` in the
   pipeline, **only fire in a Debug build**. A failed `assert_` calls `_wassert`,
   which pops the abort/retry/ignore dialog and breaks into an attached debugger.
-- POST_BUILD copies the debug OpenCV DLL (`opencv_world455d.dll`) instead of the
+- POST_BUILD copies the debug OpenCV DLL (`opencv_world4130d.dll`) instead of the
   release one. (FFmpeg DLL is still not copied — see the `video` note above.)
 
 (The compile-time log level floor is independent of build type — see **Logs**.)

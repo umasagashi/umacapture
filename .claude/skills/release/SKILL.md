@@ -176,7 +176,7 @@ release the publisher creates attaches to the pushed `v<version>` tag.
    Two files matter: `umacapture.pdb` (covers the runner **and** the native C++
    backend, which is linked straight into the exe) and the engine's
    `flutter_windows.dll.pdb` (already in the FVM SDK cache — no download). Third-
-   party DLLs (`opencv_world455.dll`, `onnxruntime.dll`) ship without PDBs and
+   party DLLs (`opencv_world4130.dll`, `onnxruntime.dll`) ship without PDBs and
    stay unsymbolicated; that is expected.
    ```bash
    export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"

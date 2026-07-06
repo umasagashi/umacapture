@@ -8,9 +8,9 @@ The C++ backend (``native/CMakeLists.txt`` and ``windows/runner``) links against
 two large prebuilt third-party packages that are gitignored and were historically
 copied in by hand:
 
-* **OpenCV 4.5.5** -> ``windows/opencv`` (the official ``opencv_world455`` prebuilt,
+* **OpenCV 4.13.0** -> ``windows/opencv`` (the official ``opencv_world4130`` prebuilt,
   distributed as a 7-Zip self-extracting ``.exe``).
-* **ONNX Runtime 1.11.1** -> ``windows/onnxruntime`` (the official ``win-x64`` zip,
+* **ONNX Runtime 1.27.0** -> ``windows/onnxruntime`` (the official ``win-x64`` zip,
   plus two ``experimental_onnxruntime_cxx_*`` headers that live only in the source
   tree, not the release zip).
 
@@ -49,25 +49,25 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WINDOWS_DIR = REPO_ROOT / "windows"
 
-OPENCV_URL = "https://github.com/opencv/opencv/releases/download/4.5.5/opencv-4.5.5-vc14_vc15.exe"
-OPENCV_SHA256 = "cac31973cd1c59bfe9dc926acbde815553d23662ea355e0414b5e50d8f8aa5a8"
+OPENCV_URL = "https://github.com/opencv/opencv/releases/download/4.13.0/opencv-4.13.0-windows.exe"
+OPENCV_SHA256 = "f0e98c302464d6860777a7015065e11b9b271b5394e6ba92663f0cf1fc303f2c"
 
-ONNX_URL = "https://github.com/microsoft/onnxruntime/releases/download/v1.11.1/onnxruntime-win-x64-1.11.1.zip"
-ONNX_SHA256 = "1f127b9d41f445a2d03356c86c125cb79dc3e66d391872c9babe6b444a51a93d"
+ONNX_URL = "https://github.com/microsoft/onnxruntime/releases/download/v1.27.0/onnxruntime-win-x64-1.27.0.zip"
+ONNX_SHA256 = "c5c81710938e68079ff1a192b04897faabe4b43830d48f39f27ecd4e16138bfc"
 
 # The C++ recognizer uses ONNX Runtime's experimental C++ session wrapper, which
-# ships only in the source tree (tagged v1.11.1), not in the win-x64 release zip.
+# ships only in the source tree (tagged v1.27.0), not in the win-x64 release zip.
 # Pinned to the raw blobs at that tag; each is hash-verified like the archives.
 ONNX_HEADERS = {
     "experimental_onnxruntime_cxx_api.h": (
-        "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.11.1"
+        "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0"
         "/include/onnxruntime/core/session/experimental_onnxruntime_cxx_api.h",
-        "bd209c5e6f7352babb30afc642d76ba3f9f89735cc342170b5909880a7427517",
+        "0e60a8a69e56982a51e548dab41d6d10c0a1cd98762648dee0d1ea90ce0a0041",
     ),
     "experimental_onnxruntime_cxx_inline.h": (
-        "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.11.1"
+        "https://raw.githubusercontent.com/microsoft/onnxruntime/v1.27.0"
         "/include/onnxruntime/core/session/experimental_onnxruntime_cxx_inline.h",
-        "0263599112d7d900ccc0643658a9062740f23e0a587c2fba0ab6bb52f6d5ab65",
+        "7f5cf1653e7379f7107ce0148d28499240ac89cf728aa6ac47ffd33a1a888600",
     ),
 }
 

@@ -128,14 +128,26 @@ extraction. Provisioning OpenCV requires Windows (it's a self-extracting `.exe`)
 
 | Dependency | Version | Lands at |
 |---|---|---|
-| OpenCV | 4.5.5 (vc14/vc15) | `windows/opencv/build` |
-| ONNX Runtime | 1.11.1 | `windows/onnxruntime/{include,lib}` |
+| OpenCV | 4.13.0 (vc16) | `windows/opencv/build` |
+| ONNX Runtime | 1.27.0 | `windows/onnxruntime/{include,lib}` |
 
 The third native dependency, `windows/clip`, is **committed** to the repo (pure MIT
 source, no binaries — see [`windows/clip/VENDORED.md`](../../../windows/clip/VENDORED.md)),
 so it needs no fetch. To bump an OpenCV/ONNX version, edit the pinned `*_URL` /
-`*_SHA256` constants in [`tool/fetch_deps.py`](../../../tool/fetch_deps.py) and
-re-run with `--force`. CI provisions OpenCV with the same script.
+`*_SHA256` constants in [`tool/fetch_deps.py`](../../../tool/fetch_deps.py) (for
+ONNX also re-pin the two `ONNX_HEADERS` hashes at the new tag) and re-run with
+`--force`. An OpenCV bump has three coupled edits beyond the URL/hash, because the
+prebuilt encodes the version and MSVC toolset in its layout (`build/x64/vc16/bin/opencv_world<ver>.dll`):
+
+- `OpenCV_VERSION` / `OpenCV_RUNTIME` in **both** [`native/CMakeLists.txt`](../../../native/CMakeLists.txt)
+  and [`windows/runner/CMakeLists.txt`](../../../windows/runner/CMakeLists.txt)
+  (e.g. `455`/`vc15` → `4130`/`vc16` — the runtime folder changed from `vc15` to
+  `vc16` after OpenCV 4.6, and the release asset was renamed from
+  `opencv-<ver>-vc14_vc15.exe` to `opencv-<ver>-windows.exe` at 4.7.0);
+- the `key:` of the **Cache OpenCV** step in [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)
+  — it pins the version, so a stale key would restore the old tree and break the build.
+
+CI provisions OpenCV with the same script.
 
 ### 5. Resolve Dart packages
 

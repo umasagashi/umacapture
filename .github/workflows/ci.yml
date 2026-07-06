@@ -29,19 +29,20 @@ jobs:
         with:
           arch: x64
 
-      # OpenCV 4.5.5 (vc15) is a gitignored, manually-placed third-party dependency
+      # OpenCV 4.13.0 (vc16) is a gitignored, manually-placed third-party dependency
       # (windows/.gitignore) that native/CMakeLists.txt references at
       # windows/opencv/build. Restore it from cache, or provision it on a cache miss
       # with the same tool/fetch_deps.py a local dev runs -- one source of truth for
       # the pinned URL + SHA-256 (no inline download logic to drift). onnxruntime/clip
       # are deliberately NOT provisioned: the umacapture_tests target links only OpenCV
-      # (the cli/app targets that need ONNX are never built here).
-      - name: Cache OpenCV 4.5.5
+      # (the cli/app targets that need ONNX are never built here). The cache key pins
+      # the version, so bumping OpenCV in fetch_deps.py must bump the key here too.
+      - name: Cache OpenCV 4.13.0
         id: cache-opencv
         uses: actions/cache@v4
         with:
           path: windows/opencv
-          key: opencv-4.5.5-vc14_vc15
+          key: opencv-4.13.0-windows
 
       # uv runs tool/fetch_deps.py (stdlib-only); only needed on a cache miss.
       - name: Set up uv
