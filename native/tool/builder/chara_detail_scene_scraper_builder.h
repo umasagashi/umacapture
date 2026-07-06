@@ -93,12 +93,12 @@ private:
     // history) instead of empty space, stop on green in the RIGHT factor column. x=0.6017 mirrors
     // col161 (0.2184) by the recognizer column offset (right_rect.left - left_rect.left =
     // 0.6259 - 0.2426 = 0.3833); no green factor card or character portrait ever renders in that
-    // column, so its green noise floor is 0 px and a 10 px run (partial of the 24 px bar) cannot
+    // column, so its green noise floor is 0 px and a 5 px run (partial of the 24 px bar) cannot
     // false-fire. It is armed only after scan0 is consumed, so the top "因子" green header (inside
     // scan0's 361 px) cannot trigger it. The range matches both recorded clips and the dimmer live
     // WinRT green (G>=177), same UI green as header_color_range.
     [[nodiscard]] chara_detail::scraper_config::ScanParameter factorEndGreen() const {
-        return {0.6017, 10.0 / 736.0, colorRange({128, 222, 20}, 45)};
+        return {0.6017, 5.0 / 736.0, colorRange({128, 222, 20}, 45)};
     }
 
     [[nodiscard]] std::vector<chara_detail::scraper_config::ScanParameter> campaignScanParameters() const {
