@@ -370,8 +370,10 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
         if (++current_scan != scan_parameters.end()) {
             continue;
         }
-        // The factor box crops a fixed margin below the last factor (see factorEndCropY) so its bottom
-        // margin is constant with or without inheritance history; other boxes crop at the scan point.
+        // Gray-sequence completion (reached only with enough inheritance history to accumulate the gray
+        // tail): the factor box crops a fixed margin below the last factor (see factorEndCropY) instead of
+        // at the scan point, keeping the bottom margin constant across long histories. Short histories
+        // terminate via probeGreenTerminator() instead, which does not pass through here.
         const double crop_y = end_green ? factorEndCropY(scaled_top_left.y(), scaled_y) : scaled_y;
         if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
             saveIncremental(frame.view(rect));
@@ -674,6 +676,12 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     // no strip is latched -- exactly the case a latch-coupled scan misses. Skip frames with no usable
     // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
     if (offset.has_value() && scraping_box->probeGreenTerminator(frame, std::lround(offset.value()))) {
+        // Report the final position before going Ready so the UI progress reaches 100% for the tab,
+        // matching the gray-completion path below (which emits via addScrollArea). Without this, a
+        // short-history factor tab that ends via the green terminator would stall one update short.
+        if (const auto position = offset_estimator.position(current_fragment)) {
+            on_scroll_updated->send(position.value());
+        }
         state = Ready;
         return;
     }
