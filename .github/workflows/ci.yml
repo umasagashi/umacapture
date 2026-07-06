@@ -49,7 +49,7 @@ jobs:
         if: steps.cache-opencv.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v6
 
-      - name: Provision OpenCV 4.5.5
+      - name: Provision OpenCV 4.13.0
         if: steps.cache-opencv.outputs.cache-hit != 'true'
         run: uv run tool/fetch_deps.py --only opencv
 

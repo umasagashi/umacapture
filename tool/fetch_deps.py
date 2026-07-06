@@ -77,10 +77,15 @@ def log(message: str) -> None:
     print(f"[fetch_deps] {message}", flush=True)
 
 
+# Per-read socket timeout (seconds). Bounds a stalled connection so a hung
+# download fails fast in CI instead of blocking the job until it times out.
+DOWNLOAD_TIMEOUT = 60
+
+
 def download(url: str, dest: Path) -> None:
     """Stream ``url`` to ``dest``."""
     log(f"downloading {url}")
-    with urllib.request.urlopen(url) as response, dest.open("wb") as out:
+    with urllib.request.urlopen(url, timeout=DOWNLOAD_TIMEOUT) as response, dest.open("wb") as out:
         shutil.copyfileobj(response, out)
 
 
