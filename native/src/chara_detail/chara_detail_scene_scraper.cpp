@@ -39,28 +39,154 @@ constexpr double kFactorEndGreenSearchSpan = 0.08;
 }  // namespace
 
 ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
-    const Range<Color> &scroll_bar_bg_color_range, const Line<double> &scroll_bar_scan_line)
+    const Range<Color> &scroll_bar_bg_color_range,
+    const Line<double> &scroll_bar_scan_line,
+    const Range<Color> &scroll_bar_margin_color_range,
+    double viewport,
+    double cap_offset)
     : scroll_bar_bg_color_range(scroll_bar_bg_color_range)
-    , scroll_bar_scan_line(scroll_bar_scan_line) {}
+    , scroll_bar_scan_line(scroll_bar_scan_line)
+    , scroll_bar_margin_color_range(scroll_bar_margin_color_range)
+    , viewport(viewport)
+    , cap_offset(cap_offset) {}
 
 bool ScrollBarOffsetEstimator::hasScrollbar(const Frame &frame) const {
     return findScrollbar(frame).has_value();
 }
 
-std::optional<double> ScrollBarOffsetEstimator::position(const Frame &frame) const {
-    const auto margin = scanMargin(frame);
-    if (!margin) {
+std::optional<ScrollBarOffsetEstimator::TrackGeometry>
+ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &scan_line) const {
+    // Background run from each end reaches the thumb (dark, out of the light bg range). == 1. means the whole
+    // line is background: no thumb, so no scrollbar. Same guard as scanMargin().
+    const auto upper = frame.lengthIn(scroll_bar_bg_color_range, scan_line);
+    const auto lower = frame.lengthIn(scroll_bar_bg_color_range, scan_line.reversed());
+    if (!upper || upper.value() == 1. || !lower || lower.value() == 1.) {
+        return std::nullopt;  // Bar not found.
+    }
+
+    // Margin run from each end reaches the (non-white) placeholder track, locating its fixed top/bottom.
+    // Fail open: if the near-white margin is absent (== 1. is the whole line, so ignore it too), fall back to
+    // the scan endpoints, i.e. the old scan-line-relative behaviour, rather than dropping the whole frame.
+    const auto margin_upper = frame.lengthIn(scroll_bar_margin_color_range, scan_line);
+    const auto margin_lower = frame.lengthIn(scroll_bar_margin_color_range, scan_line.reversed());
+    const double m_up = (margin_upper && margin_upper.value() < 1.) ? margin_upper.value() : 0.0;
+    const double m_lo = (margin_lower && margin_lower.value() < 1.) ? margin_lower.value() : 0.0;
+
+    const auto scan = frame.anchor().absolute(scan_line).vertical();
+    const double thumb_top = scan.pointAt(upper.value());
+    const double thumb_bottom = scan.pointAt(1. - lower.value());
+    const double track_top = scan.pointAt(m_up);
+    const double track_bottom = scan.pointAt(1. - m_lo);
+
+    const double thumb_logical = (thumb_bottom - thumb_top) - 2. * cap_offset;
+    const double track_span = track_bottom - track_top;
+    if (thumb_logical <= 0. || track_span <= 0.) {
         return std::nullopt;
     }
-    return 1.0 - margin->second;
+    // Clamp on overscroll: the thumb shortens and its top pins to the track top, so a tiny negative gap from
+    // sub-pixel noise should read as "at the top" (0), not a small backward offset.
+    const double upper_gap = std::max(0., thumb_top - track_top);
+    return TrackGeometry{upper_gap, track_span, thumb_logical};
+}
+
+std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame) const {
+    // Locate the thumb vertically at the configured column (its dark run out of the light bg), then read the
+    // AA coverage centroid across the columns spanning the thumb over its central rows (caps skipped).
+    const auto upper = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line);
+    const auto lower = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line.reversed());
+    if (!upper || upper.value() == 1. || !lower || lower.value() == 1.) {
+        return std::nullopt;
+    }
+    const auto &anchor = frame.anchor();
+    const auto scan = anchor.absolute(scroll_bar_scan_line).vertical();
+    const int unit = anchor.scaleToPixels(1.0);
+    const int cfg = anchor.scaleToPixels(scroll_bar_scan_line.p1().x());
+    const int thumb_top = anchor.scaleToPixels(scan.pointAt(upper.value()));
+    const int thumb_bottom = anchor.scaleToPixels(scan.pointAt(1. - lower.value()));
+
+    constexpr int kHalf = 8;      // centroid window half-width (columns)
+    constexpr int kWhiteGap = 9;  // white reference sampled at +-[7,9] from cfg, clear of the ~7 px pill
+    constexpr int kCapSkip = 3;   // rows skipped at each rounded cap (sub-thumb intensity)
+    constexpr int kMaxRows = 32;  // cap the sampled rows so a tall thumb stays cheap
+    constexpr double kMinContrast = 20.;
+
+    const cv::Mat &image = frame.data();
+    const int row_lo = thumb_top + kCapSkip;
+    const int row_hi = thumb_bottom - kCapSkip;
+    if (cfg - kWhiteGap < 0 || cfg + kWhiteGap >= image.cols || row_lo < 0 || row_hi >= image.rows
+        || row_hi - row_lo < 1) {
+        return std::nullopt;
+    }
+    const auto red = [&image](int x, int y) { return static_cast<double>(image.at<cv::Vec3b>(y, x)[2]); };
+
+    const int stride = std::max(1, (row_hi - row_lo) / kMaxRows);
+    std::vector<double> centers;
+    for (int y = row_lo; y <= row_hi; y += stride) {
+        std::array<double, 6> whites = {
+            red(cfg - kWhiteGap, y),
+            red(cfg - kWhiteGap + 1, y),
+            red(cfg - kWhiteGap + 2, y),
+            red(cfg + kWhiteGap - 2, y),
+            red(cfg + kWhiteGap - 1, y),
+            red(cfg + kWhiteGap, y),
+        };
+        std::sort(whites.begin(), whites.end());
+        const double white = (whites[2] + whites[3]) / 2.;
+        double core = 255.;
+        for (int x = cfg - 2; x <= cfg + 2; x++) {
+            core = std::min(core, red(x, y));
+        }
+        if (white - core < kMinContrast) {
+            continue;
+        }
+        double weight_sum = 0.;
+        double weighted_x = 0.;
+        for (int x = cfg - kHalf; x <= cfg + kHalf; x++) {
+            const double coverage = std::clamp((white - red(x, y)) / (white - core), 0., 1.);
+            weight_sum += coverage;
+            weighted_x += coverage * x;
+        }
+        if (weight_sum >= 3.) {
+            centers.push_back(weighted_x / weight_sum);
+        }
+    }
+    if (centers.empty()) {
+        return std::nullopt;
+    }
+    std::nth_element(centers.begin(), centers.begin() + static_cast<long>(centers.size() / 2), centers.end());
+    return centers[centers.size() / 2] / unit;
+}
+
+std::optional<ScrollBarOffsetEstimator::TrackGeometry>
+ScrollBarOffsetEstimator::trackGeometry(const Frame &frame) const {
+    const auto center_x = trackCenterX(frame);
+    if (!center_x) {
+        return geometryAt(frame, scroll_bar_scan_line);  // Fall back to the fixed config column.
+    }
+    const auto &p1 = scroll_bar_scan_line.p1();
+    const auto &p2 = scroll_bar_scan_line.p2();
+    const Line<double> centered_line{{center_x.value(), p1.y(), p1.anchor()}, {center_x.value(), p2.y(), p2.anchor()}};
+    return geometryAt(frame, centered_line);
+}
+
+std::optional<double> ScrollBarOffsetEstimator::position(const Frame &frame) const {
+    const auto geometry = trackGeometry(frame);
+    if (!geometry) {
+        return std::nullopt;
+    }
+    const double scrollable = geometry->track_span - geometry->thumb_logical;
+    if (scrollable <= 0.) {
+        return std::nullopt;  // Thumb fills the track: nothing to scroll.
+    }
+    return std::clamp(geometry->upper_gap / scrollable, 0., 1.);
 }
 
 std::optional<double> ScrollBarOffsetEstimator::topMargin(const Frame &frame) const {
-    const auto margin = scanMargin(frame);
-    if (!margin) {
+    const auto geometry = trackGeometry(frame);
+    if (!geometry) {
         return std::nullopt;
     }
-    return margin->first;
+    return geometry->upper_gap / geometry->track_span;
 }
 
 std::optional<double> ScrollBarOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
@@ -113,29 +239,21 @@ std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::scanMargin(co
 }
 
 std::optional<double> ScrollBarOffsetEstimator::scrollOffsetGuess(const Frame &from, const Frame &to) const {
-    const auto from_margin = scanMargin(from);
-    const auto to_margin = scanMargin(to);
-    if (!from_margin || !to_margin) {
+    const auto from_geometry = trackGeometry(from);
+    const auto to_geometry = trackGeometry(to);
+    if (!from_geometry || !to_geometry) {
         return std::nullopt;
     }
-    // Absolute scroll offset (content px from the top) implied by one frame's scrollbar geometry, using
-    // THAT frame's own thumb length -- unlike estimate()'s shared-length delta, this stays correct
-    // across a thumb-length change. Derivation: total content = V/f, scrollable range = V(1/f - 1),
-    // scrolled fraction = upper/(upper+lower); their product simplifies to V*upper/f.
-    const auto absolute_offset = [](const Frame &frame,
-                                    const std::pair<double, double> &margin) -> std::optional<double> {
-        const double thumb_length = 1.0 - margin.first - margin.second;
-        if (thumb_length <= 0.0) {
-            return std::nullopt;
-        }
-        return static_cast<double>(frame.height()) * margin.first / thumb_length;
+    // Absolute scroll offset (content px from the top) implied by one frame's scrollbar geometry, using THAT
+    // frame's own thumb length -- unlike estimate()'s shared-length delta, this stays correct across a
+    // thumb-length change. abs = V * upper_gap / thumb_logical, with V the true viewport (config, width-
+    // normalized -> px via scaleToPixels) rather than the crop height, and thumb_logical the cap-corrected
+    // thumb length. The fixed track top cancels in the delta below, but V and the -2c correction do not.
+    const auto absolute_offset = [this](const Frame &frame, const TrackGeometry &geometry) -> double {
+        const double viewport_px = frame.anchor().scaleToPixels(viewport);
+        return viewport_px * geometry.upper_gap / geometry.thumb_logical;
     };
-    const auto from_offset = absolute_offset(from, from_margin.value());
-    const auto to_offset = absolute_offset(to, to_margin.value());
-    if (!from_offset || !to_offset) {
-        return std::nullopt;
-    }
-    return to_offset.value() - from_offset.value();
+    return absolute_offset(to, to_geometry.value()) - absolute_offset(from, from_geometry.value());
 }
 
 ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
@@ -839,8 +957,12 @@ void SceneScraper::build(const Frame &frame) {
     const auto initial_frame = frame.view(config.scroll_area_rect);
     log_debug("{}, {}", initial_frame.size().width(), initial_frame.size().height());
 
-    scroll_bar_estimator =
-        std::make_unique<ScrollBarOffsetEstimator>(config.scroll_bar_bg_color, config.scroll_bar_scan_line);
+    scroll_bar_estimator = std::make_unique<ScrollBarOffsetEstimator>(
+        config.scroll_bar_bg_color,
+        config.scroll_bar_scan_line,
+        config.scroll_bar_margin_color,
+        config.viewport,
+        config.cap_offset);
     const auto &scroll_bar_offset_estimator = *scroll_bar_estimator;
 
     const auto stationary_catcher = StationaryFrameCatcher(

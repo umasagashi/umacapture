@@ -55,6 +55,16 @@ struct SceneScraperConfig {
     uint64 stationary_time_threshold;
     int minimum_color_threshold;
     uint64 stationary_color_threshold;
+    // Scrollbar physics, all width-normalized so they scale with the screen and never depend on the crop
+    // height (each layout carries its own values). `viewport` is the visible content height V used to turn
+    // thumb geometry into a content-pixel offset (abs = V * upper_gap / thumb_length); it is NOT the crop
+    // height. `cap_offset` is the thumb's rounded-cap depth c: the tip-to-tip length over-reads the logical
+    // thumb length by 2c, so the logical length is `tip - 2 * cap_offset`. `scroll_bar_margin_color` is the
+    // near-white band flanking the placeholder track; isolating it locates the fixed track ends so the
+    // position is measured against the true track, not the (slightly longer) config scan line.
+    double viewport;
+    double cap_offset;
+    Range<Color> scroll_bar_margin_color;
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
@@ -69,7 +79,10 @@ struct SceneScraperConfig {
         minimum_scroll_threshold,
         stationary_time_threshold,
         minimum_color_threshold,
-        stationary_color_threshold);
+        stationary_color_threshold,
+        viewport,
+        cap_offset,
+        scroll_bar_margin_color);
 };
 
 struct ScanParameter {

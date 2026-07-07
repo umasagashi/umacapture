@@ -53,16 +53,24 @@ struct FrameDescriptor {
 
 class ScrollBarOffsetEstimator {
 public:
-    ScrollBarOffsetEstimator(const Range<Color> &scroll_bar_bg_color_range, const Line<double> &scroll_bar_scan_line);
+    ScrollBarOffsetEstimator(
+        const Range<Color> &scroll_bar_bg_color_range,
+        const Line<double> &scroll_bar_scan_line,
+        const Range<Color> &scroll_bar_margin_color_range,
+        double viewport,
+        double cap_offset);
 
     [[nodiscard]] bool hasScrollbar(const Frame &frame) const;
 
+    // Scroll position as a fraction of the scrollable range: 0 at the very top, 1 at the bottom. Derived
+    // from the true placeholder track (upper_gap / (track_span - thumb_length)), so the config scan line's
+    // deliberate overshoot past the track no longer biases it. nullopt when no scrollbar is present.
     [[nodiscard]] std::optional<double> position(const Frame &frame) const;
 
-    // Fraction of the scroll track above the thumb (distance from the top edge to the thumb's top). It is ~0
-    // when the content is scrolled to the very top and grows as the user scrolls down, independent of the
-    // thumb's length. Returns nullopt when no scrollbar is present (a short, non-scrollable page). Used to
-    // detect a completed tab snapping back to the top after a character switch.
+    // Fraction of the placeholder track above the thumb (thumb top relative to the track top). It is ~0 when
+    // the content is scrolled to the very top and grows as the user scrolls down, independent of the thumb's
+    // length. Returns nullopt when no scrollbar is present (a short, non-scrollable page). Used to detect a
+    // completed tab snapping back to the top after a character switch.
     [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const;
 
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
@@ -74,12 +82,38 @@ public:
     [[nodiscard]] std::optional<double> scrollOffsetGuess(const Frame &from, const Frame &to) const;
 
 private:
+    // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from
+    // colour runs along the scan line: the background run reaches the (dark) thumb, the margin run reaches
+    // the (near-white) edge of the track. Measuring against the track, not the scan line, removes the
+    // scan-line overshoot; only the thumb length carries the -2c cap correction (the caps cancel in
+    // upper_gap since the thumb top and track top share the same cap geometry).
+    struct TrackGeometry {
+        double upper_gap;      // thumb_top - track_top, clamped >= 0 (overscroll pins the thumb to the top)
+        double track_span;     // track_bottom - track_top (the placeholder length)
+        double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
+    };
+
+    [[nodiscard]] std::optional<TrackGeometry> trackGeometry(const Frame &frame) const;
+
+    // TrackGeometry from the colour runs along one scan column. trackGeometry() picks the column
+    // (trackCenterX, falling back to the config line) and delegates here.
+    [[nodiscard]] std::optional<TrackGeometry> geometryAt(const Frame &frame, const Line<double> &scan_line) const;
+
+    // Sub-pixel thumb centre x (width-normalized) from an AA intensity-weighted centroid over the thumb's
+    // central rows, so the vertical scan self-centres on the thumb instead of trusting the fixed config x
+    // (~10x more stable than a hard threshold; tolerates layout/resolution drift). nullopt when the thumb is
+    // not found or the cap contrast is too low, so trackGeometry() falls back to the config column.
+    [[nodiscard]] std::optional<double> trackCenterX(const Frame &frame) const;
+
     [[nodiscard]] std::optional<Line1D<double>> findScrollbar(const Frame &frame) const;
 
     [[nodiscard]] std::optional<std::pair<double, double>> scanMargin(const Frame &frame) const;
 
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
+    const Range<Color> scroll_bar_margin_color_range;
+    const double viewport;
+    const double cap_offset;
 };
 
 class ImageOffsetEstimator {

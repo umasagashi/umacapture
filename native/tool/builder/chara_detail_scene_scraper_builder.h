@@ -52,6 +52,15 @@ private:
             200,
             18,
             100,
+            // Viewport V and cap offset c fit across player_standard/player_inheritance/friend_inheritance
+            // (common layout): tip_len = 2c + V*slope, R^2 = 1.0 -> V = 543 px, c = 0.94 px at 736 px width.
+            // Stored width-normalized: 543/736 = 0.738, 0.94/736 = 0.00126. c is a widget constant (shared).
+            0.738,
+            0.00126,
+            // Placeholder track is faintly coloured (satisfies R < 228 or G < 228); the near-white scroll-area
+            // margin flanking it is all channels >= 228. This box catches that margin and excludes the track,
+            // so the top/bottom margin runs locate the fixed track ends.
+            Range<Color>{{228, 228, 228}, {255, 255, 255}},
         };
     }
 
@@ -64,6 +73,10 @@ private:
         const double shift = friend_layout_shift;
         config.tab_button_rect = {{0.0222, 0.7259 + shift, IS}, {0.9759, 0.8037 + shift, IS}};
         config.scroll_area_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
+        // The shorter friend scroll area has a smaller viewport: fit across friend_standard /
+        // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. cap_offset and
+        // the margin colour are widget constants, unchanged from common().
+        config.viewport = 0.553;
         return config;
     }
 

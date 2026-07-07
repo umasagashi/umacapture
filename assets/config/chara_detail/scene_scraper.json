@@ -124,7 +124,21 @@
     "minimum_scroll_threshold": 0.05,
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
-    "stationary_color_threshold": 100
+    "stationary_color_threshold": 100,
+    "viewport": 0.738,
+    "cap_offset": 0.00126,
+    "scroll_bar_margin_color": {
+      "min": {
+        "r": 228,
+        "g": 228,
+        "b": 228
+      },
+      "max": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      }
+    }
   },
   "friend_common": {
     "base_image_stationary_rect": {
@@ -251,7 +265,21 @@
     "minimum_scroll_threshold": 0.05,
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
-    "stationary_color_threshold": 100
+    "stationary_color_threshold": 100,
+    "viewport": 0.553,
+    "cap_offset": 0.00126,
+    "scroll_bar_margin_color": {
+      "min": {
+        "r": 228,
+        "g": 228,
+        "b": 228
+      },
+      "max": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      }
+    }
   },
   "skill_scans": [
     {
