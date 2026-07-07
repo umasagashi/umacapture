@@ -122,7 +122,7 @@
     },
     "scroll_bar_scan_line": {
       "p1": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": 0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -130,7 +130,7 @@
         }
       },
       "p2": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": -0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -281,7 +281,7 @@
     },
     "scroll_bar_scan_line": {
       "p1": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": 0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -289,7 +289,7 @@
         }
       },
       "p2": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": -0.0092,
         "anchor": {
           "h": "IntersectStart",
