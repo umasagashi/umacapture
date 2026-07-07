@@ -44,6 +44,8 @@ private:
             Rect<double>{{0.0, 0.0, IS}, {0.0, 0.0, ILE}},
             Rect<double>{{0.0222, 0.7259, IS}, {0.9759, 0.8037, IS}},
             Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
+            // scroll_bar_rect: full-width band for scrollbar detection, initially identical to scroll_area_rect.
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
             Rect<double>{{0.0222, 0.0000, IS}, {-0.0222, 0.0000, {ILE, IPE}}},
             Range<Color>{Color{123, 121, 140} + 30, {255, 255, 255}},
             Line<double>{{0.9676, 0.0092, IS}, {0.9676, -0.0092, {IS, ILE}}},
@@ -66,13 +68,15 @@ private:
 
     // The Friend layout differs from Standard only by shifting the tab bar and the scroll
     // area down. The scroll-bar scan line, scroll-area stationary rect and scan parameters
-    // are all relative to the cropped scroll area, so only the two absolute, top-anchored
-    // rects move; the scroll area bottom stays anchored to the screen bottom (ILE).
+    // are all relative to the cropped scroll area, so only the absolute, top-anchored rects
+    // move (tab button, scroll area and scroll-bar band); the scroll area bottom stays
+    // anchored to the screen bottom (ILE).
     [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig friendCommon() const {
         auto config = common();
         const double shift = friend_layout_shift;
         config.tab_button_rect = {{0.0222, 0.7259 + shift, IS}, {0.9759, 0.8037 + shift, IS}};
         config.scroll_area_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
+        config.scroll_bar_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
         // The shorter friend scroll area has a smaller viewport: fit across friend_standard /
         // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. cap_offset and
         // the margin colour are widget constants, unchanged from common().

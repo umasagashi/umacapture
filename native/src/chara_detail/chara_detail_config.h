@@ -47,6 +47,11 @@ struct SceneScraperConfig {
     Rect<double> base_image_rect;
     Rect<double> tab_button_rect;
     Rect<double> scroll_area_rect;
+    // Full-width band the scrollbar is detected in, decoupled from scroll_area_rect (the content/stitch crop)
+    // so the latter can move without shifting the scan geometry. It MUST stay full width (x IntersectStart ->
+    // IntersectPixelEnd): the scan line x, viewport and cap_offset are all normalized by the crop width, so a
+    // narrower band would silently mis-scale them. Only its y-range is meant to diverge from scroll_area_rect.
+    Rect<double> scroll_bar_rect;
     Rect<double> scroll_area_stationary_rect;
     Range<Color> scroll_bar_bg_color;
     Line<double> scroll_bar_scan_line;
@@ -72,6 +77,7 @@ struct SceneScraperConfig {
         base_image_rect,
         tab_button_rect,
         scroll_area_rect,
+        scroll_bar_rect,
         scroll_area_stationary_rect,
         scroll_bar_bg_color,
         scroll_bar_scan_line,

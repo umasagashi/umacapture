@@ -145,20 +145,42 @@ TEST_CASE("ScrollAreaOffsetEstimator delegates position and short-circuits witho
     const ImageOffsetEstimator image;  // default config
     const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
 
-    const FrameDescriptor with_bar{scrollbarFrame(100, 40, 60)};
+    // FrameDescriptor carries the content crop (frame) and the scroll-bar band (scroll_bar_frame) separately;
+    // the scroll-area estimator reads geometry from scroll_bar_frame. Here they are the same synthetic frame.
+    const Frame bar = scrollbarFrame(100, 40, 60);
+    const FrameDescriptor with_bar{bar, bar};
     CHECK(estimator.position(with_bar).has_value());
 
     // Two uniform frames have no scroll bar, so the scroll-bar guess is nullopt and estimate() returns
     // before ever reaching the image matcher.
-    FrameDescriptor from{Frame::fixed(testutil::solid(100, kTrack))};
-    FrameDescriptor to{Frame::fixed(testutil::solid(100, kTrack))};
+    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
+    FrameDescriptor from{uniform, uniform};
+    FrameDescriptor to{uniform, uniform};
     CHECK_FALSE(estimator.estimate(from, to).has_value());
+}
+
+TEST_CASE("ScrollAreaOffsetEstimator reads scrollbar geometry from scroll_bar_frame, not frame") {
+    // Guards the scroll-area / scroll-bar decoupling: geometry must come from the dedicated band, so that the
+    // content crop (frame) can change without disturbing detection.
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset);
+    const ImageOffsetEstimator image;  // default config
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
+
+    const Frame bar = scrollbarFrame(100, 40, 60);
+    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
+
+    // Scrollbar present only in the band: position resolves from it even though the content frame is bare.
+    CHECK(estimator.position(FrameDescriptor{uniform, bar}).has_value());
+
+    // Scrollbar present only in the content frame: the estimator reads the band, so it sees nothing.
+    CHECK_FALSE(estimator.position(FrameDescriptor{bar, uniform}).has_value());
 }
 
 TEST_CASE("ImageOffsetEstimator returns nullopt when a frame yields no keypoints") {
     const ImageOffsetEstimator estimator;  // default config
-    FrameDescriptor from{Frame::fixed(testutil::solid(100, kTrack))};
-    FrameDescriptor to{Frame::fixed(testutil::solid(100, kTrack))};
+    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
+    FrameDescriptor from{uniform, uniform};
+    FrameDescriptor to{uniform, uniform};
 
     // A uniform frame produces zero AKAZE features and an empty descriptor matrix; the guard rejects it
     // rather than letting FLANN throw on the empty set.

@@ -43,7 +43,8 @@ inline bool readyAfterUpdate(T &subject, const Frame &frame) {
 }
 
 struct FrameDescriptor {
-    Frame frame;
+    Frame frame;             // content crop: image matching + capture
+    Frame scroll_bar_frame;  // full-width scrollbar band: scrollbar geometry only
     std::vector<cv::KeyPoint> key_points;
     cv::Mat descriptors;
 
@@ -352,8 +353,11 @@ enum ReadyState {
 class NonScrollableScrapingInterpreter : public ScrapingInterpreter {
 public:
     NonScrollableScrapingInterpreter(
-        const std::shared_ptr<PageScrapingBox> &scraping_box, const StationaryFrameCatcher &stationary_catcher);
+        const std::shared_ptr<PageScrapingBox> &scraping_box,
+        const StationaryFrameCatcher &stationary_catcher,
+        const Rect<double> &scroll_area_rect);
 
+    // Receives the full frame; crops the content region internally (see ScrollableScrapingInterpreter::update).
     void update(const Frame &frame) override;
 
     [[nodiscard]] bool ready() const override;
@@ -363,6 +367,7 @@ public:
 private:
     std::shared_ptr<PageScrapingBox> scraping_box;
     StationaryFrameCatcher stationary_catcher;
+    const Rect<double> scroll_area_rect;
     ReadyState state = Updatable;
     bool has_updated = false;
 };
@@ -373,11 +378,16 @@ public:
         const std::shared_ptr<PageScrapingBox> &scraping_box,
         const ScrollAreaOffsetEstimator &offset_estimator,
         const StationaryFrameCatcher &stationary_catcher,
+        const Rect<double> &scroll_area_rect,
+        const Rect<double> &scroll_bar_rect,
         double initial_scroll_threshold,
         double minimum_scroll_threshold,
         const event_util::Sender<> &on_scroll_ready,
         const event_util::Sender<double> &on_scroll_updated);
 
+    // Receives the FULL frame each update. The content crop (scroll_area_rect) drives the stationary catcher,
+    // image matcher and capture; the scroll-bar band (scroll_bar_rect) drives only the scrollbar estimator, so
+    // the two regions are decoupled.
     void update(const Frame &frame) override;
 
     [[nodiscard]] bool ready() const override;
@@ -390,7 +400,7 @@ public:
 private:
     void updateBefore(const Frame &frame);
 
-    void startScrolling(const Frame &valid_frame);
+    void startScrolling(const FrameDescriptor &valid_descriptor);
 
     void updateScrolling(const Frame &frame);
 
@@ -398,6 +408,8 @@ private:
     const event_util::Sender<double> on_scroll_updated;
 
     const ScrollAreaOffsetEstimator offset_estimator;
+    const Rect<double> scroll_area_rect;
+    const Rect<double> scroll_bar_rect;
     const double initial_scroll;
     const double minimum_scroll;
 

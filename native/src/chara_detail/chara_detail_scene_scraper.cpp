@@ -387,11 +387,11 @@ ScrollAreaOffsetEstimator::ScrollAreaOffsetEstimator(
     , image_offset_estimator(image_offset_estimator) {}
 
 std::optional<double> ScrollAreaOffsetEstimator::position(const FrameDescriptor &descriptor) const {
-    return scroll_bar_offset_estimator.position(descriptor.frame);
+    return scroll_bar_offset_estimator.position(descriptor.scroll_bar_frame);
 }
 
 std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    const auto guess = scroll_bar_offset_estimator.estimate(from.frame, to.frame);
+    const auto guess = scroll_bar_offset_estimator.estimate(from.scroll_bar_frame, to.scroll_bar_frame);
     if (!guess) {
         return std::nullopt;
     }
@@ -407,7 +407,7 @@ ScrollAreaOffsetEstimator::estimateAcrossRescale(FrameDescriptor &from, FrameDes
     if (!(from.frame.size() == to.frame.size())) {
         return std::nullopt;  // resolution change; estimate() already rejected it -- do not recover here.
     }
-    const auto guess = scroll_bar_offset_estimator.scrollOffsetGuess(from.frame, to.frame);
+    const auto guess = scroll_bar_offset_estimator.scrollOffsetGuess(from.scroll_bar_frame, to.scroll_bar_frame);
     if (!guess) {
         return std::nullopt;
     }
@@ -745,14 +745,18 @@ Frame StationaryFrameCatcher::croppedFrame() const {
 }
 
 NonScrollableScrapingInterpreter::NonScrollableScrapingInterpreter(
-    const std::shared_ptr<PageScrapingBox> &scraping_box, const StationaryFrameCatcher &stationary_catcher)
+    const std::shared_ptr<PageScrapingBox> &scraping_box,
+    const StationaryFrameCatcher &stationary_catcher,
+    const Rect<double> &scroll_area_rect)
     : stationary_catcher(stationary_catcher)
+    , scroll_area_rect(scroll_area_rect)
     , scraping_box(scraping_box) {}
 
 void NonScrollableScrapingInterpreter::update(const Frame &frame) {
     assert_(state == Updatable);
     has_updated = true;
-    if (readyAfterUpdate(stationary_catcher, frame)) {
+    // Crop the content region from the full frame; the catcher and capture see the same pixels as before.
+    if (readyAfterUpdate(stationary_catcher, frame.copy(scroll_area_rect))) {
         scraping_box->setScrollArea(stationary_catcher.fullSizeFrame());
         state = Ready;
     }
@@ -770,6 +774,8 @@ ScrollableScrapingInterpreter::ScrollableScrapingInterpreter(
     const std::shared_ptr<PageScrapingBox> &scraping_box,
     const ScrollAreaOffsetEstimator &offset_estimator,
     const StationaryFrameCatcher &stationary_catcher,
+    const Rect<double> &scroll_area_rect,
+    const Rect<double> &scroll_bar_rect,
     double initial_scroll_threshold,
     double minimum_scroll_threshold,
     const event_util::Sender<> &on_scroll_ready,
@@ -777,6 +783,8 @@ ScrollableScrapingInterpreter::ScrollableScrapingInterpreter(
     : on_scroll_ready(on_scroll_ready)
     , on_scroll_updated(on_scroll_updated)
     , offset_estimator(offset_estimator)
+    , scroll_area_rect(scroll_area_rect)
+    , scroll_bar_rect(scroll_bar_rect)
     , initial_scroll(initial_scroll_threshold)
     , minimum_scroll(minimum_scroll_threshold)
     , scraping_box(scraping_box)
@@ -801,34 +809,36 @@ bool ScrollableScrapingInterpreter::started() const {
 }
 
 void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
-    if (readyAfterUpdate(stationary_catcher, frame)) {
-        startScrolling(stationary_catcher.fullSizeFrame());
+    // `frame` is the full frame: the catcher/capture use the content crop, the estimator the scroll-bar band.
+    if (readyAfterUpdate(stationary_catcher, frame.copy(scroll_area_rect))) {
+        // The catcher latched a stationary content frame; pair it with the current (stationary) scroll-bar band.
+        startScrolling({stationary_catcher.fullSizeFrame(), frame.copy(scroll_bar_rect)});
         on_scroll_ready->send();
         return;
     }
 
     if (initial_descriptor.empty()) {
-        initial_descriptor = {frame};
+        initial_descriptor = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
         return;
     }
 
-    FrameDescriptor current_descriptor = {frame};
+    FrameDescriptor current_descriptor = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
     if (offset_estimator.estimate(initial_descriptor, current_descriptor).value_or(-1.0) > initial_scroll) {
-        startScrolling(initial_descriptor.frame);
+        startScrolling(initial_descriptor);
         // didn't get a stationary image, so won't send a ready.
         return;
     }
 }
 
-void ScrollableScrapingInterpreter::startScrolling(const Frame &valid_frame) {
-    scraping_box->addScrollArea(valid_frame);
-    previous_descriptor = {valid_frame};
+void ScrollableScrapingInterpreter::startScrolling(const FrameDescriptor &valid_descriptor) {
+    scraping_box->addScrollArea(valid_descriptor.frame);
+    previous_descriptor = valid_descriptor;
     is_scrolling = true;
     on_scroll_updated->send(offset_estimator.position(previous_descriptor).value_or(0.0));
 }
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
-    FrameDescriptor current_fragment = {frame};
+    FrameDescriptor current_fragment = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
     auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
     if (!offset.has_value()) {
         // The shared-length scroll-bar guess in estimate() breaks when the game lazily re-scales the
@@ -846,12 +856,13 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     // stationary (a scrollbar re-scale, not a real scroll), so the offset stays under minimum_scroll and
     // no strip is latched -- exactly the case a latch-coupled scan misses. Skip frames with no usable
     // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
-    if (offset.has_value() && scraping_box->detectGreenTerminator(frame, std::lround(offset.value()))) {
+    if (offset.has_value()
+        && scraping_box->detectGreenTerminator(current_fragment.frame, std::lround(offset.value()))) {
         // Crop the saved fragments to the same bottom line the gray-completion path uses, so the trailing
         // background below the last factor is a fixed margin regardless of which terminator ended the tab.
         // The last fragment otherwise runs to the frame bottom (addScrollArea's fallback save), leaving a
         // variable gap above the footer.
-        scraping_box->trimScrollAreaToFactorEnd(frame, std::lround(offset.value()));
+        scraping_box->trimScrollAreaToFactorEnd(current_fragment.frame, std::lround(offset.value()));
         // Report the final position before going Ready so the UI progress reaches 100% for the tab,
         // matching the gray-completion path below (which emits via addScrollArea). Without this, a
         // short-history factor tab that ends via the green terminator would stall one update short.
@@ -866,7 +877,7 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
         return;
     }
 
-    scraping_box->addScrollArea(frame, std::lround(offset.value()));
+    scraping_box->addScrollArea(current_fragment.frame, std::lround(offset.value()));
 
     // Report the position of the fragment just latched (current), not the previous one. position() reads only
     // the current frame's scrollbar geometry, so it is valid on current_fragment.
@@ -906,7 +917,8 @@ void SceneScraper::update(const Frame &frame) {
         readyForStitch();
     }
 
-    if (updateUntilReady(scroll_area_scraper, frame.copy(config.scroll_area_rect))) {
+    // Pass the full frame; the interpreter crops the content and scroll-bar regions internally.
+    if (updateUntilReady(scroll_area_scraper, frame)) {
         readyForStitch();
     }
 }
@@ -923,13 +935,16 @@ std::optional<double> SceneScraper::topMargin(const Frame &frame) const {
     if (scroll_bar_estimator == nullptr) {
         return std::nullopt;
     }
-    return scroll_bar_estimator->topMargin(frame.copy(config.scroll_area_rect));
+    return scroll_bar_estimator->topMargin(frame.copy(config.scroll_bar_rect));
 }
 
 void SceneScraper::build(const Frame &frame) {
     assert_(state == Null);
 
+    // Content crop: sizes the scroll thresholds (a content-scroll concern). Scroll-bar band: gates scrollbar
+    // detection, decoupled from the content crop.
     const auto initial_frame = frame.view(config.scroll_area_rect);
+    const auto scroll_bar_frame = frame.view(config.scroll_bar_rect);
     log_debug("{}, {}", initial_frame.size().width(), initial_frame.size().height());
 
     scroll_bar_estimator = std::make_unique<ScrollBarOffsetEstimator>(
@@ -946,17 +961,20 @@ void SceneScraper::build(const Frame &frame) {
         config.stationary_color_threshold,
         config.scroll_area_stationary_rect);
 
-    if (scroll_bar_offset_estimator.hasScrollbar(initial_frame)) {
+    if (scroll_bar_offset_estimator.hasScrollbar(scroll_bar_frame)) {
         scroll_area_scraper = std::make_unique<ScrollableScrapingInterpreter>(
             scraping_box,
             ScrollAreaOffsetEstimator(scroll_bar_offset_estimator, ImageOffsetEstimator()),
             stationary_catcher,
+            config.scroll_area_rect,
+            config.scroll_bar_rect,
             config.initial_scroll_threshold * initial_frame.height(),
             config.minimum_scroll_threshold * initial_frame.height(),
             on_scroll_ready,
             on_scroll_updated);
     } else {
-        scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(scraping_box, stationary_catcher);
+        scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(
+            scraping_box, stationary_catcher, config.scroll_area_rect);
     }
 
     tab_button_catcher = std::make_unique<StationaryFrameCatcher>(
