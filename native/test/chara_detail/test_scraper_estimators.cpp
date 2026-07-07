@@ -85,12 +85,18 @@ TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
 
 TEST_CASE("ScrollBarOffsetEstimator estimates a nonzero pixel offset between two thumb positions") {
     const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset);
-    FrameDescriptor from{scrollbarFrame(100, 40, 60)};
-    FrameDescriptor to{scrollbarFrame(100, 50, 70)};  // scrolled down: the thumb moved lower
+    const Frame from = scrollbarFrame(100, 40, 60);
+    const Frame to = scrollbarFrame(100, 50, 70);  // scrolled down: the thumb moved lower
 
     const auto offset = estimator.estimate(from, to);
     REQUIRE(offset.has_value());
-    CHECK(*offset != doctest::Approx(0.0));
+    CHECK(*offset > 0.0);  // scrolled down => positive content offset
+
+    // Unified geometry: estimate() (shared-length delta) and scrollOffsetGuess() (per-frame absolute
+    // difference) now read the same trackGeometry, so for a constant thumb length they agree.
+    const auto guess = estimator.scrollOffsetGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*offset == doctest::Approx(*guess));
 }
 
 TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess is zero for identical frames and positive scrolling down") {
@@ -128,8 +134,8 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess returns nullopt without a
 
 TEST_CASE("ScrollBarOffsetEstimator rejects a size change between frames") {
     const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset);
-    FrameDescriptor from{scrollbarFrame(100, 40, 60)};
-    FrameDescriptor to{scrollbarFrame(80, 32, 48)};
+    const Frame from = scrollbarFrame(100, 40, 60);
+    const Frame to = scrollbarFrame(80, 32, 48);
 
     CHECK_FALSE(estimator.estimate(from, to).has_value());
 }

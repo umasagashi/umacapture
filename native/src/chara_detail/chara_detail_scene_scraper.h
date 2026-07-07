@@ -44,7 +44,6 @@ inline bool readyAfterUpdate(T &subject, const Frame &frame) {
 
 struct FrameDescriptor {
     Frame frame;
-    double scroll_bar_length = 0.0;
     std::vector<cv::KeyPoint> key_points;
     cv::Mat descriptors;
 
@@ -73,7 +72,11 @@ public:
     // completed tab snapping back to the top after a character switch.
     [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const;
 
-    [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
+    // Content-pixel scroll offset between two frames: the placeholder-track upper_gap difference over a
+    // shared (cap-corrected) thumb length, scaled by the true viewport. The fixed track top cancels in the
+    // difference, so this delta form keeps low per-frame noise. The primary guess that seeds the image
+    // matcher for stitching. nullopt when either frame has no scrollbar or on a mid-scroll resolution change.
+    [[nodiscard]] std::optional<double> estimate(const Frame &from, const Frame &to) const;
 
     // Content-pixel scroll offset between two frames, computed from each frame's OWN thumb length, so it
     // stays correct across a thumb-length change (unlike estimate()'s shared-length delta). Used as the
@@ -104,10 +107,6 @@ private:
     // (~10x more stable than a hard threshold; tolerates layout/resolution drift). nullopt when the thumb is
     // not found or the cap contrast is too low, so trackGeometry() falls back to the config column.
     [[nodiscard]] std::optional<double> trackCenterX(const Frame &frame) const;
-
-    [[nodiscard]] std::optional<Line1D<double>> findScrollbar(const Frame &frame) const;
-
-    [[nodiscard]] std::optional<std::pair<double, double>> scanMargin(const Frame &frame) const;
 
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;

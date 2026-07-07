@@ -51,13 +51,13 @@ ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
     , cap_offset(cap_offset) {}
 
 bool ScrollBarOffsetEstimator::hasScrollbar(const Frame &frame) const {
-    return findScrollbar(frame).has_value();
+    return trackGeometry(frame).has_value();
 }
 
 std::optional<ScrollBarOffsetEstimator::TrackGeometry>
 ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &scan_line) const {
     // Background run from each end reaches the thumb (dark, out of the light bg range). == 1. means the whole
-    // line is background: no thumb, so no scrollbar. Same guard as scanMargin().
+    // line is background: no thumb, so no scrollbar.
     const auto upper = frame.lengthIn(scroll_bar_bg_color_range, scan_line);
     const auto lower = frame.lengthIn(scroll_bar_bg_color_range, scan_line.reversed());
     if (!upper || upper.value() == 1. || !lower || lower.value() == 1.) {
@@ -189,53 +189,31 @@ std::optional<double> ScrollBarOffsetEstimator::topMargin(const Frame &frame) co
     return geometry->upper_gap / geometry->track_span;
 }
 
-std::optional<double> ScrollBarOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    // A resolution change mid-scroll would mix from.frame.height() (new-frame pixels) with a scroll_bar_length
-    // latched at the old scale below, yielding a wrong pixel offset. Bail before touching the latch so it is not
-    // polluted with a cross-scale max. (!= is not auto-generated for value types here; use !(==).)
-    if (!(from.frame.size() == to.frame.size())) {
+std::optional<double> ScrollBarOffsetEstimator::estimate(const Frame &from, const Frame &to) const {
+    // A mid-scroll resolution change would mix from's pixel scale (viewport_px below) with a cross-scale
+    // averaged thumb length, so the delta is only valid at one scale. Bail. (!= is not auto-generated for
+    // value types here; use !(==).)
+    if (!(from.size() == to.size())) {
         return std::nullopt;
     }
 
-    const auto &from_line = findScrollbar(from.frame);
-    const auto &to_line = findScrollbar(to.frame);
-    if (!from_line || !to_line) {
+    const auto from_geometry = trackGeometry(from);
+    const auto to_geometry = trackGeometry(to);
+    if (!from_geometry || !to_geometry) {
         return std::nullopt;
     }
 
-    const auto scroll_bar_length = std::max({
-        from.scroll_bar_length,
-        to.scroll_bar_length,
-        from_line->length(),
-        to_line->length(),
-    });
-    from.scroll_bar_length = scroll_bar_length;
-    to.scroll_bar_length = scroll_bar_length;
-
-    const auto &line_delta = to_line.value() - from_line.value();
-    const auto offset = (std::abs(line_delta.p1()) > std::abs(line_delta.p2())) ? line_delta.p1() : line_delta.p2();
-    return static_cast<double>(from.frame.height()) * offset / scroll_bar_length;
-}
-
-std::optional<Line1D<double>> ScrollBarOffsetEstimator::findScrollbar(const Frame &frame) const {
-    const auto margin = scanMargin(frame);
-    if (!margin) {
+    // Delta form over the calibrated track geometry: the fixed track top cancels in the upper_gap
+    // difference, so only one shared thumb length divides -- unlike scrollOffsetGuess()'s per-frame absolute
+    // difference, this cancels each frame's constant measurement bias and stays low-noise. When the game
+    // re-scales the thumb mid-scroll the two lengths disagree and this guess drifts; the image match then
+    // rejects it and estimateAcrossRescale() (each frame's OWN length) recovers -- see updateScrolling().
+    const double thumb_logical = (from_geometry->thumb_logical + to_geometry->thumb_logical) / 2.0;
+    if (thumb_logical <= 0.0) {
         return std::nullopt;
     }
-    const auto &scan_line = frame.anchor().absolute(scroll_bar_scan_line).vertical();
-    return Line1D<double>{
-        scan_line.pointAt(margin->first),
-        scan_line.pointAt(1. - margin->second),
-    };
-}
-
-std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::scanMargin(const Frame &frame) const {
-    const auto &upper_margin = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line);
-    const auto &lower_margin = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line.reversed());
-    if (!upper_margin || upper_margin.value() == 1. || !lower_margin || lower_margin.value() == 1.) {
-        return std::nullopt;  // Bar not found.
-    }
-    return std::make_pair(upper_margin.value(), lower_margin.value());
+    const double viewport_px = from.anchor().scaleToPixels(viewport);
+    return viewport_px * (to_geometry->upper_gap - from_geometry->upper_gap) / thumb_logical;
 }
 
 std::optional<double> ScrollBarOffsetEstimator::scrollOffsetGuess(const Frame &from, const Frame &to) const {
@@ -413,7 +391,7 @@ std::optional<double> ScrollAreaOffsetEstimator::position(const FrameDescriptor 
 }
 
 std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    const auto guess = scroll_bar_offset_estimator.estimate(from, to);
+    const auto guess = scroll_bar_offset_estimator.estimate(from.frame, to.frame);
     if (!guess) {
         return std::nullopt;
     }
@@ -844,7 +822,7 @@ void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
 
 void ScrollableScrapingInterpreter::startScrolling(const Frame &valid_frame) {
     scraping_box->addScrollArea(valid_frame);
-    previous_descriptor = {valid_frame, initial_descriptor.scroll_bar_length};
+    previous_descriptor = {valid_frame};
     is_scrolling = true;
     on_scroll_updated->send(offset_estimator.position(previous_descriptor).value_or(0.0));
 }
@@ -854,16 +832,13 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
     if (!offset.has_value()) {
         // The shared-length scroll-bar guess in estimate() breaks when the game lazily re-scales the
-        // thumb (factor inheritance history appended mid-scroll): the guess becomes inconsistent with
-        // the pixels, the image match rejects it, and the reference would freeze -- stalling the tab.
-        // Recover with a guess computed from each frame's OWN thumb length, which stays valid across the
-        // re-scale. If the frames still match we keep the true offset and capture the fragment normally
-        // (no skipped content), instead of stalling; if they do not match this stays nullopt exactly as
-        // before. Resetting scroll_bar_length lets the next estimate re-latch at the new thumb length.
+        // thumb (factor inheritance history appended mid-scroll): the two frames' thumb lengths disagree,
+        // the guess becomes inconsistent with the pixels, the image match rejects it, and the reference
+        // would freeze -- stalling the tab. Recover with a guess computed from each frame's OWN thumb
+        // length, which stays valid across the re-scale. If the frames still match we keep the true offset
+        // and capture the fragment normally (no skipped content); if they do not match this stays nullopt
+        // exactly as before.
         offset = offset_estimator.estimateAcrossRescale(previous_descriptor, current_fragment);
-        if (offset.has_value()) {
-            current_fragment.scroll_bar_length = 0.0;
-        }
     }
 
     // Check the green terminator every frame, anchored to the scroll frontier (height - offset), BEFORE
@@ -894,7 +869,7 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     scraping_box->addScrollArea(frame, std::lround(offset.value()));
 
     // Report the position of the fragment just latched (current), not the previous one. position() reads only
-    // the frame's scrollbar margin (independent of scroll_bar_length), so it is valid on current_fragment.
+    // the current frame's scrollbar geometry, so it is valid on current_fragment.
     // Emitting here also covers the final/bottom position before scrollAreaReady() returns, so the UI progress
     // reaches 100% for the tab instead of stalling one fragment short.
     const auto position = offset_estimator.position(current_fragment);
