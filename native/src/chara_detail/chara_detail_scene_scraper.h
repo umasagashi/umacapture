@@ -578,10 +578,18 @@ private:
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
     const event_util::Sender<> on_restarted;  // Mid-scene reset (inferred character switch).
 
-    // Top margin (fraction of the scroll track above the thumb) at or below which the content is treated as
-    // scrolled to the very top. ~0 means flush with the top; the threshold tolerates a thin idle band. Verify
-    // against footage (.notes/player_standard_sequential.mp4) when calibrating.
-    static constexpr double kTopMarginThreshold = 0.03;
+    // Top margin (fraction of the true placeholder track above the thumb, from topMargin()) at or below which
+    // the content is treated as scrolled to the very top. ~0 means flush with the top; the threshold tolerates
+    // a thin idle band. Verify against footage (.notes/player_standard_sequential.mp4) when calibrating.
+    //
+    // Was 0.03 when topMargin() measured against the config scan line, whose deliberate overshoot past the
+    // track biased the reading up by ~0.007. Once topMargin() moved to the true track (commit 0b56fc44) the
+    // same physical position reads ~0.007 lower, so 0.03 admitted a thumb a hair below the top as "at top".
+    // On the factor tab that spuriously fired maybeResetOnFactorChange when the inheritance history lazily
+    // loaded: the reload re-scales the thumb to ~0.027 while the list content changes, and 0.03 gated it as a
+    // character switch (friend_inheritance golden regression). A genuine switch is instead visible at the very
+    // top (~0.002, before any reload) so it still fires; 0.02 sits in the gap between the two.
+    static constexpr double kTopMarginThreshold = 0.02;
     // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
     static constexpr uint64 kMonitorDwellMs = 250;
