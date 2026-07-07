@@ -48,7 +48,9 @@ private:
             Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
             Rect<double>{{0.0222, 0.0000, IS}, {-0.0222, 0.0000, {ILE, IPE}}},
             Range<Color>{Color{123, 121, 140} + 30, {255, 255, 255}},
-            Line<double>{{0.9676, 0.0092, IS}, {0.9676, -0.0092, {IS, ILE}}},
+            // scroll_bar_scan_line.x sits on the thumb's true horizontal center (trackCenterX centroid across
+            // 11 screenshots, width-normalized 0.96927); this is also the config-column fallback.
+            Line<double>{{0.9693, 0.0092, IS}, {0.9693, -0.0092, {IS, ILE}}},
             0.01,
             0.05,
             200,
