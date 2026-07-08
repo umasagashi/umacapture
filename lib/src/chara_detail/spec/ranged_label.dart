@@ -129,7 +129,9 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
   @override
   TrinaCell plutoCell(RefBase ref, int value) {
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    return TrinaCell(value: value)..setUserData(RangedLabelCellData(labels[value]));
+    // A module label list that lags the recognized value would throw out of plutoCell into _buildGrid
+    // and blank every column; degrade to the raw index for that one cell instead.
+    return TrinaCell(value: value)..setUserData(RangedLabelCellData(labels.getOrNull(value) ?? value.toString()));
   }
 
   @override

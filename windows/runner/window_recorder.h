@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 
 #include "cv/frame.h"
@@ -154,10 +155,15 @@ public:
 
     void setConfig(const windows_config::WindowRecorder &config) {
         if (!recording_thread) {
-            assert(config.recording_fps.has_value());
-            assert(config.minimum_size.has_value());
-            assert(config.window_targets.has_value());
-            assert(config.force_resize.has_value());
+            // The first setConfig builds the recording thread and dereferences these required optionals.
+            // assert() is a no-op under NDEBUG, so an incomplete config would throw bad_optional_access
+            // with no context in a release build; fail loudly with the offending fields instead.
+            if (!config.recording_fps.has_value() || !config.minimum_size.has_value() ||
+                !config.window_targets.has_value() || !config.force_resize.has_value()) {
+                throw std::invalid_argument(
+                    "WindowRecorder initial config missing a required field "
+                    "(recording_fps / minimum_size / window_targets / force_resize)");
+            }
             recording_thread = std::make_unique<windows_impl::RecordingThread>(
                 frame_captured,
                 config.window_targets.value(),

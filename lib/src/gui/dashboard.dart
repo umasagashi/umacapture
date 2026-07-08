@@ -42,11 +42,14 @@ class AppUpdaterGroup extends ConsumerWidget {
   const AppUpdaterGroup({super.key, required this.version});
 
   void downloadAndOpen(WidgetRef ref) {
-    ref.read(_downloadProgressProvider.notifier).set(Progress(count: 0, total: 100));
+    // Capture the (top-level, non-autoDispose) provider objects before the async chain so the deferred
+    // callbacks never touch the build-phase WidgetRef after this card is disposed (e.g. tab switch).
+    final progress = ref.read(_downloadProgressProvider.notifier);
+    final pathInfo = ref.read(pathInfoProvider);
+    progress.set(Progress(count: 0, total: 100));
     ref
         .read(isInstallerModeLoader.future)
         .then((isInstallerMode) {
-          final pathInfo = ref.read(pathInfoProvider);
           final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
           final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
           logger.d(downloadUrl);
@@ -55,11 +58,11 @@ class AppUpdaterGroup extends ConsumerWidget {
                 downloadUrl,
                 downloadPath.path,
                 onReceiveProgress: (int count, int total) {
-                  ref.read(_downloadProgressProvider.notifier).set(Progress(count: count, total: total));
+                  progress.set(Progress(count: count, total: total));
                 },
               )
               .then((_) {
-                ref.read(_downloadProgressProvider.notifier).set(null);
+                progress.set(null);
                 (isInstallerMode ? downloadPath : downloadPath.parent).launch();
               });
         })
@@ -67,7 +70,7 @@ class AppUpdaterGroup extends ConsumerWidget {
           // Reset the progress so the card stops spinning and becomes tappable again;
           // without this a failed download leaves it stuck on the spinner forever.
           logger.w("Failed to download app update: $error\n$stackTrace");
-          ref.read(_downloadProgressProvider.notifier).set(null);
+          progress.set(null);
           Toaster.show(ToastData.error(description: "$tr_dashboard.app_updater.download_failed".tr()));
         });
   }

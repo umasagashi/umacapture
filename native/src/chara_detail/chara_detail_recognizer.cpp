@@ -441,7 +441,15 @@ record::Character FamilyTreeRecognizer::makeCharacter(const Chara &chara, int ra
     character.character = chara.chara;
     character.card = chara.card;
     character.rank = rank;
-    character.record_type = static_cast<record::RecordType>(chara.record_type);
+    // chara.record_type is a raw model-head index. RecordType uses a strict JSON enum whose to_json
+    // throws on an out-of-range value, so an out-of-distribution icon prediction would otherwise abort
+    // serialization and discard the whole record. Clamp unknown indices to Standard instead.
+    if (chara.record_type < record::Standard || chara.record_type > record::FriendInheritance) {
+        log_warning("unexpected record_type index {}, falling back to Standard", chara.record_type);
+        character.record_type = record::Standard;
+    } else {
+        character.record_type = static_cast<record::RecordType>(chara.record_type);
+    }
     return character;
 }
 

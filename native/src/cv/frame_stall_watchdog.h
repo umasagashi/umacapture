@@ -25,7 +25,7 @@ class FrameStallWatchdog : public thread_util::ThreadBase {
 public:
     FrameStallWatchdog(const std::chrono::milliseconds &timeout, const std::function<void()> &on_stalled)
         : timeout(timeout)
-        , poll_interval(std::min(timeout, std::chrono::milliseconds(100)))
+        , poll_interval(std::max(std::chrono::milliseconds(1), std::min(timeout, std::chrono::milliseconds(100))))
         , on_stalled(on_stalled)
         , last_frame(std::chrono::steady_clock::now()) {}
 

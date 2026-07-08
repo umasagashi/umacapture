@@ -408,8 +408,10 @@ class PlatformController {
       final captureState = _ref.read(charaDetailCaptureStateProvider.notifier);
       switch (dataType) {
         case 'onError':
+          // Move the state to failed before the side-effecting error chime, and coerce a missing/
+          // non-String message so fail() can never throw and leave a sound without a matching UI state.
+          captureState.fail(data['message']?.toString() ?? 'unknown_error');
           _errorEvent.add(_soundEventSequence++);
-          captureState.fail(data['message']);
           break;
         case 'onCaptureStarted':
           _captureTriggeredEvent.add(true);
@@ -500,8 +502,14 @@ class PlatformController {
           break;
         case 'onCharaDetailFinished':
           if (data['success'] == true) {
-            _charaDetailRecordCapturedEvent.add(data['id']);
-            captureState.success(data['id']);
+            final id = data['id'];
+            // Validate at the source: both consumers below are String-typed, so a non-String id would
+            // otherwise surface as a late failure in a distant listener.
+            if (id is! String) {
+              throw ArgumentError.value(id, 'id', 'onCharaDetailFinished expects a String id');
+            }
+            _charaDetailRecordCapturedEvent.add(id);
+            captureState.success(id);
           }
           break;
         case 'onCharaDetailClosed':
@@ -512,7 +520,11 @@ class PlatformController {
           _lastProbeKey = null;
           break;
         case 'onCharaDetailUpdated':
-          _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(data['id']);
+          final id = data['id'];
+          if (id is! String) {
+            throw ArgumentError.value(id, 'id', 'onCharaDetailUpdated expects a String id');
+          }
+          _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).updated(id);
           break;
         case 'onFrameRateReported':
           {

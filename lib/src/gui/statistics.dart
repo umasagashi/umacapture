@@ -350,7 +350,17 @@ class _RankingStatisticWidgetState extends ConsumerState<_RankingStatisticWidget
             (
               rank: entry.$1 + 1,
               content: _RankingIcon(
-                icon: Image.file(storage.traineeIconPathOf(entry.$2.record).toFile(), height: _rankingIconSize),
+                icon: Image.file(
+                  storage.traineeIconPathOf(entry.$2.record).toFile(),
+                  height: _rankingIconSize,
+                  // Guard against a missing/corrupt trainee icon so the row shows a placeholder
+                  // instead of a framework error glyph.
+                  errorBuilder: (context, error, stackTrace) => Icon(
+                    Symbols.hide_image_rounded,
+                    size: _rankingIconSize,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 isFriend: entry.$2.record.isFriend,
               ),
               value: entry.$2.value.toNumberString(),
@@ -465,7 +475,17 @@ class _MostFrequentCharacterStatisticWidgetState extends ConsumerState<MostFrequ
             (
               rank: entry.$1 + 1,
               content: _RankingIcon(
-                icon: Image.file(storage.traineeIconPathOf(entry.$2.first).toFile(), height: _rankingIconSize),
+                icon: Image.file(
+                  storage.traineeIconPathOf(entry.$2.first).toFile(),
+                  height: _rankingIconSize,
+                  // Guard against a missing/corrupt trainee icon so the row shows a placeholder
+                  // instead of a framework error glyph.
+                  errorBuilder: (context, error, stackTrace) => Icon(
+                    Symbols.hide_image_rounded,
+                    size: _rankingIconSize,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
                 isFriend: entry.$2.first.isFriend,
               ),
               value: entry.$2.length.toNumberString(),
