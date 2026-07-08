@@ -102,6 +102,11 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
     const auto &anchor = frame.anchor();
     const auto scan = anchor.absolute(scroll_bar_scan_line).vertical();
     const int unit = anchor.scaleToPixels(1.0);
+    // cfg indexes raw Mat columns directly, so unlike the vertical scan above it deliberately skips absolute():
+    // the scroll-bar frame always comes from Frame::view()/copy(), which returns a fixed-anchored crop with
+    // intersection.left() == 0, so the IntersectStart x-offset absolute() would add is 0 (a no-op). Routing cfg
+    // through absolute() as well would only add a false impression of generality -- the trackCenterX -> geometryAt
+    // center_x hand-off relies on the same fixed-anchor invariant, so this is safe by construction, not by luck.
     const int cfg = anchor.scaleToPixels(scroll_bar_scan_line.p1().x());
     const int thumb_top = anchor.scaleToPixels(scan.pointAt(upper.value()));
     const int thumb_bottom = anchor.scaleToPixels(scan.pointAt(1. - lower.value()));
@@ -111,7 +116,7 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
     // resolution instead of assuming one. Only the sub-pixel neighbour steps below stay at 1 px.
     const int half = std::max(1, anchor.scaleToPixels(thumb_probe.centroid_half_width));
     const int white_gap = std::max(1, anchor.scaleToPixels(thumb_probe.white_reference_gap));
-    const int white_band = anchor.scaleToPixels(thumb_probe.white_reference_band);
+    const int white_band = std::max(1, anchor.scaleToPixels(thumb_probe.white_reference_band));
     const int core_half = std::max(1, anchor.scaleToPixels(thumb_probe.core_half_width));
     const int cap_skip = std::max(1, anchor.scaleToPixels(thumb_probe.cap_skip));
     const int kMaxRows = thumb_probe.max_sampled_rows;
