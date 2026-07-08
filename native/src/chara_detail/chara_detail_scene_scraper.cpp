@@ -43,12 +43,14 @@ ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
     const Line<double> &scroll_bar_scan_line,
     const Range<Color> &scroll_bar_margin_color_range,
     double viewport,
-    double cap_offset)
+    double cap_offset,
+    const scraper_config::ScrollBarThumbProbeConfig &thumb_probe)
     : scroll_bar_bg_color_range(scroll_bar_bg_color_range)
     , scroll_bar_scan_line(scroll_bar_scan_line)
     , scroll_bar_margin_color_range(scroll_bar_margin_color_range)
     , viewport(viewport)
-    , cap_offset(cap_offset) {}
+    , cap_offset(cap_offset)
+    , thumb_probe(thumb_probe) {}
 
 bool ScrollBarOffsetEstimator::hasScrollbar(const Frame &frame) const {
     return trackGeometry(frame).has_value();
@@ -104,16 +106,16 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
     const int thumb_top = anchor.scaleToPixels(scan.pointAt(upper.value()));
     const int thumb_bottom = anchor.scaleToPixels(scan.pointAt(1. - lower.value()));
 
-    // The thumb is a fixed-DPI pill; its probe geometry is expressed as fractions of the frame width
-    // (reference: 736 px capture, ~7 px pill) and converted to pixels through the anchor, so it scales with
-    // the capture resolution instead of assuming one. Only the sub-pixel neighbour steps below stay at 1 px.
-    const int half = std::max(1, anchor.scaleToPixels(8. / 736.));       // centroid window half-width (columns)
-    const int white_gap = std::max(1, anchor.scaleToPixels(9. / 736.));  // white reference offset, just past the pill
-    const int white_band = anchor.scaleToPixels(2. / 736.);              // white reference band width (inward)
-    const int core_half = std::max(1, anchor.scaleToPixels(2. / 736.));  // darkest-core half-width at the column
-    const int cap_skip = std::max(1, anchor.scaleToPixels(3. / 736.));   // rows skipped at each rounded cap
-    constexpr int kMaxRows = 32;          // sampled-row cap (a count, resolution-independent); keeps a tall thumb cheap
-    constexpr double kMinContrast = 20.;  // minimum white-to-core intensity gap (0-255), not a spatial constant
+    // The thumb is a fixed-DPI pill; its probe geometry (thumb_probe, from the config builder) is expressed as
+    // fractions of the frame width and converted to pixels through the anchor, so it scales with the capture
+    // resolution instead of assuming one. Only the sub-pixel neighbour steps below stay at 1 px.
+    const int half = std::max(1, anchor.scaleToPixels(thumb_probe.centroid_half_width));
+    const int white_gap = std::max(1, anchor.scaleToPixels(thumb_probe.white_reference_gap));
+    const int white_band = anchor.scaleToPixels(thumb_probe.white_reference_band);
+    const int core_half = std::max(1, anchor.scaleToPixels(thumb_probe.core_half_width));
+    const int cap_skip = std::max(1, anchor.scaleToPixels(thumb_probe.cap_skip));
+    const int kMaxRows = thumb_probe.max_sampled_rows;
+    const double kMinContrast = thumb_probe.minimum_contrast;
 
     const cv::Mat &image = frame.data();
     const int row_lo = thumb_top + cap_skip;
@@ -154,7 +156,7 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
             weight_sum += coverage;
             weighted_x += coverage * x;
         }
-        if (weight_sum >= 3.) {
+        if (weight_sum >= thumb_probe.minimum_coverage) {
             centers.push_back(weighted_x / weight_sum);
         }
     }
@@ -960,7 +962,8 @@ void SceneScraper::build(const Frame &frame) {
         config.scroll_bar_scan_line,
         config.scroll_bar_margin_color,
         config.viewport,
-        config.cap_offset);
+        config.cap_offset,
+        config.scroll_bar_thumb_probe);
     const auto &scroll_bar_offset_estimator = *scroll_bar_estimator;
 
     const auto stationary_catcher = StationaryFrameCatcher(

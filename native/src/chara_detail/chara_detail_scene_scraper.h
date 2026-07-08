@@ -58,7 +58,8 @@ public:
         const Line<double> &scroll_bar_scan_line,
         const Range<Color> &scroll_bar_margin_color_range,
         double viewport,
-        double cap_offset);
+        double cap_offset,
+        const scraper_config::ScrollBarThumbProbeConfig &thumb_probe);
 
     [[nodiscard]] bool hasScrollbar(const Frame &frame) const;
 
@@ -114,6 +115,7 @@ private:
     const Range<Color> scroll_bar_margin_color_range;
     const double viewport;
     const double cap_offset;
+    const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };
 
 class ImageOffsetEstimator {

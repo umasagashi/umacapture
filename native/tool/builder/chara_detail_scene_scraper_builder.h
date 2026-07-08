@@ -66,6 +66,27 @@ private:
             // margin flanking it is all channels >= 228. This box catches that margin and excludes the track,
             // so the top/bottom margin runs locate the fixed track ends.
             Range<Color>{{228, 228, 228}, {255, 255, 255}},
+            thumbProbe(),
+        };
+    }
+
+    // Sub-pixel thumb-centre probe geometry for trackCenterX (self-centres the vertical scan on the thumb
+    // instead of trusting the fixed config column). The spatial fields are fractions of the scroll-area crop
+    // width, calibrated on 736 px footage where the pill is ~7 px wide: the centroid window spans 8 px, the
+    // white reference sits 9 px out (2 px band), the darkest core is 2 px, and 3 px is skipped at each rounded
+    // cap. max_sampled_rows (32) caps the row loop so a tall thumb stays cheap; minimum_contrast (20/255) is
+    // the white-to-core gap a row needs to contribute; minimum_coverage (3) is the summed AA coverage a row's
+    // centroid needs to be kept. The last three are counts/intensities, not spatial, so they do not scale.
+    [[nodiscard]] chara_detail::scraper_config::ScrollBarThumbProbeConfig thumbProbe() const {
+        return {
+            8.0 / 736.0,
+            9.0 / 736.0,
+            2.0 / 736.0,
+            2.0 / 736.0,
+            3.0 / 736.0,
+            32,
+            20.0,
+            3.0,
         };
     }
 

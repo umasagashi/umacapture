@@ -42,6 +42,41 @@ inline const auto path_config = PathUtil();  // NOLINT(cert-err58-cpp)
 
 namespace scraper_config {
 
+// Sub-pixel thumb-centre probe geometry for ScrollBarOffsetEstimator::trackCenterX. The thumb is a
+// fixed-DPI pill; the spatial fields are fractions of the scroll-area crop width (reference: 736 px capture,
+// ~7 px pill) and converted to pixels through the frame anchor, so they scale with the capture resolution
+// instead of assuming one. `max_sampled_rows`, `minimum_contrast` and `minimum_coverage` are not spatial: a
+// plain row count and two intensity/coverage thresholds.
+struct ScrollBarThumbProbeConfig {
+    // Half-width (columns) of the AA intensity-weighted centroid window centred on the config column.
+    double centroid_half_width;
+    // Outward offset to the near-white reference band flanking the pill, just past its edge.
+    double white_reference_gap;
+    // Width of the white reference band, sampled inward from `white_reference_gap`.
+    double white_reference_band;
+    // Half-width (columns) of the darkest-core sample taken at the column.
+    double core_half_width;
+    // Rows skipped at each rounded cap, so the centroid reads only the thumb's straight central run.
+    double cap_skip;
+    // Sampled-row cap (a count, resolution-independent); keeps a tall thumb cheap.
+    int max_sampled_rows;
+    // Minimum white-to-core intensity gap (0-255) for a row to contribute a centroid.
+    double minimum_contrast;
+    // Minimum summed AA coverage across the window for a row's centroid to be kept.
+    double minimum_coverage;
+
+    EXTENDED_JSON_TYPE_NDC(
+        ScrollBarThumbProbeConfig,
+        centroid_half_width,
+        white_reference_gap,
+        white_reference_band,
+        core_half_width,
+        cap_skip,
+        max_sampled_rows,
+        minimum_contrast,
+        minimum_coverage);
+};
+
 struct SceneScraperConfig {
     Rect<double> base_image_stationary_rect;
     Rect<double> base_image_rect;
@@ -70,6 +105,8 @@ struct SceneScraperConfig {
     double viewport;
     double cap_offset;
     Range<Color> scroll_bar_margin_color;
+    // Sub-pixel thumb-centre probe geometry (self-centres the vertical scan on the thumb; see trackCenterX).
+    ScrollBarThumbProbeConfig scroll_bar_thumb_probe;
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
@@ -88,7 +125,8 @@ struct SceneScraperConfig {
         stationary_color_threshold,
         viewport,
         cap_offset,
-        scroll_bar_margin_color);
+        scroll_bar_margin_color,
+        scroll_bar_thumb_probe);
 };
 
 struct ScanParameter {

@@ -156,6 +156,16 @@
         "g": 255,
         "b": 255
       }
+    },
+    "scroll_bar_thumb_probe": {
+      "centroid_half_width": 0.010869565217391304,
+      "white_reference_gap": 0.012228260869565218,
+      "white_reference_band": 0.002717391304347826,
+      "core_half_width": 0.002717391304347826,
+      "cap_skip": 0.004076086956521739,
+      "max_sampled_rows": 32,
+      "minimum_contrast": 20.0,
+      "minimum_coverage": 3.0
     }
   },
   "friend_common": {
@@ -315,6 +325,16 @@
         "g": 255,
         "b": 255
       }
+    },
+    "scroll_bar_thumb_probe": {
+      "centroid_half_width": 0.010869565217391304,
+      "white_reference_gap": 0.012228260869565218,
+      "white_reference_band": 0.002717391304347826,
+      "core_half_width": 0.002717391304347826,
+      "cap_skip": 0.004076086956521739,
+      "max_sampled_rows": 32,
+      "minimum_contrast": 20.0,
+      "minimum_coverage": 3.0
     }
   },
   "skill_scans": [
