@@ -29,6 +29,7 @@ public:
             lineToY({0.8259, 60.0 / 736.0, {IS, SS}}, 40.0 / 736.0),
             colorRange({139, 221, 13}, 44),
             100,
+            factorHeader(),
         };
     }
 
@@ -44,26 +45,66 @@ private:
             Rect<double>{{0.0, 0.0, IS}, {0.0, 0.0, ILE}},
             Rect<double>{{0.0222, 0.7259, IS}, {0.9759, 0.8037, IS}},
             Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
+            // scroll_bar_rect: full-width band for scrollbar detection, initially identical to scroll_area_rect.
+            Rect<double>{{0.0000, 0.8093, IS}, {0.0000, -0.2426, {IPE, ILE}}},
             Rect<double>{{0.0222, 0.0000, IS}, {-0.0222, 0.0000, {ILE, IPE}}},
             Range<Color>{Color{123, 121, 140} + 30, {255, 255, 255}},
-            Line<double>{{0.9676, 0.0092, IS}, {0.9676, -0.0092, {IS, ILE}}},
+            // scroll_bar_scan_line.x sits on the thumb's true horizontal center (trackCenterX centroid across
+            // 11 screenshots, width-normalized 0.96927); this is also the config-column fallback.
+            Line<double>{{0.9693, 0.0092, IS}, {0.9693, -0.0092, {IS, ILE}}},
             0.01,
             0.05,
             200,
             18,
             100,
+            // Viewport V and cap offset c fit across player_standard/player_inheritance/friend_inheritance
+            // (common layout): tip_len = 2c + V*slope, R^2 = 1.0 -> V = 543 px, c = 0.94 px at 736 px width.
+            // Stored width-normalized: 543/736 = 0.738, 0.94/736 = 0.00126. c is a widget constant (shared).
+            0.738,
+            0.00126,
+            // Placeholder track is faintly coloured (satisfies R < 228 or G < 228); the near-white scroll-area
+            // margin flanking it is all channels >= 228. This box catches that margin and excludes the track,
+            // so the top/bottom margin runs locate the fixed track ends.
+            Range<Color>{{228, 228, 228}, {255, 255, 255}},
+            thumbProbe(),
+        };
+    }
+
+    // Sub-pixel thumb-centre probe geometry for trackCenterX (self-centres the vertical scan on the thumb
+    // instead of trusting the fixed config column). The spatial fields are fractions of the scroll-area crop
+    // width, calibrated on 736 px footage where the pill is ~7 px wide: the centroid window spans 8 px, the
+    // white reference sits 9 px out (2 px band), the darkest core is 2 px, and 3 px is skipped at each rounded
+    // cap. max_sampled_rows (32) caps the row loop so a tall thumb stays cheap; minimum_contrast (20/255) is
+    // the white-to-core gap a row needs to contribute; minimum_coverage (3) is the summed AA coverage a row's
+    // centroid needs to be kept. The last three are counts/intensities, not spatial, so they do not scale.
+    [[nodiscard]] chara_detail::scraper_config::ScrollBarThumbProbeConfig thumbProbe() const {
+        return {
+            8.0 / 736.0,
+            9.0 / 736.0,
+            2.0 / 736.0,
+            2.0 / 736.0,
+            3.0 / 736.0,
+            32,
+            20.0,
+            3.0,
         };
     }
 
     // The Friend layout differs from Standard only by shifting the tab bar and the scroll
     // area down. The scroll-bar scan line, scroll-area stationary rect and scan parameters
-    // are all relative to the cropped scroll area, so only the two absolute, top-anchored
-    // rects move; the scroll area bottom stays anchored to the screen bottom (ILE).
+    // are all relative to the cropped scroll area, so only the absolute, top-anchored rects
+    // move (tab button, scroll area and scroll-bar band); the scroll area bottom stays
+    // anchored to the screen bottom (ILE).
     [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig friendCommon() const {
         auto config = common();
         const double shift = friend_layout_shift;
         config.tab_button_rect = {{0.0222, 0.7259 + shift, IS}, {0.9759, 0.8037 + shift, IS}};
         config.scroll_area_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
+        config.scroll_bar_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
+        // The shorter friend scroll area has a smaller viewport: fit across friend_standard /
+        // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. cap_offset and
+        // the margin colour are widget constants, unchanged from common().
+        config.viewport = 0.553;
         return config;
     }
 
@@ -99,6 +140,21 @@ private:
     // WinRT green (G>=177), same UI green as header_color_range.
     [[nodiscard]] chara_detail::scraper_config::ScanParameter factorEndGreen() const {
         return {0.6017, 5.0 / 736.0, colorRange({128, 222, 20}, 45)};
+    }
+
+    // The green "因子" section header is a precise "flush at the very top" sensor for maybeResetOnFactorChange:
+    // it moves 1:1 with the factor list, so a tiny scroll shifts it ~10 px where the scroll thumb barely moves
+    // (its travel is compressed by viewport/content). Probe a right-of-centre band x[0.65,0.88] of the scroll-area
+    // crop -- solid header green there, clear of the left icon column and the diagonal stripes, so requiring green
+    // across the whole band (fraction > 0.5) rejects a stray green factor pill. Same UI green as factorEndGreen.
+    // flush_tolerance_px is in capture pixels (the header top-edge row). Live measurement (factor reset diag): a
+    // real switch snaps to EXACTLY flush (0 px), whereas a same-character scroll of only ~4 px still spikes the
+    // content diff to ~29 %. 1.5 px sits in that gap -- it rejects a >=2 px scroll while tolerating up to 1 px of
+    // header-edge detection jitter on a genuine flush frame, so a real switch is still detected. Pixels, not a
+    // width fraction, so it does not drift with capture resolution (a fraction would drop below 1 px on a smaller
+    // capture and start missing real switches).
+    [[nodiscard]] chara_detail::scraper_config::FactorHeaderConfig factorHeader() const {
+        return {colorRange({128, 222, 20}, 45), 0.65, 0.88, 0.5, 1.5};
     }
 
     [[nodiscard]] std::vector<chara_detail::scraper_config::ScanParameter> campaignScanParameters() const {

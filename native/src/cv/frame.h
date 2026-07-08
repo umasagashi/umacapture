@@ -317,6 +317,25 @@ public:
         });
     }
 
+    // Fraction of the sampled points along `line` whose colour falls in `color_range` (0-1). Mirrors isAllIn's
+    // sampling (>= 2 points, one per pixel of length) but reports the ratio instead of a hard all/any, so a
+    // caller can accept a band that is *mostly* one colour (e.g. a solid section header row) while rejecting a
+    // narrow stray run of the same colour.
+    [[nodiscard]] double fractionIn(const Range<Color> &color_range, const Line<double> &line) const {
+        const Range<BGR> &bgr_range = asBGRRange(color_range);
+        const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
+
+        const int samples = std::max(2, (int) mapped_line.length());
+        int inside = 0;
+        for (const auto &ratio : linspace(0., 1., samples)) {
+            const auto &p = mapped_line.pointAt(ratio).round();
+            if (bgr_range.contains(bgrAt(p.x(), p.y()))) {
+                inside++;
+            }
+        }
+        return static_cast<double>(inside) / samples;
+    }
+
     [[nodiscard]] std::optional<double> lengthIn(const Range<Color> &color_range, const Line<double> &line) const {
         const Range<BGR> &bgr_range = asBGRRange(color_range);
         const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();

@@ -42,11 +42,51 @@ inline const auto path_config = PathUtil();  // NOLINT(cert-err58-cpp)
 
 namespace scraper_config {
 
+// Sub-pixel thumb-centre probe geometry for ScrollBarOffsetEstimator::trackCenterX. The thumb is a
+// fixed-DPI pill; the spatial fields are fractions of the scroll-area crop width (reference: 736 px capture,
+// ~7 px pill) and converted to pixels through the frame anchor, so they scale with the capture resolution
+// instead of assuming one. `max_sampled_rows`, `minimum_contrast` and `minimum_coverage` are not spatial: a
+// plain row count and two intensity/coverage thresholds.
+struct ScrollBarThumbProbeConfig {
+    // Half-width (columns) of the AA intensity-weighted centroid window centred on the config column.
+    double centroid_half_width;
+    // Outward offset to the near-white reference band flanking the pill, just past its edge.
+    double white_reference_gap;
+    // Width of the white reference band, sampled inward from `white_reference_gap`.
+    double white_reference_band;
+    // Half-width (columns) of the darkest-core sample taken at the column.
+    double core_half_width;
+    // Rows skipped at each rounded cap, so the centroid reads only the thumb's straight central run.
+    double cap_skip;
+    // Sampled-row cap (a count, resolution-independent); keeps a tall thumb cheap.
+    int max_sampled_rows;
+    // Minimum white-to-core intensity gap (0-255) for a row to contribute a centroid.
+    double minimum_contrast;
+    // Minimum summed AA coverage across the window for a row's centroid to be kept.
+    double minimum_coverage;
+
+    EXTENDED_JSON_TYPE_NDC(
+        ScrollBarThumbProbeConfig,
+        centroid_half_width,
+        white_reference_gap,
+        white_reference_band,
+        core_half_width,
+        cap_skip,
+        max_sampled_rows,
+        minimum_contrast,
+        minimum_coverage);
+};
+
 struct SceneScraperConfig {
     Rect<double> base_image_stationary_rect;
     Rect<double> base_image_rect;
     Rect<double> tab_button_rect;
     Rect<double> scroll_area_rect;
+    // Full-width band the scrollbar is detected in, decoupled from scroll_area_rect (the content/stitch crop)
+    // so the latter can move without shifting the scan geometry. It MUST stay full width (x IntersectStart ->
+    // IntersectPixelEnd): the scan line x, viewport and cap_offset are all normalized by the crop width, so a
+    // narrower band would silently mis-scale them. Only its y-range is meant to diverge from scroll_area_rect.
+    Rect<double> scroll_bar_rect;
     Rect<double> scroll_area_stationary_rect;
     Range<Color> scroll_bar_bg_color;
     Line<double> scroll_bar_scan_line;
@@ -55,6 +95,18 @@ struct SceneScraperConfig {
     uint64 stationary_time_threshold;
     int minimum_color_threshold;
     uint64 stationary_color_threshold;
+    // Scrollbar physics, all width-normalized so they scale with the screen and never depend on the crop
+    // height (each layout carries its own values). `viewport` is the visible content height V used to turn
+    // thumb geometry into a content-pixel offset (abs = V * upper_gap / thumb_length); it is NOT the crop
+    // height. `cap_offset` is the thumb's rounded-cap depth c: the tip-to-tip length over-reads the logical
+    // thumb length by 2c, so the logical length is `tip - 2 * cap_offset`. `scroll_bar_margin_color` is the
+    // near-white band flanking the placeholder track; isolating it locates the fixed track ends so the
+    // position is measured against the true track, not the (slightly longer) config scan line.
+    double viewport;
+    double cap_offset;
+    Range<Color> scroll_bar_margin_color;
+    // Sub-pixel thumb-centre probe geometry (self-centres the vertical scan on the thumb; see trackCenterX).
+    ScrollBarThumbProbeConfig scroll_bar_thumb_probe;
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
@@ -62,6 +114,7 @@ struct SceneScraperConfig {
         base_image_rect,
         tab_button_rect,
         scroll_area_rect,
+        scroll_bar_rect,
         scroll_area_stationary_rect,
         scroll_bar_bg_color,
         scroll_bar_scan_line,
@@ -69,7 +122,11 @@ struct SceneScraperConfig {
         minimum_scroll_threshold,
         stationary_time_threshold,
         minimum_color_threshold,
-        stationary_color_threshold);
+        stationary_color_threshold,
+        viewport,
+        cap_offset,
+        scroll_bar_margin_color,
+        scroll_bar_thumb_probe);
 };
 
 struct ScanParameter {
@@ -78,6 +135,35 @@ struct ScanParameter {
     Range<Color> color_range;
 
     EXTENDED_JSON_TYPE_NDC(ScanParameter, x, length, color_range);
+};
+
+// Locates the green "因子" section header, whose top edge moves 1:1 with the factor list (unlike the scroll
+// thumb, whose travel is compressed by viewport/content). maybeResetOnFactorChange uses it as a precise "flush
+// at the very top" sensor: it runs the same-character content diff only when the header sits at its reference
+// (flush) y, so a tiny scroll of the same character no longer reads as a switch.
+struct FactorHeaderConfig {
+    // Vivid header green (same UI green as factor_end_green / header_color_range).
+    Range<Color> color_range;
+    // Horizontal probe band, expressed as fractions of the scroll-area crop width. Right of centre, clear of the
+    // left icon column and the diagonal stripes, where only the solid header spans the whole band.
+    double band_start;
+    double band_end;
+    // Minimum green fraction across the band for a row to count as the header (rejects a narrow stray green pill).
+    double green_fraction_threshold;
+    // Max |current - reference| header top-edge offset, in capture pixels, still treated as flush. In pixels (not
+    // a width fraction) on purpose: the two quantities this discriminates -- the ~1 px header-row detection jitter
+    // and the ~2 px scroll at which the content diff already spikes -- are pixel-scale, not screen-geometry-scale.
+    // A width fraction would drift with capture resolution and, at a smaller capture, shrink below the 1 px jitter
+    // floor and start dropping real switches.
+    double flush_tolerance_px;
+
+    EXTENDED_JSON_TYPE_NDC(
+        FactorHeaderConfig,
+        color_range,
+        band_start,
+        band_end,
+        green_fraction_threshold,
+        flush_tolerance_px);
 };
 
 struct CharaDetailSceneScraperConfig {
@@ -90,6 +176,7 @@ struct CharaDetailSceneScraperConfig {
     Line<double> header_scan_line;
     Range<Color> header_color_range;
     uint64 header_visible_time_threshold;
+    FactorHeaderConfig factor_header;
 
     EXTENDED_JSON_TYPE_NDC(
         CharaDetailSceneScraperConfig,
@@ -101,7 +188,8 @@ struct CharaDetailSceneScraperConfig {
         factor_end_green,
         header_scan_line,
         header_color_range,
-        header_visible_time_threshold);
+        header_visible_time_threshold,
+        factor_header);
 };
 
 }  // namespace scraper_config

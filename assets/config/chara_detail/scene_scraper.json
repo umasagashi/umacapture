@@ -72,6 +72,24 @@
         }
       }
     },
+    "scroll_bar_rect": {
+      "top_left": {
+        "x": 0.0,
+        "y": 0.8093,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.0,
+        "y": -0.2426,
+        "anchor": {
+          "h": "IntersectPixelEnd",
+          "v": "IntersectLogicalEnd"
+        }
+      }
+    },
     "scroll_area_stationary_rect": {
       "top_left": {
         "x": 0.0222,
@@ -104,7 +122,7 @@
     },
     "scroll_bar_scan_line": {
       "p1": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": 0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -112,7 +130,7 @@
         }
       },
       "p2": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": -0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -124,7 +142,31 @@
     "minimum_scroll_threshold": 0.05,
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
-    "stationary_color_threshold": 100
+    "stationary_color_threshold": 100,
+    "viewport": 0.738,
+    "cap_offset": 0.00126,
+    "scroll_bar_margin_color": {
+      "min": {
+        "r": 228,
+        "g": 228,
+        "b": 228
+      },
+      "max": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      }
+    },
+    "scroll_bar_thumb_probe": {
+      "centroid_half_width": 0.010869565217391304,
+      "white_reference_gap": 0.012228260869565218,
+      "white_reference_band": 0.002717391304347826,
+      "core_half_width": 0.002717391304347826,
+      "cap_skip": 0.004076086956521739,
+      "max_sampled_rows": 32,
+      "minimum_contrast": 20.0,
+      "minimum_coverage": 3.0
+    }
   },
   "friend_common": {
     "base_image_stationary_rect": {
@@ -199,6 +241,24 @@
         }
       }
     },
+    "scroll_bar_rect": {
+      "top_left": {
+        "x": 0.0,
+        "y": 0.9896304347826087,
+        "anchor": {
+          "h": "IntersectStart",
+          "v": "IntersectStart"
+        }
+      },
+      "bottom_right": {
+        "x": 0.0,
+        "y": -0.2426,
+        "anchor": {
+          "h": "IntersectPixelEnd",
+          "v": "IntersectLogicalEnd"
+        }
+      }
+    },
     "scroll_area_stationary_rect": {
       "top_left": {
         "x": 0.0222,
@@ -231,7 +291,7 @@
     },
     "scroll_bar_scan_line": {
       "p1": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": 0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -239,7 +299,7 @@
         }
       },
       "p2": {
-        "x": 0.9676,
+        "x": 0.9693,
         "y": -0.0092,
         "anchor": {
           "h": "IntersectStart",
@@ -251,7 +311,31 @@
     "minimum_scroll_threshold": 0.05,
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
-    "stationary_color_threshold": 100
+    "stationary_color_threshold": 100,
+    "viewport": 0.553,
+    "cap_offset": 0.00126,
+    "scroll_bar_margin_color": {
+      "min": {
+        "r": 228,
+        "g": 228,
+        "b": 228
+      },
+      "max": {
+        "r": 255,
+        "g": 255,
+        "b": 255
+      }
+    },
+    "scroll_bar_thumb_probe": {
+      "centroid_half_width": 0.010869565217391304,
+      "white_reference_gap": 0.012228260869565218,
+      "white_reference_band": 0.002717391304347826,
+      "core_half_width": 0.002717391304347826,
+      "cap_skip": 0.004076086956521739,
+      "max_sampled_rows": 32,
+      "minimum_contrast": 20.0,
+      "minimum_coverage": 3.0
+    }
   },
   "skill_scans": [
     {
@@ -417,5 +501,23 @@
       "b": 57
     }
   },
-  "header_visible_time_threshold": 100
+  "header_visible_time_threshold": 100,
+  "factor_header": {
+    "color_range": {
+      "min": {
+        "r": 83,
+        "g": 177,
+        "b": 0
+      },
+      "max": {
+        "r": 173,
+        "g": 255,
+        "b": 65
+      }
+    },
+    "band_start": 0.65,
+    "band_end": 0.88,
+    "green_fraction_threshold": 0.5,
+    "flush_tolerance_px": 1.5
+  }
 }

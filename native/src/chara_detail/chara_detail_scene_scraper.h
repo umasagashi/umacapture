@@ -43,8 +43,8 @@ inline bool readyAfterUpdate(T &subject, const Frame &frame) {
 }
 
 struct FrameDescriptor {
-    Frame frame;
-    double scroll_bar_length = 0.0;
+    Frame frame;             // content crop: image matching + capture
+    Frame scroll_bar_frame;  // full-width scrollbar band: scrollbar geometry only
     std::vector<cv::KeyPoint> key_points;
     cv::Mat descriptors;
 
@@ -53,19 +53,32 @@ struct FrameDescriptor {
 
 class ScrollBarOffsetEstimator {
 public:
-    ScrollBarOffsetEstimator(const Range<Color> &scroll_bar_bg_color_range, const Line<double> &scroll_bar_scan_line);
+    ScrollBarOffsetEstimator(
+        const Range<Color> &scroll_bar_bg_color_range,
+        const Line<double> &scroll_bar_scan_line,
+        const Range<Color> &scroll_bar_margin_color_range,
+        double viewport,
+        double cap_offset,
+        const scraper_config::ScrollBarThumbProbeConfig &thumb_probe);
 
     [[nodiscard]] bool hasScrollbar(const Frame &frame) const;
 
+    // Scroll position as a fraction of the scrollable range: 0 at the very top, 1 at the bottom. Derived
+    // from the true placeholder track (upper_gap / (track_span - thumb_length)), so the config scan line's
+    // deliberate overshoot past the track no longer biases it. nullopt when no scrollbar is present.
     [[nodiscard]] std::optional<double> position(const Frame &frame) const;
 
-    // Fraction of the scroll track above the thumb (distance from the top edge to the thumb's top). It is ~0
-    // when the content is scrolled to the very top and grows as the user scrolls down, independent of the
-    // thumb's length. Returns nullopt when no scrollbar is present (a short, non-scrollable page). Used to
-    // detect a completed tab snapping back to the top after a character switch.
+    // Fraction of the placeholder track above the thumb (thumb top relative to the track top). It is ~0 when
+    // the content is scrolled to the very top and grows as the user scrolls down, independent of the thumb's
+    // length. Returns nullopt when no scrollbar is present (a short, non-scrollable page). Used to detect a
+    // completed tab snapping back to the top after a character switch.
     [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const;
 
-    [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
+    // Content-pixel scroll offset between two frames: the placeholder-track upper_gap difference over a
+    // shared (cap-corrected) thumb length, scaled by the true viewport. The fixed track top cancels in the
+    // difference, so this delta form keeps low per-frame noise. The primary guess that seeds the image
+    // matcher for stitching. nullopt when either frame has no scrollbar or on a mid-scroll resolution change.
+    [[nodiscard]] std::optional<double> estimate(const Frame &from, const Frame &to) const;
 
     // Content-pixel scroll offset between two frames, computed from each frame's OWN thumb length, so it
     // stays correct across a thumb-length change (unlike estimate()'s shared-length delta). Used as the
@@ -74,12 +87,35 @@ public:
     [[nodiscard]] std::optional<double> scrollOffsetGuess(const Frame &from, const Frame &to) const;
 
 private:
-    [[nodiscard]] std::optional<Line1D<double>> findScrollbar(const Frame &frame) const;
+    // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from
+    // colour runs along the scan line: the background run reaches the (dark) thumb, the margin run reaches
+    // the (near-white) edge of the track. Measuring against the track, not the scan line, removes the
+    // scan-line overshoot; only the thumb length carries the -2c cap correction (the caps cancel in
+    // upper_gap since the thumb top and track top share the same cap geometry).
+    struct TrackGeometry {
+        double upper_gap;      // thumb_top - track_top, clamped >= 0 (overscroll pins the thumb to the top)
+        double track_span;     // track_bottom - track_top (the placeholder length)
+        double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
+    };
 
-    [[nodiscard]] std::optional<std::pair<double, double>> scanMargin(const Frame &frame) const;
+    [[nodiscard]] std::optional<TrackGeometry> trackGeometry(const Frame &frame) const;
+
+    // TrackGeometry from the colour runs along one scan column. trackGeometry() picks the column
+    // (trackCenterX, falling back to the config line) and delegates here.
+    [[nodiscard]] std::optional<TrackGeometry> geometryAt(const Frame &frame, const Line<double> &scan_line) const;
+
+    // Sub-pixel thumb centre x (width-normalized) from an AA intensity-weighted centroid over the thumb's
+    // central rows, so the vertical scan self-centres on the thumb instead of trusting the fixed config x
+    // (~10x more stable than a hard threshold; tolerates layout/resolution drift). nullopt when the thumb is
+    // not found or the cap contrast is too low, so trackGeometry() falls back to the config column.
+    [[nodiscard]] std::optional<double> trackCenterX(const Frame &frame) const;
 
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
+    const Range<Color> scroll_bar_margin_color_range;
+    const double viewport;
+    const double cap_offset;
+    const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };
 
 class ImageOffsetEstimator {
@@ -319,8 +355,11 @@ enum ReadyState {
 class NonScrollableScrapingInterpreter : public ScrapingInterpreter {
 public:
     NonScrollableScrapingInterpreter(
-        const std::shared_ptr<PageScrapingBox> &scraping_box, const StationaryFrameCatcher &stationary_catcher);
+        const std::shared_ptr<PageScrapingBox> &scraping_box,
+        const StationaryFrameCatcher &stationary_catcher,
+        const Rect<double> &scroll_area_rect);
 
+    // Receives the full frame; crops the content region internally (see ScrollableScrapingInterpreter::update).
     void update(const Frame &frame) override;
 
     [[nodiscard]] bool ready() const override;
@@ -330,6 +369,7 @@ public:
 private:
     std::shared_ptr<PageScrapingBox> scraping_box;
     StationaryFrameCatcher stationary_catcher;
+    const Rect<double> scroll_area_rect;
     ReadyState state = Updatable;
     bool has_updated = false;
 };
@@ -340,11 +380,16 @@ public:
         const std::shared_ptr<PageScrapingBox> &scraping_box,
         const ScrollAreaOffsetEstimator &offset_estimator,
         const StationaryFrameCatcher &stationary_catcher,
+        const Rect<double> &scroll_area_rect,
+        const Rect<double> &scroll_bar_rect,
         double initial_scroll_threshold,
         double minimum_scroll_threshold,
         const event_util::Sender<> &on_scroll_ready,
         const event_util::Sender<double> &on_scroll_updated);
 
+    // Receives the FULL frame each update. The content crop (scroll_area_rect) drives the stationary catcher,
+    // image matcher and capture; the scroll-bar band (scroll_bar_rect) drives only the scrollbar estimator, so
+    // the two regions are decoupled.
     void update(const Frame &frame) override;
 
     [[nodiscard]] bool ready() const override;
@@ -357,7 +402,7 @@ public:
 private:
     void updateBefore(const Frame &frame);
 
-    void startScrolling(const Frame &valid_frame);
+    void startScrolling(const FrameDescriptor &valid_descriptor);
 
     void updateScrolling(const Frame &frame);
 
@@ -365,6 +410,8 @@ private:
     const event_util::Sender<double> on_scroll_updated;
 
     const ScrollAreaOffsetEstimator offset_estimator;
+    const Rect<double> scroll_area_rect;
+    const Rect<double> scroll_bar_rect;
     const double initial_scroll;
     const double minimum_scroll;
 
@@ -514,6 +561,13 @@ private:
     // re-probes). Reuses the stationary rect and its calibrated color thresholds as the change metric.
     void maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type);
 
+    // Top-edge pixel row of the green "因子" section header, relative to the scroll-area crop (so it tracks the
+    // content, not the scroll thumb). Scans the config band top-down for the first row that is mostly header
+    // green. nullopt when the header is scrolled off or mid-animation (not flush), which maybeResetOnFactorChange
+    // treats as "not at the top". Never throws on a scrolled-away frame. Compared against the reference in pixels,
+    // valid because both are taken on same-size frames.
+    [[nodiscard]] std::optional<int> factorHeaderTopY(const Frame &frame) const;
+
     void resetMonitors();
 
     [[nodiscard]] bool ready() const;
@@ -533,10 +587,18 @@ private:
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
     const event_util::Sender<> on_restarted;  // Mid-scene reset (inferred character switch).
 
-    // Top margin (fraction of the scroll track above the thumb) at or below which the content is treated as
-    // scrolled to the very top. ~0 means flush with the top; the threshold tolerates a thin idle band. Verify
-    // against footage (.notes/player_standard_sequential.mp4) when calibrating.
-    static constexpr double kTopMarginThreshold = 0.03;
+    // Top margin (fraction of the true placeholder track above the thumb, from topMargin()) at or below which
+    // the content is treated as scrolled to the very top. ~0 means flush with the top; the threshold tolerates
+    // a thin idle band. Verify against footage (.notes/player_standard_sequential.mp4) when calibrating.
+    //
+    // Was 0.03 when topMargin() measured against the config scan line, whose deliberate overshoot past the
+    // track biased the reading up by ~0.007. Once topMargin() moved to the true track (commit 0b56fc44) the
+    // same physical position reads ~0.007 lower, so 0.03 admitted a thumb a hair below the top as "at top".
+    // On the factor tab that spuriously fired maybeResetOnFactorChange when the inheritance history lazily
+    // loaded: the reload re-scales the thumb to ~0.027 while the list content changes, and 0.03 gated it as a
+    // character switch (friend_inheritance golden regression). A genuine switch is instead visible at the very
+    // top (~0.002, before any reload) so it still fires; 0.02 sits in the gap between the two.
+    static constexpr double kTopMarginThreshold = 0.02;
     // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
     static constexpr uint64 kMonitorDwellMs = 250;
@@ -587,6 +649,9 @@ private:
     std::optional<record::RecordType> type_pending_value;
     std::optional<uint64> factor_change_pending_since;
     Frame factor_probe_reference = {};
+    // Header top-edge pixel row (see factorHeaderTopY) captured with factor_probe_reference; the flush gate
+    // compares the current header row against it in pixels.
+    std::optional<int> reference_header_y;
     std::optional<std::pair<TabPage, bool>> last_scroll_position_emitted;
 };
 

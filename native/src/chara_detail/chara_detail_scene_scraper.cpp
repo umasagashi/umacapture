@@ -39,103 +39,214 @@ constexpr double kFactorEndGreenSearchSpan = 0.08;
 }  // namespace
 
 ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
-    const Range<Color> &scroll_bar_bg_color_range, const Line<double> &scroll_bar_scan_line)
+    const Range<Color> &scroll_bar_bg_color_range,
+    const Line<double> &scroll_bar_scan_line,
+    const Range<Color> &scroll_bar_margin_color_range,
+    double viewport,
+    double cap_offset,
+    const scraper_config::ScrollBarThumbProbeConfig &thumb_probe)
     : scroll_bar_bg_color_range(scroll_bar_bg_color_range)
-    , scroll_bar_scan_line(scroll_bar_scan_line) {}
+    , scroll_bar_scan_line(scroll_bar_scan_line)
+    , scroll_bar_margin_color_range(scroll_bar_margin_color_range)
+    , viewport(viewport)
+    , cap_offset(cap_offset)
+    , thumb_probe(thumb_probe) {}
 
 bool ScrollBarOffsetEstimator::hasScrollbar(const Frame &frame) const {
-    return findScrollbar(frame).has_value();
+    return trackGeometry(frame).has_value();
+}
+
+std::optional<ScrollBarOffsetEstimator::TrackGeometry>
+ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &scan_line) const {
+    // Background run from each end reaches the thumb (dark, out of the light bg range). == 1. means the whole
+    // line is background: no thumb, so no scrollbar.
+    const auto upper = frame.lengthIn(scroll_bar_bg_color_range, scan_line);
+    const auto lower = frame.lengthIn(scroll_bar_bg_color_range, scan_line.reversed());
+    if (!upper || upper.value() == 1. || !lower || lower.value() == 1.) {
+        return std::nullopt;  // Bar not found.
+    }
+
+    // Margin run from each end reaches the (non-white) placeholder track, locating its fixed top/bottom.
+    // Fail open: if the near-white margin is absent (== 1. is the whole line, so ignore it too), fall back to
+    // the scan endpoints, i.e. the old scan-line-relative behaviour, rather than dropping the whole frame.
+    const auto margin_upper = frame.lengthIn(scroll_bar_margin_color_range, scan_line);
+    const auto margin_lower = frame.lengthIn(scroll_bar_margin_color_range, scan_line.reversed());
+    const double m_up = (margin_upper && margin_upper.value() < 1.) ? margin_upper.value() : 0.0;
+    const double m_lo = (margin_lower && margin_lower.value() < 1.) ? margin_lower.value() : 0.0;
+
+    const auto scan = frame.anchor().absolute(scan_line).vertical();
+    const double thumb_top = scan.pointAt(upper.value());
+    const double thumb_bottom = scan.pointAt(1. - lower.value());
+    const double track_top = scan.pointAt(m_up);
+    const double track_bottom = scan.pointAt(1. - m_lo);
+
+    const double thumb_logical = (thumb_bottom - thumb_top) - 2. * cap_offset;
+    const double track_span = track_bottom - track_top;
+    if (thumb_logical <= 0. || track_span <= 0.) {
+        return std::nullopt;
+    }
+    // Clamp on overscroll: the thumb shortens and its top pins to the track top, so a tiny negative gap from
+    // sub-pixel noise should read as "at the top" (0), not a small backward offset.
+    const double upper_gap = std::max(0., thumb_top - track_top);
+    return TrackGeometry{upper_gap, track_span, thumb_logical};
+}
+
+std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame) const {
+    // Locate the thumb vertically at the configured column (its dark run out of the light bg), then read the
+    // AA coverage centroid across the columns spanning the thumb over its central rows (caps skipped).
+    const auto upper = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line);
+    const auto lower = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line.reversed());
+    if (!upper || upper.value() == 1. || !lower || lower.value() == 1.) {
+        return std::nullopt;
+    }
+    const auto &anchor = frame.anchor();
+    const auto scan = anchor.absolute(scroll_bar_scan_line).vertical();
+    const int unit = anchor.scaleToPixels(1.0);
+    // cfg indexes raw Mat columns directly, so unlike the vertical scan above it deliberately skips absolute():
+    // the scroll-bar frame always comes from Frame::view()/copy(), which returns a fixed-anchored crop with
+    // intersection.left() == 0, so the IntersectStart x-offset absolute() would add is 0 (a no-op). Routing cfg
+    // through absolute() as well would only add a false impression of generality -- the trackCenterX -> geometryAt
+    // center_x hand-off relies on the same fixed-anchor invariant, so this is safe by construction, not by luck.
+    const int cfg = anchor.scaleToPixels(scroll_bar_scan_line.p1().x());
+    const int thumb_top = anchor.scaleToPixels(scan.pointAt(upper.value()));
+    const int thumb_bottom = anchor.scaleToPixels(scan.pointAt(1. - lower.value()));
+
+    // The thumb is a fixed-DPI pill; its probe geometry (thumb_probe, from the config builder) is expressed as
+    // fractions of the frame width and converted to pixels through the anchor, so it scales with the capture
+    // resolution instead of assuming one. Only the sub-pixel neighbour steps below stay at 1 px.
+    const int half = std::max(1, anchor.scaleToPixels(thumb_probe.centroid_half_width));
+    const int white_gap = std::max(1, anchor.scaleToPixels(thumb_probe.white_reference_gap));
+    const int white_band = std::max(1, anchor.scaleToPixels(thumb_probe.white_reference_band));
+    const int core_half = std::max(1, anchor.scaleToPixels(thumb_probe.core_half_width));
+    const int cap_skip = std::max(1, anchor.scaleToPixels(thumb_probe.cap_skip));
+    const int kMaxRows = thumb_probe.max_sampled_rows;
+    const double kMinContrast = thumb_probe.minimum_contrast;
+
+    const cv::Mat &image = frame.data();
+    const int row_lo = thumb_top + cap_skip;
+    const int row_hi = thumb_bottom - cap_skip;
+    if (cfg - white_gap < 0 || cfg + white_gap >= image.cols || row_lo < 0 || row_hi >= image.rows
+        || row_hi - row_lo < 1) {
+        return std::nullopt;
+    }
+    const auto red = [&image](int x, int y) { return static_cast<double>(image.at<cv::Vec3b>(y, x)[2]); };
+
+    const int stride = std::max(1, (row_hi - row_lo) / kMaxRows);
+    std::vector<double> centers;
+    std::vector<double> whites;
+    for (int y = row_lo; y <= row_hi; y += stride) {
+        // White reference: the near-white band flanking the pill, sampled inward from each outer offset and
+        // taken as its median to shrug off a stray dark pixel.
+        whites.clear();
+        for (int x = cfg - white_gap; x <= cfg - white_gap + white_band; x++) {
+            whites.push_back(red(x, y));
+        }
+        for (int x = cfg + white_gap - white_band; x <= cfg + white_gap; x++) {
+            whites.push_back(red(x, y));
+        }
+        std::sort(whites.begin(), whites.end());
+        const std::size_t n = whites.size();
+        const double white = (n % 2 == 0) ? (whites[n / 2 - 1] + whites[n / 2]) / 2. : whites[n / 2];
+        double core = 255.;
+        for (int x = cfg - core_half; x <= cfg + core_half; x++) {
+            core = std::min(core, red(x, y));
+        }
+        if (white - core < kMinContrast) {
+            continue;
+        }
+        double weight_sum = 0.;
+        double weighted_x = 0.;
+        for (int x = cfg - half; x <= cfg + half; x++) {
+            const double coverage = std::clamp((white - red(x, y)) / (white - core), 0., 1.);
+            weight_sum += coverage;
+            weighted_x += coverage * x;
+        }
+        if (weight_sum >= thumb_probe.minimum_coverage) {
+            centers.push_back(weighted_x / weight_sum);
+        }
+    }
+    if (centers.empty()) {
+        return std::nullopt;
+    }
+    std::nth_element(centers.begin(), centers.begin() + static_cast<long>(centers.size() / 2), centers.end());
+    return centers[centers.size() / 2] / unit;
+}
+
+std::optional<ScrollBarOffsetEstimator::TrackGeometry>
+ScrollBarOffsetEstimator::trackGeometry(const Frame &frame) const {
+    const auto center_x = trackCenterX(frame);
+    if (!center_x) {
+        return geometryAt(frame, scroll_bar_scan_line);  // Fall back to the fixed config column.
+    }
+    const auto &p1 = scroll_bar_scan_line.p1();
+    const auto &p2 = scroll_bar_scan_line.p2();
+    const Line<double> centered_line{{center_x.value(), p1.y(), p1.anchor()}, {center_x.value(), p2.y(), p2.anchor()}};
+    return geometryAt(frame, centered_line);
 }
 
 std::optional<double> ScrollBarOffsetEstimator::position(const Frame &frame) const {
-    const auto margin = scanMargin(frame);
-    if (!margin) {
+    const auto geometry = trackGeometry(frame);
+    if (!geometry) {
         return std::nullopt;
     }
-    return 1.0 - margin->second;
+    const double scrollable = geometry->track_span - geometry->thumb_logical;
+    if (scrollable <= 0.) {
+        return std::nullopt;  // Thumb fills the track: nothing to scroll.
+    }
+    return std::clamp(geometry->upper_gap / scrollable, 0., 1.);
 }
 
 std::optional<double> ScrollBarOffsetEstimator::topMargin(const Frame &frame) const {
-    const auto margin = scanMargin(frame);
-    if (!margin) {
+    const auto geometry = trackGeometry(frame);
+    if (!geometry) {
         return std::nullopt;
     }
-    return margin->first;
+    return geometry->upper_gap / geometry->track_span;
 }
 
-std::optional<double> ScrollBarOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    // A resolution change mid-scroll would mix from.frame.height() (new-frame pixels) with a scroll_bar_length
-    // latched at the old scale below, yielding a wrong pixel offset. Bail before touching the latch so it is not
-    // polluted with a cross-scale max. (!= is not auto-generated for value types here; use !(==).)
-    if (!(from.frame.size() == to.frame.size())) {
+std::optional<double> ScrollBarOffsetEstimator::estimate(const Frame &from, const Frame &to) const {
+    // A mid-scroll resolution change would mix from's pixel scale (viewport_px below) with a cross-scale
+    // averaged thumb length, so the delta is only valid at one scale. Bail. (!= is not auto-generated for
+    // value types here; use !(==).)
+    if (!(from.size() == to.size())) {
         return std::nullopt;
     }
 
-    const auto &from_line = findScrollbar(from.frame);
-    const auto &to_line = findScrollbar(to.frame);
-    if (!from_line || !to_line) {
+    const auto from_geometry = trackGeometry(from);
+    const auto to_geometry = trackGeometry(to);
+    if (!from_geometry || !to_geometry) {
         return std::nullopt;
     }
 
-    const auto scroll_bar_length = std::max({
-        from.scroll_bar_length,
-        to.scroll_bar_length,
-        from_line->length(),
-        to_line->length(),
-    });
-    from.scroll_bar_length = scroll_bar_length;
-    to.scroll_bar_length = scroll_bar_length;
-
-    const auto &line_delta = to_line.value() - from_line.value();
-    const auto offset = (std::abs(line_delta.p1()) > std::abs(line_delta.p2())) ? line_delta.p1() : line_delta.p2();
-    return static_cast<double>(from.frame.height()) * offset / scroll_bar_length;
-}
-
-std::optional<Line1D<double>> ScrollBarOffsetEstimator::findScrollbar(const Frame &frame) const {
-    const auto margin = scanMargin(frame);
-    if (!margin) {
+    // Delta form over the calibrated track geometry: the fixed track top cancels in the upper_gap
+    // difference, so only one shared thumb length divides -- unlike scrollOffsetGuess()'s per-frame absolute
+    // difference, this cancels each frame's constant measurement bias and stays low-noise. When the game
+    // re-scales the thumb mid-scroll the two lengths disagree and this guess drifts; the image match then
+    // rejects it and estimateAcrossRescale() (each frame's OWN length) recovers -- see updateScrolling().
+    const double thumb_logical = (from_geometry->thumb_logical + to_geometry->thumb_logical) / 2.0;
+    if (thumb_logical <= 0.0) {
         return std::nullopt;
     }
-    const auto &scan_line = frame.anchor().absolute(scroll_bar_scan_line).vertical();
-    return Line1D<double>{
-        scan_line.pointAt(margin->first),
-        scan_line.pointAt(1. - margin->second),
-    };
-}
-
-std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::scanMargin(const Frame &frame) const {
-    const auto &upper_margin = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line);
-    const auto &lower_margin = frame.lengthIn(scroll_bar_bg_color_range, scroll_bar_scan_line.reversed());
-    if (!upper_margin || upper_margin.value() == 1. || !lower_margin || lower_margin.value() == 1.) {
-        return std::nullopt;  // Bar not found.
-    }
-    return std::make_pair(upper_margin.value(), lower_margin.value());
+    const double viewport_px = from.anchor().scaleToPixels(viewport);
+    return viewport_px * (to_geometry->upper_gap - from_geometry->upper_gap) / thumb_logical;
 }
 
 std::optional<double> ScrollBarOffsetEstimator::scrollOffsetGuess(const Frame &from, const Frame &to) const {
-    const auto from_margin = scanMargin(from);
-    const auto to_margin = scanMargin(to);
-    if (!from_margin || !to_margin) {
+    const auto from_geometry = trackGeometry(from);
+    const auto to_geometry = trackGeometry(to);
+    if (!from_geometry || !to_geometry) {
         return std::nullopt;
     }
-    // Absolute scroll offset (content px from the top) implied by one frame's scrollbar geometry, using
-    // THAT frame's own thumb length -- unlike estimate()'s shared-length delta, this stays correct
-    // across a thumb-length change. Derivation: total content = V/f, scrollable range = V(1/f - 1),
-    // scrolled fraction = upper/(upper+lower); their product simplifies to V*upper/f.
-    const auto absolute_offset = [](const Frame &frame,
-                                    const std::pair<double, double> &margin) -> std::optional<double> {
-        const double thumb_length = 1.0 - margin.first - margin.second;
-        if (thumb_length <= 0.0) {
-            return std::nullopt;
-        }
-        return static_cast<double>(frame.height()) * margin.first / thumb_length;
+    // Absolute scroll offset (content px from the top) implied by one frame's scrollbar geometry, using THAT
+    // frame's own thumb length -- unlike estimate()'s shared-length delta, this stays correct across a
+    // thumb-length change. abs = V * upper_gap / thumb_logical, with V the true viewport (config, width-
+    // normalized -> px via scaleToPixels) rather than the crop height, and thumb_logical the cap-corrected
+    // thumb length. The fixed track top cancels in the delta below, but V and the -2c correction do not.
+    const auto absolute_offset = [this](const Frame &frame, const TrackGeometry &geometry) -> double {
+        const double viewport_px = frame.anchor().scaleToPixels(viewport);
+        return viewport_px * geometry.upper_gap / geometry.thumb_logical;
     };
-    const auto from_offset = absolute_offset(from, from_margin.value());
-    const auto to_offset = absolute_offset(to, to_margin.value());
-    if (!from_offset || !to_offset) {
-        return std::nullopt;
-    }
-    return to_offset.value() - from_offset.value();
+    return absolute_offset(to, to_geometry.value()) - absolute_offset(from, from_geometry.value());
 }
 
 ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
@@ -291,11 +402,11 @@ ScrollAreaOffsetEstimator::ScrollAreaOffsetEstimator(
     , image_offset_estimator(image_offset_estimator) {}
 
 std::optional<double> ScrollAreaOffsetEstimator::position(const FrameDescriptor &descriptor) const {
-    return scroll_bar_offset_estimator.position(descriptor.frame);
+    return scroll_bar_offset_estimator.position(descriptor.scroll_bar_frame);
 }
 
 std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    const auto guess = scroll_bar_offset_estimator.estimate(from, to);
+    const auto guess = scroll_bar_offset_estimator.estimate(from.scroll_bar_frame, to.scroll_bar_frame);
     if (!guess) {
         return std::nullopt;
     }
@@ -311,7 +422,7 @@ ScrollAreaOffsetEstimator::estimateAcrossRescale(FrameDescriptor &from, FrameDes
     if (!(from.frame.size() == to.frame.size())) {
         return std::nullopt;  // resolution change; estimate() already rejected it -- do not recover here.
     }
-    const auto guess = scroll_bar_offset_estimator.scrollOffsetGuess(from.frame, to.frame);
+    const auto guess = scroll_bar_offset_estimator.scrollOffsetGuess(from.scroll_bar_frame, to.scroll_bar_frame);
     if (!guess) {
         return std::nullopt;
     }
@@ -649,14 +760,18 @@ Frame StationaryFrameCatcher::croppedFrame() const {
 }
 
 NonScrollableScrapingInterpreter::NonScrollableScrapingInterpreter(
-    const std::shared_ptr<PageScrapingBox> &scraping_box, const StationaryFrameCatcher &stationary_catcher)
+    const std::shared_ptr<PageScrapingBox> &scraping_box,
+    const StationaryFrameCatcher &stationary_catcher,
+    const Rect<double> &scroll_area_rect)
     : stationary_catcher(stationary_catcher)
+    , scroll_area_rect(scroll_area_rect)
     , scraping_box(scraping_box) {}
 
 void NonScrollableScrapingInterpreter::update(const Frame &frame) {
     assert_(state == Updatable);
     has_updated = true;
-    if (readyAfterUpdate(stationary_catcher, frame)) {
+    // Crop the content region from the full frame; the catcher and capture see the same pixels as before.
+    if (readyAfterUpdate(stationary_catcher, frame.copy(scroll_area_rect))) {
         scraping_box->setScrollArea(stationary_catcher.fullSizeFrame());
         state = Ready;
     }
@@ -674,6 +789,8 @@ ScrollableScrapingInterpreter::ScrollableScrapingInterpreter(
     const std::shared_ptr<PageScrapingBox> &scraping_box,
     const ScrollAreaOffsetEstimator &offset_estimator,
     const StationaryFrameCatcher &stationary_catcher,
+    const Rect<double> &scroll_area_rect,
+    const Rect<double> &scroll_bar_rect,
     double initial_scroll_threshold,
     double minimum_scroll_threshold,
     const event_util::Sender<> &on_scroll_ready,
@@ -681,6 +798,8 @@ ScrollableScrapingInterpreter::ScrollableScrapingInterpreter(
     : on_scroll_ready(on_scroll_ready)
     , on_scroll_updated(on_scroll_updated)
     , offset_estimator(offset_estimator)
+    , scroll_area_rect(scroll_area_rect)
+    , scroll_bar_rect(scroll_bar_rect)
     , initial_scroll(initial_scroll_threshold)
     , minimum_scroll(minimum_scroll_threshold)
     , scraping_box(scraping_box)
@@ -705,47 +824,46 @@ bool ScrollableScrapingInterpreter::started() const {
 }
 
 void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
-    if (readyAfterUpdate(stationary_catcher, frame)) {
-        startScrolling(stationary_catcher.fullSizeFrame());
+    // `frame` is the full frame: the catcher/capture use the content crop, the estimator the scroll-bar band.
+    if (readyAfterUpdate(stationary_catcher, frame.copy(scroll_area_rect))) {
+        // The catcher latched a stationary content frame; pair it with the current (stationary) scroll-bar band.
+        startScrolling({stationary_catcher.fullSizeFrame(), frame.copy(scroll_bar_rect)});
         on_scroll_ready->send();
         return;
     }
 
     if (initial_descriptor.empty()) {
-        initial_descriptor = {frame};
+        initial_descriptor = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
         return;
     }
 
-    FrameDescriptor current_descriptor = {frame};
+    FrameDescriptor current_descriptor = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
     if (offset_estimator.estimate(initial_descriptor, current_descriptor).value_or(-1.0) > initial_scroll) {
-        startScrolling(initial_descriptor.frame);
+        startScrolling(initial_descriptor);
         // didn't get a stationary image, so won't send a ready.
         return;
     }
 }
 
-void ScrollableScrapingInterpreter::startScrolling(const Frame &valid_frame) {
-    scraping_box->addScrollArea(valid_frame);
-    previous_descriptor = {valid_frame, initial_descriptor.scroll_bar_length};
+void ScrollableScrapingInterpreter::startScrolling(const FrameDescriptor &valid_descriptor) {
+    scraping_box->addScrollArea(valid_descriptor.frame);
+    previous_descriptor = valid_descriptor;
     is_scrolling = true;
     on_scroll_updated->send(offset_estimator.position(previous_descriptor).value_or(0.0));
 }
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
-    FrameDescriptor current_fragment = {frame};
+    FrameDescriptor current_fragment = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
     auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
     if (!offset.has_value()) {
         // The shared-length scroll-bar guess in estimate() breaks when the game lazily re-scales the
-        // thumb (factor inheritance history appended mid-scroll): the guess becomes inconsistent with
-        // the pixels, the image match rejects it, and the reference would freeze -- stalling the tab.
-        // Recover with a guess computed from each frame's OWN thumb length, which stays valid across the
-        // re-scale. If the frames still match we keep the true offset and capture the fragment normally
-        // (no skipped content), instead of stalling; if they do not match this stays nullopt exactly as
-        // before. Resetting scroll_bar_length lets the next estimate re-latch at the new thumb length.
+        // thumb (factor inheritance history appended mid-scroll): the two frames' thumb lengths disagree,
+        // the guess becomes inconsistent with the pixels, the image match rejects it, and the reference
+        // would freeze -- stalling the tab. Recover with a guess computed from each frame's OWN thumb
+        // length, which stays valid across the re-scale. If the frames still match we keep the true offset
+        // and capture the fragment normally (no skipped content); if they do not match this stays nullopt
+        // exactly as before.
         offset = offset_estimator.estimateAcrossRescale(previous_descriptor, current_fragment);
-        if (offset.has_value()) {
-            current_fragment.scroll_bar_length = 0.0;
-        }
     }
 
     // Check the green terminator every frame, anchored to the scroll frontier (height - offset), BEFORE
@@ -753,12 +871,13 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     // stationary (a scrollbar re-scale, not a real scroll), so the offset stays under minimum_scroll and
     // no strip is latched -- exactly the case a latch-coupled scan misses. Skip frames with no usable
     // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
-    if (offset.has_value() && scraping_box->detectGreenTerminator(frame, std::lround(offset.value()))) {
+    if (offset.has_value()
+        && scraping_box->detectGreenTerminator(current_fragment.frame, std::lround(offset.value()))) {
         // Crop the saved fragments to the same bottom line the gray-completion path uses, so the trailing
         // background below the last factor is a fixed margin regardless of which terminator ended the tab.
         // The last fragment otherwise runs to the frame bottom (addScrollArea's fallback save), leaving a
         // variable gap above the footer.
-        scraping_box->trimScrollAreaToFactorEnd(frame, std::lround(offset.value()));
+        scraping_box->trimScrollAreaToFactorEnd(current_fragment.frame, std::lround(offset.value()));
         // Report the final position before going Ready so the UI progress reaches 100% for the tab,
         // matching the gray-completion path below (which emits via addScrollArea). Without this, a
         // short-history factor tab that ends via the green terminator would stall one update short.
@@ -773,10 +892,10 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
         return;
     }
 
-    scraping_box->addScrollArea(frame, std::lround(offset.value()));
+    scraping_box->addScrollArea(current_fragment.frame, std::lround(offset.value()));
 
     // Report the position of the fragment just latched (current), not the previous one. position() reads only
-    // the frame's scrollbar margin (independent of scroll_bar_length), so it is valid on current_fragment.
+    // the current frame's scrollbar geometry, so it is valid on current_fragment.
     // Emitting here also covers the final/bottom position before scrollAreaReady() returns, so the UI progress
     // reaches 100% for the tab instead of stalling one fragment short.
     const auto position = offset_estimator.position(current_fragment);
@@ -813,7 +932,8 @@ void SceneScraper::update(const Frame &frame) {
         readyForStitch();
     }
 
-    if (updateUntilReady(scroll_area_scraper, frame.copy(config.scroll_area_rect))) {
+    // Pass the full frame; the interpreter crops the content and scroll-bar regions internally.
+    if (updateUntilReady(scroll_area_scraper, frame)) {
         readyForStitch();
     }
 }
@@ -830,17 +950,25 @@ std::optional<double> SceneScraper::topMargin(const Frame &frame) const {
     if (scroll_bar_estimator == nullptr) {
         return std::nullopt;
     }
-    return scroll_bar_estimator->topMargin(frame.copy(config.scroll_area_rect));
+    return scroll_bar_estimator->topMargin(frame.copy(config.scroll_bar_rect));
 }
 
 void SceneScraper::build(const Frame &frame) {
     assert_(state == Null);
 
+    // Content crop: sizes the scroll thresholds (a content-scroll concern). Scroll-bar band: gates scrollbar
+    // detection, decoupled from the content crop.
     const auto initial_frame = frame.view(config.scroll_area_rect);
+    const auto scroll_bar_frame = frame.view(config.scroll_bar_rect);
     log_debug("{}, {}", initial_frame.size().width(), initial_frame.size().height());
 
-    scroll_bar_estimator =
-        std::make_unique<ScrollBarOffsetEstimator>(config.scroll_bar_bg_color, config.scroll_bar_scan_line);
+    scroll_bar_estimator = std::make_unique<ScrollBarOffsetEstimator>(
+        config.scroll_bar_bg_color,
+        config.scroll_bar_scan_line,
+        config.scroll_bar_margin_color,
+        config.viewport,
+        config.cap_offset,
+        config.scroll_bar_thumb_probe);
     const auto &scroll_bar_offset_estimator = *scroll_bar_estimator;
 
     const auto stationary_catcher = StationaryFrameCatcher(
@@ -849,17 +977,20 @@ void SceneScraper::build(const Frame &frame) {
         config.stationary_color_threshold,
         config.scroll_area_stationary_rect);
 
-    if (scroll_bar_offset_estimator.hasScrollbar(initial_frame)) {
+    if (scroll_bar_offset_estimator.hasScrollbar(scroll_bar_frame)) {
         scroll_area_scraper = std::make_unique<ScrollableScrapingInterpreter>(
             scraping_box,
             ScrollAreaOffsetEstimator(scroll_bar_offset_estimator, ImageOffsetEstimator()),
             stationary_catcher,
+            config.scroll_area_rect,
+            config.scroll_bar_rect,
             config.initial_scroll_threshold * initial_frame.height(),
             config.minimum_scroll_threshold * initial_frame.height(),
             on_scroll_ready,
             on_scroll_updated);
     } else {
-        scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(scraping_box, stationary_catcher);
+        scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(
+            scraping_box, stationary_catcher, config.scroll_area_rect);
     }
 
     tab_button_catcher = std::make_unique<StationaryFrameCatcher>(
@@ -1016,6 +1147,15 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         // would share pixels with a capture source that reuses its buffer, so clone to own the pixels
         // (same hazard StationaryFrameCatcher::update guards against).
         factor_probe_reference = current_full_frame.clone();
+        // Capture the flush header position alongside the reference; both are taken on this settled, at-top frame,
+        // so maybeResetOnFactorChange can later reject a tiny scroll by comparing the header against it.
+        reference_header_y = factorHeaderTopY(current_full_frame);
+        // If the header green is not found here, the flush gate is unavailable and maybeResetOnFactorChange falls
+        // back to the top-margin gate. A capture source whose green differs from the configured range (e.g. live
+        // WinRT vs a recorded clip) would trip this, so surface it rather than silently losing the header gate.
+        if (!reference_header_y) {
+            log_warning("factor probe: header not found; factor reset falls back to the top-margin gate");
+        }
         factor_change_pending_since = std::nullopt;
         on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
     });
@@ -1222,6 +1362,7 @@ void CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
             break;
         case TabPage::FactorPage:
             factor_probe_reference = {};
+            reference_header_y = std::nullopt;
             factor_change_pending_since = std::nullopt;
             factor_scraper = makeTabScraper(TabPage::FactorPage, scraping_box->resetFactorBox());
             break;
@@ -1234,14 +1375,54 @@ void CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
     on_scroll_updated->send(tab_page, 0.0);  // Zero the tab's progress in the UI.
 }
 
+std::optional<int> CharaDetailSceneScraper::factorHeaderTopY(const Frame &frame) const {
+    if (active_common == nullptr) {
+        return std::nullopt;
+    }
+    const auto &header = config.factor_header;
+    // Crop to the scroll area so the scan (and the returned row) are relative to its top -- the coordinate that
+    // moves with the content. view() shares the buffer (read-only here) and, like the diff below, degrades via
+    // the scraper try/catch if the rect ever falls outside the frame. Return the pixel row (not a fraction): the
+    // caller compares it against the reference in pixels, and both are taken on same-size frames.
+    const Frame area = frame.view(active_common->scroll_area_rect);
+    const int height = area.height();
+    for (int y = 0; y < height; y++) {
+        // The probe band x-range is a fraction of the crop width; y maps back to this same row (the anchor
+        // scales both axes by the crop width, so scaleFromPixels(y) * width == y).
+        const double normalized_y = area.anchor().scaleFromPixels(y);
+        const Line<double> row = {{header.band_start, normalized_y}, {header.band_end, normalized_y}};
+        if (area.fractionIn(header.color_range, row) > header.green_fraction_threshold) {
+            return y;
+        }
+    }
+    return std::nullopt;
+}
+
 void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type) {
     if (factor_probe_reference.empty() || active_common == nullptr) {
         factor_change_pending_since = std::nullopt;
         return;
     }
-    const auto top_margin = factor_scraper->topMargin(frame);
-    const bool at_top = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
-    if (!at_top || factor_probe_reference.size() != frame.size()) {
+    // Gate the diff on being flush at the very top. Prefer the green "因子" header, which moves 1:1 with the
+    // content, over the scroll thumb (whose travel is compressed by viewport/content, so a tiny content scroll
+    // barely moves topMargin and a same-character micro-scroll used to read as a switch). The header gate needs
+    // the header detected in BOTH the reference and the current frame; when either is missing -- a capture
+    // source whose green falls outside the configured range leaves reference_header_y empty -- fall back to the
+    // top-margin gate so switch detection keeps working instead of going dead (worse than the original bug).
+    const auto header_y = factorHeaderTopY(frame);
+    bool flush;
+    bool used_header_gate;
+    if (header_y.has_value() && reference_header_y.has_value()) {
+        // Both rows are measured on same-size frames (guaranteed by the size check below), so their pixel
+        // difference is meaningful directly.
+        flush = std::abs(*header_y - *reference_header_y) <= config.factor_header.flush_tolerance_px;
+        used_header_gate = true;
+    } else {
+        const auto top_margin = factor_scraper->topMargin(frame);
+        flush = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
+        used_header_gate = false;
+    }
+    if (!flush || factor_probe_reference.size() != frame.size()) {
         factor_change_pending_since = std::nullopt;
         return;
     }
@@ -1271,7 +1452,12 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, recor
     if (chrono_util::monotonicElapsed(timestamp, factor_change_pending_since.value()) < kMonitorDwellMs) {
         return;
     }
-    log_debug("factor content changed at top -> reset session (ratio={:.4f})", ratio);
+    log_info(
+        "factor reset (ratio={:.4f}, gate={}, header_y={}, ref_header_y={})",
+        ratio,
+        used_header_gate ? "header" : "topmargin",
+        header_y.value_or(-1),
+        reference_header_y.value_or(-1));
     resetSession(record_type);
 }
 
@@ -1284,6 +1470,7 @@ void CharaDetailSceneScraper::resetMonitors() {
     type_pending_value = std::nullopt;
     factor_change_pending_since = std::nullopt;
     factor_probe_reference = {};
+    reference_header_y = std::nullopt;
     last_scroll_position_emitted = std::nullopt;
 }
 

@@ -114,6 +114,41 @@ TEST_CASE("Frame line sampling: isIn / isAllIn / lengthIn") {
     CHECK(frame.lengthIn(in_range, inside) == doctest::Approx(1.0));  // in range all the way to the end
 }
 
+TEST_CASE("Frame::fractionIn reports the share of sampled points in range") {
+    // Left half (x < 50) is in range; right half is out of range.
+    cv::Mat mat = solid(100, 100, Color(0, 0, 0));
+    mat(cv::Rect(50, 0, 50, 100)).setTo(cv::Scalar(200, 200, 200));
+    const Frame frame = Frame::fixed(mat);
+    const Range<Color> in_range{Color(0, 0, 0), Color(50, 50, 50)};
+
+    const Line<double> left{Point<double>(0.10, 0.50), Point<double>(0.40, 0.50)};
+    CHECK(frame.fractionIn(in_range, left) == doctest::Approx(1.0));  // wholly in range
+
+    const Line<double> right{Point<double>(0.60, 0.50), Point<double>(0.90, 0.50)};
+    CHECK(frame.fractionIn(in_range, right) == doctest::Approx(0.0));  // wholly out of range
+
+    // A line split evenly across the boundary reports ~half in range (the ratio, not a hard all/any).
+    const Line<double> crossing{Point<double>(0.10, 0.50), Point<double>(0.90, 0.50)};
+    CHECK(frame.fractionIn(in_range, crossing) == doctest::Approx(0.5).epsilon(0.05));
+}
+
+TEST_CASE("Frame::fractionIn separates a solid header band from a narrow stray run") {
+    // Mirrors factorHeaderTopY's probe: a right-of-centre band is "the header" only when it is *mostly* green,
+    // so a solid header row clears a 0.5 threshold while a narrow stray green pill in the same band does not.
+    cv::Mat mat = solid(100, 100, Color(0, 0, 0));  // background is out of the green range
+    mat(cv::Rect(0, 20, 100, 1)).setTo(cv::Scalar(0, 200, 0));  // y=20: a full-width solid green header row
+    mat(cv::Rect(65, 40, 5, 1)).setTo(cv::Scalar(0, 200, 0));  // y=40: a 5px green pill inside the band
+    const Frame frame = Frame::fixed(mat);
+    const Range<Color> green{Color(0, 150, 0), Color(80, 255, 80)};
+
+    // The probe band spans x[0.65,0.88] (23px on a 100px-wide frame), matching the config right-band.
+    const Line<double> header_band{Point<double>(0.65, 0.20), Point<double>(0.88, 0.20)};
+    CHECK(frame.fractionIn(green, header_band) == doctest::Approx(1.0));  // solid header -> accepted
+
+    const Line<double> pill_band{Point<double>(0.65, 0.40), Point<double>(0.88, 0.40)};
+    CHECK(frame.fractionIn(green, pill_band) < 0.5);  // narrow pill -> below threshold, rejected
+}
+
 TEST_CASE("Frame::pixelDifference sums gated per-pixel differences") {
     const Frame black = Frame::fixed(solid(4, 4, Color(0, 0, 0)));
     const Frame reddish = Frame::fixed(solid(4, 4, Color(10, 0, 0)));  // per-pixel diff of 10

@@ -21,6 +21,23 @@ the user explicitly asks**.
 - Keep all repository artifacts in English per the language policy, including
   commit messages and PR titles/descriptions.
 
+## PR title and body style
+
+Match the repo convention (see recent merged PRs):
+
+- **Title — Conventional Commits** `type(scope): summary`. Types in use: `feat`,
+  `fix`, `refactor`, `chore`, `ci`, `test`, `style`. Scope is optional, kebab-case,
+  and names the area (`chara-detail`, `native`, `sentry`, …). The summary is
+  lowercase, imperative, and has no trailing period.
+- **Body — Markdown with `##` sections.** Lead with `## Summary` (1–2 sentences on
+  what changed and why), then the detail (`## What changed` with **bold**-led
+  bullets, or numbered `### 1. …` subsections for a multi-part PR), and close with
+  `## Testing` stating what was run and the result. Add `## Risk / scope`,
+  `## Design notes`, or `## Follow-up` only when they carry real information.
+- Use `code` for identifiers and paths and **bold** for each point's key term;
+  keep it skimmable. End the body with the
+  `🤖 Generated with [Claude Code](https://claude.com/claude-code)` footer.
+
 ## Generated files and line endings
 
 - This repo uses `core.autocrlf=true`, so generated files written with LF would
