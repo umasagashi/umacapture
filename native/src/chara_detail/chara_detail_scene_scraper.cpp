@@ -104,16 +104,21 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
     const int thumb_top = anchor.scaleToPixels(scan.pointAt(upper.value()));
     const int thumb_bottom = anchor.scaleToPixels(scan.pointAt(1. - lower.value()));
 
-    constexpr int kHalf = 8;      // centroid window half-width (columns)
-    constexpr int kWhiteGap = 9;  // white reference sampled at +-[7,9] from cfg, clear of the ~7 px pill
-    constexpr int kCapSkip = 3;   // rows skipped at each rounded cap (sub-thumb intensity)
-    constexpr int kMaxRows = 32;  // cap the sampled rows so a tall thumb stays cheap
-    constexpr double kMinContrast = 20.;
+    // The thumb is a fixed-DPI pill; its probe geometry is expressed as fractions of the frame width
+    // (reference: 736 px capture, ~7 px pill) and converted to pixels through the anchor, so it scales with
+    // the capture resolution instead of assuming one. Only the sub-pixel neighbour steps below stay at 1 px.
+    const int half = std::max(1, anchor.scaleToPixels(8. / 736.));       // centroid window half-width (columns)
+    const int white_gap = std::max(1, anchor.scaleToPixels(9. / 736.));  // white reference offset, just past the pill
+    const int white_band = anchor.scaleToPixels(2. / 736.);              // white reference band width (inward)
+    const int core_half = std::max(1, anchor.scaleToPixels(2. / 736.));  // darkest-core half-width at the column
+    const int cap_skip = std::max(1, anchor.scaleToPixels(3. / 736.));   // rows skipped at each rounded cap
+    constexpr int kMaxRows = 32;          // sampled-row cap (a count, resolution-independent); keeps a tall thumb cheap
+    constexpr double kMinContrast = 20.;  // minimum white-to-core intensity gap (0-255), not a spatial constant
 
     const cv::Mat &image = frame.data();
-    const int row_lo = thumb_top + kCapSkip;
-    const int row_hi = thumb_bottom - kCapSkip;
-    if (cfg - kWhiteGap < 0 || cfg + kWhiteGap >= image.cols || row_lo < 0 || row_hi >= image.rows
+    const int row_lo = thumb_top + cap_skip;
+    const int row_hi = thumb_bottom - cap_skip;
+    if (cfg - white_gap < 0 || cfg + white_gap >= image.cols || row_lo < 0 || row_hi >= image.rows
         || row_hi - row_lo < 1) {
         return std::nullopt;
     }
@@ -121,19 +126,22 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
 
     const int stride = std::max(1, (row_hi - row_lo) / kMaxRows);
     std::vector<double> centers;
+    std::vector<double> whites;
     for (int y = row_lo; y <= row_hi; y += stride) {
-        std::array<double, 6> whites = {
-            red(cfg - kWhiteGap, y),
-            red(cfg - kWhiteGap + 1, y),
-            red(cfg - kWhiteGap + 2, y),
-            red(cfg + kWhiteGap - 2, y),
-            red(cfg + kWhiteGap - 1, y),
-            red(cfg + kWhiteGap, y),
-        };
+        // White reference: the near-white band flanking the pill, sampled inward from each outer offset and
+        // taken as its median to shrug off a stray dark pixel.
+        whites.clear();
+        for (int x = cfg - white_gap; x <= cfg - white_gap + white_band; x++) {
+            whites.push_back(red(x, y));
+        }
+        for (int x = cfg + white_gap - white_band; x <= cfg + white_gap; x++) {
+            whites.push_back(red(x, y));
+        }
         std::sort(whites.begin(), whites.end());
-        const double white = (whites[2] + whites[3]) / 2.;
+        const std::size_t n = whites.size();
+        const double white = (n % 2 == 0) ? (whites[n / 2 - 1] + whites[n / 2]) / 2. : whites[n / 2];
         double core = 255.;
-        for (int x = cfg - 2; x <= cfg + 2; x++) {
+        for (int x = cfg - core_half; x <= cfg + core_half; x++) {
             core = std::min(core, red(x, y));
         }
         if (white - core < kMinContrast) {
@@ -141,7 +149,7 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
         }
         double weight_sum = 0.;
         double weighted_x = 0.;
-        for (int x = cfg - kHalf; x <= cfg + kHalf; x++) {
+        for (int x = cfg - half; x <= cfg + half; x++) {
             const double coverage = std::clamp((white - red(x, y)) / (white - core), 0., 1.);
             weight_sum += coverage;
             weighted_x += coverage * x;
