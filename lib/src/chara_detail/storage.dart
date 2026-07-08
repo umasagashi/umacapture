@@ -507,6 +507,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     }
   }
 
+  @override
   CharaDetailRecord? getBy({required String id}) {
     return _records.firstWhereOrNull((e) => e.id == id);
   }
@@ -577,6 +578,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     }
   }
 
+  @override
   void delete(String id) {
     // Deleting a record does not clear other records' parentN links to it.
     // Inheritance resolution is additive and never clears links (see
@@ -596,6 +598,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
 
   /// Permanently deletes every record in [ids], erasing each directory then
   /// republishing once via [removeRecords] (instead of per id).
+  @override
   void deleteAll(Iterable<String> ids) {
     for (final id in ids) {
       final record = getBy(id: id);
@@ -714,6 +717,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
   DirectoryPath recordPathOf(CharaDetailRecord record) => rootDirectory / record.id;
 
+  @override
   CharaDetailRecord? getBy({required String id}) {
     return state.asData?.value.firstWhereOrNull((e) => e.id == id);
   }
@@ -758,6 +762,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
   }
 
   /// Permanently deletes an archived record's directory and republishes.
+  @override
   void delete(String id) {
     final records = state.asData?.value;
     if (records == null) {
@@ -773,6 +778,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
 
   /// Permanently deletes every archived record in [ids], erasing each directory
   /// then republishing the filtered set once.
+  @override
   void deleteAll(Iterable<String> ids) {
     final records = state.asData?.value;
     if (records == null) {

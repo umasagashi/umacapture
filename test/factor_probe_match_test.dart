@@ -135,4 +135,27 @@ void main() {
       });
     }
   });
+
+  group('RecordType wire ordinal contract', () {
+    // The onFactorProbe event carries record_type as a raw ordinal: native sends
+    // static_cast<int>(record_type) and this side decodes RecordType.values[int]
+    // (see PlatformController._handleMessage). This order must match the native
+    // enum in chara_detail_record.h, which has a matching static_assert and a
+    // factorProbe contract test. Pin the Dart-side order so a reorder fails here.
+    test('values are in the exact wire order', () {
+      expect(RecordType.values, [
+        RecordType.standard,
+        RecordType.inheritanceOnly,
+        RecordType.friendStandard,
+        RecordType.friendInheritance,
+      ]);
+    });
+
+    test('each value maps to its expected ordinal', () {
+      expect(RecordType.standard.index, 0);
+      expect(RecordType.inheritanceOnly.index, 1);
+      expect(RecordType.friendStandard.index, 2);
+      expect(RecordType.friendInheritance.index, 3);
+    });
+  });
 }

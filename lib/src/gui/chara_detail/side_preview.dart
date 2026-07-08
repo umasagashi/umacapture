@@ -360,7 +360,15 @@ class _SidePreviewImage extends ConsumerWidget {
           viewportSize: viewportSize,
           initialScale: scale,
           maxScale: scale * 3,
-          child: Image.file(imagePath.toFile(), width: size.width, height: size.height, fit: BoxFit.none),
+          child: Image.file(
+            imagePath.toFile(),
+            width: size.width,
+            height: size.height,
+            fit: BoxFit.none,
+            // Degrade to a placeholder if the file is missing or corrupt rather
+            // than showing a broken-image box and throwing from the codec per frame.
+            errorBuilder: (context, error, stackTrace) => _Placeholder(message: "$tr_preview.loading_error".tr()),
+          ),
         );
       },
     );

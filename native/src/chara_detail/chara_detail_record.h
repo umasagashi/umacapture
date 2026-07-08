@@ -23,6 +23,13 @@ enum RecordType {
     FriendStandard = 2,
     FriendInheritance = 3,
 };
+// Compile-time guard for the wire ordinal contract above: the onFactorProbe event sends
+// static_cast<int>(record_type) and Dart reads it as RecordType.values[int], so these values must never
+// change. A matching Dart-side test pins RecordType.values order; the two together catch a reorder on
+// either layer. (test_native_api_messages.cpp also locks the exact record_type int factorProbe emits.)
+static_assert(
+    Standard == 0 && InheritanceOnly == 1 && FriendStandard == 2 && FriendInheritance == 3,
+    "RecordType ordinals are a cross-layer wire contract with Dart; see the note above.");
 EXTENDED_JSON_TYPE_ENUM_STRICT(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
 
 // Stable tag for each record-type branch in the scene-context condition tree. The builder names each

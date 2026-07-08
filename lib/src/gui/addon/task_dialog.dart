@@ -370,15 +370,18 @@ List<Widget> _buildActionFields({
   required VoidCallback onChanged,
 }) {
   return switch (kind) {
-    _ActionKind.external => _externalFields(fields, trigger, onChanged),
+    _ActionKind.external => _externalFields(context, fields, trigger, onChanged),
     _ActionKind.webhook => _webhookFields(fields, trigger, onChanged),
     _ActionKind.builtin => _builtinFields(fields, trigger, onChanged),
   };
 }
 
-List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
+List<Widget> _externalFields(BuildContext context, _ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
   Future<void> pickProgram() async {
     final result = await FilePicker.pickFiles(dialogTitle: "$tr_addon.dialog.program.picker_title".tr());
+    // The native picker awaits; bail if the dialog was closed meanwhile so we
+    // don't write to a disposed controller or setState after dispose.
+    if (!context.mounted) return;
     final path = result?.files.singleOrNull?.path;
     if (path != null) {
       f.program.text = path;
@@ -388,6 +391,7 @@ List<Widget> _externalFields(_ActionFields f, TriggerEvent trigger, VoidCallback
 
   Future<void> pickWorkingDir() async {
     final dir = await FilePicker.getDirectoryPath(dialogTitle: "$tr_addon.dialog.working_dir.picker_title".tr());
+    if (!context.mounted) return;
     if (dir != null) {
       f.workingDir.text = dir;
       onChanged();

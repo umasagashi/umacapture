@@ -47,6 +47,13 @@ class WebhookRunner implements ActionRunner {
     final options = Options(
       method: action.method,
       contentType: spec.header,
+      // Do not follow redirects (Dio defaults to following up to 5). This is a
+      // fire-and-forget notification: a 3xx becomes a non-2xx failure result
+      // below. Auto-following would re-send the request -- including the body,
+      // which may embed record data, and a secret carried in the URL path -- to
+      // a redirect target, so an open redirect or a compromised endpoint could
+      // exfiltrate them. Keeping redirects off matches the URL redaction above.
+      followRedirects: false,
       // Treat any HTTP status as a completed response so non-2xx becomes a
       // failure result rather than a thrown DioException.
       validateStatus: (_) => true,

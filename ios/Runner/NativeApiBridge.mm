@@ -11,6 +11,17 @@
 
 #import <Foundation/Foundation.h>
 
+// NOTE: This iOS bridge is a leftover from the early proof-of-concept phase and is NOT maintained.
+// Windows is the only supported platform today. It is kept (rather than deleted) so a future iOS port has
+// a starting point. It is intentionally non-functional: no FlutterMethodChannel is registered, so none of
+// the Dart-side methods (setConfig/setPlatformConfig/startCapture/stopCapture/updateRecord/
+// copyToClipboardFromFile/takeScreenshot) are wired, and setConfig below is commented out.
+//
+// TODO(ios): before shipping iOS, (1) register a FlutterMethodChannel named
+// "dev.flutter.umasagashi/capturing_channel" and forward every method to NativeApi, and (2) replace the
+// two defaultCStringEncoding uses below with NSUTF8StringEncoding -- the native payloads are UTF-8 JSON
+// (record ids, factor data), so the current encoding would corrupt any non-ASCII bytes.
+
 @implementation NativeApiBridge
 
 -(void)initializeNative {

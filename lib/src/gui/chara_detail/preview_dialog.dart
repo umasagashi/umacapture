@@ -72,10 +72,14 @@ class PredictionData with PredictionDataMappable {
     }
     if (prediction.label is int) {
       final labels = labelMap["$model.name"];
-      if (labels != null) {
-        return labels[prediction.label.toInt()];
+      final i = (prediction.label as int);
+      // Fall back to the raw index when the label list lacks the entry or the
+      // index is out of range (like the Map branch below), instead of throwing
+      // a RangeError during overlay render.
+      if (labels != null && i >= 0 && i < labels.length) {
+        return labels[i];
       }
-      return (prediction.label as int).toNumberString();
+      return i.toNumberString();
     }
     if (prediction.label is Map) {
       final Map<String, dynamic> m = prediction.label;
@@ -226,16 +230,18 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
     final labelMap = ref.watch(labelMapProvider);
     final cs = Theme.of(context).colorScheme;
     final textStyle = TextStyle(color: cs.onSurface, backgroundColor: cs.surface.withValues(alpha: 0.5), fontSize: 9);
-    // Archived records may carry no image for this tab; keep the layout slot but
-    // show a placeholder instead of a broken-image box.
+    // Archived records may carry no image for this tab, or the file may be
+    // missing/corrupt; keep the layout slot but show a placeholder instead of a
+    // broken-image box (and instead of throwing per frame from the image codec).
+    Widget placeholder() => Container(
+      width: sizeInfo.intersection.width.toDouble(),
+      height: sizeInfo.intersection.height.toDouble(),
+      color: cs.onSurface.withValues(alpha: 0.04),
+      alignment: Alignment.center,
+      child: Icon(Symbols.hide_image_rounded, color: cs.onSurfaceVariant),
+    );
     if (imagePath == null) {
-      return Container(
-        width: sizeInfo.intersection.width.toDouble(),
-        height: sizeInfo.intersection.height.toDouble(),
-        color: cs.onSurface.withValues(alpha: 0.04),
-        alignment: Alignment.center,
-        child: Icon(Symbols.hide_image_rounded, color: cs.onSurfaceVariant),
-      );
+      return placeholder();
     }
     return Stack(
       children: [
@@ -244,6 +250,7 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
           width: sizeInfo.intersection.width.toDouble(),
           height: sizeInfo.intersection.height.toDouble(),
           fit: BoxFit.none,
+          errorBuilder: (context, error, stackTrace) => placeholder(),
         ),
         ...(predictions ?? []).map((PredictionData data) {
           return Positioned(

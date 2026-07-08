@@ -138,7 +138,13 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
 
   @override
   TrinaCell plutoCell(RefBase ref, int value) {
-    final card = ref.watch(charaCardInfoProvider)[value];
+    // Degrade to the raw card id when it is outside the currently loaded
+    // character_card_info list (e.g. a module lagging behind a game update),
+    // rather than throwing a RangeError that blanks the whole grid.
+    final card = ref.watch(charaCardInfoProvider).getOrNull(value);
+    if (card == null) {
+      return TrinaCell(value: value)..setUserData(CharacterCardCellData(value.toString()));
+    }
     return TrinaCell(value: card.sortKey)..setUserData(CharacterCardCellData(card.names.first));
   }
 
