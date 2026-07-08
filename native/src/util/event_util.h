@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -242,6 +243,9 @@ public:
         vlog_debug(isRunning());
         assert_(!isRunning());
         runner = std::make_shared<EventRunnerThread>(notifier, finalizer, name);
+        // Publish running_ before starting the worker: the notifier listener reads isRunning() from the
+        // worker thread, so it must observe true the moment the worker can run.
+        running_ = true;
         runner->start();
     }
 
@@ -251,10 +255,14 @@ public:
             return;
         }
         runner->join();
+        running_ = false;
         runner = nullptr;
     }
 
-    [[nodiscard]] bool isRunning() const override { return runner != nullptr; }
+    // running_ (atomic) instead of the raw shared_ptr: isRunning() is read on the worker thread (the
+    // notifier listener's assert_) while the owner thread mutates `runner`, so reading the pointer here
+    // would be a data race. The `runner == nullptr` guard in join() stays as an owner-thread-only read.
+    [[nodiscard]] bool isRunning() const override { return running_; }
 
 private:
     const std::shared_ptr<QueuedConnectionImpl<int>> notifier;
@@ -264,6 +272,7 @@ private:
 
     std::vector<std::shared_ptr<EventProcessorInterface>> processors;
     std::shared_ptr<EventRunnerThread> runner;
+    std::atomic<bool> running_ = false;
 };
 
 class EventRunnerControllerImpl : public EventRunnerInterface {
@@ -304,7 +313,9 @@ public:
 
 private:
     std::vector<std::shared_ptr<EventRunnerInterface>> runners;
-    bool is_running = false;
+    // Read from Dart-facing threads (via NativeApi) while start()/join() write it on the owner thread,
+    // so it must be atomic like ThreadBase's running flag; a plain bool here is a formal data race.
+    std::atomic<bool> is_running = false;
 };
 
 template<typename... Args>

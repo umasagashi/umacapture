@@ -332,6 +332,10 @@ void NativeApi::updateFrame(const Frame &frame, const Size<int> &original_size) 
     } catch (const std::exception &e) {
         log_error("updateFrame failed: {}", e.what());
         notifyError(e.what());
+    } catch (...) {
+        // WinRT exceptions do not derive from std::exception; letting one cross this FFI boundary is UB.
+        log_error("updateFrame failed: unknown exception");
+        notifyError("updateFrame failed: unknown exception");
     }
 }
 
@@ -351,6 +355,11 @@ void NativeApi::updateRecord(const chara_detail::RecordInfo &info) const {
         // does not wait forever for a completion that will never arrive.
         log_error("updateRecord failed: {}", e.what());
         notifyError(std::string("updateRecord failed: ") + e.what());
+    } catch (...) {
+        // WinRT exceptions do not derive from std::exception; contain them so the UI still gets a terminal
+        // error instead of waiting forever, and nothing crosses the C ABI.
+        log_error("updateRecord failed: unknown exception");
+        notifyError("updateRecord failed: unknown exception");
     }
 }
 

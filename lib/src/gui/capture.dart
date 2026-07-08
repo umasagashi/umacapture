@@ -515,7 +515,7 @@ class _CapturingPlatformInfoWidget extends ConsumerWidget {
             const SizedBox(width: 16),
             Disabled(
               disabled: isCapturing,
-              tooltip: "キャプチャ中は利用できません",
+              tooltip: "$tr_capture.capture_control.report_screen.disabled_tooltip".tr(),
               child: Tooltip(
                 message: "$tr_capture.capture_control.report_screen.tooltip".tr(),
                 child: TextButton(
