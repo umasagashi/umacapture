@@ -29,6 +29,7 @@ public:
             lineToY({0.8259, 60.0 / 736.0, {IS, SS}}, 40.0 / 736.0),
             colorRange({139, 221, 13}, 44),
             100,
+            factorHeader(),
         };
     }
 
@@ -118,6 +119,16 @@ private:
     // WinRT green (G>=177), same UI green as header_color_range.
     [[nodiscard]] chara_detail::scraper_config::ScanParameter factorEndGreen() const {
         return {0.6017, 5.0 / 736.0, colorRange({128, 222, 20}, 45)};
+    }
+
+    // The green "因子" section header is a precise "flush at the very top" sensor for maybeResetOnFactorChange:
+    // it moves 1:1 with the factor list, so a tiny scroll shifts it ~10 px where the scroll thumb barely moves
+    // (its travel is compressed by viewport/content). Probe a right-of-centre band x[0.65,0.88] of the scroll-area
+    // crop -- solid header green there, clear of the left icon column and the diagonal stripes, so requiring green
+    // across the whole band (fraction > 0.5) rejects a stray green factor pill. Same UI green as factorEndGreen.
+    // flush_tolerance 0.006 (~4-5 px at 736 wide) sits well under the ~10 px micro-scroll signal, above jitter.
+    [[nodiscard]] chara_detail::scraper_config::FactorHeaderConfig factorHeader() const {
+        return {colorRange({128, 222, 20}, 45), 0.65, 0.88, 0.5, 0.006};
     }
 
     [[nodiscard]] std::vector<chara_detail::scraper_config::ScanParameter> campaignScanParameters() const {

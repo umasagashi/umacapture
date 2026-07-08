@@ -99,6 +99,31 @@ struct ScanParameter {
     EXTENDED_JSON_TYPE_NDC(ScanParameter, x, length, color_range);
 };
 
+// Locates the green "因子" section header, whose top edge moves 1:1 with the factor list (unlike the scroll
+// thumb, whose travel is compressed by viewport/content). maybeResetOnFactorChange uses it as a precise "flush
+// at the very top" sensor: it runs the same-character content diff only when the header sits at its reference
+// (flush) y, so a tiny scroll of the same character no longer reads as a switch.
+struct FactorHeaderConfig {
+    // Vivid header green (same UI green as factor_end_green / header_color_range).
+    Range<Color> color_range;
+    // Horizontal probe band, expressed as fractions of the scroll-area crop width. Right of centre, clear of the
+    // left icon column and the diagonal stripes, where only the solid header spans the whole band.
+    double band_start;
+    double band_end;
+    // Minimum green fraction across the band for a row to count as the header (rejects a narrow stray green pill).
+    double green_fraction_threshold;
+    // Max |current - reference| header y (width-normalized, matching the anchor's units) still treated as flush.
+    double flush_tolerance;
+
+    EXTENDED_JSON_TYPE_NDC(
+        FactorHeaderConfig,
+        color_range,
+        band_start,
+        band_end,
+        green_fraction_threshold,
+        flush_tolerance);
+};
+
 struct CharaDetailSceneScraperConfig {
     SceneScraperConfig common;
     SceneScraperConfig friend_common;
@@ -109,6 +134,7 @@ struct CharaDetailSceneScraperConfig {
     Line<double> header_scan_line;
     Range<Color> header_color_range;
     uint64 header_visible_time_threshold;
+    FactorHeaderConfig factor_header;
 
     EXTENDED_JSON_TYPE_NDC(
         CharaDetailSceneScraperConfig,
@@ -120,7 +146,8 @@ struct CharaDetailSceneScraperConfig {
         factor_end_green,
         header_scan_line,
         header_color_range,
-        header_visible_time_threshold);
+        header_visible_time_threshold,
+        factor_header);
 };
 
 }  // namespace scraper_config

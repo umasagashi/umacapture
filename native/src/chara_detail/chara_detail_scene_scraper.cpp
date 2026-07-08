@@ -1139,6 +1139,9 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         // would share pixels with a capture source that reuses its buffer, so clone to own the pixels
         // (same hazard StationaryFrameCatcher::update guards against).
         factor_probe_reference = current_full_frame.clone();
+        // Capture the flush header position alongside the reference; both are taken on this settled, at-top frame,
+        // so maybeResetOnFactorChange can later reject a tiny scroll by comparing the header against it.
+        reference_header_y = factorHeaderTopY(current_full_frame);
         factor_change_pending_since = std::nullopt;
         on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
     });
@@ -1345,6 +1348,7 @@ void CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
             break;
         case TabPage::FactorPage:
             factor_probe_reference = {};
+            reference_header_y = std::nullopt;
             factor_change_pending_since = std::nullopt;
             factor_scraper = makeTabScraper(TabPage::FactorPage, scraping_box->resetFactorBox());
             break;
@@ -1357,14 +1361,41 @@ void CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
     on_scroll_updated->send(tab_page, 0.0);  // Zero the tab's progress in the UI.
 }
 
+std::optional<double> CharaDetailSceneScraper::factorHeaderTopY(const Frame &frame) const {
+    if (active_common == nullptr) {
+        return std::nullopt;
+    }
+    const auto &header = config.factor_header;
+    // Crop to the scroll area so the scan (and the returned y) are relative to its top -- the coordinate that
+    // moves with the content. view() shares the buffer (read-only here) and, like the diff below, degrades via
+    // the scraper try/catch if the rect ever falls outside the frame.
+    const Frame area = frame.view(active_common->scroll_area_rect);
+    const int height = area.height();
+    for (int y = 0; y < height; y++) {
+        // Row y in the crop's width-normalized coordinates (the anchor scales both axes by the crop width).
+        const double normalized_y = area.anchor().scaleFromPixels(y);
+        const Line<double> row = {{header.band_start, normalized_y}, {header.band_end, normalized_y}};
+        if (area.fractionIn(header.color_range, row) > header.green_fraction_threshold) {
+            return normalized_y;
+        }
+    }
+    return std::nullopt;
+}
+
 void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type) {
     if (factor_probe_reference.empty() || active_common == nullptr) {
         factor_change_pending_since = std::nullopt;
         return;
     }
-    const auto top_margin = factor_scraper->topMargin(frame);
-    const bool at_top = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
-    if (!at_top || factor_probe_reference.size() != frame.size()) {
+    // Gate the diff on the green "因子" header being flush at the very top, measured from the header itself
+    // (which moves 1:1 with the content) rather than the scroll thumb (whose travel is compressed by
+    // viewport/content, so a tiny content scroll barely moves topMargin and a same-character micro-scroll used
+    // to read as a switch). Both header positions cancel per-device layout, so compare current vs reference.
+    const auto header_y = factorHeaderTopY(frame);
+    const double tolerance = config.factor_header.flush_tolerance;
+    const bool flush =
+        header_y.has_value() && reference_header_y.has_value() && std::abs(*header_y - *reference_header_y) <= tolerance;
+    if (!flush || factor_probe_reference.size() != frame.size()) {
         factor_change_pending_since = std::nullopt;
         return;
     }
@@ -1407,6 +1438,7 @@ void CharaDetailSceneScraper::resetMonitors() {
     type_pending_value = std::nullopt;
     factor_change_pending_since = std::nullopt;
     factor_probe_reference = {};
+    reference_header_y = std::nullopt;
     last_scroll_position_emitted = std::nullopt;
 }
 

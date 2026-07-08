@@ -481,5 +481,23 @@
       "b": 57
     }
   },
-  "header_visible_time_threshold": 100
+  "header_visible_time_threshold": 100,
+  "factor_header": {
+    "color_range": {
+      "min": {
+        "r": 83,
+        "g": 177,
+        "b": 0
+      },
+      "max": {
+        "r": 173,
+        "g": 255,
+        "b": 65
+      }
+    },
+    "band_start": 0.65,
+    "band_end": 0.88,
+    "green_fraction_threshold": 0.5,
+    "flush_tolerance": 0.006
+  }
 }
