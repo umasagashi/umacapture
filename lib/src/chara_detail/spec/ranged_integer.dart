@@ -44,7 +44,7 @@ class RangedIntegerCellData implements CellData {
   RangedIntegerCellData(this.value);
 
   @override
-  String get csv => value.toString();
+  String get csv => value == evaluationValueAbsent ? absentValueLabel : value.toString();
 
   @override
   CellSelectedCallback? get onSelected => null;
@@ -149,7 +149,8 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final data = context.cell.getUserData<RangedIntegerCellData>()!;
-        return CellText(data.value.toNumberString(), textAlign: TextAlign.center);
+        final text = data.value == evaluationValueAbsent ? absentValueLabel : data.value.toNumberString();
+        return CellText(text, textAlign: TextAlign.center);
       },
     )..setUserData(this);
   }
@@ -182,7 +183,10 @@ class _RangedIntegerSelector extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = records.isEmpty ? Range<double>(min: 0, max: 0) : spec.parse(ref.base, records).range().toDouble();
+    // Drop the "no value" sentinel (inheritance-only evaluation) so the slider's
+    // minimum is a real value rather than -1. Inert for parsers that never emit it.
+    final values = spec.parse(ref.base, records).where((e) => e != evaluationValueAbsent).toList();
+    final range = values.isEmpty ? Range<double>(min: 0, max: 0) : values.range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_integer.range.label".tr()),
       description: Text("$tr_ranged_integer.range.description".tr()),

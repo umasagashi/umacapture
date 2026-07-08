@@ -274,7 +274,7 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
                 errorBuilder: (context, error, stackTrace) =>
                     Icon(Symbols.hide_image_rounded, size: 64, color: theme.colorScheme.onSurfaceVariant),
               ),
-              Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
+              Text(record.evaluationValueLabel, style: theme.textTheme.titleMedium),
               const SizedBox(height: 16),
               RatingBar.builder(
                 initialRating: widget.initialRating,

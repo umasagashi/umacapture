@@ -152,7 +152,7 @@ class _ArchiveRecordDialogState extends ConsumerState<ArchiveRecordDialog> {
                       Icon(Symbols.hide_image_rounded, size: 64, color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
-              Text(record.evaluationValue.toNumberString(), style: theme.textTheme.titleMedium),
+              Text(record.evaluationValueLabel, style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               RadioGroup<ArchiveImageOption>(
                 groupValue: _option,

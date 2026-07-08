@@ -1,4 +1,5 @@
 import 'package:dart_mappable/dart_mappable.dart';
+import 'package:trina_grid/trina_grid.dart';
 import 'package:uuid/uuid.dart';
 
 import '/src/chara_detail/chara_detail_record.dart';
@@ -34,6 +35,12 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
     final charaRankBorder = ref.watch(charaRankBorderProvider);
     return List<int>.from(
       records.map(parser.parse).map((evaluation) {
+        // Records with no evaluation value (inheritance-only / friend-inheritance)
+        // have no rank either: pass the sentinel through so plutoCell renders an
+        // empty cell instead of the lowest rank.
+        if (evaluation == evaluationValueAbsent) {
+          return evaluationValueAbsent;
+        }
         // indexWhere returns -1 when the evaluation exceeds every border, i.e. the
         // top-most bucket. Map it to the last rank index instead so the highest rank
         // (e.g. LS24) stays reachable for both display and filtering.
@@ -41,6 +48,16 @@ class CharaRankColumnSpec extends RangedLabelColumnSpec with CharaRankColumnSpec
         return index < 0 ? charaRankBorder.length : index;
       }),
     );
+  }
+
+  @override
+  TrinaCell plutoCell(RefBase ref, int value) {
+    // The rank sentinel is not a valid label index, so it must not reach the base
+    // `labels[value]` lookup (which would throw). Render an empty cell instead.
+    if (value == evaluationValueAbsent) {
+      return TrinaCell(value: value)..setUserData(RangedLabelCellData(absentValueLabel));
+    }
+    return super.plutoCell(ref, value);
   }
 
   @override

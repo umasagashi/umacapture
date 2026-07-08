@@ -180,7 +180,12 @@ class _RangedLabelSelector extends ConsumerWidget {
     final spec = _clonedSpecProvider.watch(ref, specId);
     final labels = ref.watch(labelMapProvider)[spec.labelKey]!;
     final records = ref.watch(charaDetailRecordStorageProvider);
-    final range = records.isEmpty ? Range<double>(min: 0, max: 0) : spec.parse(ref.base, records).range().toDouble();
+    // Drop the "no value" sentinel (e.g. an inheritance-only record's absent rank)
+    // before computing the range: it is not a valid label index, so leaving it in
+    // would make range.min -1 and crash the slider formatter's `labels[-1]` lookup.
+    // Inert for label columns that never emit it.
+    final values = spec.parse(ref.base, records).where((e) => e != evaluationValueAbsent).toList();
+    final range = values.isEmpty ? Range<double>(min: 0, max: 0) : values.range().toDouble();
     return FormGroup(
       title: Text("$tr_ranged_label.range.label".tr()),
       description: Text("$tr_ranged_label.range.description".tr()),
