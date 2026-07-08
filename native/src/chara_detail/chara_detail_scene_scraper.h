@@ -559,11 +559,12 @@ private:
     // re-probes). Reuses the stationary rect and its calibrated color thresholds as the change metric.
     void maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type);
 
-    // Top edge y of the green "因子" section header, as a width-normalized fraction relative to the scroll-area
-    // crop (so it tracks the content, not the scroll thumb). Scans the config band top-down for the first row
-    // that is mostly header green. nullopt when the header is scrolled off or mid-animation (not flush), which
-    // maybeResetOnFactorChange treats as "not at the top". Never throws on a scrolled-away frame.
-    [[nodiscard]] std::optional<double> factorHeaderTopY(const Frame &frame) const;
+    // Top-edge pixel row of the green "因子" section header, relative to the scroll-area crop (so it tracks the
+    // content, not the scroll thumb). Scans the config band top-down for the first row that is mostly header
+    // green. nullopt when the header is scrolled off or mid-animation (not flush), which maybeResetOnFactorChange
+    // treats as "not at the top". Never throws on a scrolled-away frame. Compared against the reference in pixels,
+    // valid because both are taken on same-size frames.
+    [[nodiscard]] std::optional<int> factorHeaderTopY(const Frame &frame) const;
 
     void resetMonitors();
 
@@ -646,9 +647,9 @@ private:
     std::optional<record::RecordType> type_pending_value;
     std::optional<uint64> factor_change_pending_since;
     Frame factor_probe_reference = {};
-    // Header top y (see factorHeaderTopY) captured with factor_probe_reference; the flush gate compares the
-    // current header y against it, so per-device layout differences cancel.
-    std::optional<double> reference_header_y;
+    // Header top-edge pixel row (see factorHeaderTopY) captured with factor_probe_reference; the flush gate
+    // compares the current header row against it in pixels.
+    std::optional<int> reference_header_y;
     std::optional<std::pair<TabPage, bool>> last_scroll_position_emitted;
 };
 

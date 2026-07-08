@@ -126,13 +126,14 @@ private:
     // (its travel is compressed by viewport/content). Probe a right-of-centre band x[0.65,0.88] of the scroll-area
     // crop -- solid header green there, clear of the left icon column and the diagonal stripes, so requiring green
     // across the whole band (fraction > 0.5) rejects a stray green factor pill. Same UI green as factorEndGreen.
-    // flush_tolerance is width-normalized; the header y is quantized to 1 px (1/736 = 0.00136). Live measurement
-    // (factor reset diag): a real switch snaps to EXACTLY flush (delta = 0), whereas a same-character scroll of
-    // only ~4 px (delta = 0.0055) still spikes the content diff to ~29 %. 0.002 (~1.5 px) sits in that gap --
-    // it rejects a >=2 px scroll while tolerating up to 1 px of header-edge jitter on a genuine flush frame, so
-    // a real switch is still detected. (0.006 was too loose: it admitted the ~4 px scroll as flush.)
+    // flush_tolerance_px is in capture pixels (the header top-edge row). Live measurement (factor reset diag): a
+    // real switch snaps to EXACTLY flush (0 px), whereas a same-character scroll of only ~4 px still spikes the
+    // content diff to ~29 %. 1.5 px sits in that gap -- it rejects a >=2 px scroll while tolerating up to 1 px of
+    // header-edge detection jitter on a genuine flush frame, so a real switch is still detected. Pixels, not a
+    // width fraction, so it does not drift with capture resolution (a fraction would drop below 1 px on a smaller
+    // capture and start missing real switches).
     [[nodiscard]] chara_detail::scraper_config::FactorHeaderConfig factorHeader() const {
-        return {colorRange({128, 222, 20}, 45), 0.65, 0.88, 0.5, 0.002};
+        return {colorRange({128, 222, 20}, 45), 0.65, 0.88, 0.5, 1.5};
     }
 
     [[nodiscard]] std::vector<chara_detail::scraper_config::ScanParameter> campaignScanParameters() const {

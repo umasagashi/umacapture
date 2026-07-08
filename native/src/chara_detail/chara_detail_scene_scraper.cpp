@@ -1367,22 +1367,24 @@ void CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
     on_scroll_updated->send(tab_page, 0.0);  // Zero the tab's progress in the UI.
 }
 
-std::optional<double> CharaDetailSceneScraper::factorHeaderTopY(const Frame &frame) const {
+std::optional<int> CharaDetailSceneScraper::factorHeaderTopY(const Frame &frame) const {
     if (active_common == nullptr) {
         return std::nullopt;
     }
     const auto &header = config.factor_header;
-    // Crop to the scroll area so the scan (and the returned y) are relative to its top -- the coordinate that
+    // Crop to the scroll area so the scan (and the returned row) are relative to its top -- the coordinate that
     // moves with the content. view() shares the buffer (read-only here) and, like the diff below, degrades via
-    // the scraper try/catch if the rect ever falls outside the frame.
+    // the scraper try/catch if the rect ever falls outside the frame. Return the pixel row (not a fraction): the
+    // caller compares it against the reference in pixels, and both are taken on same-size frames.
     const Frame area = frame.view(active_common->scroll_area_rect);
     const int height = area.height();
     for (int y = 0; y < height; y++) {
-        // Row y in the crop's width-normalized coordinates (the anchor scales both axes by the crop width).
+        // The probe band x-range is a fraction of the crop width; y maps back to this same row (the anchor
+        // scales both axes by the crop width, so scaleFromPixels(y) * width == y).
         const double normalized_y = area.anchor().scaleFromPixels(y);
         const Line<double> row = {{header.band_start, normalized_y}, {header.band_end, normalized_y}};
         if (area.fractionIn(header.color_range, row) > header.green_fraction_threshold) {
-            return normalized_y;
+            return y;
         }
     }
     return std::nullopt;
@@ -1403,7 +1405,9 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, recor
     bool flush;
     bool used_header_gate;
     if (header_y.has_value() && reference_header_y.has_value()) {
-        flush = std::abs(*header_y - *reference_header_y) <= config.factor_header.flush_tolerance;
+        // Both rows are measured on same-size frames (guaranteed by the size check below), so their pixel
+        // difference is meaningful directly.
+        flush = std::abs(*header_y - *reference_header_y) <= config.factor_header.flush_tolerance_px;
         used_header_gate = true;
     } else {
         const auto top_margin = factor_scraper->topMargin(frame);
@@ -1441,11 +1445,11 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, recor
         return;
     }
     log_info(
-        "factor reset (ratio={:.4f}, gate={}, header_y={:.4f}, ref_header_y={:.4f})",
+        "factor reset (ratio={:.4f}, gate={}, header_y={}, ref_header_y={})",
         ratio,
         used_header_gate ? "header" : "topmargin",
-        header_y.value_or(-1.0),
-        reference_header_y.value_or(-1.0));
+        header_y.value_or(-1),
+        reference_header_y.value_or(-1));
     resetSession(record_type);
 }
 

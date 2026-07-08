@@ -112,8 +112,12 @@ struct FactorHeaderConfig {
     double band_end;
     // Minimum green fraction across the band for a row to count as the header (rejects a narrow stray green pill).
     double green_fraction_threshold;
-    // Max |current - reference| header y (width-normalized, matching the anchor's units) still treated as flush.
-    double flush_tolerance;
+    // Max |current - reference| header top-edge offset, in capture pixels, still treated as flush. In pixels (not
+    // a width fraction) on purpose: the two quantities this discriminates -- the ~1 px header-row detection jitter
+    // and the ~2 px scroll at which the content diff already spikes -- are pixel-scale, not screen-geometry-scale.
+    // A width fraction would drift with capture resolution and, at a smaller capture, shrink below the 1 px jitter
+    // floor and start dropping real switches.
+    double flush_tolerance_px;
 
     EXTENDED_JSON_TYPE_NDC(
         FactorHeaderConfig,
@@ -121,7 +125,7 @@ struct FactorHeaderConfig {
         band_start,
         band_end,
         green_fraction_threshold,
-        flush_tolerance);
+        flush_tolerance_px);
 };
 
 struct CharaDetailSceneScraperConfig {
