@@ -238,6 +238,11 @@ extension RecordTypeTranslation on RecordType {
   };
 }
 
+/// Placeholder shown where a record has no value for a field (e.g. the
+/// evaluation value and rank of an inheritance-only / friend-inheritance record).
+/// A neutral symbol, not localized text: it means "no value", not "minimum".
+const String absentValueLabel = "-";
+
 /// Sentinel `trainer_id` for records whose owner is unknown.
 ///
 /// A friend's record captured from the player's own game exposes no recoverable
@@ -377,6 +382,21 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// Whether this is a friend's (practice-partner) record, full or inheritance-only.
   bool get isFriend =>
       metadata.recordType == RecordType.friendStandard || metadata.recordType == RecordType.friendInheritance;
+
+  /// Whether this record carries no evaluation value (nor a derived rank).
+  ///
+  /// The inheritance-only and friend-inheritance layouts have no evaluation value
+  /// on screen, so the native recognizer never reads one and leaves it at the
+  /// default 0. Mirrors `isInheritanceOnly` in the native recognizer so display
+  /// code can render an empty ([absentValueLabel]) cell instead of a spurious
+  /// minimum. Friend (non-inheritance) records do carry a real value.
+  bool get isInheritanceOnly =>
+      metadata.recordType == RecordType.inheritanceOnly || metadata.recordType == RecordType.friendInheritance;
+
+  /// The evaluation value formatted for display, or [absentValueLabel] when the
+  /// record has none ([isInheritanceOnly]). Shared by the single-record dialogs
+  /// (archive/delete/rating/memo) so they all render the absent case identically.
+  String get evaluationValueLabel => isInheritanceOnly ? absentValueLabel : evaluationValue.toNumberString();
 
   FilePath get traineeIconPath => DirectoryPath(id).filePath(traineeIconFileName);
 

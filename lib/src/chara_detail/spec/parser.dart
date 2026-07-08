@@ -5,6 +5,13 @@ import '/src/core/utils.dart';
 
 part 'parser.mapper.dart';
 
+/// Value returned by [EvaluationValueParser] for records that have no evaluation
+/// value (inheritance-only / friend-inheritance). The evaluation and rank columns
+/// detect it and render an empty ([absentValueLabel]) cell instead of a spurious
+/// minimum. Real evaluation values (and derived rank indices) are non-negative,
+/// so -1 never collides with a genuine value.
+const int evaluationValueAbsent = -1;
+
 @MappableClass(discriminatorKey: 'type')
 abstract class Parser<T> with ParserMappable<T> {
   String get type => runtimeType.toString();
@@ -15,7 +22,7 @@ abstract class Parser<T> with ParserMappable<T> {
 @MappableClass(discriminatorValue: 'EvaluationValueParser')
 class EvaluationValueParser extends Parser<int> with EvaluationValueParserMappable {
   @override
-  int parse(CharaDetailRecord record) => record.evaluationValue;
+  int parse(CharaDetailRecord record) => record.isInheritanceOnly ? evaluationValueAbsent : record.evaluationValue;
 }
 
 @MappableClass(discriminatorValue: 'CharaCardParser')
