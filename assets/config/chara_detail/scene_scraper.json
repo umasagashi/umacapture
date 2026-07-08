@@ -498,6 +498,6 @@
     "band_start": 0.65,
     "band_end": 0.88,
     "green_fraction_threshold": 0.5,
-    "flush_tolerance": 0.006
+    "flush_tolerance": 0.002
   }
 }

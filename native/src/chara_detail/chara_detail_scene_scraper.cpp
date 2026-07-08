@@ -1142,6 +1142,12 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         // Capture the flush header position alongside the reference; both are taken on this settled, at-top frame,
         // so maybeResetOnFactorChange can later reject a tiny scroll by comparing the header against it.
         reference_header_y = factorHeaderTopY(current_full_frame);
+        // If the header green is not found here, the flush gate is unavailable and maybeResetOnFactorChange falls
+        // back to the top-margin gate. A capture source whose green differs from the configured range (e.g. live
+        // WinRT vs a recorded clip) would trip this, so surface it rather than silently losing the header gate.
+        if (!reference_header_y) {
+            log_warning("factor probe: header not found; factor reset falls back to the top-margin gate");
+        }
         factor_change_pending_since = std::nullopt;
         on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
     });
@@ -1387,14 +1393,23 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, recor
         factor_change_pending_since = std::nullopt;
         return;
     }
-    // Gate the diff on the green "因子" header being flush at the very top, measured from the header itself
-    // (which moves 1:1 with the content) rather than the scroll thumb (whose travel is compressed by
-    // viewport/content, so a tiny content scroll barely moves topMargin and a same-character micro-scroll used
-    // to read as a switch). Both header positions cancel per-device layout, so compare current vs reference.
+    // Gate the diff on being flush at the very top. Prefer the green "因子" header, which moves 1:1 with the
+    // content, over the scroll thumb (whose travel is compressed by viewport/content, so a tiny content scroll
+    // barely moves topMargin and a same-character micro-scroll used to read as a switch). The header gate needs
+    // the header detected in BOTH the reference and the current frame; when either is missing -- a capture
+    // source whose green falls outside the configured range leaves reference_header_y empty -- fall back to the
+    // top-margin gate so switch detection keeps working instead of going dead (worse than the original bug).
     const auto header_y = factorHeaderTopY(frame);
-    const double tolerance = config.factor_header.flush_tolerance;
-    const bool flush =
-        header_y.has_value() && reference_header_y.has_value() && std::abs(*header_y - *reference_header_y) <= tolerance;
+    bool flush;
+    bool used_header_gate;
+    if (header_y.has_value() && reference_header_y.has_value()) {
+        flush = std::abs(*header_y - *reference_header_y) <= config.factor_header.flush_tolerance;
+        used_header_gate = true;
+    } else {
+        const auto top_margin = factor_scraper->topMargin(frame);
+        flush = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
+        used_header_gate = false;
+    }
     if (!flush || factor_probe_reference.size() != frame.size()) {
         factor_change_pending_since = std::nullopt;
         return;
@@ -1425,7 +1440,12 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, recor
     if (chrono_util::monotonicElapsed(timestamp, factor_change_pending_since.value()) < kMonitorDwellMs) {
         return;
     }
-    log_debug("factor content changed at top -> reset session (ratio={:.4f})", ratio);
+    log_info(
+        "factor reset (ratio={:.4f}, gate={}, header_y={:.4f}, ref_header_y={:.4f})",
+        ratio,
+        used_header_gate ? "header" : "topmargin",
+        header_y.value_or(-1.0),
+        reference_header_y.value_or(-1.0));
     resetSession(record_type);
 }
 
