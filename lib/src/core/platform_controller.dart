@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,6 +16,7 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/capture.dart';
+import '/src/gui/toast.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
@@ -377,10 +379,21 @@ class PlatformController {
       nativeConfig = config,
       _platformChannel = PlatformChannel() {
     _platformChannel.setCallback((message) => _handleMessage(message));
-    _platformChannel.setConfig(jsonEncode(config));
+    // Fire-and-forget from a sync constructor, so surface a native rejection instead of dropping it on an
+    // unobserved future: a failed initial config means capture silently never works.
+    _platformChannel.setConfig(jsonEncode(config)).catchError(_reportConfigPushFailure);
 
     // This is not required, but we will need storage later anyway, so start it up.
     ref.read(charaDetailRecordStorageLoaderProvider);
+  }
+
+  // Report a native config-push failure. The config setters are fire-and-forget (called from the sync
+  // constructor and a ref.listen callback), so an unhandled PlatformException would otherwise vanish and leave
+  // capture broken with no feedback. Mirrors the log-then-toast idiom used by the clipboard path.
+  void _reportConfigPushFailure(Object error, StackTrace stackTrace) {
+    logger.e("Failed to push native config: $error\n$stackTrace");
+    captureException(error, stackTrace);
+    Toaster.show(ToastData.error(description: "toast.config_failure".tr()));
   }
 
   // Order-sensitive equality of two probe keys (factors are compared by value; their order is stable).
@@ -561,6 +574,8 @@ class PlatformController {
 
   Future<void> updateRecord(String id) => _platformChannel.updateRecord(id);
 
+  Future<void> finishUpdate() => _platformChannel.finishUpdate();
+
   Future<void> copyToClipboardFromFile(FilePath path) => _platformChannel.copyToClipboardFromFile(path);
 
   Future<void> takeScreenshot(FilePath path) => _platformChannel.takeScreenshot(path);
@@ -569,6 +584,7 @@ class PlatformController {
     final config = {
       "window_recorder": {"force_resize": enable},
     };
-    return _platformChannel.setPlatformConfig(jsonEncode(config));
+    // Invoked unawaited from a ref.listen callback; handle a native rejection here so it is not lost.
+    return _platformChannel.setPlatformConfig(jsonEncode(config)).catchError(_reportConfigPushFailure);
   }
 }

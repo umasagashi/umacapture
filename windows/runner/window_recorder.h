@@ -88,11 +88,15 @@ public:
     }
 
     std::string takeScreenshot(const std::filesystem::path &path) const {
-        if (!capturer) {
-            return "Failed to take screenshot. Capturer not initialized.";
-        }
+        // Screenshots are a debug-only, infrequent operation. Build a dedicated capturer from the config this
+        // thread already holds instead of sharing the recording capturer: that capturer is driven by run() on
+        // this worker thread, and its D3D context / WinRT session are not free-threaded, so touching it from the
+        // platform (method-channel) thread would race. A separate WindowCapturer owns its own D3D device/context/
+        // session, so this keeps the capture hot path lock-free and stall-free. Reading the config members is
+        // race-free because takeScreenshot and the config setters both run on the platform thread.
+        WindowCapturer screenshot_capturer(window_targets, crop_profiles, minimum_size, force_resize);
 
-        const auto &frame = capturer->takeScreenshot();
+        const auto &frame = screenshot_capturer.takeScreenshot();
         if (frame.empty()) {
             return "Failed to take screenshot.";
         }

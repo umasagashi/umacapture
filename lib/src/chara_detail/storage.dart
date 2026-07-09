@@ -73,6 +73,10 @@ class CharaDetailRecordRegenerationController extends Notifier<Progress> {
     }
     state = state.increment();
     if (state.isCompleted) {
+      // The batch is done (every record's onCharaDetailUpdated has arrived, so the recognizer queue is drained).
+      // Release the native event loop that updateRecord spun up; the native guard leaves it running if a live
+      // capture is sharing it, so this is safe to call unconditionally.
+      ref.read(platformControllerProvider)?.finishUpdate();
       Future.delayed(const Duration(milliseconds: 200), () {
         ref.read(charaDetailRecordStorageLoaderProvider.notifier).forceRebuild();
         Toaster.show(
