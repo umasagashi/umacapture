@@ -30,6 +30,10 @@ class IsInRangeIntegerPredicate with IsInRangeIntegerPredicateMappable {
   IsInRangeIntegerPredicate({this.min, this.max});
 
   bool apply(int value) {
+    // `value` may be `evaluationValueAbsent` (-1) for records with no evaluation
+    // value; it is evaluated as an ordinary integer here on purpose. Treating
+    // "no value" as a below-minimum value means a max-only ("less than X") filter
+    // keeps such records, which is the intended semantics (see [evaluationValueAbsent]).
     return (min ?? value) <= value && value <= (max ?? value);
   }
 
@@ -127,6 +131,8 @@ class RangedIntegerColumnSpec extends ColumnSpec<int> with RangedIntegerColumnSp
 
   @override
   List<bool> evaluate(RefBase ref, List<int> values) {
+    // The `evaluationValueAbsent` sentinel is intentionally not stripped here; it
+    // flows into the predicate as a real value (see `IsInRangeIntegerPredicate.apply`).
     return values.map((e) => predicate.apply(e)).toList();
   }
 

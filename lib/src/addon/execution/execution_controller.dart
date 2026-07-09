@@ -91,8 +91,14 @@ class AddonExecutionState {
 class AddonExecutionController extends Notifier<AddonExecutionState> {
   late StorageEntry<String> _historyEntry;
 
+  /// Set once the notifier is disposed so late async callbacks (progress ticks,
+  /// result completion) skip writing `state`, which throws after disposal.
+  bool _disposed = false;
+
   @override
   AddonExecutionState build() {
+    _disposed = false;
+    ref.onDispose(() => _disposed = true);
     _historyEntry = StorageBox(StorageBoxKey.addon).entry<String>("execution_history");
     return AddonExecutionState(history: _loadHistory());
   }
@@ -197,6 +203,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     );
 
     handle.progress.listen((p) {
+      if (_disposed) return;
       state = state.copyWith(
         active: [
           for (final e in state.active)
@@ -206,6 +213,7 @@ class AddonExecutionController extends Notifier<AddonExecutionState> {
     });
 
     handle.result.then((result) {
+      if (_disposed) return;
       final entry = _buildHistoryEntry(
         task,
         executionId: executionId,

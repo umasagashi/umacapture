@@ -123,6 +123,8 @@ class RangedLabelColumnSpec extends ColumnSpec<int> with RangedLabelColumnSpecMa
 
   @override
   List<bool> evaluate(RefBase ref, List<int> values) {
+    // The `evaluationValueAbsent` sentinel is intentionally not stripped here; it
+    // flows into the predicate as a real value (see `IsInRangeIntegerPredicate.apply`).
     return values.map((e) => predicate.apply(e)).toList();
   }
 
