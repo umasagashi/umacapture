@@ -111,6 +111,11 @@ private:
     // not found or the cap contrast is too low, so trackGeometry() falls back to the config column.
     [[nodiscard]] std::optional<double> trackCenterX(const Frame &frame) const;
 
+    // True when the thumb bottom is pinned to the track bottom (bottom rest / overscroll): the measured thumb
+    // length is corrupted (top slides down, bottom pinned), so the offset guess must divide by the reference
+    // frame's logical length instead. See kThumbBottomFlushPx.
+    [[nodiscard]] bool isBottomClipped(const Frame &frame, const TrackGeometry &geometry) const;
+
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
     const Range<Color> scroll_bar_margin_color_range;
