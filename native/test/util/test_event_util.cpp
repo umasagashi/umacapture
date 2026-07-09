@@ -115,6 +115,37 @@ TEST_CASE("a Block queued connection back-pressures the producer without droppin
     CHECK(received == std::vector<int>{0, 1, 2, 3, 4});
 }
 
+TEST_CASE("aborting a Block queued connection releases a producer blocked on a full queue") {
+    // Regression for the teardown deadlock: a Block send parks in waitUntilReady until the consumer drains.
+    // If the consumer has already stopped (as during join), nothing frees a full queue and the producer spins
+    // forever. abort() -- which SingleThreadMultiEventRunner::join() now calls on each of its connections
+    // before joining the worker -- must break that wait so join cannot hang. The over-limit send is dropped
+    // (we are shutting down), not enqueued onto a stopped consumer.
+    const auto connection = makeQueuedConnection<int>(Block);
+    connection->send(0);  // Fill to the depth limit (3) with no consumer draining, so the next send blocks.
+    connection->send(1);
+    connection->send(2);
+
+    std::atomic<bool> producer_returned{false};
+    std::thread producer([&] {
+        connection->send(3);  // Queue full: Block parks here in waitUntilReady.
+        producer_returned = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_FALSE(producer_returned.load());  // Still parked: nothing is draining the queue.
+
+    connection->abort();  // The teardown signal that join() issues; it must wake the parked producer.
+    producer.join();      // Must not hang.
+    CHECK(producer_returned.load());
+
+    // The dropped over-limit send never reached the queue: only the first three survive.
+    std::vector<int> received;
+    connection->listen([&](int value) { received.push_back(value); });
+    drainQueued(connection);
+    CHECK(received == std::vector<int>{0, 1, 2});
+}
+
 // Blocks (bounded) until `processed` reaches `count` items, holding `mutex` for each read.
 bool waitForCount(std::mutex &mutex, const std::vector<int> &processed, size_t count) {
     for (int i = 0; i < 200; i++) {

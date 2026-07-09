@@ -95,6 +95,12 @@ private:
             return;
         }
         app::NativeApi::instance().startEventLoop(native_config);
+        if (!app::NativeApi::instance().isRunning()) {
+            // The pipeline failed to build (config parse, model load, ...). NativeApi already emitted onError and
+            // tore itself down. Do not start the recorder or emit onCaptureStarted, or the Dart side would reset
+            // the error state and show a running capture backed by a dead pipeline.
+            return;
+        }
         recorder_runner->start();
         window_recorder->startRecord();
         app::NativeApi::instance().notifyCaptureStarted();  // In Windows, start operation will never be canceled.
@@ -111,6 +117,11 @@ private:
     void updateRecord(const std::string &id) {
         log_debug("");
         app::NativeApi::instance().startEventLoop(native_config);
+        if (!app::NativeApi::instance().isRunning()) {
+            // Regeneration pipeline failed to build; NativeApi already reported onError and tore down. Skip the
+            // update so we do not push into a dead pipeline.
+            return;
+        }
         app::NativeApi::instance().updateRecord({id});
     }
 

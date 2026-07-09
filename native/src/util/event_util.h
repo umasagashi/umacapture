@@ -74,6 +74,11 @@ public:
 
     virtual void processIf(const std::function<bool()> &predicate) = 0;
     virtual void processOne() = 0;
+
+    // Wake any producer blocked in a Block-mode send() so teardown cannot deadlock on a full queue whose
+    // consumer has already stopped draining. One-way for the connection's lifetime; connections are recreated
+    // per pipeline session, so the flag starts clear each time. No-op for connections that never block.
+    virtual void abort() {}
 };
 
 template<typename... Args>
@@ -111,7 +116,14 @@ public:
         if (!ready()) {
             switch (queue_limit_mode) {
                 case Discard: return;
-                case Block: waitUntilReady(); break;
+                case Block:
+                    waitUntilReady();
+                    // waitUntilReady() also returns when abort() was requested during teardown; the queue is
+                    // still full then, so drop this frame instead of enqueueing onto a stopped consumer.
+                    if (!ready()) {
+                        return;
+                    }
+                    break;
                 case NoLimit: break;
                 default: throw std::logic_error("Unimplemented.");
             }
@@ -142,11 +154,13 @@ public:
         }
     }
 
+    void abort() override { aborted_ = true; }
+
 private:
     [[nodiscard]] bool ready() const { return connection.size() < queue_limit_size; }
 
     void waitUntilReady() {
-        while (!ready()) {
+        while (!ready() && !aborted_.load()) {
             waitFor(10);
         }
     }
@@ -157,6 +171,7 @@ private:
     eventpp::EventQueue<int, void(Args...)> connection;
     const std::shared_ptr<SenderBase<int>> notifier;
     const int id;
+    std::atomic<bool> aborted_ = false;
 };
 
 class EventRunnerThread : public thread_util::ThreadBase {
@@ -253,6 +268,12 @@ public:
         vlog_debug(isRunning());
         if (runner == nullptr) {
             return;
+        }
+        // Release any producer blocked in a Block-mode send() on one of these connections before joining the
+        // worker: once the worker stops draining, a full queue would otherwise wedge the producer (and this
+        // join) forever. Ordering-independent — each runner frees the producers waiting on its own connections.
+        for (const auto &processor : processors) {
+            processor->abort();
         }
         runner->join();
         running_ = false;

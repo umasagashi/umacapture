@@ -81,7 +81,11 @@ class StorageBox {
     }
     if (reset) {
       for (final name in _BoxKeyExtension.names) {
-        await Hive.deleteBoxFromDisk(name, path: location);
+        // Delete under Hive's initialized home directory (set by init/initFlutter above) rather than passing an
+        // explicit path: in the native-default branch `location` is relative (appName/settings) while initFlutter
+        // resolves it under the documents dir, so an explicit path would target the wrong (or a missing) folder
+        // and silently no-op the reset.
+        await Hive.deleteBoxFromDisk(name);
       }
     }
     registerHiveAdapters();
