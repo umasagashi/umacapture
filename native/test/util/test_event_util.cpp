@@ -193,5 +193,53 @@ TEST_CASE("the event runner survives a throwing listener and keeps processing la
     CHECK(processed == std::vector<int>{1, 2});
 }
 
+// A stand-in runner that records its start()/join() calls and can throw from start() to simulate a
+// thread-creation failure (exhaustion/bad_alloc) partway through the controller's start loop -- a case
+// real runners can't be coerced into deterministically.
+class FakeRunner : public event_util_impl::EventRunnerInterface {
+public:
+    explicit FakeRunner(bool throw_on_start) : throw_on_start(throw_on_start) {}
+
+    void start() override {
+        start_called = true;
+        if (throw_on_start) {
+            throw std::runtime_error("simulated thread creation failure");
+        }
+        running = true;
+    }
+
+    void join() override {
+        join_called = true;
+        running = false;
+    }
+
+    [[nodiscard]] bool isRunning() const override { return running; }
+
+    const bool throw_on_start;
+    bool start_called = false;
+    bool join_called = false;
+    bool running = false;
+};
+
+TEST_CASE("controller start() rolls back already-started runners when a later runner fails") {
+    // Regression for the partial-start cleanup gap: if one runner's start() throws (thread exhaustion),
+    // the controller must join the runners it already started before propagating, so no worker leaks and
+    // is_running stays false (its own destructor asserts that, and teardown's join() relies on it).
+    const auto controller = makeRunnerController();
+    const auto good = std::make_shared<FakeRunner>(false);
+    const auto bad = std::make_shared<FakeRunner>(true);
+    controller->add(good);
+    controller->add(bad);
+
+    CHECK_THROWS_AS(controller->start(), std::runtime_error);
+
+    CHECK_FALSE(controller->isRunning());  // A failed start never leaves the controller "running".
+    CHECK(good->start_called);             // The earlier runner did start...
+    CHECK(good->join_called);              // ...and was rolled back (joined) rather than left dangling.
+    CHECK_FALSE(good->running);
+    CHECK(bad->start_called);              // The failing runner was reached but never marked running.
+    CHECK_FALSE(bad->running);
+}
+
 }  // namespace
 }  // namespace uma::event_util

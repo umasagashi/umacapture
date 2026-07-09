@@ -37,12 +37,21 @@ class WebhookRunner implements ActionRunner {
       action.bodyTemplate,
       payload,
       // A rawKeys value (record_json) is inserted unescaped so a whole JSON
-      // document can embed as a JSON value. Guard it: only insert raw when it is
-      // actually well-formed JSON, otherwise fall back to escaping it so a
-      // corrupt/hand-edited record.json can never produce an invalid request body.
+      // document can embed as a JSON value (e.g. {"record": {record_json}}).
+      // Guard it: insert raw only when it is actually well-formed JSON. An
+      // empty/absent value (record.json not yet flushed -- see PayloadEnricher's
+      // disk race) would otherwise leave `{"record": }`, so emit a valid `null`
+      // literal instead. A present-but-malformed value falls back to escaping so
+      // a corrupt/hand-edited record.json can never produce an invalid body.
       transform: escaper == null
           ? null
-          : (key, value) => (spec.rawKeys.contains(key) && _isValidJson(value)) ? value : escaper(value),
+          : (key, value) {
+              if (spec.rawKeys.contains(key)) {
+                if (value.isEmpty) return "null";
+                return _isValidJson(value) ? value : escaper(value);
+              }
+              return escaper(value);
+            },
     );
     final options = Options(
       method: action.method,

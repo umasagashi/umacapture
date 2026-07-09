@@ -114,7 +114,7 @@ public:
             return {};
         }
 
-        if (!ensureCaptureSession(window_info.hwnd)) {
+        if (!ensureCaptureSession(window_info)) {
             return {};
         }
 
@@ -146,7 +146,7 @@ public:
             return {};
         }
 
-        if (!ensureCaptureSession(window_info.hwnd)) {
+        if (!ensureCaptureSession(window_info)) {
             return {};
         }
 
@@ -195,6 +195,7 @@ public:
         }
 
         current_window = nullptr;
+        session_window_size = {};
     }
 
     [[nodiscard]] Size<int> lastWindowSize() const { return last_window_size; }
@@ -370,15 +371,20 @@ private:
         return info;
     }
 
-    bool ensureCaptureSession(const HWND hwnd) {
-        if (hwnd != current_window) {
+    bool ensureCaptureSession(const WindowInfo &info) {
+        // Rebuild the session when the target window changes OR resizes: frame_pool is fixed to the window
+        // size at init, so a resized window would make source_box exceed the (stale) source texture and
+        // D3D11 would silently copy nothing (garbage frame). The downstream recognition pipeline assumes a
+        // constant frame size, so a full rebuild (rather than FramePool::Recreate) is the intended reset.
+        if (info.hwnd != current_window || info.window_rect.size() != session_window_size) {
             cleanup();
-            return initializeCapture(hwnd);
+            return initializeCapture(info);
         }
         return true;
     }
 
-    bool initializeCapture(const HWND hwnd) {
+    bool initializeCapture(const WindowInfo &info) {
+        const HWND hwnd = info.hwnd;
         try {
             winrt::Windows::Graphics::Capture::GraphicsCaptureItem capture_item{nullptr};
 
@@ -410,6 +416,7 @@ private:
             session.IsCursorCaptureEnabled(false);
             session.StartCapture();
             current_window = hwnd;
+            session_window_size = info.window_rect.size();
             return true;
         } catch (...) {
             // TODO: Error details should be reported to the app.
@@ -442,6 +449,18 @@ private:
 
             D3D11_TEXTURE2D_DESC source_desc;
             source_texture->GetDesc(&source_desc);
+
+            // Guard the copy region against the source texture bounds. ensureCaptureSession rebuilds on a
+            // resize, but a resize landing between that check and TryGetNextFrame could still hand back a
+            // frame smaller than `rect`. An out-of-bounds D3D11_BOX makes CopySubresourceRegion silently
+            // copy nothing (no error), leaving the staging texture uninitialized -- a garbage frame. Skip
+            // this frame instead; the next cycle rebuilds. Validate with the signed rect before assigning
+            // to the UINT box fields so a negative bound can't wrap to a huge value.
+            if (rect.left() < 0 || rect.top() < 0 || rect.width() <= 0 || rect.height() <= 0 ||
+                rect.right() > static_cast<int>(source_desc.Width) ||
+                rect.bottom() > static_cast<int>(source_desc.Height)) {
+                return {};
+            }
 
             D3D11_TEXTURE2D_DESC staging_desc = {};
             staging_desc.Width = rect.width();
@@ -500,6 +519,9 @@ private:
 
     Size<int> last_window_size;
     HWND current_window{nullptr};
+    // The target window's bounds when the current capture session was created. frame_pool is fixed to
+    // that size, so a later resize of the same HWND must rebuild the session (see ensureCaptureSession).
+    Size<int> session_window_size{};
 
     winrt::com_ptr<ID3D11Device> d3d_device;
     winrt::com_ptr<ID3D11DeviceContext> d3d_device_context;

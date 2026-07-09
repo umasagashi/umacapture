@@ -171,6 +171,30 @@ void main() {
       expect(jsonDecode(receivedBody!), {'record': brokenJson});
     });
 
+    test('an empty {record_json} embedded raw becomes a null literal, keeping the body valid JSON', () async {
+      String? receivedBody;
+      handler = (request) async {
+        receivedBody = await utf8.decodeStream(request);
+        request.response.statusCode = 200;
+        await request.response.close();
+      };
+
+      // record_json is absent from the payload (e.g. record.json not yet flushed
+      // when the event fires). Embedded raw at {"record": {record_json}} it would
+      // otherwise leave `{"record": }` (invalid JSON) and the request would 4xx.
+      await WebhookRunner(
+        WebhookAction(
+          url: url('/post'),
+          method: 'POST',
+          contentType: 'json',
+          bodyTemplate: '{"record": {record_json}}',
+        ),
+      ).start(ref, const {}).result;
+
+      // The absent value becomes a `null` literal, so the body stays valid JSON.
+      expect(jsonDecode(receivedBody!), {'record': null});
+    });
+
     test('a GET sends no request body even when a body template is set', () async {
       String? receivedBody;
       handler = (request) async {

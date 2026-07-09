@@ -261,7 +261,16 @@ public:
         // Publish running_ before starting the worker: the notifier listener reads isRunning() from the
         // worker thread, so it must observe true the moment the worker can run.
         running_ = true;
-        runner->start();
+        // If thread creation throws (exhaustion/bad_alloc), roll running_ and runner back so this stays
+        // consistent (running_ false, runner null) like ThreadBase::start -- otherwise isRunning() would
+        // report true with no worker, and the controller could not tell a half-started runner apart.
+        try {
+            runner->start();
+        } catch (...) {
+            running_ = false;
+            runner = nullptr;
+            throw;
+        }
     }
 
     void join() override {
@@ -313,8 +322,19 @@ public:
     void start() override {
         vlog_debug(isRunning());
         assert_(!isRunning());
-        for (const auto &r : runners) {
-            r->start();
+        try {
+            for (const auto &r : runners) {
+                r->start();
+            }
+        } catch (...) {
+            // Roll back a partial start: join every runner (idempotent -- a not-yet-started runner no-ops
+            // on its null thread, an already-started one aborts its Block-mode producers and joins) so no
+            // worker leaks before the exception propagates to teardown. is_running stays false, so the
+            // controller's own join() correctly treats the pipeline as never started.
+            for (const auto &r : runners) {
+                r->join();
+            }
+            throw;
         }
         is_running = true;
     }
