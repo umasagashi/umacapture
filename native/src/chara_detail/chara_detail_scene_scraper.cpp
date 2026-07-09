@@ -36,6 +36,16 @@ constexpr double kFactorEndBottomMargin = 0.0217;
 // instead of cropping into the previous row.
 constexpr double kFactorEndGreenSearchSpan = 0.08;
 
+// Thumb-bottom "clip" tolerance in pixels: at/below the true bottom the game pins the thumb bottom to the
+// track bottom (lower_gap ~= 0-1 px) and, if the user keeps dragging (overscroll), slides the thumb TOP down
+// so the MEASURED thumb length collapses while the logical length is unchanged. When lower_gap is within this
+// tolerance the frame is treated as clipped and the offset guess uses the reference frame's (unclipped)
+// logical thumb length instead of the shrunken measured one -- otherwise the shrinking divisor blows the
+// guess up (hundreds of px) and the image matcher's search window misses the true small offset. Expressed in
+// px via the anchor (mirroring factor_header.flush_tolerance_px = 1.5); a genuine mid-scroll history rescale
+// keeps content below the thumb so lower_gap stays well above this and the normal path is used.
+constexpr double kThumbBottomFlushPx = 2.0;
+
 }  // namespace
 
 ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
@@ -88,7 +98,8 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // Clamp on overscroll: the thumb shortens and its top pins to the track top, so a tiny negative gap from
     // sub-pixel noise should read as "at the top" (0), not a small backward offset.
     const double upper_gap = std::max(0., thumb_top - track_top);
-    return TrackGeometry{upper_gap, track_span, thumb_logical};
+    const double lower_gap = std::max(0., track_bottom - thumb_bottom);
+    return TrackGeometry{upper_gap, lower_gap, track_span, thumb_logical};
 }
 
 std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame) const {
@@ -223,7 +234,14 @@ std::optional<double> ScrollBarOffsetEstimator::estimate(const Frame &from, cons
     // difference, this cancels each frame's constant measurement bias and stays low-noise. When the game
     // re-scales the thumb mid-scroll the two lengths disagree and this guess drifts; the image match then
     // rejects it and estimateAcrossRescale() (each frame's OWN length) recovers -- see updateScrolling().
-    const double thumb_logical = (from_geometry->thumb_logical + to_geometry->thumb_logical) / 2.0;
+    // On bottom overscroll the measured thumb collapses (top slides down, bottom pinned) while the logical
+    // length is constant. Detect the clip via the pinned bottom and divide by the reference frame's logical
+    // length -- `from` is the last successful latch, frozen at the resting bottom (overscroll frames never
+    // latch), so its thumb length is the true unclipped length. Off the clip, keep the shared-length average.
+    const bool clipped = to.anchor().scaleToPixels(to_geometry->lower_gap) <= kThumbBottomFlushPx;
+    const double thumb_logical = clipped
+        ? from_geometry->thumb_logical
+        : (from_geometry->thumb_logical + to_geometry->thumb_logical) / 2.0;
     if (thumb_logical <= 0.0) {
         return std::nullopt;
     }
@@ -242,9 +260,16 @@ std::optional<double> ScrollBarOffsetEstimator::scrollOffsetGuess(const Frame &f
     // thumb-length change. abs = V * upper_gap / thumb_logical, with V the true viewport (config, width-
     // normalized -> px via scaleToPixels) rather than the crop height, and thumb_logical the cap-corrected
     // thumb length. The fixed track top cancels in the delta below, but V and the -2c correction do not.
-    const auto absolute_offset = [this](const Frame &frame, const TrackGeometry &geometry) -> double {
+    // Same clip guard as estimate(): when the thumb bottom is pinned (overscroll, or a history rescale that
+    // lands at the bottom), the `to` frame's measured length is corrupted, so divide BOTH absolute offsets by
+    // the reference (`from`) logical length. That cancels the constant bias exactly and keeps the delta sane;
+    // off the clip each frame keeps its own length so a genuine mid-scroll rescale is untouched.
+    const bool clipped = to.anchor().scaleToPixels(to_geometry->lower_gap) <= kThumbBottomFlushPx;
+    const double reference_thumb = from_geometry->thumb_logical;
+    const auto absolute_offset = [&](const Frame &frame, const TrackGeometry &geometry) -> double {
         const double viewport_px = frame.anchor().scaleToPixels(viewport);
-        return viewport_px * geometry.upper_gap / geometry.thumb_logical;
+        const double thumb_logical = clipped ? reference_thumb : geometry.thumb_logical;
+        return viewport_px * geometry.upper_gap / thumb_logical;
     };
     return absolute_offset(to, to_geometry.value()) - absolute_offset(from, from_geometry.value());
 }

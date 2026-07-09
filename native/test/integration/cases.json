@@ -12,6 +12,8 @@
     { "name": "player_inheritance", "video": "player_inheritance.mp4", "golden": "golden/player_inheritance.json" },
     { "name": "friend_standard", "video": "friend_standard.mp4", "golden": "golden/friend_standard.json" },
     { "name": "friend_inheritance", "video": "friend_inheritance.mp4", "golden": "golden/friend_inheritance.json" },
-    { "name": "player_standard_scrollbar_change", "video": "player_standard_scrollbar_change.mp4", "golden": "golden/player_standard_scrollbar_change.json" }
+    { "name": "player_standard_scrollbar_change_1", "video": "player_standard_scrollbar_change_1.mp4", "golden": "golden/player_standard_scrollbar_change_1.json" },
+    { "name": "player_standard_scrollbar_change_2", "video": "player_standard_scrollbar_change_2.mp4", "golden": "golden/player_standard_scrollbar_change_2.json" },
+    { "name": "player_standard_sequential", "video": "player_standard_sequential.mp4", "golden": "golden/player_standard_sequential.json" }
   ]
 }

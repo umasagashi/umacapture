@@ -94,6 +94,7 @@ private:
     // upper_gap since the thumb top and track top share the same cap geometry).
     struct TrackGeometry {
         double upper_gap;      // thumb_top - track_top, clamped >= 0 (overscroll pins the thumb to the top)
+        double lower_gap;      // track_bottom - thumb_bottom, clamped >= 0 (~0 when the thumb bottom is pinned)
         double track_span;     // track_bottom - track_top (the placeholder length)
         double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
     };
