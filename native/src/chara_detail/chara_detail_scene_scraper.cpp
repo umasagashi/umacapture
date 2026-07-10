@@ -19,29 +19,28 @@ bool closeEnough(const std::vector<double> &a, const std::vector<double> &b, dou
     return true;
 }
 
-// Bottom margin kept below the last factor when cropping the terminating factor fragment, as a fraction of
-// the frame width (the project's length unit). The scan's color run that follows the last factor starts a
-// few px below its stars; a small margin below that leaves a clean, constant gap -- matching the normal
-// (no inheritance history) look and independent of the green 継承履歴 header that may follow. Both terminator
-// paths crop through factorEndCropY with this margin, so it is the single knob for the tail space above the
-// footer; calibrated so the stitched factor image leaves ~22 px below the last card (≈16 px at the ~736 px
-// capture width, plus the stitcher's fixed arrangement).
+// Bottom margin kept below the last factor when cropping the factor tab, as a fraction of the frame width
+// (the project's length unit). The background run that follows the last factor starts a few px below its
+// stars; a small margin below that leaves a clean, constant gap -- matching the normal (no inheritance
+// history) look and independent of the green 継承履歴 header that may follow. Both terminator paths crop at
+// frontier_stack_rows + this margin, so it is the single knob for the tail space above the footer;
+// calibrated so the stitched factor image leaves ~22 px below the last card (≈16 px at the ~736 px capture
+// width, plus the stitcher's fixed arrangement).
 constexpr double kFactorEndBottomMargin = 0.0217;
 
-// Distance (fraction of frame width) to scan up from the green "継承履歴" bar to reach the last factor in
-// trimScrollAreaToFactorEnd. The last factor sits a FIXED distance above the bar -- a game-layout constant
-// (sub-pixel jitter aside): the bar's ~2 px anti-aliased edge plus a constant background gap, together
-// ~0.05 of the width. This bound clears that fixed span with headroom yet stays under one factor-row pitch
-// (~0.12 of the width), so if the factor column is empty at the last row the scan falls back to the bar top
-// instead of cropping into the previous row.
+// Maximum distance (fraction of frame width) from the green "継承履歴" bar top up to the last factor. The
+// last factor sits a FIXED distance above the bar -- a game-layout constant (sub-pixel jitter aside): the
+// bar's ~2 px anti-aliased edge plus a constant background gap, together ~0.05 of the width. This bound
+// clears that fixed span with headroom yet stays under one factor-row pitch (~0.12 of the width), so
+// frontier evidence farther above the bar than this cannot be the last factor's gap (a stale transition
+// from a green early fire) and is rejected in favor of the fail-safe bar-top crop. Also feeds the
+// delayed-commit holdback in addScrollArea.
 constexpr double kFactorEndGreenSearchSpan = 0.08;
 
-// Upward-scan bound (fraction of frame width) for the GRAY-completion trim. Unlike the green path -- whose
-// bar sits a FIXED ~0.05 of the width below the last factor, so 0.08 suffices -- the gray path scans from the
-// scroll frontier up through the accumulated end-of-list overscroll background to the last factor, a distance
-// measured at up to ~0.145 of the width on 736 px footage. 0.16 covers that with headroom. The walk stops at
-// the first non-background pixel (the last factor), so this is only a runaway floor: an overshoot (an empty
-// last-row column at the scan x) falls through to the not-found fallback and yields a safe no-op trim.
+// Worst-case depth (fraction of frame width) of trailing end-of-list overscroll background below the last
+// factor on the GRAY-completion path, measured at up to ~0.145 of the width on 736 px footage; 0.16 covers
+// that with headroom. Feeds the delayed-commit holdback in addScrollArea so the whole trimmable tail is
+// still staged in RAM when the terminator fires.
 constexpr double kFactorEndGraySearchSpan = 0.16;
 
 // Thumb-bottom "clip" tolerance in pixels: at/below the true bottom the game pins the thumb bottom to the
@@ -512,10 +511,6 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     }
     const Point<int> &top_left = {0, frame.height() - offset_pixels};
     const Point<double> &scaled_top_left = anchor.mapFromFrame(top_left);
-    // Default the run-start to this strip's top: a color run already in progress from a prior strip has its
-    // true start in an already-saved fragment, so treat it as starting at the boundary. This keeps
-    // factorEndCropY referencing only coordinates within the current frame.
-    current_run_start_scaled = scaled_top_left.y();
 
     for (int y_pixels = top_left.y(); y_pixels < frame.height(); y_pixels++) {
         const double scaled_y = anchor.scaleFromPixels(y_pixels);
@@ -529,7 +524,16 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
             continue;
         }
         if (current_length_pixels == 0) {
-            current_run_start_scaled = scaled_y;  // start of this color run
+            // Start of a color run. For the terminating (background) scan of the factor box this is a
+            // non-background -> background transition: the frontier the terminators crop from. A run whose
+            // first matching row is the strip top counts too -- current_length_pixels survives across
+            // frames, so it is zero here only if the previous strip's bottom row was non-background, i.e.
+            // the transition sits exactly on the strip boundary. A run carried over from the previous strip
+            // (current_length_pixels > 0) keeps the frontier recorded when it started.
+            if (end_green && current_scan == std::prev(scan_parameters.end())) {
+                previous_frontier_stack_rows = frontier_stack_rows;
+                frontier_stack_rows = stack_rows + (y_pixels - top_left.y());
+            }
         }
         const int length_pixels = anchor.expand({0., current_scan->length}).y();
         if (++current_length_pixels < length_pixels) {
@@ -547,37 +551,22 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
             }
             return;
         }
-        // Factor box (reached only with enough inheritance history to accumulate the gray tail): keep a fixed
-        // margin below the last factor (see factorEndCropY) so the bottom margin is constant across long
-        // histories. Short histories terminate via detectGreenTerminator() instead, which does not pass here.
-        //
-        // The gray run's start discriminates two cases. If it began below the strip top (current_run_start >
-        // frontier), the last factor sits inside THIS frame's new content and the stack is clean up to the
-        // frontier (a phantom cannot precede the first reveal of the last factor): crop and save the strip, as
-        // before. If it began at the strip top, the whole new strip is trailing background and the real last
-        // factor is already in the saved stack above the frontier -- possibly with an overscroll phantom or
-        // ghost strip between (latched by earlier frames whose gray run had not yet completed). Do NOT save the
-        // phantom; scan this settled frame up from the frontier to the real last factor and trim the fragment
-        // stack to the same crop line the green terminator uses, so the tail below the last factor is a fixed
-        // margin regardless of overscroll. The ghost lives only in the saved stack, so scanning the live frame
-        // reaches the real factor and the ghost is removed positionally (it sits below the crop line).
-        if (current_run_start_scaled > scaled_top_left.y()) {
-            const double crop_y = factorEndCropY(current_run_start_scaled, scaled_top_left.y(), scaled_y);
-            if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
-                saveIncremental(frame.view(rect));
-            }
-            flushAll();  // terminal exit: the staged tail is final
-            return;
+        // Factor box (reached only with enough inheritance history to accumulate the gray tail): stage this
+        // strip down to the completion row, then crop the whole stack a fixed margin below the frontier --
+        // the terminating run's own start, so it is always set here. Whether the last factor sits in this
+        // strip or the trailing background spans earlier overscroll strips, the crop is the same
+        // stack-coordinate arithmetic; the staged tail absorbs it entirely (see tail_holdback_pixels), so
+        // trailing background never reaches disk. Short histories terminate via detectGreenTerminator()
+        // instead, which does not pass here.
+        if (const Rect<double> rect = {scaled_top_left, Point<double>{1., anchor.scaleFromPixels(y_pixels + 1)}};
+            !rect.empty()) {
+            saveIncremental(frame.view(rect));
         }
-        trimStackToLastFactor(
-            frame, top_left.y(), top_left.y(), y_pixels, /*skip_leading_bar=*/false, kFactorEndGraySearchSpan);
+        const int margin_pixels = anchor.expand({0., kFactorEndBottomMargin}).y();
+        cropStackTo(frontier_stack_rows >= 0 ? frontier_stack_rows + margin_pixels : stack_rows);
         return;
     }
     saveIncremental(frame.view({scaled_top_left, anchor.mapFromFrame(frame.rect().bottomRight())}));
-}
-
-double PageScrapingBox::factorEndCropY(double run_start_scaled, double scaled_top, double terminator_scaled_y) const {
-    return std::clamp(run_start_scaled + kFactorEndBottomMargin, scaled_top, terminator_scaled_y);
 }
 
 bool PageScrapingBox::detectGreenTerminator(const Frame &frame, int offset_pixels) {
@@ -627,65 +616,38 @@ void PageScrapingBox::trimScrollAreaToFactorEnd(const Frame &frame, int offset_p
     if (!end_green_fired || green_terminator_top_pixels < 0) {
         return;
     }
-    // The saved fragment stack ends at the scroll frontier (height - offset_pixels); the terminating frame is
-    // not saved on the green path. Scan up from the green bar (skipping the bar + its anti-aliased edge) and
-    // clamp/fall back to the bar top so it stays out of the factor image.
-    trimStackToLastFactor(
-        frame,
-        /*anchor_pixels=*/green_terminator_top_pixels,
-        /*stack_bottom_pixels=*/frame.height() - offset_pixels,
-        /*ceiling_pixels=*/green_terminator_top_pixels,
-        /*skip_leading_bar=*/true,
-        /*search_span=*/kFactorEndGreenSearchSpan);
+    const auto &anchor = frame.anchor();
+    const int margin_pixels = anchor.expand({0., kFactorEndBottomMargin}).y();
+    // The stack bottom corresponds to the scroll frontier (height - offset_pixels); the terminating frame is
+    // not saved on the green path. Map the live bar top into stack coordinates: it exceeds stack_rows when
+    // the bar sits below the frontier (the normal lazy render, never latched) and caps the crop when part of
+    // the bar was latched.
+    const int ceiling_stack_rows = stack_rows - ((frame.height() - offset_pixels) - green_terminator_top_pixels);
+    const int span_pixels = anchor.expand({0., kFactorEndGreenSearchSpan}).y();
+
+    // The frontier is trustworthy only if it is the last factor's gap: within the fixed factor-to-bar span
+    // above the bar top. Two ways it can fail: the bar rendered early enough to be latched, so the
+    // background BELOW the bar stole the last transition (fall back to the previous one); or the bar fired
+    // before the last factor's gap was ever latched (green early fire), leaving only a stale transition
+    // far above -- then crop at the bar top / no-op rather than cutting into latched factors.
+    const auto valid = [&](int candidate) {
+        return candidate >= 0 && candidate + margin_pixels <= ceiling_stack_rows
+            && ceiling_stack_rows - candidate <= span_pixels;
+    };
+    int crop_stack_rows = std::min(ceiling_stack_rows, stack_rows);
+    if (valid(frontier_stack_rows)) {
+        crop_stack_rows = frontier_stack_rows + margin_pixels;
+    } else if (valid(previous_frontier_stack_rows)) {
+        crop_stack_rows = previous_frontier_stack_rows + margin_pixels;
+    }
+    cropStackTo(crop_stack_rows);
 }
 
-void PageScrapingBox::trimStackToLastFactor(
-    const Frame &frame,
-    int anchor_pixels,
-    int stack_bottom_pixels,
-    int ceiling_pixels,
-    bool skip_leading_bar,
-    double search_span) {
-    const auto &anchor = frame.anchor();
-    const auto &background = scan_parameters.back();
-
-    // Locate the last factor's bottom (the top of the page-background run just below the last factor -- the same
-    // point the gray-completion path records as current_run_start_scaled). Scan up a bounded span from the
-    // anchor to the first non-background pixel: the last factor's bottom edge. When skip_leading_bar is set,
-    // first skip the run of non-background above the anchor (the green bar and its anti-aliased edge). The span
-    // bounds the walk and also stops a runaway if the factor column is empty at the last row; if the factor is
-    // not reached within it, fall back to the ceiling as the crop line rather than over-trimming.
-    const int search_floor = std::max(0, anchor_pixels - anchor.expand({0., search_span}).y());
-    int y = anchor_pixels - 1;
-    if (skip_leading_bar) {
-        while (y >= search_floor && !frame.isIn(background.color_range, {background.x, anchor.scaleFromPixels(y)})) {
-            y--;  // skip the green bar and its anti-aliased edge
-        }
-    }
-    int run_start_pixels = ceiling_pixels;
-    bool found_factor = false;
-    for (; y >= search_floor; y--) {  // walk up the background gap to the last factor
-        if (!frame.isIn(background.color_range, {background.x, anchor.scaleFromPixels(y)})) {
-            found_factor = true;
-            break;
-        }
-        run_start_pixels = y;
-    }
-    if (!found_factor) {
-        run_start_pixels = ceiling_pixels;
-    }
-
-    // A fixed margin below the last factor, clamped so it never dips past the ceiling (the green bar on the
-    // green path; the gray run's completion row on the gray path).
-    const double crop_scaled = factorEndCropY(
-        anchor.scaleFromPixels(run_start_pixels), anchor.scaleFromPixels(0), anchor.scaleFromPixels(ceiling_pixels));
-    const int crop_pixels = anchor.expand({0., crop_scaled}).y();
-
-    // stack_bottom_pixels is the frame-y the current stack bottom corresponds to; anything below the crop line
-    // is trailing background/phantom to remove. Resolution is constant here, so stack_bottom - crop is exactly
-    // the number of rows to drop from the bottom of the stack. The overshoot was latched within the holdback
-    // window, so the peel is a pure in-RAM operation; flush afterwards -- this is a terminal exit.
-    trimTail(stack_bottom_pixels - crop_pixels);
+void PageScrapingBox::cropStackTo(int crop_stack_rows) {
+    // Anything below the crop line is trailing background / bar remnants to remove; resolution is constant
+    // within a capture, so the difference is exactly the rows to drop. The overshoot was latched within the
+    // holdback window, so the peel is a pure in-RAM operation; flush afterwards -- this is a terminal exit.
+    trimTail(stack_rows - std::min(crop_stack_rows, stack_rows));
     flushAll();
 }
 
@@ -719,6 +681,7 @@ void PageScrapingBox::saveIncremental(const Frame &frame) {
     // clone(): the strip is usually a view sharing the source frame's buffer, which does not outlive this call.
     pending_strips.push_back(frame.data().clone());
     pending_rows += pending_strips.back().rows;
+    stack_rows += pending_strips.back().rows;
     flushExcess();
 }
 
@@ -751,10 +714,12 @@ void PageScrapingBox::trimTail(int trim) {
         if (trim < last.rows || fragmentCount() == 1) {
             const int kept = std::max(1, last.rows - trim);
             pending_rows -= last.rows - kept;
+            stack_rows -= last.rows - kept;
             last = last.rowRange(0, kept).clone();
             trim = 0;
         } else {
             pending_rows -= last.rows;
+            stack_rows -= last.rows;
             trim -= last.rows;
             pending_strips.pop_back();
         }
@@ -765,10 +730,13 @@ void PageScrapingBox::trimTail(int trim) {
         const auto path = image_dir / path_config.scroll_area.withNumber(committed_count - 1, 5).filename();
         const cv::Mat last = Frame::decodeBgr(path);
         if (trim < last.rows || committed_count == 1) {
-            Frame::fixed(last.rowRange(0, std::max(1, last.rows - trim)).clone()).save(path);
+            const int kept = std::max(1, last.rows - trim);
+            Frame::fixed(last.rowRange(0, kept).clone()).save(path);
+            stack_rows -= last.rows - kept;
             trim = 0;
         } else {
             std::filesystem::remove(path);
+            stack_rows -= last.rows;
             trim -= last.rows;
             committed_count--;
         }

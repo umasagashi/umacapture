@@ -175,19 +175,20 @@ TEST_CASE("detectGreenTerminator ignores a green run shorter than the required l
     CHECK_FALSE(box.scrollAreaReady());
 }
 
-// --- trimScrollAreaToFactorEnd: unify the factor-end crop across both terminator paths -----------------
+// --- trimScrollAreaToFactorEnd: the green terminator crops from the maintained frontier ----------------
 //
-// The gray-completion path crops the terminating fragment a fixed margin below the last factor
-// (factorEndCropY). The green terminator path used to leave the last fragment running to the frame bottom,
-// so the trailing background below the last factor was variable. trimScrollAreaToFactorEnd scans up from the
-// recorded green-bar top to the last factor and trims the fragment stack to the same crop line, so the
-// bottom margin matches regardless of which terminator ended the tab.
+// Both terminator paths crop the stack a fixed margin below frontier_stack_rows: the last observed
+// non-background -> background transition of the terminating scan, recorded in stack coordinates at latch
+// time. The green path validates that evidence against the live bar top (the last factor sits a fixed
+// distance above the bar, bounded by kFactorEndGreenSearchSpan) and falls back to the previous transition
+// (the bar rendered early and its trailing background stole the last one) or to a fail-safe bar-top crop /
+// no-op when the evidence cannot be the last factor's gap.
 //
-// Fixture: kArmScan (consumed on arm) matches solid kArmGray; the back scan kGapScan matches the page
-// background gap. Because kArmGray is not in the gap range, arm frames keep the box armed while a probe
-// frame's gap region is recognized as the space below the last factor. On a 100 px frame the margin (0.0217)
-// is 2 px, the probe back-scan K (0.2) is 20 px, and the factor search span (0.08) is 8 px -- so the fixed
-// factor-to-bar distance below must stay under 8 px.
+// Fixture: kArmScan (consumed on arm) matches kArmGray; the back scan kGapScan matches the page background
+// gap. structuredArmFrame latches real factor + gap structure so the frontier holds evidence that is
+// scroll-consistent with the live probes. On a 100 px frame the margin (0.0217) is 2 px, the probe
+// back-scan K (0.2) is 20 px, and the factor search span (0.08) is 8 px -- so the fixed factor-to-bar
+// distance must stay under 8 px.
 const Color kArmGray{130, 130, 130};
 const scraper_config::ScanParameter kArmScan{0.5, 0.02, {Color(120, 120, 120), Color(140, 140, 140)}};
 const scraper_config::ScanParameter kGapScan{0.5, 0.2, {Color(233, 233, 233), Color(253, 253, 253)}};
@@ -206,34 +207,54 @@ Frame factorEndFrame(int factor_bottom, int gap_height) {
     return Frame::fixed(mat);
 }
 
+// Arms the box with solid arm-gray: kArmScan consumed, no factor/gap structure latched (frontier stays -1).
 void armFactorBox(scraper_impl::PageScrapingBox &box) {
     box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)));  // consume kArmScan; kGapScan stays parked
 }
 
-TEST_CASE("trimScrollAreaToFactorEnd crops the green-terminated tab to the last factor plus the fixed margin") {
+// Arms the box with scroll-consistent structure: 2 px of arm-gray consume kArmScan, factor fill down to
+// factor_bottom, page-background gap below -- so the frontier records factor_bottom at latch time. The
+// latched gap run (100 - factor_bottom) must stay under the 20 px terminating length or the gray sequence
+// would complete during the arm latch: factor_bottom >= 81.
+Frame structuredArmFrame(int factor_bottom) {
+    cv::Mat mat = testutil::solid(100, Color(243, 243, 243));                  // page-background gap
+    mat(cv::Rect(0, 0, 100, factor_bottom)).setTo(cv::Scalar(200, 200, 200));  // factor fill
+    mat(cv::Rect(0, 0, 100, 2)).setTo(cv::Scalar(130, 130, 130));              // kArmGray consumes kArmScan
+    return Frame::fixed(mat);
+}
+
+// A pure page-background strip: the trailing background revealed by end-of-list overscroll.
+Frame gapFrame() {
+    return Frame::fixed(testutil::solid(100, Color(243, 243, 243)));
+}
+
+TEST_CASE("trimScrollAreaToFactorEnd crops the green-terminated tab at the frontier plus the fixed margin") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_factor_end_crop");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);  // fragment 00000 = 100 px
+    box.addScrollArea(structuredArmFrame(82));  // stack 100, frontier 82, latched gap 82..99 (18 px < 20)
 
-    // Last factor bottom 70, gap [70, 74), anti-alias [74, 76), green bar [76, 81). offset 10 -> frontier 90.
-    const Frame probe = factorEndFrame(70, 4);
+    // Live probe, scrolled 10 px past the arm frame (content = frame + 10): factor bottom 72 (content 82,
+    // matching the frontier), gap [72, 77), anti-alias [77, 79), bar [79, 84). The bar's content rows were
+    // latched as background before it lazily popped in, so it exists only in the live frame.
+    const Frame probe = factorEndFrame(72, 5);
     REQUIRE(box.detectGreenTerminator(probe, 10));
     box.trimScrollAreaToFactorEnd(probe, 10);
 
-    // The scan skips the bar edge and walks the gap to the last factor (70); crop = 70 + margin (2 px) = 72.
-    // The fragment bottom sat at the frontier (90), so 90 - 72 = 18 rows are trimmed: 100 -> 82.
+    // Bar top in stack coordinates = 100 - (90 - 79) = 89; frontier 82 is within the 8 px span above it and
+    // 82 + margin (2) = 84 <= 89, so the frontier is trusted: trim = 100 - 84 = 16 rows.
     const cv::Mat cropped = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
-    CHECK(cropped.rows == 82);
+    CHECK(cropped.rows == 84);
 }
 
-TEST_CASE("trimScrollAreaToFactorEnd leaves fragments untouched when nothing overshoots the crop line") {
+TEST_CASE("trimScrollAreaToFactorEnd is a no-op on a green early fire without frontier evidence") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_factor_end_noop");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);
+    armFactorBox(box);  // no factor/gap structure latched: frontier stays -1
 
-    // Crop line at/above the frontier: last factor 69 + margin 2 = 71 >= frontier 70 (offset 30) -> trim <= 0.
+    // The bar fires before the last factor's gap was ever latched. With no latch evidence the trim must
+    // fail safe; the bar (75) sits below the stack bottom (70), so the bar-top fallback is a no-op.
     const Frame probe = factorEndFrame(69, 4);  // gap [69, 73), anti-alias [73, 75), green [75, 80)
     REQUIRE(box.detectGreenTerminator(probe, 30));
     box.trimScrollAreaToFactorEnd(probe, 30);
@@ -242,73 +263,98 @@ TEST_CASE("trimScrollAreaToFactorEnd leaves fragments untouched when nothing ove
     CHECK(kept.rows == 100);
 }
 
-TEST_CASE("trimScrollAreaToFactorEnd peels whole fragments when the trim exceeds the last one") {
+TEST_CASE("trimScrollAreaToFactorEnd peels whole staged strips when the trim spans them") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_factor_end_spill");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);  // fragment 00000 = 100 px
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 20);  // fragment 00001 = 20 px strip
+    box.addScrollArea(structuredArmFrame(93));  // stack 100, frontier 93, latched gap 7 px
+    box.addScrollArea(gapFrame(), 6);           // trailing background strip: stack 106, gap run 13 px < 20
 
-    // Last factor 64, gap [64, 68), anti-alias [68, 70), green [70, 75); offset 10 -> frontier 90 -> crop 66
-    // -> trim 24.
-    const Frame probe = factorEndFrame(64, 4);
+    // Probe scrolled 16 px past the arm frame (content = frame + 16): factor bottom 77 (content 93), gap
+    // [77, 82), anti-alias [82, 84), bar [84, 89) at content 100 -- latched as background by the 6 px strip
+    // before the bar popped in.
+    const Frame probe = factorEndFrame(77, 5);
     REQUIRE(box.detectGreenTerminator(probe, 10));
     box.trimScrollAreaToFactorEnd(probe, 10);
 
-    // trim 24 > fragment1 (20 px): fragment1 removed, remaining 4 px trimmed off fragment0 (100 -> 96).
+    // Bar top in stack coordinates = 106 - (90 - 84) = 100; frontier 93 valid (span 7 <= 8): crop 95,
+    // trim 11 -> the 6 px strip is peeled entirely in RAM (never written), the arm strip crops 100 -> 95.
     CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(1, 5).filename()));
     const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
-    CHECK(frag0.rows == 96);
+    CHECK(frag0.rows == 95);
 }
 
-// --- gray-completion trim: the factor gray-sequence path shares the same tail-trim ---------------------
+TEST_CASE("trimScrollAreaToFactorEnd falls back to the previous transition when the early bar was latched") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_factor_end_early_bar");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+
+    // A short history whose bar rendered before the arm latch, so the bar itself was latched: the column
+    // reads factor [2, 81), gap [81, 86), anti-alias [86, 88), bar [88, 93), background [93, 100). The
+    // post-bar background steals the last transition (93); the factor's own gap start (81) survives as the
+    // previous one.
+    cv::Mat arm = testutil::solid(100, Color(243, 243, 243));
+    arm(cv::Rect(0, 0, 100, 81)).setTo(cv::Scalar(200, 200, 200));
+    arm(cv::Rect(0, 0, 100, 2)).setTo(cv::Scalar(130, 130, 130));
+    arm(cv::Rect(0, 86, 100, 2)).setTo(cv::Scalar(180, 240, 220));
+    arm(cv::Rect(0, 88, 100, 5)).setTo(cv::Scalar(20, 222, 128));
+    box.addScrollArea(Frame::fixed(arm));
+
+    // Probe scrolled 10 px (content = frame + 10): bar [78, 83) -> bar top in stack coordinates 88. The
+    // last transition (93) lies below the bar and is rejected; the previous one (81) is within the span.
+    const Frame probe = factorEndFrame(71, 5);
+    REQUIRE(box.detectGreenTerminator(probe, 10));
+    box.trimScrollAreaToFactorEnd(probe, 10);
+
+    // crop = 81 + margin (2) = 83, trim = 100 - 83 = 17: the latched bar and its trailing rows are removed.
+    const cv::Mat cropped = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(cropped.rows == 83);
+}
+
+// --- gray-completion trim: sequence completion crops at the frontier -----------------------------------
 //
 // The gray-completion path (addScrollArea, scan sequence consumed) terminates a LONG-inheritance factor tab
-// whose green bar is not near the bottom. End-of-list overscroll used to leave phantom trailing-background (and
-// occasionally a duplicate "ghost" row) strips below the last factor. The path now routes through the same
-// trimStackToLastFactor core as the green terminator: when the terminating frame's gray run began at the strip
-// top (the whole new strip is trailing background, the real last factor already saved above the frontier), it
-// does NOT save the phantom but scans the frame up from the frontier and trims the fragment stack to the last
-// factor + fixed margin. When the run began below the strip top (the last factor is in this frame), it saves
-// the cropped strip exactly as before (no phantom can precede the first reveal of the last factor).
+// whose green bar is not near the bottom. The terminating run's own start IS the frontier -- recorded when
+// the run began, possibly strips earlier -- so on completion the box stages the strip down to the completion
+// row and crops the whole stack at frontier + margin, one path regardless of where the last factor sits.
+// The run accumulates across strips (current_length_pixels survives frames), so trailing background latched
+// during the recognition lag counts toward the 20 px threshold and is peeled from the staged tail.
 //
 // Fixture: a clean factor-fill over a page-background gap, no anti-aliased edge or green bar, so kGapScan
-// completes on a continuous run. On a 100 px frame the margin (0.0217) is 2 px and the gray search span
-// (0.16) is 16 px. Phantom fragments are built with an arm-gray strip (out of the gap range) so
-// current_length_pixels stays 0 and the terminating frame completes the 20 px gray run on its own -> Case A.
+// completes on a continuous run. On a 100 px frame the margin (0.0217) is 2 px.
 Frame factorThenGapFrame(int factor_bottom) {
     cv::Mat mat = testutil::solid(100, Color(243, 243, 243));                  // page-background gap
     mat(cv::Rect(0, 0, 100, factor_bottom)).setTo(cv::Scalar(200, 200, 200));  // factor fill (out of gap range)
     return Frame::fixed(mat);
 }
 
-TEST_CASE("gray-completion trims a phantom fragment latched below the last factor (Case A)") {
+TEST_CASE("gray-completion trims the trailing background latched during the recognition lag") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_gray_trim_peel");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);                                                    // fragment 00000 = 100 px
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 6);   // fragment 00001 = 6 px phantom
+    box.addScrollArea(structuredArmFrame(91));  // stack 100, frontier 91, gap run 9 px
+    box.addScrollArea(gapFrame(), 6);           // lag strip: all background, run 15 px, stack 106
 
-    // Terminating frame: factor [0, 68), gap [68, 100). offset 20 -> frontier 80; the strip [80, 100] is all
-    // gap, so the gray run begins at the strip top -> Case A. The gap frontier(80)->factor(68) is 12 px, within
-    // the 16 px (0.16 w) search span. Scan up 79..68 (gap), factor at 67 -> last factor bottom 68 -> crop 70.
-    // trim = 80 - 70 = 10: phantom (6) removed, 4 more off fragment0 (100 -> 96).
-    box.addScrollArea(factorThenGapFrame(68), 20);
+    // The 20 px gray run completes 5 rows into this strip (15 + 5): rows [80, 85) are staged, stack 111.
+    // crop = frontier (91) + margin (2) = 93 -> trim 18: the 5 staged rows and the 6 px lag strip are
+    // peeled entirely in RAM (never written), and the arm strip crops 100 -> 93.
+    box.addScrollArea(gapFrame(), 20);
 
     CHECK(box.scrollAreaReady());
     CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(1, 5).filename()));
     const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
-    CHECK(frag0.rows == 96);
+    CHECK(frag0.rows == 93);
 }
 
-TEST_CASE("gray-completion saves the cropped strip and does not trim when the last factor is in-frame (Case B)") {
+TEST_CASE("gray-completion crops the terminating strip when the last factor is in-frame") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_gray_trim_caseb");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
     armFactorBox(box);  // fragment 00000 = 100 px
 
-    // Terminating frame: factor [0, 75), gap [75, 100). offset 30 -> frontier 70; the gray run begins at 75
-    // (below the strip top 70) -> Case B. Save strip [70, 75 + margin(2)] = [70, 77] = 7 px; fragment0 stays.
+    // Terminating frame: factor [0, 75), gap [75, 100). offset 30 -> the transition at 75 sets the frontier
+    // to stack row 105; the 20 px run completes at row 94, staging [70, 95) = 25 rows. crop = 105 + 2 = 107
+    // -> trim 18: the staged strip crops to 7 rows; fragment0 stays.
     box.addScrollArea(factorThenGapFrame(75), 30);
 
     CHECK(box.scrollAreaReady());
@@ -318,38 +364,68 @@ TEST_CASE("gray-completion saves the cropped strip and does not trim when the la
     CHECK(frag0.rows == 100);
 }
 
-TEST_CASE("gray-completion crops within the phantom fragment, preserving earlier ones (Case A)") {
+TEST_CASE("gray-completion crops within a middle strip, preserving earlier fragments") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_gray_trim_partial");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);                                                     // fragment 00000 = 100 px
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 30);   // fragment 00001 = 30 px phantom
+    box.addScrollArea(structuredArmFrame(100));   // all factor: stack 100, no transition yet
+    box.addScrollArea(factorThenGapFrame(82), 25);  // strip [75, 100): factor to 81, transition at 82
 
-    // factor [0, 65), gap [65, 100). offset 20 -> frontier 80; Case A. last factor 65 -> crop 67 ->
-    // trim = 80 - 67 = 13 (< phantom's 30): phantom cropped to 30 - 13 = 17, fragment0 untouched.
-    box.addScrollArea(factorThenGapFrame(65), 20);
+    // The transition at frame row 82 puts the frontier at stack row 107; the gap run is 18 px so the box
+    // stays armed (stack 125). The next background strip completes the run 2 rows in (staging 2, stack 127).
+    // crop = 107 + 2 = 109 -> trim 18: the 2 staged rows peel, the 25 px strip crops to 9, the arm strip
+    // (pure factor) is untouched.
+    box.addScrollArea(gapFrame(), 6);
 
     const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
-    CHECK(frag1.rows == 17);
+    CHECK(frag1.rows == 9);
     const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
     CHECK(frag0.rows == 100);
+    CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(2, 5).filename()));
 }
 
-TEST_CASE("gray-completion is a no-op when the last factor sits at the frontier (Case A)") {
+TEST_CASE("gray-completion never over-trims a factor ending exactly at a strip boundary") {
     HookRecorder recorder;
-    const auto dir = freshTempDir("uma_gray_trim_noop");
+    const auto dir = freshTempDir("uma_gray_trim_boundary");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);                                                     // fragment 00000 = 100 px
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 10);   // fragment 00001 = 10 px
+    box.addScrollArea(structuredArmFrame(100));  // all factor: the last factor row is the strip's bottom row
 
-    // factor [0, 78), gap [78, 100). offset 20 -> frontier 80; Case A. last factor 78 -> crop 78 + 2 = 80 ==
-    // frontier -> trim 0: nothing peeled.
-    box.addScrollArea(factorThenGapFrame(78), 20);
+    // The background run starts exactly at the next strip's top. current_length_pixels survives across
+    // frames and is zero here (the previous strip ended non-background), so the transition is recorded at
+    // the boundary: frontier = stack row 100.
+    box.addScrollArea(gapFrame(), 18);  // gap run 18 px < 20, stack 118
+
+    // The run completes 2 rows into the next strip (staging 2, stack 120). crop = 100 + 2 = 102 -> trim 18:
+    // the staged rows peel, the 18 px strip crops to 2 margin rows, and the factor strip is fully kept.
+    box.addScrollArea(gapFrame(), 6);
 
     const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
     CHECK(frag0.rows == 100);
     const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
-    CHECK(frag1.rows == 10);
+    CHECK(frag1.rows == 2);
+}
+
+TEST_CASE("gray-completion keeps a stray non-background strip below the factor (ghost repair out of scope)") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_gray_trim_stray");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    box.addScrollArea(structuredArmFrame(91));                            // stack 100, frontier 91
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 6);  // stray non-background strip
+
+    // The stray strip resets the run, so the terminating strip's top row is a boundary transition: the
+    // frontier moves to stack row 106, below the stray. Latch evidence alone cannot tell a stray from a
+    // factor ending at the boundary (see the boundary test above), so the crop refuses to reach past the
+    // transition: the stray survives and factor rows are never cut. Repairing mis-latched (ghost) strips is
+    // an alignment concern, out of scope here. The full 20 px run stages [80, 100), stack 126; crop = 108
+    // -> trim 18 crops the staged rows to 2.
+    box.addScrollArea(gapFrame(), 20);
+
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 100);
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 6);
+    const cv::Mat frag2 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(2, 5).filename());
+    CHECK(frag2.rows == 2);
 }
 
 // --- delayed commit: the factor box stages its tail in RAM and flushes on terminal exits ----------------
@@ -376,42 +452,45 @@ TEST_CASE("delayed commit stages the factor tail and flushes strips past the hol
     const auto dir = freshTempDir("uma_delayed_stage");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
 
-    // The arm strip (100 px) is the whole tail: nothing on disk yet.
-    armFactorBox(box);
+    // The arm strip (100 px, pure factor) is the whole tail: nothing on disk yet.
+    box.addScrollArea(structuredArmFrame(100));
     CHECK(scrollAreaFileCount(dir) == 0);
 
     // A second 50 px strip pushes the arm strip past the 36 px holdback: it flushes as 00000, while the
-    // 50 px strip itself stays staged.
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 50);
+    // 50 px strip itself stays staged. Factor to frame row 90, transition at 91 -> frontier stack row 141,
+    // gap run 9 px (< 20, still armed).
+    box.addScrollArea(factorThenGapFrame(91), 50);
     CHECK(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
     CHECK(scrollAreaFileCount(dir) == 1);
 
-    // Gray termination (factor [0, 68), gap [68, 100), offset 20 -> frontier 80, trim 10) crops the staged
-    // 50 px strip in RAM to 40 px and drains the tail: the final set is contiguous and complete.
-    box.addScrollArea(factorThenGapFrame(68), 20);
+    // Gray termination: the run completes 11 rows into this background strip (staging 11, stack 161).
+    // crop = 141 + 2 = 143 -> trim 18: the staged rows peel and the 50 px strip crops in RAM to 43. The
+    // final set is contiguous and complete.
+    box.addScrollArea(gapFrame(), 20);
     CHECK(box.scrollAreaReady());
     CHECK(scrollAreaFileCount(dir) == 2);
     const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
     CHECK(frag0.rows == 100);
     const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
-    CHECK(frag1.rows == 40);
+    CHECK(frag1.rows == 43);
 }
 
 TEST_CASE("delayed commit keeps committed indices contiguous when a staged strip is peeled") {
     HookRecorder recorder;
     const auto dir = freshTempDir("uma_delayed_peel_contiguous");
     scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
-    armFactorBox(box);                                                     // staged: 100 px
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 50);   // flushes 00000; staged: 50 px
-    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 6);    // staged: 50 + 6 px phantom
+    box.addScrollArea(structuredArmFrame(100));      // staged: 100 px, pure factor
+    box.addScrollArea(factorThenGapFrame(91), 50);   // flushes 00000; staged: 50 px, frontier 141, run 9 px
+    box.addScrollArea(gapFrame(), 6);                // lag strip: staged 50 + 6 px, run 15 px
 
-    // Gray termination with trim 10: the 6 px phantom is peeled entirely in RAM (never written), the 50 px
-    // strip is cropped to 46, and the flushed names have no gap for the stitcher's lexical enumeration.
-    box.addScrollArea(factorThenGapFrame(68), 20);
+    // The run completes 5 rows into this strip (staging 5, stack 161). crop = 143 -> trim 18: the staged
+    // rows and the 6 px lag strip peel entirely in RAM (never written), the 50 px strip crops to 43, and
+    // the flushed names have no gap for the stitcher's lexical enumeration.
+    box.addScrollArea(gapFrame(), 20);
     CHECK(scrollAreaFileCount(dir) == 2);
     CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(2, 5).filename()));
     const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
-    CHECK(frag1.rows == 46);
+    CHECK(frag1.rows == 43);
 }
 
 TEST_CASE("non-factor boxes write through immediately") {
