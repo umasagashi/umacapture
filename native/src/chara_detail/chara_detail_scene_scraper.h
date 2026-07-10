@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -240,7 +241,32 @@ public:
     [[nodiscard]] bool ready() const;
 
 private:
+    // Stage (factor box) or write (other boxes) one scroll-area strip. The factor box delays its commit:
+    // strips are staged as owning clones in pending_strips and only flushed to disk once they can no longer
+    // be trimmed (flushExcess) or the tab terminates (flushAll), so trailing background latched during the
+    // gray-run recognition lag never reaches disk and the terminator-time trim is a pure in-RAM operation.
     void saveIncremental(const Frame &frame);
+
+    // Committed fragments on disk plus strips staged in RAM: the logical fragment count both terminator
+    // paths and readiness reason about (the pre-delayed-commit image_count).
+    [[nodiscard]] int fragmentCount() const;
+
+    // Write the oldest staged strip as the next numbered fragment and pop it.
+    void flushFront();
+
+    // Flush staged strips down to tail_holdback_pixels. Strips older than the maximum possible
+    // terminator-time trim can never be peeled, so committing them keeps memory bounded without
+    // giving up the in-RAM trim.
+    void flushExcess();
+
+    // Terminal commit: drain the staged tail to disk. Must run before readiness is observable so the
+    // stitcher (triggered on completion) sees the final fragment set.
+    void flushAll();
+
+    // Remove trim_rows from the bottom of the fragment stack: peel/crop the staged tail first, then fall
+    // back to the on-disk fragments (unreachable while tail_holdback_pixels over-covers the trim bounds,
+    // kept as a safety net). Never drops the sole remaining fragment (scrollAreaReady must stay satisfied).
+    void trimTail(int trim_rows);
 
     // Scaled y at which the terminating fragment should be cropped for the factor box: a fixed margin below
     // run_start_scaled (the bottom of the last factor). Clamped within [scaled_top, terminator] so the rect
@@ -249,10 +275,10 @@ private:
     // end-bar) feed their own last-factor-bottom through this one function so they crop to the same line.
     [[nodiscard]] double factorEndCropY(double run_start_scaled, double scaled_top, double terminator_scaled_y) const;
 
-    // Shared core for both factor-end terminator paths: trim the saved fragment stack so its bottom lands a
+    // Shared core for both factor-end terminator paths: trim the fragment stack so its bottom lands a
     // fixed margin below the last factor. Scans `frame` upward from `anchor_pixels` (a frame-y row that sits in
     // the page-background gap below the last factor) to the last factor's bottom, computes factorEndCropY, and
-    // peels/crops the saved fragments below that crop line. `stack_bottom_pixels` is the frame-y the current
+    // trims the stack below that crop line via trimTail, then flushes. `stack_bottom_pixels` is the frame-y the current
     // stack bottom corresponds to (the scroll frontier). `ceiling_pixels` lower-bounds the crop line and is the
     // not-found fallback (green: the bar top; gray: the gray run's completion row -> a safe non-positive trim).
     // `skip_leading_bar` first skips a leading run of non-background above the anchor (the green bar + its
@@ -276,7 +302,17 @@ private:
     // strip top each frame. For the factor box the run that follows the last factor is the page-background
     // gap just below it, so this marks the bottom of the last factor.
     double current_run_start_scaled = 0.0;
-    int image_count = 0;
+
+    // Delayed-commit tail (factor box only; other boxes write through). Owning clones -- Frame views share
+    // the source buffer (see frame.h), and a staged strip outlives its source frame. Dropped, NOT flushed,
+    // when the box is discarded: recreate()/release() abandon uncommitted strips by design, matching the
+    // rmdir of the committed ones.
+    std::deque<cv::Mat> pending_strips;
+    int pending_rows = 0;
+    // Fragments on disk; doubles as the next flush filename index so committed names stay contiguous.
+    int committed_count = 0;
+    // Minimum staged rows retained in RAM; set per-latch in addScrollArea from the worst-case trim depth.
+    int tail_holdback_pixels = 0;
 
     bool tab_button_ready = false;
 

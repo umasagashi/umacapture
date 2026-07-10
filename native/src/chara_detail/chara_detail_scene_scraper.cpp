@@ -501,6 +501,15 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     }
 
     const auto &anchor = frame.anchor();
+    if (end_green) {
+        // Worst-case rows a terminator can trim below the pre-existing stack bottom, kept staged in RAM:
+        // gray trims at most kFactorEndGraySearchSpan above the frontier; green fires within back() of the
+        // frontier and trims at most kFactorEndGreenSearchSpan above the bar top. Recomputed per latch
+        // (idempotent -- resolution is constant within a capture).
+        tail_holdback_pixels =
+            anchor.expand({0., scan_parameters.back().length + std::max(kFactorEndGraySearchSpan, kFactorEndGreenSearchSpan)})
+                .y();
+    }
     const Point<int> &top_left = {0, frame.height() - offset_pixels};
     const Point<double> &scaled_top_left = anchor.mapFromFrame(top_left);
     // Default the run-start to this strip's top: a color run already in progress from a prior strip has its
@@ -557,6 +566,7 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
             if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
                 saveIncremental(frame.view(rect));
             }
+            flushAll();  // terminal exit: the staged tail is final
             return;
         }
         trimStackToLastFactor(
@@ -584,7 +594,7 @@ bool PageScrapingBox::detectGreenTerminator(const Frame &frame, int offset_pixel
     // catches the terminator and structurally excludes the top header, without a frame region or scrollbar
     // position. back() is that terminating gray gap for the factor box (the only box with end_green);
     // reaching this line implies current_scan != begin(), so scan_parameters is non-empty.
-    if (!end_green || current_scan == scan_parameters.begin() || image_count == 0) {
+    if (!end_green || current_scan == scan_parameters.begin() || fragmentCount() == 0) {
         return false;
     }
     const auto &anchor = frame.anchor();
@@ -673,36 +683,28 @@ void PageScrapingBox::trimStackToLastFactor(
 
     // stack_bottom_pixels is the frame-y the current stack bottom corresponds to; anything below the crop line
     // is trailing background/phantom to remove. Resolution is constant here, so stack_bottom - crop is exactly
-    // the number of rows to drop from the bottom of the stack. Peel whole fragments, then crop the one that
-    // straddles the line; never delete the sole remaining fragment (scrollAreaReady must stay satisfied).
-    int trim = stack_bottom_pixels - crop_pixels;
-    while (trim > 0 && image_count > 0) {
-        const auto path = image_dir / path_config.scroll_area.withNumber(image_count - 1, 5).filename();
-        const cv::Mat last = Frame::decodeBgr(path);
-        if (trim < last.rows || image_count == 1) {
-            Frame::fixed(last.rowRange(0, std::max(1, last.rows - trim)).clone()).save(path);
-            trim = 0;
-        } else {
-            std::filesystem::remove(path);
-            trim -= last.rows;
-            image_count--;
-        }
-    }
+    // the number of rows to drop from the bottom of the stack. The overshoot was latched within the holdback
+    // window, so the peel is a pure in-RAM operation; flush afterwards -- this is a terminal exit.
+    trimTail(stack_bottom_pixels - crop_pixels);
+    flushAll();
 }
 
 void PageScrapingBox::addScrollArea(const Frame &frame) {
-    assert_(image_count == 0);
+    assert_(fragmentCount() == 0);
     addScrollArea(frame, frame.height());
 }
 
 void PageScrapingBox::setScrollArea(const Frame &frame) {
-    assert_(image_count == 0);
+    assert_(fragmentCount() == 0);
     saveIncremental(frame);
+    // A factor box normally scrolls, but if the page has no scrollbar this is its terminal save: commit it
+    // so the sole strip cannot be stranded in the staged tail.
+    flushAll();
     current_scan = scan_parameters.end();
 }
 
 bool PageScrapingBox::scrollAreaReady() const {
-    return image_count > 0 && (current_scan == scan_parameters.end() || end_green_fired);
+    return fragmentCount() > 0 && (current_scan == scan_parameters.end() || end_green_fired);
 }
 
 bool PageScrapingBox::ready() const {
@@ -710,7 +712,67 @@ bool PageScrapingBox::ready() const {
 }
 
 void PageScrapingBox::saveIncremental(const Frame &frame) {
-    frame.save(image_dir / path_config.scroll_area.withNumber(image_count++, 5).filename());
+    if (!end_green) {  // skill/campaign and setScrollArea write through: no trim can follow, nothing to stage
+        frame.save(image_dir / path_config.scroll_area.withNumber(committed_count++, 5).filename());
+        return;
+    }
+    // clone(): the strip is usually a view sharing the source frame's buffer, which does not outlive this call.
+    pending_strips.push_back(frame.data().clone());
+    pending_rows += pending_strips.back().rows;
+    flushExcess();
+}
+
+int PageScrapingBox::fragmentCount() const {
+    return committed_count + static_cast<int>(pending_strips.size());
+}
+
+void PageScrapingBox::flushFront() {
+    Frame::fixed(pending_strips.front())
+        .save(image_dir / path_config.scroll_area.withNumber(committed_count++, 5).filename());
+    pending_rows -= pending_strips.front().rows;
+    pending_strips.pop_front();
+}
+
+void PageScrapingBox::flushExcess() {
+    while (!pending_strips.empty() && pending_rows - pending_strips.front().rows >= tail_holdback_pixels) {
+        flushFront();
+    }
+}
+
+void PageScrapingBox::flushAll() {
+    while (!pending_strips.empty()) {
+        flushFront();
+    }
+}
+
+void PageScrapingBox::trimTail(int trim) {
+    while (trim > 0 && !pending_strips.empty()) {
+        cv::Mat &last = pending_strips.back();
+        if (trim < last.rows || fragmentCount() == 1) {
+            const int kept = std::max(1, last.rows - trim);
+            pending_rows -= last.rows - kept;
+            last = last.rowRange(0, kept).clone();
+            trim = 0;
+        } else {
+            pending_rows -= last.rows;
+            trim -= last.rows;
+            pending_strips.pop_back();
+        }
+    }
+    // Disk fallback: unreachable while tail_holdback_pixels over-covers the trim bounds (see addScrollArea),
+    // kept as the safety net -- degrades to the pre-delayed-commit decode/crop/re-save, never to a wrong trim.
+    while (trim > 0 && committed_count > 0) {
+        const auto path = image_dir / path_config.scroll_area.withNumber(committed_count - 1, 5).filename();
+        const cv::Mat last = Frame::decodeBgr(path);
+        if (trim < last.rows || committed_count == 1) {
+            Frame::fixed(last.rowRange(0, std::max(1, last.rows - trim)).clone()).save(path);
+            trim = 0;
+        } else {
+            std::filesystem::remove(path);
+            trim -= last.rows;
+            committed_count--;
+        }
+    }
 }
 
 SceneScrapingBox::SceneScrapingBox(

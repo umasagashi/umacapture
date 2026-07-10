@@ -121,7 +121,7 @@ Frame greenBarFrame(int y0, int bar_height) {
 }
 
 // Consumes scan0 with a full gray frame, so current_scan is parked at the (never matched) scan1 and
-// image_count > 0 -- i.e. the probe is armed. Mutates the box in place (returning it by value would
+// fragmentCount() > 0 -- i.e. the probe is armed. Mutates the box in place (returning it by value would
 // leave current_scan, an iterator into the box's own vector, dangling into the moved-from source).
 void armBox(scraper_impl::PageScrapingBox &box) {
     box.addScrollArea(Frame::fixed(testutil::solid(100, kGray)));
@@ -135,7 +135,7 @@ TEST_CASE("detectGreenTerminator does not fire before scan0 is consumed (not arm
     scraper_impl::PageScrapingBox box(
         {kGrayScan0, kAbsentScan1}, freshTempDir("uma_probe_unarmed"), recorder.hooks(), kGreenTerminator);
 
-    // current_scan is still at begin() and image_count == 0: a green bar must not complete the tab.
+    // current_scan is still at begin() and fragmentCount() == 0: a green bar must not complete the tab.
     CHECK_FALSE(box.detectGreenTerminator(greenBarFrame(72, 10), kOffset));
     CHECK_FALSE(box.scrollAreaReady());
 }
@@ -350,6 +350,102 @@ TEST_CASE("gray-completion is a no-op when the last factor sits at the frontier 
     CHECK(frag0.rows == 100);
     const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
     CHECK(frag1.rows == 10);
+}
+
+// --- delayed commit: the factor box stages its tail in RAM and flushes on terminal exits ----------------
+//
+// The factor box no longer writes each strip to disk as it is latched: strips are staged in a RAM tail so
+// the terminator-time trim never has to decode/re-save committed PNGs and phantom overscroll strips never
+// reach disk at all. The tail holdback is the worst-case trim depth: on a 100 px frame,
+// back().length (0.2) + the gray search span (0.16) -> 36 px. Strips older than that are flushed as they
+// can never be trimmed; every terminal exit (gray completion, green trim, setScrollArea) drains the tail.
+
+int scrollAreaFileCount(const std::filesystem::path &dir) {
+    int count = 0;
+    for (const auto &entry : std::filesystem::directory_iterator(dir)) {
+        if (entry.is_regular_file()
+            && stds::starts_with(entry.path().filename().string(), path_config.scroll_area.stem())) {
+            count++;
+        }
+    }
+    return count;
+}
+
+TEST_CASE("delayed commit stages the factor tail and flushes strips past the holdback") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_delayed_stage");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+
+    // The arm strip (100 px) is the whole tail: nothing on disk yet.
+    armFactorBox(box);
+    CHECK(scrollAreaFileCount(dir) == 0);
+
+    // A second 50 px strip pushes the arm strip past the 36 px holdback: it flushes as 00000, while the
+    // 50 px strip itself stays staged.
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 50);
+    CHECK(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
+    CHECK(scrollAreaFileCount(dir) == 1);
+
+    // Gray termination (factor [0, 68), gap [68, 100), offset 20 -> frontier 80, trim 10) crops the staged
+    // 50 px strip in RAM to 40 px and drains the tail: the final set is contiguous and complete.
+    box.addScrollArea(factorThenGapFrame(68), 20);
+    CHECK(box.scrollAreaReady());
+    CHECK(scrollAreaFileCount(dir) == 2);
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 100);
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 40);
+}
+
+TEST_CASE("delayed commit keeps committed indices contiguous when a staged strip is peeled") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_delayed_peel_contiguous");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);                                                     // staged: 100 px
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 50);   // flushes 00000; staged: 50 px
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 6);    // staged: 50 + 6 px phantom
+
+    // Gray termination with trim 10: the 6 px phantom is peeled entirely in RAM (never written), the 50 px
+    // strip is cropped to 46, and the flushed names have no gap for the stitcher's lexical enumeration.
+    box.addScrollArea(factorThenGapFrame(68), 20);
+    CHECK(scrollAreaFileCount(dir) == 2);
+    CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(2, 5).filename()));
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 46);
+}
+
+TEST_CASE("non-factor boxes write through immediately") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_writethrough");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks());  // no end_green
+
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)));
+
+    CHECK(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
+}
+
+TEST_CASE("discarding the box abandons the staged tail without flushing") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_delayed_abandon");
+    {
+        scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+        armFactorBox(box);  // staged, not on disk
+        CHECK(scrollAreaFileCount(dir) == 0);
+    }
+    // Reset paths drop the box (recreate()/release() replace the shared_ptr) and rmdir the directory; a
+    // destructor flush would resurrect strips the reset meant to discard.
+    CHECK(scrollAreaFileCount(dir) == 0);
+}
+
+TEST_CASE("setScrollArea on a factor box commits its sole strip immediately") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_delayed_set_scroll_area");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+
+    box.setScrollArea(Frame::fixed(testutil::solid(100, kArmGray)));
+
+    CHECK(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
+    CHECK(box.scrollAreaReady());
 }
 
 }  // namespace
