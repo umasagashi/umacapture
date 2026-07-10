@@ -17,6 +17,25 @@ Runtime/user-facing strings (e.g. localized UI text under `assets/translations/`
 - Run code generation with `dart run build_runner build --force-jit`. The `--force-jit` flag is required because a transitive native build hook (`objective_c`, via `package_info_plus`) is incompatible with build_runner's default AOT compilation.
 - The Dart MCP server (`dart` in `.mcp.json`) does **not** run code generation — it exposes no `build_runner` tool, and its `pub` tool only edits `pubspec`. After adding a codegen package or editing annotated sources (`dart_mappable`, `auto_route`), run `build_runner` manually with the command above. Do not assume the MCP tools regenerate outputs.
 
+## Never reuse a build artifact you did not build this session
+
+- **Do not run, measure, diagnose, or draw conclusions from any executable (or
+  other build output) that was not produced by a build in the current session.**
+  This applies to **both** the native CLI (`native/cmake-build-*/umacapture_cli.exe`)
+  and the Flutter Windows app (`build/windows/.../*.exe`), and to any stitched /
+  captured artifacts they emit.
+- Before the first run of a session — and after any source change, `git`
+  checkout / pull / stash, or branch switch — **rebuild from the current working
+  tree** and run only that fresh binary. A pre-existing binary can be stale: built
+  from an older commit, another branch, or an uncommitted state, so its output
+  does not reflect the code under review.
+- If provenance is ever in doubt (e.g. an `.exe` whose mtime predates recent
+  commits), treat it as stale and rebuild rather than trusting it. When it
+  matters, cross-check the artifact's build time against `git log` dates.
+- Rationale: reusing a stale `umacapture_cli.exe` (built before a merged tail-trim
+  fix) once produced misleading factor-tab output and sent a whole diagnosis
+  chasing a bug that no longer existed on `HEAD`.
+
 ## Formatting
 
 - The repo complies with standard `dart format`; run it freely. The page width
