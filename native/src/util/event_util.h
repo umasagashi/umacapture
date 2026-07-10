@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -73,6 +74,11 @@ public:
 
     virtual void processIf(const std::function<bool()> &predicate) = 0;
     virtual void processOne() = 0;
+
+    // Wake any producer blocked in a Block-mode send() so teardown cannot deadlock on a full queue whose
+    // consumer has already stopped draining. One-way for the connection's lifetime; connections are recreated
+    // per pipeline session, so the flag starts clear each time. No-op for connections that never block.
+    virtual void abort() {}
 };
 
 template<typename... Args>
@@ -110,7 +116,14 @@ public:
         if (!ready()) {
             switch (queue_limit_mode) {
                 case Discard: return;
-                case Block: waitUntilReady(); break;
+                case Block:
+                    waitUntilReady();
+                    // waitUntilReady() also returns when abort() was requested during teardown; the queue is
+                    // still full then, so drop this frame instead of enqueueing onto a stopped consumer.
+                    if (!ready()) {
+                        return;
+                    }
+                    break;
                 case NoLimit: break;
                 default: throw std::logic_error("Unimplemented.");
             }
@@ -141,11 +154,13 @@ public:
         }
     }
 
+    void abort() override { aborted_ = true; }
+
 private:
     [[nodiscard]] bool ready() const { return connection.size() < queue_limit_size; }
 
     void waitUntilReady() {
-        while (!ready()) {
+        while (!ready() && !aborted_.load()) {
             waitFor(10);
         }
     }
@@ -156,6 +171,7 @@ private:
     eventpp::EventQueue<int, void(Args...)> connection;
     const std::shared_ptr<SenderBase<int>> notifier;
     const int id;
+    std::atomic<bool> aborted_ = false;
 };
 
 class EventRunnerThread : public thread_util::ThreadBase {
@@ -242,7 +258,19 @@ public:
         vlog_debug(isRunning());
         assert_(!isRunning());
         runner = std::make_shared<EventRunnerThread>(notifier, finalizer, name);
-        runner->start();
+        // Publish running_ before starting the worker: the notifier listener reads isRunning() from the
+        // worker thread, so it must observe true the moment the worker can run.
+        running_ = true;
+        // If thread creation throws (exhaustion/bad_alloc), roll running_ and runner back so this stays
+        // consistent (running_ false, runner null) like ThreadBase::start -- otherwise isRunning() would
+        // report true with no worker, and the controller could not tell a half-started runner apart.
+        try {
+            runner->start();
+        } catch (...) {
+            running_ = false;
+            runner = nullptr;
+            throw;
+        }
     }
 
     void join() override {
@@ -250,11 +278,21 @@ public:
         if (runner == nullptr) {
             return;
         }
+        // Release any producer blocked in a Block-mode send() on one of these connections before joining the
+        // worker: once the worker stops draining, a full queue would otherwise wedge the producer (and this
+        // join) forever. Ordering-independent — each runner frees the producers waiting on its own connections.
+        for (const auto &processor : processors) {
+            processor->abort();
+        }
         runner->join();
+        running_ = false;
         runner = nullptr;
     }
 
-    [[nodiscard]] bool isRunning() const override { return runner != nullptr; }
+    // running_ (atomic) instead of the raw shared_ptr: isRunning() is read on the worker thread (the
+    // notifier listener's assert_) while the owner thread mutates `runner`, so reading the pointer here
+    // would be a data race. The `runner == nullptr` guard in join() stays as an owner-thread-only read.
+    [[nodiscard]] bool isRunning() const override { return running_; }
 
 private:
     const std::shared_ptr<QueuedConnectionImpl<int>> notifier;
@@ -264,6 +302,7 @@ private:
 
     std::vector<std::shared_ptr<EventProcessorInterface>> processors;
     std::shared_ptr<EventRunnerThread> runner;
+    std::atomic<bool> running_ = false;
 };
 
 class EventRunnerControllerImpl : public EventRunnerInterface {
@@ -283,8 +322,19 @@ public:
     void start() override {
         vlog_debug(isRunning());
         assert_(!isRunning());
-        for (const auto &r : runners) {
-            r->start();
+        try {
+            for (const auto &r : runners) {
+                r->start();
+            }
+        } catch (...) {
+            // Roll back a partial start: join every runner (idempotent -- a not-yet-started runner no-ops
+            // on its null thread, an already-started one aborts its Block-mode producers and joins) so no
+            // worker leaks before the exception propagates to teardown. is_running stays false, so the
+            // controller's own join() correctly treats the pipeline as never started.
+            for (const auto &r : runners) {
+                r->join();
+            }
+            throw;
         }
         is_running = true;
     }
@@ -304,7 +354,9 @@ public:
 
 private:
     std::vector<std::shared_ptr<EventRunnerInterface>> runners;
-    bool is_running = false;
+    // Read from Dart-facing threads (via NativeApi) while start()/join() write it on the owner thread,
+    // so it must be atomic like ThreadBase's running flag; a plain bool here is a formal data race.
+    std::atomic<bool> is_running = false;
 };
 
 template<typename... Args>

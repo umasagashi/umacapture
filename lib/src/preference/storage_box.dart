@@ -35,7 +35,11 @@ class StorageBox {
 
   T? pull<T>(String key) {
     if (_closedForMigration) return null;
-    return _box?.get(key);
+    // Guard the implicit dynamic->T cast: if a key's stored type ever diverges from the caller's T (a key
+    // repurposed across versions), degrade to the default instead of throwing a TypeError inside a notifier's
+    // build().
+    final value = _box?.get(key);
+    return value is T ? value : null;
   }
 
   void push<T>(String key, T value) {
@@ -77,7 +81,11 @@ class StorageBox {
     }
     if (reset) {
       for (final name in _BoxKeyExtension.names) {
-        await Hive.deleteBoxFromDisk(name, path: location);
+        // Delete under Hive's initialized home directory (set by init/initFlutter above) rather than passing an
+        // explicit path: in the native-default branch `location` is relative (appName/settings) while initFlutter
+        // resolves it under the documents dir, so an explicit path would target the wrong (or a missing) folder
+        // and silently no-op the reset.
+        await Hive.deleteBoxFromDisk(name);
       }
     }
     registerHiveAdapters();

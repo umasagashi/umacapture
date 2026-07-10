@@ -107,6 +107,10 @@ public class MainActivity extends FlutterActivity {
         super.configureFlutterEngine(flutterEngine);
 
         platform = new PlatformChannel(flutterEngine.getDartExecutor().getBinaryMessenger());
+        // Only 3 of the 7 Dart-side methods are registered here. This Android port is an unmaintained
+        // proof-of-concept remnant (Windows is the only supported platform); the missing handlers
+        // (updateRecord/takeScreenshot/copyToClipboardFromFile/setPlatformConfig) must be added when it is
+        // revived. See the note in PlatformChannel.java.
         platform.addMethodCallHandler("setConfig", this::setConfig);
         platform.addMethodCallHandler("startCapture", this::startCapture);
         platform.addMethodCallHandler("stopCapture", this::stopCapture);

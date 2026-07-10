@@ -505,6 +505,10 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
   // aggregate). They are set ONLY through [_applyHints]; they are not constructor
   // fields, so dart_mappable never serializes them. Fully immutable handling would
   // require threading the aggregate through the shared ColumnSpec interface.
+  //
+  // Invariant: [parse]/[_applyHints] MUST run on the same instance before plutoColumn/plutoCell.
+  // _buildGrid does this in one synchronous pass; do not reuse a spec across grids or build a column
+  // from a spec that was never parsed, or these hints will be stale/default.
   bool _numericSort = false;
   bool _hasIcon = false;
 

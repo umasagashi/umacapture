@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <optional>
+#include <stdexcept>
 #include <thread>
 
 #include "cv/frame.h"
@@ -87,11 +88,15 @@ public:
     }
 
     std::string takeScreenshot(const std::filesystem::path &path) const {
-        if (!capturer) {
-            return "Failed to take screenshot. Capturer not initialized.";
-        }
+        // Screenshots are a debug-only, infrequent operation. Build a dedicated capturer from the config this
+        // thread already holds instead of sharing the recording capturer: that capturer is driven by run() on
+        // this worker thread, and its D3D context / WinRT session are not free-threaded, so touching it from the
+        // platform (method-channel) thread would race. A separate WindowCapturer owns its own D3D device/context/
+        // session, so this keeps the capture hot path lock-free and stall-free. Reading the config members is
+        // race-free because takeScreenshot and the config setters both run on the platform thread.
+        WindowCapturer screenshot_capturer(window_targets, crop_profiles, minimum_size, force_resize);
 
-        const auto &frame = capturer->takeScreenshot();
+        const auto &frame = screenshot_capturer.takeScreenshot();
         if (frame.empty()) {
             return "Failed to take screenshot.";
         }
@@ -154,10 +159,15 @@ public:
 
     void setConfig(const windows_config::WindowRecorder &config) {
         if (!recording_thread) {
-            assert(config.recording_fps.has_value());
-            assert(config.minimum_size.has_value());
-            assert(config.window_targets.has_value());
-            assert(config.force_resize.has_value());
+            // The first setConfig builds the recording thread and dereferences these required optionals.
+            // assert() is a no-op under NDEBUG, so an incomplete config would throw bad_optional_access
+            // with no context in a release build; fail loudly with the offending fields instead.
+            if (!config.recording_fps.has_value() || !config.minimum_size.has_value() ||
+                !config.window_targets.has_value() || !config.force_resize.has_value()) {
+                throw std::invalid_argument(
+                    "WindowRecorder initial config missing a required field "
+                    "(recording_fps / minimum_size / window_targets / force_resize)");
+            }
             recording_thread = std::make_unique<windows_impl::RecordingThread>(
                 frame_captured,
                 config.window_targets.value(),

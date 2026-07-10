@@ -15,9 +15,14 @@ class JsonAdapter<T> extends TypeAdapter<T?> {
 
   @override
   T? read(BinaryReader reader) {
-    final raw = reader.readString();
+    String? raw;
     try {
-      return MapperContainer.globals.fromJson<T>(raw);
+      // readString stays inside the try: a value framed by a different adapter/primitive on this key can
+      // throw on the binary read too, and that must degrade to null like a JSON-decode failure rather than
+      // escape box.get(). fromJson<T?> (not <T>) mirrors write's toJson<T?>, so a legitimately persisted
+      // null round-trips to null without being logged as corruption.
+      raw = reader.readString();
+      return MapperContainer.globals.fromJson<T?>(raw);
     } catch (error, stackTrace) {
       // A persisted value that can no longer decode (a retired enum value,
       // corrupt JSON) must not crash the provider that reads it. Fall back to
@@ -38,10 +43,21 @@ void registerHiveAdapters() {
   // typeId is the on-disk identity of each adapter, so these literals must stay
   // stable: never reorder, reuse, or repurpose an existing id. Add new types at
   // the end with the next unused id.
-  Hive.registerAdapter(JsonAdapter<Size>(0));
-  Hive.registerAdapter(JsonAdapter<Offset>(1));
-  Hive.registerAdapter(JsonAdapter<ThemeMode>(2));
-  Hive.registerAdapter(JsonAdapter<CharaDetailRecordImageMode>(3));
-  Hive.registerAdapter(JsonAdapter<ClipboardPasteImageMode>(4));
-  Hive.registerAdapter(JsonAdapter<RowHeightMode>(5));
+  //
+  // Guard each registration so registerHiveAdapters is idempotent: Hive keeps
+  // adapters registered across Hive.close(), so a second StorageBox.ensureOpened
+  // in the same process (e.g. reopening with reset) would otherwise throw
+  // HiveError on the already-registered typeId before it could reset any box.
+  void register<T>(JsonAdapter<T> adapter) {
+    if (!Hive.isAdapterRegistered(adapter.typeId)) {
+      Hive.registerAdapter(adapter);
+    }
+  }
+
+  register(JsonAdapter<Size>(0));
+  register(JsonAdapter<Offset>(1));
+  register(JsonAdapter<ThemeMode>(2));
+  register(JsonAdapter<CharaDetailRecordImageMode>(3));
+  register(JsonAdapter<ClipboardPasteImageMode>(4));
+  register(JsonAdapter<RowHeightMode>(5));
 }

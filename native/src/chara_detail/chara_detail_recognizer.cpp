@@ -441,7 +441,15 @@ record::Character FamilyTreeRecognizer::makeCharacter(const Chara &chara, int ra
     character.character = chara.chara;
     character.card = chara.card;
     character.rank = rank;
-    character.record_type = static_cast<record::RecordType>(chara.record_type);
+    // chara.record_type is a raw model-head index. RecordType uses a strict JSON enum whose to_json
+    // throws on an out-of-range value, so an out-of-distribution icon prediction would otherwise abort
+    // serialization and discard the whole record. Clamp unknown indices to Standard instead.
+    if (chara.record_type < record::Standard || chara.record_type > record::FriendInheritance) {
+        log_warning("unexpected record_type index {}, falling back to Standard", chara.record_type);
+        character.record_type = record::Standard;
+    } else {
+        character.record_type = static_cast<record::RecordType>(chara.record_type);
+    }
     return character;
 }
 
@@ -461,6 +469,17 @@ CampaignRecordRecognizer::CampaignRecordRecognizer(
     , scenario_model(std::move(scenario_model))
     , trained_date_model(std::move(trained_date_model)) {
 }
+
+namespace {
+// Class indices emitted by the `campaign_field` model. These MUST match the model's label order: if the
+// model is retrained with a different ordering, update these constants (and the switch in recognize()) in
+// lockstep. A stale value silently mis-stores fans/scenario/date with no compile-time or runtime signal, so
+// keep the mapping here as the single, greppable source of truth.
+constexpr int kCampaignFieldUnknown = 0;
+constexpr int kCampaignFieldFans = 3;
+constexpr int kCampaignFieldScenario = 5;
+constexpr int kCampaignFieldTrainedDate = 7;
+}  // namespace
 
 void CampaignRecordRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, double &scan_top, PredictionHistory &history) const {
@@ -482,7 +501,7 @@ void CampaignRecordRecognizer::recognize(
     std::map<int, float> predicted_field_confidences;
     for (const auto &field_top : field_tops) {
         const auto [field_class, confidence] = predictFieldClass(frame, anchor, {0.0, field_top}, history);
-        if (field_class == 0) {
+        if (field_class == kCampaignFieldUnknown) {
             continue;  // Unknown (not yet supported) class.
         }
         float &best_confidence = predicted_field_confidences[field_class];
@@ -502,10 +521,15 @@ void CampaignRecordRecognizer::recognize(
         best_confidence = confidence;
 
         switch (field_class) {
-            case 3: record.fans = predictFans(frame, anchor, {0.0, field_top}, history); break;
-            case 5: record.scenario = predictScenario(frame, anchor, {0.0, field_top}, history); break;
-            case 7: record.trained_date = predictTrainedDate(frame, anchor, {0.0, field_top}, history); break;
-            default:  // Do nothing for the rest of the classes.
+            case kCampaignFieldFans: record.fans = predictFans(frame, anchor, {0.0, field_top}, history); break;
+            case kCampaignFieldScenario:
+                record.scenario = predictScenario(frame, anchor, {0.0, field_top}, history);
+                break;
+            case kCampaignFieldTrainedDate:
+                record.trained_date = predictTrainedDate(frame, anchor, {0.0, field_top}, history);
+                break;
+            default:  // Do nothing for the rest of the classes. If the model's label order changes, update
+                      // the kCampaignField* constants above rather than adding bare cases here.
                 break;
         }
     }
@@ -728,6 +752,10 @@ void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info
         on_factor_probe_completed->send(self_factors, record_type);
     } catch (const std::exception &e) {
         log_error("probe failed for record_id={}: {}", raw_info.record_id, e.what());
+    } catch (...) {
+        // WinRT/ONNX exceptions do not derive from std::exception; without this arm they would escape the
+        // worker thread and terminate the process (see EventRunnerThread::run for the same pattern).
+        log_error("probe failed for record_id={}: unknown exception", raw_info.record_id);
     }
 }
 
@@ -856,6 +884,12 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
     } catch (const std::exception &e) {
         log_error(
             "recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode, e.what());
+    } catch (...) {
+        // WinRT/ONNX exceptions do not derive from std::exception; contain them here too so one unreadable
+        // record cannot terminate the process.
+        log_error(
+            "recognize failed for record_id={} (isUpdateMode={}): unknown exception", raw_info.record_id,
+            isUpdateMode);
     }
 }
 

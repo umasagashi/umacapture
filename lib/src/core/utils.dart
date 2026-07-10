@@ -158,7 +158,7 @@ extension ListExtension<T> on List<T> {
   }
 
   T? getOrNull(int? index) {
-    if (index != null) {
+    if (index != null && index >= 0 && index < length) {
       return this[index];
     }
     return null;
@@ -204,10 +204,11 @@ extension DynamicTypeListExtension<T extends dynamic> on List<T> {
     T min = first;
     T max = first;
     for (final T value in this) {
-      if (value.compareTo(min) == -1) {
+      // Compare on sign only: the Comparable contract guarantees the sign, not a ±1 magnitude.
+      if (value.compareTo(min) < 0) {
         min = value;
       }
-      if (value.compareTo(max) == 1) {
+      if (value.compareTo(max) > 0) {
         max = value;
       }
     }

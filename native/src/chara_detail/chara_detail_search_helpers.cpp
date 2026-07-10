@@ -10,6 +10,11 @@ std::optional<double> searchVertical(
     const Point<double> &scan_start_left,
     const double max_length,
     const bool reversed) {
+    // A zero-dimension frame (e.g. a momentary 0-width capture) would make the clamps below
+    // std::clamp(x, 0, -1), which is undefined behavior when lo > hi. Bail before that.
+    if (frame.width() <= 0 || frame.height() <= 0) {
+        return std::nullopt;
+    }
     const auto &frame_anchor = frame.anchor();
     // The scan point can map at or past the frame edge (e.g. a scan_top near the bottom, or an X near the
     // right edge on a narrower-than-expected frame); clamp BOTH axes so the first isIn() does not index out

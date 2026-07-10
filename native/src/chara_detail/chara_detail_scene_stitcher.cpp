@@ -105,6 +105,18 @@ void CharaDetailSceneStitcher::stitch(const RecordInfo &info) const {
                 cleanup_error.what());
         }
         on_stitch_failed->send(info);
+    } catch (...) {
+        // WinRT exceptions do not derive from std::exception, so the arm above would miss them and skip the
+        // terminal notification -- leaving a half-written output and a UI waiting forever. Mirror the cleanup
+        // and failure send for any non-std::exception throw.
+        log_error("stitch failed for record_id={}: unknown exception", info.record_id);
+        try {
+            directory_hooks.rmdir(output_dir);
+        } catch (...) {
+            log_error("stitch failed to clean up partial output for record_id={}: unknown exception",
+                info.record_id);
+        }
+        on_stitch_failed->send(info);
     }
 }
 
@@ -131,6 +143,16 @@ void CharaDetailSceneStitcher::stitchTab(
 
     // Create canvas.
     const auto amount_of_stretch = scroll_area.size() - scroll_area_window_size;
+    // A stitched scroll area shorter than the window makes amount_of_stretch negative, so the canvas below
+    // would be a cv::Mat with negative height -- a raw cv::Exception deep inside OpenCV. Fail loud here so the
+    // outer catch degrades to on_stitch_failed with a legible cause instead of an opaque OpenCV message.
+    if (amount_of_stretch.height() < 0 || amount_of_stretch.width() < 0) {
+        throw std::runtime_error(
+            "stitched scroll area (" + std::to_string(scroll_area.width()) + "x"
+            + std::to_string(scroll_area.height()) + ") is smaller than the window ("
+            + std::to_string(scroll_area_window_size.width()) + "x"
+            + std::to_string(scroll_area_window_size.height()) + ") for tab " + input_dir.string());
+    }
     auto canvas =
         Frame::stretched(cv::Mat{(base_image.size() + amount_of_stretch).toCVSize(), CV_8UC3}, base_image.size());
 

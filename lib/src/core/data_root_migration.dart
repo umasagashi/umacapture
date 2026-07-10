@@ -250,9 +250,13 @@ class DataRootMigrationController {
         'Start-Process -FilePath ${_psQuote(exePath)} -WorkingDirectory ${_psQuote(exeDir)}\n'
         'Remove-Item -LiteralPath \$PSCommandPath -ErrorAction SilentlyContinue\n';
     try {
-      final relayFile = File("${Directory.systemTemp.path}\\umacapture_restart_$pid.ps1");
-      relayFile.writeAsStringSync(relayScript);
-      final relayPath = relayFile.path.replaceAll('\\', '/');
+      // Build the temp path with package:path so a systemTemp path using forward slashes or a trailing
+      // separator cannot produce a malformed path; pass the native path straight to _psQuote (which quotes
+      // spaces, apostrophes, and backslashes) instead of hand-swapping separators. flush so the script is on
+      // disk before quit() relaunches through it.
+      final relayFile = File(p.join(Directory.systemTemp.path, 'umacapture_restart_$pid.ps1'));
+      relayFile.writeAsStringSync(relayScript, flush: true);
+      final relayPath = relayFile.path;
       await Process.run("powershell", [
         "-NoProfile",
         "-NonInteractive",

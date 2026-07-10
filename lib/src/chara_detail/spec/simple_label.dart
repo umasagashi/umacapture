@@ -139,7 +139,9 @@ class SimpleLabelColumnSpec extends ColumnSpec<int> with SimpleLabelColumnSpecMa
 
   @override
   TrinaCell plutoCell(RefBase ref, int value) {
-    final label = ref.read(labelMapProvider)[labelKey]![value];
+    // Guard against a module label list that lags the recognized value: a raw index out of range would
+    // throw out of plutoCell into _buildGrid and blank every column. Degrade to one raw-index cell.
+    final label = ref.read(labelMapProvider)[labelKey]!.getOrNull(value) ?? value.toString();
     return TrinaCell(value: label)..setUserData(SimpleLabelCellData(label));
   }
 

@@ -94,6 +94,7 @@ private:
     // upper_gap since the thumb top and track top share the same cap geometry).
     struct TrackGeometry {
         double upper_gap;      // thumb_top - track_top, clamped >= 0 (overscroll pins the thumb to the top)
+        double lower_gap;      // track_bottom - thumb_bottom, clamped >= 0 (~0 when the thumb bottom is pinned)
         double track_span;     // track_bottom - track_top (the placeholder length)
         double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
     };
@@ -109,6 +110,11 @@ private:
     // (~10x more stable than a hard threshold; tolerates layout/resolution drift). nullopt when the thumb is
     // not found or the cap contrast is too low, so trackGeometry() falls back to the config column.
     [[nodiscard]] std::optional<double> trackCenterX(const Frame &frame) const;
+
+    // True when the thumb bottom is pinned to the track bottom (bottom rest / overscroll): the measured thumb
+    // length is corrupted (top slides down, bottom pinned), so the offset guess must divide by the reference
+    // frame's logical length instead. See kThumbBottomFlushPx.
+    [[nodiscard]] bool isBottomClipped(const Frame &frame, const TrackGeometry &geometry) const;
 
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
@@ -242,6 +248,24 @@ private:
     // inheritance history follows the list. Both terminator paths (gray-sequence completion and the green
     // end-bar) feed their own last-factor-bottom through this one function so they crop to the same line.
     [[nodiscard]] double factorEndCropY(double run_start_scaled, double scaled_top, double terminator_scaled_y) const;
+
+    // Shared core for both factor-end terminator paths: trim the saved fragment stack so its bottom lands a
+    // fixed margin below the last factor. Scans `frame` upward from `anchor_pixels` (a frame-y row that sits in
+    // the page-background gap below the last factor) to the last factor's bottom, computes factorEndCropY, and
+    // peels/crops the saved fragments below that crop line. `stack_bottom_pixels` is the frame-y the current
+    // stack bottom corresponds to (the scroll frontier). `ceiling_pixels` lower-bounds the crop line and is the
+    // not-found fallback (green: the bar top; gray: the gray run's completion row -> a safe non-positive trim).
+    // `skip_leading_bar` first skips a leading run of non-background above the anchor (the green bar + its
+    // anti-aliased edge); false when the anchor already sits inside the background gap (gray). `search_span`
+    // bounds the upward walk as a fraction of the frame width. Both terminator paths route through here so the
+    // bottom margin below the last factor is identical regardless of which one ends the tab.
+    void trimStackToLastFactor(
+        const Frame &frame,
+        int anchor_pixels,
+        int stack_bottom_pixels,
+        int ceiling_pixels,
+        bool skip_leading_bar,
+        double search_span);
 
     const std::filesystem::path image_dir;
     const std::vector<scraper_config::ScanParameter> scan_parameters;

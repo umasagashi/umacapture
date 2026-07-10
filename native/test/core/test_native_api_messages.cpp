@@ -75,5 +75,16 @@ TEST_CASE("factor probe with no factors emits an empty array") {
     CHECK(parsed.at("record_type") == 0);
 }
 
+TEST_CASE("factor probe sends record_type as its wire ordinal (contract with Dart RecordType.values)") {
+    // The Dart side decodes record_type positionally (RecordType.values[int]). Lock each enumerator to the
+    // exact int it must cross the wire as, so a reorder/renumber on the native side fails here (and the
+    // matching Dart test pins the Dart-side order). Keep this in sync with the enum in chara_detail_record.h.
+    using chara_detail::record::RecordType;
+    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::Standard))).at("record_type") == 0);
+    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::InheritanceOnly))).at("record_type") == 1);
+    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::FriendStandard))).at("record_type") == 2);
+    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::FriendInheritance))).at("record_type") == 3);
+}
+
 }  // namespace
 }  // namespace uma::app::messages

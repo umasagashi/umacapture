@@ -36,6 +36,24 @@ constexpr double kFactorEndBottomMargin = 0.0217;
 // instead of cropping into the previous row.
 constexpr double kFactorEndGreenSearchSpan = 0.08;
 
+// Upward-scan bound (fraction of frame width) for the GRAY-completion trim. Unlike the green path -- whose
+// bar sits a FIXED ~0.05 of the width below the last factor, so 0.08 suffices -- the gray path scans from the
+// scroll frontier up through the accumulated end-of-list overscroll background to the last factor, a distance
+// measured at up to ~0.145 of the width on 736 px footage. 0.16 covers that with headroom. The walk stops at
+// the first non-background pixel (the last factor), so this is only a runaway floor: an overshoot (an empty
+// last-row column at the scan x) falls through to the not-found fallback and yields a safe no-op trim.
+constexpr double kFactorEndGraySearchSpan = 0.16;
+
+// Thumb-bottom "clip" tolerance in pixels: at/below the true bottom the game pins the thumb bottom to the
+// track bottom (lower_gap ~= 0-1 px) and, if the user keeps dragging (overscroll), slides the thumb TOP down
+// so the MEASURED thumb length collapses while the logical length is unchanged. When lower_gap is within this
+// tolerance the frame is treated as clipped and the offset guess uses the reference frame's (unclipped)
+// logical thumb length instead of the shrunken measured one -- otherwise the shrinking divisor blows the
+// guess up (hundreds of px) and the image matcher's search window misses the true small offset. Expressed in
+// px via the anchor (mirroring factor_header.flush_tolerance_px = 1.5); a genuine mid-scroll history rescale
+// keeps content below the thumb so lower_gap stays well above this and the normal path is used.
+constexpr double kThumbBottomFlushPx = 2.0;
+
 }  // namespace
 
 ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
@@ -88,7 +106,12 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // Clamp on overscroll: the thumb shortens and its top pins to the track top, so a tiny negative gap from
     // sub-pixel noise should read as "at the top" (0), not a small backward offset.
     const double upper_gap = std::max(0., thumb_top - track_top);
-    return TrackGeometry{upper_gap, track_span, thumb_logical};
+    const double lower_gap = std::max(0., track_bottom - thumb_bottom);
+    return TrackGeometry{upper_gap, lower_gap, track_span, thumb_logical};
+}
+
+bool ScrollBarOffsetEstimator::isBottomClipped(const Frame &frame, const TrackGeometry &geometry) const {
+    return frame.anchor().scaleToPixels(geometry.lower_gap) <= kThumbBottomFlushPx;
 }
 
 std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame) const {
@@ -223,7 +246,14 @@ std::optional<double> ScrollBarOffsetEstimator::estimate(const Frame &from, cons
     // difference, this cancels each frame's constant measurement bias and stays low-noise. When the game
     // re-scales the thumb mid-scroll the two lengths disagree and this guess drifts; the image match then
     // rejects it and estimateAcrossRescale() (each frame's OWN length) recovers -- see updateScrolling().
-    const double thumb_logical = (from_geometry->thumb_logical + to_geometry->thumb_logical) / 2.0;
+    // On bottom overscroll the measured thumb collapses (top slides down, bottom pinned) while the logical
+    // length is constant (isBottomClipped(); see kThumbBottomFlushPx). On the clip, divide by the reference
+    // frame's logical length -- `from` is the last successful latch, frozen at the resting bottom (overscroll
+    // frames never latch), so its thumb length is the true unclipped one. Off the clip, keep the shared average.
+    const bool clipped = isBottomClipped(to, to_geometry.value());
+    const double thumb_logical = clipped
+        ? from_geometry->thumb_logical
+        : (from_geometry->thumb_logical + to_geometry->thumb_logical) / 2.0;
     if (thumb_logical <= 0.0) {
         return std::nullopt;
     }
@@ -242,9 +272,17 @@ std::optional<double> ScrollBarOffsetEstimator::scrollOffsetGuess(const Frame &f
     // thumb-length change. abs = V * upper_gap / thumb_logical, with V the true viewport (config, width-
     // normalized -> px via scaleToPixels) rather than the crop height, and thumb_logical the cap-corrected
     // thumb length. The fixed track top cancels in the delta below, but V and the -2c correction do not.
-    const auto absolute_offset = [this](const Frame &frame, const TrackGeometry &geometry) -> double {
+    // Same clip guard as estimate(): when the thumb bottom is pinned (overscroll, or a history rescale that
+    // lands at the bottom), the `to` frame's measured length is corrupted, so divide BOTH absolute offsets by
+    // the reference (`from`) logical length. That cancels the constant bias exactly and keeps the delta sane;
+    // off the clip each frame keeps its own length so a genuine mid-scroll rescale is untouched.
+    const bool clipped = isBottomClipped(to, to_geometry.value());
+    const double reference_thumb = from_geometry->thumb_logical;
+    const auto absolute_offset =
+        [this, clipped, reference_thumb](const Frame &frame, const TrackGeometry &geometry) -> double {
         const double viewport_px = frame.anchor().scaleToPixels(viewport);
-        return viewport_px * geometry.upper_gap / geometry.thumb_logical;
+        const double thumb_logical = clipped ? reference_thumb : geometry.thumb_logical;
+        return viewport_px * geometry.upper_gap / thumb_logical;
     };
     return absolute_offset(to, to_geometry.value()) - absolute_offset(from, from_geometry.value());
 }
@@ -492,14 +530,37 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
         if (++current_scan != scan_parameters.end()) {
             continue;
         }
-        // Gray-sequence completion (reached only with enough inheritance history to accumulate the gray
-        // tail): the factor box crops a fixed margin below the last factor (see factorEndCropY) instead of
-        // at the scan point, keeping the bottom margin constant across long histories. Short histories
-        // terminate via detectGreenTerminator() instead, which does not pass through here.
-        const double crop_y = end_green ? factorEndCropY(current_run_start_scaled, scaled_top_left.y(), scaled_y) : scaled_y;
-        if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
-            saveIncremental(frame.view(rect));
+        // Scan-sequence completion. Non-factor boxes (no end_green) crop the terminating strip at the scan
+        // point exactly as before.
+        if (!end_green) {
+            if (const Rect<double> rect = {scaled_top_left, Point<double>{1., scaled_y}}; !rect.empty()) {
+                saveIncremental(frame.view(rect));
+            }
+            return;
         }
+        // Factor box (reached only with enough inheritance history to accumulate the gray tail): keep a fixed
+        // margin below the last factor (see factorEndCropY) so the bottom margin is constant across long
+        // histories. Short histories terminate via detectGreenTerminator() instead, which does not pass here.
+        //
+        // The gray run's start discriminates two cases. If it began below the strip top (current_run_start >
+        // frontier), the last factor sits inside THIS frame's new content and the stack is clean up to the
+        // frontier (a phantom cannot precede the first reveal of the last factor): crop and save the strip, as
+        // before. If it began at the strip top, the whole new strip is trailing background and the real last
+        // factor is already in the saved stack above the frontier -- possibly with an overscroll phantom or
+        // ghost strip between (latched by earlier frames whose gray run had not yet completed). Do NOT save the
+        // phantom; scan this settled frame up from the frontier to the real last factor and trim the fragment
+        // stack to the same crop line the green terminator uses, so the tail below the last factor is a fixed
+        // margin regardless of overscroll. The ghost lives only in the saved stack, so scanning the live frame
+        // reaches the real factor and the ghost is removed positionally (it sits below the crop line).
+        if (current_run_start_scaled > scaled_top_left.y()) {
+            const double crop_y = factorEndCropY(current_run_start_scaled, scaled_top_left.y(), scaled_y);
+            if (const Rect<double> rect = {scaled_top_left, Point<double>{1., crop_y}}; !rect.empty()) {
+                saveIncremental(frame.view(rect));
+            }
+            return;
+        }
+        trimStackToLastFactor(
+            frame, top_left.y(), top_left.y(), y_pixels, /*skip_leading_bar=*/false, kFactorEndGraySearchSpan);
         return;
     }
     saveIncremental(frame.view({scaled_top_left, anchor.mapFromFrame(frame.rect().bottomRight())}));
@@ -556,24 +617,42 @@ void PageScrapingBox::trimScrollAreaToFactorEnd(const Frame &frame, int offset_p
     if (!end_green_fired || green_terminator_top_pixels < 0) {
         return;
     }
+    // The saved fragment stack ends at the scroll frontier (height - offset_pixels); the terminating frame is
+    // not saved on the green path. Scan up from the green bar (skipping the bar + its anti-aliased edge) and
+    // clamp/fall back to the bar top so it stays out of the factor image.
+    trimStackToLastFactor(
+        frame,
+        /*anchor_pixels=*/green_terminator_top_pixels,
+        /*stack_bottom_pixels=*/frame.height() - offset_pixels,
+        /*ceiling_pixels=*/green_terminator_top_pixels,
+        /*skip_leading_bar=*/true,
+        /*search_span=*/kFactorEndGreenSearchSpan);
+}
+
+void PageScrapingBox::trimStackToLastFactor(
+    const Frame &frame,
+    int anchor_pixels,
+    int stack_bottom_pixels,
+    int ceiling_pixels,
+    bool skip_leading_bar,
+    double search_span) {
     const auto &anchor = frame.anchor();
     const auto &background = scan_parameters.back();
 
-    // Locate the last factor's bottom (the same point the gray-completion path records as
-    // current_run_start_scaled: the top of the page-background run just below the last factor), then crop to
-    // it. The green bar sits a fixed distance below the last factor: its own anti-aliased top edge (neither
-    // cleanly green nor cleanly background), then a constant background gap. Scan up a bounded span from the
-    // bar -- first skipping the non-background edge, then walking the background gap -- to the first
-    // non-background pixel, the last factor's bottom edge. The span is fixed (see kFactorEndGreenSearchSpan)
-    // so the bound is small; it also stops a runaway walk if the factor column is empty at the last row. If
-    // the factor is not reached within the span, keep the bar top as the crop line rather than over-trimming.
-    const int search_floor =
-        std::max(0, green_terminator_top_pixels - anchor.expand({0., kFactorEndGreenSearchSpan}).y());
-    int y = green_terminator_top_pixels - 1;
-    while (y >= search_floor && !frame.isIn(background.color_range, {background.x, anchor.scaleFromPixels(y)})) {
-        y--;  // skip the green bar and its anti-aliased edge
+    // Locate the last factor's bottom (the top of the page-background run just below the last factor -- the same
+    // point the gray-completion path records as current_run_start_scaled). Scan up a bounded span from the
+    // anchor to the first non-background pixel: the last factor's bottom edge. When skip_leading_bar is set,
+    // first skip the run of non-background above the anchor (the green bar and its anti-aliased edge). The span
+    // bounds the walk and also stops a runaway if the factor column is empty at the last row; if the factor is
+    // not reached within it, fall back to the ceiling as the crop line rather than over-trimming.
+    const int search_floor = std::max(0, anchor_pixels - anchor.expand({0., search_span}).y());
+    int y = anchor_pixels - 1;
+    if (skip_leading_bar) {
+        while (y >= search_floor && !frame.isIn(background.color_range, {background.x, anchor.scaleFromPixels(y)})) {
+            y--;  // skip the green bar and its anti-aliased edge
+        }
     }
-    int run_start_pixels = green_terminator_top_pixels;
+    int run_start_pixels = ceiling_pixels;
     bool found_factor = false;
     for (; y >= search_floor; y--) {  // walk up the background gap to the last factor
         if (!frame.isIn(background.color_range, {background.x, anchor.scaleFromPixels(y)})) {
@@ -583,21 +662,20 @@ void PageScrapingBox::trimScrollAreaToFactorEnd(const Frame &frame, int offset_p
         run_start_pixels = y;
     }
     if (!found_factor) {
-        run_start_pixels = green_terminator_top_pixels;
+        run_start_pixels = ceiling_pixels;
     }
 
-    // Same crop line as the gray-completion path: a fixed margin below the last factor, clamped so it never
-    // dips past the green bar (which must stay out of the factor image).
+    // A fixed margin below the last factor, clamped so it never dips past the ceiling (the green bar on the
+    // green path; the gray run's completion row on the gray path).
     const double crop_scaled = factorEndCropY(
-        anchor.scaleFromPixels(run_start_pixels), anchor.scaleFromPixels(0),
-        anchor.scaleFromPixels(green_terminator_top_pixels));
+        anchor.scaleFromPixels(run_start_pixels), anchor.scaleFromPixels(0), anchor.scaleFromPixels(ceiling_pixels));
     const int crop_pixels = anchor.expand({0., crop_scaled}).y();
 
-    // The saved fragment stack ends at the scroll frontier (height - offset_pixels); anything below the crop
-    // line is trailing background to remove. Resolution is constant here, so frontier - crop is exactly the
-    // number of rows to drop from the bottom of the stack. Peel whole fragments, then crop the one that
+    // stack_bottom_pixels is the frame-y the current stack bottom corresponds to; anything below the crop line
+    // is trailing background/phantom to remove. Resolution is constant here, so stack_bottom - crop is exactly
+    // the number of rows to drop from the bottom of the stack. Peel whole fragments, then crop the one that
     // straddles the line; never delete the sole remaining fragment (scrollAreaReady must stay satisfied).
-    int trim = (frame.height() - offset_pixels) - crop_pixels;
+    int trim = stack_bottom_pixels - crop_pixels;
     while (trim > 0 && image_count > 0) {
         const auto path = image_dir / path_config.scroll_area.withNumber(image_count - 1, 5).filename();
         const cv::Mat last = Frame::decodeBgr(path);

@@ -10,6 +10,13 @@ part 'parser.mapper.dart';
 /// detect it and render an empty ([absentValueLabel]) cell instead of a spurious
 /// minimum. Real evaluation values (and derived rank indices) are non-negative,
 /// so -1 never collides with a genuine value.
+///
+/// Note the asymmetry: display (`plutoCell`) and the range-selector UI strip this
+/// sentinel, but filter evaluation deliberately does not. Range predicates treat
+/// -1 as a genuine below-minimum value (see `IsInRangeIntegerPredicate.apply`), so
+/// a "less than X" filter intentionally keeps value-less records rather than
+/// special-casing them out. This "no value == the minimum" rule keeps the range
+/// predicate simple; it is by design, not an oversight.
 const int evaluationValueAbsent = -1;
 
 @MappableClass(discriminatorKey: 'type')

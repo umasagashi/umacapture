@@ -15,6 +15,14 @@ public class PlatformChannel {
 
     private Map<String, Consumer<String>> methodMap;
 
+    // NOTE: This Android channel is a leftover from the early proof-of-concept phase and is NOT maintained.
+    // Windows is the only supported platform today. It is kept (rather than deleted) so a future Android
+    // port has a starting point. Two known issues to fix before shipping Android:
+    //   1. MainActivity only registers 3 of the 7 methods the Dart side can call (updateRecord,
+    //      takeScreenshot, copyToClipboardFromFile, setPlatformConfig are missing).
+    //   2. The handler below is missing a `return;` after notImplemented(): an unknown method falls through
+    //      to methodMap.get(...) == null, so requireNonNull throws and the call is reported as an NPE-derived
+    //      error (and replied twice) instead of a clean notImplemented. Add `return;` when reviving this.
     PlatformChannel(BinaryMessenger messenger) {
         channel = new MethodChannel(messenger, CHANNEL);
         channel.setMethodCallHandler(

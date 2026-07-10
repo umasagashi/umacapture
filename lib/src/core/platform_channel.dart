@@ -38,6 +38,10 @@ class PlatformChannel {
     return channel.invokeMethod('updateRecord', id);
   }
 
+  Future<void> finishUpdate() {
+    return channel.invokeMethod('finishUpdate');
+  }
+
   Future<void> copyToClipboardFromFile(FilePath path) {
     return channel.invokeMethod('copyToClipboardFromFile', path.path);
   }

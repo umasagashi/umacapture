@@ -319,9 +319,21 @@ class _PatternSelectorState extends ConsumerState<_PatternSelector> {
   void initState() {
     super.initState();
     pattern = _clonedSpecProvider.read(ref, widget.specId).predicate.pattern?.pattern ?? "";
+    // Gate the dialog's OK button on the pattern compiling: an invalid regex must
+    // never reach `_commitPattern`. Seed the initial state from the existing value.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _setSaveEnabled(_isValidPattern(pattern)));
     _commitPattern = () {
+      // Guard `RegExp(pattern)`: the OK button is gated on a valid pattern, but the
+      // Reset button flushes this listener unconditionally, so an invalid pattern
+      // can still arrive here. On failure, leave the predicate unchanged.
+      final RegExp compiled;
+      try {
+        compiled = RegExp(pattern);
+      } on FormatException {
+        return;
+      }
       _clonedSpecProvider.update(ref, widget.specId, (spec) {
-        return spec.copyWith(predicate: spec.predicate.copyWith(pattern: RegExp(pattern)));
+        return spec.copyWith(predicate: spec.predicate.copyWith(pattern: compiled));
       });
     };
     widget.onDecided.addListener(_commitPattern);
@@ -331,6 +343,22 @@ class _PatternSelectorState extends ConsumerState<_PatternSelector> {
   void dispose() {
     widget.onDecided.removeListener(_commitPattern);
     super.dispose();
+  }
+
+  bool _isValidPattern(String value) {
+    // Empty is valid: `RegExp("")` matches everything, mirroring the null-pattern
+    // "Any" case in `RegExpPredicate.apply`.
+    try {
+      RegExp(value);
+      return true;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  void _setSaveEnabled(bool value) {
+    if (!mounted) return;
+    ref.read(columnSpecSaveEnabledProvider(widget.specId).notifier).set(value);
   }
 
   @override
@@ -349,6 +377,7 @@ class _PatternSelectorState extends ConsumerState<_PatternSelector> {
             hintText: ".*",
             onChanged: (value) {
               pattern = value;
+              _setSaveEnabled(_isValidPattern(value));
             },
           ),
         ),

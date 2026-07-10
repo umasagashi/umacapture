@@ -143,6 +143,31 @@ TEST_CASE("FamilyTreeRecognizer maps predicted icon/rank into the parent and set
     CHECK(record.family.parent1.rental.value() == true);
 }
 
+TEST_CASE("FamilyTreeRecognizer clamps an out-of-range record_type to Standard") {
+    // A record_type index outside {0..3} (e.g. an out-of-distribution icon) must not be cast into the strict
+    // RecordType enum verbatim: to_json would later throw and discard the whole record. It falls back to
+    // Standard instead.
+    const auto config = familyConfig();
+    const auto common = commonConfig();
+    FamilyTreeRecognizer recognizer{
+        config,
+        common,
+        constantPredictor<Chara>("character", Chara{1, 2, 3, false, 4}),  // record_type=4 is out of range
+        constantPredictor<int>("character_rank", 0),
+    };
+
+    const Frame frame = frameWithTree(/*strip_height_px=*/20);
+    record::CharaDetailRecord record{};
+    PredictionHistory history;
+    double scan_top = 0.0;
+
+    recognizer.recognize(frame, record, scan_top, history);
+
+    const auto &self = record.family.parent1.self;
+    REQUIRE(self.record_type.has_value());
+    CHECK(self.record_type.value() == record::Standard);
+}
+
 TEST_CASE("FamilyTreeRecognizer selects the legacy icon layout for a tall tree") {
     // Tall blue strip -> frame_height > legacy_frame_height, so the legacy self-icon rect (over the black
     // marker) is read and the marker-sensing predictor reports icon=1. A short strip reads the current rect

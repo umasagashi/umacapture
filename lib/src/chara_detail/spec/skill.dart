@@ -270,7 +270,9 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     final predicate = _resolved(ref);
     final foundSkills = _extract(predicate, value);
-    final skillNames = foundSkills.map((e) => labels[e.id]).toList();
+    // A skill id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
+    // blank every column; degrade to the raw id for that cell instead.
+    final skillNames = foundSkills.map((e) => labels.getOrNull(e.id) ?? e.id.toString()).toList();
     if (predicate.notation.max == 0) {
       return TrinaCell(value: foundSkills.length.toString().padLeft(3, "0"))
         ..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
@@ -317,7 +319,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     }
 
     final labels = ref.read(labelMapProvider)[labelKey]!;
-    final skills = predicate.query.map((e) => labels[e]).toList();
+    final skills = predicate.query.map((e) => labels.getOrNull(e) ?? e.toString()).toList();
     const limit = 30;
     final ellipsis = skills.length > limit ? "$sep- ${skills.length - limit} more" : "";
     return "${skills.partial(0, limit).join(sep)}$ellipsis$modeText";

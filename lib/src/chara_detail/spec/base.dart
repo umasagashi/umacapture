@@ -733,10 +733,6 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     _commit([..._specs, spec]);
   }
 
-  void addOrUpdate(ColumnSpec spec) {
-    _commit(contains(spec.id) ? [..._specs] : [..._specs, spec]);
-  }
-
   void remove(String id) {
     assert(contains(id));
     removeIfExists(id);

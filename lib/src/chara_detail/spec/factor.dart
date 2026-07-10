@@ -401,7 +401,11 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
-    final notations = factors.map((q) => "${labels[q.id]}(${q.notation(predicate.notation.mode)})").toList();
+    // A factor id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
+    // blank every column; degrade to the raw id for that cell instead.
+    final notations = factors
+        .map((q) => "${labels.getOrNull(q.id) ?? q.id}(${q.notation(predicate.notation.mode)})")
+        .toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return TrinaCell(value: desc)..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
   }
@@ -454,7 +458,7 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
-    final factors = predicate.query.map((e) => labels[e]).toList();
+    final factors = predicate.query.map((e) => labels.getOrNull(e) ?? e.toString()).toList();
     const limit = 30;
     final ellipsis = factors.length > limit ? "$sep- ${factors.length - limit} more" : "";
     return "${factors.partial(0, limit).join(sep)}$ellipsis$modeText";

@@ -37,16 +37,32 @@ class WebhookRunner implements ActionRunner {
       action.bodyTemplate,
       payload,
       // A rawKeys value (record_json) is inserted unescaped so a whole JSON
-      // document can embed as a JSON value. Guard it: only insert raw when it is
-      // actually well-formed JSON, otherwise fall back to escaping it so a
-      // corrupt/hand-edited record.json can never produce an invalid request body.
+      // document can embed as a JSON value (e.g. {"record": {record_json}}).
+      // Guard it: insert raw only when it is actually well-formed JSON. An
+      // empty/absent value (record.json not yet flushed -- see PayloadEnricher's
+      // disk race) would otherwise leave `{"record": }`, so emit a valid `null`
+      // literal instead. A present-but-malformed value falls back to escaping so
+      // a corrupt/hand-edited record.json can never produce an invalid body.
       transform: escaper == null
           ? null
-          : (key, value) => (spec.rawKeys.contains(key) && _isValidJson(value)) ? value : escaper(value),
+          : (key, value) {
+              if (spec.rawKeys.contains(key)) {
+                if (value.isEmpty) return "null";
+                return _isValidJson(value) ? value : escaper(value);
+              }
+              return escaper(value);
+            },
     );
     final options = Options(
       method: action.method,
       contentType: spec.header,
+      // Do not follow redirects (Dio defaults to following up to 5). This is a
+      // fire-and-forget notification: a 3xx becomes a non-2xx failure result
+      // below. Auto-following would re-send the request -- including the body,
+      // which may embed record data, and a secret carried in the URL path -- to
+      // a redirect target, so an open redirect or a compromised endpoint could
+      // exfiltrate them. Keeping redirects off matches the URL redaction above.
+      followRedirects: false,
       // Treat any HTTP status as a completed response so non-2xx becomes a
       // failure result rather than a thrown DioException.
       validateStatus: (_) => true,

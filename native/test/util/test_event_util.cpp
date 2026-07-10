@@ -115,6 +115,37 @@ TEST_CASE("a Block queued connection back-pressures the producer without droppin
     CHECK(received == std::vector<int>{0, 1, 2, 3, 4});
 }
 
+TEST_CASE("aborting a Block queued connection releases a producer blocked on a full queue") {
+    // Regression for the teardown deadlock: a Block send parks in waitUntilReady until the consumer drains.
+    // If the consumer has already stopped (as during join), nothing frees a full queue and the producer spins
+    // forever. abort() -- which SingleThreadMultiEventRunner::join() now calls on each of its connections
+    // before joining the worker -- must break that wait so join cannot hang. The over-limit send is dropped
+    // (we are shutting down), not enqueued onto a stopped consumer.
+    const auto connection = makeQueuedConnection<int>(Block);
+    connection->send(0);  // Fill to the depth limit (3) with no consumer draining, so the next send blocks.
+    connection->send(1);
+    connection->send(2);
+
+    std::atomic<bool> producer_returned{false};
+    std::thread producer([&] {
+        connection->send(3);  // Queue full: Block parks here in waitUntilReady.
+        producer_returned = true;
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    CHECK_FALSE(producer_returned.load());  // Still parked: nothing is draining the queue.
+
+    connection->abort();  // The teardown signal that join() issues; it must wake the parked producer.
+    producer.join();      // Must not hang.
+    CHECK(producer_returned.load());
+
+    // The dropped over-limit send never reached the queue: only the first three survive.
+    std::vector<int> received;
+    connection->listen([&](int value) { received.push_back(value); });
+    drainQueued(connection);
+    CHECK(received == std::vector<int>{0, 1, 2});
+}
+
 // Blocks (bounded) until `processed` reaches `count` items, holding `mutex` for each read.
 bool waitForCount(std::mutex &mutex, const std::vector<int> &processed, size_t count) {
     for (int i = 0; i < 200; i++) {
@@ -160,6 +191,54 @@ TEST_CASE("the event runner survives a throwing listener and keeps processing la
     CHECK(reached);
     std::lock_guard<std::mutex> lock(mutex);
     CHECK(processed == std::vector<int>{1, 2});
+}
+
+// A stand-in runner that records its start()/join() calls and can throw from start() to simulate a
+// thread-creation failure (exhaustion/bad_alloc) partway through the controller's start loop -- a case
+// real runners can't be coerced into deterministically.
+class FakeRunner : public event_util_impl::EventRunnerInterface {
+public:
+    explicit FakeRunner(bool throw_on_start) : throw_on_start(throw_on_start) {}
+
+    void start() override {
+        start_called = true;
+        if (throw_on_start) {
+            throw std::runtime_error("simulated thread creation failure");
+        }
+        running = true;
+    }
+
+    void join() override {
+        join_called = true;
+        running = false;
+    }
+
+    [[nodiscard]] bool isRunning() const override { return running; }
+
+    const bool throw_on_start;
+    bool start_called = false;
+    bool join_called = false;
+    bool running = false;
+};
+
+TEST_CASE("controller start() rolls back already-started runners when a later runner fails") {
+    // Regression for the partial-start cleanup gap: if one runner's start() throws (thread exhaustion),
+    // the controller must join the runners it already started before propagating, so no worker leaks and
+    // is_running stays false (its own destructor asserts that, and teardown's join() relies on it).
+    const auto controller = makeRunnerController();
+    const auto good = std::make_shared<FakeRunner>(false);
+    const auto bad = std::make_shared<FakeRunner>(true);
+    controller->add(good);
+    controller->add(bad);
+
+    CHECK_THROWS_AS(controller->start(), std::runtime_error);
+
+    CHECK_FALSE(controller->isRunning());  // A failed start never leaves the controller "running".
+    CHECK(good->start_called);             // The earlier runner did start...
+    CHECK(good->join_called);              // ...and was rolled back (joined) rather than left dangling.
+    CHECK_FALSE(good->running);
+    CHECK(bad->start_called);              // The failing runner was reached but never marked running.
+    CHECK_FALSE(bad->running);
 }
 
 }  // namespace

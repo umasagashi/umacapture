@@ -125,7 +125,8 @@
                 },
                 "report_screen": {
                     "label": "キャプチャエラー報告",
-                    "tooltip": "現在のゲーム画面をキャプチャエラーとして報告します"
+                    "tooltip": "現在のゲーム画面をキャプチャエラーとして報告します",
+                    "disabled_tooltip": "キャプチャ中は利用できません"
                 }
             },
             "regenerate": {
@@ -1539,6 +1540,7 @@
         "record_export": "ファイルを保存しました。",
         "record_export_failure": "ファイルの保存に失敗しました。",
         "record_unavailable": "対象のレコードが見つかりませんでした。",
+        "config_failure": "設定の適用に失敗しました。キャプチャ機能が利用できない可能性があります。",
         "module_version_check": {
             "no_version_available": "認識モジュールの取得に失敗しました。キャプチャ機能は利用できません。",
             "latest_version_not_available": "認識モジュールの取得に失敗しました。既存のモジュールが利用されます。",

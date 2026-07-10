@@ -119,6 +119,15 @@ public:
         notify_callback = method;
     }
 
+    // Restore notify_callback to its default (unassigned) state. Call this when the object that installed the
+    // callback is destroyed (e.g. the Windows NativeController, whose lambda captures `this`/`channel`): this
+    // singleton has process lifetime and outlives that owner, so without a reset a late notify() would
+    // dereference freed memory. Routes through setNotifyCallback, so it is a no-op while the loop is running
+    // (by which point the owner is being torn down after joinEventLoop() anyway).
+    void resetNotifyCallback() {
+        setNotifyCallback([](const auto &) { log_error("notify_callback not assigned"); });
+    }
+
     void notifyError(const std::string &message) const { notify(messages::error(message)); }
 
     void notifyCaptureStarted() { notify(messages::captureStarted()); }
