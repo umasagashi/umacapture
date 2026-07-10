@@ -249,6 +249,24 @@ private:
     // end-bar) feed their own last-factor-bottom through this one function so they crop to the same line.
     [[nodiscard]] double factorEndCropY(double run_start_scaled, double scaled_top, double terminator_scaled_y) const;
 
+    // Shared core for both factor-end terminator paths: trim the saved fragment stack so its bottom lands a
+    // fixed margin below the last factor. Scans `frame` upward from `anchor_pixels` (a frame-y row that sits in
+    // the page-background gap below the last factor) to the last factor's bottom, computes factorEndCropY, and
+    // peels/crops the saved fragments below that crop line. `stack_bottom_pixels` is the frame-y the current
+    // stack bottom corresponds to (the scroll frontier). `ceiling_pixels` lower-bounds the crop line and is the
+    // not-found fallback (green: the bar top; gray: the gray run's completion row -> a safe non-positive trim).
+    // `skip_leading_bar` first skips a leading run of non-background above the anchor (the green bar + its
+    // anti-aliased edge); false when the anchor already sits inside the background gap (gray). `search_span`
+    // bounds the upward walk as a fraction of the frame width. Both terminator paths route through here so the
+    // bottom margin below the last factor is identical regardless of which one ends the tab.
+    void trimStackToLastFactor(
+        const Frame &frame,
+        int anchor_pixels,
+        int stack_bottom_pixels,
+        int ceiling_pixels,
+        bool skip_leading_bar,
+        double search_span);
+
     const std::filesystem::path image_dir;
     const std::vector<scraper_config::ScanParameter> scan_parameters;
 

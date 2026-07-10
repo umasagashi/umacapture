@@ -261,5 +261,96 @@ TEST_CASE("trimScrollAreaToFactorEnd peels whole fragments when the trim exceeds
     CHECK(frag0.rows == 96);
 }
 
+// --- gray-completion trim: the factor gray-sequence path shares the same tail-trim ---------------------
+//
+// The gray-completion path (addScrollArea, scan sequence consumed) terminates a LONG-inheritance factor tab
+// whose green bar is not near the bottom. End-of-list overscroll used to leave phantom trailing-background (and
+// occasionally a duplicate "ghost" row) strips below the last factor. The path now routes through the same
+// trimStackToLastFactor core as the green terminator: when the terminating frame's gray run began at the strip
+// top (the whole new strip is trailing background, the real last factor already saved above the frontier), it
+// does NOT save the phantom but scans the frame up from the frontier and trims the fragment stack to the last
+// factor + fixed margin. When the run began below the strip top (the last factor is in this frame), it saves
+// the cropped strip exactly as before (no phantom can precede the first reveal of the last factor).
+//
+// Fixture: a clean factor-fill over a page-background gap, no anti-aliased edge or green bar, so kGapScan
+// completes on a continuous run. On a 100 px frame the margin (0.0217) is 2 px and the gray search span
+// (0.16) is 16 px. Phantom fragments are built with an arm-gray strip (out of the gap range) so
+// current_length_pixels stays 0 and the terminating frame completes the 20 px gray run on its own -> Case A.
+Frame factorThenGapFrame(int factor_bottom) {
+    cv::Mat mat = testutil::solid(100, Color(243, 243, 243));                  // page-background gap
+    mat(cv::Rect(0, 0, 100, factor_bottom)).setTo(cv::Scalar(200, 200, 200));  // factor fill (out of gap range)
+    return Frame::fixed(mat);
+}
+
+TEST_CASE("gray-completion trims a phantom fragment latched below the last factor (Case A)") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_gray_trim_peel");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);                                                    // fragment 00000 = 100 px
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 6);   // fragment 00001 = 6 px phantom
+
+    // Terminating frame: factor [0, 68), gap [68, 100). offset 20 -> frontier 80; the strip [80, 100] is all
+    // gap, so the gray run begins at the strip top -> Case A. The gap frontier(80)->factor(68) is 12 px, within
+    // the 16 px (0.16 w) search span. Scan up 79..68 (gap), factor at 67 -> last factor bottom 68 -> crop 70.
+    // trim = 80 - 70 = 10: phantom (6) removed, 4 more off fragment0 (100 -> 96).
+    box.addScrollArea(factorThenGapFrame(68), 20);
+
+    CHECK(box.scrollAreaReady());
+    CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(1, 5).filename()));
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 96);
+}
+
+TEST_CASE("gray-completion saves the cropped strip and does not trim when the last factor is in-frame (Case B)") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_gray_trim_caseb");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);  // fragment 00000 = 100 px
+
+    // Terminating frame: factor [0, 75), gap [75, 100). offset 30 -> frontier 70; the gray run begins at 75
+    // (below the strip top 70) -> Case B. Save strip [70, 75 + margin(2)] = [70, 77] = 7 px; fragment0 stays.
+    box.addScrollArea(factorThenGapFrame(75), 30);
+
+    CHECK(box.scrollAreaReady());
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 7);
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 100);
+}
+
+TEST_CASE("gray-completion crops within the phantom fragment, preserving earlier ones (Case A)") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_gray_trim_partial");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);                                                     // fragment 00000 = 100 px
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 30);   // fragment 00001 = 30 px phantom
+
+    // factor [0, 65), gap [65, 100). offset 20 -> frontier 80; Case A. last factor 65 -> crop 67 ->
+    // trim = 80 - 67 = 13 (< phantom's 30): phantom cropped to 30 - 13 = 17, fragment0 untouched.
+    box.addScrollArea(factorThenGapFrame(65), 20);
+
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 17);
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 100);
+}
+
+TEST_CASE("gray-completion is a no-op when the last factor sits at the frontier (Case A)") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_gray_trim_noop");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    armFactorBox(box);                                                     // fragment 00000 = 100 px
+    box.addScrollArea(Frame::fixed(testutil::solid(100, kArmGray)), 10);   // fragment 00001 = 10 px
+
+    // factor [0, 78), gap [78, 100). offset 20 -> frontier 80; Case A. last factor 78 -> crop 78 + 2 = 80 ==
+    // frontier -> trim 0: nothing peeled.
+    box.addScrollArea(factorThenGapFrame(78), 20);
+
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 100);
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 10);
+}
+
 }  // namespace
 }  // namespace uma::chara_detail
