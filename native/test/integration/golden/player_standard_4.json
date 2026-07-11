@@ -1,0 +1,833 @@
+[
+  {
+    "aptitudes": {
+      "distance": {
+        "long_range": 1,
+        "middle_range": 6,
+        "mile_range": 7,
+        "short_range": 0
+      },
+      "ground": {
+        "dirt": 0,
+        "turf": 6
+      },
+      "style": {
+        "late_charge": 3,
+        "lead_pace": 0,
+        "off_pace": 6,
+        "with_pace": 6
+      }
+    },
+    "evaluation_value": 61865,
+    "factors": {
+      "parent1": [
+        {
+          "id": 26,
+          "star": 3
+        },
+        {
+          "id": 27,
+          "star": 3
+        },
+        {
+          "id": 232,
+          "star": 3
+        },
+        {
+          "id": 56,
+          "star": 2
+        },
+        {
+          "id": 3,
+          "star": 2
+        },
+        {
+          "id": 152,
+          "star": 2
+        },
+        {
+          "id": 0,
+          "star": 2
+        },
+        {
+          "id": 284,
+          "star": 2
+        },
+        {
+          "id": 130,
+          "star": 1
+        },
+        {
+          "id": 268,
+          "star": 3
+        },
+        {
+          "id": 183,
+          "star": 2
+        },
+        {
+          "id": 275,
+          "star": 2
+        },
+        {
+          "id": 332,
+          "star": 2
+        },
+        {
+          "id": 407,
+          "star": 2
+        },
+        {
+          "id": 418,
+          "star": 2
+        },
+        {
+          "id": 433,
+          "star": 2
+        },
+        {
+          "id": 471,
+          "star": 2
+        },
+        {
+          "id": 540,
+          "star": 2
+        },
+        {
+          "id": 574,
+          "star": 2
+        },
+        {
+          "id": 600,
+          "star": 2
+        },
+        {
+          "id": 754,
+          "star": 2
+        },
+        {
+          "id": 777,
+          "star": 2
+        },
+        {
+          "id": 375,
+          "star": 2
+        },
+        {
+          "id": 802,
+          "star": 2
+        },
+        {
+          "id": 658,
+          "star": 2
+        }
+      ],
+      "parent2": [
+        {
+          "id": 246,
+          "star": 3
+        },
+        {
+          "id": 27,
+          "star": 3
+        },
+        {
+          "id": 775,
+          "star": 3
+        },
+        {
+          "id": 161,
+          "star": 1
+        },
+        {
+          "id": 74,
+          "star": 2
+        },
+        {
+          "id": 17,
+          "star": 1
+        },
+        {
+          "id": 273,
+          "star": 3
+        },
+        {
+          "id": 184,
+          "star": 2
+        },
+        {
+          "id": 354,
+          "star": 1
+        },
+        {
+          "id": 171,
+          "star": 2
+        },
+        {
+          "id": 151,
+          "star": 3
+        },
+        {
+          "id": 296,
+          "star": 3
+        },
+        {
+          "id": 94,
+          "star": 1
+        },
+        {
+          "id": 262,
+          "star": 1
+        },
+        {
+          "id": 275,
+          "star": 3
+        },
+        {
+          "id": 84,
+          "star": 2
+        },
+        {
+          "id": 280,
+          "star": 2
+        },
+        {
+          "id": 295,
+          "star": 2
+        },
+        {
+          "id": 231,
+          "star": 2
+        },
+        {
+          "id": 316,
+          "star": 2
+        },
+        {
+          "id": 433,
+          "star": 2
+        },
+        {
+          "id": 477,
+          "star": 2
+        },
+        {
+          "id": 522,
+          "star": 2
+        },
+        {
+          "id": 535,
+          "star": 2
+        },
+        {
+          "id": 621,
+          "star": 2
+        },
+        {
+          "id": 718,
+          "star": 1
+        },
+        {
+          "id": 727,
+          "star": 2
+        },
+        {
+          "id": 756,
+          "star": 3
+        },
+        {
+          "id": 375,
+          "star": 2
+        },
+        {
+          "id": 410,
+          "star": 1
+        },
+        {
+          "id": 658,
+          "star": 2
+        },
+        {
+          "id": 657,
+          "star": 1
+        },
+        {
+          "id": 626,
+          "star": 2
+        },
+        {
+          "id": 661,
+          "star": 3
+        },
+        {
+          "id": 618,
+          "star": 2
+        },
+        {
+          "id": 643,
+          "star": 2
+        }
+      ],
+      "self": [
+        {
+          "id": 147,
+          "star": 2
+        },
+        {
+          "id": 226,
+          "star": 2
+        },
+        {
+          "id": 800,
+          "star": 2
+        },
+        {
+          "id": 173,
+          "star": 1
+        },
+        {
+          "id": 67,
+          "star": 2
+        },
+        {
+          "id": 234,
+          "star": 2
+        },
+        {
+          "id": 135,
+          "star": 2
+        },
+        {
+          "id": 262,
+          "star": 1
+        },
+        {
+          "id": 316,
+          "star": 2
+        },
+        {
+          "id": 433,
+          "star": 2
+        },
+        {
+          "id": 471,
+          "star": 2
+        },
+        {
+          "id": 535,
+          "star": 2
+        },
+        {
+          "id": 637,
+          "star": 2
+        },
+        {
+          "id": 727,
+          "star": 2
+        },
+        {
+          "id": 760,
+          "star": 3
+        },
+        {
+          "id": 777,
+          "star": 2
+        },
+        {
+          "id": 765,
+          "star": 1
+        },
+        {
+          "id": 774,
+          "star": 2
+        },
+        {
+          "id": 375,
+          "star": 2
+        },
+        {
+          "id": 834,
+          "star": 3
+        },
+        {
+          "id": 835,
+          "star": 1
+        },
+        {
+          "id": 658,
+          "star": 2
+        },
+        {
+          "id": 669,
+          "star": 2
+        },
+        {
+          "id": 625,
+          "star": 3
+        }
+      ]
+    },
+    "family": {
+      "parent1": {
+        "parent1": {
+          "card": 162,
+          "character": 74,
+          "icon": 364,
+          "rank": 70,
+          "record_type": "Standard"
+        },
+        "parent2": {
+          "card": 215,
+          "character": 94,
+          "icon": 475,
+          "rank": 63,
+          "record_type": "Standard"
+        },
+        "self": {
+          "card": 8,
+          "character": 30,
+          "icon": 558,
+          "rank": 298,
+          "record_type": "InheritanceOnly"
+        }
+      },
+      "parent2": {
+        "parent1": {
+          "card": 157,
+          "character": 91,
+          "icon": 352,
+          "rank": 69,
+          "record_type": "Standard"
+        },
+        "parent2": {
+          "card": 25,
+          "character": 29,
+          "icon": 5,
+          "rank": 58,
+          "record_type": "Standard"
+        },
+        "rental": true,
+        "self": {
+          "card": 235,
+          "character": 121,
+          "icon": 513,
+          "rank": 70,
+          "record_type": "Standard"
+        }
+      }
+    },
+    "fans": 516405,
+    "metadata": {
+      "format_version": "1.0.0",
+      "recognizer_version": "2026-07-10T11:00:00+0900",
+      "record_type": "Standard",
+      "region": "JPN",
+      "stage": "active",
+      "strategy": 1
+    },
+    "races": [
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 1,
+        "position": 1,
+        "strategy": 1,
+        "title": 242,
+        "turn": 73,
+        "variation": 2,
+        "weather": 4
+      },
+      {
+        "distance": 12,
+        "ground": 0,
+        "place": 2,
+        "position": 1,
+        "strategy": 1,
+        "title": 265,
+        "turn": 73,
+        "variation": 5,
+        "weather": 10
+      },
+      {
+        "distance": 14,
+        "ground": 0,
+        "place": 10,
+        "position": 1,
+        "strategy": 1,
+        "title": 45,
+        "turn": 73,
+        "variation": 3,
+        "weather": 0
+      },
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 2,
+        "position": 1,
+        "strategy": 1,
+        "title": 168,
+        "turn": 70,
+        "variation": 5,
+        "weather": 0
+      },
+      {
+        "distance": 14,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 237,
+        "turn": 69,
+        "variation": 2,
+        "weather": 4
+      },
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 269,
+        "turn": 67,
+        "variation": 2,
+        "weather": 0
+      },
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 6,
+        "position": 1,
+        "strategy": 1,
+        "title": 240,
+        "turn": 64,
+        "variation": 4,
+        "weather": 0
+      },
+      {
+        "distance": 6,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 203,
+        "turn": 58,
+        "variation": 2,
+        "weather": 4
+      },
+      {
+        "distance": 6,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 158,
+        "turn": 56,
+        "variation": 2,
+        "weather": 4
+      },
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 2,
+        "position": 1,
+        "strategy": 1,
+        "title": 270,
+        "turn": 53,
+        "variation": 5,
+        "weather": 4
+      },
+      {
+        "distance": 14,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 237,
+        "turn": 45,
+        "variation": 2,
+        "weather": 0
+      },
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 10,
+        "position": 1,
+        "strategy": 1,
+        "title": 202,
+        "turn": 43,
+        "variation": 5,
+        "weather": 0
+      },
+      {
+        "distance": 14,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 5,
+        "turn": 33,
+        "variation": 2,
+        "weather": 0
+      },
+      {
+        "distance": 6,
+        "ground": 0,
+        "place": 2,
+        "position": 1,
+        "strategy": 1,
+        "title": 238,
+        "turn": 30,
+        "variation": 3,
+        "weather": 1
+      },
+      {
+        "distance": 6,
+        "ground": 0,
+        "place": 10,
+        "position": 1,
+        "strategy": 1,
+        "title": 259,
+        "turn": 24,
+        "variation": 3,
+        "weather": 4
+      },
+      {
+        "distance": 6,
+        "ground": 0,
+        "place": 7,
+        "position": 1,
+        "strategy": 1,
+        "title": 273,
+        "turn": 11,
+        "variation": 2,
+        "weather": 10
+      }
+    ],
+    "scenario": {
+      "id": 13
+    },
+    "skills": [
+      {
+        "id": 1729,
+        "level": 6
+      },
+      {
+        "id": 233
+      },
+      {
+        "id": 1509
+      },
+      {
+        "id": 1656
+      },
+      {
+        "id": 32
+      },
+      {
+        "id": 134
+      },
+      {
+        "id": 115
+      },
+      {
+        "id": 47
+      },
+      {
+        "id": 406
+      },
+      {
+        "id": 182
+      },
+      {
+        "id": 132
+      },
+      {
+        "id": 364
+      },
+      {
+        "id": 311
+      },
+      {
+        "id": 409
+      },
+      {
+        "id": 382
+      },
+      {
+        "id": 220
+      },
+      {
+        "id": 480
+      },
+      {
+        "id": 208
+      },
+      {
+        "id": 381
+      },
+      {
+        "id": 275
+      },
+      {
+        "id": 481
+      },
+      {
+        "id": 320
+      },
+      {
+        "id": 179
+      },
+      {
+        "id": 128
+      },
+      {
+        "id": 569
+      },
+      {
+        "id": 177
+      },
+      {
+        "id": 432
+      },
+      {
+        "id": 489
+      },
+      {
+        "id": 552
+      },
+      {
+        "id": 597
+      },
+      {
+        "id": 882
+      },
+      {
+        "id": 928
+      },
+      {
+        "id": 974
+      },
+      {
+        "id": 978
+      },
+      {
+        "id": 1007
+      },
+      {
+        "id": 1820
+      },
+      {
+        "id": 1183
+      },
+      {
+        "id": 1280
+      },
+      {
+        "id": 1302
+      },
+      {
+        "id": 1338
+      },
+      {
+        "id": 1408
+      },
+      {
+        "id": 1705
+      },
+      {
+        "id": 1518
+      },
+      {
+        "id": 1571
+      },
+      {
+        "id": 1600
+      },
+      {
+        "id": 1612
+      },
+      {
+        "id": 1625
+      },
+      {
+        "id": 1637
+      },
+      {
+        "id": 1648
+      },
+      {
+        "id": 1657
+      },
+      {
+        "id": 1662
+      },
+      {
+        "id": 1718
+      },
+      {
+        "id": 1714
+      },
+      {
+        "id": 591
+      },
+      {
+        "id": 584
+      },
+      {
+        "id": 712
+      },
+      {
+        "id": 1706
+      },
+      {
+        "id": 1823
+      }
+    ],
+    "status": {
+      "guts": 1294,
+      "intelligence": 1389,
+      "power": 1257,
+      "speed": 2236,
+      "stamina": 1800
+    },
+    "support_cards": [
+      {
+        "id": 508,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 497,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 540,
+        "level": 0,
+        "rank": 3
+      },
+      {
+        "id": 416,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 522,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 539,
+        "level": 0,
+        "rank": 5
+      }
+    ],
+    "trained_date": "2026/07/01",
+    "trainee": {
+      "card": 243,
+      "character": 124,
+      "icon": 531,
+      "rank": 86
+    }
+  }
+]
