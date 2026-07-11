@@ -311,6 +311,64 @@ TEST_CASE("trimScrollAreaToFactorEnd falls back to the previous transition when 
     CHECK(cropped.rows == 83);
 }
 
+TEST_CASE("latchUpToGreenTerminator captures the last factor above the bar and the trim crops from it") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_factor_end_latch_then_trim");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+
+    // Arm with a stack that ends INSIDE the last factor: gray 2 px consumes kArmScan, a mid-list gap
+    // [70, 80) records stale frontier evidence (the second-to-last factor's gap), and factor fill runs to
+    // the frame bottom -- the last card is only partially latched, as when the bar fires on the very frame
+    // the card scrolled in.
+    cv::Mat arm = testutil::solid(100, Color(200, 200, 200));
+    arm(cv::Rect(0, 0, 100, 2)).setTo(cv::Scalar(130, 130, 130));
+    arm(cv::Rect(0, 70, 100, 10)).setTo(cv::Scalar(243, 243, 243));
+    box.addScrollArea(Frame::fixed(arm));  // stack 100, frontier 70 (stale), stack bottom mid-factor
+
+    // The terminating frame, scrolled 16 px: its new strip [84, 100) carries the last factor's bottom
+    // [84, 86), its gap [86, 89), the anti-aliased edge [89, 91), the green bar [91, 96), and post-bar
+    // background broken by a dark streak at 97 -- two post-bar transitions, like the shadow/footer
+    // structure under a real bar. Latching them would evict the gap (102) from the two-deep frontier
+    // history; the latch must stop at the bar top.
+    cv::Mat probe_mat = testutil::solid(100, Color(243, 243, 243));
+    probe_mat(cv::Rect(0, 0, 100, 86)).setTo(cv::Scalar(200, 200, 200));
+    probe_mat(cv::Rect(0, 89, 100, 2)).setTo(cv::Scalar(180, 240, 220));
+    probe_mat(cv::Rect(0, 91, 100, 5)).setTo(cv::Scalar(20, 222, 128));
+    probe_mat(cv::Rect(0, 97, 100, 1)).setTo(cv::Scalar(200, 200, 200));
+    const Frame probe = Frame::fixed(probe_mat);
+    REQUIRE(box.detectGreenTerminator(probe, 16));
+    const int trim_offset = box.latchUpToGreenTerminator(probe, 16);
+    CHECK(trim_offset == 9);  // 100 - bar top (91): the stack bottom is now the bar top
+    box.trimScrollAreaToFactorEnd(probe, trim_offset);
+
+    // The latch stages only [84, 91): the gap start becomes the frontier (102), the stale 70 shifts into
+    // the previous slot, and no post-bar run is recorded. The trim maps the bar top to 107 (= stack), the
+    // frontier is within the 8 px span -> crop at 102 + margin (2) = 104: the whole last factor survives
+    // with the fixed margin and the bar never enters the stack.
+    const cv::Mat frag0 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(frag0.rows == 100);
+    const cv::Mat frag1 = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(1, 5).filename());
+    CHECK(frag1.rows == 4);
+}
+
+TEST_CASE("latchUpToGreenTerminator is a no-op when the bar sits at or above the scroll frontier") {
+    HookRecorder recorder;
+    const auto dir = freshTempDir("uma_factor_end_latch_noop");
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    box.addScrollArea(structuredArmFrame(82));  // stack 100, frontier 82
+
+    // Bar at [79, 84): fully above the frame's new-content boundary (height - offset = 90), so everything
+    // above the bar is already latched. The offset must pass through unchanged and nothing new is staged.
+    const Frame probe = factorEndFrame(72, 5);
+    REQUIRE(box.detectGreenTerminator(probe, 10));
+    CHECK(box.latchUpToGreenTerminator(probe, 10) == 10);
+    box.trimScrollAreaToFactorEnd(probe, 10);
+
+    // Identical outcome to the plain frontier-crop case: crop at 82 + margin (2) = 84.
+    const cv::Mat cropped = Frame::decodeBgr(dir / path_config.scroll_area.withNumber(0, 5).filename());
+    CHECK(cropped.rows == 84);
+}
+
 // --- gray-completion trim: sequence completion crops at the frontier -----------------------------------
 //
 // The gray-completion path (addScrollArea, scan sequence consumed) terminates a LONG-inheritance factor tab

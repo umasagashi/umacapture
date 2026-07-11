@@ -227,6 +227,15 @@ public:
     // returns true once a green run of end_green->length is present there.
     bool detectGreenTerminator(const Frame &frame, int offset_pixels);
 
+    // Latch the terminating frame's newly revealed rows ABOVE the fired green bar, so the last factor and
+    // its gap enter the stack even when the bar fired on the very frame they scrolled in (the green branch
+    // returns before the regular addScrollArea latch). Rows at/below the bar are deliberately excluded:
+    // they are trimmed anyway, and latching them would push post-bar background transitions into the
+    // frontier history that trimScrollAreaToFactorEnd validates. Returns the offset the subsequent
+    // trimScrollAreaToFactorEnd call must use (the latch moves the stack bottom to the bar top; without a
+    // latch the passed offset is returned unchanged).
+    [[nodiscard]] int latchUpToGreenTerminator(const Frame &frame, int offset_pixels);
+
     // Crop the factor fragments to the same bottom line the gray-completion path uses, once the green
     // terminator has fired. detectGreenTerminator only marks readiness; the last fragment still runs down
     // to the frame bottom (the fallback save in addScrollArea), leaving a variable amount of trailing

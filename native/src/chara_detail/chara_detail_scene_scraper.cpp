@@ -612,14 +612,41 @@ bool PageScrapingBox::detectGreenTerminator(const Frame &frame, int offset_pixel
     return false;
 }
 
+int PageScrapingBox::latchUpToGreenTerminator(const Frame &frame, int offset_pixels) {
+    if (!end_green_fired || green_terminator_top_pixels < 0) {
+        return offset_pixels;
+    }
+    // Rows of tab content above the bar that scrolled in on this frame but were never latched (the green
+    // branch in updateScrolling returns before the regular addScrollArea). Nothing to do when the bar sits
+    // at or above the frontier: everything above it is already in the stack.
+    const int revealed_above_bar = green_terminator_top_pixels - (frame.height() - offset_pixels);
+    if (revealed_above_bar < 1) {
+        return offset_pixels;
+    }
+    // Latch only up to the bar top. The bar and whatever lies below it get trimmed anyway, and latching
+    // them would record post-bar background transitions that push the last factor's gap out of the
+    // two-deep frontier history trimScrollAreaToFactorEnd validates -- degrading its evidence-based crop
+    // to the bar-top fail-safe (a longer, uneven tail).
+    const auto &anchor = frame.anchor();
+    const Rect<double> above_bar = {
+        Point<double>{0., 0.},
+        Point<double>{1., anchor.scaleFromPixels(green_terminator_top_pixels)},
+    };
+    addScrollArea(frame.view(above_bar), revealed_above_bar);
+    // The stack bottom is now the bar top; the trim's "stack bottom == height - offset" invariant needs
+    // the offset that maps it there.
+    return frame.height() - green_terminator_top_pixels;
+}
+
 void PageScrapingBox::trimScrollAreaToFactorEnd(const Frame &frame, int offset_pixels) {
     if (!end_green_fired || green_terminator_top_pixels < 0) {
         return;
     }
     const auto &anchor = frame.anchor();
     const int margin_pixels = anchor.expand({0., kFactorEndBottomMargin}).y();
-    // The stack bottom corresponds to the scroll frontier (height - offset_pixels); the terminating frame is
-    // not saved on the green path. Map the live bar top into stack coordinates: it exceeds stack_rows when
+    // The stack bottom corresponds to the scroll frontier (height - offset_pixels); when the caller latched
+    // part of the terminating frame first (latchUpToGreenTerminator), offset_pixels is the adjusted value
+    // that keeps this invariant. Map the live bar top into stack coordinates: it exceeds stack_rows when
     // the bar sits below the frontier (the normal lazy render, never latched) and caps the crop when part of
     // the bar was latched.
     const int ceiling_stack_rows = stack_rows - ((frame.height() - offset_pixels) - green_terminator_top_pixels);
@@ -981,11 +1008,15 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
     if (offset.has_value()
         && scraping_box->detectGreenTerminator(current_fragment.frame, std::lround(offset.value()))) {
-        // Crop the saved fragments to the same bottom line the gray-completion path uses, so the trailing
-        // background below the last factor is a fixed margin regardless of which terminator ended the tab.
-        // The last fragment otherwise runs to the frame bottom (addScrollArea's fallback save), leaving a
-        // variable gap above the footer.
-        scraping_box->trimScrollAreaToFactorEnd(current_fragment.frame, std::lround(offset.value()));
+        // The bar can fire on the very frame the last factor scrolled in (and the return below skips the
+        // regular addScrollArea latch), so without latching first the last card's bottom rows exist only
+        // in the live frame and the crop cannot recover them -- the stitcher then papers over the gap with
+        // background, clipping the last card. Latch the revealed rows above the bar, then crop the saved
+        // fragments to the same bottom line the gray-completion path uses, so the trailing background
+        // below the last factor is a fixed margin regardless of which terminator ended the tab.
+        const int trim_offset_pixels =
+            scraping_box->latchUpToGreenTerminator(current_fragment.frame, std::lround(offset.value()));
+        scraping_box->trimScrollAreaToFactorEnd(current_fragment.frame, trim_offset_pixels);
         // Report the final position before going Ready so the UI progress reaches 100% for the tab,
         // matching the gray-completion path below (which emits via addScrollArea). Without this, a
         // short-history factor tab that ends via the green terminator would stall one update short.
