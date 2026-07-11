@@ -4,10 +4,13 @@
 # ///
 """Golden integration test for the native recognition pipeline.
 
-Drives the real ``umacapture_cli video`` over recorded clips and compares the
-recognized ``record.json`` set against committed golden files. This exercises the
-full ONNX/WinRT/FFmpeg pipeline end to end, so it depends on local-only assets
-(the ``.notes`` clips and the ``sandbox/modules`` ONNX models, neither committed).
+Drives the real ``umacapture_cli`` over recorded clips and compares the recognized
+``record.json`` set against committed golden files. Each case's input extension picks
+the subcommand: an ``.mp4`` (or other plain clip) goes through ``video`` (OpenCV
+decode), while an ``.mkv`` is treated as a lossless FFV1 recording and goes through
+``replay`` (the recorded frames drive the pipeline directly). This exercises the full
+ONNX/WinRT/FFmpeg pipeline end to end, so it depends on local-only assets (the
+``.notes`` clips and the ``sandbox/modules`` ONNX models, neither committed).
 
 A case whose input clip -- or the modules dir -- is absent is skipped, not failed,
 so a fresh checkout / CI can run this without the data present. If every case is
@@ -89,11 +92,17 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
 
     with tempfile.TemporaryDirectory(prefix=f"uma_it_{case['name']}_") as tmp:
         output_dir = Path(tmp)
+        # An .mkv input is a lossless FFV1 recording (from `capture --record`): feed it through the
+        # `replay` subcommand, which reads the recorded frames straight into the pipeline. Anything
+        # else is a plain video clip decoded by OpenCV via the `video` subcommand. Both write the same
+        # storage/chara_detail/active/*/record.json set, so collection and comparison are identical.
+        if video.suffix.lower() == ".mkv":
+            input_args = ["replay", "--record", str(video)]
+        else:
+            input_args = ["video", "--video_path_list", str(video)]
         command = [
             str(cli),
-            "video",
-            "--video_path_list",
-            str(video),
+            *input_args,
             "--output_dir",
             str(output_dir),
             "--assets_dir",

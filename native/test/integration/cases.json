@@ -1,8 +1,10 @@
 {
   "comment": [
     "Integration golden cases for native/test/integration/run.py.",
-    "Each case runs `umacapture_cli video` over `video` (resolved under --data-dir, default .notes)",
-    "and compares the recognized record.json set against `golden`.",
+    "Each case runs umacapture_cli over `video` (resolved under --data-dir, default .notes) and",
+    "compares the recognized record.json set against `golden`. The input extension picks the",
+    "subcommand: `.mp4` (or other plain clip) -> `video` (OpenCV decode); `.mkv` -> `replay`",
+    "(a lossless FFV1 recording replayed frame-for-frame).",
     "Videos live under .notes/ and are NOT committed; goldens ARE committed (regression baseline).",
     "A case whose video is absent is skipped, so this manifest may list more clips than any one",
     "machine has locally. Add a case here + regenerate its golden with run.py --update-golden."
