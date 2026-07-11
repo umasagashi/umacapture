@@ -6,6 +6,14 @@ the user explicitly asks**.
 ## Branching
 
 - Never commit or push directly to `develop` (the default / main branch).
+- **If a non-`develop` branch is already checked out, work on it — do not create
+  a new branch on your own.** A branch that is already prepared is the intended
+  workspace; assume the current work belongs there unless the user says otherwise.
+  Only create a new branch when you are on `develop`, or when the user explicitly
+  asks for one.
+- When a new branch is genuinely needed, **base it on the currently checked-out
+  branch**, not on `develop`, unless the user says otherwise (the current branch
+  may carry unmerged work the new task builds on).
 - Before making changes that will be committed, create a feature branch first
   (e.g. `feature/<topic>`, `fix/<topic>`), then commit there.
 - Open pull requests against `develop`.
