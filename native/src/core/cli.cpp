@@ -1,8 +1,10 @@
+#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <thread>
 
@@ -17,6 +19,8 @@
 #include "builder/chara_detail_scene_stitcher_builder.h"
 #include "condition/serializer.h"
 #include "core/native_api.h"
+#include "cv/ffv1_reader.h"
+#include "cv/ffv1_recorder.h"
 #include "cv/video_loader.h"
 #include "util/json_util.h"
 #include "util/logger_util.h"
@@ -59,6 +63,36 @@ void runUntilIdleThenJoin(app::NativeApi &api, ActivityMonitor &monitor) {
             api.joinEventLoop();
             break;
         }
+    }
+}
+
+// Live `capture` runs an unbounded loop, so it needs a clean stop signal: a hard kill would skip the
+// recorder's flush + matroska trailer and leave a `--record` file unfinalized. This console handler lets
+// Ctrl-C (and console close / logoff) break the loop so teardown runs. Set from the handler thread, polled
+// by the capture loop; g_capture_finalized is set by the capture loop once teardown is done, so the
+// handler can hold the process alive for the terminating events (see below).
+std::atomic<bool> g_capture_stop_requested{false};
+std::atomic<bool> g_capture_finalized{false};
+
+BOOL WINAPI captureConsoleHandler(DWORD ctrl_type) {
+    switch (ctrl_type) {
+        // The process survives these: signal the loop and return so it finalizes on its own.
+        case CTRL_C_EVENT:
+        case CTRL_BREAK_EVENT: g_capture_stop_requested.store(true); return TRUE;
+        // Windows terminates the process as soon as the handler returns for these, so returning right after
+        // setting the flag would kill the process before the 100 ms capture poll ever sees it. Block this
+        // (handler-only) thread until the main thread reports teardown done; the OS enforces its own grace
+        // deadline (~5 s close / ~20 s logoff-shutdown) regardless, so this is best-effort -- a worst-case
+        // encoder drain (bounded at 30 s in Ffv1Recorder::close) can still be cut short.
+        case CTRL_CLOSE_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            g_capture_stop_requested.store(true);
+            while (!g_capture_finalized.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            return TRUE;
+        default: return FALSE;
     }
 }
 
@@ -114,7 +148,10 @@ json_util::Json createConfig(bool video_mode, const PipelinePaths &paths = {}) {
     };
 }
 
-void captureFromScreen() {
+void captureFromScreen(
+    const std::optional<std::filesystem::path> &record_path = std::nullopt,
+    int duration_seconds = 0,
+    const std::filesystem::path &stop_file = {}) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
@@ -122,7 +159,29 @@ void captureFromScreen() {
 
     auto &api = app::NativeApi::instance();
     api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
-    connection->listen([&api](const auto &frame, const auto &original_size) { api.updateFrame(frame, original_size); });
+
+    // Optional debug recorder: tee every captured frame to a lossless FFV1 .mkv for later replay. Built
+    // lazily on the first frame (its size is not known before capture starts); a construction failure is
+    // logged once and disables recording rather than aborting the capture.
+    std::unique_ptr<video::Ffv1Recorder> recorder;
+    bool recorder_failed = false;
+    connection->listen([&](const auto &frame, const auto &original_size) {
+        if (record_path && !recorder_failed) {
+            if (!recorder) {
+                try {
+                    recorder = std::make_unique<video::Ffv1Recorder>(*record_path, frame.size());
+                    log_info("Recording captured frames to {}", record_path->string());
+                } catch (const std::exception &e) {
+                    recorder_failed = true;
+                    log_error("Failed to start frame recording: {}", e.what());
+                }
+            }
+            if (recorder) {
+                recorder->push(frame);
+            }
+        }
+        api.updateFrame(frame, original_size);
+    });
 
     const auto config = createConfig(false);
     api.startEventLoop(config.dump());
@@ -133,9 +192,48 @@ void captureFromScreen() {
     recorder_runner->start();
     window_recorder->startRecord();
 
-    while (api.isRunning()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Ctrl-C / console close breaks the loop cleanly so the recorder can finalize (see captureConsoleHandler).
+    g_capture_stop_requested.store(false);
+    g_capture_finalized.store(false);
+    SetConsoleCtrlHandler(&captureConsoleHandler, TRUE);
+    // Clear any stale stop-file so a leftover from a previous run cannot end this one immediately.
+    if (!stop_file.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(stop_file, ec);
     }
+    if (record_path) {
+        log_info(
+            "Recording... stop with Ctrl-C{}{}.",
+            stop_file.empty() ? "" : " or by creating the stop-file",
+            duration_seconds > 0 ? " (or wait for --duration)" : "");
+    }
+    const auto start = std::chrono::steady_clock::now();
+    while (api.isRunning() && !g_capture_stop_requested.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (duration_seconds > 0
+            && std::chrono::steady_clock::now() - start >= std::chrono::seconds(duration_seconds)) {
+            break;
+        }
+        if (!stop_file.empty()) {
+            std::error_code ec;
+            if (std::filesystem::exists(stop_file, ec)) {
+                log_info("Stop-file detected; finalizing recording.");
+                break;
+            }
+        }
+    }
+    SetConsoleCtrlHandler(&captureConsoleHandler, FALSE);
+
+    // Stop producing frames and drain the connection before finalizing the file, so no late listener call
+    // races the recorder's trailer write.
+    window_recorder->stopRecord();
+    recorder_runner->join();
+    if (recorder) {
+        recorder->close();
+    }
+    // Release a console handler blocked on a terminating event (close/logoff/shutdown); the file is
+    // finalized, so the process may die now.
+    g_capture_finalized.store(true);
 }
 
 void screenshotFromScreen(const std::filesystem::path &output_path) {
@@ -187,6 +285,34 @@ void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list,
         return profile.has_value() ? profile->crop_rect : std::nullopt;
     });
     video.runBatch(video_path_list);
+
+    runUntilIdleThenJoin(api, monitor);
+}
+
+void replayFromRecording(const std::filesystem::path &record_path, const PipelinePaths &paths) {
+    const auto recorder_runner =
+        event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
+    const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
+
+    ActivityMonitor monitor;
+    auto &api = app::NativeApi::instance();
+    api.setNotifyCallback([&monitor](const auto &message) {
+        monitor.touch();
+        log_debug("CLI: {}", message);
+    });
+    connection->listen([&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
+
+    // video_mode=true gives the pipeline a Block queue (no dropped frames) and disables the frame-stall
+    // watchdog, so the replay is deterministic -- the recorded frames drive the recognition exactly as the
+    // failed live capture did, paced by the queue rather than by wall-clock. No crop: recorded frames are
+    // already pipeline-input form.
+    const auto config = createConfig(true, paths);
+    api.startEventLoop(config.dump());
+
+    recorder_runner->start();
+
+    video::Ffv1Reader reader(record_path, connection);
+    reader.run();
 
     runUntilIdleThenJoin(api, monitor);
 }
@@ -250,6 +376,15 @@ int main(int argc, char **argv) {
         build_command->add_option("--assets_dir", assets_dir)->required();
 
         auto capture_command = command.add_subcommand("capture", "run capture mode");
+        std::filesystem::path capture_record_path;
+        capture_command->add_option(
+            "--record", capture_record_path, "record every captured frame to a lossless FFV1 .mkv for replay");
+        int capture_duration_seconds = 0;
+        capture_command->add_option(
+            "--duration", capture_duration_seconds, "stop capture automatically after N seconds (0 = until Ctrl-C)");
+        std::filesystem::path capture_stop_file;
+        capture_command->add_option(
+            "--stop-file", capture_stop_file, "stop capture cleanly when this file appears (for scripted control)");
 
         auto screenshot_command =
             command.add_subcommand("screenshot", "capture a single screenshot from the game window");
@@ -270,6 +405,13 @@ int main(int argc, char **argv) {
         video_command->add_option("--video_path_list", video_path_list)->required();
         uma::cli::PipelinePaths video_paths;
         addPipelinePathOptions(video_command, video_paths);
+
+        auto replay_command =
+            command.add_subcommand("replay", "replay a recorded FFV1 .mkv through the recognition pipeline");
+        std::filesystem::path replay_path;
+        replay_command->add_option("--record", replay_path, "path to the recorded .mkv")->required();
+        uma::cli::PipelinePaths replay_paths;
+        addPipelinePathOptions(replay_command, replay_paths);
 
         auto stitch_command = command.add_subcommand("stitch", "run capture mode from scraped images");
         std::string stitch_id;
@@ -316,7 +458,9 @@ int main(int argc, char **argv) {
         }
 
         if (capture_command->parsed()) {
-            uma::cli::captureFromScreen();
+            std::optional<std::filesystem::path> record =
+                capture_command->count("--record") > 0 ? std::optional{capture_record_path} : std::nullopt;
+            uma::cli::captureFromScreen(record, capture_duration_seconds, capture_stop_file);
         }
 
         if (screenshot_command->parsed()) {
@@ -325,6 +469,10 @@ int main(int argc, char **argv) {
 
         if (video_command->parsed()) {
             uma::cli::captureFromVideo(video_path_list, video_paths);
+        }
+
+        if (replay_command->parsed()) {
+            uma::cli::replayFromRecording(replay_path, replay_paths);
         }
 
         if (stitch_command->parsed()) {

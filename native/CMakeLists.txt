@@ -23,6 +23,13 @@ set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/opencv
 
 set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/onnxruntime")
 
+# FFmpeg (BtbN LGPL shared, provisioned by tool/fetch_deps.py into windows/ffmpeg). Only the CLI target
+# links it, for the lossless FFV1 capture recorder / replay reader (src/cv/ffv1_*). Its versioned runtime
+# DLLs are copied next to the exe by the POST_BUILD step below. The Flutter Windows app target
+# (windows/runner/CMakeLists.txt) deliberately does NOT link ffmpeg, since it never compiles cli.cpp; wiring
+# recording into the app (via native_api.cpp) would require adding this include/lib/DLL there too.
+set(FFMPEG_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/ffmpeg")
+
 set(
         SOURCE_FILES
         src/core/cli.cpp
@@ -34,6 +41,8 @@ set(
         src/chara_detail/chara_detail_scene_scraper.cpp
         src/chara_detail/chara_detail_scene_stitcher.cpp
         src/condition/serializer.cpp
+        src/cv/ffv1_recorder.cpp
+        src/cv/ffv1_reader.cpp
         src/util/logger_util.cpp
 )
 
@@ -81,12 +90,16 @@ target_include_directories(
         "${CMAKE_CURRENT_LIST_DIR}/tool"
         "${OpenCV_INCLUDE_DIRS}"
         "${ONNX_DIR}/include"
+        "${FFMPEG_DIR}/include"
 )
 
 target_link_libraries(
         ${PROJECT_NAME} PRIVATE
         "${OpenCV_LIBS}"
         "${ONNX_DIR}/lib/onnxruntime.lib"
+        "${FFMPEG_DIR}/lib/avformat.lib"
+        "${FFMPEG_DIR}/lib/avcodec.lib"
+        "${FFMPEG_DIR}/lib/avutil.lib"
         windowsapp.lib
         dwmapi.lib
 )
@@ -110,6 +123,17 @@ add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
         copy
         ${OpenCV_FFMPEG_DLL}
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+)
+
+# The FFV1 recorder/reader link libav directly, so its versioned runtime DLLs (avutil/avcodec/avformat and
+# their transitive swresample/swscale) must sit next to the exe. Globbed to stay version-agnostic across
+# ffmpeg bumps; these names are distinct from OpenCV's opencv_videoio_ffmpeg plugin, so they coexist.
+file(GLOB FFMPEG_DLLS "${FFMPEG_DIR}/bin/av*.dll" "${FFMPEG_DIR}/bin/sw*.dll")
+add_custom_command(
+        TARGET ${PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy_if_different
+        ${FFMPEG_DLLS}
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
 
@@ -216,6 +240,71 @@ target_link_libraries(
 )
 
 add_test(NAME umacapture_tests COMMAND umacapture_tests)
+
+# ---------------------------------------------------------------------------
+# FFV1 recorder/reader round-trip test. Kept as a SEPARATE target from umacapture_tests because it links
+# libav (ffmpeg), which the pristine opencv-only umacapture_tests must not pull in. It reuses the same
+# opencv-old-toolset STL guard (_USE_STD_VECTOR_ALGORITHMS=0). CI provisions windows/ffmpeg for this.
+# ---------------------------------------------------------------------------
+add_executable(
+        umacapture_ffv1_tests
+        test/test_main.cpp
+        test/cv/test_ffv1_roundtrip.cpp
+        src/cv/ffv1_recorder.cpp
+        src/cv/ffv1_reader.cpp
+)
+
+target_compile_options(
+        umacapture_ffv1_tests PRIVATE
+        /wd4068
+        /wd4819
+        /wd4996
+        /wd5285
+)
+
+target_compile_definitions(
+        umacapture_ffv1_tests PRIVATE
+        USE_CUSTOM_ASSERT
+        WINVER=0x0A00
+        _WIN32_WINNT=0x0A00
+        _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
+        _USE_STD_VECTOR_ALGORITHMS=0
+)
+
+target_include_directories(
+        umacapture_ffv1_tests PRIVATE
+        "${CMAKE_CURRENT_LIST_DIR}/src"
+        "${CMAKE_CURRENT_LIST_DIR}/test"
+        "${CMAKE_CURRENT_LIST_DIR}/vendor"
+        "${OpenCV_INCLUDE_DIRS}"
+        "${FFMPEG_DIR}/include"
+)
+
+target_link_libraries(
+        umacapture_ffv1_tests PRIVATE
+        "${OpenCV_LIBS}"
+        "${FFMPEG_DIR}/lib/avformat.lib"
+        "${FFMPEG_DIR}/lib/avcodec.lib"
+        "${FFMPEG_DIR}/lib/avutil.lib"
+)
+
+add_test(NAME umacapture_ffv1_tests COMMAND umacapture_ffv1_tests)
+
+add_custom_command(
+        TARGET umacapture_ffv1_tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
+        $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
+        $<TARGET_FILE_DIR:umacapture_ffv1_tests>
+)
+
+file(GLOB FFMPEG_TEST_DLLS "${FFMPEG_DIR}/bin/av*.dll" "${FFMPEG_DIR}/bin/sw*.dll")
+add_custom_command(
+        TARGET umacapture_ffv1_tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy_if_different
+        ${FFMPEG_TEST_DLLS}
+        $<TARGET_FILE_DIR:umacapture_ffv1_tests>
+)
 
 # ---------------------------------------------------------------------------
 # Integration (golden) test -- drives the real umacapture_cli over recorded clips

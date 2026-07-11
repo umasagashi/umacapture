@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <deque>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -226,13 +227,23 @@ public:
     // returns true once a green run of end_green->length is present there.
     bool detectGreenTerminator(const Frame &frame, int offset_pixels);
 
-    // Crop the saved factor fragments to the same bottom line the gray-completion path uses, once the green
-    // terminator has fired. detectGreenTerminator only marks readiness; the last saved fragment still runs
-    // down to the frame bottom (the fallback save in addScrollArea), leaving a variable amount of trailing
-    // background below the last factor. This scans up from the recorded green-bar top to the last factor's
-    // bottom and trims the fragment stack to factorEndCropY(that), so the bottom margin is identical to the
-    // gray-completion path regardless of which terminator ends the tab. A no-op unless the green terminator
-    // fired and the saved content overshoots the crop line.
+    // Latch the terminating frame's newly revealed rows ABOVE the fired green bar, so the last factor and
+    // its gap enter the stack even when the bar fired on the very frame they scrolled in (the green branch
+    // returns before the regular addScrollArea latch). Rows at/below the bar are deliberately excluded:
+    // they are trimmed anyway, and latching them would push post-bar background transitions into the
+    // frontier history that trimScrollAreaToFactorEnd validates. Returns the offset the subsequent
+    // trimScrollAreaToFactorEnd call must use (the latch moves the stack bottom to the bar top; without a
+    // latch the passed offset is returned unchanged).
+    [[nodiscard]] int latchUpToGreenTerminator(const Frame &frame, int offset_pixels);
+
+    // Crop the factor fragments to the same bottom line the gray-completion path uses, once the green
+    // terminator has fired. detectGreenTerminator only marks readiness; the last fragment still runs down
+    // to the frame bottom (the fallback save in addScrollArea), leaving a variable amount of trailing
+    // background below the last factor. The crop line comes from the maintained frontier
+    // (frontier_stack_rows + the fixed margin), validated against the live bar top: the bar caps the crop,
+    // and frontier evidence inconsistent with the bar position falls back to the previous transition (the
+    // bar rendered early and its trailing background stole the last transition) or, failing that, to a
+    // fail-safe crop at the bar top -- never past latched factor content. Ends in a full flush.
     void trimScrollAreaToFactorEnd(const Frame &frame, int offset_pixels);
 
     [[nodiscard]] bool scrollAreaReady() const;
@@ -240,43 +251,68 @@ public:
     [[nodiscard]] bool ready() const;
 
 private:
+    // Stage (factor box) or write (other boxes) one scroll-area strip. The factor box delays its commit:
+    // strips are staged as owning clones in pending_strips and only flushed to disk once they can no longer
+    // be trimmed (flushExcess) or the tab terminates (flushAll), so trailing background latched during the
+    // gray-run recognition lag never reaches disk and the terminator-time trim is a pure in-RAM operation.
     void saveIncremental(const Frame &frame);
 
-    // Scaled y at which the terminating fragment should be cropped for the factor box: a fixed margin below
-    // run_start_scaled (the bottom of the last factor). Clamped within [scaled_top, terminator] so the rect
-    // stays valid; the caller skips an empty one. Keeps the bottom margin constant regardless of whether
-    // inheritance history follows the list. Both terminator paths (gray-sequence completion and the green
-    // end-bar) feed their own last-factor-bottom through this one function so they crop to the same line.
-    [[nodiscard]] double factorEndCropY(double run_start_scaled, double scaled_top, double terminator_scaled_y) const;
+    // Committed fragments on disk plus strips staged in RAM: the logical fragment count both terminator
+    // paths and readiness reason about (the pre-delayed-commit image_count).
+    [[nodiscard]] int fragmentCount() const;
 
-    // Shared core for both factor-end terminator paths: trim the saved fragment stack so its bottom lands a
-    // fixed margin below the last factor. Scans `frame` upward from `anchor_pixels` (a frame-y row that sits in
-    // the page-background gap below the last factor) to the last factor's bottom, computes factorEndCropY, and
-    // peels/crops the saved fragments below that crop line. `stack_bottom_pixels` is the frame-y the current
-    // stack bottom corresponds to (the scroll frontier). `ceiling_pixels` lower-bounds the crop line and is the
-    // not-found fallback (green: the bar top; gray: the gray run's completion row -> a safe non-positive trim).
-    // `skip_leading_bar` first skips a leading run of non-background above the anchor (the green bar + its
-    // anti-aliased edge); false when the anchor already sits inside the background gap (gray). `search_span`
-    // bounds the upward walk as a fraction of the frame width. Both terminator paths route through here so the
-    // bottom margin below the last factor is identical regardless of which one ends the tab.
-    void trimStackToLastFactor(
-        const Frame &frame,
-        int anchor_pixels,
-        int stack_bottom_pixels,
-        int ceiling_pixels,
-        bool skip_leading_bar,
-        double search_span);
+    // Write the oldest staged strip as the next numbered fragment and pop it.
+    void flushFront();
+
+    // Flush staged strips down to tail_holdback_pixels. Strips older than the maximum possible
+    // terminator-time trim can never be peeled, so committing them keeps memory bounded without
+    // giving up the in-RAM trim.
+    void flushExcess();
+
+    // Terminal commit: drain the staged tail to disk. Must run before readiness is observable so the
+    // stitcher (triggered on completion) sees the final fragment set.
+    void flushAll();
+
+    // Remove trim_rows from the bottom of the fragment stack: peel/crop the staged tail first, then fall
+    // back to the on-disk fragments (unreachable while tail_holdback_pixels over-covers the trim bounds,
+    // kept as a safety net). Never drops the sole remaining fragment (scrollAreaReady must stay satisfied).
+    void trimTail(int trim_rows);
+
+    // Shared core for both factor-end terminator paths: crop the fragment stack so its bottom lands the
+    // fixed margin below the last factor, then flush. `crop_stack_rows` is the target stack height
+    // (frontier + margin, already validated by the caller), clamped to the current stack so a stale or
+    // overshooting value degrades to a no-op rather than an over-trim.
+    void cropStackTo(int crop_stack_rows);
 
     const std::filesystem::path image_dir;
     const std::vector<scraper_config::ScanParameter> scan_parameters;
 
     std::vector<scraper_config::ScanParameter>::const_iterator current_scan;
     int current_length_pixels = 0;
-    // Scaled y where the current scan's run of matching color began (its 0->1 transition), reset to the
-    // strip top each frame. For the factor box the run that follows the last factor is the page-background
-    // gap just below it, so this marks the bottom of the last factor.
-    double current_run_start_scaled = 0.0;
-    int image_count = 0;
+
+    // Maintained frontier (factor box only): the stack row where the page-background run below the last
+    // factor begins -- the crop reference both terminator paths reason from. Updated at latch time, on each
+    // observed non-background -> background transition of the terminating scan: in-strip transitions record
+    // the exact row, and a transition at a strip boundary (the run starts at the strip top while the
+    // previous strip ended non-background) records the boundary, so a factor row ending exactly at a strip
+    // edge is never over-trimmed. A run carried over from the previous strip does not move it. The previous
+    // transition is kept because the green bar can render early enough to be latched, in which case the
+    // background below the bar steals the last transition (see trimScrollAreaToFactorEnd). -1 = no evidence.
+    int frontier_stack_rows = -1;
+    int previous_frontier_stack_rows = -1;
+    // Total rows in the fragment stack (staged + committed): the coordinate system of the frontier.
+    int stack_rows = 0;
+
+    // Delayed-commit tail (factor box only; other boxes write through). Owning clones -- Frame views share
+    // the source buffer (see frame.h), and a staged strip outlives its source frame. Dropped, NOT flushed,
+    // when the box is discarded: recreate()/release() abandon uncommitted strips by design, matching the
+    // rmdir of the committed ones.
+    std::deque<cv::Mat> pending_strips;
+    int pending_rows = 0;
+    // Fragments on disk; doubles as the next flush filename index so committed names stay contiguous.
+    int committed_count = 0;
+    // Minimum staged rows retained in RAM; set per-latch in addScrollArea from the worst-case trim depth.
+    int tail_holdback_pixels = 0;
 
     bool tab_button_ready = false;
 
@@ -286,7 +322,7 @@ private:
     const std::optional<scraper_config::ScanParameter> end_green;
     bool end_green_fired = false;
     // Top y (frame pixels) of the green run that fired detectGreenTerminator, or -1 if it has not fired.
-    // trimScrollAreaToFactorEnd scans up from here to locate the last factor and crop the fragment stack.
+    // trimScrollAreaToFactorEnd uses it as the crop ceiling and to validate the frontier evidence.
     int green_terminator_top_pixels = -1;
 };
 

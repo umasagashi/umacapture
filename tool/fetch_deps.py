@@ -13,6 +13,12 @@ copied in by hand:
 * **ONNX Runtime 1.27.0** -> ``windows/onnxruntime`` (the official ``win-x64`` zip,
   plus two ``experimental_onnxruntime_cxx_*`` headers that live only in the source
   tree, not the release zip).
+* **FFmpeg n7.1.5 (BtbN LGPL, shared)** -> ``windows/ffmpeg`` (headers + import libs +
+  versioned DLLs). Only the CLI target links it, for the lossless FFV1 ``.mkv`` capture
+  recorder and its replay reader (``native/src/cv/ffv1_recorder.*`` / ``ffv1_reader.*``).
+  A dated BtbN autobuild tag is used so the pinned asset (git-hash in its name) is
+  immutable; ``lgpl`` (not ``gpl``) suffices because FFV1 and the matroska muxer are
+  native LGPL components.
 
 This script downloads each artifact from its official URL, verifies it against a
 pinned SHA-256, and extracts it into the exact layout CMake expects -- the same
@@ -39,9 +45,10 @@ source, no binaries) and is therefore not fetched here.
 Run it via ``uv run`` (this repo invokes Python through ``uv``, never bare
 ``python``); it uses only the standard library::
 
-    uv run tool/fetch_deps.py                 # both deps (skips ones already present)
+    uv run tool/fetch_deps.py                 # all deps (skips ones already present)
     uv run tool/fetch_deps.py --only opencv   # just OpenCV (what CI provisions)
     uv run tool/fetch_deps.py --only opencv --slim  # + prune unused OpenCV parts (CI)
+    uv run tool/fetch_deps.py --only ffmpeg --slim  # just FFmpeg, pruned (CLI FFV1 tests)
     uv run tool/fetch_deps.py --force         # re-fetch even if already present
 
 To bump a dependency version, change its ``*_URL`` and ``*_SHA256`` constants (and
@@ -68,6 +75,18 @@ OPENCV_SHA256 = "f0e98c302464d6860777a7015065e11b9b271b5394e6ba92663f0cf1fc303f2
 
 ONNX_URL = "https://github.com/microsoft/onnxruntime/releases/download/v1.27.0/onnxruntime-win-x64-1.27.0.zip"
 ONNX_SHA256 = "c5c81710938e68079ff1a192b04897faabe4b43830d48f39f27ecd4e16138bfc"
+
+# BtbN FFmpeg-Builds n7.1.5, win64, LGPL, shared. Pinned to a dated autobuild tag so the
+# asset (its name carries the git hash g7d0e842004) is immutable -- the SHA-256 below would
+# otherwise drift if it pointed at the mutable ``latest`` tag. The archive's single root
+# folder holds ``bin/ include/ lib/``. To bump: pick a newer autobuild tag's
+# ``ffmpeg-nX.Y.Z-...-win64-lgpl-shared-X.Y.zip`` asset, download it once, sha256sum it,
+# and update both constants (and the CMake DLL-version names if the major version changes).
+FFMPEG_URL = (
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-10-13-44"
+    "/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip"
+)
+FFMPEG_SHA256 = "d31de3f3c69b3f70fbe8babacea0cff8de2b51e259fc0bd0b37b3a5c0d114077"
 
 # The C++ recognizer uses ONNX Runtime's experimental C++ session wrapper, which
 # ships only in the source tree (tagged v1.27.0), not in the win-x64 release zip.
@@ -108,6 +127,21 @@ OPENCV_SLIM_PRUNE_GLOBS = (
 # The ONNX Runtime equivalent (paths relative to ``windows/onnxruntime``): its own debug
 # symbols, never symbolicated here, and ~384 MB -- dwarfing the 15 MB DLL they pair with.
 ONNX_SLIM_PRUNE_GLOBS = ("lib/*.pdb",)
+
+# FFmpeg parts the CLI never links or ships (paths relative to ``windows/ffmpeg``). We link
+# only avformat/avcodec/avutil and load their transitive DLLs (swresample, swscale); avdevice
+# and avfilter are unused, as are the ffmpeg/ffplay front-end exes. ``ffprobe.exe`` is kept for
+# the recorder's smoke-test assertions. A missing entry is skipped (see prune_tree), so a future
+# layout shift degrades to "kept" rather than erroring.
+FFMPEG_SLIM_PRUNE_DIRS = ("doc",)  # HTML manuals we never read
+FFMPEG_SLIM_PRUNE_GLOBS = (
+    "bin/ffmpeg.exe",
+    "bin/ffplay.exe",
+    "bin/avdevice-*.dll",
+    "bin/avfilter-*.dll",
+    "lib/avdevice.lib",
+    "lib/avfilter.lib",
+)
 
 
 def log(message: str) -> None:
@@ -252,11 +286,44 @@ def fetch_onnxruntime(force: bool, slim: bool) -> None:
     log(f"provisioned {target.relative_to(REPO_ROOT)}")
 
 
+def extract_ffmpeg(zip_path: Path, target: Path) -> None:
+    """Extract the BtbN FFmpeg zip so ``include/``, ``lib/`` and ``bin/`` land directly in ``target``.
+
+    The archive's single root folder (``ffmpeg-nX.Y.Z-...-shared/``) holds those three dirs, so this
+    mirrors ``extract_onnxruntime``: extract to a temp dir, then move the sole root folder's children
+    into ``windows/ffmpeg`` -- the exact ``FFMPEG_DIR`` layout ``native/CMakeLists.txt`` references.
+    """
+    import zipfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        with zipfile.ZipFile(zip_path) as archive:
+            archive.extractall(tmp_dir)
+        inner = _sole_child_dir(tmp_dir)
+        target.mkdir(parents=True)
+        for item in inner.iterdir():
+            shutil.move(str(item), str(target / item.name))
+
+
+def fetch_ffmpeg(force: bool, slim: bool) -> None:
+    """Provision windows/ffmpeg (BtbN LGPL shared build)."""
+    target = WINDOWS_DIR / "ffmpeg"
+    if not _prepare_target(target, force):
+        return
+    with tempfile.TemporaryDirectory() as tmp:
+        zip_path = Path(tmp) / "ffmpeg.zip"
+        download_verified(FFMPEG_URL, zip_path, FFMPEG_SHA256)
+        extract_ffmpeg(zip_path, target)
+    if slim:
+        prune_tree(target, FFMPEG_SLIM_PRUNE_DIRS, FFMPEG_SLIM_PRUNE_GLOBS)
+    log(f"provisioned {target.relative_to(REPO_ROOT)}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--only",
-        choices=["opencv", "onnxruntime", "all"],
+        choices=["opencv", "onnxruntime", "ffmpeg", "all"],
         default="all",
         help="provision a single dependency instead of all (default: all)",
     )
@@ -276,6 +343,8 @@ def main() -> None:
         fetch_opencv(args.force, args.slim)
     if args.only in ("onnxruntime", "all"):
         fetch_onnxruntime(args.force, args.slim)
+    if args.only in ("ffmpeg", "all"):
+        fetch_ffmpeg(args.force, args.slim)
 
 
 if __name__ == "__main__":

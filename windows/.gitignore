@@ -24,3 +24,4 @@ cmake-build-*/
 # clip is committed to the repo (pure MIT source, no binaries) and is not listed here.
 /opencv/
 /onnxruntime/
+/ffmpeg/
