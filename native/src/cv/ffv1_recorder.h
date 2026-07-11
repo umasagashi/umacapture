@@ -15,8 +15,11 @@ namespace uma::video {
 //
 // Encoding runs on its own thread (an event_util Block-mode runner), so it never stalls the capture
 // thread beyond brief backpressure. Push is safe to call from the capture listener; the Frame is cloned
-// internally, so the caller keeps ownership of its buffer. libav is hidden behind a PIMPL so translation
-// units that only *drive* the recorder (e.g. cli.cpp) never include the ffmpeg headers.
+// internally, so the caller keeps ownership of its buffer. The producer must be stopped (its runner
+// joined) BEFORE close(): push() concurrent with close() is unsupported -- a frame enqueued after the
+// drain check would be silently dropped, or block a full queue whose worker is already gone (see the
+// cli.cpp capture teardown: recorder_runner->join(), then close()). libav is hidden behind a PIMPL so
+// translation units that only *drive* the recorder (e.g. cli.cpp) never include the ffmpeg headers.
 class Ffv1Recorder {
 public:
     // Opens `path` for a stream of `size`-sized frames. `fps_hint` is only a nominal AVStream metadata

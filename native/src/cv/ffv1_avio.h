@@ -67,6 +67,11 @@ private:
     static int readPacket(void *opaque, uint8_t *buf, int buf_size) {
         auto *self = static_cast<FileAvio *>(opaque);
         self->file_.read(reinterpret_cast<char *>(buf), buf_size);
+        // badbit is a real I/O failure (not end-of-data): report EIO so a corrupted read aborts the replay
+        // instead of silently truncating it as EOF.
+        if (self->file_.bad()) {
+            return AVERROR(EIO);
+        }
         const auto count = static_cast<int>(self->file_.gcount());
         if (count == 0) {
             return AVERROR_EOF;

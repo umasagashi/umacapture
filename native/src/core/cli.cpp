@@ -69,16 +69,29 @@ void runUntilIdleThenJoin(app::NativeApi &api, ActivityMonitor &monitor) {
 // Live `capture` runs an unbounded loop, so it needs a clean stop signal: a hard kill would skip the
 // recorder's flush + matroska trailer and leave a `--record` file unfinalized. This console handler lets
 // Ctrl-C (and console close / logoff) break the loop so teardown runs. Set from the handler thread, polled
-// by the capture loop.
+// by the capture loop; g_capture_finalized is set by the capture loop once teardown is done, so the
+// handler can hold the process alive for the terminating events (see below).
 std::atomic<bool> g_capture_stop_requested{false};
+std::atomic<bool> g_capture_finalized{false};
 
 BOOL WINAPI captureConsoleHandler(DWORD ctrl_type) {
     switch (ctrl_type) {
+        // The process survives these: signal the loop and return so it finalizes on its own.
         case CTRL_C_EVENT:
-        case CTRL_BREAK_EVENT:
+        case CTRL_BREAK_EVENT: g_capture_stop_requested.store(true); return TRUE;
+        // Windows terminates the process as soon as the handler returns for these, so returning right after
+        // setting the flag would kill the process before the 100 ms capture poll ever sees it. Block this
+        // (handler-only) thread until the main thread reports teardown done; the OS enforces its own grace
+        // deadline (~5 s close / ~20 s logoff-shutdown) regardless, so this is best-effort -- a worst-case
+        // encoder drain (bounded at 30 s in Ffv1Recorder::close) can still be cut short.
         case CTRL_CLOSE_EVENT:
         case CTRL_LOGOFF_EVENT:
-        case CTRL_SHUTDOWN_EVENT: g_capture_stop_requested.store(true); return TRUE;
+        case CTRL_SHUTDOWN_EVENT:
+            g_capture_stop_requested.store(true);
+            while (!g_capture_finalized.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            return TRUE;
         default: return FALSE;
     }
 }
@@ -181,6 +194,7 @@ void captureFromScreen(
 
     // Ctrl-C / console close breaks the loop cleanly so the recorder can finalize (see captureConsoleHandler).
     g_capture_stop_requested.store(false);
+    g_capture_finalized.store(false);
     SetConsoleCtrlHandler(&captureConsoleHandler, TRUE);
     // Clear any stale stop-file so a leftover from a previous run cannot end this one immediately.
     if (!stop_file.empty()) {
@@ -217,6 +231,9 @@ void captureFromScreen(
     if (recorder) {
         recorder->close();
     }
+    // Release a console handler blocked on a terminating event (close/logoff/shutdown); the file is
+    // finalized, so the process may die now.
+    g_capture_finalized.store(true);
 }
 
 void screenshotFromScreen(const std::filesystem::path &output_path) {
