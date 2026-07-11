@@ -12,7 +12,7 @@ namespace uma::video {
 // Replays an FFV1 `.mkv` produced by Ffv1Recorder back into the recognition pipeline. Each decoded frame
 // is emitted through the same event_util::Sender the live capture and VideoLoader use, carrying its
 // original millisecond timestamp (recovered from the container PTS) so the scene begin/end debounce fires
-// on exactly the frames it did during the failed capture. Pixels round-trip bit-exact (GBRP -> BGR).
+// on exactly the frames it did during the failed capture. Pixels round-trip bit-exact (BGR0 -> BGR).
 //
 // Frames are already pipeline-input form (post capture-resize/crop), so no cropping is applied here.
 // Ingestion is paced by the downstream Block-mode queue, not by wall-clock, matching VideoLoader.

@@ -11,7 +11,7 @@ namespace uma::video {
 // Records every pushed Frame into a single lossless FFV1 matroska (`.mkv`) file, preserving each frame's
 // millisecond timestamp as a variable-frame-rate PTS. Built for reproducing a failed live capture: the
 // exact frame stream (and its inter-frame timing, which drives the recognition debounce) can be replayed
-// later via Ffv1Reader. Pixels round-trip bit-exact (GBRP planar RGB; see ffv1_pixfmt.h).
+// later via Ffv1Reader. Pixels round-trip bit-exact (BGR0 packed RGB; see ffv1_pixfmt.h).
 //
 // Encoding runs on its own thread (an event_util Block-mode runner), so it never stalls the capture
 // thread beyond brief backpressure. Push is safe to call from the capture listener; the Frame is cloned
