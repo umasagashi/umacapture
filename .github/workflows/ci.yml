@@ -47,14 +47,28 @@ jobs:
           path: windows/opencv
           key: opencv-4.13.0-windows-slim
 
-      # uv runs tool/fetch_deps.py (stdlib-only); only needed on a cache miss.
+      # FFmpeg (BtbN n7.1.5 LGPL shared) is linked only by umacapture_ffv1_tests (the FFV1 recorder/reader
+      # round-trip); umacapture_tests stays opencv-only. Cached like OpenCV; the "-slim" key matches the
+      # pruned layout. Bump this key when the ffmpeg pin in tool/fetch_deps.py changes.
+      - name: Cache FFmpeg n7.1.5
+        id: cache-ffmpeg
+        uses: actions/cache@v4
+        with:
+          path: windows/ffmpeg
+          key: ffmpeg-n7.1.5-lgpl-shared-slim
+
+      # uv runs tool/fetch_deps.py (stdlib-only); only needed when a dependency must be provisioned.
       - name: Set up uv
-        if: steps.cache-opencv.outputs.cache-hit != 'true'
+        if: steps.cache-opencv.outputs.cache-hit != 'true' || steps.cache-ffmpeg.outputs.cache-hit != 'true'
         uses: astral-sh/setup-uv@v6
 
       - name: Provision OpenCV 4.13.0
         if: steps.cache-opencv.outputs.cache-hit != 'true'
         run: uv run tool/fetch_deps.py --only opencv --slim
+
+      - name: Provision FFmpeg n7.1.5
+        if: steps.cache-ffmpeg.outputs.cache-hit != 'true'
+        run: uv run tool/fetch_deps.py --only ffmpeg --slim
 
       # Ninja + Debug are required (see native/test/README.md); asserts are live in Debug.
       - name: Configure (CMake + Ninja, Debug)
@@ -62,6 +76,10 @@ jobs:
 
       - name: Build umacapture_tests
         run: cmake --build native/cmake-build-tests --target umacapture_tests
+
+      # Separate libav-linked target for the FFV1 recorder/reader round-trip (bit-exact color + timestamps).
+      - name: Build umacapture_ffv1_tests
+        run: cmake --build native/cmake-build-tests --target umacapture_ffv1_tests
 
       # integration_golden self-skips (exit 77) here: we build only umacapture_tests, not the
       # ONNX-linked cli it drives, and the local-only clips/models are absent too -- so ctest
