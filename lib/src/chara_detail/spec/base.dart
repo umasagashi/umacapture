@@ -479,6 +479,65 @@ bool isSpecMapIncomplete(Object? raw, Object? full) {
   return false;
 }
 
+// Legacy `factor`/`skill` notation `mode` values mapped to their current
+// replacements, as `[withName, valueOnly]` — the second is used when the legacy
+// `max` was 0 (the old "value only, no name" switch). See [_upgradeLegacyNotation].
+const _legacyFactorNotationModes = <String, List<String>>{
+  'sumOnly': ['nameStarTotal', 'starTotal'],
+  'traineeAndParents': ['nameStarTotal', 'starTotal'],
+  'each': ['nameStarEach', 'starEach'],
+};
+
+// Rewrites one `notation` sub-map from a pre-content-mode payload to the current
+// format, in place. Idempotent: a map already in the current format is untouched.
+//
+// Both `factor` and `skill` notation formerly overloaded `max == 0` to mean
+// "show a single aggregate value instead of names"; that is now an explicit
+// `mode`. A legacy factor map carries a `mode` that is no longer a valid enum
+// value (so it would fail to decode); a legacy skill map has no `mode` at all
+// (so it would be flagged broken for the missing key). Both are disambiguated by
+// the `mode` value and healed here before decode and the incompleteness check.
+void _upgradeLegacyNotation(Map<String, dynamic> notation) {
+  final wasValueOnly = notation['max'] == 0;
+  final mode = notation['mode'];
+  if (mode == null) {
+    // Legacy skill notation: only ever carried `max`.
+    notation['mode'] = wasValueOnly ? 'count' : 'names';
+  } else {
+    final mapping = _legacyFactorNotationModes[mode];
+    if (mapping == null) {
+      return; // Already a current factor or skill mode.
+    }
+    notation['mode'] = wasValueOnly ? mapping[1] : mapping[0];
+  }
+  if (wasValueOnly) {
+    // The value-only modes ignore `max`, but the new UI requires it to be >= 1.
+    notation['max'] = 3;
+  }
+}
+
+// Upgrades legacy notation payloads throughout a stored spec map, recursing into
+// nested container children. Runs on the raw JSON before decode so the healed
+// map both decodes cleanly and matches the freshly encoded spec (avoiding a
+// spurious broken flag), and is then re-persisted in the current format.
+void migrateLegacyColumnSpecMap(Map<String, dynamic> specMap) {
+  final predicate = specMap['predicate'];
+  if (predicate is Map<String, dynamic>) {
+    final notation = predicate['notation'];
+    if (notation is Map<String, dynamic>) {
+      _upgradeLegacyNotation(notation);
+    }
+  }
+  final children = specMap['children'];
+  if (children is List) {
+    for (final child in children) {
+      if (child is Map<String, dynamic>) {
+        migrateLegacyColumnSpecMap(child);
+      }
+    }
+  }
+}
+
 // A column whose stored JSON could not be decoded into any known concrete spec
 // (e.g. an unknown discriminator `type`, or a value that still fails the tolerant
 // decode). Rather than drop it — which would erase the user's saved column from
@@ -642,6 +701,9 @@ class ColumnSpecSelection extends AsyncNotifier<List<ColumnSpec>> {
     bool broken = false;
     for (final d in data) {
       final map = d as Map<String, dynamic>;
+      // Heal pre-content-mode notation payloads in place so they decode cleanly,
+      // are not flagged broken for legacy shape, and re-persist in current form.
+      migrateLegacyColumnSpecMap(map);
       try {
         final spec = ColumnSpecMapper.fromMap(map);
         if (_registerBroken(spec, map)) {
