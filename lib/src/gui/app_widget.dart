@@ -239,6 +239,21 @@ class ApplicationWidget extends ConsumerStatefulWidget {
 }
 
 class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
+  @override
+  void initState() {
+    super.initState();
+    // Reclaim scratch space left over from a previous run. The native pipeline
+    // can leave scraping fragments in the temp tree when a capture is interrupted
+    // (or the app is killed), so empty it once at startup -- keeping the temp
+    // directory itself -- rather than on exit, which never runs after a crash.
+    ref.read(pathInfoLoader.future).then((info) => info.tempDir.clearSync()).catchError((
+      Object error,
+      StackTrace stackTrace,
+    ) {
+      logger.e("Failed to clear temp directory on startup.", error, stackTrace);
+    });
+  }
+
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {
     // FontWeight.index was deprecated in favor of the numeric `value` (100-900).
     // Reproduce the old index (value ~/ 100 - 1, clamped to 0..8) and step by `offset`,

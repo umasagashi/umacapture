@@ -250,6 +250,28 @@ class DirectoryPath extends PathEntity {
     }
   }
 
+  /// Deletes every entry inside this directory, leaving the (now empty)
+  /// directory itself in place.
+  ///
+  /// Used to reclaim scratch space (e.g. the `temp` tree the native pipeline
+  /// leaves scraping fragments in after an incomplete capture) without removing
+  /// the directory the app expects to exist. Each child is removed recursively
+  /// via [PathEntity.deleteSync], inheriting its file-lock retry. A missing
+  /// directory is a no-op when [emptyOk]; individual entries that fail to delete
+  /// are skipped so a single locked file does not abort the rest.
+  void clearSync({bool emptyOk = true}) {
+    if (emptyOk && !existsSync()) {
+      return;
+    }
+    for (final entry in listSync(recursive: false, followLinks: false)) {
+      try {
+        entry.deleteSync(recursive: true, emptyOk: true);
+      } catch (error, stackTrace) {
+        logger.e("Failed to delete temp entry: ${entry.path}", error, stackTrace);
+      }
+    }
+  }
+
   void deleteSyncSafeWithCheck() {
     try {
       listSync(recursive: false, followLinks: false).forEach((e) => e.deleteSync(recursive: false));
