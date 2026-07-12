@@ -1,6 +1,6 @@
-#include <map>
-
 #include "chara_detail/chara_detail_scene_scraper.h"
+
+#include <map>
 
 namespace uma::chara_detail {
 
