@@ -42,7 +42,7 @@ FactorColumnSpec _tagFactorSpec({Set<String> factorTags = const {}, Set<String> 
         logic: FactorSetLogicMode.mixed,
         subject: FactorSearchSubjectMode.family,
         element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
-        notation: FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
+        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
         factorTags: factorTags,
         skillTags: skillTags,
       ),

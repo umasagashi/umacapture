@@ -561,24 +561,49 @@
                     },
                     "notation": {
                         "mode": {
-                            "label": "星数表示",
-                            "sum_only": {
-                                "label": "合計のみ",
-                                "tooltip": "( 合計 )"
+                            "label": "表示内容",
+                            "name_only": {
+                                "label": "因子名",
+                                "tooltip": "因子名"
                             },
-                            "trainee_and_parents": {
-                                "label": "育成ウマ娘と親合計",
-                                "tooltip": "( 育成ウマ娘 / 親合計 )"
+                            "name_star_total": {
+                                "label": "因子名＋星数（家系合計）",
+                                "tooltip": "因子名( 合計 )"
                             },
-                            "each": {
-                                "label": "個別",
-                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 )"
+                            "name_star_each": {
+                                "label": "因子名＋星数（家系個別）",
+                                "tooltip": "因子名( 育成ウマ娘 / 親1 / 親2 )"
                             },
-                            "description": "セルに星数をどの粒度で表示するかを指定します。"
+                            "name_count_total": {
+                                "label": "因子名＋個数（家系合計）",
+                                "tooltip": "因子名( 所持数の合計 )"
+                            },
+                            "name_count_each": {
+                                "label": "因子名＋個数（家系個別）",
+                                "tooltip": "因子名( 育成ウマ娘 / 親1 / 親2 の所持数 )"
+                            },
+                            "star_total": {
+                                "label": "星数（家系合計）",
+                                "tooltip": "( 星数の合計 )"
+                            },
+                            "star_each": {
+                                "label": "星数（家系個別）",
+                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 の星数 )"
+                            },
+                            "count_total": {
+                                "label": "個数（家系合計）",
+                                "tooltip": "( 所持数の合計 )"
+                            },
+                            "count_each": {
+                                "label": "個数（家系個別）",
+                                "tooltip": "( 育成ウマ娘 / 親1 / 親2 の所持数 )"
+                            },
+                            "description": "セルに因子名・星数・個数のどれをどの粒度で表示するかを指定します。個数は星数を無視した所持数です。"
                         },
                         "max": {
                             "label": "表示上限数",
-                            "description": "セルに表示する因子の最大数を指定します。0 にすると個数のみ表示します。"
+                            "description": "セルに表示する因子の最大数を指定します。",
+                            "disabled_tooltip": "因子名を表示しない場合は、全因子をまとめた値を1つ表示するため設定できません。"
                         }
                     }
                 },

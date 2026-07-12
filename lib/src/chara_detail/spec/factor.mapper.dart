@@ -176,12 +176,24 @@ class FactorNotationModeMapper extends EnumMapper<FactorNotationMode> {
   @override
   FactorNotationMode decode(dynamic value) {
     switch (value) {
-      case r'sumOnly':
-        return FactorNotationMode.sumOnly;
-      case r'traineeAndParents':
-        return FactorNotationMode.traineeAndParents;
-      case r'each':
-        return FactorNotationMode.each;
+      case r'nameOnly':
+        return FactorNotationMode.nameOnly;
+      case r'nameStarTotal':
+        return FactorNotationMode.nameStarTotal;
+      case r'nameStarEach':
+        return FactorNotationMode.nameStarEach;
+      case r'nameCountTotal':
+        return FactorNotationMode.nameCountTotal;
+      case r'nameCountEach':
+        return FactorNotationMode.nameCountEach;
+      case r'starTotal':
+        return FactorNotationMode.starTotal;
+      case r'starEach':
+        return FactorNotationMode.starEach;
+      case r'countTotal':
+        return FactorNotationMode.countTotal;
+      case r'countEach':
+        return FactorNotationMode.countEach;
       default:
         throw MapperException.unknownEnumValue(value);
     }
@@ -190,12 +202,24 @@ class FactorNotationModeMapper extends EnumMapper<FactorNotationMode> {
   @override
   dynamic encode(FactorNotationMode self) {
     switch (self) {
-      case FactorNotationMode.sumOnly:
-        return r'sumOnly';
-      case FactorNotationMode.traineeAndParents:
-        return r'traineeAndParents';
-      case FactorNotationMode.each:
-        return r'each';
+      case FactorNotationMode.nameOnly:
+        return r'nameOnly';
+      case FactorNotationMode.nameStarTotal:
+        return r'nameStarTotal';
+      case FactorNotationMode.nameStarEach:
+        return r'nameStarEach';
+      case FactorNotationMode.nameCountTotal:
+        return r'nameCountTotal';
+      case FactorNotationMode.nameCountEach:
+        return r'nameCountEach';
+      case FactorNotationMode.starTotal:
+        return r'starTotal';
+      case FactorNotationMode.starEach:
+        return r'starEach';
+      case FactorNotationMode.countTotal:
+        return r'countTotal';
+      case FactorNotationMode.countEach:
+        return r'countEach';
     }
   }
 }

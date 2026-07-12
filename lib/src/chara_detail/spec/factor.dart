@@ -48,8 +48,86 @@ class FactorSearchElement with FactorSearchElementMappable {
   }
 }
 
+/// What quantity a factor cell renders: the star rating, or the possession
+/// count that ignores the star rating (presence-only).
+enum FactorNotationMetric { star, count }
+
+/// How the three lineage slots (self / parent1 / parent2) are laid out: summed
+/// into a single number, or shown as separate per-slot segments.
+enum FactorNotationGranularity { total, individual }
+
+/// The content shown in a factor cell.
+///
+/// Decomposes into three orthogonal aspects — [showsName], [metric], and
+/// [granularity] — but is stored as a single value so the cell renders from one
+/// user choice. [nameOnly] shows just the factor names; its [metric] and
+/// [granularity] are irrelevant (defaulted for completeness).
 @MappableEnum()
-enum FactorNotationMode { sumOnly, traineeAndParents, each }
+enum FactorNotationMode {
+  nameOnly,
+  nameStarTotal,
+  nameStarEach,
+  nameCountTotal,
+  nameCountEach,
+  starTotal,
+  starEach,
+  countTotal,
+  countEach,
+}
+
+extension FactorNotationModeProperties on FactorNotationMode {
+  /// Whether the factor name is rendered before the value.
+  bool get showsName {
+    switch (this) {
+      case FactorNotationMode.nameOnly:
+      case FactorNotationMode.nameStarTotal:
+      case FactorNotationMode.nameStarEach:
+      case FactorNotationMode.nameCountTotal:
+      case FactorNotationMode.nameCountEach:
+        return true;
+      case FactorNotationMode.starTotal:
+      case FactorNotationMode.starEach:
+      case FactorNotationMode.countTotal:
+      case FactorNotationMode.countEach:
+        return false;
+    }
+  }
+
+  /// Whether a value (as opposed to only the name) is rendered.
+  bool get showsValue => this != FactorNotationMode.nameOnly;
+
+  FactorNotationMetric get metric {
+    switch (this) {
+      case FactorNotationMode.nameCountTotal:
+      case FactorNotationMode.nameCountEach:
+      case FactorNotationMode.countTotal:
+      case FactorNotationMode.countEach:
+        return FactorNotationMetric.count;
+      case FactorNotationMode.nameOnly:
+      case FactorNotationMode.nameStarTotal:
+      case FactorNotationMode.nameStarEach:
+      case FactorNotationMode.starTotal:
+      case FactorNotationMode.starEach:
+        return FactorNotationMetric.star;
+    }
+  }
+
+  FactorNotationGranularity get granularity {
+    switch (this) {
+      case FactorNotationMode.nameStarEach:
+      case FactorNotationMode.nameCountEach:
+      case FactorNotationMode.starEach:
+      case FactorNotationMode.countEach:
+        return FactorNotationGranularity.individual;
+      case FactorNotationMode.nameOnly:
+      case FactorNotationMode.nameStarTotal:
+      case FactorNotationMode.nameCountTotal:
+      case FactorNotationMode.starTotal:
+      case FactorNotationMode.countTotal:
+        return FactorNotationGranularity.total;
+    }
+  }
+}
 
 @MappableClass()
 class FactorNotation with FactorNotationMappable {
@@ -93,19 +171,40 @@ class QueriedFactor {
     }).toList();
   }
 
-  String notation(FactorNotationMode mode, {int width = 1}) {
-    late final List<int> segments;
-    switch (mode) {
-      case FactorNotationMode.sumOnly:
-        segments = [self + parent1 + parent2];
-        break;
-      case FactorNotationMode.traineeAndParents:
-        segments = [self, parent1 + parent2];
-        break;
-      case FactorNotationMode.each:
-        segments = [self, parent1, parent2];
-        break;
-    }
+  /// Renders the value of a single factor (this one) for the given [metric] and
+  /// [granularity]. Shorthand for [notationOf] over `[this]`.
+  String notation(FactorNotationMetric metric, FactorNotationGranularity granularity, {int width = 1}) {
+    return notationOf([this], metric, granularity, width: width);
+  }
+
+  /// Per-slot value of a factor under [metric]: the raw star for `star`, or a
+  /// presence flag (1 when the slot holds the factor, else 0) for `count`.
+  static int _slotValue(int star, FactorNotationMetric metric) {
+    return metric == FactorNotationMetric.count ? (star >= 1 ? 1 : 0) : star;
+  }
+
+  /// Renders the aggregate value of [factors] for the given [metric] and
+  /// [granularity].
+  ///
+  /// Each slot is summed across [factors] using [_slotValue], so `count` is
+  /// evaluated per factor before summing (summing stars first and thresholding
+  /// afterwards would miscount factors that share a slot). With
+  /// [FactorNotationGranularity.total] the three slots collapse to one segment;
+  /// with [FactorNotationGranularity.individual] they stay as self / parent1 /
+  /// parent2.
+  static String notationOf(
+    List<QueriedFactor> factors,
+    FactorNotationMetric metric,
+    FactorNotationGranularity granularity, {
+    int width = 1,
+  }) {
+    final self = factors.map((e) => _slotValue(e.self, metric)).sum;
+    final parent1 = factors.map((e) => _slotValue(e.parent1, metric)).sum;
+    final parent2 = factors.map((e) => _slotValue(e.parent2, metric)).sum;
+    final segments = switch (granularity) {
+      FactorNotationGranularity.total => [self + parent1 + parent2],
+      FactorNotationGranularity.individual => [self, parent1, parent2],
+    };
     return segments.map((e) => e.toString().padLeft(width, "0")).join("/");
   }
 }
@@ -157,7 +256,7 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
       logic = FactorSetLogicMode.anyOf,
       subject = FactorSearchSubjectMode.family,
       element = FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
-      notation = FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
+      notation = FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
       factorTags = {},
       skillTags = {};
 
@@ -388,24 +487,24 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
   @override
   TrinaCell plutoCell(RefBase ref, FactorSet value) {
     final predicate = _resolved(ref);
+    final mode = predicate.notation.mode;
     final factors = _extract(predicate, value);
-    if (predicate.notation.max == 0) {
-      final q = QueriedFactor(
-        id: 0,
-        self: factors.map((e) => e.self).sum,
-        parent1: factors.map((e) => e.parent1).sum,
-        parent2: factors.map((e) => e.parent2).sum,
-      );
-      return TrinaCell(value: q.notation(predicate.notation.mode, width: 3))
-        ..setUserData(FactorCellData("(${q.notation(predicate.notation.mode)})"));
+
+    // Value-only modes render a single aggregate value across all factors, with
+    // no factor names, so the display-count limit does not apply.
+    if (!mode.showsName) {
+      final display = QueriedFactor.notationOf(factors, mode.metric, mode.granularity, width: 3);
+      final csv = QueriedFactor.notationOf(factors, mode.metric, mode.granularity);
+      return TrinaCell(value: display)..setUserData(FactorCellData("($csv)"));
     }
 
     final labels = ref.watch(labelMapProvider)[labelKey]!;
     // A factor id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
-    final notations = factors
-        .map((q) => "${labels.getOrNull(q.id) ?? q.id}(${q.notation(predicate.notation.mode)})")
-        .toList();
+    final notations = factors.map((q) {
+      final name = labels.getOrNull(q.id) ?? q.id;
+      return mode.showsValue ? "$name(${q.notation(mode.metric, mode.granularity)})" : "$name";
+    }).toList();
     final desc = notations.partial(0, predicate.notation.max).join(", ");
     return TrinaCell(value: desc)..setUserData(FactorCellData(desc, csv: const CsvEncoder().convert([notations])));
   }
@@ -860,17 +959,23 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     return FormTile(
       title: Text("$tr_factor.notation.max.label".tr()),
       description: Text("$tr_factor.notation.max.description".tr()),
-      trailing: IntStepperField(
-        min: 0,
-        max: 100,
-        value: predicate.notation.max,
-        onChanged: (value) {
-          _clonedSpecProvider.update(ref, widget.specId, (spec) {
-            return spec.copyWith(
-              predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
-            );
-          });
-        },
+      trailing: Disabled(
+        // Value-only modes render a single aggregate cell, so the per-cell
+        // factor limit has no effect and is disabled.
+        disabled: !predicate.notation.mode.showsName,
+        tooltip: "$tr_factor.notation.max.disabled_tooltip".tr(),
+        child: IntStepperField(
+          min: 1,
+          max: 100,
+          value: predicate.notation.max,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, widget.specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
+              );
+            });
+          },
+        ),
       ),
     );
   }
@@ -990,7 +1095,7 @@ class FilteredFactorColumnBuilder extends ColumnBuilder {
         logic: FactorSetLogicMode.mixed,
         subject: FactorSearchSubjectMode.family,
         element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: initialStar, count: 1),
-        notation: FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
+        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
         factorTags: initialFactorTags,
         skillTags: initialSkillTags,
       ),
@@ -1039,7 +1144,7 @@ class TagDrivenFactorColumnBuilder extends ColumnBuilder {
         logic: FactorSetLogicMode.mixed,
         subject: FactorSearchSubjectMode.family,
         element: FactorSearchElement(mode: FactorSearchElementMode.starOnly, star: 1, count: 1),
-        notation: FactorNotation(mode: FactorNotationMode.sumOnly, max: 3),
+        notation: FactorNotation(mode: FactorNotationMode.nameStarTotal, max: 3),
       ),
       selectByTag: true,
       hiddenElements: {FactorDialogElements.selectionList, FactorDialogElements.modeLogic},
