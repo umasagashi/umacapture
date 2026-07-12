@@ -28,11 +28,21 @@ const _unset = Object();
 @MappableEnum()
 enum SkillSetLogicMode { anyOf, allOf, sumOf }
 
+/// The content shown in a skill cell: the list of skill names, or the count of
+/// matched skills.
+@MappableEnum()
+enum SkillNotationMode { names, count }
+
 @MappableClass()
 class SkillNotation with SkillNotationMappable {
+  final SkillNotationMode mode;
   final int max;
 
-  SkillNotation({this.max = 3});
+  SkillNotation({this.mode = SkillNotationMode.names, this.max = 3});
+
+  SkillNotation copyWith({SkillNotationMode? mode, int? max}) {
+    return SkillNotation(mode: mode ?? this.mode, max: max ?? this.max);
+  }
 }
 
 @MappableClass()
@@ -273,7 +283,7 @@ class SkillColumnSpec extends ColumnSpec<List<Skill>> with SkillColumnSpecMappab
     // A skill id beyond a lagging module label list would throw out of plutoCell into _buildGrid and
     // blank every column; degrade to the raw id for that cell instead.
     final skillNames = foundSkills.map((e) => labels.getOrNull(e.id) ?? e.id.toString()).toList();
-    if (predicate.notation.max == 0) {
+    if (predicate.notation.mode == SkillNotationMode.count) {
       return TrinaCell(value: foundSkills.length.toString().padLeft(3, "0"))
         ..setUserData(SkillCellData(skillNames, foundSkills.length.toString()));
     }
@@ -564,22 +574,46 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
     super.dispose();
   }
 
+  Widget notationModeWidget(BuildContext context, WidgetRef ref) {
+    final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
+    return ChoiceFormLine<SkillNotationMode>(
+      title: Text("$tr_skill.notation.mode.label".tr()),
+      description: Text("$tr_skill.notation.mode.description".tr()),
+      prefix: "$tr_skill.notation.mode",
+      values: SkillNotationMode.values,
+      selected: predicate.notation.mode,
+      onSelected: (value) {
+        _clonedSpecProvider.update(ref, widget.specId, (spec) {
+          return spec.copyWith(
+            predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(mode: value)),
+          );
+        });
+      },
+    );
+  }
+
   Widget notationMaxWidget(WidgetRef ref) {
     final predicate = _clonedSpecProvider.watch(ref, widget.specId).predicate;
     return FormTile(
       title: Text("$tr_skill.notation.max.label".tr()),
       description: Text("$tr_skill.notation.max.description".tr()),
-      trailing: IntStepperField(
-        min: 0,
-        max: 100,
-        value: predicate.notation.max,
-        onChanged: (value) {
-          _clonedSpecProvider.update(ref, widget.specId, (spec) {
-            return spec.copyWith(
-              predicate: spec.predicate.copyWith(notation: SkillNotation(max: value)),
-            );
-          });
-        },
+      trailing: Disabled(
+        // The count mode renders a single number, so the per-cell skill limit
+        // has no effect and is disabled.
+        disabled: predicate.notation.mode == SkillNotationMode.count,
+        tooltip: "$tr_skill.notation.max.disabled_tooltip".tr(),
+        child: IntStepperField(
+          min: 1,
+          max: 100,
+          value: predicate.notation.max,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, widget.specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(notation: spec.predicate.notation.copyWith(max: value)),
+              );
+            });
+          },
+        ),
       ),
     );
   }
@@ -605,7 +639,10 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       title: Text("$tr_common.notation.label".tr()),
       description: Text("$tr_common.notation.description".tr()),
       children: [
-        if (!hiddenElements.contains(SkillDialogElements.notationMax)) notationMaxWidget(ref),
+        if (!hiddenElements.contains(SkillDialogElements.notationMax)) ...[
+          notationModeWidget(context, ref),
+          notationMaxWidget(ref),
+        ],
         notationTitleWidget(ref),
         ColumnVisibilitySwitch(specId: widget.specId, onDecided: widget.onDecided),
         ColumnDescriptionField(specId: widget.specId, onDecided: widget.onDecided),
