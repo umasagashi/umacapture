@@ -1254,6 +1254,41 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
     } else {
       sortDescending(col);
     }
+    applyCaptureDateTiebreak(col, order);
+  }
+
+  /// Breaks ties in the current column sort by the record's capture date.
+  ///
+  /// trina compares only a single column's cell value, so rows trina considers
+  /// equal (e.g. same trained date, which is stored at day granularity) keep an
+  /// undefined relative order — its comparator returns 0 on ties and Dart's
+  /// [List.sort] is not stable. This re-sorts [refRows] reusing [col]'s own
+  /// comparator as the primary key (so the visible ordering is unchanged) and
+  /// disambiguates ties by [Metadata.capturedDate], mirroring [order] so a
+  /// descending sort reverses the tie order too. A no-op for
+  /// [TrinaColumnSort.none], which restores the canonical insertion order.
+  void applyCaptureDateTiebreak(TrinaColumn col, TrinaColumnSort order) {
+    if (order == TrinaColumnSort.none) {
+      return;
+    }
+    final field = col.field;
+    final descending = order == TrinaColumnSort.descending;
+    int compareRows(TrinaRow a, TrinaRow b) {
+      final primary = col.type.compare(a.cells[field]!.valueForSorting, b.cells[field]!.valueForSorting);
+      final signedPrimary = descending ? -primary : primary;
+      if (signedPrimary != 0) {
+        return signedPrimary;
+      }
+      final aDate = a.getUserData<CharaDetailRecord>()?.metadata.capturedDate;
+      final bDate = b.getUserData<CharaDetailRecord>()?.metadata.capturedDate;
+      if (aDate == null || bDate == null) {
+        return 0;
+      }
+      final tie = aDate.toDateTime().compareTo(bDate.toDateTime());
+      return descending ? -tie : tie;
+    }
+
+    refRows.sort(compareRows);
   }
 
   void sortColumnByField(String columnField, TrinaColumnSort sortOrder) {
