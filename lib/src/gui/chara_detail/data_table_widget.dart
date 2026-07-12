@@ -604,9 +604,8 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     }
     switch (order) {
       case TrinaColumnSort.ascending:
-        stateManager.sortAscending(column);
       case TrinaColumnSort.descending:
-        stateManager.sortDescending(column);
+        stateManager.sortColumn(column, order);
       case TrinaColumnSort.none:
         stateManager.sortBySortIdx(column);
     }
@@ -1098,6 +1097,10 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                       sortColumn = event.column.field;
                       sortOrder = event.column.sort;
                     }
+                    // A header click runs trina's own per-column sort, which
+                    // leaves same-day (tied) rows in an undefined order. Re-break
+                    // those ties by capture date, mirroring the sort direction.
+                    stateManager.applyCaptureDateTiebreak(event.column, event.column.sort);
                     // A header-click sort reorders the frozen rows in place
                     // (FilteredList.sort works on originalList), but unlike
                     // _reconcile/onLoaded it doesn't rebuild the pinned index, so

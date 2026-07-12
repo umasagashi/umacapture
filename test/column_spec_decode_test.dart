@@ -27,7 +27,7 @@ Map<String, dynamic> completeFactorMap() => <String, dynamic>{
     'logic': 'anyOf',
     'subject': 'family',
     'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
-    'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
+    'notation': <String, dynamic>{'mode': 'nameStarTotal', 'max': 3},
     'factorTags': <String>[],
     'skillTags': <String>[],
   },

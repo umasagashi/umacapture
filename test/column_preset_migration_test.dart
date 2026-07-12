@@ -35,7 +35,7 @@ Map<String, dynamic> legacyFactorMap(String id) => <String, dynamic>{
     'logic': 'anyOf',
     'subject': 'family',
     'element': <String, dynamic>{'mode': 'starOnly', 'star': 1, 'count': 1},
-    'notation': <String, dynamic>{'mode': 'sumOnly', 'max': 3},
+    'notation': <String, dynamic>{'mode': 'nameStarTotal', 'max': 3},
   },
   'showAllWhenQueryIsEmpty': true,
   'showAvailableOnly': true,

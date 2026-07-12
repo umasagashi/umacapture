@@ -214,8 +214,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
   /// existing columns onto them after creation) provide one.
   String? categoryDescription(ColumnCategory cat) {
     final key = "$tr_chara_detail.column_spec.dialog.category_description.${cat.name.snakeCase}";
-    final text = key.tr();
-    return text == key ? null : text;
+    return key.trExists() ? key.tr() : null;
   }
 
   @override

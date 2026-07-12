@@ -57,6 +57,52 @@ extension SkillSetLogicModeMapperExtension on SkillSetLogicMode {
   }
 }
 
+class SkillNotationModeMapper extends EnumMapper<SkillNotationMode> {
+  SkillNotationModeMapper._();
+
+  static SkillNotationModeMapper? _instance;
+  static SkillNotationModeMapper ensureInitialized() {
+    if (_instance == null) {
+      MapperContainer.globals.use(_instance = SkillNotationModeMapper._());
+    }
+    return _instance!;
+  }
+
+  static SkillNotationMode fromValue(dynamic value) {
+    ensureInitialized();
+    return MapperContainer.globals.fromValue(value);
+  }
+
+  @override
+  SkillNotationMode decode(dynamic value) {
+    switch (value) {
+      case r'names':
+        return SkillNotationMode.names;
+      case r'count':
+        return SkillNotationMode.count;
+      default:
+        throw MapperException.unknownEnumValue(value);
+    }
+  }
+
+  @override
+  dynamic encode(SkillNotationMode self) {
+    switch (self) {
+      case SkillNotationMode.names:
+        return r'names';
+      case SkillNotationMode.count:
+        return r'count';
+    }
+  }
+}
+
+extension SkillNotationModeMapperExtension on SkillNotationMode {
+  String toValue() {
+    SkillNotationModeMapper.ensureInitialized();
+    return MapperContainer.globals.toValue<SkillNotationMode>(this) as String;
+  }
+}
+
 class SkillDialogElementsMapper extends EnumMapper<SkillDialogElements> {
   SkillDialogElementsMapper._();
 
@@ -122,6 +168,7 @@ class SkillNotationMapper extends ClassMapperBase<SkillNotation> {
   static SkillNotationMapper ensureInitialized() {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = SkillNotationMapper._());
+      SkillNotationModeMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -129,6 +176,13 @@ class SkillNotationMapper extends ClassMapperBase<SkillNotation> {
   @override
   final String id = 'SkillNotation';
 
+  static SkillNotationMode _$mode(SkillNotation v) => v.mode;
+  static const Field<SkillNotation, SkillNotationMode> _f$mode = Field(
+    'mode',
+    _$mode,
+    opt: true,
+    def: SkillNotationMode.names,
+  );
   static int _$max(SkillNotation v) => v.max;
   static const Field<SkillNotation, int> _f$max = Field(
     'max',
@@ -138,10 +192,13 @@ class SkillNotationMapper extends ClassMapperBase<SkillNotation> {
   );
 
   @override
-  final MappableFields<SkillNotation> fields = const {#max: _f$max};
+  final MappableFields<SkillNotation> fields = const {
+    #mode: _f$mode,
+    #max: _f$max,
+  };
 
   static SkillNotation _instantiate(DecodingData data) {
-    return SkillNotation(max: data.dec(_f$max));
+    return SkillNotation(mode: data.dec(_f$mode), max: data.dec(_f$max));
   }
 
   @override
