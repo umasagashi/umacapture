@@ -143,7 +143,6 @@
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
     "stationary_color_threshold": 100,
-    "viewport": 0.738,
     "cap_offset": 0.00126,
     "scroll_bar_margin_color": {
       "min": {
@@ -312,7 +311,6 @@
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
     "stationary_color_threshold": 100,
-    "viewport": 0.553,
     "cap_offset": 0.00126,
     "scroll_bar_margin_color": {
       "min": {

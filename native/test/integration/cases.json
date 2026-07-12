@@ -19,6 +19,7 @@
     { "name": "player_standard_sequential", "video": "player_standard_sequential.mp4", "golden": "golden/player_standard_sequential.json" },
     { "name": "player_standard_2", "video": "player_standard_2.mp4", "golden": "golden/player_standard_2.json" },
     { "name": "player_standard_3", "video": "player_standard_3.mp4", "golden": "golden/player_standard_3.json" },
-    { "name": "player_standard_4", "video": "player_standard_4.mp4", "golden": "golden/player_standard_4.json" }
+    { "name": "player_standard_4", "video": "player_standard_4.mp4", "golden": "golden/player_standard_4.json" },
+    { "name": "player_standard_5", "video": "player_standard_5.mkv", "golden": "golden/player_standard_5.json" }
   ]
 }

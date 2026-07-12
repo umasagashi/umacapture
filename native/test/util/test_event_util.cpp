@@ -79,7 +79,7 @@ TEST_CASE("a NoLimit queued connection keeps every enqueued event") {
 }
 
 TEST_CASE("a Discard queued connection drops sends past its depth limit") {
-    // The limit is 3 (queue_limit_size); the 4th and 5th sends find the queue full and are dropped.
+    // The limit is 3 (kDefaultQueueLimitSize); the 4th and 5th sends find the queue full and are dropped.
     const auto connection = makeQueuedConnection<int>(Discard);
     std::vector<int> received;
     connection->listen([&](int value) { received.push_back(value); });
@@ -90,6 +90,21 @@ TEST_CASE("a Discard queued connection drops sends past its depth limit") {
     drainQueued(connection);
 
     CHECK(received == std::vector<int>{0, 1, 2});
+}
+
+TEST_CASE("a Discard queued connection honors a per-connection depth limit") {
+    // The frame-path runners pass a deeper limit than the default (see native_api.cpp); the depth must
+    // be per-connection, not the compiled-in default.
+    const auto connection = makeQueuedConnection<int>(Discard, 5);
+    std::vector<int> received;
+    connection->listen([&](int value) { received.push_back(value); });
+
+    for (int i = 0; i < 8; i++) {
+        connection->send(i);
+    }
+    drainQueued(connection);
+
+    CHECK(received == std::vector<int>{0, 1, 2, 3, 4});
 }
 
 TEST_CASE("a Block queued connection back-pressures the producer without dropping") {

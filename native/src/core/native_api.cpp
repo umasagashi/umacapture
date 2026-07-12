@@ -61,16 +61,26 @@ void NativeApi::startPipeline(const std::string &native_config) {
 
     const auto queue_limit_mode = video_mode ? event_util::QueueLimitMode::Block : event_util::QueueLimitMode::Discard;
 
+    // Frame-path queue depth (recorder -> distributor -> scraper). Deeper than the default so live
+    // (Discard) capture rides out transient per-frame spikes -- the scraper's offset estimation sits
+    // near the 33 ms frame budget at p95, and occasional AKAZE/scheduling spikes would otherwise drop
+    // frames a depth-3 queue cannot absorb. Sustained overload still degrades to frame thinning (by
+    // design); the costs of the extra depth are bounded staleness (8 frames ~ 270 ms at 30 fps) and a
+    // few refcounted frames of RAM. Video (Block) mode is unaffected in outcome: depth only changes
+    // read-ahead.
+    constexpr size_t frame_queue_limit_size = 8;
+
     assert_(event_runners == nullptr);
     event_runners = event_util::makeRunnerController();
 
     const auto distributor_runner =
-        event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "distributor");
+        event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "distributor", frame_queue_limit_size);
     event_runners->add(distributor_runner);
     const auto frame_captured_connection = distributor_runner->makeConnection<Frame>();
     on_frame_captured = frame_captured_connection;
 
-    const auto scraper_runner = event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "scraper");
+    const auto scraper_runner =
+        event_util::makeSingleThreadRunner(queue_limit_mode, detach_callback, "scraper", frame_queue_limit_size);
     event_runners->add(scraper_runner);
 
     const auto chara_detail_updated_connection = scraper_runner->makeConnection<Frame, chara_detail::SceneState>();
