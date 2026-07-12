@@ -4,12 +4,13 @@ description: >-
   Build, run, log, and debug the C++ capture/recognition backend in native/ as a
   standalone CLI (umacapture_cli) from the command line, without CLion. Sets up
   the MSVC toolchain via vcvars64, configures CMake with Ninja (Debug/Release),
-  runs the build / capture / video / stitch / recognize subcommands, explains the
-  spdlog output and which subcommands self-terminate vs. run a live event loop,
-  and steps through the binary with the cdb command-line debugger. Use when the user wants
-  to build, rebuild, run, inspect logs from, or debug the native CLI, regenerate
-  the assets/config/*.json scene definitions, or test capture/recognition logic
-  outside the Flutter app.
+  runs the build / capture / screenshot / video / replay / stitch / recognize
+  subcommands, explains the spdlog output and which subcommands self-terminate
+  vs. run a live event loop, and steps through the binary with the cdb
+  command-line debugger. Use when the user wants to build, rebuild, run, inspect
+  logs from, or debug the native CLI, regenerate the assets/config/*.json scene
+  definitions, record or replay FFV1 capture recordings, or test
+  capture/recognition logic outside the Flutter app.
 ---
 
 # Build, run, and debug the native C++ CLI (umacapture_cli)
@@ -39,16 +40,23 @@ and uses WinRT screen capture). Generator is **Ninja**, compiler is **MSVC
   `CMakeLists.txt` via `OpenCV_DIR`).
 - **ONNX Runtime 1.27.0** at `windows/onnxruntime` (headers in `include/`,
   `onnxruntime.lib`/`.dll` in `lib/`).
+- **FFmpeg n7.1.5 (BtbN LGPL shared)** at `windows/ffmpeg` (headers, import libs,
+  and versioned `av*`/`sw*` DLLs). The CLI links `avformat`/`avcodec`/`avutil`
+  directly for the FFV1 capture recorder and `replay` reader
+  (`src/cv/ffv1_*.{h,cpp}`); the separate `umacapture_ffv1_tests` target links it
+  too. The Flutter app target does **not** link it.
 
-These two dependency dirs are **gitignored** (`windows/.gitignore` excludes
-`/opencv/`, `/onnxruntime/`) because they are large prebuilt binaries. Provision
-them into the layout above by running `uv run tool/fetch_deps.py` (downloads the
-official prebuilts, hash-verified) -- see the **project-setup** skill for
-details. A fresh checkout must do this before the native build can configure
-(OpenCV is the hard requirement: `find_package(OpenCV REQUIRED)`; onnxruntime is
-only linked by the cli/app targets, not `umacapture_tests`). The third native
-dependency, `windows/clip`, is committed to the repo, so no fetch is needed. CI
-provisions OpenCV with the same script (see `.github/workflows/ci.yml`).
+These three dependency dirs are **gitignored** (`windows/.gitignore` excludes
+`/opencv/`, `/onnxruntime/`, `/ffmpeg/`) because they are large prebuilt
+binaries. Provision them into the layout above by running
+`uv run tool/fetch_deps.py` (downloads the official prebuilts, hash-verified) --
+see the **project-setup** skill for details. A fresh checkout must do this before
+the native build can configure (OpenCV is the hard requirement:
+`find_package(OpenCV REQUIRED)`; ffmpeg is required to link the CLI and
+`umacapture_ffv1_tests`; onnxruntime is only linked by the cli/app targets, not
+the test targets). The fourth native dependency, `windows/clip`, is committed to
+the repo, so no fetch is needed. CI provisions OpenCV and FFmpeg with the same
+script (see `.github/workflows/ci.yml`).
 
 ## Key fact: the MSVC environment is mandatory
 
@@ -106,9 +114,10 @@ Notes:
   longer matches the vcvars environment). Configure a new dir instead. (You can
   still *run* the pre-built exe that already sits in a CLion dir — see the
   `recognize`/`stitch` test-input note — just don't reconfigure/rebuild into it.)
-- A `POST_BUILD` step auto-copies the matching `opencv_world4130[d].dll` and
-  `onnxruntime.dll` next to the exe, so the exe runs from its own build dir
-  without PATH changes.
+- A `POST_BUILD` step auto-copies the matching `opencv_world4130[d].dll`,
+  `onnxruntime.dll`, the OpenCV videoio FFmpeg plugin, and the libav runtime
+  DLLs next to the exe, so the exe runs from its own build dir without PATH
+  changes (see the runtime-DLL note under **Running the CLI**).
 - Incremental rebuilds: re-run only `cmake --build <dir>` (still inside vcvars).
 - Cleanup gotcha: after a build, `mspdbsrv.exe` / `vctip.exe` linger and lock
   the build dir. Kill them (or just wait) before deleting a build directory.
@@ -122,13 +131,21 @@ those `../../` paths resolve to the repo root only from inside `native/<build-di
 
 Subcommands (see `src/core/cli.cpp`):
 
-| Subcommand  | Purpose | Example args |
-|-------------|---------|--------------|
-| `build`     | Regenerate the scene-definition JSONs from the C++ builders, round-trip-verifying each. | `build --assets_dir C:\Projects\umacapture\assets\config` |
-| `capture`   | Live capture from the game window on screen (WinRT recorder). | `capture` |
-| `video`     | Run capture against recorded video files. | `video --video_path_list "C:\Projects\umacapture\sandbox\inheritance_only_1.mp4"` |
-| `stitch`    | Stitch previously scraped images for one record id. | `stitch --id <uuid>` |
-| `recognize` | Run the recognizer over stitched images. | `recognize --id <uuid> [<uuid> ...]` |
+| Subcommand   | Purpose | Example args |
+|--------------|---------|--------------|
+| `build`      | Regenerate the scene-definition JSONs from the C++ builders, round-trip-verifying each. | `build --assets_dir C:\Projects\umacapture\assets\config` |
+| `capture`    | Live capture from the game window on screen (WinRT recorder). Optionally records every captured frame + timestamp to a lossless FFV1 `.mkv` for later `replay`. | `capture [--record out.mkv] [--duration 300] [--stop-file stop.flag]` |
+| `screenshot` | Capture a single screenshot from the game window. | `screenshot --output shot.png` |
+| `video`      | Run capture against recorded video files. | `video --video_path_list "C:\Projects\umacapture\sandbox\inheritance_only_1.mp4"` |
+| `replay`     | Re-feed a recorded FFV1 `.mkv` (from `capture --record`) through the recognition pipeline, preserving the original frame timestamps. | `replay --record "C:\...\run.mkv"` |
+| `stitch`     | Stitch previously scraped images for one record id. | `stitch --id <uuid>` |
+| `recognize`  | Run the recognizer over stitched images. | `recognize --id <uuid> [<uuid> ...]` |
+
+The one-shot pipeline subcommands (`video` / `replay` / `stitch` / `recognize`)
+also accept `--assets_dir`, `--modules_dir`, and `--output_dir`; the defaults
+reproduce the historical cwd-relative behavior (`../../assets/config`,
+`../../sandbox/modules`, `.`), so passing absolute paths makes a run independent
+of the working directory.
 
 Example (a harmless smoke test — `--help`, plus `build` into a throwaway dir):
 
@@ -143,16 +160,20 @@ umacapture_cli.exe build --assets_dir .\smoke_assets
 > place.** Only do that when you intend to regenerate them (see the `build`
 > section below); for a smoke test write to a throwaway dir as shown.
 
-### Self-termination: only `capture` runs forever; the rest exit on their own
+### Self-termination: only `capture` runs until stopped; the rest exit on their own
 
-`build` returns as soon as it finishes. `stitch` / `recognize` / `video` start
-`NativeApi`'s event loop, submit their work, then wait until the pipeline goes
-quiet — no notification for ~10s, an idle-grace window in `runUntilIdleThenJoin`
-(`src/core/cli.cpp`) — and then join the event loop and **exit on their own with
-code 0**. No need to watch for an artifact and kill them; just wait (a one-shot
-`recognize` typically exits ~10–13s after the work completes). Only `capture`
-(live screen capture) runs indefinitely and must be stopped with Ctrl-C /
-`Stop-Process -Name umacapture_cli -Force`.
+`build` and `screenshot` return as soon as they finish. `stitch` / `recognize` /
+`video` / `replay` start `NativeApi`'s event loop, submit their work, then wait
+until the pipeline goes quiet — no notification for ~10s, an idle-grace window in
+`runUntilIdleThenJoin` (`src/core/cli.cpp`) — and then join the event loop and
+**exit on their own with code 0**. No need to watch for an artifact and kill
+them; just wait (a one-shot `recognize` typically exits ~10–13s after the work
+completes). Only `capture` (live screen capture) runs indefinitely by default.
+Stop it with Ctrl-C, or — for scripted control — pass `--duration <seconds>`
+and/or `--stop-file <path>` (capture ends cleanly when the file appears). All
+three stop paths run full teardown, including finalizing an in-progress
+`--record` file; a hard `Stop-Process` kill instead leaves the `.mkv`
+un-finalized, so avoid it when recording.
 
 Because these now exit gracefully, they run full teardown — the event-loop join
 plus the `NativeApi` atexit destructor — a path that force-killing them never
@@ -172,12 +193,17 @@ commit them as the build artifact. (The round-trip `assert_` is only active in a
 Debug build — see Debugging.) With an absolute `--assets_dir`, `build` does not
 depend on the working directory, unlike the event-loop subcommands.
 
-### `video` subcommand needs the FFmpeg DLL
+### Runtime DLLs are auto-copied (including the video/FFmpeg ones)
 
-OpenCV decodes video via `opencv_videoio_ffmpeg4130_64.dll`, which the POST_BUILD
-step does **not** copy. For the `video` subcommand, copy it manually from
-`windows/opencv/build/x64/vc16/bin/opencv_videoio_ffmpeg4130_64.dll` into the
-build dir (alongside the exe). The other subcommands don't need it.
+A `POST_BUILD` step copies everything the exe needs next to it: the matching
+`opencv_world4130[d].dll`, `onnxruntime.dll`, OpenCV's video decoder plugin
+`opencv_videoio_ffmpeg4130_64.dll` (used by the `video` subcommand), and the
+libav runtime DLLs (`av*.dll` / `sw*.dll` from `windows/ffmpeg/bin`, used by
+`capture --record` / `replay`). No manual DLL copying is needed. One caveat: the
+copied videoio plugin is the release-named one; a **Debug** build's
+`opencv_world4130d.dll` looks for the `d`-suffixed plugin name, so if a Debug
+`video` run stops decoding early (progress stalls near 0), duplicate the DLL as
+`opencv_videoio_ffmpeg4130_64d.dll` in the build dir.
 
 ### `video` subcommand: automatic horizontal vs. vertical crop
 
@@ -213,8 +239,7 @@ The CLion run configs in `native/.idea/workspace.xml` recorded working inputs
 that still exist in the repo:
 
 - **`video`** — `sandbox/inheritance_only_1.mp4` (and many other `sandbox/*.mp4`
-  clips). Needs the FFmpeg DLL (see the `video` note above). Verified: it decodes
-  the clip and writes scraped scene dirs under
+  clips). Verified: it decodes the clip and writes scraped scene dirs under
   `<build-dir>/temp/chara_detail/<uuid>/`.
 - **`recognize`** / **`stitch`** — operate on record ids under
   `<build-dir>/storage/chara_detail/active/<uuid>/`. The committed CLion **debug**
@@ -253,11 +278,11 @@ what bites when you kill an event-loop subcommand. On Windows:
   (`set_level(trace)`) is already permissive, so the macro is the only gate.
 - **Buffering gotcha:** `flush_on(warn)` + `flush_every(5s)`. WARN and above
   flush immediately; DEBUG/INFO can sit in the buffer up to 5 seconds. This bites
-  the one subcommand you still kill, `capture`: **the last few seconds of buffered
-  DEBUG/INFO can be lost** when you `Stop-Process` it. `stitch` / `recognize` /
-  `video` now exit gracefully, so their final `spdlog::drop_all()` flushes the
-  tail. If you need the tail of a killed `capture`, log at WARN or wait for a
-  flush before killing.
+  a hard-killed `capture`: **the last few seconds of buffered DEBUG/INFO can be
+  lost** when you `Stop-Process` it. Every graceful exit (`stitch` / `recognize` /
+  `video` / `replay`, and `capture` via Ctrl-C / `--stop-file` / `--duration`)
+  runs the final `spdlog::drop_all()`, which flushes the tail. If you must
+  hard-kill and need the tail, log at WARN or wait for a flush first.
 
 ## Debugging
 
@@ -281,7 +306,8 @@ A Debug build differs from Release in three ways that matter:
   pipeline, **only fire in a Debug build**. A failed `assert_` calls `_wassert`,
   which pops the abort/retry/ignore dialog and breaks into an attached debugger.
 - POST_BUILD copies the debug OpenCV DLL (`opencv_world4130d.dll`) instead of the
-  release one. (FFmpeg DLL is still not copied — see the `video` note above.)
+  release one. (The videoio FFmpeg plugin and libav DLLs are copied too — see the
+  runtime-DLL note above for the Debug `d`-suffix caveat on the videoio plugin.)
 
 (The compile-time log level floor is independent of build type — see **Logs**.)
 

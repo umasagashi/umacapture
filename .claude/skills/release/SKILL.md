@@ -2,26 +2,35 @@
 name: release
 description: >-
   Cut a new umacapture release end to end: bump the app version in pubspec.yaml,
-  regenerate the version/license assets via build_runner, commit and tag on
-  develop, then build and publish the Windows exe + zip to a GitHub release with
-  flutter_distributor. Covers the two phases (version bump + codegen, then
-  flutter_distributor deploy), the FVM/Inno Setup/GITHUB_TOKEN prerequisites, and
-  the known-broken global flutter_distributor activation under Dart 3.12. Use
-  when the user wants to release, ship, publish, or bump the app version and push
-  a new build to GitHub releases.
+  regenerate the version/license assets via build_runner, land the bump on the
+  protected develop branch via a release/v<version> PR, tag the merge commit,
+  then build and publish the Windows exe + zip to a GitHub release with
+  flutter_distributor. Covers the two phases (version bump + codegen + PR merge,
+  then tag + flutter_distributor deploy), the FVM/Inno Setup/GITHUB_TOKEN
+  prerequisites, and the known-broken global flutter_distributor activation
+  under Dart 3.12. Use when the user wants to release, ship, publish, or bump
+  the app version and push a new build to GitHub releases.
 ---
 
 # Release umacapture (version bump → codegen → flutter_distributor publish)
 
 A release has two phases:
 
-1. **Version bump + codegen + commit/push** — edit `pubspec.yaml` `version:`, run
-   `build_runner` (which regenerates `assets/version_info.json`, and
-   `assets/license_info.json` when dependencies changed), then commit and push to
-   `develop` to lock in the release commit before any build/publish work.
-2. **Tag + deploy** — tag the pushed commit, then `flutter_distributor` builds the
-   Windows installer (Inno Setup `exe`) and a `zip`, and publishes both as assets
-   on a GitHub release of `umasagashi/umacapture`.
+1. **Version bump + codegen + merge to develop** — edit `pubspec.yaml` `version:`,
+   run `build_runner` (which regenerates `assets/version_info.json`, and
+   `assets/license_info.json` when dependencies changed), then land the release
+   commit on `develop` **via a pull request** (see below) to lock it in before any
+   build/publish work.
+2. **Tag + deploy** — tag the merged `develop` commit, then `flutter_distributor`
+   builds the Windows installer (Inno Setup `exe`) and a `zip`, and publishes both
+   as assets on a GitHub release of `umasagashi/umacapture`.
+
+> **`develop` is a protected branch** (GitHub branch protection requires the two
+> CI status checks — `Flutter unit/widget tests` and `Native C++ tests (doctest)`
+> — to pass). A direct `git push origin develop` is **rejected by the remote**
+> regardless of local permission, so the version bump must go through a PR that is
+> merged once CI is green. Use a **merge commit** (`gh pr merge --merge`), not
+> squash, so the tagged commit is the exact commit that was reviewed.
 
 This skill runs the whole pipeline through the GitHub publish. Stop and ask the
 user if any preflight check fails.
@@ -54,14 +63,16 @@ user if any preflight check fails.
 ## Preflight (run these checks first)
 
 All commands use the FVM-pinned toolchain. The global `flutter` on PATH already
-resolves to the FVM default (3.44.0), but verify rather than assume.
+resolves to the FVM default, but verify rather than assume.
 
-1. **Flutter SDK is the pinned 3.44.0** — `flutter_distributor` shells out to
-   `flutter build windows`, so the PATH `flutter` must be the pinned one:
+1. **Flutter SDK is the pinned version** (`.fvmrc`, currently 3.44.4) —
+   `flutter_distributor` shells out to `flutter build windows`, so the PATH
+   `flutter` must be the pinned one:
    ```bash
-   flutter --version    # expect Flutter 3.44.0 / Dart 3.12.0
+   cat .fvmrc           # the pinned version
+   flutter --version    # must match it (currently Flutter 3.44.4 / Dart 3.12)
    ```
-   If it is not 3.44.0, prepend `.fvm/flutter_sdk/bin` to PATH for the session.
+   If it does not match, prepend `.fvm/flutter_sdk/bin` to PATH for the session.
 
 2. **Inno Setup `iscc` is available** (needed by the `exe` job):
    ```bash
@@ -103,7 +114,7 @@ resolves to the FVM default (3.44.0), but verify rather than assume.
    (`umasagashi` / `umacapture-release`); the token is passed via the
    `SENTRY_AUTH_TOKEN` env var, never on the command line.
 
-## Phase 1 — version bump + codegen + commit/push
+## Phase 1 — version bump + codegen + merge to develop
 
 1. Pick the new version with the user (semver, e.g. `0.0.11`; no leading `v`).
    The builder validates it with `Version.parse`, so it must be valid semver.
@@ -129,37 +140,66 @@ resolves to the FVM default (3.44.0), but verify rather than assume.
    `assets/license_info.json` and `assets/license/*.txt` change only when
    dependencies changed since the last release.
 
-Commit and push **at the end of Phase 1** to lock in the release commit before
-any build/publish work. The user-instructed version bump may be committed and
-pushed **directly to `develop`** (an explicit exception to the no-direct-push
-rule, granted for this release flow).
+Land the release commit on `develop` **at the end of Phase 1**, before any
+build/publish work. Because `develop` is protected (see the note at the top), this
+goes through a short-lived `release/v<version>` PR — a direct push is rejected by
+the remote.
 
-5. Commit on `develop` (title matches the project's history, "Bump app version"):
+5. Commit on a `release/v<version>` branch (title matches the project's history,
+   "Bump app version"). Stage `pubspec.yaml`, `assets/version_info.json`, and any
+   regenerated `assets/license_info.json` / `assets/license/*.txt`:
    ```bash
+   git switch -c release/v<version>
+   git add pubspec.yaml assets/version_info.json   # add license_info.json / license/*.txt if changed
    git commit -F - <<'EOF'
    Bump app version
 
-   Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+   Co-Authored-By: Claude <noreply@anthropic.com>
    EOF
    ```
-   Stage `pubspec.yaml`, `assets/version_info.json`, and any regenerated
-   `assets/license_info.json` / `assets/license/*.txt`.
-6. Push `develop`:
+   (Replace the `Co-Authored-By` line with the standard trailer for whichever
+   Claude model is running the release.)
+6. Push the branch and open a PR against `develop`:
    ```bash
-   git push origin develop
+   git push origin release/v<version>
+   gh pr create --base develop --head release/v<version> \
+     --title "chore: bump app version to <version>" --body-file - <<'EOF'
+   ## Summary
+
+   Bump the app version to `<version>` for the `v<version>` release.
+
+   ## Testing
+
+   Ran `dart run build_runner build --force-jit`; `assets/version_info.json`
+   reads `<version>`.
+
+   🤖 Generated with [Claude Code](https://claude.com/claude-code)
+   EOF
+   ```
+7. Wait for the two required checks to go green, then merge with a **merge
+   commit** (not squash — the tagged commit must be the reviewed one). Deleting
+   the branch keeps the ref namespace clean:
+   ```bash
+   gh pr checks <pr-number> --watch --interval 30
+   gh pr merge <pr-number> --merge --delete-branch
+   ```
+   Then sync local `develop` to the merge commit so the tag in Phase 2 points at
+   the right place:
+   ```bash
+   git switch develop && git pull --ff-only origin develop
    ```
 
 ## Phase 2 — tag + publish
 
-The Phase 1 commit is now fixed on the remote. Tag it and publish; the GitHub
+The Phase 1 merge commit is now on `develop`. Tag it and publish; the GitHub
 release the publisher creates attaches to the pushed `v<version>` tag.
 
-7. Create the annotated tag and push it:
+8. Create the annotated tag and push it:
    ```bash
    git tag -a "v<version>" -m "v<version>"
    git push origin "v<version>"
    ```
-8. Build and publish (packages both jobs and uploads to the GitHub release):
+9. Build and publish (packages both jobs and uploads to the GitHub release):
    ```bash
    .fvm/flutter_sdk/bin/dart pub global run flutter_distributor:main \
      release --name windows
@@ -169,10 +209,10 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 
    flutter_distributor runs `flutter build windows --release` internally, so the
    fresh, matching PDBs are now sitting in `build/windows/x64/runner/Release/`.
-   Do step 8.5 **before** anything cleans `build/` — the debug-ids must match the
+   Do step 9.5 **before** anything cleans `build/` — the debug-ids must match the
    exe that was just packaged, and they cannot be regenerated later.
 
-8.5. Upload debug symbols so Sentry can symbolicate this build's native crashes.
+9.5. Upload debug symbols so Sentry can symbolicate this build's native crashes.
    Two files matter: `umacapture.pdb` (covers the runner **and** the native C++
    backend, which is linked straight into the exe) and the engine's
    `flutter_windows.dll.pdb` (already in the FVM SDK cache — no download). Third-
@@ -189,14 +229,14 @@ release the publisher creates attaches to the pushed `v<version>` tag.
    with `sentry-cli debug-files check build/windows/x64/runner/Release/umacapture.exe`
    — if the Debug ID is absent, the `/DEBUG` link flags in
    `windows/runner/CMakeLists.txt` regressed and symbols will never match.
-9. Attach `version_info.json` as a release asset. flutter_distributor only
+10. Attach `version_info.json` as a release asset. flutter_distributor only
    uploads the packaged exe/zip, so add this lightweight file separately (it lets
    a client read the published version without downloading a build). `--clobber`
    makes the step idempotent across re-runs:
    ```bash
    gh release upload "v<version>" assets/version_info.json --clobber
    ```
-10. Verify the release — all three assets present and `isPrerelease` true:
+11. Verify the release — all three assets present and `isPrerelease` true:
     ```bash
     gh release view "v<version>" --json tagName,isPrerelease,isDraft,assets \
       --jq '{tag:.tagName,prerelease:.isPrerelease,draft:.isDraft,assets:[.assets[].name]}'
@@ -204,11 +244,16 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 
 ## Notes / gotchas
 
-- **flutter_distributor uses the PATH `flutter`**, not FVM directly. The pinned
-  3.44.0 must be first on PATH or the build uses the wrong SDK.
-- **Ordering matters.** The bump commit is pushed in Phase 1 and the `v<version>`
-  tag in Phase 2, both before `flutter_distributor` publishes; otherwise the
-  GitHub release the publisher creates can point at the wrong commit.
+- **flutter_distributor uses the PATH `flutter`**, not FVM directly. The
+  FVM-pinned SDK (`.fvmrc`) must be first on PATH or the build uses the wrong SDK.
+- **Ordering matters.** The bump commit is merged to `develop` via PR in Phase 1
+  and the `v<version>` tag is pushed in Phase 2, both before `flutter_distributor`
+  publishes; otherwise the GitHub release the publisher creates can point at the
+  wrong commit. Tag the merge commit on `develop`, not the pre-merge branch tip.
+- **`develop` is a protected branch.** Direct `git push origin develop` is rejected
+  by the remote (required checks: `Flutter unit/widget tests`,
+  `Native C++ tests (doctest)`), so the bump lands via a `release/v<version>` PR
+  merged with a merge commit once CI is green — no local permission overrides this.
 - **Releases publish as pre-releases** by default (`release-prerelease: "true"`
   in `distribute_options.yaml`). To cut a full (non-pre-release) release instead,
   drop that arg for the run, or promote afterwards with
