@@ -7,6 +7,8 @@
 // names". `migrateLegacyColumnSpecMap` rewrites those stored maps in place so
 // they (a) decode into the current enums and (b) match the freshly encoded spec,
 // so `isSpecMapIncomplete` does not flag them broken.
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/spec/base.dart';
 import 'package:umacapture/src/chara_detail/spec/factor.dart';
@@ -128,6 +130,44 @@ void main() {
       expect(spec.predicate.notation.mode, SkillNotationMode.count);
       expect(spec.predicate.notation.max, 5);
       expect(isSpecMapIncomplete(map, spec.toMap()), isFalse);
+    });
+  });
+
+  group('migration scope', () {
+    test('a notation map under an unrelated spec type is not mutated', () {
+      // Only factor/skill ever carried the legacy `max == 0` overload; a future
+      // spec type with its own notation shape must survive a load unchanged
+      // (no `mode` injection, no `max` rewrite).
+      final map = <String, dynamic>{
+        'type': 'SomeFutureColumnSpec',
+        'id': 'future-id',
+        'predicate': <String, dynamic>{
+          'notation': <String, dynamic>{'max': 0},
+        },
+      };
+      final before = jsonDecode(jsonEncode(map));
+      migrateLegacyColumnSpecMap(map);
+      expect(map, before);
+    });
+
+    test('a factor map with a missing notation mode is not healed', () {
+      // A factor notation always carried `mode`; its absence means genuinely
+      // malformed data, which must stay as-is and decode into a broken
+      // placeholder rather than being silently repaired as a skill map would be.
+      final map = _factorMap({'max': 3});
+      migrateLegacyColumnSpecMap(map);
+      expect((map['predicate'] as Map<String, dynamic>)['notation'], {'max': 3});
+    });
+
+    test('the type gate still recurses into container children', () {
+      final child = _factorMap({'mode': 'sumOnly', 'max': 0});
+      final container = <String, dynamic>{
+        'type': 'LogicColumnSpec',
+        'id': 'logic-id',
+        'children': [child],
+      };
+      migrateLegacyColumnSpecMap(container);
+      expect((child['predicate'] as Map<String, dynamic>)['notation'], {'mode': 'starTotal', 'max': 3});
     });
   });
 }

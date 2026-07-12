@@ -479,40 +479,59 @@ bool isSpecMapIncomplete(Object? raw, Object? full) {
   return false;
 }
 
-// Legacy `factor`/`skill` notation `mode` values mapped to their current
-// replacements, as `[withName, valueOnly]` — the second is used when the legacy
-// `max` was 0 (the old "value only, no name" switch). See [_upgradeLegacyNotation].
+// Serialized discriminator values of the two specs whose notation carries the
+// legacy `max == 0` overload. Must match the dart_mappable discriminator (the
+// class name, see ColumnSpec's `discriminatorKey: 'type'`); string literals
+// because base.dart cannot import factor.dart/skill.dart (they import it).
+const _factorSpecType = 'FactorColumnSpec';
+const _skillSpecType = 'SkillColumnSpec';
+
+// Legacy factor notation `mode` values mapped to their current replacements, as
+// `[withName, valueOnly]` — the second is used when the legacy `max` was 0 (the
+// old "value only, no name" switch). See [_upgradeLegacyFactorNotation].
 const _legacyFactorNotationModes = <String, List<String>>{
   'sumOnly': ['nameStarTotal', 'starTotal'],
   'traineeAndParents': ['nameStarTotal', 'starTotal'],
   'each': ['nameStarEach', 'starEach'],
 };
 
-// Rewrites one `notation` sub-map from a pre-content-mode payload to the current
-// format, in place. Idempotent: a map already in the current format is untouched.
-//
-// Both `factor` and `skill` notation formerly overloaded `max == 0` to mean
-// "show a single aggregate value instead of names"; that is now an explicit
-// `mode`. A legacy factor map carries a `mode` that is no longer a valid enum
-// value (so it would fail to decode); a legacy skill map has no `mode` at all
-// (so it would be flagged broken for the missing key). Both are disambiguated by
-// the `mode` value and healed here before decode and the incompleteness check.
-void _upgradeLegacyNotation(Map<String, dynamic> notation) {
-  final wasValueOnly = notation['max'] == 0;
-  final mode = notation['mode'];
-  if (mode == null) {
-    // Legacy skill notation: only ever carried `max`.
-    notation['mode'] = wasValueOnly ? 'count' : 'names';
-  } else {
-    final mapping = _legacyFactorNotationModes[mode];
-    if (mapping == null) {
-      return; // Already a current factor or skill mode.
-    }
-    notation['mode'] = wasValueOnly ? mapping[1] : mapping[0];
+// Both factor and skill notation formerly overloaded `max == 0` to mean "show a
+// single aggregate value instead of names"; that is now an explicit `mode`. The
+// value-only modes ignore `max`, but the new UI requires it to be >= 1, so a
+// legacy `max == 0` is reset to the default.
+void _resetValueOnlyMax(Map<String, dynamic> notation) {
+  notation['max'] = 3;
+}
+
+// Rewrites a legacy factor `notation` sub-map to the current format, in place.
+// A legacy factor map carries a `mode` that is no longer a valid enum value (so
+// it would fail to decode). Idempotent: a map already in the current format —
+// or with a missing/unknown `mode`, which is left to decode into a broken
+// placeholder — is untouched.
+void _upgradeLegacyFactorNotation(Map<String, dynamic> notation) {
+  final mapping = _legacyFactorNotationModes[notation['mode']];
+  if (mapping == null) {
+    return;
   }
+  final wasValueOnly = notation['max'] == 0;
+  notation['mode'] = wasValueOnly ? mapping[1] : mapping[0];
   if (wasValueOnly) {
-    // The value-only modes ignore `max`, but the new UI requires it to be >= 1.
-    notation['max'] = 3;
+    _resetValueOnlyMax(notation);
+  }
+}
+
+// Rewrites a legacy skill `notation` sub-map to the current format, in place.
+// A legacy skill map has no `mode` at all (so it would be flagged broken for
+// the missing key). Idempotent: a map that already carries a `mode` is
+// untouched.
+void _upgradeLegacySkillNotation(Map<String, dynamic> notation) {
+  if (notation.containsKey('mode')) {
+    return;
+  }
+  final wasValueOnly = notation['max'] == 0;
+  notation['mode'] = wasValueOnly ? 'count' : 'names';
+  if (wasValueOnly) {
+    _resetValueOnlyMax(notation);
   }
 }
 
@@ -520,12 +539,23 @@ void _upgradeLegacyNotation(Map<String, dynamic> notation) {
 // nested container children. Runs on the raw JSON before decode so the healed
 // map both decodes cleanly and matches the freshly encoded spec (avoiding a
 // spurious broken flag), and is then re-persisted in the current format.
+//
+// Gated by the spec's `type` discriminator: only factor and skill specs ever
+// carried the legacy notation shape, and a future spec type with its own
+// `notation` map must not be silently mutated on load.
 void migrateLegacyColumnSpecMap(Map<String, dynamic> specMap) {
-  final predicate = specMap['predicate'];
-  if (predicate is Map<String, dynamic>) {
-    final notation = predicate['notation'];
-    if (notation is Map<String, dynamic>) {
-      _upgradeLegacyNotation(notation);
+  final type = specMap['type'];
+  if (type == _factorSpecType || type == _skillSpecType) {
+    final predicate = specMap['predicate'];
+    if (predicate is Map<String, dynamic>) {
+      final notation = predicate['notation'];
+      if (notation is Map<String, dynamic>) {
+        if (type == _factorSpecType) {
+          _upgradeLegacyFactorNotation(notation);
+        } else {
+          _upgradeLegacySkillNotation(notation);
+        }
+      }
     }
   }
   final children = specMap['children'];
@@ -1067,6 +1097,23 @@ class _RowHeightMeasurer {
   void dispose() => _painter.dispose();
 }
 
+// Parsed [Metadata.capturedDate] per record, filled lazily. The tiebreak
+// comparator below runs O(N log N) times per sort, so parsing the date string
+// inside it would repeat the work (and, for a malformed date, the error log)
+// on every comparison; record objects are stable across sorts, so one parse per
+// record suffices. Comparing the raw strings instead is not an option: the
+// native side formats them with a timezone offset (`%FT%T%z`), which breaks
+// lexicographic order across differing offsets.
+final _capturedDateTimeCache = Expando<DateTime>();
+
+DateTime? _capturedDateTimeOf(TrinaRow row) {
+  final record = row.getUserData<CharaDetailRecord>();
+  if (record == null) {
+    return null;
+  }
+  return _capturedDateTimeCache[record] ??= record.metadata.capturedDate.toDateTime();
+}
+
 extension TrinaGridStateManagerExtension on TrinaGridStateManager {
   double _visualTextWidth(BuildContext context, String text, TextStyle style) {
     if (text.isEmpty) {
@@ -1279,12 +1326,12 @@ extension TrinaGridStateManagerExtension on TrinaGridStateManager {
       if (signedPrimary != 0) {
         return signedPrimary;
       }
-      final aDate = a.getUserData<CharaDetailRecord>()?.metadata.capturedDate;
-      final bDate = b.getUserData<CharaDetailRecord>()?.metadata.capturedDate;
+      final aDate = _capturedDateTimeOf(a);
+      final bDate = _capturedDateTimeOf(b);
       if (aDate == null || bDate == null) {
         return 0;
       }
-      final tie = aDate.toDateTime().compareTo(bDate.toDateTime());
+      final tie = aDate.compareTo(bDate);
       return descending ? -tie : tie;
     }
 
