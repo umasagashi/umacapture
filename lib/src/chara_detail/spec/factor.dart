@@ -33,7 +33,7 @@ enum FactorSetLogicMode { anyOf, allOf, mixed }
 enum FactorSearchSubjectMode { trainee, family }
 
 @MappableEnum()
-enum FactorSearchElementMode { starOnly, starAndCount }
+enum FactorSearchElementMode { starOnly, countOnly, starAndCount }
 
 @MappableClass()
 class FactorSearchElement with FactorSearchElementMappable {
@@ -219,7 +219,11 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   final Set<String> factorTags;
   final Set<String> skillTags;
 
-  bool get isStarAndCountAllowed {
+  /// Whether the count-based element modes ([FactorSearchElementMode.countOnly]
+  /// and [FactorSearchElementMode.starAndCount]) are selectable. Counting only
+  /// exceeds one when there are multiple slots (family) or multiple factors
+  /// (mixed), so a single-factor trainee search is restricted to star sum.
+  bool get isCountModeAllowed {
     return logic == FactorSetLogicMode.mixed || subject == FactorSearchSubjectMode.family;
   }
 
@@ -265,7 +269,7 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
       query: query,
       logic: logic,
       subject: subject,
-      element: isStarAndCountAllowed ? element : element.copyWith(mode: FactorSearchElementMode.starOnly),
+      element: isCountModeAllowed ? element : element.copyWith(mode: FactorSearchElementMode.starOnly),
       notation: notation,
       factorTags: factorTags,
       skillTags: skillTags,
@@ -293,18 +297,24 @@ class AggregateFactorSetPredicate with AggregateFactorSetPredicateMappable {
   }
 
   bool _isAcceptable(QueriedFactor factor) {
-    if (element.mode == FactorSearchElementMode.starAndCount) {
-      return factor.count(min: element.star) >= element.count;
-    } else {
-      return factor.sum() >= element.star;
+    switch (element.mode) {
+      case FactorSearchElementMode.starOnly:
+        return factor.sum() >= element.star;
+      case FactorSearchElementMode.countOnly:
+        return factor.count(min: 1) >= element.count;
+      case FactorSearchElementMode.starAndCount:
+        return factor.count(min: element.star) >= element.count;
     }
   }
 
   bool _isMixedAcceptable(List<QueriedFactor> factors) {
-    if (element.mode == FactorSearchElementMode.starAndCount) {
-      return factors.map((e) => e.count(min: element.star)).sum >= element.count;
-    } else {
-      return factors.map((e) => e.sum()).sum >= element.star;
+    switch (element.mode) {
+      case FactorSearchElementMode.starOnly:
+        return factors.map((e) => e.sum()).sum >= element.star;
+      case FactorSearchElementMode.countOnly:
+        return factors.map((e) => e.count(min: 1)).sum >= element.count;
+      case FactorSearchElementMode.starAndCount:
+        return factors.map((e) => e.count(min: element.star)).sum >= element.count;
     }
   }
 
@@ -550,9 +560,11 @@ class FactorColumnSpec extends ColumnSpec<FactorSet> with FactorColumnSpecMappab
       modeText += "$sep${"$tr_factor.mode.element.label".tr()}: $count";
     }
 
-    modeText += "$sep${"$tr_factor.mode.element.value.star.label".tr()}: ${predicate.element.star}";
+    if (predicate.element.mode != FactorSearchElementMode.countOnly) {
+      modeText += "$sep${"$tr_factor.mode.element.value.star.label".tr()}: ${predicate.element.star}";
+    }
 
-    if (predicate.element.mode == FactorSearchElementMode.starAndCount) {
+    if (predicate.element.mode != FactorSearchElementMode.starOnly) {
       modeText += "$sep${"$tr_factor.mode.element.value.count.label".tr()}: ${predicate.element.count}";
     }
 
@@ -832,7 +844,9 @@ class _ModeSelector extends ConsumerWidget {
       tooltip: false,
       values: FactorSearchElementMode.values,
       selected: predicate.element.mode,
-      disabled: {if (!predicate.isStarAndCountAllowed) FactorSearchElementMode.starAndCount},
+      disabled: predicate.isCountModeAllowed
+          ? const {}
+          : {FactorSearchElementMode.countOnly, FactorSearchElementMode.starAndCount},
       onSelected: (value) {
         _clonedSpecProvider.update(ref, specId, (spec) {
           return spec.copyWith(
@@ -848,17 +862,21 @@ class _ModeSelector extends ConsumerWidget {
     return FormTile(
       title: Text("$tr_factor.mode.element.value.star.label".tr()),
       description: Text("$tr_factor.mode.element.value.star.description".tr()),
-      trailing: IntStepperField(
-        min: 0,
-        max: predicate.starMaxLimit,
-        value: predicate.element.star,
-        onChanged: (value) {
-          _clonedSpecProvider.update(ref, specId, (spec) {
-            return spec.copyWith(
-              predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(star: value)),
-            );
-          });
-        },
+      trailing: Disabled(
+        disabled: predicate.element.mode == FactorSearchElementMode.countOnly,
+        tooltip: "$tr_factor.mode.element.value.star.disabled_tooltip".tr(),
+        child: IntStepperField(
+          min: 0,
+          max: predicate.starMaxLimit,
+          value: predicate.element.star,
+          onChanged: (value) {
+            _clonedSpecProvider.update(ref, specId, (spec) {
+              return spec.copyWith(
+                predicate: spec.predicate.copyWith(element: spec.predicate.element.copyWith(star: value)),
+              );
+            });
+          },
+        ),
       ),
     );
   }

@@ -540,6 +540,11 @@
                                 "label": "星合計",
                                 "description": "星{star}以上の"
                             },
+                            "count_only": {
+                                "label": "因子数",
+                                "description": "{count}個以上所持する",
+                                "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.logic.mixed.label】または【@:pages.chara_detail.column_predicate.factor.mode.subject.family.label】を選択している時だけ選べます。"
+                            },
                             "star_and_count": {
                                 "label": "星数 × 因子数",
                                 "description": "星{star}以上を{count}個以上所持する",
@@ -548,11 +553,12 @@
                             "value": {
                                 "star": {
                                     "label": "星数",
-                                    "description": "星数またはその合計の下限を指定します。"
+                                    "description": "星数またはその合計の下限を指定します。",
+                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.element.count_only.label】は星数を使いません（星1以上を所持として数えます）。"
                                 },
                                 "count": {
                                     "label": "因子数",
-                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ変更できます。",
+                                    "disabled_tooltip": "【@:pages.chara_detail.column_predicate.factor.mode.element.count_only.label】または【@:pages.chara_detail.column_predicate.factor.mode.element.star_and_count.label】を選択している時だけ変更できます。",
                                     "description": "因子の数（星数含まず）の下限を指定します。"
                                 }
                             },

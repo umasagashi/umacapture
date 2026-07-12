@@ -131,6 +131,8 @@ class FactorSearchElementModeMapper
     switch (value) {
       case r'starOnly':
         return FactorSearchElementMode.starOnly;
+      case r'countOnly':
+        return FactorSearchElementMode.countOnly;
       case r'starAndCount':
         return FactorSearchElementMode.starAndCount;
       default:
@@ -143,6 +145,8 @@ class FactorSearchElementModeMapper
     switch (self) {
       case FactorSearchElementMode.starOnly:
         return r'starOnly';
+      case FactorSearchElementMode.countOnly:
+        return r'countOnly';
       case FactorSearchElementMode.starAndCount:
         return r'starAndCount';
     }
