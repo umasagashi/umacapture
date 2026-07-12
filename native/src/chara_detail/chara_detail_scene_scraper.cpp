@@ -1,3 +1,5 @@
+#include <map>
+
 #include "chara_detail/chara_detail_scene_scraper.h"
 
 namespace uma::chara_detail {
@@ -5,19 +7,6 @@ namespace uma::chara_detail {
 namespace scraper_impl {
 
 namespace {
-
-bool closeEnough(const std::vector<double> &a, const std::vector<double> &b, double threshold) {
-    if (a.size() != b.size()) {
-        return false;
-    }
-
-    for (size_t i = 0; i < a.size(); i++) {
-        if (std::abs(a[i] - b[i]) > threshold) {
-            return false;
-        }
-    }
-    return true;
-}
 
 // Bottom margin kept below the last factor when cropping the factor tab, as a fraction of the frame width
 // (the project's length unit). The background run that follows the last factor starts a few px below its
@@ -300,23 +289,68 @@ ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &con
           cv::makePtr<cv::FlannBasedMatcher>(
               cv::makePtr<cv::flann::LshIndexParams>(config.table_number, config.key_size, config.probe_level)))
     , trust_ratio(config.trust_ratio)
-    , horizontal_threshold(config.horizontal_threshold)
     , minimum_overlap_score(config.minimum_overlap_score)
-    , minimum_overlap_height(config.minimum_overlap_height)
-    , overlap_downscale(config.overlap_downscale)
-    , minimum_key_points(config.minimum_key_points)
-    , vertical_threshold(config.vertical_threshold) {}
+    , minimum_overlap_fraction(config.minimum_overlap_fraction)
+    , minimum_key_points(config.minimum_key_points) {}
 
 ImageOffsetEstimator::ImageOffsetEstimator()
     : ImageOffsetEstimator(ImageOffsetEstimatorConfig()) {}
 
-std::optional<double> ImageOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to, double guess) const {
+std::vector<OffsetCandidate> detectOffsetCandidates(const std::vector<double> &displacements, size_t count_threshold) {
+    if (displacements.empty()) {
+        return {};
+    }
+
+    // 1-px bins keyed by the rounded displacement; std::map keeps them ordered for the local-maxima walk.
+    std::map<long, int> bins;
+    for (const double displacement : displacements) {
+        bins[std::lround(displacement)]++;
+    }
+    const auto countAt = [&bins](long bin) {
+        const auto it = bins.find(bin);
+        return it != bins.end() ? it->second : 0;
+    };
+
+    std::vector<OffsetCandidate> candidates;
+    for (const auto &[bin, count] : bins) {
+        // Local maximum with ties resolved to the leftmost bin, so a spike split evenly across a bin
+        // boundary yields one peak instead of two 1-px-apart twins.
+        if (count <= countAt(bin - 1) || count < countAt(bin + 1)) {
+            continue;
+        }
+
+        // Merge the +-1 px neighbours: genuine spikes are 1-2 px wide, and thresholding the merged count
+        // keeps a boundary-split spike above the threshold even when no single bin reaches it alone.
+        std::vector<double> members;
+        for (const double displacement : displacements) {
+            if (std::abs(std::lround(displacement) - bin) <= 1) {
+                members.push_back(displacement);
+            }
+        }
+        if (members.size() < count_threshold) {
+            continue;
+        }
+
+        const auto median_iterator = members.begin() + static_cast<long>(members.size() / 2);
+        std::nth_element(members.begin(), median_iterator, members.end());
+        candidates.push_back({*median_iterator, static_cast<int>(members.size())});
+    }
+    return candidates;
+}
+
+std::optional<double> ImageOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
+    // A mid-scroll resolution change makes pixel offsets between the frames meaningless (and the overlap
+    // verification below would reject every candidate anyway). Bail up front.
+    if (!(from.frame.size() == to.frame.size())) {
+        return std::nullopt;
+    }
+
     detectKeyPoints(from);
     detectKeyPoints(to);
 
     // A near-uniform fragment yields zero AKAZE keypoints and an empty descriptor Mat; FLANN's knnMatch
     // can throw on empty/too-small train or query sets. k=2 needs at least two train rows. Bail early with
-    // the same "unreliable -> nullopt" semantics as the minimum_key_points guard below.
+    // the same "unreliable -> nullopt" semantics as an empty candidate list below.
     if (from.descriptors.empty() || to.descriptors.empty() || from.descriptors.rows < 2
         || to.descriptors.rows < 2) {
         return std::nullopt;
@@ -325,63 +359,45 @@ std::optional<double> ImageOffsetEstimator::estimate(FrameDescriptor &from, Fram
     std::vector<std::vector<cv::DMatch>> matches;
     matcher->knnMatch(from.descriptors, to.descriptors, matches, 2);
 
-    // vertical_threshold is a fraction of the frame width; scale it to pixels to match the keypoint coordinates.
-    const double vertical_margin = vertical_threshold * from.frame.width();
-    const Range<double> valid_range = {guess - vertical_margin, guess + vertical_margin};
-    std::vector<cv::Point2f> valid_key_points_of_from;
-    std::vector<cv::Point2f> valid_key_points_of_to;
+    // Collect every trusted match's vertical displacement, unwindowed. The scroll-bar guess deliberately
+    // plays no part here: on the terminating (bottom-clipped) frame the thumb's remaining travel collapses,
+    // the guess with it, and a window centred on it rejects the true offset -- the exact frame where offset
+    // accuracy decides whether the last row is captured.
+    std::vector<double> displacements;
     for (const auto &knn_match : matches) {
         // If the 2nd is closer to the 1st, the higher the probability that the 2nd is the correct one.
         if (knn_match.size() != 2 || knn_match[0].distance >= knn_match[1].distance * trust_ratio) {
             continue;
         }
-
         const auto &key_point_of_from = from.key_points[knn_match[0].queryIdx].pt;
         const auto &key_point_of_to = to.key_points[knn_match[0].trainIdx].pt;
+        displacements.push_back(key_point_of_from.y - key_point_of_to.y);
+    }
 
-        // The guess is not precise, but never wrong, matches that are far from it can be discarded.
-        if (!valid_range.contains(key_point_of_from.y - key_point_of_to.y)) {
-            continue;
+    const auto candidates = detectOffsetCandidates(displacements, static_cast<size_t>(minimum_key_points));
+    if (candidates.empty()) {
+        return std::nullopt;
+    }
+
+    // Let pixel evidence choose: the candidate with the strongest full-resolution overlap wins, regardless
+    // of how many keypoints voted for it. A keypoint majority is NOT trustworthy on this content -- factor
+    // rows repeat at a constant pitch, so an alias one row-pitch off can collect more matches than the true
+    // offset while overlaying visibly wrong pixels.
+    const cv::Mat &from_gray = grayFrame(from);
+    const cv::Mat &to_gray = grayFrame(to);
+    double best_offset = 0.0;
+    double best_score = -1.0;
+    for (const auto &candidate : candidates) {
+        const double score = overlapScore(from_gray, to_gray, std::lround(candidate.offset));
+        if (score > best_score) {
+            best_score = score;
+            best_offset = candidate.offset;
         }
-        valid_key_points_of_from.push_back(key_point_of_from);
-        valid_key_points_of_to.push_back(key_point_of_to);
     }
-
-    // If too many key points are discarded, the result is unreliable anyway.
-    if (valid_key_points_of_from.size() < minimum_key_points || valid_key_points_of_to.size() < minimum_key_points) {
+    if (best_score < minimum_overlap_score) {
         return std::nullopt;
     }
-
-    cv::Mat masks;
-    cv::Mat result = cv::findHomography(valid_key_points_of_to, valid_key_points_of_from, masks, cv::RANSAC, 3);
-    // findHomography returns an empty Mat when it cannot fit one (degenerate/insufficient inliers); reading
-    // matrix[2]/matrix[5] off an empty vector would be out of bounds. Treat a non-3x3 result as no match.
-    if (result.empty() || result.rows != 3 || result.cols != 3) {
-        return std::nullopt;
-    }
-    std::vector<double> matrix((double *) result.datastart, (double *) result.dataend);
-    const Point<double> offset = {matrix[2], matrix[5]};
-
-    // The result should only be a translation; a non-identity scale/rotation/shear means the match is wrong.
-    matrix[2] = 0.0;
-    matrix[5] = 0.0;
-    const std::vector<double> eye{1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
-    if (!closeEnough(matrix, eye, 0.1)) {
-        return std::nullopt;
-    }
-
-    // The scroll is vertical, so the horizontal translation should be ~0. A tiny value is sub-pixel matching noise
-    // and is accepted directly. A larger one (e.g. a fast scroll that leaves little frame overlap) is verified
-    // against pixel evidence instead of trusting the feature match, which can be self-consistent yet wrong:
-    // overlay the two frames using only the vertical offset and require a high overlap correlation. Rejecting these
-    // frames outright would freeze the reference descriptor and stall the page (the scroll-bar guess then grows
-    // unbounded), so this confirms the result the estimator actually returns before keeping it.
-    if (std::abs(offset.x()) > horizontal_threshold
-        && overlapScore(from.frame.data(), to.frame.data(), std::lround(offset.y())) < minimum_overlap_score) {
-        return std::nullopt;
-    }
-
-    return offset.y();
+    return best_offset;
 }
 
 void ImageOffsetEstimator::detectKeyPoints(FrameDescriptor &descriptor) const {
@@ -391,45 +407,58 @@ void ImageOffsetEstimator::detectKeyPoints(FrameDescriptor &descriptor) const {
     detector->detectAndCompute(descriptor.frame.data(), cv::noArray(), descriptor.key_points, descriptor.descriptors);
 }
 
-double ImageOffsetEstimator::overlapScore(const cv::Mat &from_frame, const cv::Mat &to_frame, long offset_pixels) const {
-    if (from_frame.size() != to_frame.size()) {
-        // Resolution changed mid-scroll. rowRange/matchTemplate below would throw on mismatched sizes and the
-        // runner would swallow it, stalling the tab. Report no overlap evidence (reject the offset) instead.
-        return 0.0;
-    }
-    const int height = from_frame.rows;
-    const long overlap_height = height - offset_pixels;
-    // overlap_height is a row count, but the threshold multiplies `cols` deliberately: minimum_overlap_height
-    // is a fraction of the frame WIDTH (the project's length unit -- see the config field doc), not of height.
-    // This is meaningful only while the scroll-area crop stays taller than minimum_overlap_height * cols, which
-    // holds for the configured crop (0.05 * width against a crop taller than that).
-    if (offset_pixels <= 0 || overlap_height < minimum_overlap_height * from_frame.cols) {
-        return 0.0;
-    }
-    const auto gray = [](const cv::Mat &frame) {
-        if (frame.channels() == 1) {
-            return frame;
+const cv::Mat &ImageOffsetEstimator::grayFrame(FrameDescriptor &descriptor) {
+    if (descriptor.gray.empty()) {
+        const cv::Mat &data = descriptor.frame.data();
+        if (data.channels() == 1) {
+            descriptor.gray = data;
+        } else {
+            cv::cvtColor(data, descriptor.gray, cv::COLOR_BGR2GRAY);
         }
-        cv::Mat result;
-        cv::cvtColor(frame, result, cv::COLOR_BGR2GRAY);
-        return result;
-    };
-    cv::Mat from_overlap = gray(from_frame).rowRange(static_cast<int>(offset_pixels), height);
-    cv::Mat to_overlap = gray(to_frame).rowRange(0, height - static_cast<int>(offset_pixels));
-    if (overlap_downscale > 1) {
-        const cv::Size size = {
-            std::max(1, from_overlap.cols / overlap_downscale),
-            std::max(1, from_overlap.rows / overlap_downscale),
-        };
-        cv::resize(from_overlap, from_overlap, size, 0, 0, cv::INTER_AREA);
-        cv::resize(to_overlap, to_overlap, size, 0, 0, cv::INTER_AREA);
     }
-    cv::Mat score;
-    cv::matchTemplate(from_overlap, to_overlap, score, cv::TM_CCOEFF_NORMED);
-    // TM_CCOEFF_NORMED is NaN when either band has zero variance (a near-uniform overlap, e.g. a long blank
-    // scroll gap). NaN must not slip through as a pass: `NaN < minimum_overlap_score` is false, which would
-    // skip the rejection and accept the suspect offset. Treat a non-finite score as no evidence (0.0).
-    const float result = score.at<float>(0, 0);
+    return descriptor.gray;
+}
+
+double ImageOffsetEstimator::overlapScore(const cv::Mat &from_gray, const cv::Mat &to_gray, long offset_pixels) const {
+    if (from_gray.size() != to_gray.size()) {
+        // rowRange/matchTemplate below would throw on mismatched sizes and the runner would swallow it,
+        // stalling the tab. Report no overlap evidence (reject the offset) instead.
+        return 0.0;
+    }
+    const int height = from_gray.rows;
+    const long overlap_height = height - std::labs(offset_pixels);
+    // Fraction of the crop HEIGHT (not the project's usual width unit): the guard bounds how much of the
+    // frames' shared content backs the correlation, which is inherently a height proportion. This also
+    // rejects |offset| >= height, so the rowRange arithmetic below cannot go out of bounds.
+    if (overlap_height < minimum_overlap_fraction * height) {
+        return 0.0;
+    }
+    const int shift = static_cast<int>(offset_pixels);
+    const cv::Mat from_overlap = shift >= 0 ? from_gray.rowRange(shift, height) : from_gray.rowRange(0, height + shift);
+    const cv::Mat to_overlap = shift >= 0 ? to_gray.rowRange(0, height - shift) : to_gray.rowRange(-shift, height);
+
+    // Zero-mean normalized cross-correlation (the TM_CCOEFF_NORMED value), computed directly:
+    // r = (sum(a*b) - N*mean_a*mean_b) / (N*sigma_a*sigma_b). matchTemplate is deliberately NOT used --
+    // for a template the size of the image (a single correlation point) it takes its DFT path, an order
+    // of magnitude slower than these three linear passes at full resolution (~8 ms vs <1 ms per verify).
+    // The double-precision accumulators are exact for this input (N*255^2 << 2^53).
+    cv::Scalar from_mean, from_stddev, to_mean, to_stddev;
+    cv::meanStdDev(from_overlap, from_mean, from_stddev);
+    cv::meanStdDev(to_overlap, to_mean, to_stddev);
+
+    // A (near-)zero-variance band -- a blank scroll gap -- carries no alignment evidence; without this
+    // guard the ~0/0 correlation could read as a perfect match (matchTemplate clamps that case to +-1)
+    // and a blank overlap would outscore every genuine candidate. 1e-3 on the 0-255 intensity scale only
+    // triggers on essentially flat pixels; any real content (text, card edges) has orders of magnitude
+    // more variance.
+    constexpr double zero_variance_epsilon = 1e-3;
+    if (from_stddev[0] <= zero_variance_epsilon || to_stddev[0] <= zero_variance_epsilon) {
+        return 0.0;
+    }
+
+    const double pixels = static_cast<double>(from_overlap.total());
+    const double result = (from_overlap.dot(to_overlap) - pixels * from_mean[0] * to_mean[0])
+                          / (pixels * from_stddev[0] * to_stddev[0]);
     return std::isfinite(result) ? result : 0.0;
 }
 
@@ -443,27 +472,7 @@ std::optional<double> ScrollAreaOffsetEstimator::position(const FrameDescriptor 
 }
 
 std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    const auto guess = scroll_bar_offset_estimator.estimate(from.scroll_bar_frame, to.scroll_bar_frame);
-    if (!guess) {
-        return std::nullopt;
-    }
-    return image_offset_estimator.estimate(from, to, guess.value());
-}
-
-std::optional<double>
-ScrollAreaOffsetEstimator::estimateAcrossRescale(FrameDescriptor &from, FrameDescriptor &to) const {
-    // Fallback for when estimate()'s shared-length guess fails: match the two frames at a guess computed
-    // from each frame's OWN thumb length, which stays valid across a thumb-length change (the game lazily
-    // re-scales the factor thumb when it appends inheritance history). The image matcher validates the
-    // result, so a wrong guess (e.g. an unrelated content change) simply yields nullopt.
-    if (!(from.frame.size() == to.frame.size())) {
-        return std::nullopt;  // resolution change; estimate() already rejected it -- do not recover here.
-    }
-    const auto guess = scroll_bar_offset_estimator.scrollOffsetGuess(from.scroll_bar_frame, to.scroll_bar_frame);
-    if (!guess) {
-        return std::nullopt;
-    }
-    return image_offset_estimator.estimate(from, to, guess.value());
+    return image_offset_estimator.estimate(from, to);
 }
 
 PageScrapingBox::PageScrapingBox(
@@ -989,17 +998,10 @@ void ScrollableScrapingInterpreter::startScrolling(const FrameDescriptor &valid_
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     FrameDescriptor current_fragment = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
-    auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
-    if (!offset.has_value()) {
-        // The shared-length scroll-bar guess in estimate() breaks when the game lazily re-scales the
-        // thumb (factor inheritance history appended mid-scroll): the two frames' thumb lengths disagree,
-        // the guess becomes inconsistent with the pixels, the image match rejects it, and the reference
-        // would freeze -- stalling the tab. Recover with a guess computed from each frame's OWN thumb
-        // length, which stays valid across the re-scale. If the frames still match we keep the true offset
-        // and capture the fragment normally (no skipped content); if they do not match this stays nullopt
-        // exactly as before.
-        offset = offset_estimator.estimateAcrossRescale(previous_descriptor, current_fragment);
-    }
+    // Guess-free: the offset comes from image evidence alone, so a scroll-bar thumb re-scale (inheritance
+    // history appended mid-scroll) or a clipped thumb cannot mislead it. On a genuine non-match the offset
+    // stays nullopt, the frame is skipped, and the reference descriptor freezes until a matching frame comes.
+    const auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
 
     // Check the green terminator every frame, anchored to the scroll frontier (height - offset), BEFORE
     // the minimum_scroll gate below. The bar can pop in in-place while the content is effectively

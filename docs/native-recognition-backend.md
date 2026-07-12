@@ -69,10 +69,13 @@ in `native/src/chara_detail/chara_detail_record.h`.
   itself lives under `native/src/condition/`.
 - **Scraper** (`chara_detail_scene_scraper.h`) is the heart of "recording → tall
   image". Per tab it decides scrollable vs. non-scrollable by looking for a
-  scrollbar, then estimates scroll offset between frames with a **two-tier
-  estimator**: `ScrollBarOffsetEstimator` (coarse guess from scrollbar position)
-  refined by `ImageOffsetEstimator` (AKAZE feature match + homography, accepting
-  only vertical translation). Newly revealed strips are cut at color boundaries
+  scrollbar, then estimates scroll offset between frames with a **guess-free
+  candidate + verify estimator** (`ImageOffsetEstimator`): AKAZE keypoint matches
+  vote into a 1-px displacement histogram whose peaks become candidate offsets,
+  and a full-resolution pixel-overlap correlation selects among them. The
+  scrollbar (`ScrollBarOffsetEstimator`) is only used for progress reporting and
+  at-top detection, never to decide the offset — its geometry collapses exactly
+  on the terminating overscroll frame. Newly revealed strips are cut at color boundaries
   (`ScanParameter`) and saved as `scroll_area_NNNNN.png`. A `BaseFrameCatcher`
   grabs the static header/frame while ignoring snackbar (toast) interference.
   Output goes to `temp_dir/chara_detail/<record_id>/`.

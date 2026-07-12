@@ -48,6 +48,7 @@ struct FrameDescriptor {
     Frame scroll_bar_frame;  // full-width scrollbar band: scrollbar geometry only
     std::vector<cv::KeyPoint> key_points;
     cv::Mat descriptors;
+    cv::Mat gray;  // grayscale of `frame`, lazily cached like key_points/descriptors (see grayFrame)
 
     [[nodiscard]] bool empty() const { return frame.empty(); }
 };
@@ -125,30 +126,43 @@ private:
     const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };
 
+// One local maximum of the 1-px keypoint-displacement histogram: a plausible vertical scroll offset,
+// carrying the sub-pixel median of the displacements merged into the peak and how many matches support it.
+struct OffsetCandidate {
+    double offset;  // median of the peak's merged displacements (genuine peaks are ~1 px wide, so sub-pixel accurate)
+    int count;      // matches merged into the peak (the peak bin and its +-1 px neighbours)
+};
+
+// Extracts scroll-offset candidates from raw keypoint vertical displacements via a 1-px-bin histogram:
+// every local maximum whose merged count (peak bin + its +-1 px neighbours, absorbing spikes split across a
+// bin boundary) reaches count_threshold becomes a candidate. Genuine offsets show up as razor-sharp 1-2 px
+// spikes (sub-pixel keypoint localization noise is ~constant in pixels regardless of resolution), while
+// mismatch noise is wide but sparse -- a few counts per bin -- and never forms a qualifying peak. Local-maxima
+// detection is used instead of gap-based clustering deliberately: sparse noise bridging two nearby genuine
+// peaks would chain them into one merged cluster with a wrong median, but it cannot turn a valley into a
+// local maximum. The full range is considered, including zero and negative displacements, so a static frame
+// yields a candidate at ~0 instead of a false positive elsewhere. Candidates are returned in ascending
+// offset order; the caller decides between them on pixel evidence, not on count.
+[[nodiscard]] std::vector<OffsetCandidate> detectOffsetCandidates(
+    const std::vector<double> &displacements, size_t count_threshold);
+
 class ImageOffsetEstimator {
 public:
     struct ImageOffsetEstimatorConfig {
         double trust_ratio = 0.5;
-        // Scroll is purely vertical, so a tiny horizontal translation is accepted as matching noise. A larger one is
-        // verified by overlaying the frames (see estimate()) rather than trusted on the feature match alone.
-        double horizontal_threshold = 1.5;
-        // Half-width of the keypoint-acceptance window centred on the scroll-bar guess, as a fraction of the frame
-        // width (the project's length unit) so it is resolution-independent. The guess error scales with the frame's
-        // pixel size, so an absolute-pixel window would clip genuine matches on higher-resolution screens. Measured on
-        // 736px-wide footage the worst genuine keypoint sits 0.0586*width from the guess and the tightest periodic-row
-        // pitch is 0.0815*width, so 0.068 stays clear of both (it equals the previous 50px on that width).
-        double vertical_threshold = 0.068;
-        // When the horizontal translation exceeds horizontal_threshold, the vertical offset is confirmed by overlapping
-        // the two frames and requiring at least this normalized cross-correlation. Measured genuine scrolls score
-        // >=0.95 and wrong alignments <=0.56, so 0.8 separates them with margin.
+        // A candidate offset is accepted only when overlaying the two frames at it reaches this normalized
+        // cross-correlation. Measured genuine scrolls score >=0.91 and wrong alignments <=0.73 across all
+        // golden clips, so 0.8 separates them with margin.
         double minimum_overlap_score = 0.8;
-        // The overlap must be at least this tall (as a fraction of the frame width, the project's length unit) for the
-        // correlation to be meaningful. A thinner band -- only possible when the scroll is nearly a full frame -- is
-        // too little evidence to trust a large stitch on, and a near-uniform sliver could even correlate spuriously.
-        double minimum_overlap_height = 0.05;
-        // Downscale factor applied before the overlap correlation. The renderer is not pixel-exact (sub-pixel shifts),
-        // so averaging neighbours makes the score robust to that noise (and cheaper).
-        int overlap_downscale = 4;
+        // The overlap must be at least this fraction of the frame (crop) HEIGHT for the correlation to be
+        // meaningful. A thinner band -- only possible when the scroll is nearly a full frame -- is too little
+        // evidence to trust a large stitch on, and a near-uniform sliver can even correlate spuriously high
+        // (measured: a 37 px sliver scoring 0.989 on a wrong offset).
+        double minimum_overlap_fraction = 0.10;
+        // Minimum merged match count for a displacement-histogram peak to become a candidate. This is a count,
+        // and keypoint counts scale with resolution/content: measured on ~736 px-wide footage genuine peaks
+        // carry 35-600 matches and noise bins <=9, but do not raise this on that evidence alone. Keep it low --
+        // a spurious extra candidate is rejected by the overlap gate, while a missed genuine peak loses the frame.
         int minimum_key_points = 10;
         int descriptor_channels = 3;
         float descriptor_threshold = 0.001f;
@@ -163,26 +177,36 @@ public:
 
     ImageOffsetEstimator();
 
-    [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to, double guess) const;
+    // Vertical content scroll between the frames, guess-free: keypoint matching proposes a short list of
+    // displacement-histogram candidates (detectOffsetCandidates) and dense pixel overlap selects among them
+    // (overlapScore). Neither side decides alone -- a keypoint majority can lock onto a periodic-row alias
+    // (factor rows repeat every ~0.09 of the width), and a dense scan alone can spike on a thin sliver; each
+    // covers the other's failure. Returns the winning candidate's sub-pixel offset, or nullopt when the
+    // frames differ in size, yield too few features, or no candidate passes the overlap gate.
+    [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
+
+    // Overlays the two (grayscale, full-resolution) frames shifted by the vertical offset and returns the
+    // normalized cross-correlation of their shared region. Symmetric in the shift sign: a point at row y in
+    // `to` lands at row y + offset_pixels in `from`, so a negative offset (backward scroll) reverses the row
+    // ranges, and zero compares the full frames -- a static frame therefore verifies at ~1 instead of needing
+    // a special case. Returns 0 when the overlap is thinner than minimum_overlap_fraction of the height or
+    // the sizes mismatch, which the caller treats as no evidence. Public for direct unit testing; production
+    // callers go through estimate().
+    [[nodiscard]] double overlapScore(const cv::Mat &from_gray, const cv::Mat &to_gray, long offset_pixels) const;
 
 private:
     void detectKeyPoints(FrameDescriptor &descriptor) const;
 
-    // Overlays the two frames shifted by the vertical offset and returns the normalized cross-correlation of their
-    // shared region. A point at row y in `to` lands at row y + offset_pixels in `from`, so those row ranges hold the
-    // overlapping content. Returns 0 when the overlap is too thin to verify (a non-positive scroll, or a band shorter
-    // than minimum_overlap_height of the frame width), which the caller treats as a failed match.
-    [[nodiscard]] double overlapScore(const cv::Mat &from_frame, const cv::Mat &to_frame, long offset_pixels) const;
+    // Grayscale of the descriptor's content crop, computed once and cached on the descriptor (same lazy
+    // pattern as detectKeyPoints), so per-candidate verification and the next frame's `from` role reuse it.
+    static const cv::Mat &grayFrame(FrameDescriptor &descriptor);
 
     const cv::Ptr<cv::Feature2D> detector;
     const cv::Ptr<cv::FlannBasedMatcher> matcher;
     const double trust_ratio;
-    const double horizontal_threshold;
     const double minimum_overlap_score;
-    const double minimum_overlap_height;
-    const int overlap_downscale;
+    const double minimum_overlap_fraction;
     const int minimum_key_points;
-    const double vertical_threshold;
 };
 
 class ScrollAreaOffsetEstimator {
@@ -192,12 +216,11 @@ public:
 
     [[nodiscard]] std::optional<double> position(const FrameDescriptor &descriptor) const;
 
+    // Content scroll offset between the frames, decided purely by the image estimator. The scroll bar is NOT
+    // consulted: its guess is wrong exactly when it matters most (the thumb pins to the track bottom on the
+    // terminating frame, collapsing the measured travel), and a keypoint window built on a wrong guess
+    // rejects the true offset. The scroll-bar estimator remains only for position()/topMargin().
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
-
-    // Recovery estimate for when estimate() fails because the thumb re-scaled (factor inheritance
-    // history appended mid-scroll): matches the two frames at scrollOffsetGuess, a guess valid across a
-    // thumb-length change. Returns the image-verified offset, or nullopt if the frames do not match.
-    [[nodiscard]] std::optional<double> estimateAcrossRescale(FrameDescriptor &from, FrameDescriptor &to) const;
 
 private:
     const ScrollBarOffsetEstimator scroll_bar_offset_estimator;
