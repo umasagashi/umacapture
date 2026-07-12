@@ -54,7 +54,7 @@ From the repo root, in order (details for each below):
 fvm install                                      # 1. Flutter 3.44.4 -> .fvm/flutter_sdk
 git config core.hooksPath tool/hooks             # 2. pre-commit format/color hook
 git config blame.ignoreRevsFile .git-blame-ignore-revs   # 3. clean git blame
-uv run tool/fetch_deps.py                         # 4. native deps (OpenCV + ONNX Runtime)
+uv run tool/fetch_deps.py                         # 4. native deps (OpenCV + ONNX Runtime + FFmpeg)
 .fvm/flutter_sdk/bin/flutter pub get              # 5. Dart packages
 .fvm/flutter_sdk/bin/dart run build_runner build --force-jit   # 6. codegen
 ```
@@ -114,22 +114,30 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 Skips the one mechanical 120-col reformat commit so `git blame` shows real authors.
 
-### 4. Native dependencies (OpenCV / ONNX Runtime)
+### 4. Native dependencies (OpenCV / ONNX Runtime / FFmpeg)
 
 ```bash
-uv run tool/fetch_deps.py            # both; add --only opencv|onnxruntime, or --force
+uv run tool/fetch_deps.py            # all three; add --only opencv|onnxruntime|ffmpeg, or --force
 ```
 
 Downloads the official prebuilts, verifies them against pinned SHA-256 hashes, and
-extracts them into `windows/{opencv,onnxruntime}` (the gitignored layout CMake
-expects), including the two experimental ONNX C++ headers that ship only in the
-source tree. Nothing is pruned, so the result is byte-identical to a manual
+extracts them into `windows/{opencv,onnxruntime,ffmpeg}` (the gitignored layout
+CMake expects), including the two experimental ONNX C++ headers that ship only in
+the source tree. Nothing is pruned by default (`--slim`, used by CI, drops parts
+this project never links), so the result is byte-identical to a manual
 extraction. Provisioning OpenCV requires Windows (it's a self-extracting `.exe`).
 
 | Dependency | Version | Lands at |
 |---|---|---|
 | OpenCV | 4.13.0 (vc16) | `windows/opencv/build` |
 | ONNX Runtime | 1.27.0 | `windows/onnxruntime/{include,lib}` |
+| FFmpeg (BtbN LGPL shared) | n7.1.5 | `windows/ffmpeg/{include,lib,bin}` |
+
+FFmpeg (libav) is linked only by the native CLI's FFV1 capture recorder /
+`replay` reader and the `umacapture_ffv1_tests` target, so it is required to
+build anything under `native/` — but the Flutter app target never links it, so
+`flutter build windows` works without it. Provision it with the rest anyway; it
+is small when `--slim`med and the native CLI is the main debugging tool here.
 
 The third native dependency, `windows/clip`, is **committed** to the repo (pure MIT
 source, no binaries — see [`windows/clip/VENDORED.md`](../../../windows/clip/VENDORED.md)),
@@ -147,7 +155,10 @@ prebuilt encodes the version and MSVC toolset in its layout (`build/x64/vc16/bin
 - the `key:` of the **Cache OpenCV** step in [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)
   — it pins the version, so a stale key would restore the old tree and break the build.
 
-CI provisions OpenCV with the same script.
+CI provisions OpenCV and FFmpeg with the same script (`--only opencv|ffmpeg
+--slim`, cached; ONNX Runtime is deliberately not provisioned there — the test
+targets never link it). When bumping the FFmpeg pin, also bump the
+`ffmpeg-…-slim` cache key in `ci.yml`.
 
 ### 5. Resolve Dart packages
 
@@ -192,7 +203,7 @@ For the standalone native C++ CLI / doctest suite (a separate CMake project unde
 
 - **Windows-only.** The native backend links `windowsapp.lib`/`dwmapi.lib` and uses
   WinRT capture; there is no macOS/Linux build path.
-- **`.fvm/` and `windows/{opencv,onnxruntime}` are gitignored** — FVM and
+- **`.fvm/` and `windows/{opencv,onnxruntime,ffmpeg}` are gitignored** — FVM and
   `fetch_deps.py` populate them; they are never committed. `windows/clip` is the
   exception (committed source).
 - **Keep `.fvmrc` and the CI Flutter version in sync** — CI hardcodes 3.44.4 because
