@@ -76,18 +76,6 @@ public:
     // completed tab snapping back to the top after a character switch.
     [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const;
 
-    // Content-pixel scroll offset between two frames: the placeholder-track upper_gap difference over a
-    // shared (cap-corrected) thumb length, scaled by the true viewport. The fixed track top cancels in the
-    // difference, so this delta form keeps low per-frame noise. The primary guess that seeds the image
-    // matcher for stitching. nullopt when either frame has no scrollbar or on a mid-scroll resolution change.
-    [[nodiscard]] std::optional<double> estimate(const Frame &from, const Frame &to) const;
-
-    // Content-pixel scroll offset between two frames, computed from each frame's OWN thumb length, so it
-    // stays correct across a thumb-length change (unlike estimate()'s shared-length delta). Used as the
-    // recovery guess when estimate() fails because the game lazily re-scaled the thumb (factor
-    // inheritance history appended mid-scroll). nullopt when either frame has no scrollbar.
-    [[nodiscard]] std::optional<double> scrollOffsetGuess(const Frame &from, const Frame &to) const;
-
 private:
     // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from
     // colour runs along the scan line: the background run reaches the (dark) thumb, the margin run reaches
@@ -112,11 +100,6 @@ private:
     // (~10x more stable than a hard threshold; tolerates layout/resolution drift). nullopt when the thumb is
     // not found or the cap contrast is too low, so trackGeometry() falls back to the config column.
     [[nodiscard]] std::optional<double> trackCenterX(const Frame &frame) const;
-
-    // True when the thumb bottom is pinned to the track bottom (bottom rest / overscroll): the measured thumb
-    // length is corrupted (top slides down, bottom pinned), so the offset guess must divide by the reference
-    // frame's logical length instead. See kThumbBottomFlushPx.
-    [[nodiscard]] bool isBottomClipped(const Frame &frame, const TrackGeometry &geometry) const;
 
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;

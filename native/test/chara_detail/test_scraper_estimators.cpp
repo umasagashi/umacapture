@@ -38,9 +38,9 @@ const Color kThumb{60, 60, 60};  // the scroll thumb
 const Range<Color> kTrackRange{Color(200, 200, 200), Color(255, 255, 255)};  // thumb vs. background
 const Range<Color> kMarginRange{Color(228, 228, 228), Color(255, 255, 255)};  // near-white margin vs. track
 
-// Estimator physics for the tests: a unit viewport keeps scrollOffsetGuess in frame-height pixels, and a
-// zero cap offset makes the logical thumb length exactly the measured tip-to-tip span, so the geometric
-// expectations below stay clean. The real cap correction is validated end-to-end (video harness), not here.
+// Estimator physics for the tests: a unit viewport, and a zero cap offset so the logical thumb length is
+// exactly the measured tip-to-tip span and the geometric expectations below stay clean. The real cap
+// correction is validated end-to-end (video harness), not here.
 constexpr double kViewport = 1.0;
 constexpr double kCapOffset = 0.0;
 
@@ -92,63 +92,6 @@ TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
     CHECK_FALSE(estimator.hasScrollbar(frame));
     CHECK_FALSE(estimator.position(frame).has_value());
     CHECK_FALSE(estimator.topMargin(frame).has_value());
-}
-
-TEST_CASE("ScrollBarOffsetEstimator estimates a nonzero pixel offset between two thumb positions") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
-    const Frame from = scrollbarFrame(100, 40, 60);
-    const Frame to = scrollbarFrame(100, 50, 70);  // scrolled down: the thumb moved lower
-
-    const auto offset = estimator.estimate(from, to);
-    REQUIRE(offset.has_value());
-    CHECK(*offset > 0.0);  // scrolled down => positive content offset
-
-    // Unified geometry: estimate() (shared-length delta) and scrollOffsetGuess() (per-frame absolute
-    // difference) now read the same trackGeometry, so for a constant thumb length they agree.
-    const auto guess = estimator.scrollOffsetGuess(from, to);
-    REQUIRE(guess.has_value());
-    CHECK(*offset == doctest::Approx(*guess));
-}
-
-TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess is zero for identical frames and positive scrolling down") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
-    const Frame a = scrollbarFrame(100, 40, 60);
-    const Frame b = scrollbarFrame(100, 55, 75);  // thumb lower (scrolled down), same length
-
-    const auto same = estimator.scrollOffsetGuess(a, a);
-    REQUIRE(same.has_value());
-    CHECK(*same == doctest::Approx(0.0));
-
-    const auto down = estimator.scrollOffsetGuess(a, b);
-    REQUIRE(down.has_value());
-    CHECK(*down > 0.0);  // scrolling down => positive content offset
-}
-
-TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess works across a thumb-length change") {
-    // The point of this guess: unlike estimate()'s shared-length delta, it stays valid when the thumb
-    // re-scales (content lazily appended), because each frame contributes its OWN thumb length.
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
-    const Frame before = scrollbarFrame(100, 60, 90);  // long thumb near the bottom (small content)
-    const Frame after = scrollbarFrame(100, 40, 55);  // shorter thumb, lifted up (content grew)
-
-    CHECK(estimator.scrollOffsetGuess(before, after).has_value());  // does not choke on differing lengths
-}
-
-TEST_CASE("ScrollBarOffsetEstimator::scrollOffsetGuess returns nullopt without a scrollbar") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
-    const Frame bar = scrollbarFrame(100, 40, 60);
-    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
-
-    CHECK_FALSE(estimator.scrollOffsetGuess(bar, uniform).has_value());
-    CHECK_FALSE(estimator.scrollOffsetGuess(uniform, bar).has_value());
-}
-
-TEST_CASE("ScrollBarOffsetEstimator rejects a size change between frames") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
-    const Frame from = scrollbarFrame(100, 40, 60);
-    const Frame to = scrollbarFrame(80, 32, 48);
-
-    CHECK_FALSE(estimator.estimate(from, to).has_value());
 }
 
 TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless frames") {
