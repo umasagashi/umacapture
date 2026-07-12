@@ -38,13 +38,11 @@ ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
     const Range<Color> &scroll_bar_bg_color_range,
     const Line<double> &scroll_bar_scan_line,
     const Range<Color> &scroll_bar_margin_color_range,
-    double viewport,
     double cap_offset,
     const scraper_config::ScrollBarThumbProbeConfig &thumb_probe)
     : scroll_bar_bg_color_range(scroll_bar_bg_color_range)
     , scroll_bar_scan_line(scroll_bar_scan_line)
     , scroll_bar_margin_color_range(scroll_bar_margin_color_range)
-    , viewport(viewport)
     , cap_offset(cap_offset)
     , thumb_probe(thumb_probe) {}
 
@@ -1033,7 +1031,6 @@ void SceneScraper::build(const Frame &frame) {
         config.scroll_bar_bg_color,
         config.scroll_bar_scan_line,
         config.scroll_bar_margin_color,
-        config.viewport,
         config.cap_offset,
         config.scroll_bar_thumb_probe);
     const auto &scroll_bar_offset_estimator = *scroll_bar_estimator;

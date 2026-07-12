@@ -38,10 +38,9 @@ const Color kThumb{60, 60, 60};  // the scroll thumb
 const Range<Color> kTrackRange{Color(200, 200, 200), Color(255, 255, 255)};  // thumb vs. background
 const Range<Color> kMarginRange{Color(228, 228, 228), Color(255, 255, 255)};  // near-white margin vs. track
 
-// Estimator physics for the tests: a unit viewport, and a zero cap offset so the logical thumb length is
-// exactly the measured tip-to-tip span and the geometric expectations below stay clean. The real cap
-// correction is validated end-to-end (video harness), not here.
-constexpr double kViewport = 1.0;
+// Estimator physics for the tests: a zero cap offset so the logical thumb length is exactly the measured
+// tip-to-tip span and the geometric expectations below stay clean. The real cap correction is validated
+// end-to-end (video harness), not here.
 constexpr double kCapOffset = 0.0;
 
 // Thumb-centre probe geometry. These tests render a full-width thumb, so trackCenterX finds no pill contrast
@@ -68,7 +67,7 @@ Frame scrollbarFrame(int size, int thumb_top, int thumb_bottom) {
 const Line<double> kScanLine{Point<double>(0.5, 0.0), Point<double>(0.5, 0.99)};
 
 TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered track") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
     const Frame frame = scrollbarFrame(100, 40, 60);
 
     CHECK(estimator.hasScrollbar(frame));
@@ -86,7 +85,7 @@ TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered trac
 }
 
 TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
     const Frame frame = Frame::fixed(testutil::solid(100, kTrack));
 
     CHECK_FALSE(estimator.hasScrollbar(frame));
@@ -95,7 +94,7 @@ TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
 }
 
 TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless frames") {
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
     const ImageOffsetEstimator image;  // default config
     const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
 
@@ -116,7 +115,7 @@ TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless 
 TEST_CASE("ScrollAreaOffsetEstimator reads scrollbar geometry from scroll_bar_frame, not frame") {
     // Guards the scroll-area / scroll-bar decoupling: geometry must come from the dedicated band, so that the
     // content crop (frame) can change without disturbing detection.
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
     const ImageOffsetEstimator image;  // default config
     const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
 

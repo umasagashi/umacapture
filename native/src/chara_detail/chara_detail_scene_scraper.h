@@ -59,7 +59,6 @@ public:
         const Range<Color> &scroll_bar_bg_color_range,
         const Line<double> &scroll_bar_scan_line,
         const Range<Color> &scroll_bar_margin_color_range,
-        double viewport,
         double cap_offset,
         const scraper_config::ScrollBarThumbProbeConfig &thumb_probe);
 
@@ -104,7 +103,6 @@ private:
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
     const Range<Color> scroll_bar_margin_color_range;
-    const double viewport;
     const double cap_offset;
     const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };

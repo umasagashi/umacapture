@@ -84,8 +84,8 @@ struct SceneScraperConfig {
     Rect<double> scroll_area_rect;
     // Full-width band the scrollbar is detected in, decoupled from scroll_area_rect (the content/stitch crop)
     // so the latter can move without shifting the scan geometry. It MUST stay full width (x IntersectStart ->
-    // IntersectPixelEnd): the scan line x, viewport and cap_offset are all normalized by the crop width, so a
-    // narrower band would silently mis-scale them. Only its y-range is meant to diverge from scroll_area_rect.
+    // IntersectPixelEnd): the scan line x and cap_offset are normalized by the crop width, so a narrower band
+    // would silently mis-scale them. Only its y-range is meant to diverge from scroll_area_rect.
     Rect<double> scroll_bar_rect;
     Rect<double> scroll_area_stationary_rect;
     Range<Color> scroll_bar_bg_color;
@@ -95,14 +95,11 @@ struct SceneScraperConfig {
     uint64 stationary_time_threshold;
     int minimum_color_threshold;
     uint64 stationary_color_threshold;
-    // Scrollbar physics, all width-normalized so they scale with the screen and never depend on the crop
-    // height (each layout carries its own values). `viewport` is the visible content height V used to turn
-    // thumb geometry into a content-pixel offset (abs = V * upper_gap / thumb_length); it is NOT the crop
-    // height. `cap_offset` is the thumb's rounded-cap depth c: the tip-to-tip length over-reads the logical
-    // thumb length by 2c, so the logical length is `tip - 2 * cap_offset`. `scroll_bar_margin_color` is the
+    // Scrollbar physics, width-normalized so they scale with the screen and never depend on the crop height.
+    // `cap_offset` is the thumb's rounded-cap depth c: the tip-to-tip length over-reads the logical thumb
+    // length by 2c, so the logical length is `tip - 2 * cap_offset`. `scroll_bar_margin_color` is the
     // near-white band flanking the placeholder track; isolating it locates the fixed track ends so the
     // position is measured against the true track, not the (slightly longer) config scan line.
-    double viewport;
     double cap_offset;
     Range<Color> scroll_bar_margin_color;
     // Sub-pixel thumb-centre probe geometry (self-centres the vertical scan on the thumb; see trackCenterX).
@@ -123,7 +120,6 @@ struct SceneScraperConfig {
         stationary_time_threshold,
         minimum_color_threshold,
         stationary_color_threshold,
-        viewport,
         cap_offset,
         scroll_bar_margin_color,
         scroll_bar_thumb_probe);
