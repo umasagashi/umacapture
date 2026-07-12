@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <stdexcept>
 #include <thread>
 #include <utility>
@@ -18,6 +19,14 @@ enum QueueLimitMode {
     Discard,
     Block,
 };
+
+// Default depth of a Discard/Block-mode connection's queue. In Discard mode the depth is a burst
+// absorber, not a throughput fix: a consumer that is slow for a few events keeps them queued instead
+// of dropping, but a consumer that is slower than the producer on average eventually drops no matter
+// the depth. Deeper queues trade memory (queued args stay alive) and worst-case staleness
+// (depth x production interval) for burst tolerance; pass a per-connection size where that trade
+// matters (see the frame-path runners in native_api.cpp).
+inline constexpr size_t kDefaultQueueLimitSize = 3;
 
 namespace event_util_impl {
 
@@ -100,13 +109,19 @@ private:
 template<typename... Args>
 class QueuedConnectionImpl : public ConnectionInterface<Args...>, public EventProcessorInterface {
 public:
-    explicit QueuedConnectionImpl(QueueLimitMode queue_limit_mode)
+    explicit QueuedConnectionImpl(QueueLimitMode queue_limit_mode, size_t queue_limit_size = kDefaultQueueLimitSize)
         : queue_limit_mode(queue_limit_mode)
+        , queue_limit_size(queue_limit_size)
         , notifier(nullptr)
         , id(0) {}
 
-    QueuedConnectionImpl(QueueLimitMode queue_limit_mode, const std::shared_ptr<SenderBase<int>> &notifier, int id)
+    QueuedConnectionImpl(
+        QueueLimitMode queue_limit_mode,
+        size_t queue_limit_size,
+        const std::shared_ptr<SenderBase<int>> &notifier,
+        int id)
         : queue_limit_mode(queue_limit_mode)
+        , queue_limit_size(queue_limit_size)
         , notifier(notifier)
         , id(id) {}
 
@@ -166,7 +181,7 @@ private:
     }
 
     const QueueLimitMode queue_limit_mode;
-    const size_t queue_limit_size = 3;
+    const size_t queue_limit_size;
 
     eventpp::EventQueue<int, void(Args...)> connection;
     const std::shared_ptr<SenderBase<int>> notifier;
@@ -228,11 +243,15 @@ public:
 class SingleThreadMultiEventRunnerImpl : public EventRunnerInterface {
 public:
     SingleThreadMultiEventRunnerImpl(
-        QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name)
+        QueueLimitMode queue_limit_mode,
+        const std::function<void()> &finalizer,
+        const std::string &name,
+        size_t queue_limit_size = kDefaultQueueLimitSize)
         : notifier(std::make_shared<QueuedConnectionImpl<int>>(QueueLimitMode::NoLimit))
         , finalizer(finalizer)
         , name(name)
-        , queue_limit_mode(queue_limit_mode) {
+        , queue_limit_mode(queue_limit_mode)
+        , queue_limit_size(queue_limit_size) {
         notifier->listen([this](const int &index) {
             assert_(isRunning());
             processors[index]->processOne();
@@ -249,7 +268,7 @@ public:
             throw std::logic_error("SingleThreadMultiEventRunner::makeConnection called after start()");
         }
         auto connection = std::make_shared<QueuedConnectionImpl<Args...>>(
-            queue_limit_mode, notifier, static_cast<int>(processors.size()));
+            queue_limit_mode, queue_limit_size, notifier, static_cast<int>(processors.size()));
         processors.emplace_back(connection);
         return connection;
     }
@@ -299,6 +318,7 @@ private:
     const std::function<void(void)> finalizer;
     const std::string name;
     const QueueLimitMode queue_limit_mode;
+    const size_t queue_limit_size;
 
     std::vector<std::shared_ptr<EventProcessorInterface>> processors;
     std::shared_ptr<EventRunnerThread> runner;
@@ -393,8 +413,9 @@ template<typename... Args, typename Listener>
 }
 
 template<typename... Args>
-[[maybe_unused]] inline QueuedConnection<Args...> makeQueuedConnection(QueueLimitMode queue_limit_mode) {
-    return std::make_shared<event_util_impl::QueuedConnectionImpl<Args...>>(queue_limit_mode);
+[[maybe_unused]] inline QueuedConnection<Args...> makeQueuedConnection(
+    QueueLimitMode queue_limit_mode, size_t queue_limit_size = kDefaultQueueLimitSize) {
+    return std::make_shared<event_util_impl::QueuedConnectionImpl<Args...>>(queue_limit_mode, queue_limit_size);
 }
 
 using EventProcessor = std::shared_ptr<event_util_impl::EventProcessorInterface>;
@@ -403,8 +424,12 @@ using SingleThreadMultiEventRunner = std::shared_ptr<event_util_impl::SingleThre
 using EventRunnerController = std::shared_ptr<event_util_impl::EventRunnerControllerImpl>;
 
 inline SingleThreadMultiEventRunner makeSingleThreadRunner(
-    QueueLimitMode queue_limit_mode, const std::function<void()> &finalizer, const std::string &name) {
-    return std::make_shared<event_util_impl::SingleThreadMultiEventRunnerImpl>(queue_limit_mode, finalizer, name);
+    QueueLimitMode queue_limit_mode,
+    const std::function<void()> &finalizer,
+    const std::string &name,
+    size_t queue_limit_size = kDefaultQueueLimitSize) {
+    return std::make_shared<event_util_impl::SingleThreadMultiEventRunnerImpl>(
+        queue_limit_mode, finalizer, name, queue_limit_size);
 }
 
 inline EventRunnerController makeRunnerController() {
