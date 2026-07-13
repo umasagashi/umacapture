@@ -44,9 +44,14 @@ constexpr double kThumbBottomFlushPx = 2.0;
 // ~5.7%, indistinguishable from a genuine re-scale step (~5.7%). In ABSOLUTE pixels the two separate cleanly --
 // jitter stays ~2 px regardless of thumb size, while a real re-scale moves the thumb ~5 px. Above this the two
 // frames' thumb lengths genuinely differ and the guess divides each upper_gap by its own frame's length; at or
-// below it the difference is only measurement jitter and the reference length is shared to cancel it. The
-// comparison is strict (>), so the observed ±2.0 px jitter does not trip it (2.0 > 2.0 is false).
-constexpr double kRescaleThumbChangePx = 2.0;
+// below it the difference is only measurement jitter and the reference length is shared to cancel it. 2.5 sits
+// between the two populations: safely above the worst jitter (two lengthIn grid steps, each slightly OVER 1 px
+// -- the sample grid is scan_length/(samples-1) -- so a 2.0 cut would let plain quantization jitter trip) and
+// safely below the ~5 px re-scale. The change is compared in EXACT pixels (thumb_logical * unit), never through
+// per-operand lround: rounding each length first wobbles the difference by ±1 px, enough to push 2 px jitter
+// over the cut (a false re-scale -> the jitter-amplifying own-length form -> a spurious veto) or a true 3 px
+// change under it.
+constexpr double kRescaleThumbChangePx = 2.5;
 
 }  // namespace
 
@@ -332,7 +337,7 @@ std::optional<double> ScrollBarOffsetEstimator::scrollGuess(const Frame &from, c
     const double viewport_px = from.anchor().scaleToPixels(viewport);
     const bool to_bottom_clipped = to.anchor().scaleToPixels(gt->lower_gap) <= kThumbBottomFlushPx;
     const double thumb_change_px =
-        std::abs(to.anchor().scaleToPixels(gt->thumb_logical) - from.anchor().scaleToPixels(gf->thumb_logical));
+        std::abs(gt->thumb_logical - gf->thumb_logical) * from.anchor().scaleToPixels(1.0);
     if (!to_bottom_clipped && thumb_change_px > kRescaleThumbChangePx) {
         return viewport_px * (gt->upper_gap / gt->thumb_logical - gf->upper_gap / gf->thumb_logical);
     }

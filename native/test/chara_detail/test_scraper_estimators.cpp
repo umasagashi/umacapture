@@ -155,6 +155,35 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollGuess returns nullopt without a usabl
     CHECK_FALSE(estimator.scrollGuess(bar, smaller).has_value());
 }
 
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess divides by each frame's own length across a genuine re-scale") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // from: thumb [40, 70) (length 30, upper_gap 32). to: thumb [50, 70) (length 20, upper_gap 42): the thumb
+    // length changed by 10 px (>> the re-scale cut) and stays clear of the track bottom, so this is read as a
+    // genuine mid-scroll re-scale and each upper_gap is divided by its OWN frame's length:
+    // guess = 100 * (42/20 - 32/30) ~= +103. The shared-reference form would read 100 * (42-32)/30 ~= +33, so
+    // the assertion separates the two forms decisively; the loose epsilon absorbs the ~1px sampling-grid skew.
+    const Frame from = scrollbarFrame(100, 40, 70);
+    const Frame to = scrollbarFrame(100, 50, 70);
+
+    const auto guess = estimator.scrollGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*guess == doctest::Approx(103.3).epsilon(0.1));
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess keeps the reference length while the thumb is bottom-clipped") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // to's thumb bottom is pinned to the track bottom (row 92 here), the overscroll signature under which to's
+    // own measured length is unreliable -- so even though the length changed by 10 px (which alone would select
+    // the own-length form, see the re-scale case above) the guess must keep dividing by from's length:
+    // guess = 100 * (44 - 32) / 30 = +40. The own-length form would read 100 * (44/40 - 32/30) ~= +3.
+    const Frame from = scrollbarFrame(100, 40, 70);
+    const Frame to = scrollbarFrame(100, 52, 92);
+
+    const auto guess = estimator.scrollGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*guess == doctest::Approx(40.0).epsilon(0.1));
+}
+
 TEST_CASE("scrollGuess sub-pixel refinement matches the integer guess on hard-edged frames") {
     const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const Frame from = scrollbarFrame(100, 40, 60);
