@@ -84,8 +84,10 @@ public:
     // re-scales mid-scroll (inheritance history appended, detected by an absolute-pixel thumb-length change)
     // does it divide each upper_gap by its OWN frame's length -- the form that stays correct across the length
     // change. Coarse by design -- used only as a far-outlier veto on the image estimate, never to decide the
-    // offset. nullopt when either frame has no scrollbar or on a mid-scroll resolution change.
-    [[nodiscard]] std::optional<double> scrollGuess(const Frame &from, const Frame &to) const;
+    // offset. nullopt when either frame has no scrollbar or on a mid-scroll resolution change. `refine` snaps
+    // both thumbs to sub-pixel tips (see refineThumbEdges), which is what removes the coarse per-tip-pixel
+    // quantization that otherwise dominates the guess on a short thumb; the veto path passes it.
+    [[nodiscard]] std::optional<double> scrollGuess(const Frame &from, const Frame &to, bool refine = false) const;
 
 private:
     // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from
@@ -100,11 +102,24 @@ private:
         double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
     };
 
-    [[nodiscard]] std::optional<TrackGeometry> trackGeometry(const Frame &frame) const;
+    [[nodiscard]] std::optional<TrackGeometry> trackGeometry(const Frame &frame, bool refine = false) const;
 
     // TrackGeometry from the colour runs along one scan column. trackGeometry() picks the column
-    // (trackCenterX, falling back to the config line) and delegates here.
-    [[nodiscard]] std::optional<TrackGeometry> geometryAt(const Frame &frame, const Line<double> &scan_line) const;
+    // (trackCenterX, falling back to the config line) and delegates here. When `refine` is set the two thumb
+    // tips are additionally snapped to sub-pixel via refineThumbEdges; scrollGuess() (the veto path) sets it,
+    // while position()/topMargin() keep the plain integer tips.
+    [[nodiscard]] std::optional<TrackGeometry>
+    geometryAt(const Frame &frame, const Line<double> &scan_line, bool refine = false) const;
+
+    // Sub-pixel refinement of the two thumb tip rows. The colour-run detection quantizes each tip to a whole
+    // pixel (the last background pixel before the thumb), so a tip whose true position sits mid-pixel jitters by
+    // +-1 px frame to frame -- and on a short thumb one tip pixel is worth tens of content pixels in the guess.
+    // Here the anti-aliased intensity ramp across the tip locates the bright(background)->dark(thumb) mid-point
+    // crossing at sub-pixel resolution along the scan column. Returns {thumb_top, thumb_bottom} width-normalized,
+    // or nullopt (caller falls back to the integer tips) when the ramp is missing / too low contrast / out of
+    // bounds. `thumb_top_norm`/`thumb_bottom_norm` are the integer tips from the colour runs, used as anchors.
+    [[nodiscard]] std::optional<std::pair<double, double>> refineThumbEdges(
+        const Frame &frame, const Line<double> &scan_line, double thumb_top_norm, double thumb_bottom_norm) const;
 
     // Sub-pixel thumb centre x (width-normalized) from an AA intensity-weighted centroid over the thumb's
     // central rows, so the vertical scan self-centres on the thumb instead of trusting the fixed config x

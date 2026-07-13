@@ -16,6 +16,8 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include "chara_detail/chara_detail_scene_scraper.h"
@@ -64,6 +66,26 @@ Frame scrollbarFrame(int size, int thumb_top, int thumb_bottom) {
     cv::Mat mat = testutil::solid(size, kMargin);
     mat(cv::Rect(0, track_inset, size, size - 2 * track_inset)).setTo(cv::Scalar(kTrack.b(), kTrack.g(), kTrack.r()));
     mat(cv::Rect(0, thumb_top, size, thumb_bottom - thumb_top)).setTo(cv::Scalar(kThumb.b(), kThumb.g(), kThumb.r()));
+    return Frame::fixed(mat);
+}
+
+// Like scrollbarFrame but with anti-aliased thumb tips placed at *fractional* rows: each track-band row is
+// blended track<->thumb by the fraction of it the thumb covers (proper area coverage). The integer colour-run
+// rounds such a tip to a whole pixel, but the sub-pixel refinement recovers the fraction from the blend -- so a
+// pair of these frames exercises exactly the quantization the refinement removes.
+Frame scrollbarFrameAA(int size, double thumb_top, double thumb_bottom) {
+    const int track_inset = size * 8 / 100;
+    cv::Mat mat = testutil::solid(size, kMargin);
+    mat(cv::Rect(0, track_inset, size, size - 2 * track_inset)).setTo(cv::Scalar(kTrack.b(), kTrack.g(), kTrack.r()));
+    for (int r = track_inset; r < size - track_inset; r++) {
+        const double coverage =
+            std::clamp(std::min<double>(r + 1, thumb_bottom) - std::max<double>(r, thumb_top), 0.0, 1.0);
+        const auto blend = [coverage](int track, int thumb) {
+            return static_cast<uchar>(std::lround(track * (1.0 - coverage) + thumb * coverage));
+        };
+        mat.row(r).setTo(cv::Scalar(blend(kTrack.b(), kThumb.b()), blend(kTrack.g(), kThumb.g()),
+                                    blend(kTrack.r(), kThumb.r())));
+    }
     return Frame::fixed(mat);
 }
 
@@ -130,6 +152,39 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollGuess returns nullopt without a usabl
     // A mid-scroll resolution change mixes pixel scales, so the guess bails.
     const Frame smaller = scrollbarFrame(80, 32, 48);
     CHECK_FALSE(estimator.scrollGuess(bar, smaller).has_value());
+}
+
+TEST_CASE("scrollGuess sub-pixel refinement matches the integer guess on hard-edged frames") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const Frame from = scrollbarFrame(100, 40, 60);
+    const Frame to = scrollbarFrame(100, 50, 70);  // same length, moved 10 px
+
+    // A hard tip carries only a constant half-pixel bias (the mid-point sits half a pixel past the last full
+    // background pixel), and that bias cancels in the upper_gap delta -- so on clean edges refine=true reproduces
+    // the integer guess to within a fraction of a pixel. This pins that the refinement never disturbs the clean
+    // case; its sub-pixel win on real (anti-aliased) tips is covered below and end-to-end by the video harness.
+    const auto integer = estimator.scrollGuess(from, to, false);
+    const auto refined = estimator.scrollGuess(from, to, true);
+    REQUIRE(integer.has_value());
+    REQUIRE(refined.has_value());
+    CHECK(*refined == doctest::Approx(*integer).epsilon(0.05));
+}
+
+TEST_CASE("scrollGuess sub-pixel refinement resolves a move the integer tips round away") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // Both tips slide 0.6 px -- below one pixel, so the colour-run rounds both frames to the same integer tips
+    // and the integer guess reads ~0. The anti-aliased tip blend encodes the fraction, so the refined guess
+    // recovers the forward move (amplified by viewport / thumb_length ~= 5x here). This is the quantization the
+    // refinement is adopted to remove, in miniature.
+    const Frame from = scrollbarFrameAA(100, 40.0, 60.0);
+    const Frame to = scrollbarFrameAA(100, 40.6, 60.6);
+
+    const auto integer = estimator.scrollGuess(from, to, false);
+    const auto refined = estimator.scrollGuess(from, to, true);
+    REQUIRE(integer.has_value());
+    REQUIRE(refined.has_value());
+    CHECK(std::abs(*integer) < 1.0);  // the whole-pixel tips cannot see a sub-pixel move
+    CHECK(*refined > 1.5);  // the blend does: a clear forward guess
 }
 
 TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless frames") {
