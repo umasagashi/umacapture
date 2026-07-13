@@ -8,11 +8,12 @@
 // with hand-built CV_8UC3 mats through Frame::fixed(), whose anchor normalizes BOTH axes by the frame
 // width, so on a square frame a pixel (px, py) is addressed at normalized (px/w, py/w).
 //
-// The image estimator's full AKAZE/FLANN match on synthetic frames is not asserted (it is brittle on
-// feature-poor test images); its deterministic pieces are pinned instead: the "no features -> nullopt"
-// guard, the candidate extraction (detectOffsetCandidates on hand-built displacement sets), and the
-// symmetric overlap verification (overlapScore on hand-built grayscale mats). The end-to-end match is
-// arbitrated by the integration golden harness on real footage.
+// The image estimator's full AKAZE/FLANN match is asserted only on a deliberately feature-RICH blob
+// texture (see blobTexture / the guess-window veto test); it is brittle on feature-poor synthetic images,
+// so its deterministic pieces are pinned separately: the "no features -> nullopt" guard, the candidate
+// extraction (detectOffsetCandidates on hand-built displacement sets), and the symmetric overlap
+// verification (overlapScore on hand-built grayscale mats). The end-to-end match is arbitrated by the
+// integration golden harness on real footage.
 
 #include <doctest/doctest.h>
 
@@ -346,6 +347,47 @@ TEST_CASE("ImageOffsetEstimator::overlapScore returns no evidence on degenerate 
     // otherwise a blank band would outscore every genuine candidate.
     const cv::Mat uniform(100, 40, CV_8UC1, cv::Scalar(128));
     CHECK(estimator.overlapScore(uniform, uniform, 10) == 0.0);
+}
+
+// A deterministic feature-RICH texture for the full-match veto test: a mosaic of 4 px random-colour blocks
+// puts a unique high-contrast corner at every block junction, which survives AKAZE's nonlinear scale space
+// (raw per-pixel noise gets diffused away, leaving it feature-poor -- see the file header). cv::RNG is a
+// fixed-algorithm LCG, so a fixed seed reproduces everywhere. Two windows of one tall texture d rows apart
+// simulate a genuine scroll of d content pixels, exactly like texturedColumn above.
+cv::Mat blockMosaic(int height, int width) {
+    cv::Mat coarse(height / 4, width / 4, CV_8UC3);
+    cv::RNG rng(24680);
+    rng.fill(coarse, cv::RNG::UNIFORM, 0, 256);
+    cv::Mat mat;
+    cv::resize(coarse, mat, cv::Size(width, height), 0, 0, cv::INTER_NEAREST);
+    return mat;
+}
+
+TEST_CASE("ScrollAreaOffsetEstimator admits an image offset near the scroll-bar guess and vetoes a far one") {
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, ImageOffsetEstimator(), kGuessMargin);
+
+    // Content: two 300-row windows of one tall texture, 90 rows apart -> the image estimator reads ~+90 px.
+    // 300 px wide (not the 100 px of the geometry tests): AKAZE keypoint counts scale with resolution, and
+    // this is the smallest round size that comfortably clears the estimator's minimum trusted-match count.
+    const cv::Mat tall = blockMosaic(420, 300);
+    const Frame content_from = Frame::fixed(tall.rowRange(0, 300).clone());
+    const Frame content_to = Frame::fixed(tall.rowRange(90, 390).clone());
+
+    // Agreeing scroll bar: the thumb (length 60) travels 18 px, so the guess is 300 * 18 / 60 = 90 px --
+    // right on the image offset, well inside the 150 px window: the image result passes through.
+    FrameDescriptor from_near{content_from, scrollbarFrame(300, 120, 180)};
+    FrameDescriptor to_near{content_to, scrollbarFrame(300, 138, 198)};
+    const auto accepted = estimator.estimate(from_near, to_near);
+    REQUIRE(accepted.has_value());
+    CHECK(accepted.value() == doctest::Approx(90.0).epsilon(0.05));
+
+    // Same content pair, but the scroll bar now reads a 480 px scroll (thumb travel 96 px): the image offset
+    // sits 390 px from the guess, far outside the 150 px window, and is vetoed even though its overlap is
+    // perfect -- the alias-rejection behaviour the window exists for.
+    FrameDescriptor from_far{content_from, scrollbarFrame(300, 120, 180)};
+    FrameDescriptor to_far{content_to, scrollbarFrame(300, 216, 276)};
+    CHECK_FALSE(estimator.estimate(from_far, to_far).has_value());
 }
 
 TEST_CASE("StationaryFrameCatcher latches once its region holds still for the threshold") {

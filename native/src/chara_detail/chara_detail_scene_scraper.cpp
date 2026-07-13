@@ -1,6 +1,5 @@
 #include "chara_detail/chara_detail_scene_scraper.h"
 
-#include <array>
 #include <map>
 
 namespace uma::chara_detail {
@@ -242,11 +241,14 @@ std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::refineThumbEd
         if (lo - kPlateau < 0 || hi + kPlateau >= image.rows) {
             return std::nullopt;
         }
-        // Plateaus sampled a couple of pixels clear of the transition on each side.
-        const int bright_row = bg_above ? lo - 1 : hi + 1;
-        const int dark_row = bg_above ? hi + 1 : lo - 1;
-        const double bright = median3(lum(bright_row), lum(bright_row + (bg_above ? -1 : 1)), lum(bright_row));
-        const double dark = median3(lum(dark_row), lum(dark_row + (bg_above ? 1 : -1)), lum(dark_row));
+        // Plateaus: three rows per side, starting at the window edge and walking outward, so the deepest row
+        // is exactly what the bounds check above reserves (lo - kPlateau / hi + kPlateau). The edge rows sit
+        // clear of the ~1-2 px tip ramp, and the median drops one stray (or ramp-tinted) pixel among them.
+        const auto plateau = [&](int edge_row, int outward) {
+            return median3(lum(edge_row), lum(edge_row + outward), lum(edge_row + 2 * outward));
+        };
+        const double bright = bg_above ? plateau(lo, -1) : plateau(hi, 1);
+        const double dark = bg_above ? plateau(hi, 1) : plateau(lo, -1);
         if (bright - dark < kMinEdgeContrast) {
             return std::nullopt;
         }
@@ -1086,9 +1088,11 @@ void ScrollableScrapingInterpreter::startScrolling(const FrameDescriptor &valid_
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     FrameDescriptor current_fragment = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
-    // Guess-free: the offset comes from image evidence alone, so a scroll-bar thumb re-scale (inheritance
-    // history appended mid-scroll) or a clipped thumb cannot mislead it. On a genuine non-match the offset
-    // stays nullopt, the frame is skipped, and the reference descriptor freezes until a matching frame comes.
+    // The offset is decided by image evidence (candidate + overlap verify); the scroll-bar guess is applied
+    // only as a far-outlier veto on that result, with a window sized so a thumb re-scale (inheritance history
+    // appended mid-scroll) or a clipped thumb cannot reject a genuine offset (see ScrollAreaOffsetEstimator::
+    // estimate). On a genuine non-match -- or a veto -- the offset stays nullopt, the frame is skipped, and
+    // the reference descriptor freezes until a matching frame comes.
     const auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
 
     // Check the green terminator every frame, anchored to the scroll frontier (height - offset), BEFORE
