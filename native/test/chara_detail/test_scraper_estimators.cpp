@@ -38,10 +38,15 @@ const Color kThumb{60, 60, 60};  // the scroll thumb
 const Range<Color> kTrackRange{Color(200, 200, 200), Color(255, 255, 255)};  // thumb vs. background
 const Range<Color> kMarginRange{Color(228, 228, 228), Color(255, 255, 255)};  // near-white margin vs. track
 
-// Estimator physics for the tests: a zero cap offset so the logical thumb length is exactly the measured
-// tip-to-tip span and the geometric expectations below stay clean. The real cap correction is validated
-// end-to-end (video harness), not here.
+// Estimator physics for the tests: a unit viewport keeps scrollGuess in frame-width pixels, and a zero cap
+// offset makes the logical thumb length exactly the measured tip-to-tip span, so the geometric expectations
+// below stay clean. The real cap correction is validated end-to-end (video harness), not here.
+constexpr double kViewport = 1.0;
 constexpr double kCapOffset = 0.0;
+
+// Guess-window half-width for the veto tests, width-normalized. On these 100 px-wide frames it scales to
+// 50 px, wide enough to admit a matching guess and narrow enough to reject a far alias.
+constexpr double kGuessMargin = 0.5;
 
 // Thumb-centre probe geometry. These tests render a full-width thumb, so trackCenterX finds no pill contrast
 // and falls back to the fixed scan column (see scrollbarFrame); the exact probe values are never exercised,
@@ -67,7 +72,7 @@ Frame scrollbarFrame(int size, int thumb_top, int thumb_bottom) {
 const Line<double> kScanLine{Point<double>(0.5, 0.0), Point<double>(0.5, 0.99)};
 
 TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered track") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const Frame frame = scrollbarFrame(100, 40, 60);
 
     CHECK(estimator.hasScrollbar(frame));
@@ -85,7 +90,7 @@ TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered trac
 }
 
 TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const Frame frame = Frame::fixed(testutil::solid(100, kTrack));
 
     CHECK_FALSE(estimator.hasScrollbar(frame));
@@ -93,10 +98,44 @@ TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
     CHECK_FALSE(estimator.topMargin(frame).has_value());
 }
 
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess turns a thumb move into a content-pixel guess") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // from: thumb [40, 60) (length 20, upper_gap 40-8 = 32). to: thumb [50, 70) (upper_gap 42), same length.
+    // guess = viewport_px * (ug_to - ug_from) / tl_from = 100 * (42 - 32) / 20 = 50 (unit viewport => px = width).
+    const Frame from = scrollbarFrame(100, 40, 60);
+    const Frame to = scrollbarFrame(100, 50, 70);
+
+    const auto guess = estimator.scrollGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*guess == doctest::Approx(50.0).epsilon(0.05));
+
+    // Identical frames imply no scroll, and the sign follows the thumb direction.
+    const auto still = estimator.scrollGuess(from, from);
+    REQUIRE(still.has_value());
+    CHECK(*still == doctest::Approx(0.0));
+    const auto back = estimator.scrollGuess(to, from);
+    REQUIRE(back.has_value());
+    CHECK(*back < 0.0);  // thumb moved up => negative (backward) guess
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess returns nullopt without a usable scrollbar pair") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const Frame bar = scrollbarFrame(100, 40, 60);
+    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
+
+    // A missing scrollbar on either frame disables the guess (=> the caller applies no veto).
+    CHECK_FALSE(estimator.scrollGuess(bar, uniform).has_value());
+    CHECK_FALSE(estimator.scrollGuess(uniform, bar).has_value());
+
+    // A mid-scroll resolution change mixes pixel scales, so the guess bails.
+    const Frame smaller = scrollbarFrame(80, 32, 48);
+    CHECK_FALSE(estimator.scrollGuess(bar, smaller).has_value());
+}
+
 TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless frames") {
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const ImageOffsetEstimator image;  // default config
-    const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, image, kGuessMargin);
 
     // FrameDescriptor carries the content crop (frame) and the scroll-bar band (scroll_bar_frame) separately;
     // the scroll-area estimator reads geometry from scroll_bar_frame. Here they are the same synthetic frame.
@@ -115,9 +154,9 @@ TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless 
 TEST_CASE("ScrollAreaOffsetEstimator reads scrollbar geometry from scroll_bar_frame, not frame") {
     // Guards the scroll-area / scroll-bar decoupling: geometry must come from the dedicated band, so that the
     // content crop (frame) can change without disturbing detection.
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const ImageOffsetEstimator image;  // default config
-    const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, image, kGuessMargin);
 
     const Frame bar = scrollbarFrame(100, 40, 60);
     const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));

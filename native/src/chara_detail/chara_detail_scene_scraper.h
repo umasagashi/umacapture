@@ -59,6 +59,7 @@ public:
         const Range<Color> &scroll_bar_bg_color_range,
         const Line<double> &scroll_bar_scan_line,
         const Range<Color> &scroll_bar_margin_color_range,
+        double viewport,
         double cap_offset,
         const scraper_config::ScrollBarThumbProbeConfig &thumb_probe);
 
@@ -74,6 +75,17 @@ public:
     // length. Returns nullopt when no scrollbar is present (a short, non-scrollable page). Used to detect a
     // completed tab snapping back to the top after a character switch.
     [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const;
+
+    // Scroll-bar-derived content-pixel guess of the scroll offset between two frames: the delta of the
+    // placeholder-track upper_gap over a cap-corrected thumb length, scaled by the true viewport. It normally
+    // divides both upper_gap terms by from's single length, which cancels the absolute scroll position (so
+    // ±1px thumb-length jitter cannot amplify) and freezes the length at the bottom for free (the terminating
+    // frame's own thumb collapses, but from is the previous unclipped latch). Only when the thumb genuinely
+    // re-scales mid-scroll (inheritance history appended, detected by an absolute-pixel thumb-length change)
+    // does it divide each upper_gap by its OWN frame's length -- the form that stays correct across the length
+    // change. Coarse by design -- used only as a far-outlier veto on the image estimate, never to decide the
+    // offset. nullopt when either frame has no scrollbar or on a mid-scroll resolution change.
+    [[nodiscard]] std::optional<double> scrollGuess(const Frame &from, const Frame &to) const;
 
 private:
     // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from
@@ -103,6 +115,7 @@ private:
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
     const Range<Color> scroll_bar_margin_color_range;
+    const double viewport;
     const double cap_offset;
     const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };
@@ -193,19 +206,24 @@ private:
 class ScrollAreaOffsetEstimator {
 public:
     ScrollAreaOffsetEstimator(
-        const ScrollBarOffsetEstimator &scroll_bar_offset_estimator, const ImageOffsetEstimator &image_offset_estimator);
+        const ScrollBarOffsetEstimator &scroll_bar_offset_estimator,
+        const ImageOffsetEstimator &image_offset_estimator,
+        double guess_window_margin);
 
     [[nodiscard]] std::optional<double> position(const FrameDescriptor &descriptor) const;
 
-    // Content scroll offset between the frames, decided purely by the image estimator. The scroll bar is NOT
-    // consulted: its guess is wrong exactly when it matters most (the thumb pins to the track bottom on the
-    // terminating frame, collapsing the measured travel), and a keypoint window built on a wrong guess
-    // rejects the true offset. The scroll-bar estimator remains only for position()/topMargin().
+    // Content scroll offset between the frames. The image estimator decides the offset (candidate + overlap
+    // verify); the scroll-bar guess is then applied only as an independent far-outlier veto: an image offset
+    // more than guess_window_margin (width units) from scrollGuess() is rejected (nullopt). The veto catches
+    // periodic-row aliases that clear the overlap gate yet land far from where the scroll bar says the scroll
+    // is. When the guess is unavailable (no scrollbar / mid-scroll resolution change) the pure image result
+    // stands.
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
 
 private:
     const ScrollBarOffsetEstimator scroll_bar_offset_estimator;
     const ImageOffsetEstimator image_offset_estimator;
+    const double guess_window_margin;
 };
 
 class PageScrapingBox {
