@@ -32,17 +32,45 @@ constexpr double kFactorEndGreenSearchSpan = 0.08;
 // still staged in RAM when the terminator fires.
 constexpr double kFactorEndGraySearchSpan = 0.16;
 
+// Thumb-bottom "pinned" tolerance in pixels for the scroll-bar guess: at/below this lower_gap the thumb
+// bottom is treated as at the track bottom (bottom rest / overscroll), where the frame's own measured thumb
+// length is unreliable, so the guess divides by the reference (from) length instead. Mirrors the historical
+// kThumbBottomFlushPx / factor_header.flush_tolerance_px = 1.5, rounded to 2 px.
+constexpr double kThumbBottomFlushPx = 2.0;
+
+// Minimum thumb-length CHANGE, in pixels, between two frames that counts as a genuine mid-scroll re-scale (the
+// game re-scaling the factor thumb when it appends 継承履歴). A percentage tolerance conflates jitter and
+// re-scale on a tiny thumb: on a ~15 px thumb (friend max-rental) the endpoint-measurement jitter is a large
+// fraction of the length, indistinguishable from a genuine re-scale step. In ABSOLUTE pixels the two separate
+// cleanly. Above this the two frames' thumb lengths genuinely differ and the guess divides each upper_gap by
+// its own frame's length; at or below it the difference is only measurement jitter and the reference length is
+// shared to cancel it. The change is compared in EXACT pixels (thumb_logical * unit): the tips feeding it are
+// sub-pixel-refined by default (scrollGuess refine=true, the calibrated path the veto uses), so there is no
+// per-operand lround rounding to wobble the difference.
+//
+// 2.0 sits in a wide empty band between the two populations, measured over all 11 golden clips (3879 frame
+// pairs) with the sub-pixel-refined tips the veto path actually uses: steady-scroll jitter tops out at ~1.2 px
+// (max 1.23, p99.9 1.15; even the tiny ~30 px friend-inheritance thumb stays at ~1.0), while the sole genuine
+// re-scale in the corpus moves the thumb ~5 px (5.14). Nothing lands in (1.5, 5.0]. 2.0 clears the worst
+// observed jitter by ~0.8 px yet stays well below the re-scale, so it neither trips on jitter (a false
+// re-scale -> the jitter-amplifying own-length form -> a spurious veto) nor misses a real re-scale. Sub-pixel
+// refinement is what shrank the jitter here: without it the whole-pixel tips quantize the change into ±1 px
+// steps, which is why the historical gate needed the extra headroom.
+constexpr double kRescaleThumbChangePx = 2.0;
+
 }  // namespace
 
 ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
     const Range<Color> &scroll_bar_bg_color_range,
     const Line<double> &scroll_bar_scan_line,
     const Range<Color> &scroll_bar_margin_color_range,
+    double viewport,
     double cap_offset,
     const scraper_config::ScrollBarThumbProbeConfig &thumb_probe)
     : scroll_bar_bg_color_range(scroll_bar_bg_color_range)
     , scroll_bar_scan_line(scroll_bar_scan_line)
     , scroll_bar_margin_color_range(scroll_bar_margin_color_range)
+    , viewport(viewport)
     , cap_offset(cap_offset)
     , thumb_probe(thumb_probe) {}
 
@@ -51,7 +79,7 @@ bool ScrollBarOffsetEstimator::hasScrollbar(const Frame &frame) const {
 }
 
 std::optional<ScrollBarOffsetEstimator::TrackGeometry>
-ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &scan_line) const {
+ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &scan_line, bool refine) const {
     // Background run from each end reaches the thumb (dark, out of the light bg range). == 1. means the whole
     // line is background: no thumb, so no scrollbar.
     const auto upper = frame.lengthIn(scroll_bar_bg_color_range, scan_line);
@@ -69,10 +97,17 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     const double m_lo = (margin_lower && margin_lower.value() < 1.) ? margin_lower.value() : 0.0;
 
     const auto scan = frame.anchor().absolute(scan_line).vertical();
-    const double thumb_top = scan.pointAt(upper.value());
-    const double thumb_bottom = scan.pointAt(1. - lower.value());
+    double thumb_top = scan.pointAt(upper.value());
+    double thumb_bottom = scan.pointAt(1. - lower.value());
     const double track_top = scan.pointAt(m_up);
     const double track_bottom = scan.pointAt(1. - m_lo);
+
+    if (refine) {
+        if (const auto refined = refineThumbEdges(frame, scan_line, thumb_top, thumb_bottom)) {
+            thumb_top = refined->first;
+            thumb_bottom = refined->second;
+        }
+    }
 
     const double thumb_logical = (thumb_bottom - thumb_top) - 2. * cap_offset;
     const double track_span = track_bottom - track_top;
@@ -168,15 +203,90 @@ std::optional<double> ScrollBarOffsetEstimator::trackCenterX(const Frame &frame)
 }
 
 std::optional<ScrollBarOffsetEstimator::TrackGeometry>
-ScrollBarOffsetEstimator::trackGeometry(const Frame &frame) const {
+ScrollBarOffsetEstimator::trackGeometry(const Frame &frame, bool refine) const {
     const auto center_x = trackCenterX(frame);
     if (!center_x) {
-        return geometryAt(frame, scroll_bar_scan_line);  // Fall back to the fixed config column.
+        return geometryAt(frame, scroll_bar_scan_line, refine);  // Fall back to the fixed config column.
     }
     const auto &p1 = scroll_bar_scan_line.p1();
     const auto &p2 = scroll_bar_scan_line.p2();
     const Line<double> centered_line{{center_x.value(), p1.y(), p1.anchor()}, {center_x.value(), p2.y(), p2.anchor()}};
-    return geometryAt(frame, centered_line);
+    return geometryAt(frame, centered_line, refine);
+}
+
+std::optional<std::pair<double, double>> ScrollBarOffsetEstimator::refineThumbEdges(
+    const Frame &frame, const Line<double> &scan_line, double thumb_top_norm, double thumb_bottom_norm) const {
+    const auto &anchor = frame.anchor();
+    const cv::Mat &image = frame.data();
+    const int unit = anchor.scaleToPixels(1.0);
+    // Scan column x in raw Mat pixels. Same fixed-anchor invariant as trackCenterX (intersection.left() == 0),
+    // so absolute()'s x-offset is a no-op and is skipped.
+    const int x = anchor.scaleToPixels(scan_line.p1().x());
+    const int top_row = anchor.scaleToPixels(thumb_top_norm);     // last background pixel above the thumb tip
+    const int bottom_row = anchor.scaleToPixels(thumb_bottom_norm);  // last background pixel below the thumb tip
+    if (unit <= 0 || x < 0 || x >= image.cols) {
+        return std::nullopt;
+    }
+    const auto lum = [&image, x](int y) {
+        const auto &p = image.at<cv::Vec3b>(y, x);
+        return (static_cast<double>(p[0]) + static_cast<double>(p[1]) + static_cast<double>(p[2])) / 3.;
+    };
+
+    // Search half-window and plateau sampling depth (whole pixels; the tip ramp is ~1-2 px wide).
+    constexpr int kWin = 3;
+    constexpr int kPlateau = 2;
+    constexpr double kMinEdgeContrast = 20.;  // bright(track ~200) vs dark(thumb ~60) is ~140; 20 rejects noise.
+
+    // Median of three samples, robust to a stray pixel.
+    const auto median3 = [](double a, double b, double c) {
+        return std::max(std::min(a, b), std::min(std::max(a, b), c));
+    };
+
+    // Refine one tip to the bright->dark mid-point crossing. `bg_above` marks the bright (background) side as
+    // the smaller-y side (the top tip); otherwise the bright side is below (the bottom tip). `anchor_row` is the
+    // last-background integer row, so the ramp lies just on the thumb side of it.
+    const auto refine = [&](int anchor_row, bool bg_above) -> std::optional<double> {
+        const int lo = anchor_row - kWin;
+        const int hi = anchor_row + kWin;
+        if (lo - kPlateau < 0 || hi + kPlateau >= image.rows) {
+            return std::nullopt;
+        }
+        // Plateaus: three rows per side, starting at the window edge and walking outward, so the deepest row
+        // is exactly what the bounds check above reserves (lo - kPlateau / hi + kPlateau). The edge rows sit
+        // clear of the ~1-2 px tip ramp, and the median drops one stray (or ramp-tinted) pixel among them.
+        const auto plateau = [&](int edge_row, int outward) {
+            return median3(lum(edge_row), lum(edge_row + outward), lum(edge_row + 2 * outward));
+        };
+        const double bright = bg_above ? plateau(lo, -1) : plateau(hi, 1);
+        const double dark = bg_above ? plateau(hi, 1) : plateau(lo, -1);
+        if (bright - dark < kMinEdgeContrast) {
+            return std::nullopt;
+        }
+        const double mid = (bright + dark) / 2.;
+        for (int y = lo; y < hi; y++) {
+            const double a = lum(y);
+            const double b = lum(y + 1);
+            if (bg_above) {
+                // Going downward: bright -> dark, so luminance falls through mid between y and y+1.
+                if (a >= mid && b < mid && a > b) {
+                    return static_cast<double>(y) + (a - mid) / (a - b);
+                }
+            } else {
+                // Going downward: dark -> bright, so luminance rises through mid between y and y+1.
+                if (a < mid && b >= mid && b > a) {
+                    return static_cast<double>(y) + (mid - a) / (b - a);
+                }
+            }
+        }
+        return std::nullopt;
+    };
+
+    const auto top = refine(top_row, /*bg_above=*/true);
+    const auto bottom = refine(bottom_row, /*bg_above=*/false);
+    if (!top || !bottom) {
+        return std::nullopt;
+    }
+    return std::make_pair(top.value() / unit, bottom.value() / unit);
 }
 
 std::optional<double> ScrollBarOffsetEstimator::position(const Frame &frame) const {
@@ -197,6 +307,52 @@ std::optional<double> ScrollBarOffsetEstimator::topMargin(const Frame &frame) co
         return std::nullopt;
     }
     return geometry->upper_gap / geometry->track_span;
+}
+
+std::optional<double> ScrollBarOffsetEstimator::scrollGuess(const Frame &from, const Frame &to, bool refine) const {
+    // A mid-scroll resolution change would mix from's pixel scale (viewport_px below) with a cross-scale thumb
+    // length, so the guess is only valid at one scale. Bail. (!= is not auto-generated for these value types;
+    // use !(==).)
+    if (!(from.size() == to.size())) {
+        return std::nullopt;
+    }
+    const auto gf = trackGeometry(from, refine);
+    const auto gt = trackGeometry(to, refine);
+    if (!gf || !gt) {
+        return std::nullopt;
+    }
+    // The scroll offset is viewport * (S_to - S_from) with each frame's absolute scroll fraction S = upper_gap
+    // / thumb_length. The total content length C cancels out of S per frame, so the guess is exact even when C
+    // changes mid-scroll -- PROVIDED each upper_gap is divided by ITS OWN frame's thumb length. Two effects
+    // force a choice of divisor:
+    //   1. Mid-scroll re-scale (inheritance history appended): the thumb length genuinely changes between the
+    //      frames. Only the per-frame-own-length form is correct; dividing to's upper_gap by from's stale
+    //      length reads a post-re-scale position on a pre-re-scale ruler and yields a large phantom offset.
+    //   2. Bottom overscroll: to's thumb collapses (top slides down, bottom pinned), so to's own length is
+    //      corrupted -- there the reference (from) length must be used instead.
+    //   3. Steady scrolling: the true length is unchanged, but the ~1px thumb-length MEASUREMENT jitter, when
+    //      each frame divides its large absolute upper_gap by its own noisy length, amplifies into a large step
+    //      error. Sharing the single reference length cancels that jitter (and the absolute position with it).
+    // So: use per-frame own length ONLY when the thumb genuinely re-scaled AND to is not bottom-clipped;
+    // otherwise share from's length (which both cancels jitter and freezes across the bottom clip). Detection
+    // is by to's lower_gap (bottom clip pins the thumb bottom to the track bottom) and the absolute-pixel
+    // thumb-length change. The gate uses only the change MAGNITUDE, never the thumb direction: V1 is correct
+    // for any genuine re-scale regardless of whether the thumb net moved up or down, so a re-scale followed by
+    // scrolling that nets the thumb downward is still caught (|Δtl| ~5px > 2.0 -> V1) with no per-frame state.
+    // The clip check outranking the re-scale gate can never mis-route a genuine re-scale into the shared form:
+    // a re-scale IS content appended at the END of the scroll area, and the append detaches the thumb bottom
+    // from the track bottom by exactly the appended fraction -- so a post-re-scale `to` is never bottom-clipped
+    // (cases 1 and 2 are mutually exclusive). The lone counterexample -- being overscrolled by at least the
+    // appended amount when the append lands -- does not occur in practice, and motion that fast defeats the
+    // image overlap anyway, so it is deliberately unsupported.
+    const double viewport_px = from.anchor().scaleToPixels(viewport);
+    const bool to_bottom_clipped = to.anchor().scaleToPixels(gt->lower_gap) <= kThumbBottomFlushPx;
+    const double thumb_change_px =
+        std::abs(gt->thumb_logical - gf->thumb_logical) * from.anchor().scaleToPixels(1.0);
+    if (!to_bottom_clipped && thumb_change_px > kRescaleThumbChangePx) {
+        return viewport_px * (gt->upper_gap / gt->thumb_logical - gf->upper_gap / gf->thumb_logical);
+    }
+    return viewport_px * (gt->upper_gap - gf->upper_gap) / gf->thumb_logical;
 }
 
 ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
@@ -387,16 +543,42 @@ double ImageOffsetEstimator::overlapScore(const cv::Mat &from_gray, const cv::Ma
 }
 
 ScrollAreaOffsetEstimator::ScrollAreaOffsetEstimator(
-    const ScrollBarOffsetEstimator &scroll_bar_offset_estimator, const ImageOffsetEstimator &image_offset_estimator)
+    const ScrollBarOffsetEstimator &scroll_bar_offset_estimator,
+    const ImageOffsetEstimator &image_offset_estimator,
+    double guess_window_margin)
     : scroll_bar_offset_estimator(scroll_bar_offset_estimator)
-    , image_offset_estimator(image_offset_estimator) {}
+    , image_offset_estimator(image_offset_estimator)
+    , guess_window_margin(guess_window_margin) {}
 
 std::optional<double> ScrollAreaOffsetEstimator::position(const FrameDescriptor &descriptor) const {
     return scroll_bar_offset_estimator.position(descriptor.scroll_bar_frame);
 }
 
 std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
-    return image_offset_estimator.estimate(from, to);
+    const auto offset = image_offset_estimator.estimate(from, to);
+    if (!offset) {
+        return std::nullopt;
+    }
+    // --- guess-window safeguard (independent; delete this block + scrollGuess + config to remove) ---
+    // Veto an image-estimator offset that sits far from the scroll-bar guess. The candidate+verify estimator is
+    // correct whenever a genuine overlap exists, but the periodic factor/list rows let a far-apart, non-
+    // overlapping pair alias onto a wrong offset that still clears the overlap gate; such an alias lands
+    // hundreds of px from the guess while a true offset lands within a fraction of a row pitch, so the window
+    // rejects the alias and never a true offset. When the guess is unavailable (no scrollbar / mid-scroll
+    // resolution change) no veto is applied and the pure candidate+verify result stands.
+    // Sub-pixel thumb-tip refinement (scrollGuess's default): on a short thumb one integer tip pixel is worth
+    // tens of content pixels (viewport / thumb_length ~= 27 px per tip pixel on the tiny friend rental thumb),
+    // so the colour-run's whole-pixel tips quantize the guess into coarse steps -- measured to halve the guess
+    // error on real scrolls and to cut the tiny-thumb worst case from ~44 px to ~17 px. The tighter guess only
+    // sharpens this outlier veto; the offset itself still comes from the image estimator.
+    if (const auto guess = scroll_bar_offset_estimator.scrollGuess(from.scroll_bar_frame, to.scroll_bar_frame)) {
+        const double margin = from.scroll_bar_frame.anchor().scaleToPixels(guess_window_margin);
+        if (std::abs(offset.value() - guess.value()) > margin) {
+            return std::nullopt;
+        }
+    }
+    // --- end safeguard ---
+    return offset;
 }
 
 PageScrapingBox::PageScrapingBox(
@@ -922,9 +1104,11 @@ void ScrollableScrapingInterpreter::startScrolling(const FrameDescriptor &valid_
 
 void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     FrameDescriptor current_fragment = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
-    // Guess-free: the offset comes from image evidence alone, so a scroll-bar thumb re-scale (inheritance
-    // history appended mid-scroll) or a clipped thumb cannot mislead it. On a genuine non-match the offset
-    // stays nullopt, the frame is skipped, and the reference descriptor freezes until a matching frame comes.
+    // The offset is decided by image evidence (candidate + overlap verify); the scroll-bar guess is applied
+    // only as a far-outlier veto on that result, with a window sized so a thumb re-scale (inheritance history
+    // appended mid-scroll) or a clipped thumb cannot reject a genuine offset (see ScrollAreaOffsetEstimator::
+    // estimate). On a genuine non-match -- or a veto -- the offset stays nullopt, the frame is skipped, and
+    // the reference descriptor freezes until a matching frame comes.
     const auto offset = offset_estimator.estimate(previous_descriptor, current_fragment);
 
     // Check the green terminator every frame, anchored to the scroll frontier (height - offset), BEFORE
@@ -1031,6 +1215,7 @@ void SceneScraper::build(const Frame &frame) {
         config.scroll_bar_bg_color,
         config.scroll_bar_scan_line,
         config.scroll_bar_margin_color,
+        config.viewport,
         config.cap_offset,
         config.scroll_bar_thumb_probe);
     const auto &scroll_bar_offset_estimator = *scroll_bar_estimator;
@@ -1044,7 +1229,7 @@ void SceneScraper::build(const Frame &frame) {
     if (scroll_bar_offset_estimator.hasScrollbar(scroll_bar_frame)) {
         scroll_area_scraper = std::make_unique<ScrollableScrapingInterpreter>(
             scraping_box,
-            ScrollAreaOffsetEstimator(scroll_bar_offset_estimator, ImageOffsetEstimator()),
+            ScrollAreaOffsetEstimator(scroll_bar_offset_estimator, ImageOffsetEstimator(), config.guess_window_margin),
             stationary_catcher,
             config.scroll_area_rect,
             config.scroll_bar_rect,

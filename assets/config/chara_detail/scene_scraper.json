@@ -143,6 +143,7 @@
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
     "stationary_color_threshold": 100,
+    "viewport": 0.738,
     "cap_offset": 0.00126,
     "scroll_bar_margin_color": {
       "min": {
@@ -165,7 +166,8 @@
       "max_sampled_rows": 32,
       "minimum_contrast": 20.0,
       "minimum_coverage": 3.0
-    }
+    },
+    "guess_window_margin": 0.1
   },
   "friend_common": {
     "base_image_stationary_rect": {
@@ -311,6 +313,7 @@
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
     "stationary_color_threshold": 100,
+    "viewport": 0.553,
     "cap_offset": 0.00126,
     "scroll_bar_margin_color": {
       "min": {
@@ -333,7 +336,8 @@
       "max_sampled_rows": 32,
       "minimum_contrast": 20.0,
       "minimum_coverage": 3.0
-    }
+    },
+    "guess_window_margin": 0.1
   },
   "skill_scans": [
     {

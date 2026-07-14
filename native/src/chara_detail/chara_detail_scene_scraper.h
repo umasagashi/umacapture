@@ -59,6 +59,7 @@ public:
         const Range<Color> &scroll_bar_bg_color_range,
         const Line<double> &scroll_bar_scan_line,
         const Range<Color> &scroll_bar_margin_color_range,
+        double viewport,
         double cap_offset,
         const scraper_config::ScrollBarThumbProbeConfig &thumb_probe);
 
@@ -75,6 +76,22 @@ public:
     // completed tab snapping back to the top after a character switch.
     [[nodiscard]] std::optional<double> topMargin(const Frame &frame) const;
 
+    // Scroll-bar-derived content-pixel guess of the scroll offset between two frames: the delta of the
+    // placeholder-track upper_gap over a cap-corrected thumb length, scaled by the true viewport. It normally
+    // divides both upper_gap terms by from's single length, which cancels the absolute scroll position (so
+    // ±1px thumb-length jitter cannot amplify) and freezes the length at the bottom for free (the terminating
+    // frame's own thumb collapses, but from is the previous unclipped latch). Only when the thumb genuinely
+    // re-scales mid-scroll (inheritance history appended, detected by an absolute-pixel thumb-length change)
+    // does it divide each upper_gap by its OWN frame's length -- the form that stays correct across the length
+    // change. Coarse by design -- used only as a far-outlier veto on the image estimate, never to decide the
+    // offset. nullopt when either frame has no scrollbar or on a mid-scroll resolution change. `refine` snaps
+    // both thumbs to sub-pixel tips (see refineThumbEdges), which is what removes the coarse per-tip-pixel
+    // quantization that otherwise dominates the guess on a short thumb. It defaults to true because that is
+    // the calibrated production path: the re-scale gate (kRescaleThumbChangePx) is sized on refined-tip
+    // jitter, so the integer-tip path runs the gate outside its calibration. Pass false only to measure or
+    // diagnose against the integer-tip baseline, never from production code.
+    [[nodiscard]] std::optional<double> scrollGuess(const Frame &from, const Frame &to, bool refine = true) const;
+
 private:
     // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from
     // colour runs along the scan line: the background run reaches the (dark) thumb, the margin run reaches
@@ -88,11 +105,24 @@ private:
         double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
     };
 
-    [[nodiscard]] std::optional<TrackGeometry> trackGeometry(const Frame &frame) const;
+    [[nodiscard]] std::optional<TrackGeometry> trackGeometry(const Frame &frame, bool refine = false) const;
 
     // TrackGeometry from the colour runs along one scan column. trackGeometry() picks the column
-    // (trackCenterX, falling back to the config line) and delegates here.
-    [[nodiscard]] std::optional<TrackGeometry> geometryAt(const Frame &frame, const Line<double> &scan_line) const;
+    // (trackCenterX, falling back to the config line) and delegates here. When `refine` is set the two thumb
+    // tips are additionally snapped to sub-pixel via refineThumbEdges; scrollGuess() (the veto path) sets it,
+    // while position()/topMargin() keep the plain integer tips.
+    [[nodiscard]] std::optional<TrackGeometry>
+    geometryAt(const Frame &frame, const Line<double> &scan_line, bool refine = false) const;
+
+    // Sub-pixel refinement of the two thumb tip rows. The colour-run detection quantizes each tip to a whole
+    // pixel (the last background pixel before the thumb), so a tip whose true position sits mid-pixel jitters by
+    // +-1 px frame to frame -- and on a short thumb one tip pixel is worth tens of content pixels in the guess.
+    // Here the anti-aliased intensity ramp across the tip locates the bright(background)->dark(thumb) mid-point
+    // crossing at sub-pixel resolution along the scan column. Returns {thumb_top, thumb_bottom} width-normalized,
+    // or nullopt (caller falls back to the integer tips) when the ramp is missing / too low contrast / out of
+    // bounds. `thumb_top_norm`/`thumb_bottom_norm` are the integer tips from the colour runs, used as anchors.
+    [[nodiscard]] std::optional<std::pair<double, double>> refineThumbEdges(
+        const Frame &frame, const Line<double> &scan_line, double thumb_top_norm, double thumb_bottom_norm) const;
 
     // Sub-pixel thumb centre x (width-normalized) from an AA intensity-weighted centroid over the thumb's
     // central rows, so the vertical scan self-centres on the thumb instead of trusting the fixed config x
@@ -103,6 +133,7 @@ private:
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
     const Range<Color> scroll_bar_margin_color_range;
+    const double viewport;
     const double cap_offset;
     const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };
@@ -193,19 +224,24 @@ private:
 class ScrollAreaOffsetEstimator {
 public:
     ScrollAreaOffsetEstimator(
-        const ScrollBarOffsetEstimator &scroll_bar_offset_estimator, const ImageOffsetEstimator &image_offset_estimator);
+        const ScrollBarOffsetEstimator &scroll_bar_offset_estimator,
+        const ImageOffsetEstimator &image_offset_estimator,
+        double guess_window_margin);
 
     [[nodiscard]] std::optional<double> position(const FrameDescriptor &descriptor) const;
 
-    // Content scroll offset between the frames, decided purely by the image estimator. The scroll bar is NOT
-    // consulted: its guess is wrong exactly when it matters most (the thumb pins to the track bottom on the
-    // terminating frame, collapsing the measured travel), and a keypoint window built on a wrong guess
-    // rejects the true offset. The scroll-bar estimator remains only for position()/topMargin().
+    // Content scroll offset between the frames. The image estimator decides the offset (candidate + overlap
+    // verify); the scroll-bar guess is then applied only as an independent far-outlier veto: an image offset
+    // more than guess_window_margin (width units) from scrollGuess() is rejected (nullopt). The veto catches
+    // periodic-row aliases that clear the overlap gate yet land far from where the scroll bar says the scroll
+    // is. When the guess is unavailable (no scrollbar / mid-scroll resolution change) the pure image result
+    // stands.
     [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
 
 private:
     const ScrollBarOffsetEstimator scroll_bar_offset_estimator;
     const ImageOffsetEstimator image_offset_estimator;
+    const double guess_window_margin;
 };
 
 class PageScrapingBox {

@@ -8,14 +8,17 @@
 // with hand-built CV_8UC3 mats through Frame::fixed(), whose anchor normalizes BOTH axes by the frame
 // width, so on a square frame a pixel (px, py) is addressed at normalized (px/w, py/w).
 //
-// The image estimator's full AKAZE/FLANN match on synthetic frames is not asserted (it is brittle on
-// feature-poor test images); its deterministic pieces are pinned instead: the "no features -> nullopt"
-// guard, the candidate extraction (detectOffsetCandidates on hand-built displacement sets), and the
-// symmetric overlap verification (overlapScore on hand-built grayscale mats). The end-to-end match is
-// arbitrated by the integration golden harness on real footage.
+// The image estimator's full AKAZE/FLANN match is asserted only on a deliberately feature-RICH blob
+// texture (see blobTexture / the guess-window veto test); it is brittle on feature-poor synthetic images,
+// so its deterministic pieces are pinned separately: the "no features -> nullopt" guard, the candidate
+// extraction (detectOffsetCandidates on hand-built displacement sets), and the symmetric overlap
+// verification (overlapScore on hand-built grayscale mats). The end-to-end match is arbitrated by the
+// integration golden harness on real footage.
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <cmath>
 #include <optional>
 
 #include "chara_detail/chara_detail_scene_scraper.h"
@@ -38,10 +41,15 @@ const Color kThumb{60, 60, 60};  // the scroll thumb
 const Range<Color> kTrackRange{Color(200, 200, 200), Color(255, 255, 255)};  // thumb vs. background
 const Range<Color> kMarginRange{Color(228, 228, 228), Color(255, 255, 255)};  // near-white margin vs. track
 
-// Estimator physics for the tests: a zero cap offset so the logical thumb length is exactly the measured
-// tip-to-tip span and the geometric expectations below stay clean. The real cap correction is validated
-// end-to-end (video harness), not here.
+// Estimator physics for the tests: a unit viewport keeps scrollGuess in frame-width pixels, and a zero cap
+// offset makes the logical thumb length exactly the measured tip-to-tip span, so the geometric expectations
+// below stay clean. The real cap correction is validated end-to-end (video harness), not here.
+constexpr double kViewport = 1.0;
 constexpr double kCapOffset = 0.0;
+
+// Guess-window half-width for the veto tests, width-normalized. On these 100 px-wide frames it scales to
+// 50 px, wide enough to admit a matching guess and narrow enough to reject a far alias.
+constexpr double kGuessMargin = 0.5;
 
 // Thumb-centre probe geometry. These tests render a full-width thumb, so trackCenterX finds no pill contrast
 // and falls back to the fixed scan column (see scrollbarFrame); the exact probe values are never exercised,
@@ -62,12 +70,32 @@ Frame scrollbarFrame(int size, int thumb_top, int thumb_bottom) {
     return Frame::fixed(mat);
 }
 
+// Like scrollbarFrame but with anti-aliased thumb tips placed at *fractional* rows: each track-band row is
+// blended track<->thumb by the fraction of it the thumb covers (proper area coverage). The integer colour-run
+// rounds such a tip to a whole pixel, but the sub-pixel refinement recovers the fraction from the blend -- so a
+// pair of these frames exercises exactly the quantization the refinement removes.
+Frame scrollbarFrameAA(int size, double thumb_top, double thumb_bottom) {
+    const int track_inset = size * 8 / 100;
+    cv::Mat mat = testutil::solid(size, kMargin);
+    mat(cv::Rect(0, track_inset, size, size - 2 * track_inset)).setTo(cv::Scalar(kTrack.b(), kTrack.g(), kTrack.r()));
+    for (int r = track_inset; r < size - track_inset; r++) {
+        const double coverage =
+            std::clamp(std::min<double>(r + 1, thumb_bottom) - std::max<double>(r, thumb_top), 0.0, 1.0);
+        const auto blend = [coverage](int track, int thumb) {
+            return static_cast<uchar>(std::lround(track * (1.0 - coverage) + thumb * coverage));
+        };
+        mat.row(r).setTo(cv::Scalar(blend(kTrack.b(), kThumb.b()), blend(kTrack.g(), kThumb.g()),
+                                    blend(kTrack.r(), kThumb.r())));
+    }
+    return Frame::fixed(mat);
+}
+
 // Endpoints stay strictly inside the frame: on a 100px-tall fixed frame, normalized y maps to pixel
 // y*width, so y=1.0 would map to row 100 (one past the last valid row 99). 0.99 keeps the scan in bounds.
 const Line<double> kScanLine{Point<double>(0.5, 0.0), Point<double>(0.5, 0.99)};
 
 TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered track") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const Frame frame = scrollbarFrame(100, 40, 60);
 
     CHECK(estimator.hasScrollbar(frame));
@@ -85,7 +113,7 @@ TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered trac
 }
 
 TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const Frame frame = Frame::fixed(testutil::solid(100, kTrack));
 
     CHECK_FALSE(estimator.hasScrollbar(frame));
@@ -93,10 +121,106 @@ TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
     CHECK_FALSE(estimator.topMargin(frame).has_value());
 }
 
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess turns a thumb move into a content-pixel guess") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // from: thumb [40, 60) (length 20, upper_gap 40-8 = 32). to: thumb [50, 70) (upper_gap 42), same length.
+    // guess = viewport_px * (ug_to - ug_from) / tl_from = 100 * (42 - 32) / 20 = 50 (unit viewport => px = width).
+    const Frame from = scrollbarFrame(100, 40, 60);
+    const Frame to = scrollbarFrame(100, 50, 70);
+
+    const auto guess = estimator.scrollGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*guess == doctest::Approx(50.0).epsilon(0.05));
+
+    // Identical frames imply no scroll, and the sign follows the thumb direction.
+    const auto still = estimator.scrollGuess(from, from);
+    REQUIRE(still.has_value());
+    CHECK(*still == doctest::Approx(0.0));
+    const auto back = estimator.scrollGuess(to, from);
+    REQUIRE(back.has_value());
+    CHECK(*back < 0.0);  // thumb moved up => negative (backward) guess
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess returns nullopt without a usable scrollbar pair") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const Frame bar = scrollbarFrame(100, 40, 60);
+    const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
+
+    // A missing scrollbar on either frame disables the guess (=> the caller applies no veto).
+    CHECK_FALSE(estimator.scrollGuess(bar, uniform).has_value());
+    CHECK_FALSE(estimator.scrollGuess(uniform, bar).has_value());
+
+    // A mid-scroll resolution change mixes pixel scales, so the guess bails.
+    const Frame smaller = scrollbarFrame(80, 32, 48);
+    CHECK_FALSE(estimator.scrollGuess(bar, smaller).has_value());
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess divides by each frame's own length across a genuine re-scale") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // from: thumb [40, 70) (length 30, upper_gap 32). to: thumb [50, 70) (length 20, upper_gap 42): the thumb
+    // length changed by 10 px (>> the re-scale cut) and stays clear of the track bottom, so this is read as a
+    // genuine mid-scroll re-scale and each upper_gap is divided by its OWN frame's length:
+    // guess = 100 * (42/20 - 32/30) ~= +103. The shared-reference form would read 100 * (42-32)/30 ~= +33, so
+    // the assertion separates the two forms decisively; the loose epsilon absorbs the ~1px sampling-grid skew.
+    const Frame from = scrollbarFrame(100, 40, 70);
+    const Frame to = scrollbarFrame(100, 50, 70);
+
+    const auto guess = estimator.scrollGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*guess == doctest::Approx(103.3).epsilon(0.1));
+}
+
+TEST_CASE("ScrollBarOffsetEstimator::scrollGuess keeps the reference length while the thumb is bottom-clipped") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // to's thumb bottom is pinned to the track bottom (row 92 here), the overscroll signature under which to's
+    // own measured length is unreliable -- so even though the length changed by 10 px (which alone would select
+    // the own-length form, see the re-scale case above) the guess must keep dividing by from's length:
+    // guess = 100 * (44 - 32) / 30 = +40. The own-length form would read 100 * (44/40 - 32/30) ~= +3.
+    const Frame from = scrollbarFrame(100, 40, 70);
+    const Frame to = scrollbarFrame(100, 52, 92);
+
+    const auto guess = estimator.scrollGuess(from, to);
+    REQUIRE(guess.has_value());
+    CHECK(*guess == doctest::Approx(40.0).epsilon(0.1));
+}
+
+TEST_CASE("scrollGuess sub-pixel refinement matches the integer guess on hard-edged frames") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const Frame from = scrollbarFrame(100, 40, 60);
+    const Frame to = scrollbarFrame(100, 50, 70);  // same length, moved 10 px
+
+    // A hard tip carries only a constant half-pixel bias (the mid-point sits half a pixel past the last full
+    // background pixel), and that bias cancels in the upper_gap delta -- so on clean edges refine=true reproduces
+    // the integer guess to within a fraction of a pixel. This pins that the refinement never disturbs the clean
+    // case; its sub-pixel win on real (anti-aliased) tips is covered below and end-to-end by the video harness.
+    const auto integer = estimator.scrollGuess(from, to, false);
+    const auto refined = estimator.scrollGuess(from, to, true);
+    REQUIRE(integer.has_value());
+    REQUIRE(refined.has_value());
+    CHECK(*refined == doctest::Approx(*integer).epsilon(0.05));
+}
+
+TEST_CASE("scrollGuess sub-pixel refinement resolves a move the integer tips round away") {
+    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    // Both tips slide 0.6 px -- below one pixel, so the colour-run rounds both frames to the same integer tips
+    // and the integer guess reads ~0. The anti-aliased tip blend encodes the fraction, so the refined guess
+    // recovers the forward move (amplified by viewport / thumb_length ~= 5x here). This is the quantization the
+    // refinement is adopted to remove, in miniature.
+    const Frame from = scrollbarFrameAA(100, 40.0, 60.0);
+    const Frame to = scrollbarFrameAA(100, 40.6, 60.6);
+
+    const auto integer = estimator.scrollGuess(from, to, false);
+    const auto refined = estimator.scrollGuess(from, to, true);
+    REQUIRE(integer.has_value());
+    REQUIRE(refined.has_value());
+    CHECK(std::abs(*integer) < 1.0);  // the whole-pixel tips cannot see a sub-pixel move
+    CHECK(*refined > 1.5);  // the blend does: a clear forward guess
+}
+
 TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless frames") {
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const ImageOffsetEstimator image;  // default config
-    const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, image, kGuessMargin);
 
     // FrameDescriptor carries the content crop (frame) and the scroll-bar band (scroll_bar_frame) separately;
     // the scroll-area estimator reads geometry from scroll_bar_frame. Here they are the same synthetic frame.
@@ -115,9 +239,9 @@ TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless 
 TEST_CASE("ScrollAreaOffsetEstimator reads scrollbar geometry from scroll_bar_frame, not frame") {
     // Guards the scroll-area / scroll-bar decoupling: geometry must come from the dedicated band, so that the
     // content crop (frame) can change without disturbing detection.
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
     const ImageOffsetEstimator image;  // default config
-    const ScrollAreaOffsetEstimator estimator(scroll_bar, image);
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, image, kGuessMargin);
 
     const Frame bar = scrollbarFrame(100, 40, 60);
     const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
@@ -252,6 +376,47 @@ TEST_CASE("ImageOffsetEstimator::overlapScore returns no evidence on degenerate 
     // otherwise a blank band would outscore every genuine candidate.
     const cv::Mat uniform(100, 40, CV_8UC1, cv::Scalar(128));
     CHECK(estimator.overlapScore(uniform, uniform, 10) == 0.0);
+}
+
+// A deterministic feature-RICH texture for the full-match veto test: a mosaic of 4 px random-colour blocks
+// puts a unique high-contrast corner at every block junction, which survives AKAZE's nonlinear scale space
+// (raw per-pixel noise gets diffused away, leaving it feature-poor -- see the file header). cv::RNG is a
+// fixed-algorithm LCG, so a fixed seed reproduces everywhere. Two windows of one tall texture d rows apart
+// simulate a genuine scroll of d content pixels, exactly like texturedColumn above.
+cv::Mat blockMosaic(int height, int width) {
+    cv::Mat coarse(height / 4, width / 4, CV_8UC3);
+    cv::RNG rng(24680);
+    rng.fill(coarse, cv::RNG::UNIFORM, 0, 256);
+    cv::Mat mat;
+    cv::resize(coarse, mat, cv::Size(width, height), 0, 0, cv::INTER_NEAREST);
+    return mat;
+}
+
+TEST_CASE("ScrollAreaOffsetEstimator admits an image offset near the scroll-bar guess and vetoes a far one") {
+    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollAreaOffsetEstimator estimator(scroll_bar, ImageOffsetEstimator(), kGuessMargin);
+
+    // Content: two 300-row windows of one tall texture, 90 rows apart -> the image estimator reads ~+90 px.
+    // 300 px wide (not the 100 px of the geometry tests): AKAZE keypoint counts scale with resolution, and
+    // this is the smallest round size that comfortably clears the estimator's minimum trusted-match count.
+    const cv::Mat tall = blockMosaic(420, 300);
+    const Frame content_from = Frame::fixed(tall.rowRange(0, 300).clone());
+    const Frame content_to = Frame::fixed(tall.rowRange(90, 390).clone());
+
+    // Agreeing scroll bar: the thumb (length 60) travels 18 px, so the guess is 300 * 18 / 60 = 90 px --
+    // right on the image offset, well inside the 150 px window: the image result passes through.
+    FrameDescriptor from_near{content_from, scrollbarFrame(300, 120, 180)};
+    FrameDescriptor to_near{content_to, scrollbarFrame(300, 138, 198)};
+    const auto accepted = estimator.estimate(from_near, to_near);
+    REQUIRE(accepted.has_value());
+    CHECK(accepted.value() == doctest::Approx(90.0).epsilon(0.05));
+
+    // Same content pair, but the scroll bar now reads a 480 px scroll (thumb travel 96 px): the image offset
+    // sits 390 px from the guess, far outside the 150 px window, and is vetoed even though its overlap is
+    // perfect -- the alias-rejection behaviour the window exists for.
+    FrameDescriptor from_far{content_from, scrollbarFrame(300, 120, 180)};
+    FrameDescriptor to_far{content_to, scrollbarFrame(300, 216, 276)};
+    CHECK_FALSE(estimator.estimate(from_far, to_far).has_value());
 }
 
 TEST_CASE("StationaryFrameCatcher latches once its region holds still for the threshold") {
