@@ -86,8 +86,11 @@ public:
     // change. Coarse by design -- used only as a far-outlier veto on the image estimate, never to decide the
     // offset. nullopt when either frame has no scrollbar or on a mid-scroll resolution change. `refine` snaps
     // both thumbs to sub-pixel tips (see refineThumbEdges), which is what removes the coarse per-tip-pixel
-    // quantization that otherwise dominates the guess on a short thumb; the veto path passes it.
-    [[nodiscard]] std::optional<double> scrollGuess(const Frame &from, const Frame &to, bool refine = false) const;
+    // quantization that otherwise dominates the guess on a short thumb. It defaults to true because that is
+    // the calibrated production path: the re-scale gate (kRescaleThumbChangePx) is sized on refined-tip
+    // jitter, so the integer-tip path runs the gate outside its calibration. Pass false only to measure or
+    // diagnose against the integer-tip baseline, never from production code.
+    [[nodiscard]] std::optional<double> scrollGuess(const Frame &from, const Frame &to, bool refine = true) const;
 
 private:
     // Placeholder-track geometry from one frame, all width-normalized. The thumb and track ends come from

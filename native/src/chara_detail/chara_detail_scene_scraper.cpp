@@ -45,8 +45,8 @@ constexpr double kThumbBottomFlushPx = 2.0;
 // cleanly. Above this the two frames' thumb lengths genuinely differ and the guess divides each upper_gap by
 // its own frame's length; at or below it the difference is only measurement jitter and the reference length is
 // shared to cancel it. The change is compared in EXACT pixels (thumb_logical * unit): the tips feeding it are
-// sub-pixel-refined on the veto path (scrollGuess refine=true), so there is no per-operand lround rounding to
-// wobble the difference.
+// sub-pixel-refined by default (scrollGuess refine=true, the calibrated path the veto uses), so there is no
+// per-operand lround rounding to wobble the difference.
 //
 // 2.0 sits in a wide empty band between the two populations, measured over all 11 golden clips (3879 frame
 // pairs) with the sub-pixel-refined tips the veto path actually uses: steady-scroll jitter tops out at ~1.2 px
@@ -339,6 +339,12 @@ std::optional<double> ScrollBarOffsetEstimator::scrollGuess(const Frame &from, c
     // thumb-length change. The gate uses only the change MAGNITUDE, never the thumb direction: V1 is correct
     // for any genuine re-scale regardless of whether the thumb net moved up or down, so a re-scale followed by
     // scrolling that nets the thumb downward is still caught (|Δtl| ~5px > 2.0 -> V1) with no per-frame state.
+    // The clip check outranking the re-scale gate can never mis-route a genuine re-scale into the shared form:
+    // a re-scale IS content appended at the END of the scroll area, and the append detaches the thumb bottom
+    // from the track bottom by exactly the appended fraction -- so a post-re-scale `to` is never bottom-clipped
+    // (cases 1 and 2 are mutually exclusive). The lone counterexample -- being overscrolled by at least the
+    // appended amount when the append lands -- does not occur in practice, and motion that fast defeats the
+    // image overlap anyway, so it is deliberately unsupported.
     const double viewport_px = from.anchor().scaleToPixels(viewport);
     const bool to_bottom_clipped = to.anchor().scaleToPixels(gt->lower_gap) <= kThumbBottomFlushPx;
     const double thumb_change_px =
@@ -560,12 +566,12 @@ std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from,
     // hundreds of px from the guess while a true offset lands within a fraction of a row pitch, so the window
     // rejects the alias and never a true offset. When the guess is unavailable (no scrollbar / mid-scroll
     // resolution change) no veto is applied and the pure candidate+verify result stands.
-    // Sub-pixel thumb-tip refinement (refine=true): on a short thumb one integer tip pixel is worth tens of
-    // content pixels (viewport / thumb_length ~= 27 px per tip pixel on the tiny friend rental thumb), so the
-    // colour-run's whole-pixel tips quantize the guess into coarse steps -- measured to halve the guess error
-    // on real scrolls and to cut the tiny-thumb worst case from ~44 px to ~17 px. The tighter guess only
+    // Sub-pixel thumb-tip refinement (scrollGuess's default): on a short thumb one integer tip pixel is worth
+    // tens of content pixels (viewport / thumb_length ~= 27 px per tip pixel on the tiny friend rental thumb),
+    // so the colour-run's whole-pixel tips quantize the guess into coarse steps -- measured to halve the guess
+    // error on real scrolls and to cut the tiny-thumb worst case from ~44 px to ~17 px. The tighter guess only
     // sharpens this outlier veto; the offset itself still comes from the image estimator.
-    if (const auto guess = scroll_bar_offset_estimator.scrollGuess(from.scroll_bar_frame, to.scroll_bar_frame, true)) {
+    if (const auto guess = scroll_bar_offset_estimator.scrollGuess(from.scroll_bar_frame, to.scroll_bar_frame)) {
         const double margin = from.scroll_bar_frame.anchor().scaleToPixels(guess_window_margin);
         if (std::abs(offset.value() - guess.value()) > margin) {
             return std::nullopt;
