@@ -40,18 +40,23 @@ constexpr double kThumbBottomFlushPx = 2.0;
 
 // Minimum thumb-length CHANGE, in pixels, between two frames that counts as a genuine mid-scroll re-scale (the
 // game re-scaling the factor thumb when it appends 継承履歴). A percentage tolerance conflates jitter and
-// re-scale on a tiny thumb: on a ~15 px thumb (friend max-rental) the ±2 px endpoint-quantization jitter is
-// ~5.7%, indistinguishable from a genuine re-scale step (~5.7%). In ABSOLUTE pixels the two separate cleanly --
-// jitter stays ~2 px regardless of thumb size, while a real re-scale moves the thumb ~5 px. Above this the two
-// frames' thumb lengths genuinely differ and the guess divides each upper_gap by its own frame's length; at or
-// below it the difference is only measurement jitter and the reference length is shared to cancel it. 2.5 sits
-// between the two populations: safely above the worst jitter (two lengthIn grid steps, each slightly OVER 1 px
-// -- the sample grid is scan_length/(samples-1) -- so a 2.0 cut would let plain quantization jitter trip) and
-// safely below the ~5 px re-scale. The change is compared in EXACT pixels (thumb_logical * unit), never through
-// per-operand lround: rounding each length first wobbles the difference by ±1 px, enough to push 2 px jitter
-// over the cut (a false re-scale -> the jitter-amplifying own-length form -> a spurious veto) or a true 3 px
-// change under it.
-constexpr double kRescaleThumbChangePx = 2.5;
+// re-scale on a tiny thumb: on a ~15 px thumb (friend max-rental) the endpoint-measurement jitter is a large
+// fraction of the length, indistinguishable from a genuine re-scale step. In ABSOLUTE pixels the two separate
+// cleanly. Above this the two frames' thumb lengths genuinely differ and the guess divides each upper_gap by
+// its own frame's length; at or below it the difference is only measurement jitter and the reference length is
+// shared to cancel it. The change is compared in EXACT pixels (thumb_logical * unit): the tips feeding it are
+// sub-pixel-refined on the veto path (scrollGuess refine=true), so there is no per-operand lround rounding to
+// wobble the difference.
+//
+// 2.0 sits in a wide empty band between the two populations, measured over all 11 golden clips (3879 frame
+// pairs) with the sub-pixel-refined tips the veto path actually uses: steady-scroll jitter tops out at ~1.2 px
+// (max 1.23, p99.9 1.15; even the tiny ~30 px friend-inheritance thumb stays at ~1.0), while the sole genuine
+// re-scale in the corpus moves the thumb ~5 px (5.14). Nothing lands in (1.5, 5.0]. 2.0 clears the worst
+// observed jitter by ~0.8 px yet stays well below the re-scale, so it neither trips on jitter (a false
+// re-scale -> the jitter-amplifying own-length form -> a spurious veto) nor misses a real re-scale. Sub-pixel
+// refinement is what shrank the jitter here: without it the whole-pixel tips quantize the change into ±1 px
+// steps, which is why the historical gate needed the extra headroom.
+constexpr double kRescaleThumbChangePx = 2.0;
 
 }  // namespace
 
