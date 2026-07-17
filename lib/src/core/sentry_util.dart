@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '/const.dart';
 import '/src/core/mapper_init.dart';
@@ -62,6 +63,54 @@ void incrementSentryReportCount() {
   final count = box.entry<int>(SettingsEntryKey.sentryReportTotalCount.name);
   month.push(DateTime.now());
   count.push((count.pull() ?? 0) + 1);
+}
+
+/// The ID gets its own box rather than sitting next to the consent flag in `settings`:
+/// that box is the [SettingsEntryKey]-keyed preference store, whereas an opaque
+/// generated ID with a lifetime of its own belongs beside [trainerIdProvider]'s
+/// `trainer_id`, whose box this mirrors.
+StorageEntry<String> _getTelemetryIdEntry() {
+  return StorageBox(StorageBoxKey.telemetryId).entry<String>("telemetry_id");
+}
+
+/// Returns the anonymous telemetry ID, generating and persisting one on first call.
+///
+/// Registered as the Sentry user, this ends up as the `distinct_id` on sentry-native's
+/// session — the identity behind Release Health's `count_unique(user)` and each issue's
+/// user count.
+///
+/// Left alone, sentry-native fills that field with its own installation ID instead. That
+/// ID is scoped to the DSN (a DSN change silently restarts the user count from zero) and
+/// only arrived in 0.14.1, which a patch-level dependency bump switched on without a code
+/// change here. Owning the ID keeps the metric from shifting under a `pub upgrade`.
+/// [trainerIdProvider]'s ID is unsuitable for the opposite reason: it is game data written
+/// into records, with its own lifetime and deletion rules.
+///
+/// It carries no personal data and is never logged: diagnostic logs ship inside bug
+/// reports, and printing the ID there would tie a report to every other report from
+/// the same installation.
+String getTelemetryId() {
+  final entry = _getTelemetryIdEntry();
+  final stored = entry.pull();
+  if (stored != null) {
+    return stored;
+  }
+  final generated = const Uuid().v4();
+  entry.push(generated);
+  return generated;
+}
+
+/// Drops the stored telemetry ID. Idempotent, and safe to call when none exists.
+///
+/// Called on opt-out, so a later opt-in mints a fresh ID instead of resurrecting the old
+/// one, which intentionally leaves the two stretches of use unlinkable.
+///
+/// Only the persisted ID is cleared. [runWithSentry]'s consent gate is evaluated once at
+/// startup, so opting out mid-session stops neither the reporting already under way nor
+/// the ID on the live scope; both last until restart. Unsetting the scope user would not
+/// close that gap either, since sentry-native then falls back to its own installation ID.
+void deleteTelemetryId() {
+  _getTelemetryIdEntry().delete();
 }
 
 class ScreenshotResult {
@@ -488,6 +537,16 @@ Future<void> _runWithSentry(AppRunner runner) async {
         return event;
       };
     }, appRunner: startAppOnce);
+    // Attach the anonymous telemetry ID so the session's distinct_id is one we own
+    // rather than sentry-native's DSN-scoped installation ID. NativeScopeObserver
+    // forwards this to sentry_set_user, which back-fills the session already started
+    // by init (verified on a release build: the session envelope carries this ID).
+    //
+    // Placement matters, keep it here: inside runWithSentry's gates the ID is never
+    // even generated when the user has opted out (or in debug), and inside this try a
+    // failure still lands in the catch below, which starts the app anyway. Wrapping
+    // appRunner instead would put failable work in front of the runApp guarantee.
+    await Sentry.configureScope((scope) => scope.setUser(SentryUser(id: getTelemetryId())));
   } catch (exception, stackTrace) {
     // Never let a Sentry/startup-prep failure prevent the app from launching.
     logger.e("Failed to initialize Sentry; starting app without it.", exception, stackTrace);
