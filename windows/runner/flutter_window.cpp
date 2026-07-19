@@ -18,6 +18,16 @@ FlutterWindow::~FlutterWindow() {
     // Tear the Flutter controller down here rather than leaving it to the
     // member's own destructor.
     //
+    // This runs only when the app leaves its message loop while the window is
+    // still alive, so the window is torn down by this destructor instead of by
+    // WM_DESTROY. In production that means a Windows logoff or shutdown, which
+    // posts WM_QUIT without ever closing the window. To reproduce it by hand,
+    // start the release build, resolve the UI thread with
+    // GetWindowThreadProcessId() on the main window, post WM_QUIT (0x0012) to
+    // that thread, and check the exit code: before this fix it was reliably
+    // 0xC0000005, after it is 0. Check WM_CLOSE (the X button) too -- that path
+    // was always safe, and it is what proves the doubled Destroy() is harmless.
+    //
     // Destroying the controller makes the engine call DestroyWindow() on the
     // view's child HWND, and Windows dispatches the resulting messages to this
     // window's top-level WndProc *synchronously*. MessageHandler() guards on
