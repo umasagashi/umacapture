@@ -78,7 +78,7 @@ class AppUpdaterGroup extends ConsumerWidget {
     progress.set(Progress(count: 0, total: 100));
     ref
         .read(isInstallerModeLoader.future)
-        .then((isInstallerMode) {
+        .then((isInstallerMode) async {
           final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
           final String fileName = Uri.parse(downloadUrl).pathSegments.last;
           final FilePath downloadPath = pathInfo.downloadDir.filePath(fileName);
@@ -91,9 +91,10 @@ class AppUpdaterGroup extends ConsumerWidget {
           // provenance is unknown (it may be a truncated or tampered-with file
           // from an earlier run). Deleting up front also surfaces a locked
           // destination here, before spending a 50 MB transfer that could only
-          // fail at the rename.
-          downloadPath.deleteSync(emptyOk: true);
-          incompletePath.deleteSync(emptyOk: true);
+          // fail at the rename. Async variants: a locked file makes the delete
+          // retry, and the sync retry would stall the UI isolate.
+          await downloadPath.delete(emptyOk: true);
+          await incompletePath.delete(emptyOk: true);
           return createDiagnosticDio(operation: "download_app_update")
               .download(
                 downloadUrl,
@@ -102,21 +103,21 @@ class AppUpdaterGroup extends ConsumerWidget {
                   progress.set(Progress(count: count, total: total));
                 },
               )
-              .then((_) {
-                incompletePath.renameSync(downloadPath);
+              .then((_) async {
+                await incompletePath.rename(downloadPath);
                 progress.set(null);
                 return (isInstallerMode ? downloadPath : downloadPath.parent).launch();
               })
-              .onError<Object>((error, stackTrace) {
+              .onError<Object>((error, stackTrace) async {
                 // Drop the half-written temp file so an abandoned download does
                 // not strand 50 MB in the user's Downloads folder. Best-effort:
                 // a cleanup failure must not replace the error being reported.
                 try {
-                  incompletePath.deleteSync(emptyOk: true);
+                  await incompletePath.delete(emptyOk: true);
                 } catch (cleanupError) {
                   logger.w("Failed to remove the incomplete app update download.", cleanupError);
                 }
-                throw error;
+                Error.throwWithStackTrace(error, stackTrace);
               });
         })
         .catchError((Object error, StackTrace stackTrace) {

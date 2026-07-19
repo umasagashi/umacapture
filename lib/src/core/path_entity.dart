@@ -68,6 +68,30 @@ class PathEntity {
     }
   }
 
+  /// Asynchronous counterpart of [deleteSync] for callers on the UI isolate.
+  ///
+  /// Retries the same way, but waits with [Future.delayed] instead of [sleep],
+  /// so a locked file stalls only this chain rather than the whole isolate.
+  Future<void> delete({bool recursive = false, bool emptyOk = false}) async {
+    if (emptyOk && !existsSync()) {
+      return;
+    }
+
+    // Retry up to 3 times to avoid file lock issues.
+    int attempts = 0;
+    while (true) {
+      try {
+        await toEntity().delete(recursive: recursive);
+        return;
+      } catch (e) {
+        if (++attempts >= 3) {
+          rethrow;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
   void deleteSyncWithCheck({bool recursive = false, bool emptyOk = false}) {
     try {
       deleteSync(recursive: recursive, emptyOk: emptyOk);
@@ -167,6 +191,9 @@ class FilePath extends PathEntity {
   /// underlying OS error, which carries the reason a replace was refused — most
   /// often a sharing violation because another process holds the destination.
   void renameSync(FilePath destination) => toFile().renameSync(destination.path);
+
+  /// Asynchronous counterpart of [renameSync]; the same same-volume caveat applies.
+  Future<void> rename(FilePath destination) => toFile().rename(destination.path);
 
   T deserializeSync<T>() => MapperContainer.globals.fromJson<T>(readAsStringSync());
 }
