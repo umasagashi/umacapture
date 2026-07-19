@@ -160,6 +160,14 @@ class FilePath extends PathEntity {
 
   void writeAsStringSync(String contents) => toFile().writeAsStringSync(contents);
 
+  /// Renames this file to [destination], replacing it if it already exists.
+  ///
+  /// Same-volume only, so callers must keep the temporary and final paths in the
+  /// same directory. Throws (rather than reporting) so the caller can surface the
+  /// underlying OS error, which carries the reason a replace was refused — most
+  /// often a sharing violation because another process holds the destination.
+  void renameSync(FilePath destination) => toFile().renameSync(destination.path);
+
   T deserializeSync<T>() => MapperContainer.globals.fromJson<T>(readAsStringSync());
 }
 

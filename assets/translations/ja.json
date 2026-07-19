@@ -27,7 +27,9 @@
                     "exe": "インストーラー",
                     "zip": "ダウンロードフォルダ"
                 },
-                "download_failed": "更新のダウンロードに失敗しました。"
+                "download_failed": {
+                    "template": "更新のダウンロードに失敗しました。\n{error}"
+                }
             },
             "module_updater": {
                 "title": "認識モジュール更新",

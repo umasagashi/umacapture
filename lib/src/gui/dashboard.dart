@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:auto_route/auto_route.dart';
+import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
@@ -41,6 +44,32 @@ class AppUpdaterGroup extends ConsumerWidget {
 
   const AppUpdaterGroup({super.key, required this.version});
 
+  /// Renders [error] as a single short line for the failure toast.
+  ///
+  /// Deliberately descriptive rather than diagnostic: it reports what the OS or
+  /// the HTTP layer actually said instead of guessing a cause, so an unfamiliar
+  /// failure is not mislabelled as a familiar one.
+  static String describeError(Object error) {
+    final String detail = switch (error) {
+      FileSystemException(:final osError?) => "${error.message}: ${osError.message} (errno ${osError.errorCode})",
+      FileSystemException() => error.message,
+      DioException(:final response?) => "${error.type.name}: HTTP ${response.statusCode}",
+      DioException() => "${error.type.name}: ${error.message ?? error.error ?? ''}",
+      _ => error.toString(),
+    };
+    // Naming what was being acted on lets the user act on it directly (close
+    // whatever holds the file, or check the URL) instead of only learning that
+    // something went wrong.
+    final String target = switch (error) {
+      FileSystemException(:final path?) => "\n$path",
+      DioException(:final requestOptions) => "\n${requestOptions.uri}",
+      _ => "",
+    };
+    const limit = 300;
+    final trimmed = detail.trim();
+    return (trimmed.length <= limit ? trimmed : "${trimmed.substring(0, limit)}...") + target;
+  }
+
   void downloadAndOpen(WidgetRef ref) {
     // Capture the (top-level, non-autoDispose) provider objects before the async chain so the deferred
     // callbacks never touch the build-phase WidgetRef after this card is disposed (e.g. tab switch).
@@ -51,27 +80,67 @@ class AppUpdaterGroup extends ConsumerWidget {
         .read(isInstallerModeLoader.future)
         .then((isInstallerMode) {
           final downloadUrl = isInstallerMode ? Const.appExeUrl(version: version) : Const.appZipUrl(version: version);
-          final FilePath downloadPath = pathInfo.downloadDir.filePath(Uri.parse(downloadUrl).pathSegments.last);
-          logger.d(downloadUrl);
+          final String fileName = Uri.parse(downloadUrl).pathSegments.last;
+          final FilePath downloadPath = pathInfo.downloadDir.filePath(fileName);
+          // Stream into a sibling temp file and rename on success, so an aborted
+          // transfer never leaves a truncated executable under the real name for
+          // the user to run. Sibling, not tempDir: a rename cannot cross volumes.
+          final FilePath incompletePath = pathInfo.downloadDir.filePath("$fileName.part");
+          logger.d("Downloading the app update from $downloadUrl to ${downloadPath.path}");
+          // Always discard a previous artifact rather than reusing it: its
+          // provenance is unknown (it may be a truncated or tampered-with file
+          // from an earlier run). Deleting up front also surfaces a locked
+          // destination here, before spending a 50 MB transfer that could only
+          // fail at the rename.
+          downloadPath.deleteSync(emptyOk: true);
+          incompletePath.deleteSync(emptyOk: true);
           return createDiagnosticDio(operation: "download_app_update")
               .download(
                 downloadUrl,
-                downloadPath.path,
+                incompletePath.path,
                 onReceiveProgress: (int count, int total) {
                   progress.set(Progress(count: count, total: total));
                 },
               )
               .then((_) {
+                incompletePath.renameSync(downloadPath);
                 progress.set(null);
-                (isInstallerMode ? downloadPath : downloadPath.parent).launch();
+                return (isInstallerMode ? downloadPath : downloadPath.parent).launch();
+              })
+              .onError<Object>((error, stackTrace) {
+                // Drop the half-written temp file so an abandoned download does
+                // not strand 50 MB in the user's Downloads folder. Best-effort:
+                // a cleanup failure must not replace the error being reported.
+                try {
+                  incompletePath.deleteSync(emptyOk: true);
+                } catch (cleanupError) {
+                  logger.w("Failed to remove the incomplete app update download.", cleanupError);
+                }
+                throw error;
               });
         })
         .catchError((Object error, StackTrace stackTrace) {
           // Reset the progress so the card stops spinning and becomes tappable again;
           // without this a failed download leaves it stuck on the spinner forever.
-          logger.w("Failed to download app update: $error\n$stackTrace");
+          // Report at error level and to Sentry: this was the only network
+          // operation that stayed a local warning, which left production failures
+          // with no trace at all.
+          logger.e("Failed to download the app update.", error, stackTrace);
+          if (error is DioException) {
+            logger.e(
+              "App update download detail: type=${error.type} url=${error.requestOptions.uri} "
+              "status=${error.response?.statusCode} inner=${error.error} (${error.error.runtimeType})",
+            );
+          }
+          captureException(error, stackTrace);
           progress.set(null);
-          Toaster.show(ToastData.error(description: "$tr_dashboard.app_updater.download_failed".tr()));
+          Toaster.show(
+            ToastData.error(
+              description: "$tr_dashboard.app_updater.download_failed.template".tr(
+                namedArgs: {"error": describeError(error)},
+              ),
+            ),
+          );
         });
   }
 
