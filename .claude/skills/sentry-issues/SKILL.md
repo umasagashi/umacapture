@@ -132,6 +132,32 @@ The `--query` value is standard Sentry issue search:
   OS frames to infer *what* the app was doing (window teardown, graphics
   release), not the exact function.
 
+**Symbolicated is not the same as trustworthy — always check `trust`.** Resolving
+a name needs a PDB; reconstructing the *call chain* needs unwind tables, which
+live in the PE binary, not the PDB. Releases up to and including **0.2.1**
+uploaded PDBs only, so their events carry `unwind_status: missing` and Sentry
+walks the stack by scanning memory for plausible return addresses. Those frames
+come back fully named and file/line-annotated while being **causally wrong** —
+sibling calls, stale frames, and unrelated leaf functions get spliced into what
+looks like a clean call stack. Before reasoning about any native stack, pull the
+raw event (`--json`) and inspect each frame's `trust`:
+
+- `context` — the crashing frame, taken from the register set. Always reliable.
+- `cfi` — walked with real unwind data. Reliable.
+- `scan` / `fp` — guessed. **Do not treat the ordering as a call relationship.**
+
+Also check `entries[].data.images[].unwind_status` in the `debugmeta` entry and
+the `native_missing_dsym` items in the event's `errors` array; both name the
+images whose unwind info was unavailable. Since the binary upload was added to
+the `release` skill's step 9.5, builds after 0.2.1 should show
+`unwind_status: found` for `umacapture.exe` and `flutter_windows.dll`.
+
+**Minidumps are not retained.** The org's `storeCrashReports` is `0`, so the
+attachments endpoint 404s for every native event and there is no dump to analyze
+locally with `cdb`. It also means an old event cannot be re-symbolicated by
+reprocessing after a late symbol upload — fixing symbols only helps events that
+arrive afterwards.
+
 **Version tagging is consistent.** Both the Dart side (`assets/version_info.json`)
 and the native side (`windows/runner/Runner.rc` `FLUTTER_VERSION`) derive from the
 pubspec `version` at build time, so a given build reports the same release on both

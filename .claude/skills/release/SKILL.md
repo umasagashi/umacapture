@@ -213,22 +213,37 @@ release the publisher creates attaches to the pushed `v<version>` tag.
    exe that was just packaged, and they cannot be regenerated later.
 
 9.5. Upload debug symbols so Sentry can symbolicate this build's native crashes.
-   Two files matter: `umacapture.pdb` (covers the runner **and** the native C++
-   backend, which is linked straight into the exe) and the engine's
-   `flutter_windows.dll.pdb` (already in the FVM SDK cache — no download). Third-
-   party DLLs (`opencv_world4130.dll`, `onnxruntime.dll`) ship without PDBs and
-   stay unsymbolicated; that is expected.
+   **Four** files matter, in two pairs:
+   - The **PDBs** — `umacapture.pdb` (covers the runner **and** the native C++
+     backend, which is linked straight into the exe) and the engine's
+     `flutter_windows.dll.pdb` (already in the FVM SDK cache — no download).
+     These give function names, files, and line numbers.
+   - The **PE binaries themselves** — `umacapture.exe` and `flutter_windows.dll`.
+     A PDB carries no unwind tables; the `.pdata` section of the binary does.
+     Without them Sentry reports `unwind_status: missing` and falls back to
+     scanning the crash stack for plausible return addresses, so almost every
+     frame comes back `trust: scan` — a plausible-looking but **causally wrong**
+     call stack. Uploading the binaries is what makes `trust: cfi` frames, and
+     therefore real stack traces, possible.
+
+   Third-party DLLs (`opencv_world4130.dll`, `onnxruntime.dll`) ship without PDBs
+   and stay unsymbolicated; that is expected.
    ```bash
    export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"
-   ENGINE_PDB=".fvm/flutter_sdk/bin/cache/artifacts/engine/windows-x64-release/flutter_windows.dll.pdb"
+   ENGINE_DIR=".fvm/flutter_sdk/bin/cache/artifacts/engine/windows-x64-release"
    sentry-cli debug-files upload --include-sources \
-     build/windows/x64/runner/Release/umacapture.pdb "$ENGINE_PDB"
+     build/windows/x64/runner/Release/umacapture.pdb \
+     "$ENGINE_DIR/flutter_windows.dll.pdb" \
+     build/windows/x64/runner/Release/umacapture.exe \
+     "$ENGINE_DIR/flutter_windows.dll"
    ```
-   Expect `UPLOADED` lines for both debug-ids (source warnings about oversized
-   Windows SDK headers are harmless). Verify the exe carries a matching debug-id
-   with `sentry-cli debug-files check build/windows/x64/runner/Release/umacapture.exe`
-   — if the Debug ID is absent, the `/DEBUG` link flags in
-   `windows/runner/CMakeLists.txt` regressed and symbols will never match.
+   Expect `UPLOADED` lines for four entries — two `pdb` and two `pe` (source
+   warnings about oversized Windows SDK headers are harmless). Verify the exe
+   carries a matching debug-id **and** unwind info with
+   `sentry-cli debug-files check build/windows/x64/runner/Release/umacapture.exe`
+   — it must print the Debug ID plus `Contained debug information: unwind`. If the
+   Debug ID is absent, the `/DEBUG` link flags in `windows/runner/CMakeLists.txt`
+   regressed and symbols will never match.
 10. Attach `version_info.json` as a release asset. flutter_distributor only
    uploads the packaged exe/zip, so add this lightweight file separately (it lets
    a client read the published version without downloading a build). `--clobber`
