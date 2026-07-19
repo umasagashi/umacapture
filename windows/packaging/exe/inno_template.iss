@@ -15,8 +15,11 @@ SolidCompression=yes
 SetupIconFile={{SETUP_ICON_FILE}}
 WizardStyle=modern
 PrivilegesRequired={{PRIVILEGES_REQUIRED}}
-ArchitecturesAllowed=x64
-ArchitecturesInstallIn64BitMode=x64
+; "x64" is deprecated since Inno Setup 6.3 (the compiler warns and substitutes
+; "x64os"). "x64compatible" additionally covers Arm64 Windows running the x64
+; binaries under emulation, which is what this app needs to keep working there.
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 
 [Languages]
 {% for locale in LOCALES %}

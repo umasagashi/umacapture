@@ -75,8 +75,10 @@ or get approval before installing anything — do not install them unprompted.**
 | **Visual Studio 2022+** (Desktop C++ workload) | MSVC toolchain for the native/Windows build | Provides `cl.exe`; VS ships `cmake` + `ninja`. Required for `flutter build windows` and the native CLI/tests. |
 | **7-Zip** (optional) | faster OpenCV extraction | `tool/fetch_deps.py` falls back to the OpenCV `.exe`'s own self-extractor if `7z` is absent. |
 
-Releasing additionally needs **Inno Setup** + `flutter_distributor` + a
-`GITHUB_TOKEN` — out of scope here; see the **release** skill.
+Releasing additionally needs **Inno Setup 6.7.3** (pinned via winget; deliberately
+on the 6.x line even though 7.x exists) + `flutter_distributor` + a
+`GITHUB_TOKEN` — out of scope here; see the **release** skill for the version
+check and the reasoning.
 
 ## Setup steps
 
