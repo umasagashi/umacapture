@@ -61,6 +61,16 @@ target_link_options(
         "$<${RELEASE_OR_PROFILE}:/OPT:ICF>"
 )
 
+# Version resource inputs for Runner.rc. Without these the #else branches in
+# Runner.rc take over and the exe reports itself as 1.0.0 forever, no matter what
+# pubspec.yaml says. FLUTTER_VERSION* come from the top-level CMakeLists.txt,
+# which the Flutter tool populates from the pubspec version at configure time.
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MINOR=${FLUTTER_VERSION_MINOR}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTTER_VERSION_PATCH}")
+target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
+
 target_compile_definitions(
         ${BINARY_NAME} PRIVATE
         NOMINMAX
@@ -71,6 +81,7 @@ target_link_libraries(
         ${BINARY_NAME} PRIVATE
         flutter
         flutter_wrapper_app
+        "dwmapi.lib"
         "${OpenCV_LIBS}"
         "${ONNX_DIR}/lib/onnxruntime.lib"
         clip

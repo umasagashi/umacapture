@@ -14,7 +14,42 @@ FlutterWindow::FlutterWindow(const flutter::DartProject &project)
     uma::logger_util::init();
 }
 
-FlutterWindow::~FlutterWindow() = default;
+FlutterWindow::~FlutterWindow() {
+    // Tear the Flutter controller down here rather than leaving it to the
+    // member's own destructor.
+    //
+    // This runs only when the app leaves its message loop while the window is
+    // still alive, so the window is torn down by this destructor instead of by
+    // WM_DESTROY. In production that means a Windows logoff or shutdown, which
+    // posts WM_QUIT without ever closing the window. To reproduce it by hand,
+    // start the release build, resolve the UI thread with
+    // GetWindowThreadProcessId() on the main window, post WM_QUIT (0x0012) to
+    // that thread, and check the exit code: before this fix it was reliably
+    // 0xC0000005, after it is 0. Check WM_CLOSE (the X button) too -- that path
+    // was always safe, and it is what proves the doubled Destroy() is harmless.
+    //
+    // Destroying the controller makes the engine call DestroyWindow() on the
+    // view's child HWND, and Windows dispatches the resulting messages to this
+    // window's top-level WndProc *synchronously*. MessageHandler() guards on
+    // `flutter_controller_`, but a member being destroyed is not null: only
+    // unique_ptr::reset() clears the pointer before running the deleter, while
+    // ~unique_ptr() leaves it dangling. So on this path the guard passes, the
+    // re-entrant call reaches a controller whose view is already gone, and
+    // FlutterWindowsView::GetEngine() dereferences null -- the 0.2.1 shutdown
+    // crash (EXCEPTION_ACCESS_VIOLATION_READ at null+0x10).
+    //
+    // Destroy() routes through FlutterWindow::OnDestroy(): virtual dispatch
+    // still resolves to this class inside its own destructor, so the pointer is
+    // nulled first and the re-entrant call is skipped. Leaving this to
+    // ~Win32Window() is too late -- by then the derived object is gone and only
+    // Win32Window::OnDestroy() runs.
+    //
+    // The WM_DESTROY path already reached OnDestroy() and Destroy() is
+    // idempotent, so this is a no-op when the window closed normally. Upstream's
+    // runner template has the same defect as of Flutter 3.44.4; this is a local
+    // patch, not a vendored change.
+    Destroy();
+}
 
 bool FlutterWindow::OnCreate() {
     log_debug("");
