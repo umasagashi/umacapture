@@ -74,10 +74,49 @@ resolves to the FVM default, but verify rather than assume.
    ```
    If it does not match, prepend `.fvm/flutter_sdk/bin` to PATH for the session.
 
-2. **Inno Setup `iscc` is available** (needed by the `exe` job):
+2. **Inno Setup is installed and pinned to 6.7.3** (needed by the `exe` job).
+   The version is pinned in winget, so this should already hold; verify rather
+   than assume, because `ISCC.exe` carries no VersionInfo and reports only
+   "Inno Setup 6" on the banner:
    ```bash
-   where iscc || ls "/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+   ls "/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+   winget pin list --id JRSoftware.InnoSetup    # expect a "Gating" pin at 6.7.3
+   powershell -NoProfile -Command "Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*' | Where-Object { \$_.DisplayName -like '*Inno Setup*' } | Select-Object DisplayVersion"
    ```
+   If the version differs, restore it before releasing:
+   ```bash
+   winget install --id JRSoftware.InnoSetup --version 6.7.3 --exact
+   winget pin add --id JRSoftware.InnoSetup --version 6.7.3 --exact
+   ```
+   **Stay on the 6.x line.** Inno Setup 7 exists (7.0.2 is the current stable,
+   alongside 6.7.3 on the 6.x line) and 6.7.3 is not being left behind — this is
+   a "no reason to move" call, not a blocker:
+   - Nothing in 7.0 pays off here. Its headline features are 64-bit *installers*
+     (a 32-bit installer installs a 64-bit app just fine; the real gain is an
+     lzma dictionary above 3.8 GB, irrelevant to a ~50 MB payload) and
+     extended-length path support (the install target is well under `MAX_PATH`).
+     Its Pascal-scripting breaking changes cannot bite us — `inno_template.iss`
+     has no `[Code]` section. `x64compatible`, which 7.0 makes the default, is
+     already set explicitly in the template.
+   - 7.0 *does* change defaults the template leaves unset (`AppVerName`,
+     `TimeStampsInUTC`, `ArchiveExtraction`), so moving would require re-verifying
+     the installer rather than being a drop-in swap.
+
+   Note for whoever revisits this: the **path** objection is obsolete. The
+   `flutter_app_packager` that runs today (0.6.5, pulled in by the globally
+   activated `flutter_distributor` 0.6.6) does hardcode
+   `C:\Program Files (x86)\Inno Setup 6\ISCC.exe` with no override, but 0.6.7 added
+   an `INNO_SETUP_PATH` environment variable plus a `PATH`-lookup fallback, and
+   0.6.9 is current. Re-running `dart pub global activate flutter_distributor`
+   picks that up — so a future 7.x move costs one environment variable, not a
+   patched dependency. Beware that the same reactivation silently changes how
+   `ISCC.exe` is resolved (the hardcoded path survives only as priority 2).
+
+   Licensing is **not** a factor either way. Inno Setup's license is unchanged
+   and still grants use "for any purpose, including commercial applications";
+   the commercial licenses introduced in 6.5.0 are a voluntary request aimed at
+   organizations above ~$5,000 USD annual revenue, and the CLI compiler emits no
+   nag when unlicensed (verified).
 
 3. **`GITHUB_TOKEN` is set** (the GitHub publisher reads it). Confirm presence
    without printing the value:
