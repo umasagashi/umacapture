@@ -191,11 +191,17 @@ were `unwind_status: unused`, i.e. no frame needed them — but if a similar rep
 appears with those modules in play, the gap above is the reason the middle of the
 stack looks incoherent.
 
-**Version tagging is consistent.** Both the Dart side (`assets/version_info.json`)
-and the native side (`windows/runner/Runner.rc` `FLUTTER_VERSION`) derive from the
-pubspec `version` at build time, so a given build reports the same release on both
-paths. If you see two events with different release strings, that's two different
-app builds/users — not a tagging bug.
+**Version tagging is consistent, but not for the reason it looks like.** Every
+event — Dart exception or native minidump — gets its `release` from the Dart side
+(`assets/version_info.json`), because `sentry_flutter` passes its options down to
+the native SDK. The exe's own version resource plays no part in it. So if you see
+two events with different release strings, that's two different app builds/users,
+not a tagging bug.
+
+Do **not** infer the app version from the exe's file properties as a cross-check.
+`windows/runner/Runner.rc` reads `FLUTTER_VERSION*`, and until the 2026-07-19 fix
+`windows/runner/CMakeLists.txt` never defined them, so every build before that
+took the `#else` branch and stamped itself `1.0.0` regardless of the pubspec.
 
 ## Ad-hoc curl (when the script doesn't cover it)
 
