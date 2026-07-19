@@ -1,5 +1,11 @@
 app_id: bb3e45c0-725c-428e-aeb4-0076a37d4873
 display_name: umacapture
+# Must be set explicitly. flutter_app_packager otherwise defaults to the first
+# *.exe it finds in the packaging directory, which since Sentry was added is
+# crashpad_handler.exe, not the app. That name feeds both [Run] and [Icons], so
+# leaving it unset breaks the post-install launch, the Start Menu entry, the
+# desktop icon and the "launch at startup" shortcut alike.
+executable_name: umacapture.exe
 publisher_name: umasagashi
 publisher_url: https://github.com/umasagashi
 create_desktop_icon: true
