@@ -4,6 +4,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:url_launcher/url_launcher.dart' show launchUrl;
 
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
@@ -68,6 +69,30 @@ class PathEntity {
     }
   }
 
+  /// Asynchronous counterpart of [deleteSync] for callers on the UI isolate.
+  ///
+  /// Retries the same way, but waits with [Future.delayed] instead of [sleep],
+  /// so a locked file stalls only this chain rather than the whole isolate.
+  Future<void> delete({bool recursive = false, bool emptyOk = false}) async {
+    if (emptyOk && !existsSync()) {
+      return;
+    }
+
+    // Retry up to 3 times to avoid file lock issues.
+    int attempts = 0;
+    while (true) {
+      try {
+        await toEntity().delete(recursive: recursive);
+        return;
+      } catch (e) {
+        if (++attempts >= 3) {
+          rethrow;
+        }
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    }
+  }
+
   void deleteSyncWithCheck({bool recursive = false, bool emptyOk = false}) {
     try {
       deleteSync(recursive: recursive, emptyOk: emptyOk);
@@ -84,8 +109,19 @@ class PathEntity {
 
   FileSystemEntity toEntity() => isFileSync ? File(path) : Directory(path);
 
-  Future<void> launch() {
-    return Process.run("start", [path], runInShell: true);
+  /// Opens this path with the shell's default action: Explorer for a
+  /// directory, execution or the associated application for a file.
+  ///
+  /// Goes through ShellExecuteW (via url_launcher) instead of a `cmd start`
+  /// command line, because cmd re-parses the path: spaces turn it into a
+  /// window title and `&` splits it into two commands, so such paths fail to
+  /// open without any error. ShellExecuteW takes the path as data, reports
+  /// failures (which this method rethrows so awaiting callers can surface
+  /// them), and handles UAC elevation when the target is an installer.
+  Future<void> launch() async {
+    if (!await launchUrl(Uri.file(path))) {
+      throw FileSystemException("The shell has no handler to open this path", path);
+    }
   }
 
   FilePath toFilePath() {
@@ -159,6 +195,17 @@ class FilePath extends PathEntity {
   }
 
   void writeAsStringSync(String contents) => toFile().writeAsStringSync(contents);
+
+  /// Renames this file to [destination], replacing it if it already exists.
+  ///
+  /// Same-volume only, so callers must keep the temporary and final paths in the
+  /// same directory. Throws (rather than reporting) so the caller can surface the
+  /// underlying OS error, which carries the reason a replace was refused — most
+  /// often a sharing violation because another process holds the destination.
+  void renameSync(FilePath destination) => toFile().renameSync(destination.path);
+
+  /// Asynchronous counterpart of [renameSync]; the same same-volume caveat applies.
+  Future<void> rename(FilePath destination) => toFile().rename(destination.path);
 
   T deserializeSync<T>() => MapperContainer.globals.fromJson<T>(readAsStringSync());
 }
