@@ -158,6 +158,39 @@ locally with `cdb`. It also means an old event cannot be re-symbolicated by
 reprocessing after a late symbol upload — fixing symbols only helps events that
 arrive afterwards.
 
+**Only two shipped modules can ever symbolicate: `umacapture.exe` and
+`flutter_windows.dll`.** If a crash stack runs through anything else in the app
+directory, that segment degrades to `trust: scan` and there is no upload that
+would fix it — so read those frames as "roughly here", never as a call chain.
+This is a known, accepted gap (decided 2026-07-19), not something to re-diagnose:
+
+- **Plugin DLLs built from our own tree** — `window_manager_plugin.dll`,
+  `screen_retriever_windows_plugin.dll`, `audioplayers_windows_plugin.dll`,
+  `desktop_drop_plugin.dll`, `pasteboard_plugin.dll`,
+  `url_launcher_windows_plugin.dll` — plus `sentry.dll`, `crashpad_handler.exe`
+  and `crashpad_wer.dll` from the FetchContent'd sentry-native. These *contain*
+  `symtab, unwind` but carry an all-zero Debug ID (`Usable: no (missing debug
+  identifier, likely stripped)`), so Sentry cannot match an upload to the module
+  in the dump. Cause: `/Zi` and `/DEBUG` are set as `target_*` options on the
+  runner binary alone (`windows/runner/CMakeLists.txt`), and MSVC's `Release`
+  config adds neither by default, so every other CMake target is stripped.
+- **Third-party prebuilts** — `opencv_world4130.dll`, `onnxruntime.dll`,
+  `dartjni.dll` — ship without PDBs at all.
+
+The fix, if a crash ever actually lands in one of these, is to move `/Zi` and
+`/DEBUG` to the Release/Profile globals in `windows/CMakeLists.txt` so every
+locally built target emits a Debug ID, then widen `tool/upload_symbols.sh` to
+sweep the build tree. It was deliberately not done up front: it needs a full
+rebuild to verify the flags reach the FetchContent'd sentry-native, and costs
+build time and artifact size for modules that had never appeared in a crash.
+
+Worth knowing for triage: the window-teardown crash on 0.2.1
+(`UMACAPTURE-RELEASE-A9`) is exactly the shape that *could* route through
+`window_manager_plugin` / `screen_retriever_windows_plugin`. In that event they
+were `unwind_status: unused`, i.e. no frame needed them — but if a similar report
+appears with those modules in play, the gap above is the reason the middle of the
+stack looks incoherent.
+
 **Version tagging is consistent.** Both the Dart side (`assets/version_info.json`)
 and the native side (`windows/runner/Runner.rc` `FLUTTER_VERSION`) derive from the
 pubspec `version` at build time, so a given build reports the same release on both
