@@ -41,6 +41,12 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             log_error("startEventLoop failed: {}", e.what());
             teardownLocked();
             start_error = e.what();
+        } catch (...) {
+            // WinRT exceptions (winrt::hresult_error) do not derive from std::exception; without this catch-all
+            // they would escape with no onError, leaving a half-built pipeline behind.
+            log_error("startEventLoop failed: unknown non-standard exception");
+            teardownLocked();
+            start_error = "startEventLoop failed: unknown non-standard exception";
         }
     }
     // notifyError routes to the Dart callback; call it after releasing the lock so a re-entrant FFI call

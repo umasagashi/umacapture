@@ -94,22 +94,45 @@ class _TwoStateButton extends ConsumerStatefulWidget {
 }
 
 class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
-  bool _isInTransition;
-  Timer? _transitionTimer;
+  // The state we requested by pressing the button, kept until the provider actually reports it. This is
+  // what drives the loading spinner: a request (e.g. start capture) is only fulfilled once native confirms
+  // it, which on the first capture can take several seconds (model load). A fixed timer would hide the
+  // spinner while the request is still pending, so we wait for the real state change instead.
+  bool? _pendingTarget;
 
-  _TwoStateButtonState() : _isInTransition = false;
+  // Safety fallback: if the requested state never arrives (e.g. start failed and no confirming event is
+  // emitted), stop showing the spinner so the button does not stay disabled forever.
+  Timer? _timeoutTimer;
+
+  static const _timeout = Duration(seconds: 15);
 
   @override
   void dispose() {
-    _transitionTimer?.cancel();
+    _timeoutTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // A native error means the pending request will never be confirmed by a state change; stop the spinner
+    // immediately instead of waiting for the fallback timeout.
+    ref.listen<AsyncValue<int>>(errorEventProvider, (_, current) {
+      current.whenData((_) {
+        if (_pendingTarget != null) {
+          _timeoutTimer?.cancel();
+          setState(() => _pendingTarget = null);
+        }
+      });
+    });
     final state = ref.watch(widget.provider);
+    // The request is fulfilled once the provider reports the target state; clear the pending marker so the
+    // spinner stops and the button becomes actionable again.
+    if (_pendingTarget != null && state == _pendingTarget) {
+      _pendingTarget = null;
+      _timeoutTimer?.cancel();
+    }
     return StackedIndicator(
-      loading: _isInTransition,
+      loading: _pendingTarget != null,
       child: AnimatedSwitcher(duration: const Duration(milliseconds: 100), child: _buildButton(state)),
     );
   }
@@ -125,17 +148,17 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
   }
 
   VoidCallback? _buildOnPressedHandler(bool state) {
-    if (_isInTransition) {
-      return null; // Prevent the button pressed until the transition is completed.
+    if (_pendingTarget != null) {
+      return null; // Prevent the button pressed until the requested state has been confirmed.
     }
     final callback = state ? widget.onTruePressed : widget.onFalsePressed;
     return () {
       callback();
-      setState(() => _isInTransition = true);
-      _transitionTimer?.cancel();
-      _transitionTimer = Timer(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          setState(() => _isInTransition = false);
+      setState(() => _pendingTarget = !state);
+      _timeoutTimer?.cancel();
+      _timeoutTimer = Timer(_timeout, () {
+        if (mounted && _pendingTarget != null) {
+          setState(() => _pendingTarget = null);
         }
       });
     };
