@@ -405,8 +405,8 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// Loads the record in [directory], quarantining it if it cannot be decoded.
   ///
   /// Returns a [RecordLoaded] on success, or a [RecordQuarantined] if decoding
-  /// failed. This runs inside a `compute` isolate on the bulk/reload paths, so
-  /// it performs no UI side effects: surfacing the outcome (a toast) is the
+  /// failed. This runs on a worker isolate on the bulk/reload paths, so it
+  /// performs no UI side effects: surfacing the outcome (a toast) is the
   /// caller's responsibility on the main isolate, driven by the returned value.
   static RecordLoadResult load(DirectoryPath directory) {
     try {
@@ -414,7 +414,13 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
       return RecordLoaded(CharaDetailRecordMapper.fromJson(content));
     } catch (exception, stackTrace) {
       logger.e("Failed to load record.json.", exception, stackTrace);
-      logger.i(directory.listSync().map((e) => e.name).join(", "));
+      try {
+        logger.i(directory.listSync().map((e) => e.name).join(", "));
+      } catch (_) {
+        // The listing is diagnostic only; the entry may not be a listable
+        // directory (vanished concurrently, or not a directory at all), and
+        // that must not escalate one bad record into a scan-wide failure.
+      }
       captureException(exception, stackTrace);
     }
     // A record that fails to decode (unknown enum value, missing required
