@@ -40,6 +40,19 @@ TEST_CASE("string-payload messages") {
     checkMessage(error("boom"), R"({"type":"onError","message":"boom"})");
 }
 
+TEST_CASE("error survives a non-UTF-8 message instead of throwing") {
+    // The message often embeds an exception's what(), which can carry non-UTF-8 bytes (e.g. a
+    // CP932-localized system message). A strict dump() would throw here and the onError notification
+    // would never reach Dart; error() must degrade the bytes (U+FFFD) and still produce valid JSON.
+    const std::string cp932_like = "boom: \x8e\xc0\x8d\x73";
+    std::string built;
+    CHECK_NOTHROW(built = error(cp932_like));
+    const Json parsed = Json::parse(built);
+    CHECK(parsed.at("type") == "onError");
+    const auto message = parsed.at("message").get<std::string>();
+    CHECK(message.rfind("boom: ", 0) == 0);
+}
+
 TEST_CASE("scroll messages") {
     checkMessage(scrollReady(3), R"({"type":"onScrollReady","index":3})");
     checkMessage(pageReady(2), R"({"type":"onPageReady","index":2})");

@@ -9,6 +9,14 @@
 #include "frame_rate.h"
 #include "native_api.h"
 
+// This backend relies on exception messages surviving until the catch site (they are forwarded to Dart
+// via onError). Under _HAS_EXCEPTIONS=0 the MSVC STL swaps std::exception for a fallback that stores the
+// message as a raw non-owning pointer, so any dynamically built message dangles by the time it is caught.
+// The stock Flutter Windows template defines _HAS_EXCEPTIONS=0; fail the build if that ever comes back.
+#if defined(_MSC_VER) && defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS
+#error "_HAS_EXCEPTIONS=0 breaks exception messages (fallback std::exception does not copy them)."
+#endif
+
 namespace uma::app {
 
 NativeApi::NativeApi() = default;  // Do not use Native::instance() in this constructor.

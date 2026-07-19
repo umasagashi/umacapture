@@ -72,7 +72,13 @@ class StackedIndicator extends StatelessWidget {
   }
 }
 
-class _TwoStateButton extends ConsumerStatefulWidget {
+/// A two-state toggle button whose visual state follows [provider], not the press.
+///
+/// A press only requests the transition (e.g. start/stop capture); the button shows a spinner and stays
+/// disabled until the provider confirms the requested state, an error event arrives, or the fallback
+/// timeout expires. Public (rather than a private helper of the capture page) so the pending/confirm
+/// state machine can be widget-tested in isolation.
+class TwoStateButton extends ConsumerStatefulWidget {
   final Widget trueWidget;
   final Widget falseWidget;
   final VoidCallback onTruePressed;
@@ -80,7 +86,8 @@ class _TwoStateButton extends ConsumerStatefulWidget {
   final bool elevateWhen;
   final Provider<bool> provider;
 
-  const _TwoStateButton({
+  const TwoStateButton({
+    super.key,
     required this.trueWidget,
     required this.falseWidget,
     required this.onTruePressed,
@@ -93,7 +100,7 @@ class _TwoStateButton extends ConsumerStatefulWidget {
   ConsumerState<ConsumerStatefulWidget> createState() => _TwoStateButtonState();
 }
 
-class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
+class _TwoStateButtonState extends ConsumerState<TwoStateButton> {
   // The state we requested by pressing the button, kept until the provider actually reports it. This is
   // what drives the loading spinner: a request (e.g. start capture) is only fulfilled once native confirms
   // it, which on the first capture can take several seconds (model load). A fixed timer would hide the
@@ -571,7 +578,7 @@ class CaptureControlGroup extends ConsumerWidget {
           child: Disabled(
             disabled: ref.watch(platformControllerProvider) == null,
             tooltip: "$tr_capture.capture_control.disabled_tooltip".tr(),
-            child: _TwoStateButton(
+            child: TwoStateButton(
               elevateWhen: false,
               falseWidget: Text("$tr_capture.capture_control.start_capture_button".tr()),
               trueWidget: Text("$tr_capture.capture_control.stop_capture_button".tr()),

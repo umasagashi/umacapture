@@ -57,7 +57,13 @@ function(APPLY_STANDARD_SETTINGS TARGET)
             /bigobj
             )
     target_compile_options(${TARGET} PRIVATE /EHsc)
-    target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
+    # Deviation from the stock Flutter template: do NOT define _HAS_EXCEPTIONS=0. The native backend
+    # (compiled into the runner) throws and catches exceptions whose messages are dynamically built
+    # std::strings. Under _HAS_EXCEPTIONS=0 the MSVC STL substitutes a fallback std::exception that
+    # stores the message as a raw non-owning pointer (stdext::exception in <exception>), so
+    # runtime_error(std::string) keeps a c_str() into a destroyed temporary and what() returns freed
+    # memory. That silently corrupted every dynamic error message (and broke onError delivery when the
+    # garbage bytes later failed strict UTF-8 JSON serialization).
     target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 
