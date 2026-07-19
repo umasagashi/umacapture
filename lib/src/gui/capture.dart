@@ -72,7 +72,13 @@ class StackedIndicator extends StatelessWidget {
   }
 }
 
-class _TwoStateButton extends ConsumerStatefulWidget {
+/// A two-state toggle button whose visual state follows [provider], not the press.
+///
+/// A press only requests the transition (e.g. start/stop capture); the button shows a spinner and stays
+/// disabled until the provider confirms the requested state, an error event arrives, or the fallback
+/// timeout expires. Public (rather than a private helper of the capture page) so the pending/confirm
+/// state machine can be widget-tested in isolation.
+class TwoStateButton extends ConsumerStatefulWidget {
   final Widget trueWidget;
   final Widget falseWidget;
   final VoidCallback onTruePressed;
@@ -80,7 +86,8 @@ class _TwoStateButton extends ConsumerStatefulWidget {
   final bool elevateWhen;
   final Provider<bool> provider;
 
-  const _TwoStateButton({
+  const TwoStateButton({
+    super.key,
     required this.trueWidget,
     required this.falseWidget,
     required this.onTruePressed,
@@ -93,23 +100,46 @@ class _TwoStateButton extends ConsumerStatefulWidget {
   ConsumerState<ConsumerStatefulWidget> createState() => _TwoStateButtonState();
 }
 
-class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
-  bool _isInTransition;
-  Timer? _transitionTimer;
+class _TwoStateButtonState extends ConsumerState<TwoStateButton> {
+  // The state we requested by pressing the button, kept until the provider actually reports it. This is
+  // what drives the loading spinner: a request (e.g. start capture) is only fulfilled once native confirms
+  // it, which on the first capture can take several seconds (model load). A fixed timer would hide the
+  // spinner while the request is still pending, so we wait for the real state change instead.
+  bool? _pendingTarget;
 
-  _TwoStateButtonState() : _isInTransition = false;
+  // Safety fallback: if the requested state never arrives (e.g. start failed and no confirming event is
+  // emitted), stop showing the spinner so the button does not stay disabled forever.
+  Timer? _timeoutTimer;
+
+  static const _timeout = Duration(seconds: 15);
 
   @override
   void dispose() {
-    _transitionTimer?.cancel();
+    _timeoutTimer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // A native error means the pending request will never be confirmed by a state change; stop the spinner
+    // immediately instead of waiting for the fallback timeout.
+    ref.listen<AsyncValue<int>>(errorEventProvider, (_, current) {
+      current.whenData((_) {
+        if (_pendingTarget != null) {
+          _timeoutTimer?.cancel();
+          setState(() => _pendingTarget = null);
+        }
+      });
+    });
     final state = ref.watch(widget.provider);
+    // The request is fulfilled once the provider reports the target state; clear the pending marker so the
+    // spinner stops and the button becomes actionable again.
+    if (_pendingTarget != null && state == _pendingTarget) {
+      _pendingTarget = null;
+      _timeoutTimer?.cancel();
+    }
     return StackedIndicator(
-      loading: _isInTransition,
+      loading: _pendingTarget != null,
       child: AnimatedSwitcher(duration: const Duration(milliseconds: 100), child: _buildButton(state)),
     );
   }
@@ -125,17 +155,17 @@ class _TwoStateButtonState extends ConsumerState<_TwoStateButton> {
   }
 
   VoidCallback? _buildOnPressedHandler(bool state) {
-    if (_isInTransition) {
-      return null; // Prevent the button pressed until the transition is completed.
+    if (_pendingTarget != null) {
+      return null; // Prevent the button pressed until the requested state has been confirmed.
     }
     final callback = state ? widget.onTruePressed : widget.onFalsePressed;
     return () {
       callback();
-      setState(() => _isInTransition = true);
-      _transitionTimer?.cancel();
-      _transitionTimer = Timer(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          setState(() => _isInTransition = false);
+      setState(() => _pendingTarget = !state);
+      _timeoutTimer?.cancel();
+      _timeoutTimer = Timer(_timeout, () {
+        if (mounted && _pendingTarget != null) {
+          setState(() => _pendingTarget = null);
         }
       });
     };
@@ -548,7 +578,7 @@ class CaptureControlGroup extends ConsumerWidget {
           child: Disabled(
             disabled: ref.watch(platformControllerProvider) == null,
             tooltip: "$tr_capture.capture_control.disabled_tooltip".tr(),
-            child: _TwoStateButton(
+            child: TwoStateButton(
               elevateWhen: false,
               falseWidget: Text("$tr_capture.capture_control.start_capture_button".tr()),
               trueWidget: Text("$tr_capture.capture_control.stop_capture_button".tr()),

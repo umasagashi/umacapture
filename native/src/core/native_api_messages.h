@@ -21,7 +21,12 @@ inline std::string screenshotTaken(const std::string &path, const std::string &r
 }
 
 inline std::string error(const std::string &message) {
-    return json_util::Json{{"type", "onError"}, {"message", message}}.dump();
+    // [message] often embeds an exception's what(), which is not guaranteed to be UTF-8 (e.g. a
+    // CP932-localized system message on a Japanese Windows). dump() is strict by default and would
+    // throw on such bytes, killing the very error notification the caller is trying to deliver;
+    // replace invalid sequences with U+FFFD instead so onError always reaches the Dart side.
+    return json_util::Json{{"type", "onError"}, {"message", message}}.dump(
+        -1, ' ', false, json_util::Json::error_handler_t::replace);
 }
 
 inline std::string captureStarted() { return json_util::Json{{"type", "onCaptureStarted"}}.dump(); }

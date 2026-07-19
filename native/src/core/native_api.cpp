@@ -9,6 +9,14 @@
 #include "frame_rate.h"
 #include "native_api.h"
 
+// This backend relies on exception messages surviving until the catch site (they are forwarded to Dart
+// via onError). Under _HAS_EXCEPTIONS=0 the MSVC STL swaps std::exception for a fallback that stores the
+// message as a raw non-owning pointer, so any dynamically built message dangles by the time it is caught.
+// The stock Flutter Windows template defines _HAS_EXCEPTIONS=0; fail the build if that ever comes back.
+#if defined(_MSC_VER) && defined(_HAS_EXCEPTIONS) && !_HAS_EXCEPTIONS
+#error "_HAS_EXCEPTIONS=0 breaks exception messages (fallback std::exception does not copy them)."
+#endif
+
 namespace uma::app {
 
 NativeApi::NativeApi() = default;  // Do not use Native::instance() in this constructor.
@@ -41,6 +49,12 @@ void NativeApi::startEventLoop(const std::string &native_config) {
             log_error("startEventLoop failed: {}", e.what());
             teardownLocked();
             start_error = e.what();
+        } catch (...) {
+            // WinRT exceptions (winrt::hresult_error) do not derive from std::exception; without this catch-all
+            // they would escape with no onError, leaving a half-built pipeline behind.
+            log_error("startEventLoop failed: unknown non-standard exception");
+            teardownLocked();
+            start_error = "startEventLoop failed: unknown non-standard exception";
         }
     }
     // notifyError routes to the Dart callback; call it after releasing the lock so a re-entrant FFI call
