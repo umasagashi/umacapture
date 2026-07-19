@@ -262,7 +262,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     ref.read(charaDetailArchiveStorageLoaderProvider);
     final List<CharaDetailRecord> records = [];
     if (rootDirectory.existsSync()) {
-      final results = await _loadAllCharaDetailRecord(rootDirectory);
+      final results = await loadAllCharaDetailRecord(rootDirectory);
       records.addAll(results.whereType<RecordLoaded>().map((e) => e.record));
       _surfaceQuarantines(ref, results.whereType<RecordQuarantined>().toList());
     }
@@ -670,7 +670,8 @@ int get _recordLoadWorkerCount => Platform.numberOfProcessors.clamp(1, 8);
 /// are skipped: they cannot be records, and passing one to
 /// [CharaDetailRecord.load] would quarantine it and report it as a corrupt
 /// record.
-Future<List<RecordLoadResult>> _loadAllCharaDetailRecord(DirectoryPath directory) async {
+@visibleForTesting
+Future<List<RecordLoadResult>> loadAllCharaDetailRecord(DirectoryPath directory) async {
   final directories = directory
       .toDirectory()
       .listSync(followLinks: false)
@@ -702,7 +703,7 @@ List<RecordLoadResult> _loadRecordChunk(List<DirectoryPath> directories) {
 /// on worker isolates ([Isolate.run] and `compute` respectively), where
 /// `Toaster.show` would be a no-op. Shared by both the active and archive
 /// storages, which each call [CharaDetailRecord.load] via
-/// [_loadAllCharaDetailRecord] and so can both trigger a quarantine move that
+/// [loadAllCharaDetailRecord] and so can both trigger a quarantine move that
 /// must be reported.
 void _surfaceQuarantines(Ref ref, List<RecordQuarantined> quarantined) {
   if (quarantined.isEmpty) {
@@ -765,7 +766,7 @@ class CharaDetailArchiveStorage extends AsyncNotifier<List<CharaDetailRecord>> i
     if (!rootDirectory.existsSync()) {
       return [];
     }
-    final results = await _loadAllCharaDetailRecord(rootDirectory);
+    final results = await loadAllCharaDetailRecord(rootDirectory);
     // Loading a corrupt archived record quarantines its directory as a side
     // effect; surface that like the active storage does, rather than silently
     // dropping it (and leaving the count inconsistent).
