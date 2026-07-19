@@ -228,22 +228,21 @@ release the publisher creates attaches to the pushed `v<version>` tag.
 
    Third-party DLLs (`opencv_world4130.dll`, `onnxruntime.dll`) ship without PDBs
    and stay unsymbolicated; that is expected.
+
+   `tool/upload_symbols.sh` does all four, so the set cannot be trimmed by
+   accident — do not hand-roll the `sentry-cli` invocation instead:
    ```bash
    export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"
-   ENGINE_DIR=".fvm/flutter_sdk/bin/cache/artifacts/engine/windows-x64-release"
-   sentry-cli debug-files upload --include-sources \
-     build/windows/x64/runner/Release/umacapture.pdb \
-     "$ENGINE_DIR/flutter_windows.dll.pdb" \
-     build/windows/x64/runner/Release/umacapture.exe \
-     "$ENGINE_DIR/flutter_windows.dll"
+   tool/upload_symbols.sh
    ```
-   Expect `UPLOADED` lines for four entries — two `pdb` and two `pe` (source
-   warnings about oversized Windows SDK headers are harmless). Verify the exe
-   carries a matching debug-id **and** unwind info with
-   `sentry-cli debug-files check build/windows/x64/runner/Release/umacapture.exe`
-   — it must print the Debug ID plus `Contained debug information: unwind`. If the
-   Debug ID is absent, the `/DEBUG` link flags in `windows/runner/CMakeLists.txt`
-   regressed and symbols will never match.
+   It refuses to run if a binary lacks unwind info or a Debug ID (which would
+   mean the `/DEBUG` link flags in `windows/runner/CMakeLists.txt` regressed and
+   symbols can never match), then asks the Sentry API to confirm an
+   unwind-capable object is really on the server for both binaries. Success ends
+   with two `ok:` lines and `==> done`. Source warnings about oversized Windows
+   SDK headers are harmless, and `Nothing to upload, all files are on the server`
+   just means this build's symbols were already uploaded — the server-side check
+   still runs, so that is a pass, not a skip.
 10. Attach `version_info.json` as a release asset. flutter_distributor only
    uploads the packaged exe/zip, so add this lightweight file separately (it lets
    a client read the published version without downloading a build). `--clobber`
