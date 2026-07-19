@@ -4,6 +4,7 @@ import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
+import 'package:url_launcher/url_launcher.dart' show launchUrl;
 
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
@@ -108,8 +109,19 @@ class PathEntity {
 
   FileSystemEntity toEntity() => isFileSync ? File(path) : Directory(path);
 
-  Future<void> launch() {
-    return Process.run("start", [path], runInShell: true);
+  /// Opens this path with the shell's default action: Explorer for a
+  /// directory, execution or the associated application for a file.
+  ///
+  /// Goes through ShellExecuteW (via url_launcher) instead of a `cmd start`
+  /// command line, because cmd re-parses the path: spaces turn it into a
+  /// window title and `&` splits it into two commands, so such paths fail to
+  /// open without any error. ShellExecuteW takes the path as data, reports
+  /// failures (which this method rethrows so awaiting callers can surface
+  /// them), and handles UAC elevation when the target is an installer.
+  Future<void> launch() async {
+    if (!await launchUrl(Uri.file(path))) {
+      throw FileSystemException("The shell has no handler to open this path", path);
+    }
   }
 
   FilePath toFilePath() {

@@ -4,6 +4,7 @@ import 'package:auto_route/auto_route.dart';
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -55,6 +56,11 @@ class AppUpdaterGroup extends ConsumerWidget {
       FileSystemException() => error.message,
       DioException(:final response?) => "${error.type.name}: HTTP ${response.statusCode}",
       DioException() => "${error.type.name}: ${error.message ?? error.error ?? ''}",
+      // url_launcher wraps ShellExecuteW failures (e.g. launching the finished
+      // installer) in a PlatformException whose message already names the
+      // target and the OS error code; toString would bury it in "(code, ...,
+      // null, null)" noise.
+      PlatformException() => error.message ?? error.code,
       _ => error.toString(),
     };
     // Naming what was being acted on lets the user act on it directly (close
