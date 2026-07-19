@@ -22,3 +22,6 @@ assets/version_info.json                       eol=lf
 # fresh clone would write CRLF, and a `#!/usr/bin/env bash\r` shebang fails to
 # run. Pin to LF so the hook stays executable on Windows.
 tool/hooks/pre-commit                          eol=lf
+
+# Same shebang trap for the shell scripts run directly from a skill runbook.
+tool/*.sh                                      eol=lf
