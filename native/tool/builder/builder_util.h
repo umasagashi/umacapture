@@ -94,23 +94,33 @@ inline ConditionBase lineCheck(const Line<double> &line, const Range<Color> &p1_
     return lineCheck(line, p1_color, length, flat_deviation);
 }
 
+// `inner_name` names the node UNDER the Stable timer, i.e. the same checks evaluated on the current frame
+// alone. Naming it lets a consumer look the timer-free verdict up by tag; leave it unset when nothing needs
+// that (an unnamed node is invisible to findByTag).
 inline ConditionBase stableLineCheck(
     int threshold,
     const Line<double> &line,
     const Range<Color> &p1_color,
     const Range<double> &length,
-    const Range<Color> &line_deviation) {
+    const Range<Color> &line_deviation,
+    const std::optional<std::string> &inner_name = std::nullopt) {
     return stable(
         threshold,
-        allOf({
-            pointColor(line.p1(), p1_color),
-            stableLineLength(line, length, line_deviation),
-        }));
+        allOf(
+            {
+                pointColor(line.p1(), p1_color),
+                stableLineLength(line, length, line_deviation),
+            },
+            inner_name));
 }
 
-inline ConditionBase
-stableLineCheck(int threshold, const Line<double> &line, const Range<Color> &p1_color, const Range<double> &length) {
-    return stableLineCheck(threshold, line, p1_color, length, flat_deviation);
+inline ConditionBase stableLineCheck(
+    int threshold,
+    const Line<double> &line,
+    const Range<Color> &p1_color,
+    const Range<double> &length,
+    const std::optional<std::string> &inner_name = std::nullopt) {
+    return stableLineCheck(threshold, line, p1_color, length, flat_deviation, inner_name);
 }
 
 inline ConditionBase logicalNot(const ConditionBase &child) {

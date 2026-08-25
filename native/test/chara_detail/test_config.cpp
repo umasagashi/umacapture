@@ -16,6 +16,7 @@
 #include <string>
 
 #include "chara_detail/chara_detail_config.h"
+#include "chara_detail/chara_detail_scene_context.h"
 #include "condition/serializer.h"
 #include "util/json_util.h"
 
