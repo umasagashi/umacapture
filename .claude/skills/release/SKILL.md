@@ -17,8 +17,9 @@ description: >-
 A release has two phases:
 
 1. **Version bump + codegen + merge to develop** — edit `pubspec.yaml` `version:`,
-   run `build_runner` (which regenerates `assets/version_info.json`, and
-   `assets/license_info.json` when dependencies changed), then land the release
+   run `build_runner` (which regenerates `assets/version_info.json` plus the
+   license-disclosure artifacts, all of them declared in `build.yaml` — Phase 1
+   derives the list from there rather than naming them), then land the release
    commit on `develop` **via a pull request** (see below) to lock it in before any
    build/publish work.
 2. **Tag + deploy** — tag the merged `develop` commit, then `flutter_distributor`
@@ -42,12 +43,20 @@ user if any preflight check fails.
   (`distributionInfoBuilder`). Despite the filename it does **not** emit a Dart
   file; it reads `pubspec.yaml` and writes the asset JSONs below.
 - `build.yaml` — wires the `distribution_info` builder (`build_to: source`,
-  `auto_apply: root_package`, `generate_for: pubspec.yaml`).
+  `auto_apply: root_package`, `generate_for: pubspec.yaml`) and, in
+  `build_extensions`, **declares the full list of generated outputs**. That list
+  is the single source of truth; Phase 1 reads it instead of naming the files.
 - `assets/version_info.json` — generated `{ "version": "<pubspec version>" }`. Committed.
-- `assets/license_info.json` — generated dependency-license digest. Committed.
-  The builder **rejects** GPL / EUPL / MPL strings (`flutter`, `dbus`, etc. are
-  pre-excluded) and also copies `assets/license/*.txt` from `native/vendor`,
-  opencv, onnxruntime, clip.
+- `assets/license_info.json` — generated digest of the **pub** dependency licenses.
+  Committed. The builder **rejects** GPL / EUPL / MPL strings (`flutter`, `dbus`,
+  etc. are pre-excluded).
+- `assets/additional_license_info.json` — generated digest of the **non-pub**
+  dependencies: everything under `native/vendor`, plus opencv, onnxruntime and
+  clip. Committed. The same pass refreshes the `assets/license/*.txt` texts it
+  digests, so those move with it.
+- `assets/web_license_info.json` — generated license disclosure for everything the
+  repository places under `web/`, gated on the SHA-256 pins in `tool/web_deps.json`.
+  Committed. See the web-asset gate below.
 - `distribute_options.yaml` — flutter_distributor config: release `windows` with
   two jobs, `exe` and `zip`, both published to GitHub (`umasagashi/umacapture`)
   with `release-prerelease: "true"`, so the GitHub release is created as a
@@ -161,23 +170,90 @@ resolves to the FVM default, but verify rather than assume.
 3. Regenerate the assets. **Delete the generated outputs first** — build_runner
    treats a pubspec `version:`-only change as a no-op and *skips* the
    `distribution_info` builder, leaving `version_info.json` stale at the old
-   version. Removing the outputs forces a real rebuild. The `--force-jit` flag is
-   mandatory (a transitive native build hook is incompatible with build_runner's
-   default AOT):
+   version. That skip is one decision for the whole builder, so **every** output
+   is at risk, not just the version: a stale `license_info.json` /
+   `additional_license_info.json` / `web_license_info.json` ships a license
+   disclosure that omits a newly added dependency, and nothing downstream reads
+   those files back. Removing the outputs forces a real rebuild.
+
+   **Read the list out of `build.yaml`; do not type it.** The builder's output set
+   went two → three → four, and the hand-written list that used to sit here stayed
+   at two through both additions without anything saying so. `build_extensions` is
+   the declaration, so deriving from it cannot fall behind:
    ```bash
-   rm -f assets/version_info.json assets/license_info.json
+   codegen_outputs() {
+     # `tr -d '\r'`: python on Windows prints CRLF, and a trailing CR turns the
+     # `rm -f` below into a silent no-op on every path.
+     uv run --quiet --with pyyaml python -c "import yaml; print('\n'.join(yaml.safe_load(open('build.yaml'))['builders']['distribution_info']['build_extensions']['pubspec.yaml']))" | tr -d '\r'
+   }
+   codegen_outputs           # four paths under assets/ today; look at what you got
+   rm -f $(codegen_outputs)
+   ```
+   Keep that function defined for steps 4 and 5 (same shell), or paste it again.
+   Then run codegen. The `--force-jit` flag is mandatory (a transitive native
+   build hook is incompatible with build_runner's default AOT):
+   ```bash
    .fvm/flutter_sdk/bin/dart run build_runner build --force-jit
    ```
+   - Run it **unfiltered**, exactly as written. A `--build-filter` narrows codegen
+     to the matching outputs and can silently skip `DistributionInfoBuilder`, and
+     with it the web-asset gate described below.
    - If it throws `Rejected key found: <license>`, a dependency introduced a
      GPL/EUPL/MPL license. Stop and resolve the dependency before continuing.
-4. Review the diff and **confirm `assets/version_info.json` now shows the new
-   version** (this is the step most likely to silently go wrong):
+   - If it throws `web/ does not match tool/web_deps.json`, stop as well — see the
+     web-asset gate below.
+4. Review the diff and **confirm every deleted output came back, and that
+   `assets/version_info.json` shows the new version** (this is the step most
+   likely to silently go wrong). Because step 3 deleted the outputs, a builder
+   that skipped leaves the file *absent* rather than stale — so absence is the
+   signal, and it is checkable without knowing what each file should contain:
    ```bash
+   for f in $(codegen_outputs); do [ -f "$f" ] || echo "MISSING: $f"; done
    cat assets/version_info.json    # must read the new <version>
    ```
-   Expect `pubspec.yaml` and `assets/version_info.json` to change;
-   `assets/license_info.json` and `assets/license/*.txt` change only when
+   Any `MISSING:` line means codegen did not write that output — stop and find out
+   why before continuing. Expect `pubspec.yaml` and `assets/version_info.json` to
+   change; the license artifacts and `assets/license/*.txt` change only when
    dependencies changed since the last release.
+
+   One diff is a stop sign rather than a change to accept: if
+   `assets/web_license_info.json` flipped from `status: verified` to
+   `not_provisioned`, this machine simply has no `web/wasm/`. That does not block a
+   Windows-only build (see the gate below), but it must not be what gets committed
+   — it *downgrades* the disclosure the tagged commit carries. Provision the tree
+   and re-run step 3 instead of staging that hunk.
+
+### The web-asset gate (mandatory before any `flutter build web`)
+
+The same codegen run emits `assets/web_license_info.json`, which tells users that
+every third-party file under `web/` is the *unmodified* upstream artifact pinned in
+`tool/web_deps.json` (mediabunny 1.52.3 is MPL-2.0 and is only acceptable on
+exactly that basis; the manifest pins it as two entries — the bundle and a
+shipped copy of its `LICENSE` — so the notice travels with the code). The
+builder hashes those files and **refuses to write the artifact** when they
+disagree, so this codegen run *is* the enforcement point — not a human
+declaration.
+
+- The `build_runner` run in step 3 must be **unfiltered** and must **exit 0**. Treat a
+  failure as release-blocking: restore the pinned bytes with
+  `uv run tool/fetch_web_deps.py`, or update the pins deliberately (see
+  `native/wasm/README.md`), then re-run.
+- **Never continue past a failed gate.** On failure build_runner *deletes* the
+  artifact, and because `assets/` is a directory asset a later `flutter build web`
+  would still succeed — producing a bundle that refuses to start and shows a startup
+  error instead of the app.
+- **Never run `flutter build web` directly.** Use the wrapper, which re-checks the
+  pins and the licence side and refuses to build unless the committed artifact says
+  `verified`. Everything after it is forwarded to `flutter build web` untouched:
+  ```bash
+  tool/build_web.sh --pwa-strategy=none
+  ```
+  This matters because `web/wasm/` is gitignored: tampering with a byte there needs
+  no commit and does not re-run codegen, so the codegen gate and the pre-commit hook
+  alone would not see it. A Windows-only release (everything below) publishes no web
+  bundle, so a `not_provisioned` status is expected there and does not block it.
+  A release that *does* publish a web bundle has one more obligation — see
+  "If the release also publishes a web bundle" at the end of Phase 2.
 
 Land the release commit on `develop` **at the end of Phase 1**, before any
 build/publish work. Because `develop` is protected (see the note at the top), this
@@ -185,11 +261,16 @@ goes through a short-lived `release/v<version>` PR — a direct push is rejected
 the remote.
 
 5. Commit on a `release/v<version>` branch (title matches the project's history,
-   "Bump app version"). Stage `pubspec.yaml`, `assets/version_info.json`, and any
-   regenerated `assets/license_info.json` / `assets/license/*.txt`:
+   "Bump app version"). Stage `pubspec.yaml`, **every** output the builder
+   declares, and the `assets/license/*.txt` texts it refreshes (those are written
+   as a side effect and are not declared outputs, so they are named separately).
+   Staging an unchanged file is a no-op, so stage the whole derived set rather
+   than deciding per file which one moved — the artifact the release *ships* comes
+   from the working tree, and anything left unstaged makes the tagged commit
+   disagree with it:
    ```bash
    git switch -c release/v<version>
-   git add pubspec.yaml assets/version_info.json   # add license_info.json / license/*.txt if changed
+   git add pubspec.yaml assets/license $(codegen_outputs)
    git commit -F - <<'EOF'
    Bump app version
 
@@ -295,6 +376,28 @@ release the publisher creates attaches to the pushed `v<version>` tag.
       --jq '{tag:.tagName,prerelease:.isPrerelease,draft:.isDraft,assets:[.assets[].name]}'
     ```
 
+### If the release also publishes a web bundle
+
+Steps 8–11 publish the Windows build only. A release that ships a **web** bundle
+needs the browser counterpart of step 9.5 — `tool/upload_web_sourcemaps.sh`.
+Without it every web frame in Sentry arrives minified (`minified:aeK`), which is
+the exact condition the script exists to prevent.
+
+Build with source maps through the wrapper (never `flutter build web`), then
+upload:
+```bash
+tool/build_web.sh --pwa-strategy=none --source-maps
+export SENTRY_AUTH_TOKEN="$(tr -d ' \t\r\n' < ~/.sentry_token)"
+tool/upload_web_sourcemaps.sh
+```
+Two properties make the order load-bearing:
+- The release string is read from `assets/version_info.json`, so this runs
+  **after** Phase 1. Maps uploaded under any other release do not symbolicate.
+- The script's `sourcemaps inject` pass rewrites `build/web` **in place** with
+  debug IDs. **Deploy that exact tree** — rebuilding afterwards without re-running
+  the script breaks the match. The script verifies the artifact bundle really
+  landed for the release and fails if it did not.
+
 ## Notes / gotchas
 
 - **flutter_distributor uses the PATH `flutter`**, not FVM directly. The
@@ -312,6 +415,10 @@ release the publisher creates attaches to the pushed `v<version>` tag.
   drop that arg for the run, or promote afterwards with
   `gh release edit "v<version>" --latest --prerelease=false`. Historically
   pre-releases also used a date-suffixed tag, e.g. `v0.0.10-20260507`.
+- **The pre-commit hook re-checks the web pins** (`tool/hooks/pre-commit` runs
+  `dart run tool/check_web_pins.dart`), so a commit that changed a pinned file
+  without re-running codegen is rejected before it can carry a stale claim. The
+  hook does not replace the codegen gate — it is the cheap mirror of it.
 - `dist/` is gitignored; build artifacts are never committed.
 - Generated assets are pinned to `eol=lf` in `.gitattributes`, so codegen
   produces no EOL-only churn — do not renormalize.

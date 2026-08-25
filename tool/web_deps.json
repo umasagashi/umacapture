@@ -1,0 +1,396 @@
+{
+  "_comment": [
+    "Pinned inventory of every third-party (and locally built) asset that the Flutter *web*",
+    "bundle ships out of web/. It is the single source of truth for tool/fetch_web_deps.py and",
+    "for the license disclosure -- the web-side counterpart of the *_URL / *_SHA256 constants in",
+    "tool/fetch_deps.py, which pin the Windows native prebuilts.",
+    "",
+    "Entries are keyed by the file's path relative to web/. Fields:",
+    "  sha256       -- SHA-256 of the exact bytes that must land on disk.",
+    "  bytes        -- size of those bytes, as a cheap second check and a review aid.",
+    "  origin       -- 'upstream' (fetchable and hash-verifiable) or 'in-tree' (produced here;",
+    "                  no byte-level upstream claim is possible, so 'build' records provenance).",
+    "  build.sources-- (in-tree only) a digest of the sources the artifact was built from, plus",
+    "                  the selection that produced it. Every other field here compares bytes to",
+    "                  their pin, which cannot see the one failure that matters for a locally",
+    "                  built, gitignored artifact: the bytes still match while the C++ they came",
+    "                  from has moved on. This block makes that comparable, and it needs neither",
+    "                  emsdk nor the artifact on disk, so CI checks it too. Line endings are",
+    "                  normalised to LF before hashing, so a CRLF checkout and a Linux runner",
+    "                  agree. The selection over-approximates on purpose (every header under the",
+    "                  roots, not the module's real include closure): a false 'stale' costs a",
+    "                  rebuild, a false 'fresh' would ship the wrong binary. 'exclude' mirrors",
+    "                  native/wasm/build.sh's EXCLUDED_SOURCES, and check_sources.py holds the",
+    "                  two together. What it proves is 'the recorded digest equals this tree',",
+    "                  and no more: nothing reads the binary back, so repinning without",
+    "                  rebuilding passes. It removes the SILENT failure, where the manifest is",
+    "                  never touched and the stale pin verifies against its own bytes.",
+    "  upstream     -- url / package / version of the artifact the bytes come from. When the",
+    "                  artifact is an archive, 'member' names the path inside it; without",
+    "                  'member' the url is the file itself.",
+    "  license      -- SPDX-ish id plus 'asset', a repo-relative path to the committed text.",
+    "                  Optional 'parent' marks the text as a *sub-notice* of an already",
+    "                  disclosed package (e.g. fmt inside spdlog): the license page shows it",
+    "                  under that package instead of inventing a separate dependency entry.",
+    "  source_form  -- how to obtain the corresponding sources: 'url' + 'sha256' pin an",
+    "                  immutable source archive, and 'git_url' points at the upstream tag or",
+    "                  commit. No self-hosted mirror is kept.",
+    "",
+    "Everything under web/wasm/ is gitignored and provisioned locally; web/coi-serviceworker.js",
+    "is committed. Both are listed here, so the manifest also doubles as the answer to 'what",
+    "exactly does this repo place under web/, and under which license'. It does NOT cover the",
+    "rest of build/web/: Flutter emits flutter.js, flutter_bootstrap.js, main.dart.js and the",
+    "CanvasKit / Skwasm payload at build time, and those carry the Flutter SDK's own licensing.",
+    "",
+    "'first_party' below lists this repo's own hand-written files under web/ (verified against",
+    "'git ls-files web/'). Anything under web/ that is neither pinned in 'files' nor allow-listed",
+    "there is flagged by tool/fetch_web_deps.py, because 'flutter build web' would publish it.",
+    "",
+    "To bump an upstream dependency:",
+    "  1. Pick the new version and download its artifact once (npm tarball or raw release file).",
+    "  2. sha256sum the artifact and each shipped member, and record the byte sizes.",
+    "  3. Update this entry's sha256 / bytes / upstream.version / upstream.url and the matching",
+    "     source_form.url + source_form.sha256 + source_form.git_url.",
+    "  4. Refresh license.asset under assets/license/ if the upstream license text changed.",
+    "  5. Run: uv run tool/fetch_web_deps.py --force --only <package>",
+    "     It re-downloads, verifies every hash against this file, and fails loudly on a mismatch.",
+    "",
+    "To refresh an in-tree entry, rebuild it (native/wasm/build.sh), copy the artifacts into",
+    "web/wasm/, then update sha256 / bytes / build.* here -- including build.sources.digest,",
+    "which 'dart run tool/check_web_pins.dart --source-digest' prints. Repinning the bytes and",
+    "leaving the digest behind is itself a failure, so the two cannot drift apart silently.",
+    "'uv run tool/fetch_web_deps.py' reports in-tree drift as a warning rather than",
+    "re-downloading anything.",
+    "",
+    "WHO FAILS ON A STALE build.sources.digest: CI and tool/build_web.sh, i.e. everything that",
+    "decides what ships. tool/hooks/pre-commit does NOT -- it passes",
+    "--warn-stale-source-digest, so it prints the drift and lets the commit through. Rebuilding",
+    "the module needs an emsdk toolchain, and a fatal check there would make every native/",
+    "change uncommittable from a machine that has none. Committing a native/ change with the",
+    "pin left behind is therefore allowed and expected; the rebuild+repin above is what clears",
+    "the CI failure before the branch can merge.",
+    "",
+    "'provisioned_root' is the gitignored prefix (see .gitignore) that has to be provisioned",
+    "before a web build. When nothing under it exists, the tree is simply un-provisioned --",
+    "an ordinary Windows-only checkout -- and DistributionInfoBuilder emits",
+    "assets/web_license_info.json with status 'not_provisioned' instead of failing. That only",
+    "changes the status: the pins and the closed-world scan still run over whatever IS on disk,",
+    "so the committed half of web/ (coi-serviceworker.js) is verified in every checkout."
+  ],
+  "manifest_version": 1,
+  "provisioned_root": "wasm/",
+  "first_party": {
+    "_comment": [
+      "This repo's own hand-written files under web/ -- everything 'git ls-files web/' reports",
+      "except coi-serviceworker.js, which is third-party and therefore pinned in 'files' instead.",
+      "Paths are relative to web/ and match EXACTLY: there is deliberately no directory-prefix",
+      "form, because a prefix would allow an unbounded number of unreviewed files underneath it.",
+      "Adding a hand-written file under web/ therefore means adding it here (and a third-party",
+      "one means pinning it in 'files'), otherwise codegen refuses to emit the disclosure.",
+      "Symbolic links are never first-party, whatever they are named."
+    ],
+    "files": [
+      "index.html",
+      "flutter_bootstrap.js",
+      "frame_shaping.mjs",
+      "video_import.mjs",
+      "worker.js",
+      "manifest.json",
+      "favicon.png",
+      "icons/Icon-192.png",
+      "icons/Icon-512.png",
+      "icons/Icon-maskable-192.png",
+      "icons/Icon-maskable-512.png",
+      "splash/splash.js",
+      "splash/style.css"
+    ]
+  },
+  "files": {
+    "coi-serviceworker.js": {
+      "sha256": "d12bd536e27e39a773d7dc7adb1a1167d24002293e97ac81c995fb00cf8d4d5a",
+      "bytes": 4678,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://raw.githubusercontent.com/gzuidhof/coi-serviceworker/6229991f4651cdfc5ec755599680547a9c3bd9f2/coi-serviceworker.js",
+        "package": "coi-serviceworker",
+        "version": "0.1.7"
+      },
+      "license": {
+        "id": "MIT",
+        "asset": "assets/license/coi_serviceworker.txt"
+      },
+      "source_form": {
+        "form": "npm-tarball",
+        "url": "https://registry.npmjs.org/coi-serviceworker/-/coi-serviceworker-0.1.7.tgz",
+        "sha256": "6a546d4748e215220de923cf5dbb887104cec1aa7bb9afc2e925ba376a229616",
+        "git_url": "https://github.com/gzuidhof/coi-serviceworker/tree/6229991f4651cdfc5ec755599680547a9c3bd9f2",
+        "note": "The upstream repository carries no git tags, so the source form is pinned to the 'Prepare v0.1.7 release' commit; the file at that commit is byte-identical to the npm 0.1.7 tarball's coi-serviceworker.js. This is a single hand-written file, so the shipped bytes are already the source form."
+      }
+    },
+    "wasm/ort/ort.wasm.bundle.min.mjs": {
+      "sha256": "1db5e1c5cd2b860eed85e6eeff23e2aaa7cffcc407f67093bcc888f631b94ba9",
+      "bytes": 72799,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
+        "member": "package/dist/ort.wasm.bundle.min.mjs",
+        "package": "onnxruntime-web",
+        "version": "1.27.0"
+      },
+      "license": {
+        "id": "MIT",
+        "asset": "assets/license/onnxruntime.txt"
+      },
+      "source_form": {
+        "form": "npm-tarball",
+        "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
+        "sha256": "b59c9819434a7519f334f77e8d4bf22b69808d531a57724cabc4bb2c0704c835",
+        "git_url": "https://github.com/microsoft/onnxruntime/tree/v1.27.0/js/web"
+      }
+    },
+    "wasm/ort/ort-wasm-simd-threaded.mjs": {
+      "sha256": "0a1e718d99c41b22c21f2520ff4f9e883a6b5533856e398d21816ee8eb8185d3",
+      "bytes": 24180,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
+        "member": "package/dist/ort-wasm-simd-threaded.mjs",
+        "package": "onnxruntime-web",
+        "version": "1.27.0"
+      },
+      "license": {
+        "id": "MIT",
+        "asset": "assets/license/onnxruntime.txt"
+      },
+      "source_form": {
+        "form": "npm-tarball",
+        "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
+        "sha256": "b59c9819434a7519f334f77e8d4bf22b69808d531a57724cabc4bb2c0704c835",
+        "git_url": "https://github.com/microsoft/onnxruntime/tree/v1.27.0/js/web"
+      }
+    },
+    "wasm/ort/ort-wasm-simd-threaded.wasm": {
+      "sha256": "d1ab1b94b16a65b29d710d0b587b29e7bed336827577623913479b8afe8113e6",
+      "bytes": 13479978,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
+        "member": "package/dist/ort-wasm-simd-threaded.wasm",
+        "package": "onnxruntime-web",
+        "version": "1.27.0"
+      },
+      "license": {
+        "id": "MIT",
+        "asset": "assets/license/onnxruntime.txt"
+      },
+      "source_form": {
+        "form": "npm-tarball",
+        "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
+        "sha256": "b59c9819434a7519f334f77e8d4bf22b69808d531a57724cabc4bb2c0704c835",
+        "git_url": "https://github.com/microsoft/onnxruntime/tree/v1.27.0/js/web",
+        "note": "This prebuilt .wasm statically links the ONNX Runtime C++ core and its own third-party dependencies. Its component licenses are the ones ONNX Runtime discloses for the v1.27.0 tag; only the top-level MIT text is reproduced here."
+      }
+    },
+    "wasm/mediabunny/mediabunny.mjs": {
+      "sha256": "d11e20430af630a73a8fa670f08576d2701115690539355c169012799780c3b0",
+      "bytes": 1367976,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.52.3.tgz",
+        "member": "package/dist/bundles/mediabunny.mjs",
+        "package": "mediabunny",
+        "version": "1.52.3"
+      },
+      "license": {
+        "id": "MPL-2.0",
+        "asset": "assets/license/mediabunny.txt"
+      },
+      "source_form": {
+        "form": "npm-tarball",
+        "url": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.52.3.tgz",
+        "sha256": "83212e9bb7c174f8ebf66447862c3136aea0f1253f4d11a7eb4413eec3da94bb",
+        "git_url": "https://github.com/Vanilagy/mediabunny/tree/v1.52.3",
+        "note": "MPL-2.0 is file-level copyleft: it is accepted for this web-only asset because the bundle is shipped unmodified and hash-pinned, and the source form above discloses the exact sources. The bundle carries no version string, so the version is established by the npm tarball's own digest rather than by reading the file. The pub-side reject list in lib/distribution_info.dart is unaffected -- mediabunny is not a pub package."
+      }
+    },
+    "wasm/mediabunny/LICENSE": {
+      "sha256": "3f3d9e0024b1921b067d6f7f88deb4a60cbe7a78e76c64e3f1d7fc3b779b9d04",
+      "bytes": 16726,
+      "origin": "upstream",
+      "upstream": {
+        "url": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.52.3.tgz",
+        "member": "package/LICENSE",
+        "package": "mediabunny",
+        "version": "1.52.3"
+      },
+      "license": {
+        "id": "MPL-2.0",
+        "asset": "assets/license/mediabunny.txt"
+      },
+      "source_form": {
+        "form": "npm-tarball",
+        "url": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.52.3.tgz",
+        "sha256": "83212e9bb7c174f8ebf66447862c3136aea0f1253f4d11a7eb4413eec3da94bb",
+        "git_url": "https://github.com/Vanilagy/mediabunny/tree/v1.52.3",
+        "note": "Shipped next to the bundle so the MPL-2.0 notice travels with the code it covers. Byte-identical to assets/license/mediabunny.txt."
+      }
+    },
+    "wasm/umacapture_core.js": {
+      "sha256": "57693fa46eea6c705d3be78fe56ddeba5c984528229fe1d1550914253fe7ec79",
+      "bytes": 125370,
+      "origin": "in-tree",
+      "build": {
+        "script": "native/wasm/build.sh",
+        "git_commit": "f54b713f74bc08e035586593daeec91c23376fed",
+        "git_commit_note": "Rebuild against the uncommitted working tree on feature/wasm-poc, HEAD f54b713f (stage H1-5a of the video-import-error-report delegation: wasm rebuild + repin after native/src changes, chiefly stage H1-3a adding GrabbedFrame::next_media_ts_ms to native/src/cv/video_frame_grabber.h). MODULE BYTES UNCHANGED from the previous pin (sha256 57693fa4... / 89452556..., same byte counts): video_frame_grabber.h cannot be included from any wasm translation unit -- Emscripten's link carries no opencv_videoio, and the header says so at video_frame_grabber.h:67-75 -- so the change is invisible to this module; the rebuild reproduced the prior artifact byte-for-byte, which is expected here and not evidence of a stale build. VERIFIED AS AN ACTUAL REBUILD: build log shows all 11 source TUs recompiled (native_api.cpp, native_api_frame_shaping.cpp, chara_detail_scene_context.cpp, chara_detail_scene_scraper.cpp, chara_detail_scene_stitcher.cpp, chara_detail_search_helpers.cpp, chara_detail_recognizer.cpp, serializer.cpp, logger_util.cpp, wasm_api.cpp, wasm_recognizer_models.cpp) followed by one [link], into BUILD_DIR C:/Projects/wasm-poc/app-build. build.sources.digest moved 42b95a84... -> 939a4fd9....",
+        "emscripten": "6.0.3",
+        "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
+        "opencv_wasm": "4.13.0",
+        "sources": {
+          "digest": "939a4fd90db972be208ddfb0e2b475f6b74110df26cace1354bd089e360d8cf5",
+          "roots": ["native/src", "native/vendor", "native/wasm"],
+          "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
+          "exclude": [
+            "native/src/core/cli.cpp",
+            "native/src/cv/ffv1_reader.cpp",
+            "native/src/cv/ffv1_recorder.cpp",
+            "native/src/chara_detail/chara_detail_recognizer_models.cpp"
+          ]
+        }
+      },
+      "license": {
+        "id": "MIT",
+        "asset": "LICENSE"
+      },
+      "source_form": {
+        "form": "in-tree",
+        "git_url": "https://github.com/umasagashi/umacapture/tree/c9663a20d4c3f7cd0283bfdd4541398e8e188826/native",
+        "note": "Emscripten JS loader glue emitted alongside umacapture_core.wasm. Its third-party content is the Emscripten runtime support code; see the 'linked' list on the .wasm entry."
+      }
+    },
+    "wasm/umacapture_core.wasm": {
+      "sha256": "89452556dd1af3d7d7208d29fbd5906d836583976ab63487371300d46f2a61aa",
+      "bytes": 3622906,
+      "origin": "in-tree",
+      "build": {
+        "script": "native/wasm/build.sh",
+        "git_commit": "f54b713f74bc08e035586593daeec91c23376fed",
+        "git_commit_note": "Rebuild against the uncommitted working tree on feature/wasm-poc, HEAD f54b713f (stage H1-5a of the video-import-error-report delegation: wasm rebuild + repin after native/src changes, chiefly stage H1-3a adding GrabbedFrame::next_media_ts_ms to native/src/cv/video_frame_grabber.h). MODULE BYTES UNCHANGED from the previous pin (sha256 57693fa4... / 89452556..., same byte counts): video_frame_grabber.h cannot be included from any wasm translation unit -- Emscripten's link carries no opencv_videoio, and the header says so at video_frame_grabber.h:67-75 -- so the change is invisible to this module; the rebuild reproduced the prior artifact byte-for-byte, which is expected here and not evidence of a stale build. VERIFIED AS AN ACTUAL REBUILD: build log shows all 11 source TUs recompiled (native_api.cpp, native_api_frame_shaping.cpp, chara_detail_scene_context.cpp, chara_detail_scene_scraper.cpp, chara_detail_scene_stitcher.cpp, chara_detail_search_helpers.cpp, chara_detail_recognizer.cpp, serializer.cpp, logger_util.cpp, wasm_api.cpp, wasm_recognizer_models.cpp) followed by one [link], into BUILD_DIR C:/Projects/wasm-poc/app-build. build.sources.digest moved 42b95a84... -> 939a4fd9....",
+        "emscripten": "6.0.3",
+        "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
+        "opencv_wasm": "4.13.0",
+        "sources": {
+          "digest": "939a4fd90db972be208ddfb0e2b475f6b74110df26cace1354bd089e360d8cf5",
+          "roots": ["native/src", "native/vendor", "native/wasm"],
+          "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
+          "exclude": [
+            "native/src/core/cli.cpp",
+            "native/src/cv/ffv1_reader.cpp",
+            "native/src/cv/ffv1_recorder.cpp",
+            "native/src/chara_detail/chara_detail_recognizer_models.cpp"
+          ]
+        }
+      },
+      "license": {
+        "id": "MIT",
+        "asset": "LICENSE"
+      },
+      "linked": [
+        {
+          "name": "OpenCV",
+          "version": "4.13.0",
+          "modules": ["core", "imgproc", "imgcodecs"],
+          "license": {"id": "Apache-2.0", "asset": "assets/license/opencv.txt"},
+          "evidence": "native/wasm/build.sh OPENCV_LIBS; the module's embedded cv::getBuildInformation() string reports 'OpenCV 4.13.0'."
+        },
+        {
+          "name": "OpenCV core: softfloat (Berkeley SoftFloat 3c and FDLIBM derived)",
+          "version": "as shipped in OpenCV 4.13.0",
+          "license": {"id": "BSD-3-Clause AND SunPro", "asset": "assets/license/opencv_softfloat.txt", "parent": "opencv"},
+          "evidence": "modules/core/src/softfloat.cpp carries its own notices on top of OpenCV's Apache-2.0 text, which does not reproduce them. softfloat.cpp.o is present in libopencv_core.a (llvm-ar t), and the module contains cv::softfloat assert strings such as 'softfloat((int)LAB_CBRT_TAB_SIZE)'."
+        },
+        {
+          "name": "libpng",
+          "version": "1.6.53",
+          "license": {"id": "libpng-2.0", "asset": "assets/license/libpng.txt"},
+          "evidence": "Linked via liblibpng.a in build.sh; the embedded OpenCV build string reports 'PNG: build (ver 1.6.53)' and the module contains libpng's own error strings."
+        },
+        {
+          "name": "libjpeg-turbo",
+          "version": "3.1.2-70",
+          "license": {"id": "IJG AND BSD-3-Clause AND Zlib", "asset": "assets/license/libjpeg_turbo.txt"},
+          "evidence": "Linked via liblibjpeg-turbo.a in build.sh; the embedded OpenCV build string reports 'JPEG: build-libjpeg-turbo (ver 3.1.2-70)'."
+        },
+        {
+          "name": "zlib",
+          "version": "1.3.1",
+          "license": {"id": "Zlib", "asset": "assets/license/zlib.txt"},
+          "evidence": "Linked via libzlib.a in build.sh; the embedded OpenCV build string reports 'ZLib: build (ver 1.3.1)'."
+        },
+        {
+          "name": "Emscripten runtime (libc syscalls, pthread, embind)",
+          "version": "6.0.3",
+          "license": {"id": "MIT OR NCSA", "asset": "assets/license/emscripten.txt"},
+          "evidence": "em++ links these implicitly (-pthread, -lembind); the module's source-path strings include 'emscripten/system/lib/pthread/*.c'."
+        },
+        {
+          "name": "musl libc (via the Emscripten sysroot)",
+          "version": "bundled with Emscripten 6.0.3",
+          "license": {"id": "MIT", "asset": "assets/license/musl.txt"},
+          "evidence": "The module's source-path strings include 'emscripten/system/lib/libc/musl/...'."
+        },
+        {
+          "name": "LLVM runtimes: libc++, libc++abi, compiler-rt",
+          "version": "bundled with Emscripten 6.0.3",
+          "license": {"id": "Apache-2.0 WITH LLVM-exception", "asset": "assets/license/llvm_runtime.txt"},
+          "evidence": "-fexceptions plus C++ standard-library use; the module's source-path strings include 'libcxxabi/src/cxa_exception_emscripten.cpp', 'cxa_demangle.cpp' and 'private_typeinfo.cpp'."
+        },
+        {
+          "name": "spdlog",
+          "version": "1.17.0",
+          "license": {"id": "MIT", "asset": "assets/license/spdlog.txt"},
+          "evidence": "Header-only vendored dependency of native/src/util/logger_util.*; the module contains mangled spdlog:: symbols."
+        },
+        {
+          "name": "{fmt} (bundled inside the vendored spdlog snapshot)",
+          "version": "12.1.0",
+          "license": {
+            "id": "MIT (plus fmt's optional embedding exception; no registered SPDX id)",
+            "asset": "assets/license/fmt.txt",
+            "parent": "spdlog"
+          },
+          "evidence": "native/vendor/spdlog/VENDORED.md records that spdlog 1.17.0 bundles {fmt} 12.1.0 (fmt/bundled/base.h: FMT_VERSION 120100). SPDLOG_FMT_EXTERNAL is not defined, so spdlog/fmt/fmt.h takes the bundled path and the include closure pulls in the fmt/bundled/* headers; the module contains 'N3fmt3v1212format_errorE' and 'N3fmt3v1212format_facet' mangled symbols. Disclosed separately from spdlog because assets/license/spdlog.txt only links to fmt's licence by URL, and fmt's text adds an 'Optional exception' clause that spdlog's MIT does not carry."
+        },
+        {
+          "name": "nlohmann/json",
+          "version": "3.12.0",
+          "license": {"id": "MIT", "asset": "assets/license/nlohmann.txt"},
+          "evidence": "Header-only vendored dependency of native/src/util/json_util.h; the module contains 'nlohmann::json_abi_v3_12_0' mangled symbols."
+        },
+        {
+          "name": "eventpp",
+          "version": "vendored (native/vendor/eventpp)",
+          "license": {"id": "Apache-2.0", "asset": "assets/license/eventpp.txt"},
+          "evidence": "Header-only vendored dependency of native/src/util/event_util.h; the module contains 'eventpp::internal_::CallbackList' mangled symbols."
+        },
+        {
+          "name": "nameof",
+          "version": "0.10.6",
+          "license": {"id": "MIT", "asset": "assets/license/nameof.txt"},
+          "evidence": "Header-only vendored dependency of native/src/condition/basic_condition.h, which is in the wasm translation units' include closure. Its output is compile-time string literals, so it leaves no mangled symbols."
+        },
+        {
+          "name": "minimal_uuid4",
+          "version": "vendored (native/vendor/minimal_uuid4)",
+          "license": {"id": "MIT", "asset": "assets/license/minimal_uuid4.txt"},
+          "evidence": "Header-only vendored dependency of native/src/chara_detail/chara_detail_scene_scraper.h, which is compiled into the module."
+        }
+      ],
+      "source_form": {
+        "form": "in-tree",
+        "git_url": "https://github.com/umasagashi/umacapture/tree/c9663a20d4c3f7cd0283bfdd4541398e8e188826/native",
+        "note": "Built here from native/src + native/wasm, so no byte-level upstream claim is made. CLI11, doctest and FFmpeg are NOT part of this module -- they belong to the CLI and test targets only, which native/wasm/build.sh does not compile."
+      }
+    }
+  }
+}

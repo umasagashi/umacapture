@@ -13,6 +13,8 @@ lib/generated/assets.dart                      eol=lf
 lib/distribution_info.dart                     eol=lf
 assets/license_info.json                       eol=lf
 assets/version_info.json                       eol=lf
+assets/web_license_info.json                   eol=lf
+assets/additional_license_info.json            eol=lf
 
 # The flutter-ai-rules-sync skill regenerates this vendored rules file with LF.
 # Same rationale as above: pin to LF so re-syncing produces no EOL-only churn.
@@ -24,4 +26,15 @@ assets/version_info.json                       eol=lf
 tool/hooks/pre-commit                          eol=lf
 
 # Same shebang trap for the shell scripts run directly from a skill runbook.
-tool/*.sh                                      eol=lf
+# The `**` is required: a pattern containing a slash is path-anchored and a plain
+# `*` does not match `/`, so `tool/*.sh` would leave tool/cloudflare/*.sh CRLF.
+tool/**/*.sh                                   eol=lf
+
+# Same shebang trap for the wasm PoC build script, which is run with bash.
+native/wasm/*.sh                               eol=lf
+
+# Pinned byte-for-byte in tool/web_deps.json (it is a verbatim upstream release
+# file). With core.autocrlf=true a fresh clone would check it out as CRLF, so its
+# SHA-256 would no longer match the pin and tool/fetch_web_deps.py would report
+# drift and overwrite this tracked file. Pin to LF so the checkout matches upstream.
+web/coi-serviceworker.js                       eol=lf
