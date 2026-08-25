@@ -15,7 +15,7 @@ import 'package:umacapture/src/gui/capture.dart';
 
 final _stateProvider = Provider<bool>((ref) => false);
 
-Future<void> _pumpButton(WidgetTester tester, StreamController<int> errorEvents) async {
+Future<void> _pumpButton(WidgetTester tester, StreamController<int> errorEvents, {bool pending = false}) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [errorEventProvider.overrideWith((ref) => errorEvents.stream)],
@@ -24,6 +24,8 @@ Future<void> _pumpButton(WidgetTester tester, StreamController<int> errorEvents)
           body: TwoStateButton(
             trueWidget: const Text('stop'),
             falseWidget: const Text('start'),
+            pendingTrueWidget: pending ? const Text('starting') : null,
+            pendingFalseWidget: pending ? const Text('stopping') : null,
             onTruePressed: () {},
             onFalsePressed: () {},
             provider: _stateProvider,
@@ -71,6 +73,41 @@ void main() {
     expect(tester.widget<OutlinedButton>(find.byType(OutlinedButton)).onPressed, isNotNull);
     // No further pump(16 s) here: if the fallback timer were still alive, testWidgets would fail the
     // test with a pending-timer assertion on teardown, so finishing cleanly asserts the cancel.
+  });
+
+  testWidgets('a pending press replaces the label, and restores it on confirmation', (tester) async {
+    // The affordance the capture page's stop button needs: a stop now waits for the pipeline to
+    // drain (2.1-2.4 s with a record in flight), and the spinner alone is the same mute overlay a
+    // start shows, so the button looked like it had swallowed the click.
+    final errorEvents = StreamController<int>.broadcast();
+    addTearDown(errorEvents.close);
+    await _pumpButton(tester, errorEvents, pending: true);
+
+    expect(find.text('start'), findsOneWidget);
+    expect(find.text('starting'), findsNothing);
+
+    await tester.tap(find.text('start'));
+    await tester.pump();
+
+    expect(find.text('starting'), findsOneWidget, reason: 'the pending state must say which request is in flight');
+    expect(find.text('start'), findsNothing);
+
+    // The fallback timeout clears the pending marker, which is the same path a confirmation takes.
+    await tester.pump(const Duration(seconds: 16));
+    expect(find.text('start'), findsOneWidget);
+    expect(find.text('starting'), findsNothing);
+  });
+
+  testWidgets('a caller that supplies no pending label keeps the settled one', (tester) async {
+    final errorEvents = StreamController<int>.broadcast();
+    addTearDown(errorEvents.close);
+    await _pumpButton(tester, errorEvents);
+
+    await tester.tap(find.text('start'));
+    await tester.pump();
+
+    expect(find.text('start'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 16));
   });
 
   testWidgets('an error event before any press is a no-op', (tester) async {
