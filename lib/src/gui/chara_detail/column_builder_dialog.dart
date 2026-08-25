@@ -15,6 +15,40 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
+/// The translation key holding [cat]'s guidance line.
+///
+/// Separate from [optionalGuidanceLine] so the lookup can be asked about a key this app does
+/// not have -- which is what a renamed or deleted key looks like from the outside, and cannot
+/// be expressed as a [ColumnCategory] because the enum is exactly the set that does exist.
+@visibleForTesting
+String columnCategoryDescriptionKey(ColumnCategory cat) =>
+    "$tr_chara_detail.column_spec.dialog.category_description.${cat.name.snakeCase}";
+
+/// The sentence at [key], or null when the translations deliberately have nothing to say.
+///
+/// **The absence of a line is written down, not inferred.** Every category carries a
+/// `category_description` entry; the ones that need no guidance carry `""`. So an empty value
+/// means "deliberately none" and a *missing* key means a defect -- a rename, a category added
+/// without its entry -- and the two must not look alike.
+///
+/// That is why the missing case is resolved through `tr()` rather than answered with null:
+/// `tr()` logs `Localization key [...] not found`, which `localization_util.dart` forwards into
+/// the app logger and thence into the Sentry breadcrumbs, and returns the raw key so it
+/// surfaces on screen exactly as a missing mandatory line does. This function used to be
+/// `key.trExists() ? key.tr() : null`, which silenced precisely that report: a renamed key made
+/// the guidance vanish with no warning anywhere, which is the defect class the empty value
+/// exists to keep separate. `trExists` is asked only to keep the *deliberate* case quiet.
+///
+/// Same shape, and the same reasoning, as `optionalMessageLine` in `capture.dart`.
+@visibleForTesting
+String? optionalGuidanceLine(String key) {
+  if (!key.trExists()) {
+    return key.tr();
+  }
+  final text = key.tr();
+  return text.isEmpty ? null : text;
+}
+
 /// A leading info icon followed by dimmed guidance text, used for the dialog's
 /// top tip and each category's usage note so they share one look.
 class _HintLine extends StatelessWidget {
@@ -212,10 +246,7 @@ class ColumnBuilderDialog extends ConsumerWidget {
   /// category needs no extra explanation. Only categories whose usage is not
   /// obvious from the chips alone (e.g. logic columns are populated by dragging
   /// existing columns onto them after creation) provide one.
-  String? categoryDescription(ColumnCategory cat) {
-    final key = "$tr_chara_detail.column_spec.dialog.category_description.${cat.name.snakeCase}";
-    return key.trExists() ? key.tr() : null;
-  }
+  String? categoryDescription(ColumnCategory cat) => optionalGuidanceLine(columnCategoryDescriptionKey(cat));
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
