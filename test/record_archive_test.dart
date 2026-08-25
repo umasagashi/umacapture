@@ -76,10 +76,10 @@ void main() {
     return ArchiveRecordArgs('${activeDir.path}/$id', '${archiveDir.path}/$id', option);
   }
 
-  test('resizedJpeg replaces PNGs with JPEGs and moves the record', () {
+  test('resizedJpeg replaces PNGs with JPEGs and moves the record', () async {
     seedRecord('id-jpeg');
 
-    final ok = archiveRecordInIsolate(argsFor('id-jpeg', ArchiveImageOption.resizedJpeg));
+    final ok = await archiveRecordOnNative(argsFor('id-jpeg', ArchiveImageOption.resizedJpeg));
 
     expect(ok, isTrue);
     // Source gone, destination present.
@@ -99,14 +99,41 @@ void main() {
       expect(File('${dst.path}/$name.json').existsSync(), isTrue);
       expect(intersectionSizeOf('${dst.path}/$name.json'), (width: 720, height: 1080));
     }
-    // resolveImagePath prefers the archived JPEG.
-    expect(resolveImagePath(dst, CharaDetailRecordImageMode.skillPlain)!.name, 'skill.jpg');
+    // resolveImagePathSync prefers the archived JPEG.
+    expect(resolveImagePathSync(dst, CharaDetailRecordImageMode.skillPlain)!.name, 'skill.jpg');
   });
 
-  test('none drops all images and moves the record', () {
+  test('failed conversion keeps the source PNG even when a stale JPEG exists', () async {
+    final source = seedRecord('id-corrupt');
+    File('$source/skill.png').writeAsBytesSync([0, 1, 2, 3]);
+    File('$source/skill.jpg').writeAsBytesSync(jpgBytes(10, 10));
+
+    final ok = await archiveRecordOnNative(argsFor('id-corrupt', ArchiveImageOption.resizedJpeg));
+
+    expect(ok, isTrue);
+    final destination = Directory('${archiveDir.path}/id-corrupt');
+    expect(File('${destination.path}/skill.png').existsSync(), isTrue);
+    expect(File('${destination.path}/skill.json').existsSync(), isTrue);
+    // WHAT THE STALE JPEG IS FOR. Without the three assertions below the fixture does nothing --
+    // remove the `skill.jpg` line above and the case still passes -- so the condition in the title
+    // was not being exercised at all.
+    //
+    // The failed conversion leaves the 10x10 leftover of an earlier interrupted run sitting beside
+    // the PNG it could not replace, and nothing deletes it.
+    expect(File('${destination.path}/skill.jpg').existsSync(), isTrue);
+    // The geometry stays at the PNG's size, because the PNG is what is still there to overlay.
+    expect(intersectionSizeOf('${destination.path}/skill.json'), (width: 1000, height: 1500));
+    // And the resolver is the only thing standing between the user and that pairing: it looks for
+    // the PNG first. Flip that order and this record renders a 10x10 image under a 1000x1500
+    // overlay -- which is why the preference is pinned here, at the one place that produces a
+    // record carrying both.
+    expect(resolveImagePathSync(DirectoryPath(destination), CharaDetailRecordImageMode.skillPlain)!.name, 'skill.png');
+  });
+
+  test('none drops all images and moves the record', () async {
     seedRecord('id-none');
 
-    final ok = archiveRecordInIsolate(argsFor('id-none', ArchiveImageOption.none));
+    final ok = await archiveRecordOnNative(argsFor('id-none', ArchiveImageOption.none));
 
     expect(ok, isTrue);
     final dst = DirectoryPath('${archiveDir.path}/id-none');
@@ -121,30 +148,30 @@ void main() {
       expect(File('${dst.path}/$name.json').existsSync(), isFalse);
     }
     // No image of any kind for an image-less archive.
-    expect(resolveImagePath(dst, CharaDetailRecordImageMode.skillPlain), isNull);
+    expect(resolveImagePathSync(dst, CharaDetailRecordImageMode.skillPlain), isNull);
   });
 
-  test('archiving leaves id-keyed metadata outside the record tree untouched', () {
+  test('archiving leaves id-keyed metadata outside the record tree untouched', () async {
     seedRecord('id-meta');
     final ratingDir = Directory('${tempRoot.path}/metadata/rating')..createSync(recursive: true);
     final rating = File('${ratingDir.path}/ratings.json')..writeAsStringSync('{"id-meta":5}');
 
-    archiveRecordInIsolate(argsFor('id-meta', ArchiveImageOption.none));
+    await archiveRecordOnNative(argsFor('id-meta', ArchiveImageOption.none));
 
     expect(rating.readAsStringSync(), '{"id-meta":5}');
   });
 
-  test('returns false when the source directory is missing', () {
-    expect(archiveRecordInIsolate(argsFor('does-not-exist', ArchiveImageOption.none)), isFalse);
+  test('returns false when the source directory is missing', () async {
+    expect(await archiveRecordOnNative(argsFor('does-not-exist', ArchiveImageOption.none)), isFalse);
   });
 
-  test('returns false and leaves the source intact when the destination already exists', () {
+  test('returns false and leaves the source intact when the destination already exists', () async {
     // A leftover archive/<id> (e.g. from an interrupted prior archive) must not
     // be silently merged into or clobbered; the record stays in active/.
     seedRecord('id-dup');
     Directory('${archiveDir.path}/id-dup').createSync(recursive: true);
 
-    final ok = archiveRecordInIsolate(argsFor('id-dup', ArchiveImageOption.none));
+    final ok = await archiveRecordOnNative(argsFor('id-dup', ArchiveImageOption.none));
 
     expect(ok, isFalse);
     // Source untouched: its PNGs are still present (not stripped) and not moved.
@@ -152,7 +179,7 @@ void main() {
     expect(File('${activeDir.path}/id-dup/record.json').existsSync(), isTrue);
   });
 
-  test('batch archives every record in one call, results aligned with input order', () {
+  test('batch archives every record in one call, results aligned with input order', () async {
     // Mix a present record, a missing one, and another present one so the result
     // bools must line up by index (true, false, true), not just by count.
     seedRecord('id-a');
@@ -163,7 +190,7 @@ void main() {
       argsFor('id-c', ArchiveImageOption.resizedJpeg),
     ];
 
-    final results = archiveRecordsInIsolate(ArchiveBatchArgs(items));
+    final results = await archiveRecordsOnNative(ArchiveBatchArgs(items));
 
     expect(results, [true, false, true]);
     expect(Directory('${archiveDir.path}/id-a').existsSync(), isTrue);
@@ -171,7 +198,7 @@ void main() {
     expect(Directory('${activeDir.path}/id-a').existsSync(), isFalse);
     // Per-record option is honored within the batch.
     expect(
-      resolveImagePath(DirectoryPath('${archiveDir.path}/id-c'), CharaDetailRecordImageMode.skillPlain)!.name,
+      resolveImagePathSync(DirectoryPath('${archiveDir.path}/id-c'), CharaDetailRecordImageMode.skillPlain)!.name,
       'skill.jpg',
     );
   });
@@ -190,7 +217,7 @@ void main() {
     return dir.path;
   }
 
-  test('migration rescales stale geometry json to the archived JPEG and drops prediction.json', () {
+  test('migration rescales stale geometry json to the archived JPEG and drops prediction.json', () async {
     final dst = seedStaleArchive('id-stale');
 
     final count = migrateArchivedRecordsInIsolate(archiveDir.path);
@@ -206,7 +233,7 @@ void main() {
     expect(File('$dst/trainee.jpg').existsSync(), isTrue);
   });
 
-  test('migration drops geometry json for an image-less archived record', () {
+  test('migration drops geometry json for an image-less archived record', () async {
     // An older "none" archive: geometry json present but no image of any kind.
     final dir = Directory('${archiveDir.path}/id-imageless')..createSync(recursive: true);
     File('${dir.path}/record.json').writeAsStringSync('{"id":"id-imageless"}');
@@ -224,7 +251,7 @@ void main() {
     expect(File('${dir.path}/record.json').existsSync(), isTrue);
   });
 
-  test('migration is idempotent: a second run leaves an already-correct record unchanged', () {
+  test('migration is idempotent: a second run leaves an already-correct record unchanged', () async {
     final dst = seedStaleArchive('id-twice');
 
     migrateArchivedRecordsInIsolate(archiveDir.path);

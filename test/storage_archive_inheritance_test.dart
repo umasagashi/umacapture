@@ -49,6 +49,16 @@ void main() {
     return (map['metadata']['record_id'] as Map)['parent$slot'] as String?;
   }
 
+  // resolveAllInheritance is fire-and-forget on every platform: it publishes the
+  // in-flight flag synchronously and clears it when the run completes, so that
+  // flag is what a test waits on.
+  Future<void> settleInheritanceResolution(ProviderContainer container) async {
+    for (var i = 0; i < 200 && container.read(inheritanceResolutionRunningProvider); i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(container.read(inheritanceResolutionRunningProvider), isFalse, reason: 'resolution never finished');
+  }
+
   ProviderContainer makeContainer(DirectoryPath root) {
     return ProviderContainer(
       overrides: [
@@ -82,6 +92,7 @@ void main() {
     expect(parentOnDisk(activeDir, 'child-active', 1), isNull, reason: 'precondition: starts unlinked');
 
     active.resolveAllInheritance();
+    await settleInheritanceResolution(container);
 
     // Active child now points at the ARCHIVED parent, on disk and in memory.
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive');
@@ -163,6 +174,7 @@ void main() {
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive', reason: 'precondition: starts linked');
 
     active.resolveAllInheritance();
+    await settleInheritanceResolution(container);
 
     // Link preserved on disk and in memory; not cleared against the missing archive.
     expect(parentOnDisk(activeDir, 'child-active', 1), 'parent-archive');

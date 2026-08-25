@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
@@ -54,21 +55,92 @@ List<ImageConvertResult?> convertPngBatch(ImageConvertArgs args) {
   for (var i = 0; i < args.srcPngPaths.length; i++) {
     try {
       final bytes = FilePath(args.srcPngPaths[i]).readAsBytesSync();
-      final decoded = img.decodePng(bytes);
-      if (decoded == null) {
+      final converted = _encodeJpegFromPng(bytes, maxWidth: args.maxWidth, quality: args.quality);
+      if (converted == null) {
         logger.w("Failed to decode PNG for archive: ${args.srcPngPaths[i]}");
         continue;
       }
-      final image = decoded.width > args.maxWidth
-          ? img.copyResize(decoded, width: args.maxWidth, interpolation: img.Interpolation.average)
-          : decoded;
-      FilePath(args.dstJpgPaths[i]).toFile().writeAsBytesSync(img.encodeJpg(image, quality: args.quality));
-      results[i] = ImageConvertResult(decoded.width, image.width, image.height);
+      FilePath(args.dstJpgPaths[i]).toFile().writeAsBytesSync(converted.bytes);
+      results[i] = converted.result;
     } catch (error, stackTrace) {
       logger.e("Failed to convert image for archive: ${args.srcPngPaths[i]}", error, stackTrace);
     }
   }
   return results;
+}
+
+/// Asynchronous, web-safe counterpart of [convertPngBatch].
+///
+/// Both archive executors use this implementation, and the FS backend selects
+/// the appropriate storage without duplicating cleanup semantics. They do not
+/// run it in the same place, and only one of the two is off the UI thread:
+/// desktop calls it inside the `compute` isolate `archive_executor_io.dart`
+/// spawns, so no pixel work reaches the UI isolate, while **web decodes,
+/// resizes and encodes on the UI thread**.
+///
+/// That asymmetry is forced, not chosen. The web Dart SDK's `Isolate.spawn`
+/// throws `UnsupportedError`, and Flutter's web `compute` is literally
+/// `await null; return callback(message)` — a same-thread call. There is no
+/// isolate on web to move this into, so the desktop placement has no web twin.
+///
+/// What the page does keep is the granularity of the FS awaits: each image's
+/// read and write genuinely suspend, so the batch never blocks for longer than
+/// one image. That block is not small — a real captured record's three PNGs
+/// (736x2380, 736x3447, 736x4625) measure 250 / 330 / 460 ms of
+/// decode+resize+encode on the Dart VM, about 1.0 s per record, and a web build
+/// is not faster. Adding a `Future.delayed(Duration.zero)` between images would
+/// buy nothing: the awaits above already return to the event loop, and the
+/// uninterruptible unit is one image either way.
+///
+/// Rejected alternative — convert in a worker. Both workers reachable from web
+/// (an `OffscreenCanvas` in a plain web worker, or this app's wasm recognition
+/// core) would have to re-encode with a *different* codec than `package:image`,
+/// so an archived record's images would stop being the bytes desktop produces;
+/// that trades a responsiveness divergence for an artefact divergence, which is
+/// the worse of the two. Neither worker holds the OPFS handles either — the
+/// paths below are resolved by the main-isolate FS backend.
+///
+/// Same best-effort, index-aligned semantics as [convertPngBatch]: a failed
+/// image logs and leaves a null slot.
+Future<List<ImageConvertResult?>> convertPngBatchAsync(ImageConvertArgs args) async {
+  final results = List<ImageConvertResult?>.filled(args.srcPngPaths.length, null);
+  for (var i = 0; i < args.srcPngPaths.length; i++) {
+    try {
+      final bytes = await FilePath(args.srcPngPaths[i]).readAsBytes();
+      final converted = _encodeJpegFromPng(bytes, maxWidth: args.maxWidth, quality: args.quality);
+      if (converted == null) {
+        logger.w("Failed to decode PNG for archive: ${args.srcPngPaths[i]}");
+        continue;
+      }
+      await FilePath(args.dstJpgPaths[i]).writeAsBytes(converted.bytes);
+      results[i] = converted.result;
+    } catch (error, stackTrace) {
+      logger.e("Failed to convert image for archive: ${args.srcPngPaths[i]}", error, stackTrace);
+    }
+  }
+  return results;
+}
+
+/// Pure, FS-free core shared by [convertPngBatch] and [convertPngBatchAsync]:
+/// decodes the PNG [bytes], clamps the width to [maxWidth] without upscaling, and
+/// re-encodes as a JPEG. Returns the encoded bytes with their [ImageConvertResult]
+/// dimensions, or `null` if the input could not be decoded.
+({Uint8List bytes, ImageConvertResult result})? _encodeJpegFromPng(
+  Uint8List bytes, {
+  required int maxWidth,
+  required int quality,
+}) {
+  final decoded = img.decodePng(bytes);
+  if (decoded == null) {
+    return null;
+  }
+  final image = decoded.width > maxWidth
+      ? img.copyResize(decoded, width: maxWidth, interpolation: img.Interpolation.average)
+      : decoded;
+  return (
+    bytes: img.encodeJpg(image, quality: quality),
+    result: ImageConvertResult(decoded.width, image.width, image.height),
+  );
 }
 
 /// Reads just the pixel dimensions of [imageFile] from its header, without
@@ -109,27 +181,58 @@ void scaleIntersectionJson(FilePath jsonFile, {required int newWidth, required i
   if (!jsonFile.existsSync()) {
     return;
   }
-  final decoded = jsonDecode(jsonFile.readAsStringSync());
-  if (decoded is! Map) {
+  final rewritten = _rescaleIntersectionString(jsonFile.readAsStringSync(), newWidth: newWidth, newHeight: newHeight);
+  if (rewritten != null) {
+    jsonFile.writeAsStringSync(rewritten);
+  }
+}
+
+/// Asynchronous, web-safe counterpart of [scaleIntersectionJson].
+///
+/// The desktop archive/migration path rescales geometry json inside a `compute`
+/// isolate over the sync FS; on web that FS throws, so this variant reads and
+/// writes through the async FS backend while sharing the arithmetic
+/// ([_rescaleIntersectionString]). Same best-effort semantics: a missing file or a
+/// degenerate intersection is left untouched.
+Future<void> scaleIntersectionJsonAsync(FilePath jsonFile, {required int newWidth, required int newHeight}) async {
+  if (!await jsonFile.exists()) {
     return;
+  }
+  final rewritten = _rescaleIntersectionString(await jsonFile.readAsString(), newWidth: newWidth, newHeight: newHeight);
+  if (rewritten != null) {
+    await jsonFile.writeAsString(rewritten);
+  }
+}
+
+/// Pure, FS-free core shared by [scaleIntersectionJson] and
+/// [scaleIntersectionJsonAsync]: parses the geometry json [contents] and rewrites
+/// its `intersection` rect for an image of [newWidth] x [newHeight] pixels.
+///
+/// Returns the re-encoded json string, or `null` when the json lacks a usable
+/// intersection (so the caller skips the write-back, matching the original's
+/// early returns). See [scaleIntersectionJson] for the scaling rule.
+String? _rescaleIntersectionString(String contents, {required int newWidth, required int newHeight}) {
+  final decoded = jsonDecode(contents);
+  if (decoded is! Map) {
+    return null;
   }
   final intersection = decoded["intersection"];
   if (intersection is! Map) {
-    return;
+    return null;
   }
   final topLeft = intersection["top_left"];
   final bottomRight = intersection["bottom_right"];
   if (topLeft is! Map || bottomRight is! Map) {
-    return;
+    return null;
   }
   final oldWidth = (bottomRight["x"] as num) - (topLeft["x"] as num);
   if (oldWidth <= 0) {
-    return;
+    return null;
   }
   final scale = newWidth / oldWidth;
   topLeft["x"] = ((topLeft["x"] as num) * scale).round();
   topLeft["y"] = ((topLeft["y"] as num) * scale).round();
   bottomRight["x"] = (topLeft["x"] as int) + newWidth;
   bottomRight["y"] = (topLeft["y"] as int) + newHeight;
-  jsonFile.writeAsStringSync(const JsonEncoder.withIndent('    ').convert(decoded));
+  return const JsonEncoder.withIndent('    ').convert(decoded);
 }
