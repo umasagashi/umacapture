@@ -117,8 +117,38 @@ current project, and look for conflicts not on this list.
   `pub` tool". (FVM rule already lives in CLAUDE.md, so not restated here.)
 - **State management:** upstream "Built-in Solutions" (prefer built-in, avoid
   third-party) and "Provider" (use the `provider` package) bullets. Project uses
-  `flutter_riverpod ^3.0.0`. → Deleted both bullets; kept the architecture-neutral
-  Streams/Futures/ValueNotifier/ChangeNotifier/MVVM/manual-DI bullets.
+  `flutter_riverpod ^3.0.0`. → Deleted both bullets. Also deleted the
+  **"Local state: use `ValueNotifier` / `ChangeNotifier`"** and **"DI: manual
+  constructor injection"** bullets (the `rules_4k` wording; larger variants phrase
+  the same two as MVVM/manual-DI).
+  **A previous sync kept those two as "architecture-neutral" — that judgement was
+  wrong and must not be repeated.** Riverpod *is* this project's DI: dependencies
+  arrive through providers and `ref`, so "manual constructor injection" names a
+  competing mechanism, not a neutral fallback. `ChangeNotifier` does still appear
+  in the tree (`Widget selector(ChangeNotifier onDecided)`,
+  `lib/src/chara_detail/spec/base.dart`) as a plain widget-to-widget notification
+  channel — that is what made the bullet *look* neutral. It is not app state and
+  it is not DI, so the bullet still reads as an instruction to do the wrong thing.
+  General test: a bullet is neutral only if following it would produce code this
+  repo would accept in review; "does the named class appear somewhere" is not the
+  test.
+- **Folder layout:** upstream "Features: group by feature (e.g.
+  `lib/features/login/`)". There is no `lib/features`; the tree is `lib/main.dart`
+  plus `lib/src/{app,core,gui,chara_detail,preference,addon}`. → Deleted.
+- **Logging:** upstream "Use `dart:developer` `log()` locally. NEVER use `print`."
+  Every diagnostic here goes through `logger` (`lib/src/core/app_logger.dart`),
+  which is the only place a Sentry breadcrumb is built and the only place the
+  filesystem-path scrub runs; a `dart:developer` line is silently missing from
+  every crash report. → Rewrote to "NEVER use `print`." (`.claude/CLAUDE.md`
+  §"App conventions (Dart)" carries the positive rule.)
+- **Assertions:** upstream "Use `package:checks`." Not a dependency; the suites use
+  `expect(...)` from `flutter_test`. → Deleted.
+- **Theme construction:** upstream "Theme: use `ThemeData` with
+  `ColorScheme.fromSeed`". Project uses `flex_color_scheme ^8.4.0`
+  (`FlexThemeData.light` / `.dark` in `lib/src/gui/app_widget.dart`); `fromSeed`
+  appears nowhere in `lib/`. Same class as the state-management conflict — upstream
+  picking an approach that competes with an adopted package. → Deleted the bullet,
+  kept "Modes: support Light & Dark (`ThemeMode.system`)", which the project does.
 - **Routing:** upstream "### Routing" recommends `go_router` with a setup example
   + auth-redirect bullet, and the overview "Navigation" bullet lists
   "`auto_route` or `go_router`". Project uses `auto_route`. → Deleted the
@@ -133,7 +163,12 @@ current project, and look for conflicts not on this list.
 - **Tests:** upstream fallback `flutter test`. → Reduced to "use the `run_tests`
   tool".
 - **Non-conflicts left intact:** the `google_fonts` example is an optional
-  suggestion that competes with nothing the project mandates — keep it.
+  suggestion that competes with nothing the project mandates — keep it (and
+  `google_fonts ^8.1.0` is in fact a dependency). **`mockito`** ("Mocks: prefer
+  Fakes. Use `mockito` sparingly.") is *not* a dependency and none is needed:
+  "sparingly" alongside "prefer Fakes" reads as discouragement, not as an
+  instruction to adopt it, so it competes with nothing — **keep it, and do not
+  re-litigate this each sync.**
 
 ## Step 3 — Prune
 

@@ -33,8 +33,12 @@ the user explicitly asks**.
 
 Match the repo convention (see recent merged PRs):
 
-- **Title — Conventional Commits** `type(scope): summary`. Types in use: `feat`,
-  `fix`, `refactor`, `chore`, `ci`, `test`, `style`. Scope is optional, kebab-case,
+- **Title — Conventional Commits** `type(scope): summary`. The permitted types are
+  the ones the Conventional Commits spec defines — `feat`, `fix`, `docs`, `style`,
+  `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert` — and not a census of
+  what the log happens to contain: a hand-kept census reads as a prohibition the
+  first time someone legitimately uses a type nobody had used yet. Every one of
+  them except `revert` already appears in this repository's history. Scope is optional, kebab-case,
   and names the area (`chara-detail`, `native`, `sentry`, …). The summary is
   lowercase, imperative, and has no trailing period.
 - **Body — Markdown with `##` sections.** Lead with `## Summary` (1–2 sentences on
@@ -50,11 +54,13 @@ Match the repo convention (see recent merged PRs):
 
 - This repo uses `core.autocrlf=true`, so generated files written with LF would
   otherwise show up as spurious, content-identical diffs after each codegen run.
-- Codegen outputs are pinned to `eol=lf` in `.gitattributes`
-  (`*.mapper.dart`, `*.gr.dart`, `lib/generated/assets.dart`,
-  `lib/distribution_info.dart`, `assets/license_info.json`,
-  `assets/version_info.json`). When new generated outputs appear, pin them the
-  same way instead of committing EOL-only churn.
+- Codegen outputs are pinned to `eol=lf` in `.gitattributes`. **That file is the
+  list**; read it there rather than trusting a copy — an enumeration repeated here
+  goes stale the first time an output is added, and it already had (it named six
+  entries while `.gitattributes` carried eight, missing both
+  `assets/web_license_info.json` and `assets/additional_license_info.json`). When a
+  new generated output appears, add the `eol=lf` line for it in `.gitattributes`
+  instead of committing EOL-only churn.
 - Avoid `git add --renormalize .` across the whole repo: it re-stages unrelated
   files whose committed EOLs differ from the working tree. Limit it to specific
   paths, or verify the staged set before continuing.
