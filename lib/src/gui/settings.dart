@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:auto_route/auto_route.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
@@ -15,17 +17,24 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/clipboard_alt.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
+import '/src/core/raw_frame_probe.dart';
 import '/src/core/sound_player.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/core/video_import.dart';
+import '/src/core/video_import_ops.dart';
 import '/src/gui/app_widget.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
 import '/src/gui/license_alt.dart' as license;
 import '/src/gui/module_update_dialog.dart';
+import '/src/gui/raw_frame_probe_view.dart';
+import '/src/gui/toast.dart';
 import '/src/gui/storage_settings.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/theme_gallery.dart';
+import '/src/gui/video_import.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/privacy_setting.dart';
 
@@ -252,16 +261,38 @@ class CaptureSettingsGroup extends ConsumerWidget {
       title: "$tr_settings.capture.title".tr(),
       padding: EdgeInsets.zero,
       children: [
-        SwitchWidget(
-          title: Text("$tr_settings.capture.auto_start.title".tr()),
-          description: Text("$tr_settings.capture.auto_start.description".tr()),
-          provider: autoStartCaptureStateProvider,
-        ),
-        DropdownButtonWidget<CharaDetailRecordImageMode?>(
-          title: "$tr_settings.capture.auto_copy.title".tr(),
-          description: "$tr_settings.capture.auto_copy.description".tr(),
-          name: (e) => "$tr_settings.capture.auto_copy.choice.${e!.name.snakeCase}".tr(),
-          provider: autoCopyClipboardStateProvider,
+        // Both of the settings below need something a browser only grants in
+        // response to a gesture, so neither is offered on web:
+        //
+        // - auto_start: starting a capture on web opens getDisplayMedia, which
+        //   requires transient user activation. A load-time start has none, so it
+        //   is guarded away in platform_controller.dart (the `!kIsWeb &&` next to
+        //   autoStartCaptureStateProvider) and the switch would do nothing here.
+        // - auto_copy: a browser clipboard write requires transient user
+        //   activation too, which the post-capture callback that would perform
+        //   this copy does not have (see CharaDetailRecordStorage.copyToClipboard).
+        //
+        // Same reasoning as the clipboard_paste_image_mode dropdown further down.
+        if (!kIsWeb)
+          SwitchWidget(
+            title: Text("$tr_settings.capture.auto_start.title".tr()),
+            description: Text("$tr_settings.capture.auto_start.description".tr()),
+            provider: autoStartCaptureStateProvider,
+          ),
+        if (!kIsWeb)
+          DropdownButtonWidget<CharaDetailRecordImageMode?>(
+            title: "$tr_settings.capture.auto_copy.title".tr(),
+            description: "$tr_settings.capture.auto_copy.description".tr(),
+            name: (e) => "$tr_settings.capture.auto_copy.choice.${e!.name.snakeCase}".tr(),
+            provider: autoCopyClipboardStateProvider,
+          ),
+        // Disabled while capturing for the same reason force_resize is: the core reads
+        // `detail_crop_calibration` once, when the pipeline is built, so a mid-session toggle could not
+        // take effect and would silently misrepresent what the running session is doing.
+        Disabled(
+          disabled: isCapturing,
+          tooltip: "$tr_settings.capture.detail_crop_calibration.disabled_tooltip".tr(),
+          child: const DetailCropCalibrationTile(),
         ),
         Disabled(
           disabled: isCapturing,
@@ -273,6 +304,54 @@ class CaptureSettingsGroup extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ignore: constant_identifier_names
+const tr_detail_crop = "$tr_settings.capture.detail_crop_calibration";
+
+/// Controls detail-crop auto-calibration and shows the corrected crop it currently uses.
+///
+/// The values come from native's `onDetailCropReported`, which is throttled at the source, so this rebuilds
+/// at most about once a second while a crop is being measured.
+@visibleForTesting
+class DetailCropCalibrationTile extends ConsumerWidget {
+  const DetailCropCalibrationTile({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final enabled = ref.watch(detailCropCalibrationStateProvider);
+    final report = ref.watch(detailCropReportProvider);
+    final labelStyle = theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    final value = report == null
+        ? "$tr_detail_crop.value.unmeasured".tr()
+        : "$tr_detail_crop.value.corrected".tr(
+            namedArgs: {
+              "left": report.correctedRect.left.toString(),
+              "top": report.correctedRect.top.toString(),
+              "width": report.correctedRect.width.toString(),
+              "height": report.correctedRect.height.toString(),
+            },
+          );
+
+    void setEnabled(bool value) => ref.read(detailCropCalibrationStateProvider.notifier).set(value);
+
+    return ListTile(
+      title: Text("$tr_detail_crop.title".tr()),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text("$tr_detail_crop.description".tr()),
+          Text(value, style: labelStyle),
+        ],
+      ),
+      trailing: Align(
+        widthFactor: 1,
+        child: Switch(value: enabled, onChanged: setEnabled),
+      ),
+      onTap: () => setEnabled(!enabled),
     );
   }
 }
@@ -304,33 +383,39 @@ class _SoundSettingTile extends ConsumerStatefulWidget {
 }
 
 class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
-  /// Whether the current custom file is absent on disk. Kept out of [build] so the filesystem
-  /// stat runs only when the tile is created or the path changes, not on every rebuild.
+  /// Whether the current custom file is absent. Kept out of [build] so the filesystem stat runs
+  /// only when the tile is created or the path changes, not on every rebuild.
   bool _fileMissing = false;
+
+  /// Serial number of the most recently started stat. A stat that finishes after a newer one was
+  /// started is discarded, so a rapid path change cannot settle the flag on the stale answer.
+  int _statGeneration = 0;
 
   SoundType get _type => widget.type;
 
   @override
   void initState() {
     super.initState();
-    // Seed the initial state synchronously so the first frame reflects reality: the tile is
-    // recreated whenever the settings page is opened, so this also re-checks on each open.
-    _fileMissing = _statMissing(ref.read(soundSettingProvider(_type)));
+    // The tile is recreated whenever the settings page is opened, so this also re-checks on each
+    // open. The stat is asynchronous (see [_recheckMissing]), so the first frame shows no warning
+    // and the flag settles once the backend answers.
+    unawaited(_recheckMissing(ref.read(soundSettingProvider(_type))));
   }
 
-  /// Whether [setting] points at a custom file that no longer exists on disk.
+  /// Re-stats the custom file and updates [_fileMissing] if it changed.
   ///
-  /// The player silently falls back to the default clip in that case, so the UI would otherwise
-  /// keep showing a path that never plays.
-  bool _statMissing(SoundSetting setting) => setting.isCustom && !FilePath(setting.path).existsSync();
-
-  /// Re-stats the custom file and updates [_fileMissing] if it changed. Called from a listener,
-  /// so [setState] is safe here (unlike during [initState]).
-  void _recheckMissing(SoundSetting setting) {
-    final missing = _statMissing(setting);
-    if (missing != _fileMissing && mounted) {
-      setState(() => _fileMissing = missing);
-    }
+  /// A custom clip that is gone makes the player silently fall back to the default, so the UI
+  /// would otherwise keep showing a path that never plays. This is not desktop-only: a web custom
+  /// sound lives in OPFS, which the browser may evict when storage was never granted persistence
+  /// (see the storage persistence tile), leaving exactly the same state.
+  ///
+  /// Uses the asynchronous [PathEntity.exists] rather than `existsSync`, which is a desktop-only
+  /// sync FS call that throws on web.
+  Future<void> _recheckMissing(SoundSetting setting) async {
+    final generation = ++_statGeneration;
+    final missing = setting.isCustom && !await FilePath(setting.path).exists();
+    if (!mounted || generation != _statGeneration || missing == _fileMissing) return;
+    setState(() => _fileMissing = missing);
   }
 
   Future<void> _pickFile() async {
@@ -339,7 +424,23 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
       type: FileType.custom,
       allowedExtensions: const ["wav", "mp3"],
     );
-    final path = file?.path;
+    if (file == null) return;
+    if (kIsWeb) {
+      try {
+        final stored = await persistCustomSound(
+          directory: ref.read(pathInfoProvider).customSoundDir,
+          type: _type,
+          originalName: file.name,
+          bytes: await file.readAsBytes(),
+        );
+        ref.read(soundSettingProvider(_type).notifier).setCustomFile(stored.path);
+      } catch (error, stackTrace) {
+        logger.e("Failed to persist custom sound", error, stackTrace);
+        Toaster.show(ToastData.error(description: "$tr_sound.save_failure".tr()));
+      }
+      return;
+    }
+    final path = file.path;
     if (path == null) return;
     ref.read(soundSettingProvider(_type).notifier).setCustomFile(path);
   }
@@ -351,7 +452,7 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
     final theme = Theme.of(context);
     // Re-check existence only when the path or source actually changes, not on volume-slider commits.
     ref.listen(soundSettingProvider(_type), (prev, next) {
-      if (prev?.path != next.path || prev?.source != next.source) _recheckMissing(next);
+      if (prev?.path != next.path || prev?.source != next.source) unawaited(_recheckMissing(next));
     });
     final setting = ref.watch(soundSettingProvider(_type));
     final notifier = ref.read(soundSettingProvider(_type).notifier);
@@ -462,23 +563,32 @@ class SystemGroup extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ListCard(
-      title: "$tr_settings.system.title".tr(),
-      padding: EdgeInsets.zero,
-      children: [
+    // Built as a list rather than inlined so the empty case is decidable: every
+    // row here is platform-gated, and on web both gates close, which would
+    // otherwise leave a titled card band with nothing under it.
+    final rows = <Widget>[
+      // Browsers can copy image bytes after a user gesture, but cannot place
+      // native file references on the system clipboard, so there is no mode
+      // choice to expose on web.
+      if (!kIsWeb)
         DropdownButtonWidget<ClipboardPasteImageMode?>(
           title: "$tr_settings.system.clipboard_paste_image_mode.title".tr(),
           description: "$tr_settings.system.clipboard_paste_image_mode.description".tr(),
           name: (e) => "$tr_settings.system.clipboard_paste_image_mode.choice.${e!.name.snakeCase}".tr(),
           provider: clipboardPasteImageModeProvider,
         ),
-        // Windows-only: the migration flow relies on a PowerShell relaunch and on
-        // desktop path semantics (the settings box living under the documents
-        // dir). Neither holds on Android/iOS/web, so the relocation UI is hidden
-        // there rather than offering a broken migration.
-        if (CurrentPlatform.isWindows()) const DataRootTile(),
-      ],
-    );
+      // Windows-only: the migration flow relies on a PowerShell relaunch and on
+      // desktop path semantics (the settings box living under the documents
+      // dir). Neither holds on Android/iOS/web, so the relocation UI is hidden
+      // there rather than offering a broken migration. The web build reports
+      // the host OS via defaultTargetPlatform (isWindows() is true in a Windows
+      // browser), so exclude web explicitly.
+      if (!CurrentPlatform.isWeb() && CurrentPlatform.isWindows()) const DataRootTile(),
+    ];
+    if (rows.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return ListCard(title: "$tr_settings.system.title".tr(), padding: EdgeInsets.zero, children: rows);
   }
 }
 
@@ -621,8 +731,179 @@ class AboutGroup extends ConsumerWidget {
           ),
           onTap: () => Pasteboard.writeText(versionString(ref)),
         ),
-        Disabled(
-          disabled: !ref.watch(charaDetailRecordRegenerationControllerProvider).isEmpty,
+        const RegenerateAllRecordsTile(),
+        const ResolveInheritanceTile(),
+        const ModuleManualUpdateTile(),
+      ],
+    );
+  }
+}
+
+/// The "re-resolve parent/child links across the whole store" entry of [AboutGroup].
+///
+/// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a seam
+/// a test can mount without dragging in the version loaders and the license page.
+///
+/// The resolution is asynchronous and fire-and-forget, so the entry disables itself while one is
+/// in flight instead of letting a second tap start another whole-store lock acquisition — and it
+/// **says so**. A silent grey tile is exactly the defect [RegenerateAllBlocker] was introduced ten
+/// lines below to remove; leaving its immediate neighbour silent would have reproduced it. There is
+/// one reason here and no closed set is needed for it, but the obligation is the same: `disabled`
+/// and `tooltip` are decided by one expression, so "is it inert" and "why" cannot disagree.
+class ResolveInheritanceTile extends ConsumerWidget {
+  const ResolveInheritanceTile({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resolving = ref.watch(inheritanceResolutionRunningProvider);
+    return Disabled(
+      disabled: resolving,
+      tooltip: resolving ? "$tr_settings.about.resolve_inheritance.blocked.resolving".tr() : null,
+      child: ListTile(
+        title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
+        subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
+        trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
+        onTap: () {
+          ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
+        },
+      ),
+    );
+  }
+}
+
+/// The "apply a manually downloaded modules.zip" entry of [AboutGroup].
+///
+/// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a
+/// seam a test can mount without dragging in the version loaders and the license page.
+class ModuleManualUpdateTile extends StatelessWidget {
+  /// The import state to gate on, defaulting to the front end's own. Injectable because
+  /// `video_import.dart` resolves to the desktop stub under `flutter test`, where the
+  /// notifier is a constant idle and the gate would be permanently open.
+  final ValueListenable<VideoImportState>? importState;
+
+  const ModuleManualUpdateTile({super.key, this.importState});
+
+  @override
+  Widget build(BuildContext context) {
+    // A manual install is a regeneration entry point without a regeneration UI: on success it
+    // calls `checkRecordVersion()`, which auto-starts a whole-store batch. It is also the one
+    // entry that can destroy a running import outright -- installing modules invalidates
+    // `moduleVersionLoader`, which `platformControllerLoader` watches, so the rebuild tears the
+    // worker (and the import riding it) down. Worded from the key the other regeneration gates
+    // use, so the user meets one explanation and not four.
+    return ValueListenableBuilder<VideoImportState>(
+      valueListenable: importState ?? videoImportState,
+      builder: (context, import, _) => Disabled(
+        disabled: import.isRunning,
+        tooltip: import.isRunning ? "$tr_video_import.blocks_regeneration".tr() : null,
+        child: Consumer(
+          builder: (context, ref, _) => ListTile(
+            title: Text("$tr_settings.module_update.entry.title".tr()),
+            subtitle: Text("$tr_settings.module_update.entry.description".tr()),
+            trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.download_rounded)),
+            onTap: () => ModuleManualUpdateDialog.show(ref.base),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Why the whole-store "re-recognize captured records" entry may not be pressed right now.
+///
+/// **The reason is data, and the sentence is derived from it** — the shape [VideoImportBlocker]
+/// uses, brought here because [RegenerateAllRecordsTile] had the same defect in its worst form: two
+/// reasons in `disabled` and a `tooltip` that was non-null for **one** of them, so the entry was
+/// greyed out and completely silent whenever the reason was the more common one, a regeneration
+/// batch already running. That is the rule `video_import_ops.dart` states in words — "a disabled
+/// control that does not say why is the defect the removed implementation set out to avoid" — being
+/// broken by its neighbour.
+///
+/// A closed set plus the exhaustive [regenerateAllBlockerKey] means a third reason cannot be added
+/// without the compiler demanding a sentence for it. A ternary could not do that: it pairs a
+/// condition with a string at the call site, so whatever is added inherits an arm, silently.
+@visibleForTesting
+enum RegenerateAllBlocker {
+  /// A video import owns the event loop, so a batch started here would be refused record by record.
+  ///
+  /// Named first so the sentence does not move: this is the one reason the tile explained before,
+  /// and it is also the one that would refuse at the funnel every entry point shares
+  /// (`CharaDetailRecordRegenerationController.start`), so it stays the more actionable of the two.
+  /// The pair is not reachable in any case — each of the two refuses to start while the other runs —
+  /// so precedence only decides which true sentence a race would show.
+  importing,
+
+  /// A regeneration batch is already in flight. **This is the reason that had no sentence at all**:
+  /// the tile is disabled for the whole length of a batch the user themselves started, which is
+  /// strictly the longer-lived and more often met of the two states.
+  regenerating,
+}
+
+/// Which reason (if any) makes the whole-store regeneration entry inert, in precedence order.
+@visibleForTesting
+RegenerateAllBlocker? resolveRegenerateAllBlocker({required bool regenerating, required bool importing}) {
+  if (importing) {
+    return RegenerateAllBlocker.importing;
+  }
+  if (regenerating) {
+    return RegenerateAllBlocker.regenerating;
+  }
+  return null;
+}
+
+/// The **full** translation key for [blocker]'s sentence.
+///
+/// Full keys rather than two leaves under one `blocked` map, because the two sentences deliberately
+/// do not live in one namespace: `blocks_regeneration` is the shared refusal line that
+/// [ModuleManualUpdateTile] and `RegenerateRecordDialog` also read, and
+/// `regenerate_all_records_tile_test.dart` pins that sharing by name ("says it in the same words the
+/// per-record dialog does"). Copying it into a local map would make one refusal grow three
+/// explanations that nothing compares — the very thing the sharing exists to prevent. Only the
+/// regeneration sentence is this control's own, and it is new.
+///
+/// Exhaustive and explicit, not `blocker.name`: easy_localization renders a key it cannot find **as
+/// the key**, so a mistyped key ships `pages.…` into a tooltip instead of failing anywhere.
+@visibleForTesting
+String regenerateAllBlockerKey(RegenerateAllBlocker blocker) => switch (blocker) {
+  RegenerateAllBlocker.importing => "$tr_video_import.blocks_regeneration",
+  RegenerateAllBlocker.regenerating => "$tr_settings.about.regenerate.blocked.regenerating",
+};
+
+/// The whole-store "re-recognize captured records" entry of [AboutGroup].
+///
+/// A widget of its own only so its gate has a seam a test can mount: [AboutGroup] pulls in
+/// the version loaders and the license page, none of which this gate has anything to do with.
+class RegenerateAllRecordsTile extends ConsumerWidget {
+  /// The import state to gate on, defaulting to the front end's own.
+  ///
+  /// Injectable for the same reason [VideoImportGateNotice]'s is: the `video_import.dart` facade
+  /// resolves to the desktop stub under `flutter test` (no `dart:js_interop` compiles on the
+  /// VM), where the notifier is a constant idle -- so without this the gate below is
+  /// permanently open and not one line of it is testable.
+  final ValueListenable<VideoImportState>? importState;
+
+  const RegenerateAllRecordsTile({super.key, this.importState});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // The third half of import/regeneration mutual exclusion, on exactly the predicate the record
+    // table's context menu and RegenerateRecordDialog are gated on, worded from the same key so the
+    // user meets one explanation and not three. Without it this entry started a whole-store batch
+    // that the worker refused record by record ("a video import owns the event loop"), turning every
+    // record in the store into an error-level failure. Listened to rather than read: the settings
+    // page stays mounted for as long as the user leaves it open, and an import can begin behind it.
+    return ValueListenableBuilder<VideoImportState>(
+      valueListenable: importState ?? videoImportState,
+      builder: (context, import, _) {
+        // One expression decides both halves, so "is it inert" and "why" cannot disagree. They did:
+        // the disjunction listed two reasons and the tooltip covered one of them.
+        final blocker = resolveRegenerateAllBlocker(
+          regenerating: !ref.watch(charaDetailRecordRegenerationControllerProvider).isEmpty,
+          importing: import.isRunning,
+        );
+        return Disabled(
+          disabled: blocker != null,
+          tooltip: blocker == null ? null : regenerateAllBlockerKey(blocker).tr(),
           child: ListTile(
             title: Text("$tr_settings.about.regenerate.title".tr()),
             subtitle: Text("$tr_settings.about.regenerate.description".tr()),
@@ -632,22 +913,8 @@ class AboutGroup extends ConsumerWidget {
               storage.checkRecordVersion(includeCurrentVersion: true);
             },
           ),
-        ),
-        ListTile(
-          title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
-          subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
-          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.refresh_rounded)),
-          onTap: () {
-            ref.read(charaDetailRecordStorageLoaderProvider.notifier).resolveAllInheritance();
-          },
-        ),
-        ListTile(
-          title: Text("$tr_settings.module_update.entry.title".tr()),
-          subtitle: Text("$tr_settings.module_update.entry.description".tr()),
-          trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.download_rounded)),
-          onTap: () => ModuleManualUpdateDialog.show(ref.base),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -688,6 +955,7 @@ class SettingsPage extends ConsumerWidget {
         const SystemGroup(),
         const PrivacySettingsGroup(),
         const AboutGroup(),
+        if (rawFrameProbeEnabled) const RawFrameProbeGroup(),
         if (kDebugMode) const DebugSettingsGroup(),
       ],
     );

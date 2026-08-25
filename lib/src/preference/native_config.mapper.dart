@@ -73,132 +73,6 @@ mixin WindowTargetMappable {
   }
 }
 
-class AspectRatioRangeMapper extends ClassMapperBase<AspectRatioRange> {
-  AspectRatioRangeMapper._();
-
-  static AspectRatioRangeMapper? _instance;
-  static AspectRatioRangeMapper ensureInitialized() {
-    if (_instance == null) {
-      MapperContainer.globals.use(_instance = AspectRatioRangeMapper._());
-    }
-    return _instance!;
-  }
-
-  @override
-  final String id = 'AspectRatioRange';
-
-  static double? _$min(AspectRatioRange v) => v.min;
-  static const Field<AspectRatioRange, double> _f$min = Field(
-    'min',
-    _$min,
-    opt: true,
-  );
-  static double? _$max(AspectRatioRange v) => v.max;
-  static const Field<AspectRatioRange, double> _f$max = Field(
-    'max',
-    _$max,
-    opt: true,
-  );
-
-  @override
-  final MappableFields<AspectRatioRange> fields = const {
-    #min: _f$min,
-    #max: _f$max,
-  };
-
-  static AspectRatioRange _instantiate(DecodingData data) {
-    return AspectRatioRange(min: data.dec(_f$min), max: data.dec(_f$max));
-  }
-
-  @override
-  final Function instantiate = _instantiate;
-
-  static AspectRatioRange fromMap(Map<String, dynamic> map) {
-    return ensureInitialized().decodeMap<AspectRatioRange>(map);
-  }
-
-  static AspectRatioRange fromJson(String json) {
-    return ensureInitialized().decodeJson<AspectRatioRange>(json);
-  }
-}
-
-mixin AspectRatioRangeMappable {
-  String toJson() {
-    return AspectRatioRangeMapper.ensureInitialized()
-        .encodeJson<AspectRatioRange>(this as AspectRatioRange);
-  }
-
-  Map<String, dynamic> toMap() {
-    return AspectRatioRangeMapper.ensureInitialized()
-        .encodeMap<AspectRatioRange>(this as AspectRatioRange);
-  }
-}
-
-class CropProfileMapper extends ClassMapperBase<CropProfile> {
-  CropProfileMapper._();
-
-  static CropProfileMapper? _instance;
-  static CropProfileMapper ensureInitialized() {
-    if (_instance == null) {
-      MapperContainer.globals.use(_instance = CropProfileMapper._());
-      AspectRatioRangeMapper.ensureInitialized();
-    }
-    return _instance!;
-  }
-
-  @override
-  final String id = 'CropProfile';
-
-  static AspectRatioRange? _$windowAspectRatio(CropProfile v) =>
-      v.windowAspectRatio;
-  static const Field<CropProfile, AspectRatioRange> _f$windowAspectRatio =
-      Field('windowAspectRatio', _$windowAspectRatio, opt: true);
-  static Size? _$clientAspectRatio(CropProfile v) => v.clientAspectRatio;
-  static const Field<CropProfile, Size> _f$clientAspectRatio = Field(
-    'clientAspectRatio',
-    _$clientAspectRatio,
-    opt: true,
-  );
-
-  @override
-  final MappableFields<CropProfile> fields = const {
-    #windowAspectRatio: _f$windowAspectRatio,
-    #clientAspectRatio: _f$clientAspectRatio,
-  };
-
-  static CropProfile _instantiate(DecodingData data) {
-    return CropProfile(
-      windowAspectRatio: data.dec(_f$windowAspectRatio),
-      clientAspectRatio: data.dec(_f$clientAspectRatio),
-    );
-  }
-
-  @override
-  final Function instantiate = _instantiate;
-
-  static CropProfile fromMap(Map<String, dynamic> map) {
-    return ensureInitialized().decodeMap<CropProfile>(map);
-  }
-
-  static CropProfile fromJson(String json) {
-    return ensureInitialized().decodeJson<CropProfile>(json);
-  }
-}
-
-mixin CropProfileMappable {
-  String toJson() {
-    return CropProfileMapper.ensureInitialized().encodeJson<CropProfile>(
-      this as CropProfile,
-    );
-  }
-
-  Map<String, dynamic> toMap() {
-    return CropProfileMapper.ensureInitialized().encodeMap<CropProfile>(
-      this as CropProfile,
-    );
-  }
-}
-
 class RecorderConfigMapper extends ClassMapperBase<RecorderConfig> {
   RecorderConfigMapper._();
 
@@ -207,7 +81,6 @@ class RecorderConfigMapper extends ClassMapperBase<RecorderConfig> {
     if (_instance == null) {
       MapperContainer.globals.use(_instance = RecorderConfigMapper._());
       WindowTargetMapper.ensureInitialized();
-      CropProfileMapper.ensureInitialized();
     }
     return _instance!;
   }
@@ -219,12 +92,6 @@ class RecorderConfigMapper extends ClassMapperBase<RecorderConfig> {
       v.windowTargets;
   static const Field<RecorderConfig, List<WindowTarget>> _f$windowTargets =
       Field('windowTargets', _$windowTargets, opt: true);
-  static List<CropProfile>? _$cropProfiles(RecorderConfig v) => v.cropProfiles;
-  static const Field<RecorderConfig, List<CropProfile>> _f$cropProfiles = Field(
-    'cropProfiles',
-    _$cropProfiles,
-    opt: true,
-  );
   static int? _$recordingFps(RecorderConfig v) => v.recordingFps;
   static const Field<RecorderConfig, int> _f$recordingFps = Field(
     'recordingFps',
@@ -241,7 +108,6 @@ class RecorderConfigMapper extends ClassMapperBase<RecorderConfig> {
   @override
   final MappableFields<RecorderConfig> fields = const {
     #windowTargets: _f$windowTargets,
-    #cropProfiles: _f$cropProfiles,
     #recordingFps: _f$recordingFps,
     #minimumSize: _f$minimumSize,
   };
@@ -249,7 +115,6 @@ class RecorderConfigMapper extends ClassMapperBase<RecorderConfig> {
   static RecorderConfig _instantiate(DecodingData data) {
     return RecorderConfig(
       windowTargets: data.dec(_f$windowTargets),
-      cropProfiles: data.dec(_f$cropProfiles),
       recordingFps: data.dec(_f$recordingFps),
       minimumSize: data.dec(_f$minimumSize),
     );

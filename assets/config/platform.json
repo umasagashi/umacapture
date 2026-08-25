@@ -2,7 +2,6 @@
     "windows": {
         "window_recorder": {
             "recording_fps": 40,
-            "force_resize": false,
             "minimum_size": {
                 "height": 960,
                 "width": 540
@@ -16,37 +15,10 @@
                     "window_class": "UnityWndClass",
                     "window_title": "UmamusumePrettyDerby_Jpn"
                 }
-            ],
-            "crop_profiles": [
-                {
-                    "window_aspect_ratio": {
-                        "min": 1.66,
-                        "max": 1.88
-                    },
-                    "client_aspect_ratio": {
-                        "height": 9,
-                        "width": 16
-                    },
-                    "crop_rect": {
-                        "top_left": {
-                            "x": -0.669,
-                            "y": 0.0,
-                            "anchor": {
-                                "h": "IntersectStart",
-                                "v": "IntersectStart"
-                            }
-                        },
-                        "bottom_right": {
-                            "x": 0.331,
-                            "y": 0.0,
-                            "anchor": {
-                                "h": "IntersectStart",
-                                "v": "IntersectLogicalEnd"
-                            }
-                        }
-                    }
-                }
             ]
         }
+    },
+    "web": {
+        "live_pull_interval_ms": 33
     }
 }
