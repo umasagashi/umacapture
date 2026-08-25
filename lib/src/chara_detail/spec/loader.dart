@@ -45,15 +45,23 @@ final moduleInfoLoaders = FutureProvider((ref) async {
 });
 
 Future<T> _loadFromJson<T>(FilePath path) async {
+  // Read through the FS backend (dart:io on desktop, OPFS on web) rather than a
+  // direct dart:io File, which throws at runtime on web.
+  final content = await path.readAsString();
+  // Parse off the UI isolate on native platforms. Flutter's compute() already
+  // executes on the current event loop on web, so callers need no platform gate.
+  return compute(_decodeJson<T>, content);
+}
+
+T _decodeJson<T>(String content) {
   initializeMappers();
-  return path.toFile().readAsString().then((e) => MapperContainer.globals.fromJson<T>(e));
+  return MapperContainer.globals.fromJson<T>(content);
 }
 
 final labelMapLoader = FutureProvider<LabelMap>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(
-    _loadFromJson<Map<String, dynamic>>,
+  return _loadFromJson<Map<String, dynamic>>(
     path.modulesDir.filePath("labels.json"),
   ).then((e) => e.map((k, v) => MapEntry(k, List<String>.from(v)))).then((map) {
     // record_type maps to the app-side RecordType enum, so its labels come from
@@ -75,8 +83,7 @@ final labelMapProvider = Provider<LabelMap>((ref) {
 final _skillInfoLoader = FutureProvider<List<SkillInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(
-    _loadFromJson<List<SkillInfo>>,
+  return _loadFromJson<List<SkillInfo>>(
     path.modulesDir.filePath("skill_info.json"),
   ).then((e) => e.sortedBy<num>((e) => e.sortKey));
 });
@@ -94,7 +101,7 @@ final availableSkillInfoProvider = Provider<List<SkillInfo>>((ref) {
 final _skillTagLoader = FutureProvider<List<Tag>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<Tag>>, path.modulesDir.filePath("skill_tag.json"));
+  return _loadFromJson<List<Tag>>(path.modulesDir.filePath("skill_tag.json"));
 });
 
 final skillTagProvider = Provider<List<Tag>>((ref) {
@@ -105,7 +112,7 @@ final factorInfoLoader = FutureProvider<List<FactorInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
   final skillInfo = (await ref.watch(_skillInfoLoader.future)).toMap((e) => e.sid);
-  return compute(_loadFromJson<List<FactorInfo>>, path.modulesDir.filePath("factor_info.json"))
+  return _loadFromJson<List<FactorInfo>>(path.modulesDir.filePath("factor_info.json"))
       .then((info) => info.map((e) => e.copyWith(skillInfo: skillInfo[e.skillSid])).toList())
       .then((e) => e.sortedBy<num>((e) => e.sortKey));
 });
@@ -123,7 +130,7 @@ final availableFactorInfoProvider = Provider<List<FactorInfo>>((ref) {
 final _factorTagLoader = FutureProvider<List<Tag>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<Tag>>, path.modulesDir.filePath("factor_tag.json"));
+  return _loadFromJson<List<Tag>>(path.modulesDir.filePath("factor_tag.json"));
 });
 
 final factorTagProvider = Provider<List<Tag>>((ref) {
@@ -133,7 +140,7 @@ final factorTagProvider = Provider<List<Tag>>((ref) {
 final charaRankBorderLoader = FutureProvider<List<int>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<int>>, path.modulesDir.filePath("rank_border.json"));
+  return _loadFromJson<List<int>>(path.modulesDir.filePath("rank_border.json"));
 });
 
 final charaRankBorderProvider = Provider<List<int>>((ref) {
@@ -143,7 +150,7 @@ final charaRankBorderProvider = Provider<List<int>>((ref) {
 final _charaCardInfoLoader = FutureProvider<List<CharaCardInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<CharaCardInfo>>, path.modulesDir.filePath("character_card_info.json"));
+  return _loadFromJson<List<CharaCardInfo>>(path.modulesDir.filePath("character_card_info.json"));
 });
 
 final charaCardInfoProvider = Provider<List<CharaCardInfo>>((ref) {
@@ -153,7 +160,7 @@ final charaCardInfoProvider = Provider<List<CharaCardInfo>>((ref) {
 final raceTitleInfoLoader = FutureProvider<List<RaceTitleInfo>>((ref) async {
   await ref.watch(moduleVersionLoader.future);
   final path = await ref.watch(pathInfoLoader.future);
-  return compute(_loadFromJson<List<RaceTitleInfo>>, path.modulesDir.filePath("race_title_info.json"));
+  return _loadFromJson<List<RaceTitleInfo>>(path.modulesDir.filePath("race_title_info.json"));
 });
 
 final raceTitleInfoProvider = Provider<List<RaceTitleInfo>>((ref) {
@@ -183,6 +190,83 @@ final availableCharaCardsProvider = Provider<List<AvailableCharaCardInfo>>((ref)
       .map((e) => AvailableCharaCardInfo(e, iconMap[e.sid]!))
       .toList();
 });
+
+/// Raised when a rating/memo mutation is asked to change storage whose load failed.
+///
+/// [AsyncValue.value] is null in two unrelated situations: while the first read is
+/// still in flight, and after that read or its decode failed. The first is a window
+/// of a few hundred ms that clears on its own, so dropping a change is defensible.
+/// The second never clears - nothing re-reads the file for the rest of the session
+/// (riverpod's automatic retry is disabled application-wide) - so answering it the
+/// same way discards every rating and memo the user enters from then on, while the
+/// column keeps rendering from the empty fallback as if the storage were simply new.
+/// Refusing loudly is the point: the change cannot be saved, and the caller must not
+/// carry on as though it had been.
+class StorageLoadFailure implements Exception {
+  StorageLoadFailure({required this.storage, required this.key, required this.attempt, required this.cause});
+
+  /// Which storage kind failed, for the message only (`rating` / `memo`).
+  final String storage;
+
+  /// Storage file stem, i.e. the family argument of the failing controller.
+  final String key;
+
+  /// What the caller was trying to do, phrased for a log line.
+  final String attempt;
+
+  /// The error [CharaDetailRecordRatingController.build] (or the memo one) failed with.
+  final Object cause;
+
+  @override
+  String toString() => "StorageLoadFailure: refused $attempt because $storage storage '$key' failed to load: $cause";
+}
+
+/// Reads and decodes one rating/memo storage file, reporting a failure where it happens.
+///
+/// The resulting `AsyncError` reports nothing by itself: no `ProviderObserver` is
+/// registered, so an undecodable file would otherwise reach neither the log nor a
+/// crash report - while every later change to that storage is refused.
+Future<T> _readStorageFile<T>(FilePath path, String description, T Function(String json) decode) async {
+  try {
+    return decode(await path.readAsString());
+  } catch (exception, stackTrace) {
+    logger.e("Failed to load $description: path=${path.path}", exception, stackTrace);
+    captureException(exception, stackTrace);
+    rethrow;
+  }
+}
+
+/// The error [state] is stuck on, or null when it holds a value or is still loading.
+///
+/// This is the single place that tells the two null-valued states apart, so no
+/// caller has to re-derive the distinction (and none can get it subtly wrong). A
+/// failed *re*load that still carries the previously loaded value is not stuck:
+/// those contents are known, so both reading and persisting them stay correct.
+Object? _loadFailureOf<T>(AsyncValue<T> state) {
+  if (state.hasValue) {
+    return null;
+  }
+  return switch (state) {
+    AsyncError(:final error) => error,
+    _ => null,
+  };
+}
+
+/// The value a mutator may change, or null while [state] is still loading.
+///
+/// Throws [StorageLoadFailure] when the load failed instead of collapsing that into
+/// the same null - see the class doc for why the two cases must not share an answer.
+T? _dataForMutation<T>(AsyncValue<T> state, {required String storage, required String key, required String attempt}) {
+  final failure = _loadFailureOf(state);
+  if (failure != null) {
+    throw StorageLoadFailure(storage: storage, key: key, attempt: attempt, cause: failure);
+  }
+  final value = state.value;
+  if (value == null) {
+    logger.w("Dropped $attempt: $storage storage $key has not finished loading.");
+  }
+  return value;
+}
 
 class _RatingDataWriter {
   final FilePath path;
@@ -216,7 +300,7 @@ class RatingData with RatingDataMappable {
   }
 }
 
-class CharaDetailRecordRatingController extends Notifier<RatingData> {
+class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> {
   CharaDetailRecordRatingController(this.key);
 
   final String key;
@@ -224,28 +308,63 @@ class CharaDetailRecordRatingController extends Notifier<RatingData> {
   late FilePath path;
 
   @override
-  RatingData build() {
+  Future<RatingData> build() async {
+    // `path` is assigned synchronously (before the first await) so [save] is safe
+    // the moment the controller starts building. The read is async so web can load
+    // the ratings file from OPFS; on desktop it is a fast local-disk read.
     path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
-    return path.existsSync() ? RatingDataMapper.fromJson(path.readAsStringSync()) : RatingData.empty;
+    return (await path.exists())
+        ? await _readStorageFile(path, "rating storage $key", RatingDataMapper.fromJson)
+        : RatingData.empty;
   }
+
+  // The loaded data, or null while the async build is still in flight.
+  //
+  // Every mutator and [save] below early-returns on null. The rating column does
+  // render before this resolves ([RatingColumnSpec.plutoColumn] falls back to
+  // RatingData.empty), and an unrated cell is precisely the interactive one, so a
+  // drag during the load window is reachable - and writing the fallback back out
+  // would erase every rating in this storage file.
+  //
+  // A *failed* load is a different situation and throws instead of returning null;
+  // see [StorageLoadFailure].
+  RatingData? _dataFor(String attempt) => _dataForMutation(state, storage: "rating", key: key, attempt: attempt);
 
   // Mutates the live map in place to avoid rebuilding the data grid on every
   // rating change. [save] snapshots the map before handing it to the writer
   // isolate, so this in-place edit cannot race the serialization.
   void updateWithoutNotify(String recordId, double rating) {
-    state.data[recordId] = rating;
+    final data = _dataFor("a rating for $recordId");
+    if (data == null) {
+      return;
+    }
+    data.data[recordId] = rating;
   }
 
-  void update(String recordId, double rating) {
-    state = state.copyWith(data: {...state.data, recordId: rating});
+  // Named `updateRating` (not `update`) to avoid colliding with the inherited
+  // `AsyncNotifier.update` modifier, which has an incompatible signature.
+  void updateRating(String recordId, double rating) {
+    final data = _dataFor("a rating for $recordId");
+    if (data == null) {
+      return;
+    }
+    state = AsyncData(data.copyWith(data: {...data.data, recordId: rating}));
   }
 
   void updateTitle(String title) {
-    state = state.copyWith(title: title);
+    final data = _dataFor("a title change");
+    if (data == null) {
+      return;
+    }
+    state = AsyncData(data.copyWith(title: title));
   }
 
   void save() {
-    _RatingDataWriter(path, state.copyWith(data: {...state.data})).run();
+    final data = _dataFor("a save");
+    if (data == null) {
+      return;
+    }
+    _RatingDataWriter(path, data.copyWith(data: {...data.data})).run();
   }
 }
 
@@ -262,29 +381,24 @@ class RatingStorageData {
 
 Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async {
   initializeMappers();
-  if (!directoryPath.existsSync()) {
+  if (!await directoryPath.exists()) {
     return [];
   }
-  return directoryPath
-      .listSync()
-      .map((e) {
-        try {
-          return RatingStorageData(
-            key: e.stem,
-            title: RatingDataMapper.fromJson(e.asFilePath.readAsStringSync()).title,
-          );
-        } catch (error, stackTrace) {
-          logger.w("Skipping unreadable rating file: path=${e.asFilePath}", error, stackTrace);
-          return null;
-        }
-      })
-      .whereType<RatingStorageData>()
-      .toList();
+  final result = <RatingStorageData>[];
+  await for (final e in directoryPath.list()) {
+    try {
+      final title = RatingDataMapper.fromJson(await e.asFilePath.readAsString()).title;
+      result.add(RatingStorageData(key: e.stem, title: title));
+    } catch (error, stackTrace) {
+      logger.w("Skipping unreadable rating file: path=${e.asFilePath.path}", error, stackTrace);
+    }
+  }
+  return result;
 }
 
 final _charaDetailRecordRatingStorageDataLoader = FutureProvider<List<RatingStorageData>>((ref) {
   final path = ref.watch(pathInfoProvider).charaDetailRatingDir;
-  return compute(_loadRatings, path);
+  return _loadRatings(path);
 });
 
 // Holds the list of rating/memo storage descriptors. Replaces the legacy
@@ -304,9 +418,10 @@ final charaDetailRecordRatingStorageDataProvider =
       CharaDetailRecordRatingStorageDataNotifier.new,
     );
 
-final charaDetailRecordRatingProvider = NotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>(
-  CharaDetailRecordRatingController.new,
-);
+final charaDetailRecordRatingProvider =
+    AsyncNotifierProvider.family<CharaDetailRecordRatingController, RatingData, String>(
+      CharaDetailRecordRatingController.new,
+    );
 
 class _MemoDataWriter {
   final FilePath path;
@@ -340,7 +455,7 @@ class MemoData with MemoDataMappable {
   }
 }
 
-class CharaDetailRecordMemoController extends Notifier<MemoData> {
+class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> {
   CharaDetailRecordMemoController(this.key);
 
   final String key;
@@ -348,35 +463,71 @@ class CharaDetailRecordMemoController extends Notifier<MemoData> {
   late FilePath path;
 
   @override
-  MemoData build() {
+  Future<MemoData> build() async {
+    // `path` is assigned synchronously (before the first await) so [_save] is safe
+    // the moment the controller starts building. The read is async so web can load
+    // the memo file from OPFS; on desktop it is a fast local-disk read.
     path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
-    return path.existsSync() ? MemoDataMapper.fromJson(path.readAsStringSync()) : MemoData.empty;
+    return (await path.exists())
+        ? await _readStorageFile(path, "memo storage $key", MemoDataMapper.fromJson)
+        : MemoData.empty;
   }
 
-  String get title => state.title;
+  // The loaded data, or null while the async build is still in flight (see the
+  // note on [CharaDetailRecordRatingController]: the mutators and [_save] must
+  // never persist a value derived from the empty fallback). A failed load throws
+  // [StorageLoadFailure] rather than sharing that null.
+  MemoData? _dataFor(String attempt) => _dataForMutation(state, storage: "memo", key: key, attempt: attempt);
 
-  void _update({required String recordId, required String memo}) {
-    state = state.copyWith(data: {...state.data, recordId: memo});
+  // The empty fallback is safe while the load is in flight: it only labels a column
+  // whose real title arrives with it. It is not safe once the load has *failed* -
+  // answering with the default title there tells the reader the storage is empty,
+  // when in truth its contents are unknown and every memo typed into the dialog this
+  // title heads would be refused. That case throws [StorageLoadFailure] instead.
+  String get title {
+    final failure = _loadFailureOf(state);
+    if (failure != null) {
+      throw StorageLoadFailure(storage: "memo", key: key, attempt: "reading the title", cause: failure);
+    }
+    return state.value?.title ?? MemoData.empty.title;
   }
 
-  void _remove({required String recordId}) {
-    state = state.copyWith(data: {...state.data}..remove(recordId));
+  void _update({required String recordId, required String memo, required MemoData data}) {
+    state = AsyncData(data.copyWith(data: {...data.data, recordId: memo}));
+  }
+
+  void _remove({required String recordId, required MemoData data}) {
+    state = AsyncData(data.copyWith(data: {...data.data}..remove(recordId)));
   }
 
   void updateTitle({required String title}) {
-    state = state.copyWith(title: title);
+    final data = _dataFor("a title change");
+    if (data == null) {
+      return;
+    }
+    state = AsyncData(data.copyWith(title: title));
     _save();
   }
 
   void _save() {
-    _MemoDataWriter(path, state.copyWith(data: {...state.data})).run();
+    final data = _dataFor("a save");
+    if (data == null) {
+      return;
+    }
+    _MemoDataWriter(path, data.copyWith(data: {...data.data})).run();
   }
 
-  void update({required String recordId, required String? memo}) {
-    if (memo?.isEmpty ?? true) {
-      _remove(recordId: recordId);
+  // Named `updateMemo` (not `update`) to avoid colliding with the inherited
+  // `AsyncNotifier.update` modifier, which has an incompatible signature.
+  void updateMemo({required String recordId, required String? memo}) {
+    final data = _dataFor("a memo for $recordId");
+    if (data == null) {
+      return;
+    }
+    if (memo == null || memo.isEmpty) {
+      _remove(recordId: recordId, data: data);
     } else {
-      _update(recordId: recordId, memo: memo!);
+      _update(recordId: recordId, memo: memo, data: data);
     }
     _save();
   }
@@ -395,26 +546,24 @@ class MemoStorageData {
 
 Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   initializeMappers();
-  if (!directoryPath.existsSync()) {
+  if (!await directoryPath.exists()) {
     return [];
   }
-  return directoryPath
-      .listSync()
-      .map((e) {
-        try {
-          return MemoStorageData(key: e.stem, title: MemoDataMapper.fromJson(e.asFilePath.readAsStringSync()).title);
-        } catch (error, stackTrace) {
-          logger.w("Skipping unreadable memo file: path=${e.asFilePath}", error, stackTrace);
-          return null;
-        }
-      })
-      .whereType<MemoStorageData>()
-      .toList();
+  final result = <MemoStorageData>[];
+  await for (final e in directoryPath.list()) {
+    try {
+      final title = MemoDataMapper.fromJson(await e.asFilePath.readAsString()).title;
+      result.add(MemoStorageData(key: e.stem, title: title));
+    } catch (error, stackTrace) {
+      logger.w("Skipping unreadable memo file: path=${e.asFilePath.path}", error, stackTrace);
+    }
+  }
+  return result;
 }
 
 final _charaDetailRecordMemoStorageDataLoader = FutureProvider<List<MemoStorageData>>((ref) {
   final path = ref.watch(pathInfoProvider).charaDetailMemoDir;
-  return compute(_loadMemos, path);
+  return _loadMemos(path);
 });
 
 class CharaDetailRecordMemoStorageDataNotifier extends _StorageDataNotifier<MemoStorageData> {
@@ -427,7 +576,7 @@ final charaDetailRecordMemoStorageDataProvider =
       CharaDetailRecordMemoStorageDataNotifier.new,
     );
 
-final charaDetailRecordMemoProvider = NotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>(
+final charaDetailRecordMemoProvider = AsyncNotifierProvider.family<CharaDetailRecordMemoController, MemoData, String>(
   CharaDetailRecordMemoController.new,
 );
 

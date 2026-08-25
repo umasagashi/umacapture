@@ -3,6 +3,10 @@ import 'package:dart_mappable/dart_mappable.dart';
 
 import '/src/core/json_adapter.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/fs/record_directory_transaction.dart';
+import '/src/core/fs/record_id_safety.dart';
+import '/src/core/fs/record_mutation_lock.dart';
+import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
@@ -317,6 +321,58 @@ class RecordQuarantined extends RecordLoadResult {
   const RecordQuarantined(this.destination);
 }
 
+/// A record whose decode failed *and* whose quarantine move failed with it, so
+/// the directory is still standing where the scan found it.
+///
+/// Exists so that outcome can be *counted* rather than only announced: the bulk
+/// scans put one of these in [RecordScanResult.unavailable], which is what makes
+/// the store say its view is incomplete and puts the record on the persistent
+/// banner. Reported as a toast alone it was gone the moment it scrolled away,
+/// while the record stayed missing from duplicate detection and inheritance
+/// resolution for the rest of the session — and the remedy is the same rescan
+/// the banner already offers, because a rescan re-runs the decode and therefore
+/// re-attempts the very move that failed.
+final class RecordQuarantineFailed implements Exception {
+  const RecordQuarantineFailed(this.id);
+
+  /// The record directory that could not be moved aside.
+  final String id;
+
+  @override
+  String toString() =>
+      'RecordQuarantineFailed: "$id" could not be decoded and could not be moved '
+      'into quarantine/, so it is still in place and still unreadable';
+}
+
+/// Outcome of scanning a whole record root.
+///
+/// [results] holds one [RecordLoadResult] per record directory the scan managed
+/// to open; [unavailable] maps the id of every record it could **not** open to
+/// the error that refused it. Together they account for every directory scanned,
+/// so a caller can never lose a record without being handed the reason.
+///
+/// Deliberately *not* a third [RecordLoadResult] variant. Only the bulk scan can
+/// produce an unavailable record — the single-record loaders rethrow, which is
+/// their contract — so widening the per-record result would force a case its own
+/// producer cannot return onto the three single-record switches that can never
+/// see it, while the two bulk call sites (which filter with `whereType`) would
+/// still compile after silently dropping it. The shape instead mirrors
+/// `WebRecordPersistenceResult.failures`, which reports the same "lost, and why"
+/// on the write side.
+typedef RecordScanResult = ({List<RecordLoadResult> results, Map<String, Object> unavailable});
+
+/// A decoded `record.json` claimed an id other than its containing directory.
+/// Mutation authority is always derived from the directory leaf.
+final class RecordIdMismatch implements Exception {
+  const RecordIdMismatch({required this.expectedId, required this.actualId});
+
+  final String expectedId;
+  final String actualId;
+
+  @override
+  String toString() => 'RecordIdMismatch: expected "$expectedId", decoded "$actualId".';
+}
+
 /// File name of the always-retained trainee icon inside a record's directory.
 ///
 /// Single source of truth shared by [CharaDetailRecord.traineeIconPath] and the
@@ -400,7 +456,16 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
 
   FilePath get traineeIconPath => DirectoryPath(id).filePath(traineeIconFileName);
 
-  DateTime get trainedDateAsDateTime => trainedDate.replaceAll("/", "-").toDateTime();
+  /// The date this trainee finished training, or `null` when the recognizer
+  /// could not read one.
+  ///
+  /// Unlike `captured_date`, which this app writes itself, `trained_date` is OCR
+  /// of the game screen and is left as an empty string when the date could not
+  /// be read -- measured at about 2% of captured records, so "unknown" is a
+  /// routine state rather than an error. Nullable so that callers placing a
+  /// record in time can leave it out instead of placing it at a stand-in date
+  /// decades before every real record.
+  DateTime? get trainedDateAsDateTimeOrNull => trainedDate.replaceAll("/", "-").toDateTimeOrNull();
 
   /// Loads the record in [directory], quarantining it if it cannot be decoded.
   ///
@@ -411,21 +476,66 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   static RecordLoadResult load(DirectoryPath directory) {
     try {
       final content = directory.filePath("record.json").readAsStringSync();
-      return RecordLoaded(CharaDetailRecordMapper.fromJson(content));
+      final record = CharaDetailRecordMapper.fromJson(content);
+      _validateDirectoryId(directory, record);
+      return RecordLoaded(record);
     } catch (exception, stackTrace) {
-      logger.e("Failed to load record.json.", exception, stackTrace);
-      try {
-        logger.i(directory.listSync().map((e) => e.name).join(", "));
-      } catch (_) {
-        // The listing is diagnostic only; the entry may not be a listable
-        // directory (vanished concurrently, or not a directory at all), and
-        // that must not escalate one bad record into a scan-wide failure.
-      }
-      captureException(exception, stackTrace);
+      return _quarantineOnFailure(directory, exception, stackTrace);
     }
-    // A record that fails to decode (unknown enum value, missing required
-    // field, legacy/hand-edited file) is moved aside instead of being deleted,
-    // so its images and json survive for later inspection or recovery.
+  }
+
+  /// Asynchronous counterpart of [load] for the web/main-isolate loader.
+  ///
+  /// Reads `record.json` through the async FS backend (OPFS on web) instead of
+  /// the sync one, but keeps the decode and the `record-load-deletes-on-failure`
+  /// quarantine branch identical to [load], so a decode failure still moves the
+  /// record aside rather than deleting it.
+  static Future<RecordLoadResult> loadAsync(
+    DirectoryPath directory, {
+    RecordRecoveryGate? recoveryGate,
+    RecordMutationLock? mutationLock,
+  }) {
+    final gate = recoveryGate ?? createPlatformRecordRecoveryGate(mutationLock: mutationLock);
+    return gate.runForRecord(directory.parent.parent.parent, directory.name, () => loadAsyncUnlocked(directory));
+  }
+
+  /// Variant of [loadAsync] for a caller which already owns [directory]'s
+  /// record-mutation lock. Keeping this separate prevents a decode failure
+  /// from trying to acquire the same non-reentrant Web Lock a second time.
+  static Future<RecordLoadResult> loadAsyncUnlocked(DirectoryPath directory) async {
+    try {
+      final content = await directory.filePath("record.json").readAsString();
+      final record = CharaDetailRecordMapper.fromJson(content);
+      _validateDirectoryId(directory, record);
+      return RecordLoaded(record);
+    } catch (exception, stackTrace) {
+      return _quarantineOnFailureAsyncUnlocked(directory, exception, stackTrace);
+    }
+  }
+
+  static void _validateDirectoryId(DirectoryPath directory, CharaDetailRecord record) {
+    if (record.id != directory.name) {
+      throw RecordIdMismatch(expectedId: directory.name, actualId: record.id);
+    }
+  }
+
+  /// Logs [exception], reports it, and quarantines [directory].
+  ///
+  /// Shared by [load] and [loadAsync] so the decode-failure handling stays
+  /// identical across the sync and async loaders. A record that fails to decode
+  /// (unknown enum value, missing required field, legacy/hand-edited file) is
+  /// moved aside instead of being deleted, so its images and json survive for
+  /// later inspection or recovery.
+  static RecordLoadResult _quarantineOnFailure(DirectoryPath directory, Object exception, StackTrace stackTrace) {
+    logger.e("Failed to load record.json.", exception, stackTrace);
+    try {
+      logger.i(directory.listSync().map((e) => e.name).join(", "));
+    } catch (_) {
+      // The listing is diagnostic only; the entry may not be a listable
+      // directory (vanished concurrently, or not a directory at all), and
+      // that must not escalate one bad record into a scan-wide failure.
+    }
+    captureException(exception, stackTrace);
     return RecordQuarantined(quarantine(directory));
   }
 
@@ -437,13 +547,83 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// quarantined record is not re-loaded (and re-quarantined) on restart. A name
   /// collision with an already-quarantined id is resolved with an `_<n>` suffix.
   /// Returns the destination, or `null` if the move failed.
+  ///
+  /// The destination name comes from [safeRecordDirectoryName] rather than from
+  /// [directory] directly, so it is always a *single* segment. Quarantine is the
+  /// one mover that can be handed a name no writer of this app would have
+  /// produced — an unusable name is a reason to quarantine, not a reason to
+  /// refuse — and joining such a name onto the quarantine root is what would
+  /// file the record below `quarantine/` instead of in it.
   static DirectoryPath? quarantine(DirectoryPath directory) {
     final quarantineRoot = directory.parent.parent / "quarantine";
-    var destination = quarantineRoot / directory.name;
+    final name = safeRecordDirectoryName(directory.name);
+    var destination = quarantineRoot / name;
     for (var n = 1; destination.existsSync(); n++) {
-      destination = quarantineRoot / "${directory.name}_$n";
+      destination = quarantineRoot / "${name}_$n";
     }
     return directory.moveSyncSafe(destination);
+  }
+
+  /// Asynchronous counterpart of [_quarantineOnFailure], for a caller which
+  /// already owns [directory]'s record-mutation lock.
+  ///
+  /// Reached from [loadAsyncUnlocked] and quarantines through
+  /// [quarantineAsyncUnlocked], so the decode-failure path never asks for the
+  /// same non-reentrant Web Lock a second time.
+  static Future<RecordLoadResult> _quarantineOnFailureAsyncUnlocked(
+    DirectoryPath directory,
+    Object exception,
+    StackTrace stackTrace,
+  ) async {
+    logger.e("Failed to load record.json.", exception, stackTrace);
+    try {
+      logger.i(await directory.list().map((e) => e.name).join(", "));
+    } catch (_) {
+      // Diagnostic-only; the directory may already have changed.
+    }
+    captureException(exception, stackTrace);
+    return RecordQuarantined(await quarantineAsyncUnlocked(directory));
+  }
+
+  /// Asynchronous counterpart of [quarantine] for the web / main-isolate loader,
+  /// for a caller which already holds a lock covering [directory].
+  ///
+  /// That is [directory]'s own record-mutation lock for the decode-failure path,
+  /// and the **exclusive root lock** for the store scan's unusable-name path,
+  /// which cannot name a per-record lock after the id it is quarantining *for*.
+  /// The root scope is the wider of the two — every per-record acquisition takes
+  /// the root name shared first — so both callers are covered, and neither is an
+  /// unlocked mutation.
+  ///
+  /// Resolves the collision-free destination via async existence probes and moves
+  /// the directory with [DirectoryPath.moveAsyncSafe] (a copy-then-delete, since
+  /// OPFS has no directory rename). Returns the destination, or `null` if the
+  /// move failed.
+  ///
+  /// The destination probe and the move stay in the same critical section, so a
+  /// collision cannot select the same suffix in another tab.
+  ///
+  /// The name is folded through [safeRecordDirectoryName] for the reason spelled
+  /// out there: `WebVfs` splits the joined path on `\` as well as `/`, so a
+  /// directory whose name carries a separator would be filed one level below
+  /// `quarantine/` — out of sight of the only reader that folder has.
+  ///
+  /// Deliberately *not* a [RecordDirectoryTransaction]: every way this can be
+  /// interrupted leaves the record whole. A partial copy leaves `active/<id>`
+  /// untouched and a stray tree under `quarantine/`; a copy that finished but a
+  /// delete that did not leaves the record in both places. Either way the next
+  /// scan fails the same decode and quarantines it again to the next free
+  /// `_<n>` suffix, so nothing is lost and the store converges on its own. A
+  /// transaction can only protect a move whose commit deletes bytes that exist
+  /// nowhere else, which is what archiving does and this does not.
+  static Future<DirectoryPath?> quarantineAsyncUnlocked(DirectoryPath directory) async {
+    final quarantineRoot = directory.parent.parent / "quarantine";
+    final name = safeRecordDirectoryName(directory.name);
+    var destination = quarantineRoot / name;
+    for (var n = 1; await destination.exists(); n++) {
+      destination = quarantineRoot / "${name}_$n";
+    }
+    return directory.moveAsyncSafe(destination);
   }
 
   /// Determines if another record represents the same character based on key attributes.

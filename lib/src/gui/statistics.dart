@@ -15,6 +15,7 @@ import '/src/core/callback.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_image.dart';
 import '/src/gui/theme_extensions.dart';
 
 // ignore: constant_identifier_names
@@ -350,8 +351,8 @@ class _RankingStatisticWidgetState extends ConsumerState<_RankingStatisticWidget
             (
               rank: entry.$1 + 1,
               content: _RankingIcon(
-                icon: Image.file(
-                  storage.traineeIconPathOf(entry.$2.record).toFile(),
+                icon: RecordImage(
+                  storage.traineeIconPathOf(entry.$2.record),
                   height: _rankingIconSize,
                   // Guard against a missing/corrupt trainee icon so the row shows a placeholder
                   // instead of a framework error glyph.
@@ -475,8 +476,8 @@ class _MostFrequentCharacterStatisticWidgetState extends ConsumerState<MostFrequ
             (
               rank: entry.$1 + 1,
               content: _RankingIcon(
-                icon: Image.file(
-                  storage.traineeIconPathOf(entry.$2.first).toFile(),
+                icon: RecordImage(
+                  storage.traineeIconPathOf(entry.$2.first),
                   height: _rankingIconSize,
                   // Guard against a missing/corrupt trainee icon so the row shows a placeholder
                   // instead of a framework error glyph.
@@ -625,21 +626,41 @@ class MostFrequentFactorStatisticWidget {
   }
 }
 
+/// A record together with the date it is placed at on a time axis.
+typedef DatedRecord = ({CharaDetailRecord record, DateTime trainedDate});
+
+/// The subset of [records] that has a place on a time axis, each paired with the
+/// date it is placed at.
+///
+/// A record whose `trained_date` the recognizer could not read has no position
+/// in time at all, so it is left out rather than drawn somewhere. Drawing it
+/// somewhere is what the sentinel date would amount to: it is older than every
+/// real record, so a chart that let it in would stretch its axis back to 1999 to
+/// reach it and squash three years of real data into the last few pixels -- one
+/// unreadable record out of a thousand hiding the other nine hundred and
+/// ninety-nine. Leaving it out costs one point that carries no information
+/// anyway, and the tiles already render "-" when nothing is left.
+List<DatedRecord> datedRecords(Iterable<CharaDetailRecord> records) => [
+  for (final record in records)
+    if (record.trainedDateAsDateTimeOrNull case final trainedDate?) (record: record, trainedDate: trainedDate),
+];
+
 class MonthlyFansChartData {
-  final List<CharaDetailRecord> records;
+  final List<DatedRecord> entries;
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
   /// Friend (practice-partner) records are excluded: their fan counts belong to
-  /// the friend's trainee, not the player's own monthly fan acquisition.
+  /// the friend's trainee, not the player's own monthly fan acquisition. Records
+  /// with no readable trained date are excluded by [datedRecords].
   MonthlyFansChartData(List<CharaDetailRecord> records)
-    : records = records.where((record) => !record.isFriend).toList();
+    : entries = datedRecords(records.where((record) => !record.isFriend));
 
   List<FlSpot> parse({required DateTime start, required DateTime end}) {
-    final targets = records.where((record) => record.trainedDateAsDateTime.isInRange(start, end));
+    final targets = entries.where((entry) => entry.trainedDate.isInRange(start, end));
 
     final fansPerDay = targets.groupFoldBy<int, int>(
-      (record) => record.trainedDateAsDateTime.inDays,
-      (previous, record) => (previous ?? 0) + record.fans,
+      (entry) => entry.trainedDate.inDays,
+      (previous, entry) => (previous ?? 0) + entry.record.fans,
     );
 
     final List<int> fans = [0];
@@ -776,7 +797,10 @@ class _MonthlyFansStatisticWidgetState extends ConsumerState<MonthlyFansStatisti
       final records = ref.watch(charaDetailRecordStorageProvider);
       // The earliest navigable month is the month of the oldest player (non-friend)
       // record; with no such record, fall back to the current month.
-      final playerDates = records.where((record) => !record.isFriend).map((record) => record.trainedDateAsDateTime);
+      // Only records that have a readable trained date bound the navigation: one
+      // that has none would otherwise pull the bound back to the sentinel date
+      // and put three hundred empty months between the arrows.
+      final playerDates = datedRecords(records.where((record) => !record.isFriend)).map((e) => e.trainedDate);
       final oldest = playerDates.isEmpty ? widget.end : playerDates.reduce((a, b) => a.isBefore(b) ? a : b);
       final start = DateTime(oldest.year, oldest.month);
       return _StatisticTile(
@@ -1178,17 +1202,20 @@ class CountRedFactorStatisticWidget {
 
 /// All-time scatter of every player (non-friend) record's evaluation value,
 /// the X axis laid out in fractional months from the oldest record.
-class _EvaluationScatterChartData {
-  final List<CharaDetailRecord> records;
+class EvaluationScatterChartData {
+  final List<DatedRecord> entries;
 
   final noTitle = AxisTitles(sideTitles: SideTitles(showTitles: false));
 
   /// Trained (own) records only: friend records are not the player's own runs,
-  /// and inheritance-only records carry no evaluation value.
-  _EvaluationScatterChartData(List<CharaDetailRecord> records)
-    : records = records
-          .where((record) => (record.metadata.recordType ?? RecordType.standard) == RecordType.standard)
-          .toList();
+  /// and inheritance-only records carry no evaluation value. Records with no
+  /// readable trained date are excluded by [datedRecords] -- this is the tile
+  /// the sentinel date damaged most, since its X axis is derived from the oldest
+  /// record rather than from a month the user picked.
+  EvaluationScatterChartData(List<CharaDetailRecord> records)
+    : entries = datedRecords(
+        records.where((record) => (record.metadata.recordType ?? RecordType.standard) == RecordType.standard),
+      );
 
   double _monthOffset(DateTime date, DateTime start) {
     final months = (date.year - start.year) * 12 + (date.month - start.month);
@@ -1196,7 +1223,7 @@ class _EvaluationScatterChartData {
   }
 
   ScatterChart build(ThemeData theme) {
-    final dates = records.map((e) => e.trainedDateAsDateTime);
+    final dates = entries.map((e) => e.trainedDate);
     final oldest = dates.reduce((a, b) => a.isBefore(b) ? a : b);
     final latest = dates.reduce((a, b) => a.isAfter(b) ? a : b);
     final start = DateTime(oldest.year, oldest.month);
@@ -1210,7 +1237,7 @@ class _EvaluationScatterChartData {
     // Same headroom on the left so the oldest point isn't flush against the edge.
     final minX = -(maxX - latestOffset);
     final monthStep = Math.max(1, (lastMonth / 5).ceil());
-    final maxValue = records.map((e) => e.evaluationValue).max;
+    final maxValue = entries.map((e) => e.record.evaluationValue).max;
     // Keep headroom above the highest point, but suppress the top-most axis label
     // (it would sit above the real maximum) so no inflated number is shown.
     final maxY = Math.max(1.0, (maxValue * 1.1).ceilToDouble());
@@ -1219,10 +1246,10 @@ class _EvaluationScatterChartData {
     return ScatterChart(
       ScatterChartData(
         scatterSpots: [
-          for (final record in records)
+          for (final entry in entries)
             ScatterSpot(
-              _monthOffset(record.trainedDateAsDateTime, start),
-              record.evaluationValue.toDouble(),
+              _monthOffset(entry.trainedDate, start),
+              entry.record.evaluationValue.toDouble(),
               dotPainter: FlDotCirclePainter(color: theme.chart.series, radius: 3),
             ),
         ],
@@ -1302,8 +1329,8 @@ class EvaluationTrendStatisticWidget extends ConsumerWidget {
       title: Text("$tr_statistics.evaluation_trend.title".tr()),
       bottom: const SizedBox.shrink(),
       builder: () {
-        final chart = _EvaluationScatterChartData(ref.watch(charaDetailRecordStorageProvider));
-        if (chart.records.isEmpty) {
+        final chart = EvaluationScatterChartData(ref.watch(charaDetailRecordStorageProvider));
+        if (chart.entries.isEmpty) {
           return Text("-", style: theme.textTheme.headlineLarge);
         }
         return Padding(padding: const EdgeInsets.only(top: 16, right: 16, bottom: 8), child: chart.build(theme));

@@ -6,6 +6,7 @@ import 'package:dart_eval/dart_eval.dart';
 import 'package:dart_eval/dart_eval_bridge.dart';
 import 'package:dart_mappable/dart_mappable.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
@@ -271,13 +272,13 @@ final _enricherProvider = Provider<_Enricher>((ref) {
   final factorInfo = {for (final f in ref.watch(factorInfoProvider)) f.sid: f};
   final ratingsByRecord = <String, Map<String, double>>{};
   for (final storage in ref.watch(charaDetailRecordRatingStorageDataProvider)) {
-    ref.watch(charaDetailRecordRatingProvider(storage.key)).data.forEach((recordId, value) {
+    (ref.watch(charaDetailRecordRatingProvider(storage.key)).value ?? RatingData.empty).data.forEach((recordId, value) {
       (ratingsByRecord[recordId] ??= {})[storage.key] = value;
     });
   }
   final memosByRecord = <String, Map<String, String>>{};
   for (final storage in ref.watch(charaDetailRecordMemoStorageDataProvider)) {
-    ref.watch(charaDetailRecordMemoProvider(storage.key)).data.forEach((recordId, value) {
+    (ref.watch(charaDetailRecordMemoProvider(storage.key)).value ?? MemoData.empty).data.forEach((recordId, value) {
       (memosByRecord[recordId] ??= {})[storage.key] = value;
     });
   }
@@ -579,7 +580,7 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
     scriptCodeTables = ref.read(scriptCodeTablesProvider);
     // Production has no hard per-call timeout: dart_eval exposes no instruction
     // hook, so a single runaway record cannot be interrupted here. The save-time
-    // check runs the whole record set under [_previewTimeout], which is what
+    // check runs the whole record set under [_previewExecutionBudget], which is what
     // guarantees no such script is committed. As a softer secondary guard against
     // cumulative cost (e.g. far more records than existed at check time), abort
     // once the looser [_productionBudget] is spent and mark the remaining rows.
@@ -618,10 +619,9 @@ class ScriptColumnSpec extends ColumnSpec<ScriptCellResult> with ScriptColumnSpe
 
   ScriptCellResult _run(RefBase ref, Runtime runtime, CharaDetailRecord record) {
     try {
-      final map = ref.read(enrichedRecordProvider(record.id));
-      final visible = _unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
-      if (!visible) return const ScriptCellResult(visible: false, display: '');
-      return _displayResult(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
+      // [_evalRecord] already maps a throwing script to an error cell; this catch
+      // only covers the record lookup that precedes it.
+      return _evalRecord(runtime, ref.read(enrichedRecordProvider(record.id)));
     } catch (e) {
       return ScriptCellResult(visible: true, display: '', error: e.toString());
     }
@@ -721,16 +721,37 @@ class _ScriptCell extends StatelessWidget {
   }
 }
 
-// --- Preview (separate isolate + timeout) -----------------------------------
+// --- Preview (killable isolate where there is one, timeout everywhere) ------
 
 /// Maximum number of rows the preview grid widget renders. The check itself runs
 /// against every record; this only bounds how many result rows are shown (and
 /// hashed into the grid key) so a large dataset stays responsive in the dialog.
 const _previewDisplayLimit = 100;
 
-/// Hard cap on a save-time check, now run over the FULL record set; exceeding it
-/// rejects the save (infinite loops, pathologically heavy scripts).
-const _previewTimeout = Duration(seconds: 3);
+/// Hard cap on the script's own execution during the save-time check, which is
+/// run over the FULL record set; exceeding it rejects the save (infinite loops,
+/// pathologically heavy scripts).
+///
+/// Deliberately stricter than [_productionBudget] so a script that passes the
+/// check keeps headroom for records added after it. It is charged for the record
+/// loop only: [_previewEntry] reports when that loop starts, so isolate spawn and
+/// the in-isolate recompile -- fixed overhead the script is not responsible for,
+/// and which a busy machine can stretch to seconds -- are budgeted separately by
+/// [_previewStartupBudget]. Charging them here made the gate depend on machine
+/// load and could reject a trivially fast script.
+const _previewExecutionBudget = Duration(seconds: 3);
+
+/// Budget for spawning the preview isolate and recompiling the source inside it,
+/// i.e. everything before the first record is evaluated.
+///
+/// Generous on purpose: it says nothing about how fast a script has to be, it is
+/// only a last resort so a spawn that never comes back cannot hang the dialog.
+const _previewStartupBudget = Duration(seconds: 30);
+
+/// Sent by [_previewEntry] once compilation has succeeded and the record loop is
+/// about to begin, so the caller starts [_previewExecutionBudget] at the point
+/// the script itself begins costing time.
+const _previewStartedSignal = '__script_preview_started__';
 
 /// Looser wall-clock budget for the synchronous production grid build. A script
 /// that passed the stricter full-set check stays well under this; the headroom
@@ -772,6 +793,23 @@ class ScriptPreviewResult {
   bool get ok => compileError == null && !timedOut && rows.every((r) => r.error == null);
 }
 
+/// Evaluates one enriched record: `filter`, then `display` when it passes.
+///
+/// The single definition of "what running one record means", shared by the
+/// production grid ([ScriptColumnSpec._run]), the preview isolate
+/// ([_previewEntry]) and the in-process preview ([_runPreviewInProcess]), so a
+/// script — including a throwing one — cannot be judged differently by the
+/// check than by the grid, nor by web than by Windows.
+ScriptCellResult _evalRecord(Runtime runtime, Map<String, dynamic> map) {
+  try {
+    final visible = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
+    if (!visible) return const ScriptCellResult(visible: false, display: '');
+    return ScriptColumnSpec._displayResult(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)]));
+  } catch (e) {
+    return ScriptCellResult(visible: true, display: '', error: e.toString());
+  }
+}
+
 /// Isolate entry: recompiles the (already main-side-validated) source and runs
 /// filter + display over the sampled records, timing the whole pass. Runs in a
 /// killable isolate so an infinite loop can be aborted by the caller's timeout.
@@ -785,38 +823,119 @@ void _previewEntry(_PreviewRequest request) {
   // Mirror the production run: name→code tables for codeOf/atLeast/atMost.
   scriptCodeTables = request.tables;
   final rows = <ScriptCellResult>[];
+  // Everything above is fixed setup cost; the execution budget starts here.
+  request.port.send(_previewStartedSignal);
   final stopwatch = Stopwatch()..start();
   for (final map in request.records) {
-    try {
-      final visible = ScriptColumnSpec._unwrap(runtime.executeLib(_scriptLib, 'filter', [$Record.wrap(map)])) == true;
-      if (!visible) {
-        rows.add(const ScriptCellResult(visible: false, display: ''));
-        continue;
-      }
-      rows.add(ScriptColumnSpec._displayResult(runtime.executeLib(_scriptLib, 'display', [$Record.wrap(map)])));
-    } catch (e) {
-      rows.add(ScriptCellResult(visible: true, display: '', error: e.toString()));
-    }
+    rows.add(_evalRecord(runtime, map));
   }
   stopwatch.stop();
   final micros = request.records.isEmpty ? 0.0 : stopwatch.elapsedMicroseconds / request.records.length;
   request.port.send(ScriptPreviewResult(rows: rows, microsPerRecord: micros));
 }
 
+/// Runs the preview pass on the calling isolate, bounded by [executionBudget]
+/// re-checked between records. Used where [Isolate.spawn] does not exist.
+///
+/// **Why**: `dart:isolate` compiles for both web backends but every entry point
+/// is a stub — `Isolate.spawn` throws `UnsupportedError` under dart2js, dartdevc
+/// and dart2wasm alike (see each backend's `isolate_patch.dart`) — so on web
+/// there is no worker to run the check in, and no way to kill one.
+///
+/// **What is preserved**: the property the save gate depends on — a script whose
+/// full-set pass costs more than [executionBudget] is reported as timed out and
+/// therefore cannot be saved — plus identical per-record semantics via
+/// [_evalRecord].
+///
+/// **What is lost**: the hard kill. dart_eval's interpreter loop exposes no
+/// instruction hook and `executeLib` is synchronous, so between-record checks
+/// are the only place control ever returns here: a single record that never
+/// returns (`while (true) {}`) cannot be interrupted by any timer and hangs the
+/// page. Restoring a kill on web means compiling a second entry point into a Web
+/// Worker; that is deliberately not done here, because the production grid path
+/// ([ScriptColumnSpec.parse]) already interprets scripts in-process on web under
+/// the same between-record-only guard, so the check would be the only hardened
+/// half of a path that stays soft on either side of it.
+Future<ScriptPreviewResult> _runPreviewInProcess(
+  String source,
+  List<Map<String, dynamic>> records,
+  Map<String, Map<String, int>> tables,
+  Duration executionBudget,
+) async {
+  // Compiling always terminates and is charged to startup, not to the script:
+  // it happens before the stopwatch starts, matching [_previewEntry].
+  final compiled = CompiledScript.compile(source);
+  if (compiled.error != null) return ScriptPreviewResult(compileError: compiled.error);
+  final runtime = compiled.runtime!;
+  // Same name→code tables the production run installs. Overwriting the global is
+  // safe because [ScriptColumnSpec.parse] re-installs its own before every build.
+  scriptCodeTables = tables;
+  // Yield once so the dialog can paint its running state before the pass takes
+  // the only thread the page has.
+  await Future<void>.delayed(Duration.zero);
+  final rows = <ScriptCellResult>[];
+  final stopwatch = Stopwatch()..start();
+  for (final map in records) {
+    rows.add(_evalRecord(runtime, map));
+    if (stopwatch.elapsedMicroseconds > executionBudget.inMicroseconds) {
+      // Report it the way a killed isolate is reported: no partial rows, not ok,
+      // so the caller's save gate treats both platforms the same.
+      return ScriptPreviewResult(timedOut: true);
+    }
+  }
+  stopwatch.stop();
+  final micros = records.isEmpty ? 0.0 : stopwatch.elapsedMicroseconds / records.length;
+  return ScriptPreviewResult(rows: rows, microsPerRecord: micros);
+}
+
+/// Runs [source] over [records] and reports the outcome.
+///
+/// [executionBudget] bounds the record loop alone (see [_previewExecutionBudget])
+/// and [startupBudget] the spawn/compile that precedes it (see
+/// [_previewStartupBudget]). Both are parameters so a test can state which budget
+/// its case is about instead of inheriting a product constant it does not mean to
+/// exercise.
+///
+/// [inProcess] selects how the pass is run and defaults to the only choice each
+/// platform has: web has no isolates, so it runs on the calling isolate with a
+/// weaker guard ([_runPreviewInProcess] states exactly what is weaker), while
+/// everywhere else the pass runs in a killable isolate. It is a parameter so a
+/// test running on the VM can exercise the web path; production never passes it.
+/// [startupBudget] is unused in-process (there is nothing to spawn).
 Future<ScriptPreviewResult> runScriptPreview(
   String source,
-  List<Map<String, dynamic>> records, [
+  List<Map<String, dynamic>> records, {
   Map<String, Map<String, int>> tables = const {},
-]) async {
+  Duration executionBudget = _previewExecutionBudget,
+  Duration startupBudget = _previewStartupBudget,
+  bool inProcess = kIsWeb,
+}) async {
+  if (inProcess) return _runPreviewInProcess(source, records, tables, executionBudget);
   final receivePort = ReceivePort();
   final isolate = await Isolate.spawn(_previewEntry, _PreviewRequest(receivePort.sendPort, source, records, tables));
+  final events = StreamIterator<dynamic>(receivePort);
   try {
-    final result = await receivePort.first.timeout(_previewTimeout);
-    return result as ScriptPreviewResult;
+    // First message: either a compile error (reported before any record ran) or
+    // the start signal. Only the fixed spawn/compile cost is charged to this wait.
+    if (!await events.moveNext().timeout(startupBudget)) {
+      return ScriptPreviewResult(timedOut: true); // The isolate died without reporting.
+    }
+    final first = events.current;
+    if (first is ScriptPreviewResult) {
+      return first;
+    }
+    // The record loop is running; from here the wall clock is the script's own.
+    if (!await events.moveNext().timeout(executionBudget)) {
+      return ScriptPreviewResult(timedOut: true);
+    }
+    return events.current as ScriptPreviewResult;
   } on TimeoutException {
-    isolate.kill(priority: Isolate.immediate);
     return ScriptPreviewResult(timedOut: true);
   } finally {
+    // Unconditional: after a result the isolate is already exiting and the kill is
+    // a no-op, while every failure path above leaves a live isolate to reclaim.
+    isolate.kill(priority: Isolate.immediate);
+    await events.cancel();
     receivePort.close();
   }
 }
@@ -1203,12 +1322,13 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
       return;
     }
     // Validate against every record, not a sample: the full-set run (bounded by
-    // [_previewTimeout]) is the real guard that no committed script hangs the grid.
+    // [_previewExecutionBudget]) is the real guard that no committed script hangs
+    // the grid.
     final records = ref
         .read(charaDetailRecordStorageProvider)
         .map((r) => ref.read(enrichedRecordProvider(r.id)))
         .toList();
-    final result = await runScriptPreview(source, records, ref.read(scriptCodeTablesProvider));
+    final result = await runScriptPreview(source, records, tables: ref.read(scriptCodeTablesProvider));
     if (!mounted) return;
     _setSaveEnabled(result.ok);
     setState(() {

@@ -13,6 +13,7 @@ import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_image.dart';
 
 part 'preview_dialog.mapper.dart';
 
@@ -130,11 +131,11 @@ class PredictionContainer with PredictionContainerMappable {
 
   PredictionContainer(this.statusHeader, this.skillTab, this.factorTab, this.campaignTab);
 
-  static PredictionContainer? load(DirectoryPath recordDir) {
+  static Future<PredictionContainer?> load(DirectoryPath recordDir) async {
     // Optional overlay data: an older or quarantined record may lack a readable
     // prediction.json. Degrade to no overlay instead of throwing during build.
     try {
-      return PredictionContainerMapper.fromJson(recordDir.filePath("prediction.json").readAsStringSync());
+      return PredictionContainerMapper.fromJson(await recordDir.filePath("prediction.json").readAsString());
     } catch (e, s) {
       logger.w("Failed to load prediction.json for ${recordDir.name}: $e\n$s");
       return null;
@@ -156,11 +157,41 @@ class ImageSizeContainer {
 
   ImageSizeContainer({required this.skill, required this.factor, required this.campaign});
 
-  static ImageSizeContainer? load(DirectoryPath recordDir) {
+  static Future<ImageSizeContainer?> load(DirectoryPath recordDir) async {
     return ImageSizeContainer(
-      skill: recordDir.filePath("skill.json").deserializeSync<ImageSizeInfo>(),
-      factor: recordDir.filePath("factor.json").deserializeSync<ImageSizeInfo>(),
-      campaign: recordDir.filePath("campaign.json").deserializeSync<ImageSizeInfo>(),
+      skill: await recordDir.filePath("skill.json").deserialize<ImageSizeInfo>(),
+      factor: await recordDir.filePath("factor.json").deserialize<ImageSizeInfo>(),
+      campaign: await recordDir.filePath("campaign.json").deserialize<ImageSizeInfo>(),
+    );
+  }
+}
+
+/// The three per-tab preview images, resolved (existence-checked) once per record.
+///
+/// Mirrors how [ImageSizeContainer] loads all three tabs together so the preview
+/// dialog and side panel resolve image paths in a single async pass rather than
+/// probing the filesystem synchronously on every layout.
+class PreviewImagePaths {
+  final FilePath? skill;
+  final FilePath? factor;
+  final FilePath? campaign;
+
+  const PreviewImagePaths({this.skill, this.factor, this.campaign});
+
+  FilePath? forMode(CharaDetailRecordImageMode mode) => switch (mode) {
+    CharaDetailRecordImageMode.skillPlain => skill,
+    CharaDetailRecordImageMode.factorPlain => factor,
+    CharaDetailRecordImageMode.campaignPlain => campaign,
+    CharaDetailRecordImageMode.none => null,
+  };
+
+  bool get hasAny => skill != null || factor != null || campaign != null;
+
+  static Future<PreviewImagePaths> load(DirectoryPath recordDir) async {
+    return PreviewImagePaths(
+      skill: await resolveImagePath(recordDir, CharaDetailRecordImageMode.skillPlain),
+      factor: await resolveImagePath(recordDir, CharaDetailRecordImageMode.factorPlain),
+      campaign: await resolveImagePath(recordDir, CharaDetailRecordImageMode.campaignPlain),
     );
   }
 }
@@ -175,18 +206,18 @@ class ImageSizeContainer {
 /// frees it a frame after the last watcher leaves (e.g. navigating to another
 /// record). The key is the path string because [DirectoryPath] uses identity
 /// equality (a fresh instance per build would never cache-hit).
-final imageSizeContainerProvider = Provider.autoDispose.family<ImageSizeContainer?, String>((ref, path) {
+final imageSizeContainerProvider = FutureProvider.autoDispose.family<ImageSizeContainer?, String>((ref, path) async {
   // size json may be missing or corrupt (e.g. an archived record); degrade to a
   // placeholder instead of throwing out of the watching build.
   try {
-    return ImageSizeContainer.load(DirectoryPath(path));
+    return await ImageSizeContainer.load(DirectoryPath(path));
   } catch (e, s) {
     logger.w("Failed to load image size for $path: $e\n$s");
     return null;
   }
 });
 
-final predictionContainerProvider = Provider.autoDispose.family<PredictionContainer?, String>((ref, path) {
+final predictionContainerProvider = FutureProvider.autoDispose.family<PredictionContainer?, String>((ref, path) {
   // PredictionContainer.load already degrades to null on a missing/unreadable
   // prediction.json.
   return PredictionContainer.load(DirectoryPath(path));
@@ -195,13 +226,21 @@ final predictionContainerProvider = Provider.autoDispose.family<PredictionContai
 /// Whether a record still has its `prediction.json` (a cheap existence check, no
 /// parse). Archiving drops it, so the overlay visualization is offered only when
 /// this is true.
-final predictionAvailableProvider = Provider.autoDispose.family<bool, String>((ref, path) {
-  return DirectoryPath(path).filePath("prediction.json").existsSync();
+final predictionAvailableProvider = FutureProvider.autoDispose.family<bool, String>((ref, path) {
+  return DirectoryPath(path).filePath("prediction.json").exists();
+});
+
+/// Resolved (existence-checked) preview image paths for a record, memoized like
+/// [imageSizeContainerProvider] so the async filesystem probes run once per
+/// record rather than on every layout pass.
+final previewImagePathsProvider = FutureProvider.autoDispose.family<PreviewImagePaths, String>((ref, path) {
+  return PreviewImagePaths.load(DirectoryPath(path));
 });
 
 class ImageViewer extends ConsumerStatefulWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer imageSize;
+  final PreviewImagePaths imagePaths;
   final Size viewportSize;
   final Size contentSize;
   final bool overlay;
@@ -213,6 +252,7 @@ class ImageViewer extends ConsumerStatefulWidget {
     super.key,
     required this.recordDir,
     required this.imageSize,
+    required this.imagePaths,
     required this.viewportSize,
     required this.contentSize,
     required this.overlay,
@@ -245,8 +285,8 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
     }
     return Stack(
       children: [
-        Image.file(
-          imagePath.toFile(),
+        RecordImage(
+          imagePath,
           width: sizeInfo.intersection.width.toDouble(),
           height: sizeInfo.intersection.height.toDouble(),
           fit: BoxFit.none,
@@ -293,19 +333,19 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           predictionTabOverlay(
-            resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.skillPlain),
+            widget.imagePaths.forMode(CharaDetailRecordImageMode.skillPlain),
             widget.imageSize.skill,
             !widget.overlay
                 ? null
                 : [...(widget.prediction?.statusHeader ?? []), ...(widget.prediction?.skillTab ?? [])],
           ),
           predictionTabOverlay(
-            resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.factorPlain),
+            widget.imagePaths.forMode(CharaDetailRecordImageMode.factorPlain),
             widget.imageSize.factor,
             !widget.overlay ? null : widget.prediction?.factorTab,
           ),
           predictionTabOverlay(
-            resolveImagePath(widget.recordDir, CharaDetailRecordImageMode.campaignPlain),
+            widget.imagePaths.forMode(CharaDetailRecordImageMode.campaignPlain),
             widget.imageSize.campaign,
             !widget.overlay ? null : widget.prediction?.campaignTab,
           ),
@@ -324,12 +364,14 @@ class _ImageViewerState extends ConsumerState<ImageViewer> {
 class _PreviewContent extends StatelessWidget {
   final DirectoryPath recordDir;
   final ImageSizeContainer? imageSize;
+  final PreviewImagePaths imagePaths;
   final PredictionContainer? prediction;
   final bool overlay;
 
   const _PreviewContent({
     required this.recordDir,
     required this.imageSize,
+    required this.imagePaths,
     required this.prediction,
     required this.overlay,
   });
@@ -341,13 +383,9 @@ class _PreviewContent extends StatelessWidget {
       // The size json is gone. If the images are gone too, this is an intentional
       // image-less archive (the geometry json is dropped alongside the images), so
       // show the neutral "no image" message; otherwise it is a genuine load error.
-      const modes = [
-        CharaDetailRecordImageMode.skillPlain,
-        CharaDetailRecordImageMode.factorPlain,
-        CharaDetailRecordImageMode.campaignPlain,
-      ];
-      final hasAnyImage = modes.any((mode) => resolveImagePath(recordDir, mode) != null);
-      return ErrorMessageWidget(message: hasAnyImage ? "$tr_preview.loading_error".tr() : "$tr_preview.no_image".tr());
+      return ErrorMessageWidget(
+        message: imagePaths.hasAny ? "$tr_preview.loading_error".tr() : "$tr_preview.no_image".tr(),
+      );
     }
     final imageWidth = [
       imageSize.skill.intersection.width,
@@ -370,6 +408,7 @@ class _PreviewContent extends StatelessWidget {
         return ImageViewer(
           recordDir: recordDir,
           imageSize: imageSize,
+          imagePaths: imagePaths,
           viewportSize: Size(constraints.maxWidth, constraints.maxHeight),
           contentSize: Size(imageWidth.toDouble(), maxHeight.toDouble()),
           overlay: overlay,
@@ -406,15 +445,23 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
     // Watch the memoized disk loads here in the build phase (not inside the
     // LayoutBuilder below, which runs during layout): re-running on resize /
     // overlay toggle reuses the cached value, so only navigating to another record
-    // re-reads json. The overlay's prediction is read only while it is on.
-    final imageSize = ref.watch(imageSizeContainerProvider(recordDir.path));
+    // re-reads json. The overlay's prediction is read only while it is on. These
+    // are async (FutureProvider) so the record data can come from OPFS on web; on
+    // desktop the reads are fast local disk behind a resolved Future.
+    final imageSizeAsync = ref.watch(imageSizeContainerProvider(recordDir.path));
+    final imagePathsAsync = ref.watch(previewImagePathsProvider(recordDir.path));
     // The overlay is only meaningful while prediction.json exists; archiving drops
     // it. Gate on availability so the toggle isn't a dead button on archived
     // records, but keep the user's `overlay` preference so it re-applies when
     // navigating back to a record that still has predictions.
-    final predictionAvailable = ref.watch(predictionAvailableProvider(recordDir.path));
+    final predictionAvailable = ref.watch(predictionAvailableProvider(recordDir.path)).value ?? false;
     final effectiveOverlay = overlay && predictionAvailable;
-    final prediction = effectiveOverlay ? ref.watch(predictionContainerProvider(recordDir.path)) : null;
+    final prediction = effectiveOverlay ? ref.watch(predictionContainerProvider(recordDir.path)).value : null;
+    // Distinguish "still loading" from "loaded but missing/corrupt": the loaders
+    // catch their own errors and resolve to null, so a null value past the load
+    // frame is a genuine no-data case handled by _PreviewContent.
+    final loading = imageSizeAsync.isLoading || imagePathsAsync.isLoading;
+    final imagePaths = imagePathsAsync.value ?? const PreviewImagePaths();
     return CardDialog(
       dialogTitle: "$tr_preview.dialog.title".tr(),
       closeButtonTooltip: "$tr_preview.dialog.close_button.tooltip".tr(),
@@ -426,12 +473,15 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
           },
           child: Padding(
             padding: const EdgeInsets.all(2),
-            child: _PreviewContent(
-              recordDir: recordDir,
-              imageSize: imageSize,
-              prediction: prediction,
-              overlay: effectiveOverlay,
-            ),
+            child: loading
+                ? const Center(child: CircularProgressIndicator())
+                : _PreviewContent(
+                    recordDir: recordDir,
+                    imageSize: imageSizeAsync.value,
+                    imagePaths: imagePaths,
+                    prediction: prediction,
+                    overlay: effectiveOverlay,
+                  ),
           ),
         ),
       ),
@@ -467,8 +517,20 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
               ),
             ],
             const Spacer(),
+            // A sentence goes to [Disabled] too, not only to the inner [Tooltip]: `Disabled` wraps
+            // its child in an `IgnorePointer`, which refuses hover as well as taps, so a `Tooltip`
+            // inside it says nothing for exactly as long as the button is unavailable. Both are
+            // needed -- `Disabled` mounts its own only while disabled, the inner one covers the
+            // offered state.
+            //
+            // THE TWO SENTENCES ARE DIFFERENT, and that is the point of handing them separately.
+            // The inner one names the action; the outer one names the reason there is no action,
+            // because promising "shows the trainee one row above" to a button that cannot move is
+            // announcing something that will not happen. Same split as
+            // `report_import_dialog._stepButton`'s `tooltip` / `disabled_tooltip`.
             Disabled(
               disabled: currentIdx == 0,
+              tooltip: "$tr_preview.dialog.up_button.disabled_tooltip".tr(),
               child: Tooltip(
                 message: "$tr_preview.dialog.up_button.tooltip".tr(),
                 child: OutlinedButton(
@@ -484,6 +546,7 @@ class _CharaDetailPreviewDialogState extends ConsumerState<CharaDetailPreviewDia
             const SizedBox(width: 8),
             Disabled(
               disabled: currentIdx == widget.recordDirs.length - 1,
+              tooltip: "$tr_preview.dialog.down_button.disabled_tooltip".tr(),
               child: Tooltip(
                 message: "$tr_preview.dialog.down_button.tooltip".tr(),
                 child: OutlinedButton(

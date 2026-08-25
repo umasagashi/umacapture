@@ -84,21 +84,24 @@ void main() {
       seedValidRecord(id);
     }
 
-    final results = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
 
     final loadedIds = results.whereType<RecordLoaded>().map((e) => e.record.id).toSet();
     expect(loadedIds, ids.toSet());
     expect(results.whereType<RecordQuarantined>(), isEmpty);
+    // The desktop scan takes no record lock, so it can never refuse a record.
+    expect(unavailable, isEmpty);
   });
 
   test('skips non-directory entries in the root instead of quarantining them', () async {
     seedValidRecord('id-001');
     File('${activeDir.path}/desktop.ini').writeAsStringSync('[.ShellClassInfo]');
 
-    final results = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
 
     expect(results, hasLength(1));
     expect(results.single, isA<RecordLoaded>());
+    expect(unavailable, isEmpty);
     // The stray file is left in place, not moved into a quarantine folder.
     expect(File('${activeDir.path}/desktop.ini').existsSync(), isTrue);
     expect(Directory('${tempRoot.path}/quarantine').existsSync(), isFalse);
@@ -107,7 +110,9 @@ void main() {
   test('returns empty when the root holds no directories', () async {
     File('${activeDir.path}/desktop.ini').writeAsStringSync('[.ShellClassInfo]');
 
-    expect(await loadAllCharaDetailRecord(activeDir), isEmpty);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
+    expect(results, isEmpty);
+    expect(unavailable, isEmpty);
   });
 
   test('a corrupt record is quarantined without affecting the valid ones', () async {
@@ -115,10 +120,12 @@ void main() {
     seedValidRecord('id-002');
     seedRecordJson('id-corrupt', 'not valid json');
 
-    final results = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
 
     expect(results, hasLength(3));
     expect(results.whereType<RecordLoaded>().map((e) => e.record.id).toSet(), {'id-001', 'id-002'});
+    // A record that cannot be decoded is quarantined, never reported unavailable.
+    expect(unavailable, isEmpty);
     final quarantined = results.whereType<RecordQuarantined>().single;
     expect(quarantined.destination, isNotNull);
     expect(quarantined.destination!.name, 'id-corrupt');

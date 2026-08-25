@@ -8,11 +8,14 @@ library;
 
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:hive_ce_flutter/adapters.dart';
 import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '/src/core/bootstrap.dart';
+import '/src/core/fs/record_mutation_lock.dart';
+import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
@@ -20,6 +23,42 @@ import '/src/preference/storage_box.dart';
 
 /// How a chosen target relates to the current data, deciding the dialog content.
 enum MigrationKind { sameLocation, invalid, empty, hasData }
+
+/// How a [DataRootMigrationController.migrate] attempt ended.
+///
+/// Success and failure are not the distinction the UI needs. Once Hive has been
+/// closed the session can no longer read its settings, so quitting or
+/// relaunching is the only safe exit — and that is true of a *success* as much
+/// as of a failure halfway through the copy. A refusal that happens before the
+/// close is the opposite case: nothing moved, nothing closed, the app is intact,
+/// and retrying in a moment is the whole remedy. [sessionUsable] is that fact,
+/// carried out of here rather than re-derived from a success flag.
+enum MigrationOutcome {
+  /// Every directory swapped and the override was persisted. Hive is closed.
+  succeeded,
+
+  /// Refused before anything irreversible: the root record scope was held by
+  /// another party (a bulk scan, an archive repair), or there is no relocatable
+  /// data root on this platform at all. Nothing was moved, Hive is still open.
+  refusedSessionIntact,
+
+  /// Failed after Hive was closed. The data is rolled back to the old location,
+  /// but this session cannot read settings again.
+  failedAfterClose;
+
+  bool get isSuccess => this == MigrationOutcome.succeeded;
+
+  /// Whether the running session survived the attempt, i.e. whether closing the
+  /// dialog and carrying on is safe.
+  ///
+  /// Written as an exhaustive switch on purpose: a future outcome has to be
+  /// classified here, and will not default into "safe to close".
+  bool get sessionUsable => switch (this) {
+    MigrationOutcome.succeeded => false,
+    MigrationOutcome.refusedSessionIntact => true,
+    MigrationOutcome.failedAfterClose => false,
+  };
+}
 
 /// Drives a data-root relocation: classification, the file migration, and the
 /// process control (quit / relaunch) that must follow it on Windows.
@@ -77,14 +116,60 @@ class DataRootMigrationController {
   ///
   /// Stops capture and closes Hive to release native file handles, swaps each
   /// directory into place (see [swapDirectories]), then persists the override so
-  /// the next launch resolves paths under the new root. Returns `false` without
-  /// changing the override if any step fails; the source data is never touched,
-  /// so a failed migration is fully recoverable by restarting.
-  Future<bool> migrate(
+  /// the next launch resolves paths under the new root. Leaves the override
+  /// unchanged if any step fails; the source data is never touched, so a failed
+  /// migration is fully recoverable by restarting.
+  ///
+  /// The [MigrationOutcome] distinguishes a failure that closed Hive from one
+  /// refused before it, because only the caller can act on that and only it
+  /// knows there is a user waiting on a dialog with no way out.
+  Future<MigrationOutcome> migrate(
     DirectoryPath? targetRoot, {
     required bool isCapturing,
     Future<void> Function()? stopCapture,
+    RecordRecoveryGate? recoveryGate,
   }) async {
+    // There is no relocatable data root on web (OPFS is the storage root), and
+    // the migration relies on desktop-only process/window control. The UI entry
+    // (DataRootTile) is hidden on web; this guard makes the controller inert
+    // even if it is ever reached.
+    if (kIsWeb) return MigrationOutcome.refusedSessionIntact;
+    // Moving `storage/` moves every record directory at once, so this is the
+    // widest record mutation the app performs and it takes the same exclusive
+    // root scope the bulk scan and the archive geometry repair take — acquired
+    // here, on the UI isolate, and held across the whole relocation. Without it
+    // a store scan still running (its worker isolates decode, and quarantine, out
+    // of `storage/chara_detail/...`) would be reading directories this method is
+    // renaming away, which is reachable because the settings page is live while
+    // the startup scans are.
+    //
+    // Acquired *before* Hive is closed, so a refusal leaves the session intact
+    // and the old location authoritative — the same contract every other early
+    // failure below keeps.
+    final gate = recoveryGate ?? platformRecordRecoveryGate;
+    try {
+      final swapped = await gate.runForRoot(
+        source.storageDir,
+        () => _migrateLocked(targetRoot, isCapturing, stopCapture),
+      );
+      // Every failure _migrateLocked can report happens after StorageBox was
+      // neutralized and Hive.close() was attempted, so there is no third case
+      // to distinguish here.
+      return swapped ? MigrationOutcome.succeeded : MigrationOutcome.failedAfterClose;
+    } catch (error, stackTrace) {
+      if (error is! RecordMutationLockBusy && error is! RecordMutationLockUnavailable) {
+        rethrow;
+      }
+      // Nothing was moved, nothing was closed, and the override is untouched, so
+      // retrying once the store is idle is the whole remedy — which the caller
+      // can only offer if it can tell this apart from a failure mid-copy.
+      logger.e("Data root migration could not take the root record lock; nothing was moved.", error, stackTrace);
+      return MigrationOutcome.refusedSessionIntact;
+    }
+  }
+
+  /// The relocation itself, running under the exclusive root record scope.
+  Future<bool> _migrateLocked(DirectoryPath? targetRoot, bool isCapturing, Future<void> Function()? stopCapture) async {
     final target = source.withDataRoot(targetRoot);
     // Release native file handles so storage/modules can be copied on Windows.
     try {
@@ -218,6 +303,9 @@ class DataRootMigrationController {
 
   /// Quits the app, falling back to a hard exit if the window cannot be closed.
   Future<void> quit() async {
+    // windowManager.destroy()/exit(0) are desktop-only; there is no app window
+    // to close on web. Reached only through the (web-hidden) migration dialog.
+    if (kIsWeb) return;
     try {
       await windowManager.destroy();
     } catch (_) {
@@ -242,6 +330,9 @@ class DataRootMigrationController {
   /// and opens Hive at the migrated location. If scheduling fails the dialog
   /// stays put so the user can still quit and relaunch manually.
   Future<void> restart() async {
+    // The relaunch is a Windows PowerShell/Process dance with no web meaning.
+    // Reached only through the (web-hidden) migration dialog.
+    if (kIsWeb) return;
     final exePath = Platform.resolvedExecutable;
     final exeDir = FilePath.resolvedExecutable.parent.path;
     final relayScript =
