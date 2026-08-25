@@ -1,68 +1,30 @@
-import 'package:flutter/services.dart';
+/// The app's single capture channel to the recognition core.
+///
+/// The transport is selected at compile time, mirroring the `fs_backend.dart`
+/// pattern: on desktop (`dart.library.io`) it is a Flutter `MethodChannel`
+/// (`platform_channel_io.dart`); on web (`dart.library.js_interop`) it is a
+/// `WasmWorkerClient`-backed adapter (`platform_channel_web.dart`). Both files
+/// expose the identical public surface — the `PlatformChannel` class (constructor,
+/// `setCallback`, and its instance `Dart -> native` methods) and the
+/// `PlatformCallback` typedef — so `PlatformController` and its `handleNativeMessage`
+/// dispatch are reused verbatim across platforms.
+///
+/// **How many those methods are is deliberately not written down**, here or in either leg.
+/// The count is not the contract — *identical on both legs* is — and a written count is a
+/// second statement of the surface that nothing checks: this file said "nine" and
+/// `wasm_worker_client.dart` said "eight" while the io leg's instance surface had ten, and
+/// neither figure was revisited when a method was added. What actually holds the two legs
+/// together is that `PlatformController` compiles against whichever one it gets, so a member
+/// missing from one is a compile error — which no prose count could ever have been. The
+/// `static` members sit outside this shared surface on purpose and say so at their own sites.
+///
+/// `dispose()` is part of that shared surface and **returns whether tearing the channel
+/// down also ended a capture session that was still running**. The two transports differ
+/// there and only there: a desktop session lives in the native runner and outlives any
+/// channel (`false`, always), while a web session *is* the channel — the `MediaStream` it
+/// holds and the worker live supply it drives — so disposing it ends the session. The
+/// answer is data rather than behaviour precisely so the reaction to it (announcing the
+/// end, see `PlatformController.dispose`) lives once, in shared code, and cannot drift.
+library;
 
-import '/src/core/callback.dart';
-import '/src/core/path_entity.dart';
-import '/src/core/utils.dart';
-
-typedef PlatformCallback = StringCallback;
-
-class PlatformChannel {
-  static const channel = MethodChannel('dev.flutter.umasagashi/capturing_channel');
-  PlatformCallback? callbackMethod;
-
-  PlatformChannel() {
-    channel.setMethodCallHandler(callbackFromPlatform);
-  }
-
-  void setCallback(PlatformCallback method) {
-    callbackMethod = method;
-  }
-
-  Future<void> setConfig(String config) {
-    return channel.invokeMethod('setConfig', config);
-  }
-
-  Future<void> setPlatformConfig(String config) {
-    return channel.invokeMethod('setPlatformConfig', config);
-  }
-
-  Future<void> startCapture() {
-    return channel.invokeMethod('startCapture');
-  }
-
-  Future<void> stopCapture() {
-    return channel.invokeMethod('stopCapture');
-  }
-
-  Future<void> updateRecord(String id) {
-    return channel.invokeMethod('updateRecord', id);
-  }
-
-  Future<void> finishUpdate() {
-    return channel.invokeMethod('finishUpdate');
-  }
-
-  Future<void> copyToClipboardFromFile(FilePath path) {
-    return channel.invokeMethod('copyToClipboardFromFile', path.path);
-  }
-
-  Future<void> takeScreenshot(FilePath path) {
-    return channel.invokeMethod('takeScreenshot', path.path);
-  }
-
-  Future<dynamic> callbackFromPlatform(MethodCall call) {
-    switch (call.method) {
-      case 'notify':
-        final callback = callbackMethod;
-        if (callback == null) {
-          logger.d('Dropped platform notify before callback was registered');
-        } else {
-          callback(call.arguments.toString());
-        }
-        return Future.value('called from platform!');
-      default:
-        logger.d('Unknowm method ${call.method}');
-        throw MissingPluginException();
-    }
-  }
-}
+export 'platform_channel_io.dart' if (dart.library.js_interop) 'platform_channel_web.dart';
