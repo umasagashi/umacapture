@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
@@ -21,9 +23,10 @@ const tr_module_update = "pages.settings.module_update";
 /// Lets the user apply a manually downloaded `modules.zip` when the automatic
 /// update could not download it (e.g. blocked network, proxy, TLS issues).
 ///
-/// The zip can be dropped onto the drop zone (desktop only) or selected with a
-/// file picker. Applying it extracts the archive and refreshes the module
-/// loaders via [installModuleFromZip].
+/// The zip can be dropped onto the drop zone or selected with a file picker.
+/// Applying it extracts the archive and refreshes the module loaders, via
+/// [installModuleFromZip] where the archive has a filesystem path and via
+/// [installModuleFromZipBytes] in a browser, where it does not.
 class ModuleManualUpdateDialog extends ConsumerStatefulWidget {
   const ModuleManualUpdateDialog({super.key});
 
@@ -39,12 +42,29 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
   bool _installing = false;
   bool _dragging = false;
 
-  Future<void> _install(FilePath zipPath) async {
+  /// Whether a picked or dropped archive can be handed over as a filesystem
+  /// path.
+  ///
+  /// False in a browser: the picker reports no path at all there
+  /// (`PlatformFile.path` is always null) and a dropped item carries a blob URL
+  /// that `dart:io` cannot open, so those archives are applied from their bytes.
+  /// Deliberately not `CurrentPlatform.isDesktop()`, which reports the **host
+  /// OS** and is therefore true inside a desktop browser — the same trap the
+  /// Windows-only gate in `settings.dart` names.
+  static bool get _hasFilesystemPaths => CurrentPlatform.hasWindowFrame();
+
+  /// Applies a picked or dropped archive, then refreshes the module loaders.
+  ///
+  /// Takes [path] when the platform has one, because the path route streams the
+  /// zip from disk in a background isolate instead of holding the whole archive
+  /// in memory; otherwise the archive is read through [readBytes] and extracted
+  /// into the same store the web bootstrap writes.
+  Future<void> _install(String? path, Future<Uint8List> Function() readBytes) async {
     if (_installing) {
       return;
     }
     setState(() => _installing = true);
-    final succeeded = await installModuleFromZip(ref.base, zipPath);
+    final succeeded = await _runInstall(_hasFilesystemPaths ? path : null, readBytes);
     if (!mounted) {
       return;
     }
@@ -60,6 +80,22 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
       CardDialog.dismiss(ref.base);
     } else {
       setState(() => _installing = false);
+    }
+  }
+
+  Future<bool> _runInstall(String? path, Future<Uint8List> Function() readBytes) async {
+    if (path != null) {
+      return installModuleFromZip(ref.base, FilePath(path));
+    }
+    try {
+      return await installModuleFromZipBytes(ref.base, await readBytes());
+    } catch (exception, stackTrace) {
+      // Reading the bytes is the one step outside installModuleFromZipBytes'
+      // own guard, so report it the same way: the manual update must never
+      // consume the click and return without saying anything.
+      logger.e("Failed to read the selected module archive.", exception, stackTrace);
+      sendModuleVersionCheckToast(ToastType.error, ModuleVersionCheckResultCode.manualUpdateFailure);
+      return false;
     }
   }
 
@@ -85,7 +121,7 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
       _showInvalidNameToast();
       return;
     }
-    _install(FilePath(zip.path));
+    _install(zip.path, zip.readAsBytes);
   }
 
   Future<void> _pickFile() async {
@@ -101,10 +137,10 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
       _showInvalidNameToast();
       return;
     }
-    final path = picked.path;
-    if (path != null) {
-      _install(FilePath(path));
-    }
+    // readAsBytes() reads from the path on desktop and fetches the picked file's
+    // blob on web, so the byte route works on both without the deprecated
+    // `withData` flag -- which `pickFile` pins to false in any case.
+    await _install(picked.path, picked.readAsBytes);
   }
 
   @override
@@ -139,7 +175,11 @@ class _ModuleManualUpdateDialogState extends ConsumerState<ModuleManualUpdateDia
             const SizedBox(height: 12),
             const _WarningCard(),
             const SizedBox(height: 16),
-            if (CurrentPlatform.isDesktop()) ...[
+            // The zone is offered wherever a file can be dropped on the window,
+            // which includes the browser (`desktop_drop` registers a web
+            // implementation); whether the dropped archive is applied from its
+            // path or its bytes is [_hasFilesystemPaths]' separate decision.
+            if (CurrentPlatform.supportsFileDrop()) ...[
               _DropZone(
                 dragging: _dragging,
                 installing: _installing,
