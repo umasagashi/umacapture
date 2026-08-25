@@ -9,6 +9,7 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/chara_detail_settings_dialog.dart';
 import '/src/gui/chara_detail/export_button.dart';
+import '/src/gui/chara_detail/import_button.dart';
 import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/common.dart';
 
@@ -156,6 +157,7 @@ class ColumnPresetBarWidget extends ConsumerWidget {
                     // CharaDetailExportButton carries the same horizontal:3
                     // margin as _PresetActionButton, so no extra spacer is needed.
                     const CharaDetailExportButton(),
+                    const CharaDetailImportButton(),
                     // Caps the record group right after export, setting it off
                     // from the right-pinned controls.
                     const _ToolbarDivider(),

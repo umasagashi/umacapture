@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
-import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
@@ -15,7 +14,7 @@ import '/src/gui/common.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-final _recordExportEvent = EventStreamProvider<PathEntity>();
+final _recordExportEvent = EventStreamProvider<ExportResult>();
 final recordExportEventProvider = _recordExportEvent.provider;
 
 /// Output formats offered by [ExportRecordDialog], one per radio entry.
@@ -134,7 +133,7 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
         .read(exportRunnerProvider.notifier)
         .run(
           (rb) => _exporterFor(format, title, ids, source, grid, rb),
-          onSuccess: (path) => _recordExportEvent.add(path),
+          onSuccess: (result) => _recordExportEvent.add(result),
         );
     exitSelection(ref);
     CardDialog.dismiss(ref.base);
