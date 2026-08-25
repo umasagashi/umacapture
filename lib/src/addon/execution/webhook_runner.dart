@@ -1,6 +1,41 @@
+/// Outbound HTTP delivery for the addon system's webhook action.
+///
+/// **The action is offered on every platform, deliberately, and web is not
+/// gated.** Whether a browser can reach a given destination is a property of
+/// *that destination's* response headers (`Access-Control-Allow-Origin`), not of
+/// the platform: a destination that allows this app's origin works from the
+/// browser exactly as it does from Windows, and one that does not is refused
+/// before the request leaves the tab. An app-side "not supported on web" gate
+/// would therefore be a false claim — it would block the destinations that do
+/// work. What the browser genuinely costs is the *reason*: a refused request is
+/// reported to script as an opaque network failure, with no status and no
+/// distinction between "blocked by CORS", "host unreachable", and "blocked by an
+/// extension". [describeWebhookError] annotates that one case so the history
+/// entry names the likely cause instead of leaving a message no user can act on.
+///
+/// Two upgrades were considered for this branch and both were declined:
+///
+/// * **`no-cors` fire-and-forget.** A browser can send a request the destination
+///   will not answer to, by giving up the response: the reply is opaque, with no
+///   status and no body. Every execution would then be recorded as a success it
+///   cannot verify, which is worse than a visible failure — the execution
+///   history exists to tell the user whether the notification arrived, and this
+///   would make every webhook row meaningless on web while leaving the Windows
+///   rows truthful. It also cannot carry a JSON content type or custom headers,
+///   so the bodies this runner builds would not survive it.
+/// * **A first-party relay proxy.** Routing webhooks through a server on this
+///   app's own origin would make CORS moot, and it is the only real fix. It is
+///   out of scope here because it is delivery infrastructure, not a code change:
+///   it needs a deployed endpoint, and it turns this app into an open HTTP relay
+///   unless it also carries authentication, rate limiting, and destination
+///   restrictions — abuse controls that must exist before the endpoint does. It
+///   is deferred until web operation actually starts.
+library;
+
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
@@ -112,7 +147,9 @@ class WebhookRunner implements ActionRunner {
           exec.finish(
             (elapsed) => ExecutionResult(
               status: webhookErrorStatus(e, cancelled: cancelled),
-              error: e.toString(),
+              // Never swallow the failure: it is persisted as a failed history
+              // entry whose error text the detail dialog shows verbatim.
+              error: describeWebhookError(e, onWeb: kIsWeb),
               duration: elapsed,
             ),
           );
@@ -148,6 +185,42 @@ class WebhookRunner implements ActionRunner {
 /// positive, so a webhook can never hang unbounded and hold an execution slot.
 int resolveWebhookTimeoutSeconds(int? configured) =>
     (configured == null || configured <= 0) ? WebhookAction.defaultTimeoutSeconds : configured;
+
+/// Appended to the recorded error when a browser refuses the request outright.
+///
+/// Deliberately English and untranslated, matching every other persisted
+/// [ExecutionResult.error] (see `external_program_runner.dart`): history entries
+/// hold diagnostic text that is shown verbatim in the detail dialog and is meant
+/// to be pasted into a bug report, not localized prose.
+const webhookWebBlockedHint =
+    "The browser refused this request before it left the page. The destination "
+    "most likely does not allow this app's origin (no Access-Control-Allow-Origin "
+    "response header); a browser extension or an offline network can also cause "
+    "it. This is a setting on the destination, not a limitation of this app.";
+
+/// The diagnostic text persisted on the history entry for a failed request.
+///
+/// [onWeb] is a parameter rather than a direct `kIsWeb` read so the web-only
+/// branch is reachable from a VM test — `kIsWeb` is false under `flutter test`,
+/// so a branch that read it directly could never be covered.
+///
+/// A browser reports a request it refused (CORS preflight denied, blocked by an
+/// extension, host unreachable) as one indistinguishable, statusless error:
+/// `DioExceptionType.connectionError` carrying "XMLHttpRequest error". That text
+/// alone tells the user nothing they can act on, so name the cause that actually
+/// explains it on web. Every other failure — a non-2xx status, a timeout, a
+/// cancel — already carries a meaningful message and is left untouched, on both
+/// platforms.
+String describeWebhookError(Object error, {required bool onWeb}) {
+  final text = error.toString();
+  if (!onWeb || error is! DioException) {
+    return text;
+  }
+  return switch (error.type) {
+    DioExceptionType.connectionError || DioExceptionType.unknown => "$text $webhookWebBlockedHint",
+    _ => text,
+  };
+}
 
 /// Maps a failed webhook request to a terminal [ExecutionStatus].
 ///

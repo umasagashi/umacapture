@@ -10,8 +10,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:recase/recase.dart';
+import 'package:umacapture/src/core/fs/fs_backend.dart';
+import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/sound_player.dart';
 import 'package:umacapture/src/preference/settings_state.dart';
+
+import 'support/web_like_fs_backend.dart';
 
 /// Builds the persisted Hive key the notifier uses for [type]'s [field] (e.g. `Path`, `Source`,
 /// `Volume`), mirroring `SoundSettingNotifier.build()`.
@@ -26,6 +30,61 @@ void main() {
 
   setUp(() async {
     await Hive.box('settings').clear();
+  });
+
+  group('persistCustomSound', () {
+    late Directory tempRoot;
+    late FsBackend originalBackend;
+
+    setUp(() {
+      tempRoot = Directory.systemTemp.createTempSync('umacapture_custom_sound_test');
+      originalBackend = fsBackend;
+      fsBackend = WebLikeFsBackend(originalBackend);
+    });
+
+    tearDown(() {
+      fsBackend = originalBackend;
+      tempRoot.deleteSync(recursive: true);
+    });
+
+    test('uses only the async filesystem surface and removes a stale extension', () async {
+      final directory = DirectoryPath(tempRoot.path) / 'sound';
+      final mp3 = await persistCustomSound(
+        directory: directory,
+        type: SoundType.error,
+        originalName: 'alert.MP3',
+        bytes: [1, 2, 3],
+      );
+      expect(mp3.name, 'error.mp3');
+      expect(await mp3.readAsBytes(), [1, 2, 3]);
+
+      final wav = await persistCustomSound(
+        directory: directory,
+        type: SoundType.error,
+        originalName: 'replacement.wav',
+        bytes: [4, 5],
+      );
+      expect(wav.name, 'error.wav');
+      expect(await wav.readAsBytes(), [4, 5]);
+      expect(await mp3.exists(), isFalse);
+    });
+
+    test('rejects unsupported extensions and empty files', () async {
+      final directory = DirectoryPath(tempRoot.path) / 'sound';
+      expect(
+        persistCustomSound(directory: directory, type: SoundType.success, originalName: 'alert.ogg', bytes: [1]),
+        throwsFormatException,
+      );
+      expect(
+        persistCustomSound(directory: directory, type: SoundType.success, originalName: 'alert.wav', bytes: []),
+        throwsFormatException,
+      );
+    });
+
+    test('maps supported extensions to audio MIME types', () {
+      expect(customSoundMimeType('alert.mp3'), 'audio/mpeg');
+      expect(customSoundMimeType('alert.wav'), 'audio/wav');
+    });
   });
 
   group('SoundSetting', () {

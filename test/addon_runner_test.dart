@@ -336,6 +336,21 @@ void main() {
       expect(builtinNeedsUnavailableRecord('show_toast', TriggerEvent.manual), isFalse);
     });
 
+    test('builtinNeedsManualRun notes gesture-requiring builtins on automatic triggers', () {
+      // needsGesture is injected because `flutter test` runs on the VM, where the
+      // browser answer (true) is unreachable.
+      expect(builtinNeedsManualRun('copy_image_to_clipboard', TriggerEvent.recordCaptured, needsGesture: true), isTrue);
+      expect(builtinNeedsManualRun('copy_image_to_clipboard', TriggerEvent.taskExecuted, needsGesture: true), isTrue);
+      // The manual trigger already fires from the ▶ button, so there is nothing
+      // to note; and a host whose clipboard needs no gesture never notes at all.
+      expect(builtinNeedsManualRun('copy_image_to_clipboard', TriggerEvent.manual, needsGesture: true), isFalse);
+      expect(
+        builtinNeedsManualRun('copy_image_to_clipboard', TriggerEvent.recordCaptured, needsGesture: false),
+        isFalse,
+      );
+      expect(builtinNeedsManualRun('show_toast', TriggerEvent.recordCaptured, needsGesture: true), isFalse);
+    });
+
     test('clampToOptions keeps a known value and falls back to the first option', () {
       expect(clampToOptions('GET', ['POST', 'GET']), 'GET');
       // A value persisted by another app version must not crash the dropdown.

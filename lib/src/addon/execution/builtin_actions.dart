@@ -5,6 +5,7 @@ import '/src/addon/payload_enricher.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/clipboard_alt.dart';
+import '/src/core/clipboard_image_writer.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/sound_player.dart';
 import '/src/core/utils.dart';
@@ -87,6 +88,29 @@ class BuiltinActionDescriptor {
   /// Default template for the second argument of a freshly configured action.
   final String defaultSecondArgument;
 
+  /// Whether a browser offers any API at all for what this action does.
+  ///
+  /// False only where no browser counterpart exists in any circumstance: putting
+  /// a *file reference* on the clipboard (a page can only offer bytes) and
+  /// writing to an arbitrary host path (OPFS is origin-private). The task editor
+  /// keeps those visible but unselectable on web, and the runtime checks remain
+  /// as a backstop for definitions saved by an older version.
+  ///
+  /// An action a browser *can* perform, but only under some condition, stays
+  /// true here and names the condition instead — see [requiresUserGesture].
+  final bool supportsWeb;
+
+  /// Whether the action only succeeds while the transient user activation from a
+  /// real click is still alive.
+  ///
+  /// This names a property of the *trigger*, not of the platform: the action is
+  /// selectable on every host, and where the clipboard demands a gesture
+  /// ([clipboardWriteNeedsGesture], i.e. in a browser) the ▶ manual run is the
+  /// one trigger that carries one — it reaches the clipboard write inside the
+  /// click's own task. An automatic trigger there fails with an explicit reason
+  /// (see [gestureRefusesRun]) instead of silently doing nothing.
+  final bool requiresUserGesture;
+
   final BuiltinFn run;
 
   const BuiltinActionDescriptor({
@@ -105,10 +129,49 @@ class BuiltinActionDescriptor {
     this.secondaryArgumentHelperKey,
     this.secondaryArgumentUsesPlaceholders = true,
     this.defaultSecondArgument = '',
+    this.supportsWeb = true,
+    this.requiresUserGesture = false,
   });
 }
 
 const _trBuiltin = "pages.addon.builtin";
+
+/// The diagnostic text persisted when [gestureRefusesRun] refuses a run.
+///
+/// Deliberately English and untranslated, matching every other persisted
+/// [ExecutionResult.error] (see the same statement on `webhookWebBlockedHint` in
+/// `webhook_runner.dart`): history entries hold diagnostic text that is shown
+/// verbatim in the detail dialog and is meant to be pasted into a bug report,
+/// not localized prose. This threw `pages.addon.action.unsupported_on_web`
+/// **already translated**, so the one Japanese sentence in the field arrived
+/// wearing Dart's `Bad state: ` prefix.
+///
+/// The user-facing half of this condition is not lost by saying it in English
+/// here: it is `_BuiltinManualRunNote` in the task editor, which renders that
+/// same translation key beside the action picker *before* the pairing is saved.
+/// The two are separate on purpose — the note explains, this records.
+const builtinGestureBlockedHint =
+    "This action needs the transient user activation of a click, which an "
+    "automatic trigger does not carry. Only the manual run button can execute "
+    "it on this host.";
+
+/// Whether [payload] belongs to a run started by the ▶ button.
+///
+/// `AddonExecutionController.runManual` is the only producer of `event: manual`
+/// (every automatic trigger writes its own event name, and a chain hop rewrites
+/// it to `task_executed`), so this is the payload-level expression of "the click
+/// that started this run is still in progress".
+bool isManualRun(PayloadMap payload) => payload["event"] == "manual";
+
+/// Whether an action declaring [BuiltinActionDescriptor.requiresUserGesture]
+/// must refuse this run: the host's clipboard needs a transient user activation
+/// and the run did not start from the ▶ button.
+///
+/// [needsGesture] defaults to the host capability and is injectable only because
+/// `flutter test` always runs on the VM, where the browser answer is otherwise
+/// unreachable.
+bool gestureRefusesRun(PayloadMap payload, {bool needsGesture = clipboardWriteNeedsGesture}) =>
+    needsGesture && !isManualRun(payload);
 
 /// Maps an image-kind keyword to the record file it resolves to, shared by the
 /// `copy_image` / `copy_file` argument dropdowns and [_recordImagePath] so the
@@ -165,7 +228,16 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     argumentUsesPlaceholders: false,
     argumentOptions: _imageKindOptions("image"),
     defaultArgument: "trainee",
+    // Copying image *bytes* is something a browser can do — `ClipboardItem`
+    // carries them — but only within a click's transient user activation. The
+    // limit is the trigger, not the platform, so the action stays available on
+    // web and declares the gesture requirement instead.
+    requiresUserGesture: true,
     run: (ref, payload, argument, secondaryArgument) async {
+      // Refuse before touching the record so an automatic trigger reports the
+      // actual reason rather than a bare "failed". Never taken on a host whose
+      // clipboard needs no gesture (Windows), where every trigger still works.
+      if (gestureRefusesRun(payload)) throw StateError(builtinGestureBlockedHint);
       final record = _requireRecord(ref, payload);
       // silent: the execution-history entry already reports the outcome, so an
       // automated/chained run shouldn't also pop a clipboard toast.
@@ -173,6 +245,9 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
         ref,
         _recordImagePath(ref, record, (argument ?? "trainee").trim()),
         silent: true,
+        // The ▶ run reaches this synchronously from the button's callback, so
+        // the browser still sees the click as the write's originating gesture.
+        userInitiated: isManualRun(payload),
       );
       if (!ok) throw StateError("Failed to copy image to clipboard.");
     },
@@ -189,6 +264,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
       BuiltinArgumentOption("record_json", "$_trBuiltin.options.file_record"),
     ],
     defaultArgument: "trainee",
+    supportsWeb: false,
     run: (ref, payload, argument, secondaryArgument) async {
       final record = _requireRecord(ref, payload);
       final path = _recordFilePath(ref, record, (argument ?? "trainee").trim());
@@ -211,6 +287,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     usesSecondArgument: true,
     secondaryArgumentLabelKey: "$_trBuiltin.copy_file_to_path_destination",
     defaultSecondArgument: "",
+    supportsWeb: false,
     run: (ref, payload, argument, secondaryArgument) async {
       final record = _requireRecord(ref, payload);
       final source = _recordFilePath(ref, record, (argument ?? "trainee").trim());
