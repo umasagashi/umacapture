@@ -92,9 +92,22 @@ struct SceneScraperConfig {
     Line<double> scroll_bar_scan_line;
     double initial_scroll_threshold;
     double minimum_scroll_threshold;
+    // The stationary latch's two calibrated inputs. `stationary_time_threshold` is how long (ms) a region
+    // must hold still before the latch fires -- NOT CharaDetailSceneScraper::kMonitorDwellMs, which is the
+    // factor-change monitor's dwell. `stationary_change_ratio_threshold` is the area budget, a FRACTION of
+    // the compared region (0-1) rather than an absolute count or sum: "at most this fraction of the region
+    // moved between two consecutive frames", with `minimum_color_threshold` as the per-pixel gate feeding it.
+    // The two move the same boundary and neither may be re-tuned without the other.
+    //
+    // THE CALIBRATION RECORD -- both values, the measured 2-D region, why the dwell is a fixed constraint and
+    // why this key was renamed when its unit changed -- lives in ONE place, beside the values:
+    // native/tool/builder/chara_detail_scene_scraper_builder.h. It is not repeated here.
+    // The rule that outlives it: changing this field's unit again means renaming the key again, because
+    // nlohmann silently static_casts across the numeric types and neither the parser nor the compiler will
+    // catch a config and a binary from opposite sides of the change.
     uint64 stationary_time_threshold;
     int minimum_color_threshold;
-    uint64 stationary_color_threshold;
+    double stationary_change_ratio_threshold;
     // Scrollbar physics, all width-normalized so they scale with the screen and never depend on the crop
     // height (each layout carries its own values). `viewport` is the visible content height V used to turn a
     // per-step thumb-travel delta into a content-pixel scroll guess (guess = V * delta_upper_gap /
@@ -128,7 +141,7 @@ struct SceneScraperConfig {
         minimum_scroll_threshold,
         stationary_time_threshold,
         minimum_color_threshold,
-        stationary_color_threshold,
+        stationary_change_ratio_threshold,
         viewport,
         cap_offset,
         scroll_bar_margin_color,
