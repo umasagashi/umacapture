@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "player_standard_5",
+  "description": "The app (real Flutter build, live WinRT capture off the mimic player window) against the golden the CLI's replay path produced from the same clip. Settings are 'fresh' on purpose: an empty settings box yields the app's documented defaults -- detail-crop calibration on and the frame resize on -- which is the only config a run can be attributed to; 'copy' would carry whatever this machine's installation happens to hold. Those are also the CLI's defaults (--frame-resize, --no-frame-resize to turn it off), and this case states frame_resize true in native/test/integration/cases.json, so the golden is a baseline for the same configuration and a mismatch is the app's, not a config difference. Not re-run since the frame resize started defaulting on.",
+  "clip": ".notes/player_standard_5.mkv",
+  "stops": ".notes/player_standard_5.stops.json",
+  "golden": "native/test/integration/golden/player_standard_5.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "pace_ms": 0,
+  "range_seconds": null,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 600
+}

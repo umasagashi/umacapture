@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "name": "falsify_wrong_golden",
+  "description": "FALSIFICATION of the verdict, expectation side. Byte-for-byte the player_standard_5 scenario except that `golden` names another case's golden (player_standard_4). The run itself is the normal green one, so a FAIL here can only come from the comparison, and the diff must be a real record-to-record difference rather than an empty or trivially-shaped one.",
+  "clip": ".notes/player_standard_5.mkv",
+  "stops": ".notes/player_standard_5.stops.json",
+  "golden": "native/test/integration/golden/player_standard_4.json",
+  "config": "debug",
+  "settings": "fresh",
+  "sync": true,
+  "scroll_rate": 0.5,
+  "pace_ms": 0,
+  "range_seconds": null,
+  "sync_timeout_seconds": 30,
+  "record_wait_seconds": 120,
+  "run_timeout_seconds": 600
+}
