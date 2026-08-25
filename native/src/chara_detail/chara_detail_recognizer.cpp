@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "chara_detail/chara_detail_search_helpers.h"
+#include "util/error_util.h"
 #include "util/logger_util.h"
 
 namespace uma::chara_detail {
@@ -750,12 +751,19 @@ void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info
                                   ? static_cast<int>(raw_info.record_type.value())
                                   : -1;
         on_factor_probe_completed->send(self_factors, record_type);
-    } catch (const std::exception &e) {
-        log_error("probe failed for record_id={}: {}", raw_info.record_id, e.what());
     } catch (...) {
-        // WinRT/ONNX exceptions do not derive from std::exception; without this arm they would escape the
-        // worker thread and terminate the process (see EventRunnerThread::run for the same pattern).
-        log_error("probe failed for record_id={}: unknown exception", raw_info.record_id);
+        // One arm on purpose: WinRT/ONNX exceptions do not derive from std::exception, and without an arm
+        // that catches them too they would escape the worker thread and terminate the process (see
+        // EventRunnerThread::run for the same pattern). describeCurrentFailure() does the type matching.
+        const auto failure = error_util::describeCurrentFailure();
+        if (failure.aborted) {
+            // Not a defect: stop() cancels an in-flight inference by design (see
+            // native/wasm/wasm_inference_bridge.h), and dropping this probe is that cancellation working.
+            // Keep it out of the error stream so a real probe failure stays visible there.
+            log_info("probe aborted for record_id={}: {}", raw_info.record_id, failure.message);
+        } else {
+            log_error("probe failed for record_id={}: {}", raw_info.record_id, failure.message);
+        }
     }
 }
 
@@ -881,15 +889,29 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         } else {
             on_recognize_completed->send(record_info);
         }
-    } catch (const std::exception &e) {
-        log_error(
-            "recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode, e.what());
     } catch (...) {
-        // WinRT/ONNX exceptions do not derive from std::exception; contain them here too so one unreadable
-        // record cannot terminate the process.
-        log_error(
-            "recognize failed for record_id={} (isUpdateMode={}): unknown exception", raw_info.record_id,
-            isUpdateMode);
+        // One arm on purpose, same as probe(): WinRT/ONNX exceptions do not derive from std::exception and
+        // must be contained here too, so one unreadable record cannot terminate the process.
+        const auto failure = error_util::describeCurrentFailure();
+        if (failure.aborted) {
+            // A stop() that races a full recognize() lands here, and it is the same expected cancellation
+            // probe() already handles: the record is dropped on purpose, so it is not an error.
+            log_info(
+                "recognize aborted for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode,
+                failure.message);
+        } else {
+            log_error(
+                "recognize failed for record_id={} (isUpdateMode={}): {}", raw_info.record_id, isUpdateMode,
+                failure.message);
+        }
+        // Only the update path has a caller blocked on a terminal signal (the Dart regeneration flow, and on
+        // web the worker's update window that otherwise waits out its full timeout). Surface the outcome so it
+        // is not silent; the capture path reports its own failures elsewhere and is left unchanged. An abort
+        // is reported here as well, deliberately: the update did not produce a record either way, and leaving
+        // the waiter to time out would be worse than telling it the update did not happen.
+        if (isUpdateMode) {
+            on_error->send("updateRecord failed for record_id=" + raw_info.record_id + ": " + failure.message);
+        }
     }
 }
 

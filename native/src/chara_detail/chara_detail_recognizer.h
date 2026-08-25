@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
 #include "chara_detail/chara_detail_config.h"
@@ -454,6 +453,7 @@ public:
         const event_util::Sender<RecordInfo> &on_update_completed,
         const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
         const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
+        const event_util::Sender<std::string> &on_error,
         const recognizer_config::CharaDetailRecognizerConfig &config);
 
     // Recognizes only the trainee's own factors visible on a single, non-stitched factor-tab frame
@@ -483,6 +483,10 @@ private:
 
     const event_util::Listener<Frame, RecordInfo> on_factor_probe_ready;
     const event_util::Sender<std::vector<record::Factor>, int> on_factor_probe_completed;
+
+    // Surfaces a terminal recognition failure (currently only the update path) as a human-readable message,
+    // wired to NativeApi::notifyError so a failed re-recognition reaches the UI instead of stalling forever.
+    const event_util::Sender<std::string> on_error;
 };
 
 }  // namespace uma::chara_detail
