@@ -70,9 +70,10 @@ in `native/src/chara_detail/chara_detail_record.h`.
 - **Scraper** (`chara_detail_scene_scraper.h`) is the heart of "recording → tall
   image". Per tab it decides scrollable vs. non-scrollable by looking for a
   scrollbar, then estimates scroll offset between frames with a **guess-free
-  candidate + verify estimator** (`ImageOffsetEstimator`): AKAZE keypoint matches
-  vote into a 1-px displacement histogram whose peaks become candidate offsets,
-  and a full-resolution pixel-overlap correlation selects among them. The
+  propose + verify estimator** (`ImageOffsetEstimator`): a reduced row ×
+  column-block intensity signature is correlated at every integer row shift and
+  its top-ranked peaks become candidate offsets, and a full-resolution
+  pixel-overlap correlation selects among them. Offsets are whole pixels. The
   scrollbar (`ScrollBarOffsetEstimator`) is only used for progress reporting and
   at-top detection, never to decide the offset — its geometry collapses exactly
   on the terminating overscroll frame. Newly revealed strips are cut at color boundaries
@@ -195,8 +196,10 @@ serializes them to JSON (round-trip-verifying each).
   — the generated layout/condition configs (deserialized into
   `chara_detail_config.h` structs).
 - `assets/config/platform.json` — per-platform capture config (window targets,
-  recording fps, crop profiles per aspect ratio). The full runtime config object
-  is assembled in `createConfig` (`native/src/core/cli.cpp`) for CLI runs.
+  recording fps, and the retained 540x960 minimum-size compatibility field).
+  Pane shaping is shared native geometry, not an aspect-ratio profile. The full
+  runtime config object is assembled in `createConfig` (`native/src/core/cli.cpp`)
+  for CLI runs.
 - Runtime dirs (from the config's `directory` block):
   - `temp_dir/chara_detail/<record_id>/` — scraper output (fragments, base, tab buttons).
   - `storage_dir/chara_detail/active/<record_id>/` — stitched `skill/factor/campaign.png` (+ `.json`), and the recognizer's `record.json` / `prediction.json` / `trainee.jpg`.

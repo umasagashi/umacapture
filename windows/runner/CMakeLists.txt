@@ -9,6 +9,16 @@ set(OpenCV_DLL_NAME "opencv_world")
 set(OpenCV_DLL_PREFIX "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_DLL_NAME}${OpenCV_VERSION}")
 set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
 set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
+# OpenCV decodes video through this FFmpeg plugin DLL, loaded at run time from next to the exe. The app needs
+# it for video import (windows/runner/video_import_session.h -> cv/video_loader.h -> cv::VideoCapture); without
+# it every clip fails to open. Same DLL and same reason as native/CMakeLists.txt copies for the CLI's `video`
+# subcommand -- tool/fetch_deps.py already put it in the OpenCV bin dir, so nothing new is provisioned.
+#
+# The base name is captured into a variable of its own because it is needed again far below, AFTER
+# find_package(OpenCV) -- which overwrites OpenCV_VERSION with the dotted "4.13.0". Spelling the name out down
+# there produced `opencv_videoio_ffmpeg4.13.0_64.dll`, which OpenCV's loader never looks for.
+set(OpenCV_FFMPEG_DLL_NAME "opencv_videoio_ffmpeg${OpenCV_VERSION}_64")
+set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_FFMPEG_DLL_NAME}.dll")
 
 set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../onnxruntime")
 
@@ -24,6 +34,7 @@ set(
         "Runner.rc"
         "runner.exe.manifest"
         "${NATIVE_EXTENSION_DIR}/src/core/native_api.cpp"
+        "${NATIVE_EXTENSION_DIR}/src/core/native_api_frame_shaping.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_recognizer.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_recognizer_models.cpp"
         "${NATIVE_EXTENSION_DIR}/src/chara_detail/chara_detail_search_helpers.cpp"
@@ -35,6 +46,15 @@ set(
 )
 
 add_executable(${BINARY_NAME} WIN32 ${SOURCE_FILES})
+
+# Flutter adds a Profile configuration that third-party packages know nothing about. The OpenCV
+# imported targets only carry DEBUG and RELEASE, and CMake's fallback picks the first one (DEBUG),
+# so Profile would link opencv_world*d.lib while compiling without _DEBUG. OpenCV wraps the array
+# types in an inline `debug_build_guard` namespace under _DEBUG (see core/cvdef.h), so the two sides
+# mangle differently and the link fails with LNK2019 on every _InputArray/_OutputArray overload.
+# Profile is a release build with symbols, so map it to Release. Must precede find_package, which is
+# where the imported targets pick the mapping up.
+set(CMAKE_MAP_IMPORTED_CONFIG_PROFILE Release)
 
 find_package(OpenCV REQUIRED)
 message(STATUS "You don't need to add OpenCV to your PATH, but you need to copy dll files into build directory.")
@@ -106,22 +126,22 @@ set(
         # ONNX Runtime
         ${ONNX_DIR}/lib/onnxruntime.dll
 
-        # OpenCV
+        # OpenCV. Profile takes the release DLLs to match CMAKE_MAP_IMPORTED_CONFIG_PROFILE above.
         $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
-        $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
+        $<${RELEASE_OR_PROFILE}:${OpenCV_RELEASE_DLL}>
 
         # VC++ Redistributable
         $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/vcruntime140d.dll>
-        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/vcruntime140.dll>
+        $<${RELEASE_OR_PROFILE}:${SYSTEM_DLL_DIR}/vcruntime140.dll>
 
         $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/vcruntime140_1d.dll>
-        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/vcruntime140_1.dll>
+        $<${RELEASE_OR_PROFILE}:${SYSTEM_DLL_DIR}/vcruntime140_1.dll>
 
         $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/msvcp140d.dll>
-        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/msvcp140.dll>
+        $<${RELEASE_OR_PROFILE}:${SYSTEM_DLL_DIR}/msvcp140.dll>
 
         $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/concrt140d.dll>
-        $<$<CONFIG:Release>:${SYSTEM_DLL_DIR}/concrt140.dll>
+        $<${RELEASE_OR_PROFILE}:${SYSTEM_DLL_DIR}/concrt140.dll>
 
         # For debug mode build for non-developer
         $<$<CONFIG:Debug>:${SYSTEM_DLL_DIR}/ucrtbased.dll>
@@ -133,4 +153,23 @@ add_custom_command(
         ${DEPENDENT_DLLS}
         $<TARGET_FILE_DIR:${BINARY_NAME}>
         COMMAND_EXPAND_LISTS
+)
+
+# The videoio plugin is copied SEPARATELY from DEPENDENT_DLLS because it is the one DLL whose destination NAME
+# depends on the configuration. OpenCV's plugin loader asks for a name derived from the opencv_world it is
+# loaded by, so a Debug build's opencv_world4130d.dll looks for `..._64d.dll` while Release/Profile look for
+# `..._64.dll` -- and the vendored package ships only the release-named file (see the OpenCV bin dir; there is
+# no `..._64d.dll` to copy). The same asymmetry bites the CLI, where it is worked around by hand
+# (.claude/skills/native-cli-dev/SKILL.md, "Runtime DLLs are auto-copied": a Debug `video` run stalls near 0
+# until the DLL is duplicated under the d-suffixed name). Renaming on copy does that automatically, so every
+# configuration of the app ships a plugin its opencv_world will actually find. DEPENDENT_DLLS cannot express
+# this: it copies a list into a directory, preserving names.
+#
+# Only the Release/Profile branch has been exercised by a build (`flutter build windows` is Release); the Debug
+# name is the skill's measured claim about the CLI applied here, not a verified app run.
+add_custom_command(
+        TARGET ${BINARY_NAME} POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        ${OpenCV_FFMPEG_DLL}
+        "$<TARGET_FILE_DIR:${BINARY_NAME}>/${OpenCV_FFMPEG_DLL_NAME}$<$<CONFIG:Debug>:d>.dll"
 )

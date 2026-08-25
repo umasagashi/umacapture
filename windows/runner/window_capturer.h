@@ -4,9 +4,11 @@
 #include <d3d11.h>
 #include <dwmapi.h>
 #include <dxgi1_2.h>
+#include <functional>
 #include <optional>
 #include <thread>
 #include <utility>
+#include <vector>
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 #include <windows.h>
@@ -17,6 +19,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "cv/frame.h"
+#include "cv/frame_shaper.h"
 #include "types/shape.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
@@ -43,66 +46,41 @@ struct WindowTarget {
     EXTENDED_JSON_TYPE_NDC(WindowTarget, window_class, window_title);
 };
 
-struct CropProfile {
-    std::optional<Range<double>> window_aspect_ratio;
-    std::optional<Size<int>> client_aspect_ratio;
-    std::optional<Rect<double>> crop_rect;
-
-    EXTENDED_JSON_TYPE_NDC(CropProfile, window_aspect_ratio, client_aspect_ratio, crop_rect);
-};
-
-// Select the crop profile whose window_aspect_ratio range contains the given size's aspect ratio, or nullopt
-// if none matches. Shared by the live WindowCapturer and the offline VideoLoader so both pick the same profile
-// (a landscape game window vs. a portrait phone recording) from the frame dimensions alone.
-[[nodiscard]] inline std::optional<CropProfile> matchCropProfile(
-    const std::vector<CropProfile> &profiles, const Size<int> &size) {
-    if (size.height() <= 0) {
-        return {};
-    }
-    const double ratio = static_cast<double>(size.width()) / size.height();
-    for (const auto &profile : profiles) {
-        if (profile.window_aspect_ratio && profile.window_aspect_ratio->contains(ratio)) {
-            return profile;
-        }
-    }
-    return {};
-}
-
 }  // namespace windows_config
 
 namespace windows_impl {
+
+using ShapingSelector = frame_shaper::ShapingSelector;
+
+// How this capturer ACQUIRES pixels, which is a Windows concern: CropPixels narrows the GPU copy region to the
+// latched pane (the normal live-capture optimization), AnchorOnly copies the untouched client area. capture
+// --record uses AnchorOnly so the FFV1 stream remains a full-frame input that replay can run through detection
+// and calibration again. The corresponding SHAPING is frame_shaper::ShapingMode, derived in captureStableFrame:
+// a narrowed GPU copy is a CopiedRegion, a full copy is AnchorOnly.
+enum class ShapingMode {
+    CropPixels,
+    AnchorOnly,
+};
 
 // Window information structure
 struct WindowInfo {
     HWND hwnd{nullptr};
     Rect<int> window_rect;  // Window bounds, including frames.
-    Rect<int> client_rect;  // Client area, including letterbox (in full-screen mode).
-    Rect<int> content_rect;  // Client area, excluding letterbox (in full-screen mode).
-    Rect<int> capture_rect;  // Final area of interest.
+    Rect<int> client_rect;  // Client area in screen coordinates.
+    Rect<int> capture_rect;  // Full client area in capture-texture coordinates.
 
     [[nodiscard]] inline bool isValid() const { return hwnd != nullptr; }
 };
-
-inline Size<int> getRatioFixedSize(const Size<int> &source, const Size<int> &fitTo) {
-    const auto &sd = source.cast<double>();
-    const auto &fd = fitTo.cast<double>();
-    return {
-        source.width(),
-        std::lround(sd.width() * fd.height() / fd.width()),
-    };
-}
 
 class WindowCapturer {
 public:
     WindowCapturer(
         const std::vector<windows_config::WindowTarget> &window_targets,
-        const std::vector<windows_config::CropProfile> &crop_profiles,
-        const Size<int> &minimum_size,
-        const bool force_resize)
+        ShapingSelector shaping_selector,
+        ShapingMode shaping_mode = ShapingMode::CropPixels)
         : window_targets(window_targets)
-        , crop_profiles(crop_profiles)
-        , minimum_size(minimum_size)
-        , force_resize(force_resize) {
+        , shaping_selector(std::move(shaping_selector))
+        , shaping_mode(shaping_mode) {
         initializeGraphicsCapture();
     }
 
@@ -117,27 +95,7 @@ public:
         if (!ensureCaptureSession(window_info)) {
             return {};
         }
-
-        auto image = captureRegion(window_info.capture_rect);
-        if (image.empty()) {
-            return {};
-        }
-
-        // TODO: This should not be the minimum size, but rather the ideal size for image recognition.
-        const Size<int> &target_size =
-            force_resize ? minimum_size : getRatioFixedSize(window_info.capture_rect.size(), minimum_size);
-
-        // Allow a small margin of error, since resizing even when the difference is minor can make the image blur.
-        if (target_size.difference_max(image.size()) > 3) {
-            cv::Mat resized;
-            cv::resize(image, resized, target_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
-            image = resized;
-        }
-
-        // `image` is a freshly allocated cv::Mat every call (the cvtColor output in captureRegion, or the
-        // resize output above), never a reused buffer. The pipeline relies on this: NativeApi::updateFrame
-        // forwards the Frame downstream without cloning (see the Frame class doc ownership contract).
-        return {image, chrono_util::to_timestamp(chrono_util::local_now())};
+        return captureStableFrame(window_info);
     }
 
     [[nodiscard]] Frame takeScreenshot() {
@@ -150,26 +108,21 @@ public:
             return {};
         }
 
-        const auto capture_rect = Rect<int>{
-            window_info.content_rect.topLeft() - window_info.window_rect.topLeft(),
-            window_info.content_rect.size(),
-        };
-
-        // Try to capture with retries (max 3 seconds)
+        // Screenshots do not have the queued consumer's stale-snapshot guard, so retry until one GPU copy was
+        // made under a snapshot that is still current afterward. The same shaping path as live capture means
+        // an unlatched screenshot is full, CropPixels saves the pane, and AnchorOnly keeps the full pixels.
         const auto start_time = std::chrono::steady_clock::now();
         constexpr auto max_duration = std::chrono::seconds(3);
         constexpr auto retry_interval = std::chrono::milliseconds(100);
 
         while (true) {
-            const auto image = captureRegion(capture_rect);
-            if (!image.empty()) {
-                // Successfully captured.
+            auto frame = captureStableFrame(window_info);
+            if (!frame.empty()) {
                 cleanup();
-                return {image, chrono_util::to_timestamp(chrono_util::local_now())};
+                return frame;
             }
 
             if ((std::chrono::steady_clock::now() - start_time) >= max_duration) {
-                // Failed to capture.
                 cleanup();
                 return {};
             }
@@ -201,14 +154,66 @@ public:
     [[nodiscard]] Size<int> lastWindowSize() const { return last_window_size; }
 
 private:
+    // Captures one frame under a pane snapshot and cheaply rejects it if the snapshot changed during the GPU
+    // copy. A change after the final check can still happen, so queued consumers remain authoritative by
+    // validating the snapshot carried on the returned Frame.
+    [[nodiscard]] Frame captureStableFrame(const WindowInfo &window_info) {
+        const auto shaping_snapshot = shaping_selector(window_info.client_rect.size());
+        const bool crop_pixels = shaping_mode == ShapingMode::CropPixels;
+        // One value drives BOTH the narrowed GPU copy below and the anchor claimed for it in
+        // frame_shaper::shapeCapturedFrame, so the two cannot drift apart.
+        const auto copy_origin = crop_pixels ? frame_shaper::paneCopyOrigin(shaping_snapshot) : Point<int>{0, 0};
+        auto capture_rect = window_info.capture_rect;
+        if (crop_pixels && shaping_snapshot.rect.has_value()) {
+            capture_rect = {window_info.capture_rect.topLeft() + copy_origin, shaping_snapshot.rect->size()};
+        }
+
+        auto image = captureRegion(capture_rect);
+        if (image.empty()) {
+            return {};
+        }
+
+        // `image` is the fresh cvtColor output from captureRegion, never a reused buffer -- unlike the
+        // `bgra_image` wrapper captureRegion builds over the D3D mapped resource, which owns nothing and is
+        // exactly what must not escape. The pipeline relies on that: NativeApi::updateFrame forwards the Frame
+        // downstream without cloning, and both modes this producer asks for (AnchorOnly, CopiedRegion) forward
+        // the buffer by shallow cv::Mat copy -- only CropPixels duplicates pixels, and this producer never asks
+        // for it because the GPU already delivered exactly the region wanted. That reliance is enforced rather
+        // than described: shapeCapturedFrame below throws unless frame_shaper::ownsPixelsSolely(image) holds.
+        // Re-resolving the selector is a separate guarantee: it re-validates the pane decision across the GPU
+        // copy, and a stale one yields an empty Frame, which callers treat as "no frame".
+        const auto timestamp = chrono_util::to_timestamp(chrono_util::local_now());
+        const auto shaped = frame_shaper::shapeCapturedFrame(
+            image,
+            timestamp,
+            shaping_snapshot,
+            crop_pixels ? frame_shaper::ShapingMode::CopiedRegion : frame_shaper::ShapingMode::AnchorOnly,
+            copy_origin,
+            shaping_selector);
+        return shaped.ok() ? shaped.frame : Frame{};
+    }
+
     void initializeGraphicsCapture() {
-        // The thread that constructs the capturer is already COM-initialized as STA
-        // (see CoInitializeEx in main.cpp). Newer Flutter Windows embedders dispatch
-        // platform-channel handlers on that STA thread, so init_apartment(multi_threaded)
-        // raises RPC_E_CHANGED_MODE. That is a winrt::hresult_error (not a std::exception),
-        // so it would escape the method channel's std::exception handler and terminate the
-        // process. COM is usable from either apartment for our capture path, so a
-        // changed-mode result is benign and treated as success.
+        // APARTMENT. This runs on whichever thread constructs the capturer, and those threads no longer share
+        // one COM state. The whole codebase calls CoInitializeEx exactly once -- windows/runner/main.cpp,
+        // COINIT_APARTMENTTHREADED, on the Flutter app's platform thread -- so:
+        //   * The app's SCREENSHOT capturer, built on that platform thread ("takeScreenshot" in
+        //     native_controller.h is a plain, non-deferred handler), meets an STA and
+        //     init_apartment(multi_threaded) raises RPC_E_CHANGED_MODE. This is the ONLY constructor that
+        //     does; the arm below exists for it alone.
+        //   * The app's LIVE capturer is built on NativeController's capture_lifecycle worker (applyConfig /
+        //     mergeConfigDelta -> WindowRecorder::setConfig -> the RecordingThread constructor), which is
+        //     never CoInitialize'd, so init_apartment SUCCEEDS and joins the MTA. It stopped meeting the STA
+        //     when config pushes moved off the platform thread; do not read the arm below as covering it.
+        //   * The CLI builds both kinds on its own main thread (native/src/core/cli.cpp, capture and
+        //     screenshot), which is likewise never CoInitialize'd -- the MTA branch again.
+        // In each success case the apartment stays initialized for the life of that thread, which is the life
+        // of the process here; nothing calls uninit_apartment.
+        // RPC_E_CHANGED_MODE arrives as a winrt::hresult_error, which does NOT derive from std::exception, so
+        // letting it escape would slip past the method channel's std::exception handler (platform_channel.h)
+        // and terminate the process. COM is usable from either apartment for this capture path -- the frame
+        // pool is created with CreateFreeThreaded -- so a changed-mode result is benign and treated as
+        // success. Any other hresult is rethrown: it means COM is unusable, not that it was already set up.
         try {
             winrt::init_apartment(winrt::apartment_type::multi_threaded);
         } catch (const winrt::hresult_error &error) {
@@ -246,38 +251,6 @@ private:
         }
 
         winrt_device = inspectable.as<winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice>();
-    }
-
-    Rect<int> removeLetterbox(const Rect<int> &client_rect, const Size<int> &expected_aspect) const {
-        const double expected_ratio = static_cast<double>(expected_aspect.width()) / expected_aspect.height();
-        const double client_ratio = static_cast<double>(client_rect.width()) / client_rect.height();
-
-        int expected_width, expected_height;
-        if (client_ratio > expected_ratio) {
-            // Letterbox on left/right.
-            expected_height = client_rect.height();
-            expected_width = static_cast<int>(std::round(expected_height * expected_ratio));
-        } else {
-            // Letterbox on top/bottom.
-            expected_width = client_rect.width();
-            expected_height = static_cast<int>(std::round(expected_width / expected_ratio));
-        }
-
-        // Allow a small margin of error, since resizing even when the difference is minor can make the image blur.
-        if (client_rect.size().difference_max({expected_width, expected_height}) <= 3) {
-            // Within tolerance, treat as no letterbox.
-            return client_rect;
-        }
-
-        // Calculate centered content area.
-        const int content_width = std::min(client_rect.width(), expected_width);
-        const int content_height = std::min(client_rect.height(), expected_height);
-        const int offset_x = (client_rect.width() - content_width) / 2;
-        const int offset_y = (client_rect.height() - content_height) / 2;
-        return {
-            client_rect.topLeft() + Size<int>{offset_x, offset_y},
-            Size<int>{content_width, content_height},
-        };
     }
 
     WindowInfo findWindow(const windows_config::WindowTarget &target) {
@@ -324,10 +297,6 @@ private:
         return info;
     }
 
-    std::optional<windows_config::CropProfile> findMatchingCropProfile(const Rect<int> &client_rect) const {
-        return windows_config::matchCropProfile(crop_profiles, client_rect.size());
-    }
-
     WindowInfo findTargetWindow() {
         // Phase 1: Find window from targets.
         WindowInfo info;
@@ -341,33 +310,13 @@ private:
             return {};
         }
 
-        // Phase 2: Select crop profile based on window aspect ratio.
-        const auto &profile = findMatchingCropProfile(info.client_rect);
-        if (!profile.has_value()) {
-            // No matching profile means no cropping is needed.
-            info.content_rect = info.client_rect;
-            info.capture_rect = {info.content_rect.topLeft() - info.window_rect.topLeft(), info.content_rect.size()};
-        } else {
-            // Apply letterbox removal if client_aspect_ratio is specified.
-            if (!profile->client_aspect_ratio.has_value()) {
-                info.content_rect = info.client_rect;
-            } else {
-                info.content_rect = removeLetterbox(info.client_rect, profile->client_aspect_ratio.value());
-            }
-
-            // Apply crop_rect if specified.
-            const auto window_origin = info.window_rect.topLeft();
-            if (!profile->crop_rect.has_value()) {
-                info.capture_rect = {info.content_rect.topLeft() - window_origin, info.content_rect.size()};
-            } else {
-                const auto anchor = FrameAnchor::intersect(info.content_rect.size());
-                const auto crop_rect = anchor.mapToFrame(profile->crop_rect.value());
-                const auto crop_origin = info.content_rect.topLeft() + Size<int>{crop_rect.left(), crop_rect.top()};
-                info.capture_rect = {crop_origin - window_origin, crop_rect.size()};
-            }
-        }
-
-        last_window_size = info.content_rect.size();
+        // Pane shaping is resolved per frame in capture(). Window discovery always describes the untouched
+        // client area so lastWindowSize remains the pre-shaping size passed to NativeApi::updateFrame.
+        info.capture_rect = {
+            info.client_rect.topLeft() - info.window_rect.topLeft(),
+            info.client_rect.size(),
+        };
+        last_window_size = info.client_rect.size();
         return info;
     }
 
@@ -513,9 +462,8 @@ private:
     }
 
     const std::vector<windows_config::WindowTarget> window_targets;
-    const std::vector<windows_config::CropProfile> crop_profiles;
-    const Size<int> minimum_size;
-    const bool force_resize;
+    const ShapingSelector shaping_selector;
+    const ShapingMode shaping_mode;
 
     Size<int> last_window_size;
     HWND current_window{nullptr};

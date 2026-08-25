@@ -9,13 +9,17 @@
 
 namespace uma::video {
 
-// Replays an FFV1 `.mkv` produced by Ffv1Recorder back into the recognition pipeline. Each decoded frame
-// is emitted through the same event_util::Sender the live capture and VideoLoader use, carrying its
-// original millisecond timestamp (recovered from the container PTS) so the scene begin/end debounce fires
-// on exactly the frames it did during the failed capture. Pixels round-trip bit-exact (BGR0 -> BGR).
+// Replays an FFV1 `.mkv` produced by Ffv1Recorder back into the recognition pipeline. Each decoded full frame
+// is emitted through the same event_util::Sender the live capture and VideoLoader use, carrying its original
+// millisecond timestamp (recovered from the container PTS) so the scene begin/end debounce fires on exactly
+// the frames it did during capture. Pixels round-trip bit-exact (BGR0 -> BGR).
 //
-// Frames are already pipeline-input form (post capture-resize/crop), so no cropping is applied here.
-// Ingestion is paced by the downstream Block-mode queue, not by wall-clock, matching VideoLoader.
+// This producer resolves NO pane decision of its own: it emits the full recorded frame with the default
+// anchor and no pane snapshot, and the distributor thread applies the latched pane as the Frame anchor. See
+// cv/video_loader.h for the constraint that forces both offline producers to work that way -- in short, an
+// offline producer races the thread that owns the latch, while the golden suite consumes these paths as a
+// deterministic function of their input. Ingestion is paced by the downstream Block-mode queue, not by
+// wall-clock, matching VideoLoader.
 class Ffv1Reader {
 public:
     Ffv1Reader(const std::filesystem::path &path, const event_util::Sender<Frame, Size<int>> &on_frame_captured);

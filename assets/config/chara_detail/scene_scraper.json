@@ -142,7 +142,7 @@
     "minimum_scroll_threshold": 0.05,
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
-    "stationary_color_threshold": 100,
+    "stationary_change_ratio_threshold": 1.4e-05,
     "viewport": 0.738,
     "cap_offset": 0.00126,
     "scroll_bar_margin_color": {
@@ -312,7 +312,7 @@
     "minimum_scroll_threshold": 0.05,
     "stationary_time_threshold": 200,
     "minimum_color_threshold": 18,
-    "stationary_color_threshold": 100,
+    "stationary_change_ratio_threshold": 1.4e-05,
     "viewport": 0.553,
     "cap_offset": 0.00126,
     "scroll_bar_margin_color": {
@@ -462,14 +462,14 @@
     "length": 0.006793478260869565,
     "color_range": {
       "min": {
-        "r": 83,
-        "g": 177,
+        "r": 70,
+        "g": 150,
         "b": 0
       },
       "max": {
-        "r": 173,
+        "r": 190,
         "g": 255,
-        "b": 65
+        "b": 85
       }
     }
   },
@@ -479,7 +479,7 @@
       "y": 0.08152173913043478,
       "anchor": {
         "h": "IntersectStart",
-        "v": "ScreenStart"
+        "v": "IntersectStart"
       }
     },
     "p2": {
@@ -487,34 +487,34 @@
       "y": 0.05434782608695652,
       "anchor": {
         "h": "IntersectStart",
-        "v": "ScreenStart"
+        "v": "IntersectStart"
       }
     }
   },
   "header_color_range": {
     "min": {
-      "r": 95,
-      "g": 177,
+      "r": 70,
+      "g": 150,
       "b": 0
     },
     "max": {
-      "r": 183,
+      "r": 195,
       "g": 255,
-      "b": 57
+      "b": 85
     }
   },
   "header_visible_time_threshold": 100,
   "factor_header": {
     "color_range": {
       "min": {
-        "r": 83,
-        "g": 177,
+        "r": 70,
+        "g": 150,
         "b": 0
       },
       "max": {
-        "r": 173,
+        "r": 190,
         "g": 255,
-        "b": 65
+        "b": 85
       }
     },
     "band_start": 0.65,

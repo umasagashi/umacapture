@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -13,6 +14,7 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic pop
 
+#include "cv/pane_mode_latch.h"
 #include "types/color.h"
 #include "types/range.h"
 #include "types/shape.h"
@@ -287,6 +289,19 @@ public:
 
     [[nodiscard]] inline const FrameAnchor &anchor() const { return anchor_; }
 
+    // Carries the producer's pane-shaping decision through an asynchronous capture queue. Producers that do
+    // no pane shaping leave this empty. DetailCropTracker validates a present snapshot at the actual
+    // distributor-thread consumer boundary before interpreting this frame's anchor.
+    [[nodiscard]] inline Frame withPaneModeSnapshot(const PaneModeLatch::Snapshot &snapshot) const {
+        Frame guarded = *this;
+        guarded.pane_mode_snapshot_ = snapshot;
+        return guarded;
+    }
+
+    [[nodiscard]] inline const std::optional<PaneModeLatch::Snapshot> &paneModeSnapshot() const {
+        return pane_mode_snapshot_;
+    }
+
     [[nodiscard]] bool isIn(const Range<Color> &color_range, const Point<double> &point) const {
         return color_range.contains(colorAt(point));
     }
@@ -354,37 +369,16 @@ public:
         return length;
     }
 
-    // Precondition: `other` shares this frame's anchor family (same construction path), so `rect` maps to the
-    // same pixels in both. In general anchor is NOT a pure function of pixel size -- fixed()/stretched() frames
-    // of equal size can have different anchors -- so the size check below is a proxy, not a full guarantee. It
-    // holds because every caller diffs two live-capture frames (both intersect()-anchored), where equal size
-    // does imply an equal anchor. Do not pass a mix of construction paths (e.g. a fixed()-derived stitched
-    // frame against a live one): it would silently compare mismatched regions.
-    [[nodiscard]] uint64 pixelDifference(const Frame &other, const Rect<double> &rect, int ignore_threshold) const {
-        // Both frames are indexed over the same rect; a size mismatch (e.g. a capture resolution change between
-        // frames) would read out of bounds on the smaller image in release, where the assert is compiled out.
-        if (this->size() != other.size()) {
-            throw std::invalid_argument("pixelDifference: frame sizes do not match");
-        }
-        const auto mapped_rect = clampedMappedRect(rect);
-        uint64 total = 0;
-        for (int y = mapped_rect.top(); y < mapped_rect.bottom(); y++) {
-            for (int x = mapped_rect.left(); x < mapped_rect.right(); x++) {
-                const auto &a = bgrAt(x, y);
-                const auto &b = other.bgrAt(x, y);
-                const auto d = a.difference(b);
-                if (d > ignore_threshold) {
-                    total += d;
-                }
-            }
-        }
-        return total;
-    }
-
     // Per-pixel difference statistics over `rect`, gated at `threshold`: a pixel is "changed" when its
     // per-pixel BGR difference (0-765) exceeds the threshold. Reports how *many* pixels changed (ratio),
     // so a caller can key off a broad-area change rather than a magnitude sum that a few large-delta
     // pixels can dominate.
+    //
+    // This is the only area-difference primitive in Frame. A sum-of-gated-distances sibling
+    // (`pixelDifference`) used to sit here for the stationary latch; it was removed when the latch moved to
+    // ratio(), because two rival difference conventions in one class invite exactly the confusion that made
+    // the latch's absolute budget mean three different things at its three different rects (the census is in
+    // chara_detail_scene_scraper.h, on StationaryFrameCatcher).
     struct DiffStats {
         uint64 changed = 0;  // pixels whose per-pixel diff exceeds the threshold
         uint64 total = 0;  // pixels examined
@@ -393,9 +387,15 @@ public:
         [[nodiscard]] double ratio() const { return total == 0 ? 0.0 : static_cast<double>(changed) / total; }
     };
 
-    // Same anchor-family precondition as pixelDifference: the size check is a proxy that holds only because
-    // callers diff two live-capture (intersect()-anchored) frames. See pixelDifference above.
+    // Precondition: `other` shares this frame's anchor family (same construction path), so `rect` maps to the
+    // same pixels in both. In general anchor is NOT a pure function of pixel size -- fixed()/stretched() frames
+    // of equal size can have different anchors -- so the size check below is a proxy, not a full guarantee. It
+    // holds because every caller diffs two live-capture frames (both intersect()-anchored), where equal size
+    // does imply an equal anchor. Do not pass a mix of construction paths (e.g. a fixed()-derived stitched
+    // frame against a live one): it would silently compare mismatched regions.
     [[nodiscard]] DiffStats diffStats(const Frame &other, const Rect<double> &rect, int threshold) const {
+        // Both frames are indexed over the same rect; a size mismatch (e.g. a capture resolution change between
+        // frames) would read out of bounds on the smaller image in release, where the assert is compiled out.
         if (this->size() != other.size()) {
             throw std::invalid_argument("diffStats: frame sizes do not match");
         }
@@ -428,7 +428,176 @@ public:
         return view(r.left(), r.top(), r.width(), r.height());
     }
 
-    [[nodiscard]] inline Frame clone() const { return {image.clone(), timestamp_, anchor_}; }
+    // Pixel-space counterpart to the normalized view above. The returned ROI has a fixed, full local anchor;
+    // callers that retain it beyond the source buffer's lifetime must clone it.
+    [[nodiscard]] inline Frame viewPixels(const Rect<int> &rect) const {
+        return view(rect.left(), rect.top(), rect.width(), rect.height());
+    }
+
+    [[nodiscard]] inline Frame clone() const {
+        Frame cloned{image.clone(), timestamp_, anchor_};
+        cloned.pane_mode_snapshot_ = pane_mode_snapshot_;
+        return cloned;
+    }
+
+    // A copy of this frame carrying an EXPLICIT intersection instead of the aspect-ratio guess the public
+    // constructors derive (FrameAnchor::intersect). Shallow like any other Frame copy: only the anchor
+    // differs, the pixel buffer is shared. Used by the detail-crop auto-calibration to re-anchor the live
+    // stream onto the game's measured client rect; every downstream stage maps through frame.anchor(), so
+    // the correction reaches the condition tree, the scraper and the recognizer without further plumbing.
+    // The CALLER owns the containment check (see isCropInsideFrame in cv/detail_crop_tracker.h): an
+    // intersection reaching outside the image makes the coordinate math below throw from bgrAt/view.
+    [[nodiscard]] inline Frame reanchored(const Rect<int> &intersection) const {
+        return {image, timestamp_, FrameAnchor::fixed(size(), intersection)};
+    }
+
+    // How far the frame's own unit may sit from a requested one before the resize is skipped as not worth
+    // paying for: resizing over a negligible difference only blurs the image. The 3 px is inherited verbatim
+    // from the Windows runner's original force-resize; what changed is the QUANTITY it measures (see
+    // resizedToUnit). Public so the tests can pin the number and the behaviour to the same constant.
+    static constexpr int kUnitTolerance = 3;
+
+    // A copy of this frame rescaled so its anchor UNIT -- the intersection WIDTH, the single number every
+    // normalized coordinate is multiplied by -- becomes exactly `unit` pixels. This is the pure seam behind
+    // the "normalize the recognized image size" setting; it owns both halves of the operation (the pixel
+    // resize and the matching intersection transform) so neither can drift from the other.
+    //
+    // ONE ISOTROPIC FACTOR. The scale is `unit / intersection.width()`, applied to both axes, because
+    // FrameAnchor normalizes x AND y by the intersection width (see its unit_size). Scaling the axes
+    // independently would leave the horizontal coordinates right and silently multiply every vertical one by
+    // sy/sx. So the postcondition is "the unit is exactly `unit`", NOT "the frame is `unit` wide": the frame
+    // keeps its own aspect ratio, and the intersection keeps its relative place inside it.
+    //
+    // Every edge is ROUNDED, never rounded up. `ceil` looks like the safe choice for the destination size
+    // (it cannot lose a source pixel) but it is not: `frame_width * (unit / source_width)` is mathematically
+    // exactly `unit` when the two widths are equal, yet in double precision e.g. 532 * (540.0/532) evaluates
+    // to 540.0000000000001, so ceil yields 541 -- a 541-px image whose unit is pinned to 540, i.e. content
+    // stretched one column wider than the coordinate system that addresses it. Rounding cannot overshoot that
+    // way, and cannot undershoot either: the frame is never narrower than its own intersection, so
+    // lround(frame_width * scale) >= unit always holds and nothing can overhang.
+    //
+    // The intersection's width is then pinned to `unit` (defensive: lround(source_width * scale) provably
+    // equals it, so this is belt-and-braces rather than a distinct behaviour) and the other three edges are
+    // clamped back inside the destination image, so the result still satisfies isCropInsideFrame
+    // (cv/detail_crop_tracker.h) -- a single pixel of overhang would make every probe throw from bgrAt.
+    //
+    // Returns *this when the frame's unit is already within kUnitTolerance of the target, or when the input is
+    // degenerate. Total: it never throws for any constructible Frame, and the postcondition is unconditional --
+    // for any non-degenerate input the resulting unit IS `unit`, with no third outcome a caller has to allow for.
+    //
+    // NO DESTINATION-AREA CEILING, DELIBERATELY. There used to be one here (`destination area > 64e6 -> return
+    // *this`, born with this function). It was untested, unlogged and indistinguishable from success at the
+    // seam, and it was measured to be unreachable as the pipeline is wired: the band is consulted only for a
+    // frame the condition tree already matched, and a frame extreme enough to reach the ceiling cannot get
+    // there. Deleting it would have traded an untested branch for an unstated assumption, so the assumption is
+    // written down instead -- as two properties, both pinned by name in test/cv/test_frame.cpp:
+    //
+    //   1. THE DESTINATION DEPENDS ON THE FRAME'S SHAPE, NOT ON ITS PIXEL COUNT. The destination area is
+    //      `frame_area * (unit / W)^2`; scaling a frame and its intersection together leaves it unchanged. So
+    //      no source resolution, however large, can make the destination large -- only an absurd aspect ratio
+    //      could. ("resizing into the band depends on the frame's shape, not on its pixel count")
+    //   2. W IS NEVER A SMALL FRACTION OF THE FRAME. Every anchor the pipeline installs is derived from the
+    //      frame's own size -- FrameAnchor::intersect and the two candidates in cv/pane_mode.h -- so a tiny
+    //      rectangle inside a huge frame is not constructible. ("every anchor the pipeline installs is a
+    //      bounded fraction of the frame's shorter side")
+    //
+    // The way back into the region is an anchor source that names a rectangle WITHOUT deriving it from the
+    // frame's geometry; that is exactly what property 2 refuses, by name, rather than leaving it to a constant.
+    [[nodiscard]] inline Frame resizedToUnit(int unit) const {
+        const Rect<int> source = anchor_.intersection();
+        if (unit <= 0 || image.empty() || source.width() <= 0 || source.height() <= 0) {
+            return *this;
+        }
+        // MEASURED ON THE UNIT, not on the frame. This tolerance used to compare the destination SIZE with
+        // the current one (`target.difference_max(size()) <= 3`), which spends the same 3 px budget on
+        // whichever of the two axes moves most -- and the frame is scaled by `unit / intersection.width()`,
+        // so a one-pixel change of the unit becomes `frame_height / intersection_width` pixels of frame. For
+        // the portrait phone captures this project actually reads, that ratio is 2.3 to 4.7, so the
+        // "negligible difference" the tolerance was written to skip shrank to a fraction of a pixel of unit
+        // and varied with the frame's aspect ratio -- i.e. the protection was quietly not delivered for the
+        // material it exists for. The unit is the quantity the caller asks for and the only one every
+        // normalized coordinate is divided by, so it is the quantity the tolerance belongs to.
+        const int unit_difference = unit > source.width() ? unit - source.width() : source.width() - unit;
+        if (unit_difference <= kUnitTolerance) {
+            return *this;
+        }
+        const double scale = static_cast<double>(unit) / source.width();
+        const Size<int> target{
+            static_cast<int>(std::lround(size().width() * scale)),
+            static_cast<int>(std::lround(size().height() * scale)),
+        };
+        if (target.width() <= 0 || target.height() <= 0) {
+            return *this;
+        }
+        cv::Mat resized;
+        cv::resize(image, resized, target.toCVSize(), 0, 0, cv::INTER_LINEAR);
+        const int width = std::min(unit, target.width());
+        const int height = std::clamp(static_cast<int>(std::lround(source.height() * scale)), 1, target.height());
+        const int left = std::clamp(static_cast<int>(std::lround(source.left() * scale)), 0, target.width() - width);
+        const int top = std::clamp(static_cast<int>(std::lround(source.top() * scale)), 0, target.height() - height);
+        return {resized, timestamp_, FrameAnchor::fixed(target, {{left, top}, Size<int>{width, height}})};
+    }
+
+    // The band form of the transform above, and the form the pipeline actually configures: resize this
+    // frame's anchor unit TOWARDS `band` -- scale UP to the lower bound when the unit is below it, scale DOWN
+    // to the upper bound once the unit reaches kShrinkDeadband times that bound, and forward the frame
+    // untouched anywhere else. TOWARDS, not INTO: the untouched arm covers everything from the lower bound up
+    // to the shrink arm's fire point, so a frame somewhat above the upper bound is forwarded ABOVE the band.
+    // That gap is deliberate and the paragraph on asymmetry below says why.
+    //
+    // THE DECISION LIVES HERE, WITH THE FRAME, and not at the pipeline's construction site, because it is
+    // not resolvable there: which bound applies -- and whether either does -- is a function of this frame's
+    // own intersection width, which the crop calibration can change from one frame to the next. Handing the
+    // pipeline a band rather than a unit is what keeps that a property of the frame instead of a snapshot
+    // taken once when the capture session started.
+    //
+    // Scaling UP is deliberate, not an accident of the lower bound: a small window is normalized up to the
+    // recognizer's reference width rather than recognized at a width no model was trained near. It is not
+    // clamped by any allocation ceiling; see resizedToUnit for the anchor invariant that bounds it instead.
+    //
+    // THE TWO ARMS ARE ASYMMETRIC ON PURPOSE, and the dead band below is why. The lower bound exists for
+    // ACCURACY -- 540 is the recognizer's reference width, and no model has been trained near a width below
+    // it -- so every frame under it is normalized, however small the correction. The upper bound exists for
+    // COST: shrinking buys back downstream work, and a resample that shrinks by a few percent costs a full
+    // pass over the frame to buy back a few percent of the stages behind it. So the shrink arm only fires
+    // once the frame is a long way above the bound, and the lower arm has no dead band at all.
+    [[nodiscard]] inline Frame resizedIntoBand(const Range<int> &band) const {
+        const int unit = anchor_.intersection().width();
+        if (unit < band.min()) {
+            return resizedToUnit(band.min());
+        }
+        if (isWorthShrinkingTo(unit, band.max())) {
+            return resizedToUnit(band.max());
+        }
+        return *this;
+    }
+
+    // The shrink arm's DEAD BAND, as a MULTIPLE of the band's upper bound rather than as an absolute width.
+    //
+    // A ratio, because the quantity that decides whether a shrink pays for itself is the ratio: the resample
+    // costs one pass over the source and buys back `1 - (max/unit)^2` of the per-frame work behind it, and
+    // that saving is a function of `unit / max` alone. An absolute threshold would say nothing about the
+    // trade at any other bound, and would have to be re-derived -- silently, by whoever next moves the bound.
+    //
+    // ==> IF THE BAND'S UPPER BOUND MOVES, THIS THRESHOLD MOVES WITH IT: the shrink arm always fires at
+    //     `max_unit * kShrinkDeadband`, so raising the bound to 900 raises the fire point to 1350.
+    //
+    // 1.5 is a chosen operating point, NOT an optimum, and it is deliberately not a config key. The band's
+    // whole job is to stop the per-frame cost growing without limit on a high-resolution capture; the exact
+    // point at which it starts is not a quantity this project has, or needs, an answer for, and no input in
+    // the supported range fails differently on either side of it. A key would therefore add a way to get the
+    // pipeline into a state nothing tests, in exchange for a number nobody can derive. Two facts place it:
+    // it is above the measured cost cross-over on both reference platforms (so neither loses by waiting),
+    // and 1080 -- what it resolves to at the shipped 720 bound -- is a standard phone-recording width, so
+    // the captures the band exists for still take the shrink arm.
+    static constexpr double kShrinkDeadband = 1.5;
+
+    // `>=`, so a unit landing EXACTLY on the threshold shrinks. That edge is not academic: at the shipped
+    // 720 bound it is 1080, i.e. the width of an ordinary phone screen recording, and those are the captures
+    // the upper bound exists to hold down. Pinned at 1079/1080/1081 in test/cv/test_frame.cpp.
+    [[nodiscard]] static constexpr bool isWorthShrinkingTo(int unit, int max_unit) {
+        return unit >= max_unit * kShrinkDeadband;
+    }
 
     // In-place mutator: writes through the shared cv::Mat buffer. Used deliberately to write to a parent
     // through a view (e.g. canvas.view(rect).fill(...)). See the class doc for the shared-buffer ownership
@@ -517,7 +686,7 @@ private:
     }
 
     // Maps `rect` (normalized coordinates) to frame pixels and clips it to the image bounds. An empty rect
-    // means "the whole frame". Used by the area metrics (pixelDifference/diffStats): a rect that reaches past
+    // means "the whole frame". Used by the area metric (diffStats): a rect that reaches past
     // the frame edge should clip to the valid region, not throw mid-loop through bgrAt.
     [[nodiscard]] inline Rect<int> clampedMappedRect(const Rect<double> &rect) const {
         if (rect.empty()) {
@@ -534,6 +703,7 @@ private:
     cv::Mat image;
     uint64 timestamp_;
     FrameAnchor anchor_;
+    std::optional<PaneModeLatch::Snapshot> pane_mode_snapshot_;
 };
 
 }  // namespace uma
