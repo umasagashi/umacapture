@@ -8,22 +8,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '/const.dart';
 import '/src/addon/addon_dispatcher.dart';
 import '/src/app/pages.dart';
 import '/src/app/route.dart';
+import '/src/core/fs/temp_session.dart';
 import '/src/core/notification_controller.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/data_table_widget.dart';
+import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
+import '/src/gui/feedback_drawer.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/window_manager_alt.dart';
 import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/window_state.dart';
-
-final kIsDesktop = {TargetPlatform.windows, TargetPlatform.linux, TargetPlatform.macOS}.contains(defaultTargetPlatform);
 
 final themeSettingProvider = ExclusiveItemsNotifierProvider<ThemeMode>(() {
   return ExclusiveItemsNotifier<ThemeMode>(
@@ -62,8 +64,16 @@ class _Sidebar extends ConsumerWidget {
           destinations: [
             for (final pageLabel in Pages.labels)
               NavigationRailDestination(
-                icon: pageLabel.unselectedIcon,
-                selectedIcon: pageLabel.selectedIcon,
+                // Route-derived identities so an external driver can select a page without
+                // depending on the localized label. NavigationRailDestination is not a widget and
+                // takes no key, and the label cannot carry one either: a collapsed rail lays the
+                // label out at zero size, which makes it unhittable. The icon is rendered at full
+                // size in both states, and exactly one of the two is mounted at a time.
+                icon: KeyedSubtree(key: ValueKey("nav_${pageLabel.route.routeName}"), child: pageLabel.unselectedIcon),
+                selectedIcon: KeyedSubtree(
+                  key: ValueKey("nav_${pageLabel.route.routeName}"),
+                  child: pageLabel.selectedIcon,
+                ),
                 label: Text(pageLabel.label, style: theme.textTheme.titleMedium),
                 padding: EdgeInsets.zero,
               ),
@@ -143,7 +153,24 @@ class _ResponsiveScaffold extends StatelessWidget {
                 child: Row(
                   children: [
                     if (wide) _Sidebar(),
-                    Expanded(child: child),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          // App level, not the record tab: every persisted record
+                          // read and write takes the cross-tab lock, so when it is
+                          // missing capture, import and the record list all fail
+                          // together. Renders nothing when the lock is available.
+                          const RecordLockUnavailableBanner(),
+                          // One scope up and the same argument: startup resolves
+                          // the directory layout and prepares the record store
+                          // under the exclusive root lock, and capture, settings,
+                          // addons and the record list all wait on it. Renders
+                          // nothing unless that failed.
+                          const RecordStoreStartupOutageBanner(),
+                          Expanded(child: child),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -210,8 +237,13 @@ class _WindowFrameState extends ConsumerState<_WindowFrame> with WindowListener 
 class AppWidget extends StatelessWidget {
   const AppWidget({super.key});
 
-  Widget root(Widget child) {
-    return DialogLayer(child: _ResponsiveScaffold(child: child));
+  /// Wraps a page in the app-level chrome.
+  ///
+  /// [withFeedbackDrawer] adds the pull-down feedback handle. It is only for
+  /// builds without the custom title bar, which already hosts that button.
+  Widget root(Widget child, {required bool withFeedbackDrawer}) {
+    final scaffold = _ResponsiveScaffold(child: child);
+    return DialogLayer(child: withFeedbackDrawer ? FeedbackDrawer(child: scaffold) : scaffold);
   }
 
   @override
@@ -219,10 +251,11 @@ class AppWidget extends StatelessWidget {
     return AutoTabsRouter(
       routes: Pages.routes,
       builder: (context, child) {
-        if (!kIsWeb && kIsDesktop) {
-          return _WindowFrame(child: root(child));
+        final hasTitleBar = CurrentPlatform.hasWindowFrame();
+        if (hasTitleBar) {
+          return _WindowFrame(child: root(child, withFeedbackDrawer: false));
         } else {
-          return root(child);
+          return root(child, withFeedbackDrawer: true);
         }
       },
     );
@@ -242,16 +275,48 @@ class ApplicationWidgetState extends ConsumerState<ApplicationWidget> {
   @override
   void initState() {
     super.initState();
-    // Reclaim scratch space left over from a previous run. The native pipeline
-    // can leave scraping fragments in the temp tree when a capture is interrupted
-    // (or the app is killed), so empty it once at startup -- keeping the temp
-    // directory itself -- rather than on exit, which never runs after a crash.
-    ref.read(pathInfoLoader.future).then((info) => info.tempDir.clearSync()).catchError((
-      Object error,
-      StackTrace stackTrace,
-    ) {
+    // Reclaim scratch space left over from a previous run, once at startup --
+    // keeping the temp directory itself -- rather than on exit, which never runs
+    // after a crash. Desktop leaves scraping fragments there when a capture is
+    // interrupted (or the app is killed); both platforms can leave an abandoned
+    // bug-report screenshot (sentry_util.takeScreenshot), which on web is a full
+    // frame of a screen share sitting in OPFS with no other sweeper. The owning
+    // dialog deletes its own shot on close, so this only reclaims what an
+    // abnormal termination stranded.
+    ref.read(pathInfoLoader.future).then(_clearTempDir).catchError((Object error, StackTrace stackTrace) {
       logger.e("Failed to clear temp directory on startup.", error, stackTrace);
     });
+  }
+
+  /// Reclaims stranded scratch space, keeping what is still in use.
+  ///
+  /// Desktop empties the whole tree synchronously: one process owns it, so
+  /// everything in it at startup is by definition left over, and the synchronous
+  /// variant keeps startup from racing the native pipeline's first writes.
+  ///
+  /// Web cannot do that. OPFS is shared by every tab of the origin while this
+  /// runs once per tab, so an unconditional clear deleted a *live* tab's
+  /// in-flight bug-report screenshot or module download. It sweeps by ownership
+  /// instead (see `temp_session.dart`), which still reclaims exactly what an
+  /// abnormal termination stranded — a dead tab holds no lock. `clearSync` is
+  /// also unavailable there: it goes through the sync FS, which OPFS does not
+  /// implement.
+  Future<void> _clearTempDir(PathInfo info) async {
+    if (!kIsWeb) {
+      info.tempDir.clearSync();
+      return;
+    }
+    // Writers reach for this path without creating it (OPFS refuses a write into
+    // a missing directory), and it is one level deeper than it used to be.
+    await info.tempDir.create(recursive: true);
+    if (info.tempSession == null) {
+      // No claim of our own means the lock primitive is missing here, so the
+      // liveness answer cannot be trusted either -- and our own scratch is
+      // sitting in the shared root where a sweep would take it.
+      logger.w("Skipped the temp sweep: this session holds no claim on the temp tree.");
+      return;
+    }
+    await sweepTempSessions(info.tempRootDir, liveSessions: liveTempSessionIds);
   }
 
   TextStyle? modifyFontWeight(TextStyle? base, int offset) {

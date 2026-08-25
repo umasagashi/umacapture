@@ -33,7 +33,6 @@
 /dist/
 
 # Web related
-lib/generated_plugin_registrant.dart
 
 # Symbolication related
 app.*.symbols
@@ -57,6 +56,10 @@ lib/*.g.dart
 # its log output is not). The integration test writes to a temp file instead.
 /tool/addon_test/echo_log.txt
 
+# Cloudflare R2 setup credentials (real token/account id; scripts are tracked,
+# the secrets file is not). Copy tool/cloudflare/.env.example to .env.
+/tool/cloudflare/.env
+
 # FVM
 .fvm/
 
@@ -67,6 +70,14 @@ lib/*.g.dart
 
 # Local working notes (kept out of version control)
 .notes/
+.codex/
 
 # Flutter test coverage output
 coverage/
+
+# Wasm recognition-core build outputs + vendored onnxruntime-web runtime.
+# These are produced locally by native/wasm/build.sh (see native/wasm/README.md)
+# and are treated like any other build artifact: each developer builds them
+# locally, they are never committed. The coi-serviceworker shim in web/ is a
+# tracked third-party vendored file and is intentionally NOT ignored here.
+/web/wasm/
