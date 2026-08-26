@@ -9,6 +9,7 @@ import '/src/core/path_entity.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_image.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
@@ -247,6 +248,7 @@ class _Footer extends StatelessWidget {
           _NavButton(
             disabled: !canModeLeft,
             tooltip: "$tr_side_panel.left_button.tooltip".tr(),
+            disabledTooltip: "$tr_side_panel.left_button.disabled_tooltip".tr(),
             icon: Symbols.arrow_back_rounded,
             onPressed: () => onChangeMode(-1),
           ),
@@ -256,6 +258,7 @@ class _Footer extends StatelessWidget {
               _NavButton(
                 disabled: !canPrev,
                 tooltip: "$tr_side_panel.up_button.tooltip".tr(),
+                disabledTooltip: "$tr_side_panel.up_button.disabled_tooltip".tr(),
                 icon: Symbols.arrow_upward_rounded,
                 onPressed: () => onNavigate(-1),
               ),
@@ -263,6 +266,7 @@ class _Footer extends StatelessWidget {
               _NavButton(
                 disabled: !canNext,
                 tooltip: "$tr_side_panel.down_button.tooltip".tr(),
+                disabledTooltip: "$tr_side_panel.down_button.disabled_tooltip".tr(),
                 icon: Symbols.arrow_downward_rounded,
                 onPressed: () => onNavigate(1),
               ),
@@ -271,6 +275,7 @@ class _Footer extends StatelessWidget {
           _NavButton(
             disabled: !canModeRight,
             tooltip: "$tr_side_panel.right_button.tooltip".tr(),
+            disabledTooltip: "$tr_side_panel.right_button.disabled_tooltip".tr(),
             icon: Symbols.arrow_forward_rounded,
             onPressed: () => onChangeMode(1),
           ),
@@ -283,15 +288,40 @@ class _Footer extends StatelessWidget {
 class _NavButton extends StatelessWidget {
   final bool disabled;
   final String tooltip;
+
+  /// Why the button cannot be pressed, shown in place of [tooltip] while [disabled].
+  ///
+  /// Required rather than optional so a nav button added later cannot be written without one: an
+  /// omitted reason is exactly the defect this parameter exists to end, and a default would let it
+  /// back in silently.
+  final String disabledTooltip;
+
   final IconData icon;
   final VoidCallback onPressed;
 
-  const _NavButton({required this.disabled, required this.tooltip, required this.icon, required this.onPressed});
+  const _NavButton({
+    required this.disabled,
+    required this.tooltip,
+    required this.disabledTooltip,
+    required this.icon,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
+    // A SENTENCE HAS TO BE HANDED TO [Disabled] AS WELL, not only to the inner [Tooltip]. `Disabled`
+    // wraps its child in an `IgnorePointer`, which refuses hover along with taps, so a `Tooltip`
+    // *inside* it goes silent for exactly as long as the control is unavailable -- the one state in
+    // which the user is most likely to point at it and ask what it is. Both are needed: `Disabled`
+    // only mounts its own tooltip while disabled, and the inner one covers the offered state.
+    //
+    // AND THE TWO SENTENCES DIFFER. Handing the same string to both makes the withdrawn button
+    // describe a move it will not make ("shows the image one to the left") instead of saying that
+    // there is nothing to the left. The reason belongs to the disabled state, the action to the
+    // offered one -- the split `report_import_dialog._stepButton` already draws.
     return Disabled(
       disabled: disabled,
+      tooltip: disabledTooltip,
       child: Tooltip(
         message: tooltip,
         child: OutlinedButton(onPressed: onPressed, child: Icon(icon)),
@@ -334,8 +364,15 @@ class _SidePreviewImage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final imagePath = resolveImagePath(recordDir, mode);
-    final container = ref.watch(imageSizeContainerProvider(recordDir.path));
+    // Both loads are async (FutureProvider) so the record data can come from OPFS
+    // on web; on desktop they resolve from fast local disk behind a Future.
+    final imagePathsAsync = ref.watch(previewImagePathsProvider(recordDir.path));
+    final containerAsync = ref.watch(imageSizeContainerProvider(recordDir.path));
+    if (imagePathsAsync.isLoading || containerAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final imagePath = imagePathsAsync.value?.forMode(mode);
+    final container = containerAsync.value;
     // No image file: archiving dropped it (and, for an image-less archive, the
     // geometry json with it). This is the intentional, neutral case, so it is
     // checked first and shows a "no image" message rather than a load error.
@@ -360,8 +397,8 @@ class _SidePreviewImage extends ConsumerWidget {
           viewportSize: viewportSize,
           initialScale: scale,
           maxScale: scale * 3,
-          child: Image.file(
-            imagePath.toFile(),
+          child: RecordImage(
+            imagePath,
             width: size.width,
             height: size.height,
             fit: BoxFit.none,

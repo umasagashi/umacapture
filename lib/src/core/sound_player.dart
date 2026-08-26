@@ -4,17 +4,60 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:recase/recase.dart';
 
+import '/src/core/path_entity.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
 enum SoundType { standby, success, error }
+
+const customSoundExtensions = {"wav", "mp3"};
+
+/// Returns the supported lowercase extension in [fileName].
+String customSoundExtensionOf(String fileName) {
+  final dot = fileName.lastIndexOf('.');
+  final extension = dot < 0 ? "" : fileName.substring(dot + 1).toLowerCase();
+  if (!customSoundExtensions.contains(extension)) {
+    throw FormatException("Unsupported custom sound extension: $fileName");
+  }
+  return extension;
+}
+
+String customSoundMimeType(String path) {
+  return switch (customSoundExtensionOf(path)) {
+    "mp3" => "audio/mpeg",
+    _ => "audio/wav",
+  };
+}
+
+/// Persists a browser-picked sound in the app-managed filesystem.
+///
+/// On web [directory] maps to OPFS; on desktop the same helper remains usable
+/// with the io backend. A fixed name per sound role keeps the persisted setting
+/// stable and bounds stale files to the other supported extension.
+Future<FilePath> persistCustomSound({
+  required DirectoryPath directory,
+  required SoundType type,
+  required String originalName,
+  required List<int> bytes,
+}) async {
+  if (bytes.isEmpty) throw const FormatException("Custom sound is empty.");
+  final extension = customSoundExtensionOf(originalName);
+  await directory.create(recursive: true);
+  final target = directory.filePath("${type.name}.$extension");
+  await target.writeAsBytes(bytes);
+  for (final staleExtension in customSoundExtensions.where((value) => value != extension)) {
+    final stale = directory.filePath("${type.name}.$staleExtension");
+    if (await stale.exists()) await stale.delete();
+  }
+  return target;
+}
 
 /// Where a notification sound's audio data comes from.
 enum SoundSource {
   /// A clip bundled under `assets/sound/` (the built-in defaults).
   asset,
 
-  /// A user-selected file on the local filesystem, referenced by absolute path.
+  /// A user-selected file in the platform filesystem (native disk or web OPFS).
   file,
 }
 
@@ -140,7 +183,9 @@ class SoundEffect {
       return;
     }
     try {
-      await player.setSourceDeviceFile(setting.path);
+      await player.setSource(
+        BytesSource(await FilePath(setting.path).readAsBytes(), mimeType: customSoundMimeType(setting.path)),
+      );
     } catch (e, s) {
       developer.log(
         'Failed to load custom sound "${setting.path}"; falling back to default',

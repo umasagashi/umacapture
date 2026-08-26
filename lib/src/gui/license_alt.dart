@@ -551,7 +551,16 @@ String _defaultApplicationName(BuildContext context) {
   // can provide an explicit applicationName to the widgets defined in this
   // file, instead of relying on the default.
   final Title? ancestorTitle = context.findAncestorWidgetOfExactType<Title>();
-  return ancestorTitle?.title ?? Platform.resolvedExecutable.split(Platform.pathSeparator).last;
+  if (ancestorTitle != null) {
+    return ancestorTitle.title;
+  }
+  // Platform.resolvedExecutable/pathSeparator are dart:io and throw on web.
+  // The license dialog reaches here only when no explicit applicationName is
+  // passed; fall back to the fixed product name rather than the executable path.
+  if (kIsWeb) {
+    return 'umacapture';
+  }
+  return Platform.resolvedExecutable.split(Platform.pathSeparator).last;
 }
 
 String _defaultApplicationVersion(BuildContext context) {

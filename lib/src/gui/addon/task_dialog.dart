@@ -1,5 +1,6 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:flutter/services.dart';
@@ -11,6 +12,7 @@ import '/src/addon/model/addon_action.dart';
 import '/src/addon/model/task_definition.dart';
 import '/src/addon/task_definitions.dart';
 import '/src/addon/trigger_catalog.dart';
+import '/src/core/clipboard_image_writer.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
 import '/src/gui/toast.dart';
@@ -190,6 +192,19 @@ bool builtinNeedsUnavailableRecord(String builtinKey, TriggerEvent trigger) {
   return descriptor?.requiresRecord == true && !placeholdersForTrigger(trigger).contains("record_id");
 }
 
+/// Whether [builtinKey]'s action needs the transient user activation of a click
+/// that [trigger] cannot supply on this host, so only the ▶ run can execute it.
+///
+/// Unlike [builtinNeedsUnavailableRecord] this is **not** a save gate: the
+/// pairing is legal and the task remains runnable from the ▶ button, which is
+/// why the dialog only notes it. [needsGesture] is injectable for the same
+/// reason as in [gestureRefusesRun] (the VM never answers as a browser does).
+@visibleForTesting
+bool builtinNeedsManualRun(String builtinKey, TriggerEvent trigger, {bool needsGesture = clipboardWriteNeedsGesture}) {
+  if (!needsGesture || trigger == TriggerEvent.manual) return false;
+  return builtinActionRegistry[builtinKey]?.requiresUserGesture == true;
+}
+
 /// The [_ActionKind] of an existing [action].
 _ActionKind _kindOf(AddonAction action) {
   return switch (action) {
@@ -205,7 +220,16 @@ class TaskEditDialog extends ConsumerStatefulWidget {
   final TaskDefinition initial;
   final bool isNew;
 
-  const TaskEditDialog({super.key, required this.initial, required this.isNew});
+  /// Whether this host is a browser, i.e. cannot launch a program and cannot run
+  /// a builtin whose descriptor declares `supportsWeb: false`.
+  ///
+  /// Injectable for the same reason [builtinNeedsManualRun]'s `needsGesture` is:
+  /// `kIsWeb` is a compile-time `false` under `flutter test`, so without this
+  /// neither the blocked save **nor the sentence that explains it** is reachable
+  /// from the VM, and the whole gate would ship with nothing asserting it.
+  final bool onWeb;
+
+  const TaskEditDialog({super.key, required this.initial, required this.isNew, this.onWeb = kIsWeb});
 
   /// Opens the dialog for [task]. [isNew] controls whether a delete button shows
   /// and whether the title reads "add" or "edit".
@@ -245,7 +269,31 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
   bool get _canSave {
     if (_nameController.text.trim().isEmpty) return false;
     if (_trigger == TriggerEvent.taskExecuted && !_hasValidSourceTask) return false;
+    if (_unavailableOnHost) return false;
     return _fields.isValid(_actionKind, _trigger);
+  }
+
+  /// Whether this host cannot run the selected action **at all**, so the task
+  /// cannot be saved however the rest of the form is filled in.
+  ///
+  /// One expression decides both the block and the sentence
+  /// ([_UnavailableOnHostWarning] below), so a greyed-out save button and the
+  /// explanation for it cannot disagree — they did not merely disagree here, the
+  /// explanation did not exist, and the button simply stopped working with
+  /// nothing on screen to say why. Reachable in ordinary use: a `copy_file` task
+  /// saved by an older web build opens, edits and refuses to save.
+  ///
+  /// A `switch` over the kinds rather than a pair of `if`s, and the builtin arm
+  /// asks the registry rather than naming `copy_file`/`copy_file_to_path`: a new
+  /// kind will not compile without a decision, and a new builtin is covered by
+  /// declaring its own `supportsWeb`.
+  bool get _unavailableOnHost {
+    if (!widget.onWeb) return false;
+    return switch (_actionKind) {
+      _ActionKind.external => true,
+      _ActionKind.webhook => false,
+      _ActionKind.builtin => builtinActionRegistry[_fields.builtinKey]?.supportsWeb == false,
+    };
   }
 
   /// Whether the selected chain source refers to an existing other task. A
@@ -285,7 +333,15 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
           if (widget.isNew) ...[const ExperimentalBanner(), const SizedBox(height: 16)],
           TextField(
             controller: _nameController,
-            decoration: InputDecoration(labelText: "$tr_addon.dialog.name".tr()),
+            decoration: InputDecoration(
+              labelText: "$tr_addon.dialog.name".tr(),
+              // The fourth of [_canSave]'s conditions, and the only one that used to withhold its
+              // sentence: the host block has [_UnavailableOnHostWarning], the chain source and every
+              // action field carry an `errorText`, and an empty name greyed the save button with
+              // nothing anywhere on screen to say why. Same shape as the chain source's required
+              // error below, so the form states its refusals one way.
+              errorText: _nameController.text.trim().isEmpty ? "$tr_addon.dialog.name_required".tr() : null,
+            ),
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
@@ -299,13 +355,19 @@ class _TaskEditDialogState extends ConsumerState<TaskEditDialog> {
           ),
           if (_trigger == TriggerEvent.taskExecuted) ...[const SizedBox(height: 16), _sourceTaskDropdown()],
           const SizedBox(height: 16),
-          _ActionKindDropdown(value: _actionKind, onChanged: (v) => setState(() => _actionKind = v)),
+          _ActionKindDropdown(
+            value: _actionKind,
+            onWeb: widget.onWeb,
+            onChanged: (v) => setState(() => _actionKind = v),
+          ),
+          if (_unavailableOnHost) const _UnavailableOnHostWarning(),
           const SizedBox(height: 8),
           ..._buildActionFields(
             context: context,
             fields: _fields,
             kind: _actionKind,
             trigger: _trigger,
+            onWeb: widget.onWeb,
             onChanged: () => setState(() {}),
           ),
         ],
@@ -367,22 +429,29 @@ List<Widget> _buildActionFields({
   required _ActionFields fields,
   required _ActionKind kind,
   required TriggerEvent trigger,
+  required bool onWeb,
   required VoidCallback onChanged,
 }) {
   return switch (kind) {
     _ActionKind.external => _externalFields(context, fields, trigger, onChanged),
     _ActionKind.webhook => _webhookFields(fields, trigger, onChanged),
-    _ActionKind.builtin => _builtinFields(fields, trigger, onChanged),
+    _ActionKind.builtin => _builtinFields(fields, trigger, onWeb, onChanged),
   };
 }
 
 List<Widget> _externalFields(BuildContext context, _ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
   Future<void> pickProgram() async {
-    final result = await FilePicker.pickFiles(dialogTitle: "$tr_addon.dialog.program.picker_title".tr());
+    // `pickFile`, not `pickFiles`: this field holds one program path, and
+    // `pickFiles` defaults to `allowMultiple: true`, so the dialog would let the
+    // user select several and then answer with a selection this field cannot
+    // represent. Refusing the multi-selection in the dialog is the only place
+    // the mismatch can be prevented rather than explained afterwards (the same
+    // reasoning as `pickVideoFile` in `lib/src/core/video_file_dialog_io.dart`).
+    final result = await FilePicker.pickFile(dialogTitle: "$tr_addon.dialog.program.picker_title".tr());
     // The native picker awaits; bail if the dialog was closed meanwhile so we
     // don't write to a disposed controller or setState after dispose.
     if (!context.mounted) return;
-    final path = result?.files.singleOrNull?.path;
+    final path = result?.path;
     if (path != null) {
       f.program.text = path;
       onChanged();
@@ -513,7 +582,7 @@ List<Widget> _webhookFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
   ];
 }
 
-List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback onChanged) {
+List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, bool onWeb, VoidCallback onChanged) {
   final descriptor = builtinActionRegistry[f.builtinKey];
   void onBuiltinChanged(String key) {
     final previousDefault = builtinActionRegistry[f.builtinKey]?.defaultArgument ?? "";
@@ -542,9 +611,11 @@ List<Widget> _builtinFields(_ActionFields f, TriggerEvent trigger, VoidCallback 
       label: "$tr_addon.dialog.builtin.label".tr(),
       value: f.builtinKey,
       items: {for (final d in builtinActionRegistry.values) d.key: d.labelKey.tr()},
+      enabled: (key) => !onWeb || builtinActionRegistry[key]?.supportsWeb != false,
       onChanged: onBuiltinChanged,
     ),
     if (builtinNeedsUnavailableRecord(f.builtinKey, trigger)) _BuiltinRecordWarning(),
+    if (builtinNeedsManualRun(f.builtinKey, trigger)) const _BuiltinManualRunNote(),
     if (descriptor?.usesArgument == true) ...[
       const SizedBox(height: 16),
       if (descriptor!.argumentOptions != null)
@@ -665,6 +736,67 @@ class _RunInShellSwitch extends StatelessWidget {
   }
 }
 
+/// Notes that the selected action only runs from the ▶ button on this host. It
+/// is informational, not an error: the pairing saves and the task still works
+/// when run manually, so it is styled as a hint rather than as a warning.
+class _BuiltinManualRunNote extends StatelessWidget {
+  const _BuiltinManualRunNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 12, right: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Symbols.info_rounded, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "$tr_addon.action.unsupported_on_web".tr(),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Inline warning shown when the selected action kind cannot run on this host at
+/// all, explaining why save is blocked and naming the way out (pick another
+/// kind).
+///
+/// Same shape and same styling as [_BuiltinRecordWarning] on purpose: both mark
+/// the same state — the form is otherwise fine and the save button is inert — and
+/// a user who has met one should recognise the other. It is not a
+/// [_BuiltinManualRunNote], which marks a pairing that *does* save.
+class _UnavailableOnHostWarning extends StatelessWidget {
+  const _UnavailableOnHostWarning();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, left: 12, right: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Symbols.warning_rounded, size: 18, color: theme.colorScheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "$tr_addon.dialog.unavailable_on_web".tr(),
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Inline warning shown when a record-requiring builtin is paired with a trigger
 /// that never supplies a `record_id`, explaining why save is blocked.
 class _BuiltinRecordWarning extends StatelessWidget {
@@ -763,9 +895,16 @@ class _SimpleDropdown extends StatelessWidget {
   final String label;
   final String value;
   final Map<String, String> items;
+  final bool Function(String value)? enabled;
   final ValueChanged<String> onChanged;
 
-  const _SimpleDropdown({required this.label, required this.value, required this.items, required this.onChanged});
+  const _SimpleDropdown({
+    required this.label,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.enabled,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -773,7 +912,10 @@ class _SimpleDropdown extends StatelessWidget {
       initialValue: value,
       isExpanded: true,
       decoration: InputDecoration(labelText: label),
-      items: [for (final e in items.entries) DropdownMenuItem(value: e.key, child: Text(e.value))],
+      items: [
+        for (final e in items.entries)
+          DropdownMenuItem(value: e.key, enabled: enabled?.call(e.key) ?? true, child: Text(e.value)),
+      ],
       onChanged: (v) => v == null ? null : onChanged(v),
     );
   }
@@ -801,9 +943,10 @@ class _TriggerDropdown extends StatelessWidget {
 
 class _ActionKindDropdown extends StatelessWidget {
   final _ActionKind value;
+  final bool onWeb;
   final ValueChanged<_ActionKind> onChanged;
 
-  const _ActionKindDropdown({required this.value, required this.onChanged});
+  const _ActionKindDropdown({required this.value, required this.onWeb, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -812,7 +955,11 @@ class _ActionKindDropdown extends StatelessWidget {
       decoration: InputDecoration(labelText: "$tr_addon.dialog.action_kind".tr()),
       items: [
         for (final k in _ActionKind.values)
-          DropdownMenuItem(value: k, child: Text("$tr_addon.dialog.kind_${k.name}".tr())),
+          DropdownMenuItem(
+            value: k,
+            enabled: !onWeb || k != _ActionKind.external,
+            child: Text("$tr_addon.dialog.kind_${k.name}".tr()),
+          ),
       ],
       onChanged: (v) => v == null ? null : onChanged(v),
     );

@@ -14,11 +14,13 @@ enum SettingsEntryKey {
   soundEffect,
   allowPostUserData,
   forceResizeMode,
+  detailCropCalibration,
   autoRowHeight,
   rowHeightMode,
   minRowLines,
   sentryReportLastMonth,
   sentryReportTotalCount,
+  capturePreview,
 }
 
 final storageBoxProvider = Provider<StorageBox>((ref) {

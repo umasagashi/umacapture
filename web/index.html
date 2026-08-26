@@ -16,6 +16,28 @@
   -->
   <base href="$FLUTTER_BASE_HREF">
 
+  <!--
+    Cross-origin isolation shim (coi-serviceworker).
+
+    The Wasm recognition core is built -pthread and therefore requires
+    SharedArrayBuffer, which browsers gate behind cross-origin isolation
+    (crossOriginIsolated === true, via COOP: same-origin + COEP: require-corp).
+    Flutter's dev server (flutter run, 3.44.4) cannot inject those headers, so
+    this service-worker shim re-serves every response with them and reloads once
+    into the isolated context. It works uniformly under `flutter run -d chrome`,
+    `flutter run -d web-server`, and any static host, using only cross-engine
+    standards (Service Worker + COOP/COEP) -- no Chrome-only API.
+
+    Third-party vendored file (tracked in git):
+      coi-serviceworker v0.1.7, MIT (c) Guido Zuidhof and contributors
+      https://github.com/gzuidhof/coi-serviceworker
+      Obtained via `npm pack coi-serviceworker@0.1.7`.
+
+    Loaded early (before the Flutter bootstrap below) so isolation is in place
+    before main.dart.js instantiates the pthreads Wasm module.
+  -->
+  <script src="coi-serviceworker.js"></script>
+
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="Application for the game Umamusume players.">
@@ -23,85 +45,39 @@
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="umasagashi_app">
+  <meta name="apple-mobile-web-app-title" content="umacapture">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>umasagashi_app</title>
+  <title>umacapture</title>
   <link rel="manifest" href="manifest.json">
   <script src="splash/splash.js"></script>
   <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
   <link rel="stylesheet" type="text/css" href="splash/style.css">
 </head>
 <body>
-  <!-- This script installs service_worker.js to provide PWA functionality to
-       application. For more information, see:
-       https://developers.google.com/web/fundamentals/primers/service-workers -->
-  <script>
-    var serviceWorkerVersion = null;
-    var scriptLoaded = false;
-    function loadMainDartJs() {
-      if (scriptLoaded) {
-        return;
-      }
-      scriptLoaded = true;
-      var scriptTag = document.createElement('script');
-      scriptTag.src = 'main.dart.js';
-      scriptTag.type = 'application/javascript';
-      document.body.append(scriptTag);
-    }
+  <!--
+    Official Flutter bootstrap loader (Flutter 3.44 template).
 
-    if ('serviceWorker' in navigator) {
-      // Service workers are supported. Use them.
-      window.addEventListener('load', function () {
-        // Wait for registration to finish before dropping the <script> tag.
-        // Otherwise, the browser will load the script multiple times,
-        // potentially different versions.
-        var serviceWorkerUrl = 'flutter_service_worker.js?v=' + serviceWorkerVersion;
-        navigator.serviceWorker.register(serviceWorkerUrl)
-          .then((reg) => {
-            function waitForActivation(serviceWorker) {
-              serviceWorker.addEventListener('statechange', () => {
-                if (serviceWorker.state == 'activated') {
-                  console.log('Installed new service worker.');
-                  loadMainDartJs();
-                }
-              });
-            }
-            if (!reg.active && (reg.installing || reg.waiting)) {
-              // No active web worker and we have installed or are installing
-              // one for the first time. Simply wait for it to activate.
-              waitForActivation(reg.installing || reg.waiting);
-            } else if (!reg.active.scriptURL.endsWith(serviceWorkerVersion)) {
-              // When the app updates the serviceWorkerVersion changes, so we
-              // need to ask the service worker to update.
-              console.log('New service worker available.');
-              reg.update();
-              waitForActivation(reg.installing);
-            } else {
-              // Existing service worker is still good.
-              console.log('Loading app from service worker.');
-              loadMainDartJs();
-            }
-          });
+    flutter_bootstrap.js boots the engine once the build has substituted its
+    tokens. This page cannot decide what that file does -- so the file itself
+    is committed at web/flutter_bootstrap.js rather than left to the build to
+    generate. It calls _flutter.loader.load() with no serviceWorkerSettings,
+    which is what actually keeps a Flutter service worker from ever being
+    registered; the generated default would register the offline-first one.
+    See that file for the full reason.
 
-        // If service worker doesn't succeed in a reasonable amount of time,
-        // fallback to plaint <script> tag.
-        setTimeout(() => {
-          if (!scriptLoaded) {
-            console.warn(
-              'Failed to load app from service worker. Falling back to plain <script> tag.',
-            );
-            loadMainDartJs();
-          }
-        }, 4000);
-      });
-    } else {
-      // Service workers not supported. Just drop the <script> tag.
-      loadMainDartJs();
-    }
-  </script>
+    Do NOT write a build-time token (the double-brace form) anywhere in this
+    file, comments included: substitution is a plain text replacement over the
+    whole file, so a token merely quoted in prose inlines the entire contents
+    of flutter.js right here.
+
+    Cross-origin isolation is provided solely by the coi-serviceworker shim
+    loaded in <head>; a second (offline-first) Flutter service worker at scope
+    "/" would fight the shim and cause COI flip-flop.
+  -->
+  <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

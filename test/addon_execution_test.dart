@@ -207,6 +207,45 @@ void main() {
     });
   });
 
+  group('describeWebhookError', () {
+    RequestOptions options() => RequestOptions(path: 'https://example.test/hook');
+    DioException ofType(DioExceptionType type) =>
+        DioException(requestOptions: options(), type: type, error: 'XMLHttpRequest error');
+
+    test('on web, explains the statusless connection error a refused request produces', () {
+      // The failure a CORS-blocked destination produces in a browser: no status,
+      // no reason, one opaque message. Without the hint the history entry says
+      // nothing the user can act on.
+      final text = describeWebhookError(ofType(DioExceptionType.connectionError), onWeb: true);
+      expect(text, contains('XMLHttpRequest error'));
+      expect(text, contains(webhookWebBlockedHint));
+      expect(describeWebhookError(ofType(DioExceptionType.unknown), onWeb: true), contains(webhookWebBlockedHint));
+    });
+
+    test('never annotates the same error off web, where the message is already meaningful', () {
+      final text = describeWebhookError(ofType(DioExceptionType.connectionError), onWeb: false);
+      expect(text, isNot(contains(webhookWebBlockedHint)));
+      expect(text, ofType(DioExceptionType.connectionError).toString());
+    });
+
+    test('leaves failures that already carry a reason untouched, on web too', () {
+      // A timeout, a cancel, or a bad response is self-explanatory; blaming CORS
+      // for them would be a wrong diagnosis, not a helpful one.
+      for (final type in [
+        DioExceptionType.connectionTimeout,
+        DioExceptionType.sendTimeout,
+        DioExceptionType.receiveTimeout,
+        DioExceptionType.cancel,
+        DioExceptionType.badResponse,
+        DioExceptionType.badCertificate,
+      ]) {
+        expect(describeWebhookError(ofType(type), onWeb: true), isNot(contains(webhookWebBlockedHint)));
+      }
+      // A non-Dio error carries its own message and is passed through verbatim.
+      expect(describeWebhookError(Exception('boom'), onWeb: true), Exception('boom').toString());
+    });
+  });
+
   group('AddonExecutionController._loadHistory', () {
     late Directory tempDir;
 
@@ -274,6 +313,46 @@ void main() {
       );
       final decoded = HistoryEntryMapper.fromMap(entry.toMap());
       expect(decoded.output, 'captured stdout');
+    });
+
+    test('a webhook whose request never reaches the destination is recorded as a readable failure', () async {
+      // The regression this guards is "silently失敗": a webhook the network (or,
+      // on web, the browser's CORS check) refuses must not vanish. It has to
+      // land in the persisted history as a failure carrying a reason, because
+      // that history entry is the only place the user can see what happened.
+      // Bind and immediately release a port so the connection is refused.
+      final probe = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final deadPort = probe.port;
+      await probe.close();
+
+      final container = ProviderContainer.test();
+      addTearDown(container.dispose);
+      final controller = container.read(addonExecutionControllerProvider.notifier);
+      final task = TaskDefinition(
+        id: 't-hook',
+        name: 'Hook',
+        trigger: TriggerEvent.manual,
+        action: WebhookAction(url: 'http://127.0.0.1:$deadPort/hook', method: 'POST', timeoutSeconds: 5),
+      );
+
+      controller.run(task, const {"event": "manual"});
+      // The run completes asynchronously; wait for it to leave the active list.
+      while (container.read(addonExecutionControllerProvider).active.isNotEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+
+      final history = container.read(addonExecutionControllerProvider).history;
+      expect(history, hasLength(1));
+      expect(history.first.status, ExecutionStatus.failure);
+      expect(history.first.error, isNotNull);
+      expect(history.first.error, isNotEmpty);
+      // Persisted, not just held in memory: the history card reads it back.
+      final persisted = decodeJsonList(
+        Hive.box('addon').get('execution_history') as String?,
+        HistoryEntryMapper.fromMap,
+        label: 'test',
+      );
+      expect(persisted.single.status, ExecutionStatus.failure);
     });
 
     test('decodes legacy entries without an output key to null', () {
@@ -373,6 +452,79 @@ void main() {
       expect(builtinActionRegistry['copy_file_to_path']!.requiresRecord, isTrue);
       expect(builtinActionRegistry['show_toast']!.requiresRecord, isFalse);
       expect(builtinActionRegistry['play_sound']!.requiresRecord, isFalse);
+    });
+
+    test('web support metadata disables only the builtins a browser cannot do at all', () {
+      final unsupported = builtinActionRegistry.entries
+          .where((entry) => !entry.value.supportsWeb)
+          .map((entry) => entry.key);
+      // A file reference on the clipboard and a write to a host path have no
+      // browser counterpart. Copying image bytes does — under a gesture — so it
+      // is not listed here (see the requiresUserGesture test below).
+      expect(unsupported, unorderedEquals(['copy_file_to_clipboard', 'copy_file_to_path']));
+    });
+
+    test('copy_image_to_clipboard states a gesture requirement, not a platform limit', () {
+      final descriptor = builtinActionRegistry['copy_image_to_clipboard']!;
+      expect(descriptor.supportsWeb, isTrue);
+      expect(descriptor.requiresUserGesture, isTrue);
+      final gestureRequiring = builtinActionRegistry.entries
+          .where((entry) => entry.value.requiresUserGesture)
+          .map((entry) => entry.key);
+      expect(gestureRequiring, unorderedEquals(['copy_image_to_clipboard']));
+    });
+
+    test('a gesture-requiring builtin runs only from the manual trigger', () {
+      // needsGesture is injected because the VM always answers as a native host;
+      // true is the browser answer this branch exists for.
+      expect(gestureRefusesRun({'event': 'manual'}, needsGesture: true), isFalse);
+      expect(gestureRefusesRun({'event': 'record_captured'}, needsGesture: true), isTrue);
+      expect(gestureRefusesRun({'event': 'task_executed'}, needsGesture: true), isTrue);
+      expect(gestureRefusesRun({}, needsGesture: true), isTrue);
+      // Where the clipboard needs no gesture, every trigger keeps working.
+      expect(gestureRefusesRun({'event': 'record_captured'}, needsGesture: false), isFalse);
+      expect(isManualRun({'event': 'manual'}), isTrue);
+      expect(isManualRun({'event': 'record_captured'}), isFalse);
+    });
+
+    test('a refused run records English diagnostic text, never a translated sentence', () {
+      // WHY A SOURCE SCAN. The refusal is guarded by `clipboardWriteNeedsGesture`, which is false
+      // off the browser, so no VM test can execute the throw and read what lands in
+      // `ExecutionResult.error`. What is checkable is the property that field depends on -- this
+      // layer never throws localized prose -- and scanning the layer counts the throw sites by
+      // machine, so an action added later is covered without anyone remembering this test.
+      //
+      // The defect: the gesture gate threw `pages.addon.action.unsupported_on_web` *already
+      // translated*, so the execution history, whose every other line is English by a documented
+      // rule (`webhookWebBlockedHint`), held one Japanese sentence wearing Dart's `Bad state: `.
+      expect(builtinGestureBlockedHint, isNot(startsWith('pages.')), reason: 'not a raw translation key');
+      expect(
+        builtinGestureBlockedHint.runes.every((rune) => rune < 128),
+        isTrue,
+        reason: 'persisted diagnostics are English; this one shipped as Japanese prose',
+      );
+
+      final sources = Directory(
+        'lib/src/addon/execution',
+      ).listSync().whereType<File>().where((file) => file.path.endsWith('.dart'));
+      final throwSites = <String>[];
+      final translated = <String>[];
+      for (final file in sources) {
+        // Whole-line comments dropped so a prose mention of a throw is not a site; the statement
+        // itself is matched across lines because `throw StateError(` routinely wraps.
+        final code = file.readAsLinesSync().where((line) => !line.trimLeft().startsWith('//')).join('\n');
+        for (final match in RegExp(r'throw\b[^;]*;', dotAll: true).allMatches(code)) {
+          final site = match.group(0) ?? '';
+          throwSites.add(site);
+          if (site.contains('.tr()')) {
+            translated.add('${file.path}: $site');
+          }
+        }
+      }
+      // Positive control for the scan itself: a matcher that found nothing would agree with every
+      // implementation, including the one this test exists to reject.
+      expect(throwSites, isNotEmpty, reason: 'the scan must actually be finding throw sites');
+      expect(translated, isEmpty, reason: 'a persisted execution error must not be built from .tr()');
     });
 
     test('copy_file_to_path takes a destination as its second argument', () {

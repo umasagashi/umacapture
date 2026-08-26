@@ -43,7 +43,7 @@ inline std::string to_datetime_string(std::chrono::system_clock::time_point tp) 
     const time_t unix_ts = std::chrono::system_clock::to_time_t(tp);
     std::tm datetime{};
 
-#if defined(__ANDROID__)
+#if defined(__ANDROID__) || defined(__EMSCRIPTEN__)
     localtime_r(&unix_ts, &datetime);
 #else
     localtime_s(&datetime, &unix_ts);

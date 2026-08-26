@@ -370,9 +370,29 @@ class Disabled extends StatelessWidget {
   const Disabled({super.key, required this.disabled, this.tooltip, required this.child});
 
   Widget wrappedChild() {
-    return IgnorePointer(
-      ignoring: disabled,
-      child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
+    // WITHDRAWN FROM THE KEYBOARD AS WELL AS FROM THE POINTER. [IgnorePointer] only refuses
+    // hit-testing: it builds a `RenderIgnorePointer` and touches no focus node, so a greyed-out
+    // control still took Tab focus and still fired on Enter and on Space. That made "disabled" mean
+    // two different things depending on the input device, and on the capture card it let a keyboard
+    // user start a screen capture during a video import -- the overlap the card's whole exclusivity
+    // rule exists to forbid. [ExcludeFocus] removes the subtree from focus traversal and unfocuses
+    // anything inside it that already holds focus, so the two devices now agree.
+    //
+    // Here rather than at each call site on purpose: a caller that forgets is the failure mode this
+    // primitive exists to prevent, and a control added later is covered without anyone remembering.
+    // Callers should still hand their button a null callback where they can -- that is what makes it
+    // announce itself as disabled -- but the guard must not depend on their doing so.
+    //
+    // Wrapped unconditionally with `excluding:` toggled, never inserted and removed: swapping the
+    // widget in and out would change the element tree's shape and discard the child's [State] every
+    // time the control changed availability (the capture toggle's in-flight marker, an
+    // [AnimatedSwitcher]'s running transition).
+    return ExcludeFocus(
+      excluding: disabled,
+      child: IgnorePointer(
+        ignoring: disabled,
+        child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
+      ),
     );
   }
 
@@ -649,15 +669,37 @@ class _WheelZoomViewerState extends State<WheelZoomViewer> {
 }
 
 class CardDialog extends ConsumerStatefulWidget {
-  static void show(RefBase ref, WidgetBuilder builder, {bool barrierDismissible = true}) {
-    ref.read(dialogBuilderProvider.notifier).show(builder, barrierDismissible: barrierDismissible);
+  /// Shows [builder] as the single dialog and returns its token.
+  ///
+  /// Pass the token to [dismiss] when the close happens later than the dialog's
+  /// own lifetime — see [DialogController.dismiss].
+  static int show(
+    RefBase ref,
+    WidgetBuilder builder, {
+    bool barrierDismissible = true,
+    AlignmentGeometry alignment = Alignment.center,
+  }) {
+    return ref
+        .read(dialogBuilderProvider.notifier)
+        .show(builder, barrierDismissible: barrierDismissible, alignment: alignment);
   }
 
-  static void dismiss(RefBase ref) {
-    ref.read(dialogBuilderProvider.notifier).dismiss();
+  /// Closes the current dialog, or only the dialog [token] identifies.
+  ///
+  /// Callers that close the dialog they are currently rendering can omit
+  /// [token]; callers that close it from a delayed callback should pass the
+  /// token returned by [show] so a dialog opened meanwhile is not closed too.
+  static void dismiss(RefBase ref, [int? token]) {
+    ref.read(dialogBuilderProvider.notifier).dismiss(token);
   }
 
-  final String dialogTitle;
+  /// When null, renders a compact dialog without a title bar.
+  final String? dialogTitle;
+
+  /// Tooltip of the title bar's close button.
+  ///
+  /// Ignored when [dialogTitle] is null: that case renders no title bar at all,
+  /// so there is no close button to label.
   final String? closeButtonTooltip;
   final Widget content;
   final Widget? bottom;
@@ -671,7 +713,7 @@ class CardDialog extends ConsumerStatefulWidget {
 
   const CardDialog({
     super.key,
-    required this.dialogTitle,
+    this.dialogTitle,
     this.closeButtonTooltip,
     required this.content,
     this.bottom,
@@ -695,30 +737,37 @@ class _CardDialogState extends ConsumerState<CardDialog> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Hoisted so flow analysis promotes it to a non-nullable `String` inside the title branch below.
+    final title = widget.dialogTitle;
     return Card(
       margin: EdgeInsets.zero,
       child: Column(
+        // Shrink-wrap only the self-sizing branch below. A bounded `maxHeight`
+        // is an upper bound there, not a target: with the default
+        // `MainAxisSize.max` the card always grows to the bound and pads short
+        // content with dead space. The other branches put the content in an
+        // `Expanded`, which forces the column to fill the main axis anyway, so
+        // `MainAxisSize.min` would not apply there.
+        mainAxisSize: !widget.usePageView && widget.scrollableContent ? MainAxisSize.min : MainAxisSize.max,
         children: [
-          ListTile(
-            tileColor: theme.colorScheme.tertiary,
-            shape: Border(bottom: BorderSide(color: theme.dividerColor)),
-            title: Text(
-              widget.dialogTitle,
-              style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onTertiary),
-            ),
-            trailing: widget.closeButtonTooltip == null
-                ? null
-                : Tooltip(
-                    message: widget.closeButtonTooltip,
-                    child: IconButton(
-                      icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onTertiary),
-                      splashRadius: 24,
-                      onPressed: () {
-                        CardDialog.dismiss(ref.base);
-                      },
+          if (title != null)
+            ListTile(
+              tileColor: theme.colorScheme.tertiary,
+              shape: Border(bottom: BorderSide(color: theme.dividerColor)),
+              title: Text(title, style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onTertiary)),
+              trailing: widget.closeButtonTooltip == null
+                  ? null
+                  : Tooltip(
+                      message: widget.closeButtonTooltip,
+                      child: IconButton(
+                        icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onTertiary),
+                        splashRadius: 24,
+                        onPressed: () {
+                          CardDialog.dismiss(ref.base);
+                        },
+                      ),
                     ),
-                  ),
-          ),
+            ),
           if (widget.usePageView)
             Expanded(
               child: Scrollbar(
@@ -830,6 +879,105 @@ class _CustomFeedbackLocalizationsDelegate extends GlobalFeedbackLocalizationsDe
   }
 }
 
+/// The feedback sheet, replacing the package's `StringFeedback`.
+///
+/// Only the button row differs in substance: the stock sheet ends in a single
+/// centered [TextButton], which is the odd one out among the app's report
+/// dialogs (a right-aligned outlined Cancel plus a filled Send). Cancel closes
+/// the whole feedback overlay, matching the X in its side toolbar.
+class _FeedbackSheet extends StatefulWidget {
+  final OnSubmit onSubmit;
+  final ScrollController? scrollController;
+
+  const _FeedbackSheet({required this.onSubmit, required this.scrollController});
+
+  @override
+  State<_FeedbackSheet> createState() => _FeedbackSheetState();
+}
+
+class _FeedbackSheetState extends State<_FeedbackSheet> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // The ambient theme is the app's own, installed by FeedbackLayer._buildSheet,
+    // so the text styles come from there rather than from the FeedbackThemeData
+    // fields that only the package's own sheet reads.
+    final textStyle = Theme.of(context).textTheme.bodyMedium;
+    return Column(
+      children: [
+        Expanded(
+          child: Stack(
+            children: [
+              ListView(
+                controller: widget.scrollController,
+                // Pad the top to clear the corner radius when the sheet can be dragged.
+                padding: EdgeInsets.fromLTRB(16, widget.scrollController != null ? 20 : 16, 16, 0),
+                children: [
+                  Text(FeedbackLocalizations.of(context).feedbackDescriptionText, style: textStyle),
+                  TextField(
+                    style: textStyle,
+                    minLines: 2,
+                    maxLines: 2,
+                    controller: _controller,
+                    textInputAction: TextInputAction.done,
+                  ),
+                ],
+              ),
+              if (widget.scrollController != null) const FeedbackSheetDragHandle(),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              OutlinedButton.icon(
+                icon: const Icon(Symbols.cancel_rounded),
+                label: Text("app.feedback.cancel".tr()),
+                onPressed: () => BetterFeedback.of(context).hide(),
+              ),
+              const SizedBox(width: 8),
+              // SENDING NOTHING IS NOT A REPORT. This sheet replaced the package's
+              // `StringFeedback`, whose button was likewise always live. An empty note
+              // still files both halves of a feedback pair (`captureFeedback` in
+              // `lib/src/core/sentry_util.dart` sends a message event plus a feedback
+              // event), so the developer receives a screenshot with nothing said about
+              // it and no way to tell that from a report whose text was lost -- while
+              // the user is answered with the success toast either way. Whitespace is
+              // empty for this purpose: a note of three spaces says as much as none.
+              //
+              // Refused by disabling the button rather than by rejecting the press, and
+              // without an explanatory tooltip, because the reason is the empty field
+              // directly above it: nothing here is state the user cannot see. The
+              // report dialogs' Send buttons carry `Disabled(tooltip:)` precisely
+              // because theirs turns on a screenshot that has not landed yet, which is
+              // invisible.
+              ValueListenableBuilder<TextEditingValue>(
+                valueListenable: _controller,
+                builder: (context, value, child) {
+                  return FilledButton.icon(
+                    icon: const Icon(Symbols.check_circle_rounded),
+                    label: Text(FeedbackLocalizations.of(context).submitButtonText),
+                    onPressed: value.text.trim().isEmpty ? null : () => widget.onSubmit(_controller.text),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Wraps [BetterFeedback] around the app.
 ///
 /// [BetterFeedback] must sit ABOVE [MaterialApp], not inside it: the feedback
@@ -855,23 +1003,87 @@ class FeedbackLayer extends StatelessWidget {
     required this.themeMode,
   });
 
-  FeedbackThemeData _feedbackTheme(ThemeData theme) {
+  /// Derives the feedback overlay theme from an app [ThemeData].
+  ///
+  /// [FeedbackThemeData] is a separate color system from [ThemeData]: the
+  /// feedback sheet is drawn outside the app's MaterialApp, so anything left at
+  /// its defaults keeps the package's hard-coded light-theme colors (black text,
+  /// a raw blue accent, a bare M2 ColorScheme). Every color-bearing property is
+  /// therefore mapped explicitly onto the app ColorScheme, so the sheet stays
+  /// readable in both the light and dark app themes.
+  FeedbackThemeData _feedbackTheme(ThemeData theme, double sheetHeight) {
+    final colorScheme = theme.colorScheme;
+    final sheetTextStyle = (theme.textTheme.bodyMedium ?? const TextStyle()).copyWith(color: colorScheme.onSurface);
     return FeedbackThemeData(
       background: Colors.transparent,
-      feedbackSheetColor: theme.colorScheme.surface,
+      feedbackSheetColor: colorScheme.surface,
       sheetIsDraggable: false, // Not draggable anyway.
-      bottomSheetDescriptionStyle: theme.textTheme.bodyMedium!,
+      feedbackSheetHeight: sheetHeight,
+      bottomSheetDescriptionStyle: sheetTextStyle,
+      bottomSheetTextInputStyle: sheetTextStyle,
+      activeFeedbackModeColor: colorScheme.primary,
+      // Do not let the package guess the brightness from the sheet color.
+      brightness: colorScheme.brightness,
+      colorScheme: colorScheme,
+    );
+  }
+
+  /// The height [_FeedbackSheet] needs for a single-line description, its
+  /// two-line note field and the button row, measured at 133px, plus a little
+  /// slack for a description that wraps. Overshooting shows up directly as an
+  /// empty band above the buttons, which is what this number exists to avoid.
+  static const double _sheetTargetHeight = 145;
+
+  /// The package sizes the sheet as a fraction of the window, and its default
+  /// (0.3) leaves a wide empty band between the note field and the buttons.
+  /// Expressing a fixed target height as that fraction makes the sheet hug its
+  /// content instead, at any window size. The content is a scroll view, so a
+  /// window too short for the target just scrolls.
+  double _sheetHeightFraction(BuildContext context) {
+    final windowHeight = MediaQuery.maybeSizeOf(context)?.height;
+    if (windowHeight == null || windowHeight <= 0) {
+      return 0.3;
+    }
+    // Only an upper bound: the target is already the height wanted, so a lower
+    // bound would just reintroduce the empty band on tall windows.
+    return (_sheetTargetHeight / windowHeight).clamp(0.0, 0.5);
+  }
+
+  /// Builds the sheet under the app [ThemeData].
+  ///
+  /// The feedback package themes the sheet through its own inherited widget,
+  /// which is not a Material [Theme], and the sheet is built outside MaterialApp
+  /// -- so Material widgets inside it would otherwise resolve against
+  /// [ThemeData.fallback] and come out in the default M3 purple. Which of the two
+  /// themes to install mirrors the package's own light/dark rule, so the sheet
+  /// never disagrees with the [FeedbackThemeData] it is painted on.
+  Widget _buildSheet(BuildContext context, OnSubmit onSubmit, ScrollController? scrollController) {
+    final isDark =
+        themeMode == ThemeMode.dark ||
+        (themeMode == ThemeMode.system && MediaQuery.platformBrightnessOf(context) == Brightness.dark);
+    // Without this the sheet's text field takes typed characters but ignores
+    // backspace, delete, and the caret/selection keys: those arrive as
+    // shortcuts, and the app's own set lives under MaterialApp, which the sheet
+    // is drawn outside of. The package installs it only on its draggable sheet
+    // path, and this app pins `sheetIsDraggable: false`.
+    return DefaultTextEditingShortcuts(
+      child: Theme(
+        data: isDark ? darkTheme : lightTheme,
+        child: _FeedbackSheet(onSubmit: onSubmit, scrollController: scrollController),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final sheetHeight = _sheetHeightFraction(context);
     return BetterFeedback(
       localizationsDelegates: [_CustomFeedbackLocalizationsDelegate()],
       localeOverride: _CustomFeedbackLocalizationsDelegate.locale,
       themeMode: themeMode,
-      theme: _feedbackTheme(lightTheme),
-      darkTheme: _feedbackTheme(darkTheme),
+      theme: _feedbackTheme(lightTheme, sheetHeight),
+      darkTheme: _feedbackTheme(darkTheme, sheetHeight),
+      feedbackBuilder: _buildSheet,
       child: child,
     );
   }
@@ -879,20 +1091,57 @@ class FeedbackLayer extends StatelessWidget {
 
 /// A shown dialog and whether tapping the background dismisses it.
 ///
-/// [barrierDismissible] is `false` for dialogs that must not be left through the
-/// scrim — e.g. the data-root migration dialog, which closes Hive mid-flow and
-/// can only end in a restart.
-typedef DialogEntry = ({WidgetBuilder builder, bool barrierDismissible});
+/// [barrierDismissible] is `false` for dialogs whose steps decide for themselves
+/// whether leaving is safe — e.g. the data-root migration dialog, where a
+/// migration that got past its record-scope acquisition has closed Hive and can
+/// only end in a restart, while one refused before that (or the web build, which
+/// never migrates at all) leaves the session untouched. The scrim cannot tell
+/// those outcomes apart, so it stays off for the whole flow and each step offers
+/// its own close button or withholds it.
+typedef DialogEntry = ({WidgetBuilder builder, bool barrierDismissible, AlignmentGeometry alignment});
 
+/// Holds the one dialog the [DialogLayer] renders.
+///
+/// Only a single dialog exists at a time, so an unconditional [dismiss] closes
+/// whatever is on screen — including a dialog someone else opened in the
+/// meantime. That matters for callers that dismiss from a delayed callback: the
+/// web capture tutorial banner, for instance, closes when `startCapture()`
+/// settles, which can be long after the user moved on to another dialog.
+/// [show] therefore hands out a token identifying that particular dialog, and
+/// `dismiss(token)` closes it only while it is still the one on screen.
 class DialogController extends Notifier<DialogEntry?> {
+  /// Monotonic id of the most recently shown dialog. Never reset, so a token
+  /// from a closed dialog can never match a later one.
+  int _token = 0;
+
   @override
   DialogEntry? build() => null;
 
-  void show(WidgetBuilder builder, {bool barrierDismissible = true}) {
-    state = (builder: builder, barrierDismissible: barrierDismissible);
+  /// Token of the dialog currently on screen (0 before the first [show]).
+  ///
+  /// For callers that did not open the dialog themselves but still have to
+  /// dismiss it later: the dialog reads its own token while it is being
+  /// interacted with, then passes it to [dismiss] after the await, so a dialog
+  /// opened meanwhile is left alone. Reading it before the await also keeps the
+  /// caller off `WidgetRef`, which throws once the dialog is unmounted.
+  int get currentToken => _token;
+
+  /// Replaces the current dialog with [builder] and returns its token.
+  int show(WidgetBuilder builder, {bool barrierDismissible = true, AlignmentGeometry alignment = Alignment.center}) {
+    _token += 1;
+    state = (builder: builder, barrierDismissible: barrierDismissible, alignment: alignment);
+    return _token;
   }
 
-  void dismiss() {
+  /// Closes the current dialog.
+  ///
+  /// With a [token] from [show], closes it only if that dialog is still the
+  /// current one; otherwise does nothing. Without a token, closes whatever is
+  /// currently shown.
+  void dismiss([int? token]) {
+    if (token != null && token != _token) {
+      return;
+    }
     state = null;
   }
 }
@@ -917,7 +1166,26 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
       alignment: Alignment.center,
       fit: StackFit.expand,
       children: [
-        widget.child,
+        // THE APP BEHIND A DIALOG IS WITHDRAWN FROM THE KEYBOARD, NOT ONLY FROM
+        // THE POINTER. The scrim below is a [GestureDetector]: it swallows hit
+        // tests and touches no focus node, so without this the whole app stayed
+        // in the focus order underneath it — Tab walked out of the dialog and
+        // Enter or Space fired a control the user could not even see. That is
+        // the same defect [Disabled] carries the long comment about, in the one
+        // place that is supposed to be the app's strongest occlusion.
+        //
+        // Flutter gives this for free to dialogs pushed as routes
+        // (`_ModalScopeState` sets `focusScopeNode.skipTraversal` for every
+        // route that is not current), but every dialog here is an entry in
+        // [DialogController] rendered as a sibling in this [Stack], so no route
+        // boundary exists between the dialog and the app and nothing withdraws
+        // the app on its own.
+        //
+        // Wrapped unconditionally with `excluding:` toggled, for the reason
+        // spelled out on [Disabled]: inserting and removing the widget would
+        // change the element tree's shape and discard the [State] of the entire
+        // page every time a dialog opened or closed.
+        ExcludeFocus(excluding: entry != null, child: widget.child),
         if (entry != null) ...[
           GestureDetector(
             // A non-dismissible barrier still swallows the tap (empty callback)
@@ -927,7 +1195,7 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
           ),
           Padding(
             padding: const EdgeInsets.all(32),
-            child: Center(child: entry.builder(context)),
+            child: Align(alignment: entry.alignment, child: entry.builder(context)),
           ),
         ],
       ],

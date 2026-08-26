@@ -69,8 +69,19 @@ CharaDetailRecord? resolveRecordById(RefBase ref, String recordId) {
     // Storage not ready yet; fall through to the on-disk copy.
   }
   final file = (ref.read(pathInfoProvider).charaDetailActiveDir / recordId).filePath(recordJsonName);
-  if (!file.existsSync()) return null;
-  return CharaDetailRecordMapper.fromJson(file.readAsStringSync());
+  try {
+    if (!file.existsSync()) return null;
+    return CharaDetailRecordMapper.fromJson(file.readAsStringSync());
+  } on UnsupportedError {
+    // The on-disk fallback is io-only: OPFS has no synchronous main-thread API,
+    // so the web FsBackend rejects the whole sync surface. Without this, a web
+    // lookup that misses the in-memory store threw out of here instead of
+    // reporting "not found" — `_requireRecord` surfaced an UnsupportedError to
+    // the user rather than its own message. "Not found" is also the honest
+    // answer there: the in-memory store is the only source web can consult
+    // synchronously, so a miss is all this function can determine.
+    return null;
+  }
 }
 
 void _addRecordPlaceholders(RefBase ref, PayloadMap p, CharaDetailRecord r) {

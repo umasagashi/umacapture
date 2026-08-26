@@ -2,8 +2,9 @@
 //
 // These cover the dependency-light pieces that do not need the full pipeline: the argument-binding
 // helpers on a sender, the queued-connection limit modes (Discard drops, NoLimit keeps, Block back-
-// pressures without dropping), and the runner thread's guarantee that a throwing listener is contained
-// rather than tearing down the process.
+// pressures without dropping), send()'s accept/drop verdict and the drop counter that goes with it, and
+// the runner thread's guarantee that a throwing listener is contained rather than tearing down the process, and
+// the per-runner in-flight count that NativeApi::isPipelineDrained turns into the offline drain barrier.
 //
 // The after-start lifecycle guards (makeConnection / controller add) are intentionally NOT exercised:
 // they trip assert_ first, which aborts this Debug-built binary, so only their always-on behavior is
@@ -14,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -92,6 +94,42 @@ TEST_CASE("a Discard queued connection drops sends past its depth limit") {
     CHECK(received == std::vector<int>{0, 1, 2});
 }
 
+TEST_CASE("send() reports whether the event was accepted, so a dropped one can never be counted twice") {
+    // The browser build's two-stage backpressure counts "frames forwarded to the scraper" at the send site and
+    // "frames the scraper consumed" at the listener; their difference is the queue depth the JS driver gates
+    // on. Live capture forwards over a Discard connection, so a full queue silently drops the send -- and the
+    // consumed side can never settle a frame that was never enqueued. send()'s verdict is what keeps the pair
+    // honest: count only what it accepted. This models that producer.
+    const auto connection = makeQueuedConnection<int>(Discard, 2);
+    int forwarded = 0;
+    int consumed = 0;
+    connection->listen([&](int) { consumed++; });
+
+    for (int i = 0; i < 6; i++) {
+        if (connection->send(i)) {
+            forwarded++;
+        }
+    }
+    CHECK(forwarded == 2);                  // Only the two that fit were accepted...
+    CHECK(connection->droppedCount() == 4);  // ...and the four that did not are accounted for as drops.
+
+    drainQueued(connection);
+    CHECK(consumed == 2);
+    CHECK(forwarded - consumed == 0);  // The depth the JS driver would compute settles back to zero.
+}
+
+TEST_CASE("a NoLimit queued connection and a direct connection always report acceptance") {
+    // The counterpart of the check above: nothing but a full Discard/aborted-Block queue may return false, so
+    // a producer on these connections can rely on every send being observed downstream.
+    const auto queued = makeQueuedConnection<int>(NoLimit, 1);
+    CHECK(queued->send(0));
+    CHECK(queued->send(1));  // Past the depth limit, but NoLimit does not enforce it.
+    CHECK(queued->droppedCount() == 0);
+
+    const auto direct = makeDirectConnection<int>();
+    CHECK(direct->send(0));
+}
+
 TEST_CASE("a Discard queued connection honors a per-connection depth limit") {
     // The frame-path runners pass a deeper limit than the default (see native_api.cpp); the depth must
     // be per-connection, not the compiled-in default.
@@ -142,8 +180,9 @@ TEST_CASE("aborting a Block queued connection releases a producer blocked on a f
     connection->send(2);
 
     std::atomic<bool> producer_returned{false};
+    std::atomic<bool> send_accepted{true};
     std::thread producer([&] {
-        connection->send(3);  // Queue full: Block parks here in waitUntilReady.
+        send_accepted = connection->send(3);  // Queue full: Block parks here in waitUntilReady.
         producer_returned = true;
     });
 
@@ -153,6 +192,11 @@ TEST_CASE("aborting a Block queued connection releases a producer blocked on a f
     connection->abort();  // The teardown signal that join() issues; it must wake the parked producer.
     producer.join();      // Must not hang.
     CHECK(producer_returned.load());
+
+    // The released send reports its drop rather than pretending to have been delivered, so a producer that
+    // tracks in-flight events does not strand one across teardown.
+    CHECK_FALSE(send_accepted.load());
+    CHECK(connection->droppedCount() == 1);
 
     // The dropped over-limit send never reached the queue: only the first three survive.
     std::vector<int> received;
@@ -230,6 +274,10 @@ public:
 
     [[nodiscard]] bool isRunning() const override { return running; }
 
+    // A stand-in runs nothing, so it holds nothing. Stated rather than inherited: the interface makes this pure
+    // precisely so a fake cannot report "idle" by accident (see EventRunnerInterface::pendingEvents).
+    [[nodiscard]] int32_t pendingEvents() const override { return 0; }
+
     const bool throw_on_start;
     bool start_called = false;
     bool join_called = false;
@@ -254,6 +302,175 @@ TEST_CASE("controller start() rolls back already-started runners when a later ru
     CHECK_FALSE(good->running);
     CHECK(bad->start_called);              // The failing runner was reached but never marked running.
     CHECK_FALSE(bad->running);
+}
+
+// --- the drain barrier (EventRunnerInterface::pendingEvents) ------------------------------------------------
+//
+// This is the mechanism NativeApi::isPipelineDrained is built on, and through it the end of every offline run:
+// the CLI's one-shot subcommands (runUntilDrainedThenJoin) and the web worker's video-import teardown
+// (awaitPipelineDrained) both stop when this total reaches zero. What each case below protects is therefore a
+// record, not a counter.
+
+TEST_CASE("a runner counts an accepted event from the send until the listener has returned") {
+    const auto runner = makeSingleThreadRunner(QueueLimitMode::NoLimit, nullptr, "counted");
+    const auto connection = runner->makeConnection<int>();
+    std::atomic<bool> release{false};
+    std::atomic<bool> inside{false};
+    connection->listen([&](int) {
+        inside = true;
+        while (!release.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    });
+
+    CHECK(runner->pendingEvents() == 0);  // Nothing sent, nothing held.
+    runner->start();
+    connection->send(1);
+    // Counted from the send itself, not from the dequeue: an event sitting on the queue is work this runner
+    // holds, and a barrier that could not see it would join a pipeline with events still queued.
+    CHECK(runner->pendingEvents() == 1);
+    for (int i = 0; i < 500 && !inside.load(); i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(inside.load());
+    CHECK(runner->pendingEvents() == 1);  // Still counted WHILE the listener runs.
+    release = true;
+    for (int i = 0; i < 500 && runner->pendingEvents() != 0; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(runner->pendingEvents() == 0);
+    runner->join();
+}
+
+TEST_CASE("a chained hand-off is never invisible to every runner at once") {
+    // THE PROPERTY THE WHOLE BARRIER RESTS ON. Work moves stage to stage (distributor -> scraper -> stitcher ->
+    // recognizer), and each hand-off happens INSIDE the upstream listener. If a runner stopped counting an event
+    // before running its listener, the total would read zero in the gap between "upstream finished" and
+    // "downstream received" -- and a teardown polling in that gap would join a pipeline that still had a record
+    // to produce. That is exactly the shape of the defect this barrier was written for, so it is checked directly
+    // rather than inferred from the two counters agreeing at rest.
+    const auto controller = makeRunnerController();
+    const auto upstream = makeSingleThreadRunner(QueueLimitMode::NoLimit, nullptr, "upstream");
+    controller->add(upstream);
+    const auto downstream = makeSingleThreadRunner(QueueLimitMode::NoLimit, nullptr, "downstream");
+    controller->add(downstream);
+    const auto to_upstream = upstream->makeConnection<int>();
+    const auto to_downstream = downstream->makeConnection<int>();
+
+    std::atomic<bool> downstream_finished{false};
+    to_downstream->listen([&](int) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        downstream_finished = true;
+    });
+    to_upstream->listen([&](int value) {
+        // The delay is what makes the gap observable at all: with the decrement in the wrong place the total sits
+        // at zero for this whole sleep, which no amount of polling luck can hide.
+        std::this_thread::sleep_for(std::chrono::milliseconds(30));
+        to_downstream->send(value);
+    });
+
+    controller->start();
+    to_upstream->send(7);
+
+    bool saw_zero = false;
+    for (int i = 0; i < 2000 && !downstream_finished.load(); i++) {
+        if (controller->pendingEvents() == 0) {
+            saw_zero = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(downstream_finished.load());
+    CHECK_FALSE(saw_zero);
+
+    for (int i = 0; i < 500 && controller->pendingEvents() != 0; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(controller->pendingEvents() == 0);  // ...and it does reach zero once the chain is finished.
+    controller->join();
+}
+
+TEST_CASE("a listener that throws releases its runner and does not strand the events queued behind it") {
+    // The runner thread contains a throwing listener and keeps going (see the test above on containment). If the
+    // decrement went with the throw, that runner would read as permanently busy and no later run could ever
+    // report the pipeline drained -- turning one bad record into a teardown that always times out.
+    //
+    // MORE THAN ONE EVENT, DELIBERATELY. eventpp's processIf swaps the whole queue into a local list and
+    // dispatches it in a loop, so a throw that escapes the dispatch destroys every entry BEHIND it undispatched
+    // -- their listeners skipped and their pending increments released by nobody. A single-event case cannot
+    // tell that apart from correct containment, which is exactly how the gap stayed invisible.
+    const auto runner = makeSingleThreadRunner(QueueLimitMode::NoLimit, nullptr, "throwing");
+    const auto connection = runner->makeConnection<int>();
+    std::atomic<int> seen{0};
+    connection->listen([&seen](int value) {
+        seen++;
+        if (value == 1) {
+            throw std::runtime_error("listener failure");
+        }
+    });
+
+    // Queued BEFORE start, so all three are in the runner's queue at once when the worker first dispatches --
+    // which is what puts events behind the throwing one in the same swapped-out batch.
+    connection->send(1);
+    connection->send(2);
+    connection->send(3);
+    CHECK(runner->pendingEvents() == 3);
+
+    runner->start();
+    for (int i = 0; i < 1000 && runner->pendingEvents() != 0; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK(runner->pendingEvents() == 0);
+    CHECK(seen.load() == 3);
+    runner->join();
+}
+
+TEST_CASE("one runner processes its connections in send order, not connection by connection") {
+    // WHAT THE OFFLINE END-OF-INPUT SIGNAL RESTS ON. An offline producer (cli.cpp's captureFromVideo /
+    // replayFromRecording, windows/runner/video_import_session.h) pushes its frames onto a runner of its own and
+    // then sends "the input has ended" on a SECOND connection of that SAME runner, so the signal cannot overtake
+    // frames the producer has already enqueued but the runner has not delivered yet. If a runner drained one
+    // connection ahead of another, that signal would close a chara-detail scene while the clip's own last frames
+    // were still queued -- a healthy import would report a truncation it never had, which is worse than the
+    // silence the signal exists to fix. The ordering comes from the runner's single notifier queue
+    // (SingleThreadMultiEventRunnerImpl), so it is asserted here rather than assumed at four call sites.
+    const auto runner = makeSingleThreadRunner(QueueLimitMode::Block, nullptr, "ordered", 8);
+    const auto frames = runner->makeConnection<int>("frames");
+    const auto end_of_input = runner->makeConnection<>("end_of_input");
+
+    std::vector<int> seen;
+    frames->listen([&seen](int value) { seen.push_back(value); });
+    end_of_input->listen([&seen]() { seen.push_back(-1); });
+
+    // Enqueued before the runner starts, exactly as a producer that returns before the barrier leaves them.
+    for (int i = 1; i <= 5; i++) {
+        CHECK(frames->send(i));
+    }
+    CHECK(end_of_input->send());
+    CHECK(runner->pendingEvents() == 6);
+
+    runner->start();
+    for (int i = 0; i < 1000 && runner->pendingEvents() != 0; i++) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    runner->join();
+
+    REQUIRE(seen.size() == 6);
+    CHECK(seen == std::vector<int>{1, 2, 3, 4, 5, -1});  // The signal is last, behind every frame.
+}
+
+TEST_CASE("a dropped send is not counted as pending") {
+    // Invariant shared with FrameFlowCounters: only an ACCEPTED send is counted, because the paired decrement
+    // runs in a listener that a dropped event never reaches. Counting one would ratchet the total up per drop,
+    // permanently -- and live capture drops by design, so the barrier would never read zero again.
+    const auto runner = makeSingleThreadRunner(QueueLimitMode::Discard, nullptr, "dropping", 1);
+    const auto connection = runner->makeConnection<int>();
+    connection->listen([](int) {});
+
+    // Not started: nothing drains, so the queue fills at its limit of one and every later send is dropped.
+    CHECK(connection->send(1));
+    CHECK_FALSE(connection->send(2));
+    CHECK_FALSE(connection->send(3));
+    CHECK(runner->pendingEvents() == 1);
 }
 
 }  // namespace

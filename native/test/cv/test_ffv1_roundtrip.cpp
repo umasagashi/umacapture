@@ -4,6 +4,7 @@
 // libav directly (unlike the opencv-only umacapture_tests), so it is built separately.
 
 #include <filesystem>
+#include <utility>
 #include <vector>
 
 #include <doctest/doctest.h>
@@ -39,7 +40,10 @@ cv::Mat makePattern(int width, int height, int seed) {
     return image;
 }
 
-std::vector<Frame> roundTrip(const std::filesystem::path &path, const std::vector<Frame> &inputs) {
+std::vector<Frame> roundTrip(
+    const std::filesystem::path &path,
+    const std::vector<Frame> &inputs,
+    std::vector<Size<int>> *original_sizes = nullptr) {
     const auto size = inputs.front().size();
     {
         video::Ffv1Recorder recorder(path, size);
@@ -51,7 +55,12 @@ std::vector<Frame> roundTrip(const std::filesystem::path &path, const std::vecto
 
     const auto connection = event_util::makeDirectConnection<Frame, Size<int>>();
     std::vector<Frame> received;
-    connection->listen([&received](const Frame &frame, const Size<int> &) { received.push_back(frame.clone()); });
+    connection->listen([&received, original_sizes](const Frame &frame, const Size<int> &original_size) {
+        received.push_back(frame.clone());
+        if (original_sizes != nullptr) {
+            original_sizes->push_back(original_size);
+        }
+    });
 
     video::Ffv1Reader reader(path, connection);
     reader.run();
@@ -108,6 +117,37 @@ TEST_CASE("FFV1 recorder writes through non-ASCII paths") {
     REQUIRE(received.size() == inputs.size());
     CHECK(bitExact(received[0].data(), inputs[0].data()));
     CHECK(bitExact(received[1].data(), inputs[1].data()));
+
+    std::filesystem::remove(path);
+}
+
+// Pins the producer half of the offline determinism contract (see cv/video_loader.h): replay emits the full
+// recorded frame with the DEFAULT anchor and NO pane snapshot, for every frame of the recording. Carrying a
+// snapshot is what makes a frame refusable at the consumer boundary when the latch moves under it, and the
+// number of frames in flight when that happens is set by thread scheduling -- so a snapshot here would make
+// the delivered frame set depend on timing rather than on the recording.
+TEST_CASE("FFV1 replay resolves no pane decision and emits full frames with the default anchor") {
+    const auto path = std::filesystem::temp_directory_path() / "uma_ffv1_anchor_only.mkv";
+    std::filesystem::remove(path);
+
+    std::vector<Frame> inputs;
+    inputs.emplace_back(makePattern(40, 24, 3), 100);
+    inputs.emplace_back(makePattern(40, 24, 7), 200);
+    inputs.emplace_back(makePattern(40, 24, 11), 300);
+
+    const Size<int> full_size{40, 24};
+    std::vector<Size<int>> original_sizes;
+    const auto received = roundTrip(path, inputs, &original_sizes);
+
+    REQUIRE(received.size() == inputs.size());
+    REQUIRE(original_sizes.size() == inputs.size());
+    for (size_t i = 0; i < inputs.size(); ++i) {
+        CHECK_FALSE(received[i].paneModeSnapshot().has_value());
+        CHECK(received[i].size() == inputs[i].size());
+        CHECK(received[i].anchor().intersection() == FrameAnchor::intersect(full_size).intersection());
+        CHECK(original_sizes[i] == inputs[i].size());
+        CHECK(bitExact(received[i].data(), inputs[i].data()));
+    }
 
     std::filesystem::remove(path);
 }

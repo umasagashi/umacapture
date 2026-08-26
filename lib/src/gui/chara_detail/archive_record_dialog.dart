@@ -8,6 +8,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_image.dart';
 
 // ignore: constant_identifier_names
 const tr_archive_record = "pages.chara_detail.archive_records";
@@ -143,8 +144,8 @@ class _ArchiveRecordDialogState extends ConsumerState<ArchiveRecordDialog> {
             children: [
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 140),
-                child: Image.file(
-                  iconPath.toFile(),
+                child: RecordImage(
+                  iconPath,
                   // The trainee icon is normally always present, but guard against a
                   // missing/corrupt file (e.g. a hand-edited archive) so the dialog
                   // shows a placeholder instead of a red error box.

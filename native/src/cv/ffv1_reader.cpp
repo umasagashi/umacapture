@@ -1,8 +1,10 @@
 #include <string>
+#include <utility>
 
 #include "cv/ffv1_avio.h"
 #include "cv/ffv1_pixfmt.h"
 #include "cv/ffv1_reader.h"
+#include "cv/frame_shaper.h"
 #include "util/logger_util.h"
 
 extern "C" {
@@ -109,6 +111,14 @@ private:
         if (ret < 0) {
             throw std::runtime_error("ffv1: avcodec_parameters_to_context failed: " + avError(ret));
         }
+        // Decode on all cores. avcodec_parameters_to_context leaves thread_count at 1, and single-threaded
+        // FFV1 decode of a full-size client frame measures ~12 fps here -- below the ~24 fps the recordings
+        // were captured at, so any consumer that has to keep up with the clip's own timestamps (the mimic
+        // player) cannot. 0 means "one thread per core", the same default the ffmpeg CLI uses (~157 fps on
+        // the same clip). Decoding is lossless and avcodec_receive_frame still returns frames in
+        // presentation order, so this changes throughput only: replay sees the identical frame sequence,
+        // just sooner, and is still paced by its Block-mode downstream queue rather than by the decoder.
+        codec_ctx->thread_count = 0;
         ret = avcodec_open2(codec_ctx, codec, nullptr);
         if (ret < 0) {
             throw std::runtime_error("ffv1: avcodec_open2 failed: " + avError(ret));
@@ -137,8 +147,21 @@ private:
         const int64_t pts = (frame->pts == AV_NOPTS_VALUE) ? 0 : frame->pts;
         const int64_t ts_ms = av_rescale_q(pts, stream->time_base, kMillisTimeBase);
         cv::Mat bgr = ffv1_detail::frameToBgr(frame);
-        const Frame emitted{bgr, static_cast<uint64>(ts_ms < 0 ? 0 : ts_ms)};
-        on_frame_captured->send(emitted, emitted.size());
+        const Size<int> full_size = bgr.size();
+        // No pane snapshot and no re-validation selector: this producer resolves nothing (see ffv1_reader.h),
+        // so there is no decision that could go stale across a copy. AnchorOnly forwards `bgr` by shallow
+        // cv::Mat copy rather than duplicating it, which is sound because frameToBgr allocates a fresh Mat per
+        // frame -- and that is no longer left to this sentence: shapeCapturedFrame refuses any non-CropPixels
+        // mode whose image fails frame_shaper::ownsPixelsSolely, by throwing. If frameToBgr ever started
+        // handing back a wrapper over avcodec's own buffer, or an alias the decoder keeps, the throw would say
+        // so instead of the pipeline quietly reading pixels the next decode overwrote.
+        const auto shaped = frame_shaper::shapeCapturedFrame(
+            bgr, static_cast<uint64>(ts_ms < 0 ? 0 : ts_ms), std::nullopt, frame_shaper::ShapingMode::AnchorOnly);
+        if (!shaped.ok()) {
+            log_debug("ffv1 replay dropped a frame: {}", frame_shaper::describe(shaped.status));
+            return;
+        }
+        on_frame_captured->send(shaped.frame, full_size);
     }
 
     void freeDecoder() {
@@ -161,7 +184,8 @@ private:
     int stream_index = -1;
 };
 
-Ffv1Reader::Ffv1Reader(const std::filesystem::path &path, const event_util::Sender<Frame, Size<int>> &on_frame_captured)
+Ffv1Reader::Ffv1Reader(
+    const std::filesystem::path &path, const event_util::Sender<Frame, Size<int>> &on_frame_captured)
     : impl_(std::make_unique<Impl>(path, on_frame_captured)) {
 }
 

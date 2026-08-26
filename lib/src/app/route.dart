@@ -18,11 +18,11 @@ class AppRouter extends RootStackRouter {
       page: AppWidgetRoute.page,
       initial: true,
       children: [
-        AutoRoute(page: DashboardRoute.page, initial: true),
-        AutoRoute(page: CaptureRoute.page),
-        AutoRoute(page: CharaDetailRoute.page),
-        AutoRoute(page: AddonRoute.page),
-        AutoRoute(page: SettingsRoute.page),
+        AutoRoute(path: '', page: DashboardRoute.page, initial: true),
+        AutoRoute(path: 'capture', page: CaptureRoute.page),
+        AutoRoute(path: 'chara-detail', page: CharaDetailRoute.page),
+        AutoRoute(path: 'addon', page: AddonRoute.page),
+        AutoRoute(path: 'settings', page: SettingsRoute.page),
       ],
     ),
   ];

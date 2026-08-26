@@ -1,5 +1,7 @@
 #include "chara_detail/chara_detail_scene_context.h"
 
+#include "core/frame_flow_counters.h"
+
 namespace uma::chara_detail {
 
 CharaDetailSceneContext::CharaDetailSceneContext(
@@ -8,7 +10,9 @@ CharaDetailSceneContext::CharaDetailSceneContext(
     const event_util::Sender<Frame, SceneState> &on_scene_updated,
     const event_util::Sender<> &on_scene_end,
     const chrono_util::time_unit &scene_begin_timeout,
-    const chrono_util::time_unit &scene_end_timeout)
+    const chrono_util::time_unit &scene_end_timeout,
+    const std::shared_ptr<DetailCropTracker> &detail_crop,
+    const std::optional<Range<int>> &forwarded_frame_band)
     : child(child)
     , tab_page_condition(dynamic_cast<const TabCondition *>(child->findByTag("tab_page")))
     , record_type_condition(dynamic_cast<const TabCondition *>(child->findByTag("record_type")))
@@ -16,7 +20,9 @@ CharaDetailSceneContext::CharaDetailSceneContext(
     , on_scene_updated(on_scene_updated)
     , on_scene_end(on_scene_end)
     , scene_begin_timeout(scene_begin_timeout)
-    , scene_end_timeout(scene_end_timeout) {
+    , scene_end_timeout(scene_end_timeout)
+    , detail_crop(detail_crop)
+    , forwarded_frame_band(forwarded_frame_band) {
     if (tab_page_condition == nullptr) {
         throw std::runtime_error("tab_page condition not found");
     }
@@ -27,11 +33,28 @@ CharaDetailSceneContext::CharaDetailSceneContext(
     tab_page_branches = resolveBranches(tab_page_condition, kAllTabPages, tabPageTag);
 }
 
-void CharaDetailSceneContext::update(const Frame &input) {
+void CharaDetailSceneContext::update(const Frame &raw_input) {
+    // Let the detail-crop tracker consume pending releases before the tree runs. Before latching this is the
+    // full producer frame; after latching the producer is authoritative for both shaping and frame.anchor(),
+    // which then reaches the scraper, stitcher and recognizer without further plumbing.
+    const auto prepared =
+        detail_crop != nullptr ? detail_crop->beginFrame(raw_input) : std::optional<Frame>{raw_input};
+    if (!prepared.has_value()) {
+        return;
+    }
+    const Frame &input = prepared.value();
+
     child->update(input);
     const auto tab_page = getActiveTabIndex();
     const auto record_type = getRecordType();
-    met_ = child->met() && tab_page.has_value() && record_type.has_value();
+    const bool resolved = tab_page.has_value() && record_type.has_value();
+    met_ = child->met() && resolved;
+
+    if (detail_crop != nullptr) {
+        // Calibration is driven only by the two pane candidates. The scene verdict is not an independent
+        // guard for it, so no close-button timer bypass or extra tree resolution is involved.
+        detail_crop->endFrame(input);
+    }
 
     if (met_) {
         scene_end_pending_since = std::nullopt;  // A reappearance within the timeout keeps the same scene.
@@ -42,7 +65,24 @@ void CharaDetailSceneContext::update(const Frame &input) {
         // also makes the scraper's reference frame a settled, post-animation still instead of one captured
         // mid-animation.
         if (scene_active) {
-            on_scene_updated->send(input, {tab_page.value(), record_type.value()});
+            // Hold the forwarded frame's anchor unit inside the configured band when the setting asks for it.
+            // Deliberately HERE and not at the pipeline entry: the crop calibration above scans the raw
+            // pixels, so an earlier resize would hand it a blurred image -- calibrate first, then resize.
+            // Everything downstream (scraper, stitcher, recognizer) maps through frame.anchor(), so the
+            // rescaled frame needs no further plumbing. A no-op when the setting is off, and also whenever
+            // THIS frame's unit is already inside the band -- which is the majority of frames, and is why the
+            // band is evaluated per frame here instead of being resolved to one unit at construction.
+            const bool forwarded = on_scene_updated->send(
+                forwarded_frame_band.has_value() ? input.resizedIntoBand(forwarded_frame_band.value()) : input,
+                {tab_page.value(), record_type.value()});
+            // HOP 2 IN of the offline producer's brake (core/frame_flow_counters.h): the frame just entered the
+            // scraper's queue. Its paired dequeue is the chara_detail_updated listener in native_api.cpp, on the
+            // scraper thread. Counted only when the queue ACCEPTED the frame: live capture runs this connection
+            // in Discard mode, so a full queue drops the send and the paired dequeue can never fire for it --
+            // counting a dropped send would ratchet the reported depth up by one per drop, permanently.
+            if (forwarded) {
+                app::frameFlowCounters().noteEnqueued();
+            }
         }
     } else {
         // Any drop before commit resets the begin window; the same record_type must persist uninterrupted.

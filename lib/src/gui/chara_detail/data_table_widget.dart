@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:percent_indicator/circular_percent_indicator.dart';
 import 'package:trina_grid/trina_grid.dart';
 
+import '/const.dart';
 import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
@@ -16,6 +17,7 @@ import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
+import '/src/core/video_import.dart';
 import '/src/gui/chara_detail/archive_record_dialog.dart';
 import '/src/gui/chara_detail/column_preset_bar_widget.dart';
 import '/src/gui/chara_detail/column_spec_tag_widget.dart';
@@ -25,7 +27,9 @@ import '/src/gui/chara_detail/preview_dialog.dart';
 import '/src/gui/chara_detail/regenerate_record_dialog.dart';
 import '/src/gui/chara_detail/report_record_dialog.dart';
 import '/src/gui/chara_detail/side_preview.dart';
+import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_store_banner.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/settings_state.dart';
@@ -34,7 +38,10 @@ import '/src/preference/storage_box.dart';
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
 
-final charaDetailInitialDataLoader = FutureProvider((ref) async {
+// Same retry policy as the stores it awaits: this loader inherits their
+// rejection, and riverpod would otherwise keep re-running it (staying *loading*
+// with the error attached) long after the store below it has given up.
+final charaDetailInitialDataLoader = FutureProvider(retry: retryUnlessStoreOutage, (ref) async {
   final pathInfo = await ref.watch(pathInfoLoader.future);
   // One-time repair of archived records whose geometry json predates being kept in
   // sync with the downscaled image. Runs before the stores load so the preview
@@ -286,6 +293,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // While selecting rows (to archive or export), actions that rebuild the
     // table (and would drop the in-progress selection) are disabled.
     final selecting = ref.read(selectionModeProvider) != null;
+    // Re-recognition is disabled while a video import runs, on exactly the predicate the capture
+    // button is gated on, so the two halves of import mutual exclusion cannot drift. A batch started
+    // now would have every record refused by the worker (the import owns the event loop and runs on
+    // its own storage root) and would then reach the batch teardown with the import still decoding.
+    // Read rather than watched because a context menu is built afresh each time it is opened.
+    final importing = videoImportState.value.isRunning;
     final isPinned = ref.read(pinnedRecordIdsProvider).contains(record.id);
     DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
     const constraints = BoxConstraints(minHeight: 40);
@@ -349,12 +362,16 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
                   copyRecordImageToClipboard(ref.base, dirOf(record), CharaDetailRecordImageMode.factorPlain),
               label: Text("$tr_chara_detail.context_menu.copy_factor".tr(), style: style),
             ),
-            MenuItem(
-              constraints: constraints,
-              icon: const Icon(Symbols.folder_open, weight: iconWeight),
-              onSelected: (_) => dirOf(record).launch(),
-              label: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
-            ),
+            // Revealing the record folder needs an OS file manager; on web the
+            // paths are virtual (OPFS) and there is nothing to open, so the
+            // entry is absent rather than present and inert.
+            if (CurrentPlatform.canRevealInFileManager())
+              MenuItem(
+                constraints: constraints,
+                icon: const Icon(Symbols.folder_open, weight: iconWeight),
+                onSelected: (_) => dirOf(record).launch(),
+                label: Text("$tr_chara_detail.context_menu.open_in_explorer".tr(), style: style),
+              ),
           ],
         ),
         // Destructive record actions, set off by a divider: archive (active-only;
@@ -383,8 +400,12 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         if (source == RecordSource.active)
           MenuItem(
             constraints: constraints,
-            enabled: !selecting,
-            icon: Icon(Symbols.autorenew, weight: iconWeight, color: disabledIconColor),
+            enabled: !selecting && !importing,
+            icon: Icon(
+              Symbols.autorenew,
+              weight: iconWeight,
+              color: (selecting || importing) ? theme.disabledColor : null,
+            ),
             onSelected: (_) async {
               final moduleVersion = await ref.read(moduleVersionLoader.future);
               if (moduleVersion == null) {
@@ -399,7 +420,7 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
             },
             label: Text(
               "$tr_chara_detail.context_menu.regenerate_record".tr(),
-              style: selecting ? disabledStyle : style,
+              style: (selecting || importing) ? disabledStyle : style,
             ),
           ),
         if (source == RecordSource.active && isSentryAvailable())
@@ -1349,15 +1370,35 @@ class _SelectionRowOverlay extends StatelessWidget {
   }
 }
 
-/// The preset bar + column chips, with a hit-absorbing scrim overlaid while
-/// bulk-archive selection is active.
+/// The preset bar + column chips, withdrawn behind a scrim while bulk-archive
+/// selection is active.
 ///
 /// During selection every top control (presets, source switch, column chips)
 /// must be inert — changing any of them rebuilds the grid and would drop the
-/// in-progress checkbox selection. The scrim blocks them and surfaces the only
-/// two valid actions: archive the selection, or cancel.
-class _TopControlsLayer extends ConsumerWidget {
-  const _TopControlsLayer();
+/// in-progress checkbox selection. The controls are withdrawn and the scrim
+/// surfaces the only two valid actions: archive the selection, or cancel.
+///
+/// **The scrim is not what makes them inert.** [AbsorbPointer] refuses
+/// hit-testing and touches no focus node, exactly as [IgnorePointer] does, so
+/// covering the controls left them Tab-reachable and firing on Enter and on
+/// Space — a keyboard user could switch presets or a column spec mid-selection
+/// and rebuild the grid out from under the checkboxes. [Disabled] is the app's
+/// one primitive for "this control is withdrawn", and it withdraws from both
+/// input devices; reusing it here is also what keeps a second implementation of
+/// the same idea from drifting away from the first.
+class TopControlsLayer extends ConsumerWidget {
+  /// The controls the scrim covers. Injectable only so a test can mount this
+  /// layer without the preset bar's and the chip row's whole provider graph:
+  /// what is under test is the withdrawal, which has to hold for any child.
+  final Widget controls;
+
+  const TopControlsLayer({
+    super.key,
+    this.controls = const Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [ColumnPresetBarWidget(), ColumnSpecTagWidget()],
+    ),
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1366,12 +1407,14 @@ class _TopControlsLayer extends ConsumerWidget {
     final selectedCount = ref.watch(selectedRecordIdsProvider).length;
     return Stack(
       children: [
-        const Column(mainAxisSize: MainAxisSize.min, children: [ColumnPresetBarWidget(), ColumnSpecTagWidget()]),
+        Disabled(disabled: purpose != null, child: controls),
         if (purpose != null)
           Positioned.fill(
             child: Stack(
               children: [
-                // Scrim absorbs taps so the controls underneath are inert.
+                // The scrim still absorbs taps: with the controls under it
+                // ignoring the pointer, an unabsorbed tap would fall through to
+                // whatever the table paints behind this layer.
                 Positioned.fill(
                   child: AbsorbPointer(child: ColoredBox(color: theme.colorScheme.surface.withValues(alpha: 0.85))),
                 ),
@@ -1509,50 +1552,32 @@ class _QuarantineBannerWidget extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final count = ref.watch(charaDetailQuarantineCountProvider);
+    // The count is loaded asynchronously (a filesystem/OPFS scan); treat the
+    // loading and error states as "nothing to show" so the banner only appears
+    // once a non-zero count resolves.
+    final count = ref.watch(charaDetailQuarantineCountProvider).asData?.value ?? 0;
     if (count == 0) {
       return const SizedBox.shrink();
     }
-    final theme = Theme.of(context);
     final quarantineDir = ref.watch(pathInfoProvider).charaDetailQuarantineDir;
-    // Flat buttons tinted with the banner's own foreground color so they read as
-    // part of the error-themed banner rather than standing out as separate chips.
-    final buttonStyle = TextButton.styleFrom(foregroundColor: theme.colorScheme.onErrorContainer);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: theme.colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              Icon(Symbols.warning_rounded, color: theme.colorScheme.onErrorContainer),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  "$tr_chara_detail.quarantine_banner.message".tr(namedArgs: {"count": "$count"}),
-                  style: TextStyle(color: theme.colorScheme.onErrorContainer),
-                ),
-              ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: () => ref.invalidate(charaDetailQuarantineCountProvider),
-                icon: const Icon(Symbols.refresh_rounded),
-                label: Text("$tr_chara_detail.quarantine_banner.refresh".tr()),
-                style: buttonStyle,
-              ),
-              const SizedBox(width: 8),
-              TextButton.icon(
-                onPressed: () => quarantineDir.launch(),
-                icon: const Icon(Symbols.folder_open_rounded),
-                label: Text("$tr_chara_detail.quarantine_banner.open".tr()),
-                style: buttonStyle,
-              ),
-            ],
-          ),
+    return RecordStoreBanner(
+      message: "$tr_chara_detail.quarantine_banner.message".tr(namedArgs: {"count": "$count"}),
+      actions: [
+        RecordStoreBannerAction(
+          label: "$tr_chara_detail.quarantine_banner.refresh".tr(),
+          icon: Symbols.refresh_rounded,
+          onPressed: () => ref.invalidate(charaDetailQuarantineCountProvider),
         ),
-      ),
+        // Same capability gate as the record context menu: the banner still
+        // reports the quarantined count on web, but only platforms with a file
+        // manager get the shortcut into the folder.
+        if (CurrentPlatform.canRevealInFileManager())
+          RecordStoreBannerAction(
+            label: "$tr_chara_detail.quarantine_banner.open".tr(),
+            icon: Symbols.folder_open_rounded,
+            onPressed: () => quarantineDir.launch(),
+          ),
+      ],
     );
   }
 }
@@ -1578,7 +1603,18 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
     return Column(
       children: const [
         _QuarantineBannerWidget(),
-        _TopControlsLayer(),
+        // Quarantined and unavailable records are different conditions with
+        // different remedies, so they get one banner each rather than a merged
+        // count: a quarantined record was moved aside and is inspected in the
+        // quarantine folder; an unavailable one is intact, still in place, and
+        // is recovered by rescanning or repairing.
+        IncompleteStoreBanner(),
+        // The archive scan is not awaited by this page, so its whole-store
+        // failure would otherwise be invisible while still narrowing every
+        // dedup and inheritance decision. Above the table, not instead of it:
+        // the active records are loaded and usable.
+        ArchiveStoreOutageBanner(),
+        TopControlsLayer(),
         SizedBox(height: 8),
         _CharaDetailDataTablePreCheckLayer(),
       ],
@@ -1587,7 +1623,45 @@ class CharaDetailDataTableLoaderLayer extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Blocking, and ahead of the loader: without the cross-tab lock every record
+    // read throws, so the loader can only ever reach its error branch and paint a
+    // raw English exception in a Japanese UI. Draw nothing rather than pretend the
+    // table is loading -- and nothing rather than the banner, for the same reason
+    // the startup branch below draws nothing: [RecordLockUnavailableBanner] is
+    // already mounted above every page in `app_widget.dart`, so stating it here
+    // too would stack two copies of the identical remedy on this one tab. The
+    // cause and the way out are not lost; they are simply said once.
+    if (ref.watch(recordMutationLockUnavailabilityProvider) != null) {
+      return const SizedBox.shrink();
+    }
+    // A startup outage reaches this loader too (it awaits the path info), but it
+    // is stated app-wide by [RecordStoreStartupOutageBanner], which is above this
+    // page on every tab. Repeating it here would say the same thing twice and
+    // offer a rescan that cannot work: the stores are downstream of the path info
+    // that failed, so invalidating them only replays the cached rejection.
+    if (ref.watch(pathInfoOutageProvider) != null) {
+      return const SizedBox.shrink();
+    }
     final loader = ref.watch(charaDetailInitialDataLoader);
+    // Same short-circuit, one scope down: the lock exists but the store-wide scan
+    // could not list a single record, so this loader can only be in error and its
+    // error branch would paint that raw exception. The banner states whether
+    // waiting fixes it and carries the rescan. It replaces the table because
+    // there is nothing to draw -- exactly what the error branch it displaces did.
+    //
+    // Read off the loader rather than off the store directly: this page awaits
+    // the loader anyway, so watching the store would add a second subscription
+    // reporting the same outage. It is no longer a *safety* argument — the scan
+    // and the archive geometry migration exclude each other through the root
+    // record lock now, not through which provider is read first (see
+    // `record_loader_io.dart` and [runArchiveGeometryMigrationIfNeeded]).
+    final outage = loader.storeOutage;
+    if (outage != null) {
+      return Align(
+        alignment: Alignment.topCenter,
+        child: RecordStoreOutageBanner(outage: outage),
+      );
+    }
     return loader.when(
       // A background reload of an upstream loader (path/module/record storage)
       // must not tear down the whole table subtree: doing so remounts the grid,

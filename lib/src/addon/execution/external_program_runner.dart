@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+
 import '/src/addon/execution/action_runner.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/addon_action.dart';
@@ -90,6 +92,20 @@ class ExternalProgramRunner implements ActionRunner {
   @override
   ActionHandle start(RefBase ref, PayloadMap payload) {
     final exec = ActionExecution();
+    // Launching a local program is a desktop-only capability (Process.start is a
+    // dart:io API with no web counterpart). Fail the execution cleanly instead
+    // of throwing, so a configured addon reaching this on web is reported as
+    // unavailable rather than crashing the run.
+    if (kIsWeb) {
+      exec.finish(
+        (elapsed) => ExecutionResult(
+          status: ExecutionStatus.failure,
+          error: "External program execution is not available on web.",
+          duration: elapsed,
+        ),
+      );
+      return exec.handle(() {});
+    }
     Process? process;
     Timer? timeoutTimer;
     var cancelled = false;

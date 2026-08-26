@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '/src/addon/execution/execution_controller.dart';
 import '/src/addon/execution/execution_models.dart';
 import '/src/addon/model/task_definition.dart';
-import '/src/core/path_entity.dart';
+import '/src/chara_detail/exporter.dart';
 import '/src/core/platform_controller.dart';
 import '/src/gui/chara_detail/export_button.dart';
 
@@ -31,7 +31,7 @@ const recordPlaceholders = <String>[
 ];
 
 /// Placeholders populated only by the export-completed trigger.
-const _exportPlaceholders = <String>["export_path"];
+const _exportPlaceholders = <String>["export_path", "export_file_name", "export_delivery"];
 
 /// Placeholders describing the upstream task in a `taskExecuted` chain.
 /// `task_status` is the upstream's terminal status (success/failure/cancelled/
@@ -54,6 +54,19 @@ List<String> placeholdersForTrigger(TriggerEvent event) {
     ],
     _ => _commonPlaceholders,
   };
+}
+
+PayloadMap recordExportedPayload(ExportResult result) {
+  final payload = <String, String>{
+    "event": "record_exported",
+    "export_file_name": result.fileName,
+    "export_delivery": result.delivery.payloadValue,
+  };
+  final path = result.path;
+  if (path != null) {
+    payload["export_path"] = path.path;
+  }
+  return payload;
 }
 
 /// One triggerable event: its [TriggerEvent], a localized label, and a closure
@@ -92,15 +105,19 @@ final triggerCatalog = <TriggerCatalogEntry>[
   TriggerCatalogEntry(
     event: TriggerEvent.recordCaptured,
     labelKey: "$_trTrigger.record_captured",
-    subscribe: (ref, emit) => ref.listen<AsyncValue<String>>(charaDetailRecordCapturedEventProvider, (_, c) {
-      c.whenData((id) => emit({"event": "record_captured", "record_id": id}));
-    }),
+    // The event carries the producing session's kind as well as the id now; the payload keeps only
+    // the id, because "a record was captured" is what this trigger has always meant and an import's
+    // records are captures too. Widening the payload is a separate, user-visible decision.
+    subscribe: (ref, emit) =>
+        ref.listen<AsyncValue<CharaDetailRecordCapturedEvent>>(charaDetailRecordCapturedEventProvider, (_, c) {
+          c.whenData((e) => emit({"event": "record_captured", "record_id": e.id}));
+        }),
   ),
   TriggerCatalogEntry(
     event: TriggerEvent.recordExported,
     labelKey: "$_trTrigger.record_exported",
-    subscribe: (ref, emit) => ref.listen<AsyncValue<PathEntity>>(recordExportEventProvider, (_, c) {
-      c.whenData((path) => emit({"event": "record_exported", "export_path": path.path}));
+    subscribe: (ref, emit) => ref.listen<AsyncValue<ExportResult>>(recordExportEventProvider, (_, c) {
+      c.whenData((result) => emit(recordExportedPayload(result)));
     }),
   ),
   TriggerCatalogEntry(

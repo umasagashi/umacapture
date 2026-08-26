@@ -6,6 +6,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <thread>
 
 #include <CLI11/CLI11.hpp>
@@ -18,10 +19,14 @@
 #include "builder/chara_detail_scene_scraper_builder.h"
 #include "builder/chara_detail_scene_stitcher_builder.h"
 #include "condition/serializer.h"
+#include "core/cli_run_report.h"
 #include "core/native_api.h"
+#include "core/pipeline_config.h"
+#include "core/pipeline_drain.h"
 #include "cv/ffv1_reader.h"
 #include "cv/ffv1_recorder.h"
 #include "cv/video_loader.h"
+#include "stop_file_guard.h"
 #include "util/json_util.h"
 #include "util/logger_util.h"
 #include "util/misc.h"
@@ -30,40 +35,55 @@ namespace uma::cli {
 
 namespace {
 
-// Tracks the wall-clock time of the most recent notify message from the pipeline. The one-shot subcommands
-// (stitch/recognize/video) have no single "batch complete" signal to wait on -- video's record count is
-// unknown up front and a silently-failing recognize emits no completion -- so they instead run until the
-// pipeline goes quiet.
-struct ActivityMonitor {
-    mutable std::mutex mutex;
-    std::chrono::steady_clock::time_point last_activity = std::chrono::steady_clock::now();
-
-    void touch() {
-        std::lock_guard<std::mutex> lock(mutex);
-        last_activity = std::chrono::steady_clock::now();
+// Wait for the whole offline chain to DRAIN, then join the event loop so the process can exit.
+//
+// The barrier itself -- which stages are asked, in which order, and what the deadline means -- lives in
+// core/pipeline_drain.h, together with the reason `recorder_runner` has to be one of those stages. Here it is
+// only wired up and its verdict turned into a process outcome: a wedged stage becomes a throw, which main()
+// prints and reports as a non-zero exit, so it cannot be mistaken for a successful run that simply produced
+// fewer records.
+void runUntilDrainedThenJoin(app::NativeApi &api, const event_util::EventRunner &recorder_runner) {
+    if (runUntilDrainedThenJoin(offlineDrainBarrier(api, recorder_runner)) == DrainOutcome::TimedOut) {
+        throw std::runtime_error("the pipeline did not drain within the deadline; results are incomplete");
     }
+}
 
-    [[nodiscard]] std::chrono::steady_clock::duration idleFor() const {
-        std::lock_guard<std::mutex> lock(mutex);
-        return std::chrono::steady_clock::now() - last_activity;
-    }
-};
+// The end-of-input signal for an offline subcommand, ON THE RECORDER RUNNER -- which is the whole point of
+// routing it through a connection instead of calling api.endOfInput() from the producer's thread.
+//
+// VideoLoader::runBatch / Ffv1Reader::run return after their last ENQUEUE onto that runner, not after delivery
+// (core/pipeline_drain.h makes the same point about the drain barrier), so at the moment they return whole
+// frames can still be sitting one stage upstream of NativeApi. Calling endOfInput() there would close an open
+// chara-detail scene while those frames were still queued and make a healthy clip report a truncation it did
+// not have. Sent on this runner instead, the signal is dequeued strictly after every frame already sent on the
+// frame connection -- one notifier queue orders every connection a runner owns (util/event_util.h) -- and
+// NativeApi::endOfInput then posts onto the distributor runner behind the frames it has itself accepted.
+//
+// Must be created before the runner is started (makeConnection refuses afterwards) and sent after the producer
+// has returned.
+[[nodiscard]] event_util::Sender<> makeEndOfInputSignal(
+    app::NativeApi &api, const event_util::SingleThreadMultiEventRunner &recorder_runner) {
+    const auto connection = recorder_runner->makeConnection<>("end_of_input");
+    connection->listen([&api]() { api.endOfInput(); });
+    return connection;
+}
 
-// Run until the pipeline stops emitting notifications for kIdleGrace, then join the event loop so the process
-// can exit. kIdleGrace must exceed the longest quiet gap during real processing, which is dominated by a
-// single record's recognize pass; 10s is comfortably above that while keeping shutdown snappy.
-void runUntilIdleThenJoin(app::NativeApi &api, ActivityMonitor &monitor) {
-    constexpr auto kIdleGrace = std::chrono::seconds(10);
-    // Reset the baseline so a slow pipeline start (e.g. model load with no notifications) cannot be mistaken
-    // for an idle pipeline before the submitted work has had a chance to run.
-    monitor.touch();
-    while (api.isRunning()) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (monitor.idleFor() > kIdleGrace) {
-            api.joinEventLoop();
-            break;
-        }
-    }
+// What this invocation observed on the notify stream, kept at file scope because main() composes the summary
+// line AFTER the subcommand has returned or thrown -- including from a run that threw, which still owes an
+// account of what it managed to report. One process runs one subcommand, so one report is the whole run.
+RunReport g_run_report;
+
+// Every notification goes two places: the log, as before, and the run report that becomes the machine-readable
+// summary line and the classified exit code (core/cli_run_report.h).
+//
+// Installed through one function rather than repeated per subcommand so that a subcommand cannot be added with
+// only half of it. A subcommand that logged but did not report would exit 0 while announcing a failure -- the
+// exact silence this change exists to end.
+void installNotifyCallback(app::NativeApi &api) {
+    api.setNotifyCallback([](const auto &message) {
+        g_run_report.observe(message);
+        log_debug("CLI: {}", message);
+    });
 }
 
 // Live `capture` runs an unbounded loop, so it needs a clean stop signal: a hard kill would skip the
@@ -126,7 +146,52 @@ struct PipelinePaths {
     std::filesystem::path output_dir = ".";
 };
 
-json_util::Json createConfig(bool video_mode, const PipelinePaths &paths = {}) {
+// The band the CLI's `--frame-resize` writes into `frame_resize`, so it asks for exactly the band the app
+// asks for.
+//
+// DERIVED, not repeated: these used to be a second literal carrying the same number, kept in step by a
+// comment alone. Aliasing the constants in core/pipeline_config.h makes the mirroring a fact of the code
+// instead of a promise about it, so the one pair of C++ literals -- and the doctest that pins them -- cover
+// the CLI too, and the two cannot drift apart without the test going red. That matters more here than
+// anywhere else: cli.cpp carries `main()` and is therefore NOT linked into `umacapture_tests`, so a literal
+// written out here would be guarded by nothing at all. The KEY NAMES are a separate matter and are NOT
+// covered by that test -- see the `frame_resize` guard in test/integration/run.py, which is what reads back
+// what this writer emits.
+constexpr int kFrameResizeMinUnit = app::kDefaultFrameResizeMinUnit;
+constexpr int kFrameResizeMaxUnit = app::kDefaultFrameResizeMaxUnit;
+
+// Help text for the `--frame-resize` / `--no-frame-resize` flag pair, built from the constants above for the
+// same reason they are derived: hand-written numbers in the help would go stale silently the next time the
+// band moves. [off_tail] says what turning it OFF means for the subcommand being described.
+[[nodiscard]] inline std::string frameResizeHelp(const std::string &off_tail) {
+    return "hold the anchor unit of the frames forwarded to the scraper inside the "
+         + std::to_string(kFrameResizeMinUnit) + "-" + std::to_string(kFrameResizeMaxUnit)
+         + " px band, scaling up below it and down above it (on by default, matching the app's shipped "
+           "setting; --no-frame-resize " + off_tail + ")";
+}
+
+// `detail_crop_calibration` arms the in-frame client-rect auto-calibration. It defaults on (matching the app,
+// where the key is absent). Both offline producers default it on: they hand over full decoded pixels for the
+// whole clip, and the latch is applied on the consumer side as the Frame anchor (see cv/video_loader.h --
+// resolving it in the producer would make the delivered frames depend on thread scheduling).
+//
+// `frame_resize` arms the neutral frame-resize the app exposes as a setting, and it defaults ON for the same
+// reason calibration does: the app ships it on, so this is the config a run has to build to answer the
+// question the CLI is actually asked -- "what does the recognition core do with this clip?". It defaulted OFF
+// while the app shipped it off; keeping that default once the app turned it on would make every CLI run, and
+// every integration golden, a measurement of a configuration nobody uses, silently, unless the operator
+// remembered a flag.
+//
+// It matters most on `replay`. Live `capture --record` tees the frames to the recorder BEFORE they reach the
+// pipeline (the band is applied at the consumer's forward site, see chara_detail_scene_context.cpp), so a
+// recording is always raw pixels: reproducing what that session recognized means replaying it under the same
+// band the session ran with, which is now the same default on both sides. `--no-frame-resize` is the escape
+// hatch for the opposite question -- what this clip looks like at its own resolution.
+json_util::Json createConfig(
+    bool video_mode,
+    const PipelinePaths &paths = {},
+    bool detail_crop_calibration = true,
+    bool frame_resize = true) {
     const std::filesystem::path &config_dir = paths.assets_dir;
     return {
         {"chara_detail",
@@ -138,6 +203,9 @@ json_util::Json createConfig(bool video_mode, const PipelinePaths &paths = {}) {
          }},
         {"platform", json_util::read(config_dir / "platform.json")},
         {"video_mode", video_mode},
+        {"detail_crop_calibration", detail_crop_calibration},
+        {"frame_resize",
+         {{"enabled", frame_resize}, {"min_unit", kFrameResizeMinUnit}, {"max_unit", kFrameResizeMaxUnit}}},
         {"directory",
          {
              {"temp_dir", (paths.output_dir / "temp").string()},
@@ -152,17 +220,37 @@ void captureFromScreen(
     const std::optional<std::filesystem::path> &record_path = std::nullopt,
     int duration_seconds = 0,
     const std::filesystem::path &stop_file = {}) {
+    // Clear any stale stop-file so a leftover from a previous run cannot end this one immediately.
+    // FIRST, before the recorder, the window capturer or the event loop exist, because the guard can
+    // refuse: a path that already holds something is not a stale sentinel and will not be deleted
+    // (tool/stop_file_guard.h explains what it removes and why it is decided that way). Throwing here
+    // is a run that never started; the behaviour it replaces could delete a recording that cannot be
+    // made again.
+    if (!stop_file.empty()) {
+        const auto clearance = tool::clearStaleStopFile(stop_file);
+        if (clearance.clearance == tool::StopFileClearance::Refused) {
+            throw std::runtime_error(clearance.reason);
+        }
+        if (clearance.clearance == tool::StopFileClearance::Cleared) {
+            log_info("{}", clearance.reason);
+        }
+    }
+
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
-    const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
-
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([](const auto &message) { log_debug("CLI: {}", message); });
+    const auto window_recorder = std::make_unique<windows::WindowRecorder>(
+        connection,
+        [&api](const Size<int> &size) { return api.frameShapingSnapshot(size); },
+        record_path ? windows::windows_impl::ShapingMode::AnchorOnly
+                    : windows::windows_impl::ShapingMode::CropPixels);
+    installNotifyCallback(api);
 
-    // Optional debug recorder: tee every captured frame to a lossless FFV1 .mkv for later replay. Built
-    // lazily on the first frame (its size is not known before capture starts); a construction failure is
-    // logged once and disables recording rather than aborting the capture.
+    // Optional debug recorder: record the full, pre-crop client pixels to lossless FFV1 for later replay.
+    // WindowRecorder uses AnchorOnly in this mode, so live recognition still receives the latched pane anchor
+    // while this tee sees a stable full-size pixel matrix. FFV1 stores pixels, not Frame anchor metadata.
+    // The encoder is built lazily on the first frame; a construction failure disables recording, not capture.
     std::unique_ptr<video::Ffv1Recorder> recorder;
     bool recorder_failed = false;
     connection->listen([&](const auto &frame, const auto &original_size) {
@@ -196,11 +284,7 @@ void captureFromScreen(
     g_capture_stop_requested.store(false);
     g_capture_finalized.store(false);
     SetConsoleCtrlHandler(&captureConsoleHandler, TRUE);
-    // Clear any stale stop-file so a leftover from a previous run cannot end this one immediately.
-    if (!stop_file.empty()) {
-        std::error_code ec;
-        std::filesystem::remove(stop_file, ec);
-    }
+    // The stale stop-file was already cleared (or refused) at the top of this function -- see there.
     if (record_path) {
         log_info(
             "Recording... stop with Ctrl-C{}{}.",
@@ -240,7 +324,10 @@ void screenshotFromScreen(const std::filesystem::path &output_path) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Discard, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
-    const auto window_recorder = std::make_unique<windows::WindowRecorder>(connection);
+    auto &api = app::NativeApi::instance();
+    const auto window_recorder = std::make_unique<windows::WindowRecorder>(
+        connection,
+        [&api](const Size<int> &size) { return api.frameShapingSnapshot(size); });
 
     const auto config = createConfig(false);
     const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
@@ -253,80 +340,87 @@ void screenshotFromScreen(const std::filesystem::path &output_path) {
     log_info("Screenshot saved to {}", output_path.string());
 }
 
-void captureFromVideo(const std::vector<std::filesystem::path> &video_path_list, const PipelinePaths &paths) {
+void captureFromVideo(
+    const std::vector<std::filesystem::path> &video_path_list,
+    const PipelinePaths &paths,
+    bool detail_crop_calibration = true,
+    bool frame_resize = true,
+    const std::optional<color::ColorMatrix> &diagnostic_matrix = std::nullopt) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
 
-    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([&monitor](const auto &message) {
-        monitor.touch();
-        log_debug("CLI: {}", message);
-    });
+    installNotifyCallback(api);
     connection->listen([&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
+    const auto end_of_input = makeEndOfInputSignal(api, recorder_runner);
 
-    const auto config = createConfig(true, paths);
+    // VideoLoader decodes and sends; it resolves no pane decision (cv/video_loader.h). Every frame recognition
+    // sees is therefore a pure function of the clip: the two Block-mode queues change read-ahead only, never
+    // order or content, and the latched pane is applied on the single distributor thread.
+    const auto config = createConfig(true, paths, detail_crop_calibration, frame_resize);
+    log_info("detail crop calibration: {}", detail_crop_calibration ? "enabled" : "disabled");
+    log_info("frame resize: {}", frame_resize ? "enabled" : "disabled");
+    if (diagnostic_matrix.has_value()) {
+        log_info("colour matrix: {} (diagnostic planar decode)",
+                 diagnostic_matrix.value() == color::ColorMatrix::Bt709 ? "bt709" : "bt601");
+    }
     api.startEventLoop(config.dump());
-
-    const auto windows_config = config["platform"]["windows"].get<windows::windows_config::WindowsConfig>();
-
-    // Pick the crop the way live capture does, per clip: match each clip's frame aspect ratio against the
-    // configured crop_profiles. A landscape game recording matches a profile and is cropped to the vertical
-    // content region; a portrait phone recording matches nothing and is used uncropped. This replaces the old
-    // manual horizontal/vertical toggle.
-    const auto crop_profiles = windows_config.window_recorder.value().crop_profiles.value_or(
-        std::vector<windows::windows_config::CropProfile>{});
 
     recorder_runner->start();
 
-    auto video = video::VideoLoader(connection, [crop_profiles](const Size<int> &size) -> std::optional<Rect<double>> {
-        const auto profile = windows::windows_config::matchCropProfile(crop_profiles, size);
-        return profile.has_value() ? profile->crop_rect : std::nullopt;
-    });
+    auto video = video::VideoLoader(connection, diagnostic_matrix);
     video.runBatch(video_path_list);
+    // The clip list is exhausted. Behind the frames still on the recorder runner -- see makeEndOfInputSignal.
+    end_of_input->send();
 
-    runUntilIdleThenJoin(api, monitor);
+    runUntilDrainedThenJoin(api, recorder_runner);
 }
 
-void replayFromRecording(const std::filesystem::path &record_path, const PipelinePaths &paths) {
+// Replay starts from full recorded pixels and runs pane detection/calibration by default. Ffv1Reader keeps
+// those pixels intact for the whole recording; once the pane latch is available it is the consumer that
+// changes the Frame anchor for downstream geometry.
+// Legacy FFV1 files recorded before full-frame capture carry no format marker and may already contain shaped
+// pixels. They are indistinguishable at decode time; use --no-calibrate if re-detecting such a clip is harmful.
+void replayFromRecording(
+    const std::filesystem::path &record_path,
+    const PipelinePaths &paths,
+    bool detail_crop_calibration = true,
+    bool frame_resize = true) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
     const auto connection = recorder_runner->makeConnection<Frame, Size<int>>();
 
-    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([&monitor](const auto &message) {
-        monitor.touch();
-        log_debug("CLI: {}", message);
-    });
+    installNotifyCallback(api);
     connection->listen([&api](const auto &frame, const auto &size) { api.updateFrame(frame, size); });
+    const auto end_of_input = makeEndOfInputSignal(api, recorder_runner);
 
     // video_mode=true gives the pipeline a Block queue (no dropped frames) and disables the frame-stall
-    // watchdog, so the replay is deterministic -- the recorded frames drive the recognition exactly as the
-    // failed live capture did, paced by the queue rather than by wall-clock. No crop: recorded frames are
-    // already pipeline-input form.
-    const auto config = createConfig(true, paths);
+    // watchdog; together with a producer that resolves no pane decision of its own (cv/ffv1_reader.h) the
+    // replay is deterministic -- the frames recognition sees are a pure function of the recording, paced by
+    // the queue rather than wall-clock. Nothing on this path ever crops pixels.
+    const auto config = createConfig(true, paths, detail_crop_calibration, frame_resize);
+    log_info("detail crop calibration: {}", detail_crop_calibration ? "enabled" : "disabled");
+    log_info("frame resize: {}", frame_resize ? "enabled" : "disabled");
     api.startEventLoop(config.dump());
 
     recorder_runner->start();
 
     video::Ffv1Reader reader(record_path, connection);
     reader.run();
+    // The recording is exhausted. Behind the frames still on the recorder runner -- see makeEndOfInputSignal.
+    end_of_input->send();
 
-    runUntilIdleThenJoin(api, monitor);
+    runUntilDrainedThenJoin(api, recorder_runner);
 }
 
 void stitchFromImages(const std::string &id, const PipelinePaths &paths) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
-    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([&monitor](const auto &message) {
-        monitor.touch();
-        log_debug("CLI: {}", message);
-    });
+    installNotifyCallback(api);
 
     const auto config = createConfig(true, paths);
     api.startEventLoop(config.dump());
@@ -335,19 +429,15 @@ void stitchFromImages(const std::string &id, const PipelinePaths &paths) {
 
     api.stitch({id, chara_detail::record::RecordType::Standard});
 
-    runUntilIdleThenJoin(api, monitor);
+    runUntilDrainedThenJoin(api, recorder_runner);
 }
 
 void recognizeFromImages(const std::vector<std::string> &id_list, const PipelinePaths &paths) {
     const auto recorder_runner =
         event_util::makeSingleThreadRunner(event_util::QueueLimitMode::Block, nullptr, "recorder");
 
-    ActivityMonitor monitor;
     auto &api = app::NativeApi::instance();
-    api.setNotifyCallback([&monitor](const auto &message) {
-        monitor.touch();
-        log_debug("CLI: {}", message);
-    });
+    installNotifyCallback(api);
 
     const auto config = createConfig(true, paths);
     api.startEventLoop(config.dump());
@@ -358,7 +448,7 @@ void recognizeFromImages(const std::vector<std::string> &id_list, const Pipeline
         api.recognize(id);
     }
 
-    runUntilIdleThenJoin(api, monitor);
+    runUntilDrainedThenJoin(api, recorder_runner);
 }
 
 }  // namespace uma::cli
@@ -366,7 +456,11 @@ void recognizeFromImages(const std::vector<std::string> &id_list, const Pipeline
 int main(int argc, char **argv) {
     uma::logger_util::init();
 
-    int rc = 0;
+    // Set for the subcommands that start the pipeline, and left empty for the ones that do not (`build`,
+    // `screenshot`): those never touch NativeApi, so there is no run to report and a summary line claiming
+    // zero records for them would be a lie about a run that never happened.
+    std::optional<uma::cli::RunInvocation> run;
+    bool threw = false;
     try {
         CLI::App command{"App description"};
         command.require_subcommand(1);
@@ -378,13 +472,17 @@ int main(int argc, char **argv) {
         auto capture_command = command.add_subcommand("capture", "run capture mode");
         std::filesystem::path capture_record_path;
         capture_command->add_option(
-            "--record", capture_record_path, "record every captured frame to a lossless FFV1 .mkv for replay");
+            "--record", capture_record_path, "record full pre-shaping client frames to lossless FFV1 for replay");
         int capture_duration_seconds = 0;
         capture_command->add_option(
             "--duration", capture_duration_seconds, "stop capture automatically after N seconds (0 = until Ctrl-C)");
         std::filesystem::path capture_stop_file;
         capture_command->add_option(
-            "--stop-file", capture_stop_file, "stop capture cleanly when this file appears (for scripted control)");
+            "--stop-file",
+            capture_stop_file,
+            "stop capture cleanly when this file appears (for scripted control). A stale EMPTY file at that "
+            "path is cleared at startup; a path that already holds anything else makes the run refuse to start "
+            "rather than delete it");
 
         auto screenshot_command =
             command.add_subcommand("screenshot", "capture a single screenshot from the game window");
@@ -405,6 +503,27 @@ int main(int argc, char **argv) {
         video_command->add_option("--video_path_list", video_path_list)->required();
         uma::cli::PipelinePaths video_paths;
         addPipelinePathOptions(video_command, video_paths);
+        bool video_calibrate = true;
+        video_command->add_flag(
+            "--calibrate{true},!--no-calibrate",
+            video_calibrate,
+            "enable pane auto-calibration and shaping (on by default; --no-calibrate disables it)");
+        bool video_frame_resize = true;
+        video_command->add_flag(
+            "--frame-resize{true},!--no-frame-resize",
+            video_frame_resize,
+            uma::cli::frameResizeHelp("recognises the clip's own resolution instead"));
+        std::string video_color_matrix;
+        video_command->add_option(
+            "--color_matrix",
+            video_color_matrix,
+            "DIAGNOSTIC: decode the clip's own YUV planes and convert them with this matrix instead of "
+            "letting OpenCV/swscale convert (which is always bt601, whatever the stream is tagged). "
+            "bt601 reproduces the default to within one unit per channel (its limited-range luma ramp is "
+            "deliberately coarsened; the records are unchanged). bt709 is the interpretation a browser applies, "
+            "which it does by default and not by reading a tag. Used by test/integration/run_dual_decode.py to "
+            "measure how much colour shift recognition tolerates; leave unset for the shipping behaviour.")
+            ->check(CLI::IsMember({"bt601", "bt709"}));
 
         auto replay_command =
             command.add_subcommand("replay", "replay a recorded FFV1 .mkv through the recognition pipeline");
@@ -412,6 +531,17 @@ int main(int argc, char **argv) {
         replay_command->add_option("--record", replay_path, "path to the recorded .mkv")->required();
         uma::cli::PipelinePaths replay_paths;
         addPipelinePathOptions(replay_command, replay_paths);
+        bool replay_calibrate = true;
+        replay_command->add_flag(
+            "--calibrate{true},!--no-calibrate",
+            replay_calibrate,
+            "enable pane detection/calibration and anchor-only shaping (default for new capture --record files; "
+            "legacy already-shaped clips may require --no-calibrate)");
+        bool replay_frame_resize = true;
+        replay_command->add_flag(
+            "--frame-resize{true},!--no-frame-resize",
+            replay_frame_resize,
+            uma::cli::frameResizeHelp("replays the recording's own resolution instead"));
 
         auto stitch_command = command.add_subcommand("stitch", "run capture mode from scraped images");
         std::string stitch_id;
@@ -458,6 +588,8 @@ int main(int argc, char **argv) {
         }
 
         if (capture_command->parsed()) {
+            // Assigned BEFORE the call, so a subcommand that throws still gets its summary line.
+            run = uma::cli::RunInvocation{"capture", 0};
             std::optional<std::filesystem::path> record =
                 capture_command->count("--record") > 0 ? std::optional{capture_record_path} : std::nullopt;
             uma::cli::captureFromScreen(record, capture_duration_seconds, capture_stop_file);
@@ -468,25 +600,36 @@ int main(int argc, char **argv) {
         }
 
         if (video_command->parsed()) {
-            uma::cli::captureFromVideo(video_path_list, video_paths);
+            run = uma::cli::RunInvocation{"video", static_cast<int64_t>(video_path_list.size())};
+            std::optional<uma::color::ColorMatrix> matrix;
+            if (video_color_matrix == "bt601") {
+                matrix = uma::color::ColorMatrix::Bt601;
+            } else if (video_color_matrix == "bt709") {
+                matrix = uma::color::ColorMatrix::Bt709;
+            }
+            uma::cli::captureFromVideo(
+                video_path_list, video_paths, video_calibrate, video_frame_resize, matrix);
         }
 
         if (replay_command->parsed()) {
-            uma::cli::replayFromRecording(replay_path, replay_paths);
+            run = uma::cli::RunInvocation{"replay", 1};
+            uma::cli::replayFromRecording(replay_path, replay_paths, replay_calibrate, replay_frame_resize);
         }
 
         if (stitch_command->parsed()) {
+            run = uma::cli::RunInvocation{"stitch", 1};
             uma::cli::stitchFromImages(stitch_id, stitch_paths);
         }
 
         if (recognize_command->parsed()) {
+            run = uma::cli::RunInvocation{"recognize", static_cast<int64_t>(recognize_id_list.size())};
             uma::cli::recognizeFromImages(recognize_id_list, recognize_paths);
         }
     } catch (std::exception &e) {
-        // Set a failure code and fall through instead of exit(1) so normal unwinding runs and the cleanup
-        // below still executes.
+        // Record that the run did not finish and fall through instead of exit(1), so normal unwinding runs and
+        // the cleanup below still executes. The exit code is decided in one place, below.
         std::cerr << e.what() << std::endl;
-        rc = 1;
+        threw = true;
     }
 
     // A subcommand can throw after startEventLoop() has started the pipeline (e.g. VideoLoader failing to open
@@ -495,6 +638,35 @@ int main(int argc, char **argv) {
     // logs through an already-destroyed logger (which would crash). No-op when nothing was started (e.g.
     // `build`) or when the subcommand already joined (stitch/recognize/video on success).
     uma::app::NativeApi::instance().joinEventLoop();
+
+    // THE RUN'S ACCOUNT OF ITSELF, after the event loop has been joined and therefore after every notification
+    // it was going to send. The record count is read here for the same reason: it is only a fact once the
+    // recognizer has finished with everything still in flight (NativeApi::recordsProduced says so), and reading
+    // it early would undercount -- which for zero is the difference between a reported failure and a silent one.
+    //
+    // ON STDERR, NOT STDOUT, and this is the point where the two streams stop being interchangeable:
+    //   * spdlog writes to stdout through its own sink (util/logger_util.cpp), so a std::cout line can be
+    //     interleaved mid-line with a log record and stop being one parseable line at all;
+    //   * a harness that shows only the tail of stderr on failure (test/integration/run.py) would otherwise
+    //     have the verdict on the one stream it does not show;
+    //   * main's own fatal message already goes here, so a run that threw keeps its two lines together.
+    // Nothing is removed from stdout: the notifications themselves still log exactly as before.
+    int rc = uma::cli::kExitOk;
+    if (run.has_value()) {
+        run->records = uma::app::NativeApi::instance().recordsProduced();
+        // The geometry the run recognized at, read at the same point and for the same reason as the count
+        // above: only after the drain barrier has every forwarded frame been observed.
+        const auto geometry = uma::app::NativeApi::instance().forwardedFrameGeometry();
+        run->forwarded_frames = geometry.frames;
+        run->anchor_unit_min = geometry.min_unit;
+        run->anchor_unit_max = geometry.max_unit;
+        rc = uma::cli::g_run_report.exitCode(threw);
+        run->exit_code = rc;
+        std::cerr << uma::cli::g_run_report.summaryLine(run.value()) << std::endl;
+    } else if (threw) {
+        // `build` / `screenshot` run no pipeline, so they have no verdict to report -- only whether they threw.
+        rc = uma::cli::kExitDidNotRun;
+    }
 
     spdlog::drop_all();
     return rc;

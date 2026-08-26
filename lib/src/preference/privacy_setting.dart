@@ -5,9 +5,6 @@ import '/src/preference/notifier.dart';
 import '/src/preference/settings_state.dart';
 import '/src/preference/storage_box.dart';
 
-// ignore: constant_identifier_names
-const tr_privacy = "app.privacy";
-
 /// The consent switch, which additionally discards the telemetry ID on opt-out.
 ///
 /// Every opt-out reaches [set] (the settings switch calls it directly, and `toggle`

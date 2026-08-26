@@ -18,6 +18,7 @@ import '/src/core/providers.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
+import '/src/gui/record_image.dart';
 import '/src/gui/theme_extensions.dart';
 
 part 'character.mapper.dart';
@@ -167,8 +168,8 @@ class CharacterCardColumnSpec extends ColumnSpec<int> with CharacterCardColumnSp
       enableEditingMode: false,
       renderer: (TrinaColumnRendererContext context) {
         final record = context.row.getUserData<CharaDetailRecord>()!;
-        final icon = Image.file(
-          (recordRootDir.filePath(record.traineeIconPath)).toFile(),
+        final icon = RecordImage(
+          recordRootDir.filePath(record.traineeIconPath),
           // Archived records keep their trainee icon, but guard against a
           // missing/corrupt file so the cell shows a placeholder instead of a red
           // error box. Sized to the cell, not the larger dialog placeholder.
@@ -301,7 +302,7 @@ class _CharaCardChip extends ConsumerWidget {
                 alignment: Alignment.bottomCenter,
                 widthFactor: 0.9,
                 heightFactor: 0.9,
-                child: Image.file(card.iconPath.toFile()),
+                child: RecordImage(card.iconPath),
               ),
             ),
           ),

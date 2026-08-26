@@ -46,9 +46,7 @@ inline bool readyAfterUpdate(T &subject, const Frame &frame) {
 struct FrameDescriptor {
     Frame frame;             // content crop: image matching + capture
     Frame scroll_bar_frame;  // full-width scrollbar band: scrollbar geometry only
-    std::vector<cv::KeyPoint> key_points;
-    cv::Mat descriptors;
-    cv::Mat gray;  // grayscale of `frame`, lazily cached like key_points/descriptors (see grayFrame)
+    cv::Mat gray;            // grayscale of `frame`, computed once and cached on first use (see grayFrame)
 
     [[nodiscard]] bool empty() const { return frame.empty(); }
 };
@@ -138,31 +136,120 @@ private:
     const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
 };
 
-// One local maximum of the 1-px keypoint-displacement histogram: a plausible vertical scroll offset,
-// carrying the sub-pixel median of the displacements merged into the peak and how many matches support it.
-struct OffsetCandidate {
-    double offset;  // median of the peak's merged displacements (genuine peaks are ~1 px wide, so sub-pixel accurate)
-    int count;      // matches merged into the peak (the peak bin and its +-1 px neighbours)
+// One local maximum of the signature shift-correlation curve: a plausible vertical scroll offset in WHOLE
+// pixels, carrying the correlation that ranked it. The offset is exactly an integer: the curve is only ever
+// evaluated at integer row shifts and no interpolation is done between them, so the proposer has no
+// sub-pixel notion of an offset at all (which is what lets the scroll gates and their consumers share one
+// quantisation -- see ScrollableScrapingInterpreter::updateScrolling).
+struct ShiftProposal {
+    int offset;    // integer row shift, same sign convention as ImageOffsetEstimator::overlapScore
+    double score;  // signature correlation at that shift; ranks the proposals, never accepts one
 };
 
-// Extracts scroll-offset candidates from raw keypoint vertical displacements via a 1-px-bin histogram:
-// every local maximum whose merged count (peak bin + its +-1 px neighbours, absorbing spikes split across a
-// bin boundary) reaches count_threshold becomes a candidate. Genuine offsets show up as razor-sharp 1-2 px
-// spikes (sub-pixel keypoint localization noise is ~constant in pixels regardless of resolution), while
-// mismatch noise is wide but sparse -- a few counts per bin -- and never forms a qualifying peak. Local-maxima
-// detection is used instead of gap-based clustering deliberately: sparse noise bridging two nearby genuine
-// peaks would chain them into one merged cluster with a wrong median, but it cannot turn a valley into a
-// local maximum. The full range is considered, including zero and negative displacements, so a static frame
-// yields a candidate at ~0 instead of a false positive elsewhere. Candidates are returned in ascending
-// offset order; the caller decides between them on pixel evidence, not on count.
-[[nodiscard]] std::vector<OffsetCandidate> detectOffsetCandidates(
-    const std::vector<double> &displacements, size_t count_threshold);
+// The gapless column tiling one signature is reduced over: `blocks` consecutive column ranges covering
+// [0, width) with no gap and no overlap. The boundaries are computed in int64 so they stay exact for any
+// width, and consecutive blocks share an endpoint, so a width that is not a multiple of `blocks` yields
+// blocks of two adjacent widths (44 and 45 at the shipped 719 px / 16 blocks) rather than a dropped or
+// double-counted column.
+//
+// The tiling is a value, not a private detail of the reducer, because the correlation needs the SAME per
+// block widths the reducer used: the signature stores each block's undivided PIXEL SUM, and the division
+// by the block's own width happens once, at the fold of the correlation (see columnBlockSignature). Both
+// sides therefore have to read one object, and computing it twice from `width` would be an invariant
+// rather than data.
+struct BlockTiling {
+    std::vector<int> begin;  // blocks + 1 boundaries; block b spans [begin[b], begin[b + 1])
+    std::vector<int> count;  // blocks widths; count[b] == begin[b + 1] - begin[b], possibly 0
+    int max_count = 0;  // widest block; the bound every range argument below is expressed in
+
+    [[nodiscard]] int blocks() const { return static_cast<int>(count.size()); }
+
+    // A block that is empty on a very narrow frame would divide by zero. Its sum is 0, so dividing by 1
+    // reproduces the historical "mean of nothing is 0" behaviour without a branch at the use site.
+    [[nodiscard]] int divisorAt(int block) const { return std::max(1, count[static_cast<size_t>(block)]); }
+
+    // The two range facts the exactness of the whole correlation rests on, as expressions over the tiling
+    // rather than as constants. They are what licenses `float` storage and a `double` accumulator:
+    //
+    //  * every stored signature element is a block pixel sum, at most max_count * 255, and `float`
+    //    represents every integer below 2^24 = 16 777 216 exactly. Even an absurd 8K-wide frame at 16
+    //    blocks gives 480 * 255 = 122 400, a 137x margin;
+    //  * the correlation accumulates `height` products of two such sums, so the largest partial sum is
+    //    height * (max_count * 255)^2, and `double` represents every integer below 2^53 = 9.007e15
+    //    exactly. At 4K with the resize band off that is 1.05e13, an 862x margin.
+    //
+    // Both quantities are therefore EXACT INTEGERS in their containers, which is what makes the reduction
+    // order, the accumulator count and the compiler's vectorisation decisions unobservable in the result.
+    // This is a property of the types and the value range, not a convention the code has to maintain.
+    // `double` return type so an 8K-class geometry cannot overflow the bound computation itself.
+    [[nodiscard]] double maxBlockSum() const { return static_cast<double>(max_count) * 255.0; }
+    [[nodiscard]] double maxCrossAccumulation(int height) const {
+        return static_cast<double>(height) * maxBlockSum() * maxBlockSum();
+    }
+};
+
+// The gapless tiling of `width` columns into `blocks` blocks. Derived from the geometry every time; there
+// is no cached or configured copy of it anywhere.
+[[nodiscard]] BlockTiling blockTiling(int width, int blocks);
+
+// Column-block signature of one grayscale frame: for every (block, row), the exact PIXEL SUM of that row's
+// slice of the block, laid out BLOCK-MAJOR (block b occupies [b*height, (b+1)*height), so one block's
+// column of rows is contiguous). Column blocks are what make the signature a useful proposal source rather
+// than a row-profile: a plain per-row mean throws away all horizontal structure and aliases badly on the
+// repeating factor rows, while a handful of blocks keeps enough horizontal layout to separate one row from
+// its neighbours yet still collapses each row to a few numbers, so a shift correlation over the whole
+// plausible range is affordable.
+//
+// The sum is deliberately NOT divided here, and the two consequences are the point of the design:
+//
+//  * the value stored is an integer, so the products the correlation forms are integers too and every
+//    partial sum of them is exact in `double` (see BlockTiling's range facts). The correlation's answer
+//    then does not depend on the order the products are summed in, on how many accumulators are used, or
+//    on whether the compiler vectorised the loop -- so those become free implementation choices instead of
+//    behaviour;
+//  * blocks of unequal width (44 vs 45) keep their own divisor. Folding a single global divisor in would
+//    reweight the wider blocks by (q+1)/q and change the objective; dividing per block at the fold does
+//    not. The historical form divided at build time and rounded each quotient to `float`, which is the one
+//    step this removes.
+//
+// `float` is the container, not the arithmetic: the value is an integer far below 2^24, and this
+// toolchain's auto-vectoriser turns a `float` source into a widening f64 multiply-add where an int32
+// source stays scalar. Nothing here is approximate.
+[[nodiscard]] std::vector<float> columnBlockSignature(const cv::Mat &gray, const BlockTiling &tiling);
+
+// Exact cross accumulation of one block's column over `rows` samples: sum of from[i] * to[i] in `double`.
+//
+// Four independent accumulators, so the per-block dependency chain is broken and the compiler is free to
+// vectorise; the grouping is not part of the answer, because every operand and every partial sum is an
+// exact integer (BlockTiling::maxCrossAccumulation). Deliberately plain C++ with no intrinsic and no
+// platform branch: measured on wasm/ARM and wasm/x64, LLVM's auto-vectoriser emits better code from this
+// source than OpenCV's Universal Intrinsics do through their wasm HAL, and an #ifdef here would be a
+// divergence with no platform constraint behind it.
+[[nodiscard]] double blockCrossAccumulate(const float *from, const float *to, int rows);
+
+// Zero-mean normalized correlation of two signatures at every integer shift whose overlap still reaches
+// minimum_overlap_fraction of the height, reduced to the local maxima of that curve and returned as the
+// top `top_k` by correlation (ties broken by the smaller offset, so the result is deterministic).
+//
+// The whole range is scanned, including zero and negative shifts, so a static frame proposes ~0 instead of a
+// spurious offset elsewhere. Local maxima rather than a global argmax: the repeating factor rows make the
+// curve multi-modal, and the true offset is not always the tallest peak of the SIGNATURE correlation -- it is
+// the caller's full-resolution pixel verification that decides between the peaks. A shift whose overlap has
+// (near-)zero variance on either side carries no correlation and is skipped, so a uniform band cannot score.
+//
+// The signatures must both be columnBlockSignature output over `tiling` at the same `height`.
+[[nodiscard]] std::vector<ShiftProposal> proposeVerticalShifts(
+    const std::vector<float> &from_signature,
+    const std::vector<float> &to_signature,
+    const BlockTiling &tiling,
+    int height,
+    double minimum_overlap_fraction,
+    int top_k);
 
 class ImageOffsetEstimator {
 public:
     struct ImageOffsetEstimatorConfig {
-        double trust_ratio = 0.5;
-        // A candidate offset is accepted only when overlaying the two frames at it reaches this normalized
+        // A proposed offset is accepted only when overlaying the two frames at it reaches this normalized
         // cross-correlation. Measured genuine scrolls score >=0.91 and wrong alignments <=0.73 across all
         // golden clips, so 0.8 separates them with margin.
         double minimum_overlap_score = 0.8;
@@ -171,31 +258,73 @@ public:
         // evidence to trust a large stitch on, and a near-uniform sliver can even correlate spuriously high
         // (measured: a 37 px sliver scoring 0.989 on a wrong offset).
         double minimum_overlap_fraction = 0.10;
-        // Minimum merged match count for a displacement-histogram peak to become a candidate. This is a count,
-        // and keypoint counts scale with resolution/content: measured on ~736 px-wide footage genuine peaks
-        // carry 35-600 matches and noise bins <=9, but do not raise this on that evidence alone. Keep it low --
-        // a spurious extra candidate is rejected by the overlap gate, while a missed genuine peak loses the frame.
-        int minimum_key_points = 10;
-        int descriptor_channels = 3;
-        float descriptor_threshold = 0.001f;
-        int octaves = 2;
-        int octave_layers = 1;
-        int table_number = 3;
-        int key_size = 12;
-        int probe_level = 1;
+
+        // The two proposer settings: how many column blocks the row signature carries, and how many of the
+        // correlation curve's ranked peaks are handed to the full-resolution verifier.
+        //
+        // THE RULE THEY WERE CHOSEN BY (user ruling, 2026-08-15): take values where (1) raising EITHER of them
+        // recovers not one further frame pair -- a plateau, not a knee -- and (2) somewhere inside that plateau,
+        // whole clips at every supported width have been stitched end to end and the result checked against the
+        // previous estimator. Both halves are required. A knee cannot be read off this corpus at all: every
+        // "minimum B" in the sweeps is decided by one to three pairs out of 677 per width, and zero observed
+        // misses out of 677 only bounds the true miss rate below 0.56 % (95 %), so a value picked at a knee is
+        // picked out of the noise. Recall is also NOT monotone in the block count, so "the largest of each
+        // width's own minimum" is not a value that satisfies every width.
+        //
+        // Where the plateau is measured: .notes/analysis/akaze-alternatives/BC9-verify-bk-and-gate.md
+        // (sections "The real mechanism, and why it does not stop at 2" and "K >= 3 adds nothing ... is false",
+        // over 8 969 frame pairs). At 16 blocks the correct offset ranks first on 8 960 pairs and second on the
+        // remaining 9 -- so the top 2 peaks already contain every pair the proposer reaches, a third peak
+        // recovers none, and more blocks have nothing left to recover. At smaller block counts neither holds:
+        // at 7 blocks a third peak does recover a pair, which is why the count is not trimmed to the smallest
+        // one that "looks" sufficient.
+        // Where the whole-clip check is: BA7-corpus-sweep.md, section I TOGETHER WITH section VII. Section I on
+        // its own does not support half (2) of the rule and must not be cited for it: its 32-material batch
+        // deliberately excludes 35 materials ("Not run, and why"), and the excluded set is precisely the width
+        // ladder -- 21 scale re-encodes and 12 accept_ladder widths -- that the phrase "every supported width"
+        // is about. Section VII ("Coverage-gap follow-up") runs those 35. Both sections together are 67
+        // materials: every clip and replay recording this project holds, spanning the supported width range,
+        // each stitched end to end by both estimators. 44 came out identical and 23 differed -- and every one of
+        // the 23 differs only in the stitched image pixels and the number of fragments they were cut from,
+        // never in what was recognised: record.json is identical on all 67 after stripping the volatile fields.
+        // Re-measured on the two SHIPPING binaries rather than the switchable one the sweeps used -- this
+        // estimator against AKAZE at 0dfa94d -- in IMPL-sweep/IMPL-sweep.md: 67/67 materials completed on both
+        // arms with no exclusions and no failed runs, 26803/26803 record.json leaves equal, 65/65 records on
+        // each side, 45 materials identical throughout and 22 differing in the stitched pixels alone. So what
+        // the corpus establishes is record-level equivalence at every supported width, with a residual in where
+        // the fragment seams fall; it is not a claim that the stitched images are byte-identical.
+        // Extended to adversarial re-encodes by BC8-gate-ablation-and-fragment-delta.md and BC9.
+        //
+        // Both are absolute counts, NOT a function of the frame width, and that is a positive decision rather
+        // than an approximation of one: the plateau holds at each width the sweeps measured -- 539, 673 and
+        // 719 px, i.e. both ends and the middle of the supported band (kDefaultFrameResizeMinUnit /
+        // MaxUnit in core/pipeline_config.h) -- so there is nothing left for a width term to do. BC9 (section
+        // "B is an absolute count, not a function of width") could not resolve a width rule from this data
+        // either way -- the three per-width figures differ by three pairs in total (p = 1.000) -- and what
+        // direction there is runs the wrong way for proportionality: across 539 -> 673 -> 719 px the block count
+        // goes down or stays flat, never up. Deriving the block count from the width would therefore encode a
+        // relationship the measurements do not support.
+        int signature_blocks = 16;
+        int proposal_count = 2;
     };
 
     explicit ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config);
 
     ImageOffsetEstimator();
 
-    // Vertical content scroll between the frames, guess-free: keypoint matching proposes a short list of
-    // displacement-histogram candidates (detectOffsetCandidates) and dense pixel overlap selects among them
-    // (overlapScore). Neither side decides alone -- a keypoint majority can lock onto a periodic-row alias
-    // (factor rows repeat every ~0.09 of the width), and a dense scan alone can spike on a thin sliver; each
-    // covers the other's failure. Returns the winning candidate's sub-pixel offset, or nullopt when the
-    // frames differ in size, yield too few features, or no candidate passes the overlap gate.
-    [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
+    // Vertical content scroll between the frames, in WHOLE pixels, guess-free: a reduced row x column-block
+    // signature proposes a short list of integer shifts (proposeVerticalShifts) and dense pixel overlap at
+    // full resolution selects among them (overlapScore). Neither side decides alone -- the signature
+    // correlation can rank a periodic-row alias above the truth (factor rows repeat every ~0.09 of the width),
+    // and a dense scan alone can spike on a thin sliver; each covers the other's failure. Returns the winning
+    // proposal's integer offset, or nullopt when the frames differ in size, carry no vertical structure to
+    // correlate, or no proposal passes the overlap gate.
+    //
+    // The integer return type is the estimator's statement about its own resolution, not a rounding of
+    // something finer: nothing on this path ever holds a fractional offset. Callers therefore compare and
+    // consume the SAME number, which is what keeps the scroll gates and the strip latch on one quantisation.
+    // Adding sub-pixel refinement here would reopen that question and must revisit those call sites.
+    [[nodiscard]] std::optional<int> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
 
     // Overlays the two (grayscale, full-resolution) frames shifted by the vertical offset and returns the
     // normalized cross-correlation of their shared region. Symmetric in the shift sign: a point at row y in
@@ -207,18 +336,14 @@ public:
     [[nodiscard]] double overlapScore(const cv::Mat &from_gray, const cv::Mat &to_gray, long offset_pixels) const;
 
 private:
-    void detectKeyPoints(FrameDescriptor &descriptor) const;
-
-    // Grayscale of the descriptor's content crop, computed once and cached on the descriptor (same lazy
-    // pattern as detectKeyPoints), so per-candidate verification and the next frame's `from` role reuse it.
+    // Grayscale of the descriptor's content crop, computed once and cached on the descriptor, so the
+    // signature build, every per-proposal verification, and the next frame's `from` role all reuse it.
     static const cv::Mat &grayFrame(FrameDescriptor &descriptor);
 
-    const cv::Ptr<cv::Feature2D> detector;
-    const cv::Ptr<cv::FlannBasedMatcher> matcher;
-    const double trust_ratio;
     const double minimum_overlap_score;
     const double minimum_overlap_fraction;
-    const int minimum_key_points;
+    const int signature_blocks;
+    const int proposal_count;
 };
 
 class ScrollAreaOffsetEstimator {
@@ -230,13 +355,14 @@ public:
 
     [[nodiscard]] std::optional<double> position(const FrameDescriptor &descriptor) const;
 
-    // Content scroll offset between the frames. The image estimator decides the offset (candidate + overlap
-    // verify); the scroll-bar guess is then applied only as an independent far-outlier veto: an image offset
-    // more than guess_window_margin (width units) from scrollGuess() is rejected (nullopt). The veto catches
-    // periodic-row aliases that clear the overlap gate yet land far from where the scroll bar says the scroll
-    // is. When the guess is unavailable (no scrollbar / mid-scroll resolution change) the pure image result
-    // stands.
-    [[nodiscard]] std::optional<double> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
+    // Content scroll offset between the frames, in whole pixels. The image estimator decides the offset
+    // (propose + overlap verify); the scroll-bar guess is then applied only as an independent far-outlier
+    // veto: an image offset more than guess_window_margin (width units) from scrollGuess() is rejected
+    // (nullopt). The veto catches periodic-row aliases that clear the overlap gate yet land far from where the
+    // scroll bar says the scroll is. When the guess is unavailable (no scrollbar / mid-scroll resolution
+    // change) the pure image result stands. The offset is passed through unchanged, so it is still exactly
+    // the integer the image estimator produced.
+    [[nodiscard]] std::optional<int> estimate(FrameDescriptor &from, FrameDescriptor &to) const;
 
 private:
     const ScrollBarOffsetEstimator scroll_bar_offset_estimator;
@@ -414,9 +540,18 @@ private:
     bool base_ready = false;
 };
 
+// Latches "this region has stopped moving": a region counts as still while the fraction of its pixels that
+// changed since the previous frame stays below `stationary_ratio`, and it is `ready()` once that has held for
+// `stationary_time`. The decision is a FRACTION of the region, so one shared value means the same thing at
+// every construction site and at every capture resolution.
+//
+// BOTH calibrated inputs move the latch, and neither is the sole dial. Where the shared value is used, how
+// the pair was calibrated, and why `stationary_time` is a fixed constraint rather than a dial are recorded in
+// ONE place, beside the values: native/tool/builder/chara_detail_scene_scraper_builder.h. Read it before
+// touching either.
 class StationaryFrameCatcher {
 public:
-    StationaryFrameCatcher(uint64 stationary_time, int minimum_color, uint64 stationary_color, const Rect<double> &rect);
+    StationaryFrameCatcher(uint64 stationary_time, int minimum_color, double stationary_ratio, const Rect<double> &rect);
 
     void update(const Frame &frame);
 
@@ -430,7 +565,7 @@ private:
     const Rect<double> target_rect;
     const uint64 stationary_time;
     const int minimum_color;
-    const uint64 stationary_color;
+    const double stationary_ratio;
 
     Frame previous_frame;
     std::optional<uint64> first_timestamp;
@@ -611,7 +746,7 @@ public:
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
-        const event_util::Sender<> &on_restarted,
+        const event_util::Sender<DiscardedSession> &on_restarted,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir,
         const io_util::DirectoryHooks &directory_hooks);
@@ -622,7 +757,32 @@ public:
 
     void update(const Frame &frame, const SceneState &scene_state);
 
-    void release();
+    // Tear the current session down, AND REPORT WHAT WAS TORN DOWN. Taking the snapshot inside the call that
+    // destroys the state it describes is the point: it reads state this very function invalidates (ready()
+    // stops being answerable, and the buildSession that follows a reset overwrites current_record_info), so a
+    // snapshot taken by the caller could be taken one line too late and would then describe the FRESH session
+    // -- silently, as a discard that lost nothing. There is no correct moment other than this one, so there is
+    // no choice of moment. A caller with nothing to report (the scene-closed listener, whose loss already went
+    // out as closed_before_completed) simply drops the value.
+    DiscardedSession release();
+
+    // The factor-tab character-switch discriminator, split into its two halves and exposed as pure statics so
+    // the decision can be asserted on hand-built frames instead of only through whole-clip goldens. That
+    // indirection is not cosmetic: a RECORD-SET golden cannot see this rule on three of the five must-fire
+    // clips, which produce zero records both with it and with it deleted. Those three are covered instead by
+    // `expect_records` / `expect_errors` / `expect_discarded` in native/test/integration/cases.json, which
+    // assert the reset COUNT off the CLI's run summary rather than a record set -- so the rule firing is now
+    // watched end to end, while the decision itself is still only assertable here.
+    //
+    // factorChangeRatio: fraction of `diff_rect` whose pixels differ from the reference by more than
+    // kFactorChangePixelDiffThreshold. Both frames must already be cropped to the scroll area (the rect is
+    // defined relative to that crop) and must be the same size.
+    [[nodiscard]] static double
+    factorChangeRatio(const Frame &current_area, const Frame &reference_area, const Rect<double> &diff_rect);
+
+    // isFactorChanged: applies kFactorChangeRatioThreshold to that ratio. True means "a different character's
+    // factor list", subject to the kMonitorDwellMs dwell the caller enforces.
+    [[nodiscard]] static bool isFactorChanged(double ratio);
 
 private:
     // Discard the current session and start a fresh one with the given record type, without the detail
@@ -685,7 +845,11 @@ private:
     const event_util::Sender<int> on_page_ready;  // When each page is ready.
     const event_util::Sender<RecordInfo> on_completed;  // When all three pages are ready.
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;  // Factor tab scroll-ready, for dedup.
-    const event_util::Sender<> on_restarted;  // Mid-scene reset (inferred character switch).
+    // Mid-scene reset (inferred character switch), carrying the session it threw away. NOT an error channel:
+    // all three reset rules fire legitimately on a real switch, so what travels here is the FACT of a discard
+    // and its contents -- see DiscardedSession for why the contents are what makes a partial failure
+    // expressible, and why "a discard is a failure" was rejected.
+    const event_util::Sender<DiscardedSession> on_restarted;
 
     // Top margin (fraction of the true placeholder track above the thumb, from topMargin()) at or below which
     // the content is treated as scrolled to the very top. ~0 means flush with the top; the threshold tolerates
@@ -701,26 +865,66 @@ private:
     static constexpr double kTopMarginThreshold = 0.02;
     // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
+    //
+    // For the factor-content rule this dwell is the ONLY barrier against a codec plateau, and it must not be
+    // relaxed. The false-change excursion on a re-encoded phone recording is not a spike: it is a single
+    // sustained plateau of 537-1915 ms (17-58 consecutive frames), 2.1-7.7x this window, measured on 19 reject
+    // clips. That rules out every "average it away" variant from both directions -- a window shorter than the
+    // plateau does not suppress it, and a window long enough to outlast it (2000 ms) also outlasts every real
+    // switch in the accept population, which then measures exactly 0. Taking the minimum ratio over the window
+    // (what the pending-since counter below does) also beats taking the mean at every window length tested
+    // (55.0x vs 16.2x separation at 250 ms). Reproduction: .notes/analysis/android-web-import/cpp/
+    // fix1-statistics.md.
+    //
+    // NOT the stationary latch's dwell. That one is `stationary_time_threshold` in the scraper config and is
+    // calibrated against a different thing entirely (when a settle ends, jointly with the area budget -- see
+    // StationaryFrameCatcher above and the 2-D map in tool/builder/chara_detail_scene_scraper_builder.h).
+    // The two are independent; a change to either says nothing about the other.
     static constexpr uint64 kMonitorDwellMs = 250;
-    // A pixel counts as "changed" when its per-pixel BGR difference (0-765) exceeds this. The dominant
-    // same-character noise is anti-aliasing / video-codec shimmer along text, star and icon edges -- broadly
-    // scattered but LOW magnitude. Measured per-pixel-diff sweeps on two clips (373k-pixel region): that
-    // shimmer is entirely below magnitude ~10-12 (a same-character frame reading 1.06% at X=5 collapses to
-    // 0.04% at X=8 and 0% at X=12), whereas a real switch changes text glyphs -- high contrast, high magnitude
-    // -- and barely moves (6.59% at X=5 -> 5.70% at X=15, ~87% retained). 15 sits just above the shimmer
-    // ceiling, so raising the gate here (not the ratio below) is what suppresses the noise while keeping a real
-    // switch intact -- including a similar-factor switch, whose smaller but still-high-magnitude text change
-    // survives the gate where equal-ratio edge noise does not.
-    static constexpr int kFactorChangePixelDiffThreshold = 15;
+    // A pixel counts as "changed" when its per-pixel BGR difference (0-765) exceeds this. The value is a
+    // calibration between two measured populations, not a property of anti-aliasing:
+    //  * reject (must NOT reset) -- the same character re-rendered. Video-codec re-quantisation of already
+    //    rendered pixels, bounded by the quantiser step, plus a residue of genuine same-character change
+    //    (a moving mouse cursor, a lazily loaded inheritance row). 19 clips over 9 source materials, 6 encodes
+    //    (pristine, x264 crf 5/12/18/23/30, lossless FFV1) and 6 capture widths (1080/810/736/718/674/540).
+    //    Worst case at X=80: 0.0709% of the diffed region.
+    //  * accept (MUST reset) -- a switch to another character, i.e. glyph replacement, bounded below by
+    //    ink-to-background contrast. 6 switch events x 3 widths (736/540/404) = 18 clips. Worst case at X=80:
+    //    3.8984%.
+    // The 0.5% bar below therefore clears the worst reject by 7.0x and sits 7.8x under the worst accept, close
+    // to the geometric centre of the 55x gap. The usable band is X in [60, 150]; outside it one side loses
+    // margin.
+    //
+    // This was 15, on the belief that same-character shimmer is "entirely below magnitude 10-12". Measurement
+    // refutes that for video sources: the reject population reaches per-pixel amplitude 133 on a phone
+    // recording's IDR frame and 765 on desktop material, and at X=15 the reject worst (11.45%) is LARGER than
+    // the accept worst (5.58%) -- the two populations are inverted there and no ratio bar can separate them.
+    //
+    // Two measured facts constrain how this may be re-tuned:
+    //  * the codec noise floor DRIFTS, it does not jitter about a constant. On a settled crf30 region the
+    //    per-frame diff reads 0.02% while the 8-frame-lag diff reads 0.65% (30x). Averaging frames therefore
+    //    compares two drift states instead of cancelling noise.
+    //  * keep this distinct from the stationary latch's minimum_color_threshold (18), even though both are
+    //    per-pixel BGR gates. That one asks "did this pixel move at all between two consecutive frames" (a
+    //    sensor-noise question); this one asks "is this pixel a different colour than it was on another
+    //    character's list" (a content question).
+    //
+    // Not covered: a switch between two characters with near-identical factor lists. Every accept clip replaces
+    // a visibly different list, so the breadth-bound case is unmeasured on the accept side. Raising X is not
+    // expected to make it worse (glyph depth does not depend on how many glyphs changed) but that is inference.
+    // Reproduction: .notes/analysis/android-web-import/cpp/fix1-calibration.md (populations, sweep, evidence
+    // image) and cpp/fix1-statistics.md (why block mean / temporal averaging / EMA reference were rejected).
+    static constexpr int kFactorChangePixelDiffThreshold = 80;
     // Fraction of the factor scroll area that must be "changed" (per X above) to treat the content as a
     // different character rather than noise. Counting *how many* pixels changed (a broad, contiguous area on a
     // real switch) instead of *how much* (a magnitude average a few large-delta pixels could dominate) is far
-    // more robust to the spikes video sources inject. The 250ms dwell guards transient spikes. With X=15 the
-    // only same-character residual is a moving mouse cursor (high contrast, so it survives the gate, but tiny:
-    // ~0.10% of the region), while a real switch reads ~5.7%. 0.5% sits above that ~0.10% cursor floor yet well
-    // below a real switch, low enough to also catch a weak (few-row / similar-factor) change that the old 1%
-    // could miss. Verified end-to-end: .notes/player_standard.mp4 (same character) no longer resets, while the
-    // .notes/player_standard_factor_only_1.mp4 switch still does.
+    // more robust to the spikes video sources inject. The 250ms dwell guards transient spikes.
+    //
+    // Deliberately unchanged by the X=15 -> 80 recalibration, and it must not be lowered. Past X~60 the reject
+    // population stops falling with X: what remains is a flat 0.03-0.07% floor of real same-character content
+    // change that no per-pixel threshold can remove, and it is what caps the achievable separation at ~55x.
+    // 0.5% clears that floor by 7.0x and sits 7.8x below the worst measured real switch (3.90%); over the same
+    // populations the margin-balancing value is 0.526%, so 0.5% is still almost exactly centred.
     static constexpr double kFactorChangeRatioThreshold = 0.005;
 
     const scraper_config::CharaDetailSceneScraperConfig config;

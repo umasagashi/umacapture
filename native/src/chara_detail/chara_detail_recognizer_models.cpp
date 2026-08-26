@@ -152,6 +152,7 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     const event_util::Sender<RecordInfo> &on_update_completed,
     const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
     const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
+    const event_util::Sender<std::string> &on_error,
     const recognizer_config::CharaDetailRecognizerConfig &config)
     : trainer_id(trainer_id)
     , record_root_dir(record_root_dir)
@@ -166,7 +167,8 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     , on_update_requested(on_update_requested)
     , on_update_completed(on_update_completed)
     , on_factor_probe_ready(on_factor_probe_ready)
-    , on_factor_probe_completed(on_factor_probe_completed) {
+    , on_factor_probe_completed(on_factor_probe_completed)
+    , on_error(on_error) {
     this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
     this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
     this->on_factor_probe_ready->listen([this](const auto &frame, const auto &info) { this->probe(frame, info); });

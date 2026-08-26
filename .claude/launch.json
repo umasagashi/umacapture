@@ -1,0 +1,35 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web-dev",
+      "runtimeExecutable": ".fvm\\flutter_sdk\\bin\\flutter.bat",
+      "runtimeArgs": ["run", "-d", "web-server", "--web-port", "8140", "--web-hostname", "127.0.0.1"],
+      "port": 8140,
+      "url": "http://127.0.0.1:8140"
+    },
+    {
+      "name": "web-profile",
+      "runtimeExecutable": ".fvm\\flutter_sdk\\bin\\flutter.bat",
+      "runtimeArgs": [
+        "run",
+        "--profile",
+        "-d",
+        "web-server",
+        "--web-port",
+        "8140",
+        "--web-hostname",
+        "127.0.0.1"
+      ],
+      "port": 8140,
+      "url": "http://127.0.0.1:8140"
+    },
+    {
+      "name": "web-release",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "tool\\serve_web_coi.py", "--port", "8097"],
+      "port": 8097,
+      "url": "http://127.0.0.1:8097"
+    }
+  ]
+}

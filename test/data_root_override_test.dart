@@ -27,6 +27,7 @@ void main() {
     test('falls back to native defaults when no override is set', () {
       final info = base();
       expect(info.storageDir.path, (documentDir / 'storage').path);
+      expect(info.customSoundDir.path, (documentDir / 'storage' / 'sound').path);
       expect(info.tempDir.path, (documentDir / 'temp').path);
       expect(info.modulesDir.path, (supportDir / 'modules').path);
       // Mirrors Hive.initFlutter, which resolves against the documents dir.
@@ -38,6 +39,7 @@ void main() {
       final info = base(dataRoot: root);
       expect(info.storageDir.path, (root / 'storage').path);
       expect(info.tempDir.path, (root / 'temp').path);
+      expect(info.customSoundDir.path, (root / 'storage' / 'sound').path);
       expect(info.modulesDir.path, (root / 'modules').path);
       expect(info.settingsDir.path, (root / 'settings').path);
       // chara_detail dirs chain off storageDir, so they follow automatically.

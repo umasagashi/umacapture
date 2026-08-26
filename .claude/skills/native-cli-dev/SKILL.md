@@ -35,7 +35,14 @@ and uses WinRT screen capture). Generator is **Ninja**, compiler is **MSVC
 - **Visual Studio 2022 or newer** with the C++ workload. `vcvars64.bat` provides
   `cl.exe`, and VS ships both `cmake` and `ninja` under
   `Common7\IDE\CommonExtensions\Microsoft\CMake\`. (A system CMake at
-  `C:\Program Files\CMake` also works once `cl`/`ninja` are on PATH.)
+  `C:\Program Files\CMake` also works for the **CLI** target once `cl`/`ninja`
+  are on PATH.)
+  *Reported, measured once on 2026-08-11 and not independently confirmed:*
+  building the **Flutter Windows runner** needs the **VS-bundled cmake called by
+  full path** — the system cmake first on PATH does not know the generator that
+  produced `build/windows/`'s cache and the configure fails. If a runner build
+  fails at configure with a generator/cache complaint, try that before assuming
+  the cache is corrupt (the other stale-cache remedy is `rm -rf build/windows`).
 - **OpenCV 4.13.0** prebuilt at `windows/opencv/build` (referenced absolutely by
   `CMakeLists.txt` via `OpenCV_DIR`).
 - **ONNX Runtime 1.27.0** at `windows/onnxruntime` (headers in `include/`,
@@ -73,7 +80,40 @@ then call `"<installationPath>\VC\Auxiliary\Build\vcvars64.bat"`.
 Because the Bash/PowerShell tools do not persist a sourced batch environment
 across calls, the reliable pattern is a **single `.cmd` script** that sources
 vcvars and then runs cmake in the same process. PowerShell cannot `call` a
-`.bat`, so drive it through `cmd /c`.
+`.bat`, so drive it through `cmd /c` — in the exact form the next section gives,
+because the obvious one silently does nothing.
+
+### Trap: launching `cmd` from Git Bash silently does nothing
+
+The Bash tool runs **Git Bash**, whose MSYS2 argument mangling rewrites a bare
+`/c` into a Windows path (`C:/`). `cmd` then never sees its switch, opens an
+interactive shell instead, reads EOF, and **returns 0 without running the
+script** — a failure that looks exactly like a successful build, so the next
+measurement runs a stale binary. Measured 2026-08-11 in this repo's shell:
+
+```
+cmd /c 'C:\path\to\build.cmd'                          # prints the cmd banner, rc=0, script NOT run
+MSYS2_ARG_CONV_EXCL='*' cmd /c 'C:\path\to\build.cmd'  # runs it
+cmd //c 'C:\path\to\build.cmd'                         # also runs it (`//c` survives the mangling)
+```
+
+Use the `MSYS2_ARG_CONV_EXCL='*'` form with an **absolute Windows path** to the
+script. After any `cmd`-driven build, confirm it actually built — look for
+compiler/link output, or check the exe's mtime — rather than trusting rc=0.
+
+### Trap: a bare exe name inside a `.cmd` is not resolved from the cwd
+
+This machine sets `NoDefaultCurrentDirectoryInExePath=1`, so cmd does **not**
+search the current directory for an executable. A script that `cd`s into the
+build dir and then writes `umacapture_cli.exe` bare gets **9009**
+("not recognized as an internal or external command") — and because a `.cmd`
+exits with the code of its *last* command, the wrapper can still return 0 while
+the run that was supposed to produce records never happened. Downstream that
+reads as "the clip produced 0 records".
+
+Write `.\umacapture_cli.exe` or an absolute path.
+`tool/live_capture_test/run_capture.cmd` already does the former; copy that shape.
+Measured 2026-08-11 (bare → 9009, `.\` → 0, same cwd).
 
 ## Build steps
 
@@ -94,10 +134,11 @@ The `...\18\Community\...` path is this machine's current VS install; on a VS 20
 box it would read `...\2022\Community\...`. Resolve it with `vswhere` (above)
 rather than copying the literal path.
 
-Run it:
+Run it (see the Git Bash trap above — the `MSYS2_ARG_CONV_EXCL` prefix and the
+absolute path are both load-bearing):
 
 ```
-cmd /c C:\Projects\umacapture\native\build.cmd
+MSYS2_ARG_CONV_EXCL='*' cmd /c 'C:\Projects\umacapture\native\build.cmd'
 ```
 
 Notes:
@@ -134,10 +175,10 @@ Subcommands (see `src/core/cli.cpp`):
 | Subcommand   | Purpose | Example args |
 |--------------|---------|--------------|
 | `build`      | Regenerate the scene-definition JSONs from the C++ builders, round-trip-verifying each. | `build --assets_dir C:\Projects\umacapture\assets\config` |
-| `capture`    | Live capture from the game window on screen (WinRT recorder). Optionally records every captured frame + timestamp to a lossless FFV1 `.mkv` for later `replay`. | `capture [--record out.mkv] [--duration 300] [--stop-file stop.flag]` |
+| `capture`    | Live capture from the game window on screen (WinRT recorder). `--record` stores every full client frame + timestamp as lossless FFV1 for later `replay`. | `capture [--record out.mkv] [--duration 300] [--stop-file stop.flag]` |
 | `screenshot` | Capture a single screenshot from the game window. | `screenshot --output shot.png` |
 | `video`      | Run capture against recorded video files. | `video --video_path_list "C:\Projects\umacapture\sandbox\inheritance_only_1.mp4"` |
-| `replay`     | Re-feed a recorded FFV1 `.mkv` (from `capture --record`) through the recognition pipeline, preserving the original frame timestamps. | `replay --record "C:\...\run.mkv"` |
+| `replay`     | Re-feed a recorded FFV1 `.mkv` through pane detection and the recognition pipeline, preserving the original frame timestamps. | `replay --record "C:\...\run.mkv" [--no-calibrate]` |
 | `stitch`     | Stitch previously scraped images for one record id. | `stitch --id <uuid>` |
 | `recognize`  | Run the recognizer over stitched images. | `recognize --id <uuid> [<uuid> ...]` |
 
@@ -163,23 +204,79 @@ umacapture_cli.exe build --assets_dir .\smoke_assets
 ### Self-termination: only `capture` runs until stopped; the rest exit on their own
 
 `build` and `screenshot` return as soon as they finish. `stitch` / `recognize` /
-`video` / `replay` start `NativeApi`'s event loop, submit their work, then wait
-until the pipeline goes quiet — no notification for ~10s, an idle-grace window in
-`runUntilIdleThenJoin` (`src/core/cli.cpp`) — and then join the event loop and
-**exit on their own with code 0**. No need to watch for an artifact and kill
-them; just wait (a one-shot `recognize` typically exits ~10–13s after the work
-completes). Only `capture` (live screen capture) runs indefinitely by default.
-Stop it with Ctrl-C, or — for scripted control — pass `--duration <seconds>`
-and/or `--stop-file <path>` (capture ends cleanly when the file appears). All
-three stop paths run full teardown, including finalizing an in-progress
-`--record` file; a hard `Stop-Process` kill instead leaves the `.mkv`
-un-finalized, so avoid it when recording.
+`video` / `replay` start `NativeApi`'s event loop, submit their work, then block
+on the **drain barrier** (`runUntilDrainedThenJoin` in `src/core/cli.cpp`, over
+`offlineDrainBarrier` in `src/core/pipeline_drain.h`): it polls each pipeline
+stage's own in-flight counter every 10 ms and returns as soon as they are all
+empty, with a 5-minute deadline as the failure path. A stage that never drains
+becomes a throw, not a quiet short run. (It replaced an older "no notification
+for ~10 s" quiet window, which cost every run ten seconds it did not need.)
+Then they join the event loop and exit on their own — no need to watch for an
+artifact and kill them.
 
-Because these now exit gracefully, they run full teardown — the event-loop join
-plus the `NativeApi` atexit destructor — a path that force-killing them never
+Only `capture` (live screen capture) runs indefinitely by default. Stop it with
+Ctrl-C, or — for scripted control — pass `--duration <seconds>` and/or
+`--stop-file <path>` (capture ends cleanly when the file appears). All three
+stop paths run full teardown, including finalizing an in-progress `--record`
+file; a hard `Stop-Process` kill instead leaves the `.mkv` un-finalized, so
+avoid it when recording.
+
+Because these exit gracefully, they run full teardown — the event-loop join plus
+the `NativeApi` atexit destructor — a path that force-killing them never
 exercised. If you change shutdown/teardown or logging, run one to completion and
-confirm exit code 0 (this path previously crashed at exit by logging through an
+read its exit code (this path previously crashed at exit by logging through an
 already-dropped spdlog logger; fixed in `NativeApi::joinEventLoop`).
+
+#### The exit code is classified, and there is a machine-readable summary line
+
+**"It exited 0" no longer means "it worked", and non-zero no longer means "the
+tool is broken."** Every subcommand that starts the pipeline (`capture`,
+`video`, `replay`, `stitch`, `recognize`) classifies its exit
+(`src/core/cli_run_report.h`):
+
+| code | meaning |
+|---|---|
+| **0** | ran to the end, and the pipeline reported no `onError` |
+| **1** | the subcommand **threw** — bad args, an unopenable clip, a drain that hit its deadline. Nothing about the run can be concluded |
+| **2** | ran to the end **and** reported at least one terminal error (e.g. `closed_before_completed`, `stitch_failed`) |
+
+77 is deliberately never returned: ctest reads it as *Skipped*, and
+`tool/live_capture_test/run_capture.cmd` passes this process's code through to
+its caller. `build` and `screenshot` touch no pipeline, so they have no verdict
+and return 0 or 1 only.
+
+The same runs print **one line on stderr** (key set as of
+`native/src/core/cli_run_report.h`; the values below are illustrative, not a
+recorded run):
+
+```
+UMACAPTURE_RUN_SUMMARY {"schema":1,"subcommand":"video","unit":"run","inputs":1,"records":2,"failed":0,"discarded":1,"discarded_incomplete":0,"errors":[],"error_total":0,"unparsed":0,"forwarded_frames":1284,"anchor_unit_min":720,"anchor_unit_max":720,"exit":0}
+```
+
+`RunReport::summaryLine` in `native/src/core/cli_run_report.h` is the definition
+of that key set — read it there rather than off this example.
+
+`records` is the core's own count read after the drain, `discarded` counts
+`onCharaDetailRestarted` (mid-run session resets), and `errors` is the deduped
+list of `onError` tags. The last three before `exit` are **the geometry that
+reached recognition**: `anchor_unit_min` / `anchor_unit_max` are the intersection
+width of the frames the scraper actually scraped (min and max, because the unit
+may legitimately move within a run), and `forwarded_frames` is what says whether
+those two bounds describe anything at all — a run in which no chara-detail scene
+ever committed reports `0` frames and `0..0`, which is an absence and not a
+measurement. `native-change-verification` §5 relies on these three keys; they
+were **added**, not a schema bump, so a consumer written against an older CLI
+finds them absent rather than misread.
+
+The counts are **per invocation, not per clip** — a
+`video --video_path_list a b c` run decodes the files as one continuous stream,
+so there is no instant at which a per-clip split would be a fact; `inputs` is
+reported beside them so a consumer can see that and split the invocation.
+
+**stderr vs stdout matters now.** spdlog writes the log to **stdout**; the
+summary line and `main`'s fatal message go to **stderr**. Capture both when
+scripting a run — redirecting only one of them loses either the diagnosis or the
+verdict.
 
 ### `build` subcommand — regenerating scene config
 
@@ -205,33 +302,62 @@ copied videoio plugin is the release-named one; a **Debug** build's
 `video` run stops decoding early (progress stalls near 0), duplicate the DLL as
 `opencv_videoio_ffmpeg4130_64d.dll` in the build dir.
 
-### `video` subcommand: automatic horizontal vs. vertical crop
+### `video` subcommand: the producer shapes nothing
 
-`captureFromVideo` (`src/core/cli.cpp`) selects the crop **automatically per clip**,
-the same way live `capture` does: it matches the clip's frame aspect ratio against
-the configured `crop_profiles` (`windows_config::matchCropProfile`,
-`windows/runner/window_capturer.h`). No manual edit or rebuild is needed to switch
-between recording orientations.
+`captureFromVideo` (`src/core/cli.cpp`) hands over each clip's **full decoded
+frame**, with the default anchor and **no pane snapshot**; `original_size` is
+that same decoded size. `VideoLoader` resolves no pane decision at all — the
+pane latch is applied on the consumer side by `DetailCropTracker::beginFrame`,
+which re-anchors any frame that carries no snapshot (see the class comment in
+`src/cv/video_loader.h` and `.claude/rules/platform-parity.md`). That is
+deliberate and shared by all three *offline* producers: an offline producer runs
+concurrently with the thread that owns the latch, so a producer-side crop would
+make the result depend on thread scheduling instead of on the clip. The two
+*live* producers (Windows, web worker) do crop, which saves them the copy
+bandwidth.
 
-- A **horizontal-screen** recording (16:9, aspect in the profile's
-  `window_aspect_ratio` range ≈1.66–1.88) matches `crop_profiles[0]` and is cropped
-  to the vertical content region.
-- A **vertical-screen** recording (a 9:16 phone capture, e.g. 736×1308 — already
-  the bare intersection with no horizontal padding) matches no profile and is used
-  **uncropped**.
-
-`VideoLoader::run` logs the decision as `crop_rect.has_value()=<bool>` on the first
-frame of each clip. This replaces the old hand-edited toggle; because the crop is
-chosen by aspect ratio, the old failure mode of applying a horizontal `crop_rect`
-to a vertical frame (an OpenCV ROI abort,
-`Mat::Mat ... 0 <= roi.x && ... roi.x + roi.width <= m.cols`) can no longer happen.
-A successful run
+Shared pane detection/calibration still decides whether the content is a
+one-pane frame or the left pane of a wider game surface — it just does so
+downstream. There is no aspect-ratio `crop_profiles` config and no manual
+orientation switch: the same shared detector used by live capture owns the
+decision. A successful run
 logs `{"type":"onCharaDetailFinished",...,"success":true}` and writes
 `record.json` + `prediction.json` + `skill/factor/campaign.png` + `trainee.jpg`
 under `<build-dir>/storage/chara_detail/active/<uuid>/`. The `onCharaDetailFinished`
 log line (or that artifact) marks a completed record. The `video` run then
 self-terminates once the pipeline drains (see the self-termination note above),
 whether or not the clip ends with the detail screen closing — no manual kill needed.
+
+A clip that **ends while a detail screen is still being captured** no longer ends
+silently: `captureFromVideo` / `replayFromRecording` send `NativeApi::endOfInput()`
+on the recorder runner once the producer has returned, which closes the open scene
+and reports `closed_before_completed` (exit 2, and the tag in the summary line's
+`errors`). That is the **same** tag a clip gets when the detail screen closes
+on-screen — the core does not distinguish the two endings, deliberately, so do not
+expect to tell them apart from the tag or from the summary line. Either way it is
+an ordinary outcome of a truncated clip: read it as "this clip does not contain a
+whole character", not as a build problem.
+
+**What that costs a diagnosis.** Because the tag is shared, a broken
+`NativeApi::endOfInput()` does *not* show up as a different tag; it shows up as
+the tag going **missing** on a clip that ends mid-capture, i.e. as exit 0 and an
+empty `errors` where exit 2 was expected. `player_standard_factor_only_1` is the
+one case in `native/test/integration/cases.json` whose tag can only come from the
+end-of-input path, so it is the only automated thing that catches this — see
+§4 of the `native-change-verification` skill.
+
+### `capture --record` / `replay`: full-frame FFV1 input
+
+New `capture --record` files contain the full, pre-shaping client pixels. `replay`
+therefore enables pane detection/calibration by default, keeps the decoded pixels
+full-size, and applies a latched pane as `Frame` anchor metadata only. This makes
+the capture-to-replay round trip exercise the same detector as live capture.
+
+FFV1 stores neither the `Frame` anchor nor a recording-format marker. Clips made
+before full-frame recording was introduced may already contain shaped pixels and
+are indistinguishable from new recordings at decode time. If recalibrating such a
+legacy clip is harmful, replay it with `--no-calibrate`; new `capture --record`
+files should normally use the default calibration-on behavior.
 
 ### Test inputs (from the old CLion run configurations)
 
@@ -267,7 +393,10 @@ what bites when you kill an event-loop subcommand. On Windows:
   i.e. `<level-char> HH:MM:SS.microseconds [thread-id] [function:line] message`.
   There is **no file sink** by default (the `basic_file_sink` line is commented
   out). To capture a run, redirect stdout: `umacapture_cli.exe recognize --id
-  <uuid> > run.log 2>&1` (ANSI color codes land in the file too).
+  <uuid> > run.log 2>&1` (ANSI color codes land in the file too). Keep the
+  `2>&1`: **stderr is not empty** — it carries the `UMACAPTURE_RUN_SUMMARY` line
+  and `main`'s fatal message (see the exit-code section above). Redirect the two
+  to separate files if you want to parse the summary without stripping log lines.
 - **Log macros:** `log_debug/info/warning/error/fatal(...)` and the `vlog_*`
   variants, which auto-print each argument as `name=value` (used in `main()` as a
   smoke test of all six levels at startup).
@@ -330,7 +459,7 @@ Two things to get right:
 Scripted example — set a breakpoint, run to it, dump a source-line stack, then
 quit. Targets the self-terminating `build` subcommand (`capture` never exits, so
 under cdb you just break, inspect, and `q` to stop; `stitch` / `recognize` /
-`video` now drain and exit on their own after their idle-grace window):
+`video` now drain and exit on their own at the drain barrier):
 
 ```bat
 cd /d C:\Projects\umacapture\native\cmake-build-debug

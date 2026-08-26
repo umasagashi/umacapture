@@ -303,6 +303,35 @@ extension StringExtension on String {
       return DateTime(1999, 12, 31);
     }
   }
+
+  /// Parses a date string, answering `null` when it is not one.
+  ///
+  /// The date counterpart of `toVersionOrNull` in `version_check.dart`, and for
+  /// the same reason: where the parsed value is a reference point something else
+  /// is compared against, "could not be read" has to stay distinguishable from
+  /// "read, and very old". [toDateTime]'s stand-in is smaller than every real
+  /// date, so a comparison against it answers as though the reference point were
+  /// met -- which is the opposite of what an unreadable one has shown.
+  ///
+  /// [toDateTime] is deliberately left as it is rather than routed through this:
+  /// its remaining callers display or sort the value, and a row that shows
+  /// `1999-12-31` and sinks to the bottom of the table is on screen, where the
+  /// user can act on it. Only the callers that *decide* something need the null.
+  ///
+  /// No `captureException` here either. The empty string is a routine input --
+  /// the recognizer leaves `trained_date` empty when it could not read the date
+  /// off the screen, measured at ~2% of captured records -- so reporting it as
+  /// an exception would fire once per such record every time a view is built.
+  /// The `logger.e` line is still a Sentry breadcrumb, so the failure is not
+  /// silent; it is just not an issue of its own.
+  DateTime? toDateTimeOrNull() {
+    try {
+      return DateTime.parse(this);
+    } catch (error, stackTrace) {
+      logger.e("Failed to parse DateTime: value=$this", error, stackTrace);
+      return null;
+    }
+  }
 }
 
 Iterable<(T1, T2)> zip2<T1, T2>(Iterable<T1> it1, Iterable<T2> it2) sync* {

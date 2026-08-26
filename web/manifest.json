@@ -1,6 +1,6 @@
 {
-    "name": "umasagashi_app",
-    "short_name": "umasagashi_app",
+    "name": "umacapture",
+    "short_name": "umacapture",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

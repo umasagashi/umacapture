@@ -15,6 +15,7 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -28,6 +29,15 @@ const int _bootstrapVersion = 1;
 /// Public so the settings UI can show its location, letting a user hand-edit the
 /// data root if the in-app change ever fails to write it.
 const String bootstrapFileName = "data_root.json";
+
+/// Environment variable that overrides the data root, taking precedence over
+/// [bootstrapFileName].
+///
+/// Unlike the file, this is process-scoped (set only in the launching
+/// process's environment) and leaves no state behind if the process is killed,
+/// which is what makes it safe for an automated test harness to use instead of
+/// the file — see the doc comment at the top of this library.
+const String dataRootOverrideEnvVar = "UMACAPTURE_DATA_ROOT";
 
 const String _versionKey = "version";
 
@@ -83,6 +93,25 @@ Future<File> _bootstrapFile() async {
 Future<String?> readDataRootOverride() async {
   dataRootDegraded = false;
   configuredDataRoot = null;
+  // Web has no relocatable data root: OPFS is the storage root, and there is no
+  // OS-managed support directory to hold the bootstrap file (design §3). Skip
+  // the whole override concept so the path_provider call never runs on web.
+  if (kIsWeb) {
+    resolvedDataRoot = null;
+    return null;
+  }
+  final envRoot = Platform.environment[dataRootOverrideEnvVar];
+  if (envRoot != null && envRoot.trim().isNotEmpty) {
+    configuredDataRoot = envRoot;
+    if (!_ensureUsable(envRoot)) {
+      logger.w("Env-configured data root is not usable; falling back to defaults: $envRoot");
+      dataRootDegraded = true;
+      resolvedDataRoot = null;
+      return null;
+    }
+    resolvedDataRoot = envRoot;
+    return envRoot;
+  }
   try {
     final file = await _bootstrapFile();
     if (!file.existsSync()) {
@@ -119,6 +148,10 @@ Future<String?> readDataRootOverride() async {
 /// defaults. Called by the migration flow after data has been copied to the new
 /// location; the change only takes effect on the next launch.
 Future<void> writeDataRootOverride(String? root) async {
+  // The data-root override does not exist on web (see [readDataRootOverride]).
+  if (kIsWeb) {
+    return;
+  }
   final file = await _bootstrapFile();
   if (root == null || root.trim().isEmpty) {
     if (file.existsSync()) {

@@ -18,12 +18,77 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_image.dart';
 import '/src/gui/theme_extensions.dart';
+import '/src/gui/toast.dart';
 
 part 'rating.mapper.dart';
 
 // ignore: constant_identifier_names
 const tr_rating = "pages.chara_detail.column_predicate.rating";
+
+/// What the user is told when a rating or a memo could not be saved because the
+/// storage file behind it did not load. One sentence for both, because it is one
+/// situation: [charaDetailRecordRatingProvider] and [charaDetailRecordMemoProvider]
+/// are the same machinery over two files.
+// ignore: constant_identifier_names
+const tr_storage_load_failure = "pages.chara_detail.storage_load_failure";
+
+/// Runs [change] and tells the user when it was refused because the storage it
+/// would change is stuck on a load failure. Answers whether [change] went through.
+///
+/// The mutators throw [StorageLoadFailure] instead of dropping the change quietly,
+/// but every one of them is called from a gesture — a drag on a cell, a dialog
+/// button, a listener on the column editor's "decided" notifier — and a throw out of
+/// one of those reaches nobody in a release build. The framework prints it to a
+/// console that is not open, the cell goes on looking editable, and the rating or
+/// memo the user just entered is gone with nothing said. That silence *is* the
+/// defect; refusing loudly one layer down only moved it.
+///
+/// Shaped after `TaskDefinitionsNotifier.build`, which answers the same class of
+/// problem — persisted state that would not decode — with a warning toast and
+/// nothing thrown away. Nothing here rewrites the unreadable file either: its
+/// contents are the user's only copy of those ratings and memos.
+///
+/// Only [StorageLoadFailure] is caught. Any other error is a defect of this app
+/// rather than of the file, and must keep reaching the error handling that reports
+/// it, so it is left to propagate.
+bool commitStorageChange(void Function() change) {
+  try {
+    change();
+    return true;
+  } on StorageLoadFailure catch (error) {
+    // No stack trace: the load error that caused this was already logged with one where it
+    // happened, and this line is here to say the user was told, once per refused gesture.
+    logger.w("Refused a rating/memo change and told the user.", error);
+    Toaster.show(ToastData.warning(description: tr_storage_load_failure.tr()));
+    return false;
+  }
+}
+
+/// Persists [rating] for [recordId], announcing a refusal. Answers whether it was saved.
+///
+/// [notify] is what separates the two ways a rating is entered: a drag on a cell
+/// edits the live map in place so the grid does not rebuild under the user's finger,
+/// while the dialog's OK replaces the state so the cell behind it repaints. Both go
+/// through here so neither can lose the announcement.
+bool saveRating(
+  RefBase ref, {
+  required String storageKey,
+  required String recordId,
+  required double rating,
+  required bool notify,
+}) {
+  final controller = ref.read(charaDetailRecordRatingProvider(storageKey).notifier);
+  return commitStorageChange(() {
+    if (notify) {
+      controller.updateRating(recordId, rating);
+    } else {
+      controller.updateWithoutNotify(recordId, rating);
+    }
+    controller.save();
+  });
+}
 
 final ratingFormatter = NumberFormat("0.0");
 
@@ -146,7 +211,10 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   List<double?> parse(RefBase ref, List<CharaDetailRecord> records) {
-    final ratings = ref.watch(charaDetailRecordRatingProvider(storageKey));
+    // The per-key controller is an AsyncNotifier (its build reads the ratings file
+    // async, so web can load it from OPFS). Until the first load lands, fall back
+    // to empty data; when it lands, the watch triggers a rebuild with real values.
+    final ratings = ref.watch(charaDetailRecordRatingProvider(storageKey)).value ?? RatingData.empty;
     return List<double?>.from(records.map((e) => ratings.data[parser.parse(e)]));
   }
 
@@ -162,7 +230,7 @@ class RatingColumnSpec extends ColumnSpec<double?> with RatingColumnSpecMappable
 
   @override
   TrinaColumn plutoColumn(RefBase ref) {
-    final ratings = ref.watch(charaDetailRecordRatingProvider(storageKey));
+    final ratings = ref.watch(charaDetailRecordRatingProvider(storageKey)).value ?? RatingData.empty;
     return TrinaColumn(
       title: title,
       field: id,
@@ -266,8 +334,8 @@ class _RecordRatingDialogState extends ConsumerState<_RecordRatingDialog> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.file(
-                iconPath.toFile(),
+              RecordImage(
+                iconPath,
                 // Archived records keep their trainee icon, but guard against a
                 // missing/corrupt file so the dialog shows a placeholder instead
                 // of a red error box.
@@ -359,9 +427,7 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
       initialRating: widget.rating!,
       ratingTitle: widget.ratingTitle,
       onRatingUpdate: (rating) {
-        final controller = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
-        controller.update(widget.recordId, rating);
-        controller.save();
+        saveRating(ref.base, storageKey: widget.storageKey, recordId: widget.recordId, rating: rating, notify: true);
       },
     );
   }
@@ -385,10 +451,17 @@ class _RecordRatingWidgetState extends ConsumerState<_RecordRatingWidget> {
             glow: false,
             itemPadding: EdgeInsets.zero,
             onRatingUpdate: (rating) {
-              final controller = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
-              controller.updateWithoutNotify(widget.recordId, rating);
-              controller.save();
-              if (!isRated) {
+              // The cell only stops showing the "not rated yet" hint when the rating
+              // actually reached storage: a refused drag must not leave the column
+              // claiming this record is rated.
+              final saved = saveRating(
+                ref.base,
+                storageKey: widget.storageKey,
+                recordId: widget.recordId,
+                rating: rating,
+                notify: false,
+              );
+              if (saved && !isRated) {
                 setState(() => isRated = true);
               }
             },
@@ -486,8 +559,10 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       });
 
       final ratingController = ref.read(charaDetailRecordRatingProvider(widget.storageKey).notifier);
-      ratingController.updateTitle(title);
-      ratingController.save();
+      commitStorageChange(() {
+        ratingController.updateTitle(title);
+        ratingController.save();
+      });
 
       final ratingStorageController = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
       ratingStorageController.update((state) {
@@ -543,16 +618,16 @@ class _StorageController extends ConsumerWidget {
       children: [
         TextButton(
           onPressed: () {},
-          onLongPress: () {
+          onLongPress: () async {
             final ratingStorageController = ref.read(charaDetailRecordRatingStorageDataProvider.notifier);
             ratingStorageController.update((state) {
               state.removeWhere((e) => e.key == storageKey);
               return [...state];
             });
 
-            final storageFile = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$storageKey.json");
-            if (storageFile.existsSync()) {
-              storageFile.deleteSyncWithCheck();
+            final storageFile = ref.read(pathInfoProvider).charaDetailRatingDir.filePath("$storageKey.json");
+            if (await storageFile.exists()) {
+              await storageFile.deleteWithCheck();
             }
 
             ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);

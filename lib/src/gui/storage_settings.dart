@@ -323,9 +323,12 @@ class _DataRootMigrationDialog extends ConsumerStatefulWidget {
   const _DataRootMigrationDialog();
 
   static void show(RefBase ref) {
-    // Non-dismissible: once migration starts it closes Hive, after which the
-    // only safe exit is a restart. Letting the user tap the scrim away (or hit
-    // the close button) would drop them back into an app with no open boxes.
+    // Non-dismissible: a migration that gets past its record-scope acquisition
+    // closes Hive, after which the only safe exit is a restart, and a stray tap
+    // on the scrim would drop the user back into an app with no open boxes. The
+    // close button is offered back by the steps that know the session survived
+    // (see [closeButtonTooltip] in `build`); the scrim cannot know, so it stays
+    // off throughout.
     CardDialog.show(ref, (_) => const _DataRootMigrationDialog(), barrierDismissible: false);
   }
 
@@ -336,8 +339,16 @@ class _DataRootMigrationDialog extends ConsumerStatefulWidget {
 class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDialog> {
   _Phase _phase = _Phase.overview;
 
-  /// Null until the migration finishes; then true on success, false on failure.
+  /// Null until the attempt finishes; then true on success, false on failure.
   bool? _succeeded;
+
+  /// Whether the finished attempt left this session usable.
+  ///
+  /// True for the clear-override path (it never closes Hive) and for a
+  /// migration refused before the close — the root record scope being held by a
+  /// startup scan, which moves nothing and is over as soon as the scan is. False
+  /// once Hive has been closed, where quit and restart are the only safe exits.
+  bool _sessionUsable = false;
 
   late final PathInfo _source = ref.read(pathInfoProvider);
   late final DataRootMigrationController _controller = DataRootMigrationController(source: _source);
@@ -383,19 +394,22 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
       _targetRoot = null;
       _kind = null;
       _clearedOverride = false;
+      _succeeded = null;
+      _sessionUsable = false;
     });
   }
 
   Future<void> _migrate() async {
     setState(() => _phase = _Phase.migrating);
-    final ok = await _controller.migrate(
+    final outcome = await _controller.migrate(
       _targetRoot,
       isCapturing: ref.read(capturingStateProvider),
       stopCapture: () async => ref.read(platformControllerProvider)?.stopCapture(),
     );
     if (!mounted) return;
     setState(() {
-      _succeeded = ok;
+      _succeeded = outcome.isSuccess;
+      _sessionUsable = outcome.sessionUsable;
       _phase = _Phase.result;
     });
   }
@@ -406,6 +420,9 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
     if (!mounted) return;
     setState(() {
       _succeeded = ok;
+      // No Hive.close() and no copy on this path either way, so the session is
+      // usable whichever way it went.
+      _sessionUsable = true;
       _clearedOverride = true;
       _phase = _Phase.result;
     });
@@ -415,10 +432,13 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   Widget build(BuildContext context) {
     return CardDialog(
       dialogTitle: "$tr_storage.dialog.title".tr(),
-      // No close button once Hive is closed (migrating/migration result): the
-      // result step offers an explicit quit/restart, which is the only safe way
-      // out. The clear-override result keeps Hive open, so a close button is fine.
-      closeButtonTooltip: (_phase == _Phase.migrating || (_phase == _Phase.result && !_clearedOverride))
+      // No close button once Hive is closed: the result step then offers an
+      // explicit quit/restart, which is the only safe way out. A result the
+      // session survived — the clear-override path, and a migration refused
+      // before the close — keeps its close button, because there is nothing to
+      // recover from. Asked of the outcome rather than of "did it succeed":
+      // a success closes Hive too.
+      closeButtonTooltip: (_phase == _Phase.migrating || (_phase == _Phase.result && !_sessionUsable))
           ? null
           : "$tr_storage.dialog.close_button".tr(),
       usePageView: false,
@@ -467,10 +487,16 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
             isError: !_succeeded!,
           );
         }
+        if (_succeeded!) {
+          return _MessageBlock(icon: Symbols.check_circle_rounded, message: "$tr_storage.dialog.success".tr());
+        }
+        // A refusal and a failure mid-copy leave the app in different states, so
+        // they cannot share a sentence: "restart to get back" is the remedy for
+        // one and a pointless demand for the other, which changed nothing.
         return _MessageBlock(
-          icon: _succeeded! ? Symbols.check_circle_rounded : Symbols.error_rounded,
-          message: "$tr_storage.dialog.${_succeeded! ? "success" : "failure"}".tr(),
-          isError: !_succeeded!,
+          icon: Symbols.error_rounded,
+          message: "$tr_storage.dialog.${_sessionUsable ? "refused" : "failure"}".tr(),
+          isError: true,
         );
       case _Phase.confirm:
         switch (_kind!) {
@@ -525,6 +551,23 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
                   onPressed: () => CardDialog.dismiss(ref.base),
                   child: Text("$tr_storage.dialog.close_button".tr()),
                 ),
+            ],
+          );
+        }
+        // Refused before anything was closed: nothing to quit or relaunch for,
+        // and the remedy is to wait a moment and try again — so this offers the
+        // way back to the overview and the way out of the dialog, not the exits
+        // a closed-Hive session is limited to.
+        if (_sessionUsable) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(onPressed: _backToOverview, child: Text("$tr_storage.dialog.back_button".tr())),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () => CardDialog.dismiss(ref.base),
+                child: Text("$tr_storage.dialog.close_button".tr()),
+              ),
             ],
           );
         }

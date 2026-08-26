@@ -34,6 +34,12 @@ CharaDetailRecord makeRecord({
   String? parent2Id,
   int? relationBonus,
   List<Race> races = const [],
+  RecordType recordType = RecordType.standard,
+  // The recognizer leaves this empty when it could not read the date off the
+  // game screen, so '' is a real input shape and not a malformed fixture.
+  String trainedDate = '2026/01/01',
+  int fans = 0,
+  int evaluationValue = 0,
 }) {
   final metadata = Metadata(
     '1.0.0',
@@ -45,21 +51,21 @@ CharaDetailRecord makeRecord({
     RecordStage.active,
     0,
     relationBonus,
-    RecordType.standard,
+    recordType,
   );
   return CharaDetailRecord(
     metadata,
     chara(card),
-    0,
+    evaluationValue,
     const CharacterStatus(0, 0, 0, 0, 0),
     const AptitudeSet(GroundAptitude(0, 0), DistanceAptitude(0, 0, 0, 0), StyleAptitude(0, 0, 0, 0)),
     const <Skill>[],
     FactorSet(self, parent1, parent2),
     const <SupportCard>[],
     Family(parentOf(parent1Card), parentOf(parent2Card)),
-    0,
+    fans,
     const Scenario(0),
-    '2026/01/01',
+    trainedDate,
     races,
   );
 }

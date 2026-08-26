@@ -1,17 +1,18 @@
 #pragma once
 
 #include <array>
+#include <optional>
 
 #include "chara_detail/chara_detail_record.h"
 #include "condition/basic_condition.h"
 #include "condition/condition.h"
 #include "condition/rule.h"
+#include "cv/detail_crop_tracker.h"
 #include "cv/frame.h"
 #include "cv/scene_context.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
 #include "util/misc.h"
-#include "util/stds.h"
 
 namespace uma::chara_detail {
 
@@ -59,15 +60,18 @@ public:
         const event_util::Sender<Frame, SceneState> &on_scene_updated,
         const event_util::Sender<> &on_scene_end,
         const chrono_util::time_unit &scene_begin_timeout,
-        const chrono_util::time_unit &scene_end_timeout);
+        const chrono_util::time_unit &scene_end_timeout,
+        const std::shared_ptr<DetailCropTracker> &detail_crop = nullptr,
+        const std::optional<Range<int>> &forwarded_frame_band = std::nullopt);
 
-    void update(const Frame &input) override;
+    void update(const Frame &raw_input) override;
 
     [[nodiscard]] bool met() const override;
 
-    // The live frame stream stalled. The frame-timestamp scene-end debounce cannot advance without frames, so
-    // close an already-committed scene here; a scene still in the begin debounce never committed, so just drop
-    // its pending window. Invoked on the distributor runner thread, the same thread as update().
+    // The frame stream ended -- an offline producer's input ran out, or a live stream stalled. The
+    // frame-timestamp scene-end debounce cannot advance without frames, so close an already-committed scene
+    // here; a scene still in the begin debounce never committed, so just drop its pending window. Invoked on
+    // the distributor runner thread, the same thread as update().
     void onIdle() override;
 
 private:
@@ -151,6 +155,17 @@ private:
 
     const chrono_util::time_unit scene_begin_timeout;
     const chrono_util::time_unit scene_end_timeout;
+
+    // Null when calibration is switched off in the config. Owned by NativeApi so it outlives this pipeline.
+    std::shared_ptr<DetailCropTracker> detail_crop;
+
+    // Band (in pixels) the anchor unit -- the intersection width -- of the frames forwarded downstream is
+    // held inside, or nullopt to forward them untouched. A BAND and not a resolved unit because which bound
+    // applies, and whether either does, depends on each frame's own intersection width: the crop calibration
+    // can change that mid-session, so resolving it once here would resolve it against a frame that has not
+    // arrived yet. Applied at the forward site only -- AFTER the condition tree and the crop calibration have
+    // run on the full-resolution image -- so the calibration never scans a rescaled frame.
+    const std::optional<Range<int>> forwarded_frame_band;
 
     std::optional<uint64> scene_begin_pending_since;
     std::optional<record::RecordType> scene_begin_pending_type;

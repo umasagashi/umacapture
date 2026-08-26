@@ -13,29 +13,12 @@ class WindowTarget with WindowTargetMappable {
 }
 
 @MappableClass()
-class AspectRatioRange with AspectRatioRangeMappable {
-  final double? min;
-  final double? max;
-
-  const AspectRatioRange({this.min, this.max});
-}
-
-@MappableClass()
-class CropProfile with CropProfileMappable {
-  final AspectRatioRange? windowAspectRatio;
-  final Size? clientAspectRatio;
-
-  const CropProfile({this.windowAspectRatio, this.clientAspectRatio});
-}
-
-@MappableClass()
 class RecorderConfig with RecorderConfigMappable {
   final List<WindowTarget>? windowTargets;
-  final List<CropProfile>? cropProfiles;
   final int? recordingFps;
   final Size? minimumSize;
 
-  const RecorderConfig({this.windowTargets, this.cropProfiles, this.recordingFps, this.minimumSize});
+  const RecorderConfig({this.windowTargets, this.recordingFps, this.minimumSize});
 }
 
 @MappableClass()

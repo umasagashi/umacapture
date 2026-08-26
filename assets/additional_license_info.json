@@ -1,14 +1,243 @@
 {
-    "google_fonts": "assets/license/google_fonts.txt",
-    "ZapSplat": "assets/license/ZapSplat.txt",
-    "opencv": "assets/license/opencv.txt",
-    "onnxruntime": "assets/license/onnxruntime.txt",
-    "clip": "assets/license/clip.txt",
-    "CLI11": "assets/license/CLI11.txt",
-    "doctest": "assets/license/doctest.txt",
-    "eventpp": "assets/license/eventpp.txt",
-    "minimal_uuid4": "assets/license/minimal_uuid4.txt",
-    "nameof": "assets/license/nameof.txt",
-    "nlohmann": "assets/license/nlohmann.txt",
-    "spdlog": "assets/license/spdlog.txt"
+    "disclosure_scope": "Every file the Windows build redistributes (parsed from windows/runner/CMakeLists.txt) is claimed by an entry below. The components listed as 'statically linked into' a file are read from that file's own recorded build information; they are not derived from its code. Operating-system redistributables copied out of C:/Windows/System32 are covered by their own redistribution terms and are not listed.",
+    "entries": [
+        {
+            "package": "google_fonts",
+            "asset": "assets/license/google_fonts.txt",
+            "platforms": [
+                "windows",
+                "web"
+            ],
+            "sub_notice_of": null,
+            "components": [],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows and web builds."
+        },
+        {
+            "package": "ZapSplat",
+            "asset": "assets/license/ZapSplat.txt",
+            "platforms": [
+                "windows",
+                "web"
+            ],
+            "sub_notice_of": null,
+            "components": [],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows and web builds."
+        },
+        {
+            "package": "opencv",
+            "asset": "assets/license/opencv.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "OpenCV 4.13.0 -- shipped as opencv_world4130.dll next to umacapture.exe"
+            ],
+            "shipped_files": [
+                "opencv_world4130.dll"
+            ],
+            "notice": "Included in the umacapture Windows build.\n\nOpenCV 4.13.0 -- shipped as opencv_world4130.dll next to umacapture.exe"
+        },
+        {
+            "package": "onnxruntime",
+            "asset": "assets/license/onnxruntime.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "ONNX Runtime -- shipped as onnxruntime.dll next to umacapture.exe"
+            ],
+            "shipped_files": [
+                "onnxruntime.dll"
+            ],
+            "notice": "Included in the umacapture Windows build.\n\nONNX Runtime -- shipped as onnxruntime.dll next to umacapture.exe"
+        },
+        {
+            "package": "clip",
+            "asset": "assets/license/clip.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "clip -- source form under windows/clip, compiled into umacapture.exe"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nclip -- source form under windows/clip, compiled into umacapture.exe"
+        },
+        {
+            "package": "CLI11",
+            "asset": "assets/license/CLI11.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "CLI11 -- vendored source under native/vendor/CLI11"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nCLI11 -- vendored source under native/vendor/CLI11"
+        },
+        {
+            "package": "doctest",
+            "asset": "assets/license/doctest.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "doctest -- vendored source under native/vendor/doctest"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\ndoctest -- vendored source under native/vendor/doctest"
+        },
+        {
+            "package": "eventpp",
+            "asset": "assets/license/eventpp.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "eventpp -- vendored source under native/vendor/eventpp"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\neventpp -- vendored source under native/vendor/eventpp"
+        },
+        {
+            "package": "minimal_uuid4",
+            "asset": "assets/license/minimal_uuid4.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "minimal_uuid4 -- vendored source under native/vendor/minimal_uuid4"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nminimal_uuid4 -- vendored source under native/vendor/minimal_uuid4"
+        },
+        {
+            "package": "nameof",
+            "asset": "assets/license/nameof.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "nameof -- vendored source under native/vendor/nameof"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nnameof -- vendored source under native/vendor/nameof"
+        },
+        {
+            "package": "nlohmann",
+            "asset": "assets/license/nlohmann.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "nlohmann -- vendored source under native/vendor/nlohmann"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nnlohmann -- vendored source under native/vendor/nlohmann"
+        },
+        {
+            "package": "spdlog",
+            "asset": "assets/license/spdlog.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "spdlog -- vendored source under native/vendor/spdlog"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nspdlog -- vendored source under native/vendor/spdlog"
+        },
+        {
+            "package": "ffmpeg",
+            "asset": "assets/license/ffmpeg.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "FFmpeg (OpenCV's prebuilt videoio plugin, built without GPL components) -- shipped as opencv_videoio_ffmpeg4130_64.dll next to umacapture.exe and loaded at run time by opencv_world4130.dll"
+            ],
+            "shipped_files": [
+                "opencv_videoio_ffmpeg4130_64.dll"
+            ],
+            "notice": "Included in the umacapture Windows build.\n\nFFmpeg (OpenCV's prebuilt videoio plugin, built without GPL components) -- shipped as opencv_videoio_ffmpeg4130_64.dll next to umacapture.exe and loaded at run time by opencv_world4130.dll\n\nThis component is licensed under the GNU Lesser General Public License, version 2.1 or later. It is shipped unmodified, as a separate dynamically loaded library that umacapture does not link against, so it can be replaced with a modified version by substituting the file. It is FFmpeg 4.4.6, prebuilt by the OpenCV project and taken unchanged from the OpenCV 4.13.0 Windows distribution (https://github.com/opencv/opencv/releases/tag/4.13.0). The FFmpeg 4.4.6 sources are published at https://github.com/FFmpeg/FFmpeg/releases/tag/n4.4.6, and this exact binary together with the scripts that produced it at https://github.com/opencv/opencv_3rdparty/tree/d82ad9a54a7b42a1648a9cae8fed5c2f20ea396c/ffmpeg -- the commit that OpenCV 4.13.0's own 3rdparty/ffmpeg/ffmpeg.cmake pins (branch ffmpeg/4.x_20251226)."
+        },
+        {
+            "package": "zlib",
+            "asset": "assets/license/zlib.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "zlib 1.3.1 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nzlib 1.3.1 -- statically linked into opencv_world4130.dll"
+        },
+        {
+            "package": "libpng",
+            "asset": "assets/license/libpng.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "libpng 1.6.53 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nlibpng 1.6.53 -- statically linked into opencv_world4130.dll"
+        },
+        {
+            "package": "libjpeg_turbo",
+            "asset": "assets/license/libjpeg_turbo.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "libjpeg-turbo 3.1.2-70 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nlibjpeg-turbo 3.1.2-70 -- statically linked into opencv_world4130.dll"
+        },
+        {
+            "package": "opencv",
+            "asset": "assets/license/opencv_softfloat.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "OpenCV core: softfloat (Berkeley SoftFloat 3c and FDLIBM derived) as shipped in OpenCV 4.13.0 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nOpenCV core: softfloat (Berkeley SoftFloat 3c and FDLIBM derived) as shipped in OpenCV 4.13.0 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "spdlog",
+            "asset": "assets/license/fmt.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "spdlog",
+            "components": [
+                "{fmt} (bundled inside the vendored spdlog snapshot) -- compiled into umacapture.exe together with spdlog"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\n{fmt} (bundled inside the vendored spdlog snapshot) -- compiled into umacapture.exe together with spdlog\n\nDisclosed under spdlog because it is bundled inside it, and spdlog's own license text does not reproduce this notice."
+        }
+    ]
 }

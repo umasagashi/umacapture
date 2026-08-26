@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Reject commits that (a) leave staged Dart files unformatted, or (b) introduce
-# new raw color literals outside the theme.
+# Reject commits that (a) ship web assets whose bytes no longer match their pins,
+# (b) leave staged Dart files unformatted, or (c) introduce new raw color literals
+# outside the theme.
 #
 # The page width is read from analysis_options.yaml (`formatter.page_width`), so
 # this stays in sync with the project setting. Enable it once per clone with:
@@ -12,7 +13,88 @@ set -euo pipefail
 
 DART="${DART:-.fvm/flutter_sdk/bin/dart}"
 
-mapfile -t files < <(git diff --cached --name-only --diff-filter=ACM -- '*.dart')
+# Every gate below shells out to $DART, so a missing/unrunnable SDK would surface
+# as exit 127/126 inside an `if !` and be reported as the gate's own failure
+# ("web/ does not match ...") with nothing above it to explain. Say what is
+# actually wrong, once, before any gate runs.
+if ! command -v "$DART" > /dev/null 2>&1; then
+  echo "✖ Dart SDK not found at: $DART" >&2
+  echo "  Install the pinned SDK (see .fvmrc / .claude/CLAUDE.md), or point the hook" >&2
+  echo "  at another one:  DART=/path/to/dart git commit ..." >&2
+  exit 1
+fi
+
+# Block a commit whose web/ tree contradicts tool/web_deps.json. The committed
+# assets/web_license_info.json claims those exact bytes are unmodified upstream;
+# codegen is what enforces the claim, but a commit that skips codegen would carry
+# the stale claim over the new bytes. Hashing the pinned files directly costs a
+# couple of seconds, so the check runs on every commit rather than only when a
+# web/ path is staged -- the artifact is committed, and it speaks for the whole
+# tree, not just the staged part.
+#
+# SCOPE, DELIBERATELY: this verifies the WORKING TREE, not the staged content.
+# `git add -p` / `git commit --only` can therefore commit bytes for a *tracked*
+# pinned file (web/coi-serviceworker.js) that this check never saw. That residue
+# is covered -- CI re-verifies the committed tree. What CI can never see is
+# web/wasm/*, which is gitignored and exists only in the working tree, and that
+# is precisely the tree this hook exists to speak for (see tool/build_web.sh's
+# header for the same argument on the build path).
+#
+# --licenses keeps the hook exactly as strong as the artifact it defends: without
+# it a commit that nulls a license.asset, adds a relocation_required block or
+# points at a text that was never committed would pass here and only fail in CI.
+#
+# --warn-stale-source-digest IS A DELIBERATE HOLE, and the only one. The manifest
+# pins the locally built web recognition core against a digest of the native/
+# sources it was compiled from; every other consumer treats a mismatch as fatal.
+# Here it only prints. Rebuilding that module needs an emsdk toolchain, so a
+# fatal check would mean nobody without emsdk can commit a native/ change at all
+# -- including native/ work that has nothing to do with the web build. The check
+# still RUNS: when the pin is stale the check_web_pins run above prints what
+# drifted and says CI will reject it, so the developer hears it here rather than
+# only from a red CI run. Do not add this flag to tool/build_web.sh or to CI:
+# those decide what ships, and there the stale pin must stay fatal.
+#
+# `status=$?` inside `if ! cmd` would read the *negated* status (always 0), so
+# capture it on the command itself; `|| status=$?` also keeps `set -e` happy.
+status=0
+"$DART" run tool/check_web_pins.dart --licenses --warn-stale-source-digest || status=$?
+if [ "$status" -ne 0 ]; then
+  if [ "$status" -eq 127 ] || [ "$status" -eq 126 ]; then
+    echo "" >&2
+    echo "✖ Could not run '$DART run tool/check_web_pins.dart' (exit $status)." >&2
+    echo "  This is a toolchain problem, not a pin mismatch. Resolve dependencies with:" >&2
+    echo "    $DART pub get" >&2
+    exit 1
+  fi
+  echo "" >&2
+  echo "✖ web/ does not match tool/web_deps.json (see above)." >&2
+  echo "  Restore the pinned bytes with:" >&2
+  echo "    uv run tool/fetch_web_deps.py" >&2
+  echo "  or, if the change is deliberate, update the pins in tool/web_deps.json" >&2
+  echo "  and re-run: $DART run build_runner build --force-jit" >&2
+  exit 1
+fi
+
+# `mapfile -t files < <(git ...)` would have discarded git's exit status: process
+# substitution reports only what the *reader* did, so a git that failed (a broken
+# index, a pathspec it rejected) produced an empty list, which reads exactly like
+# "no Dart is staged" and skipped BOTH gates below with an exit 0. Take the list
+# through a checked command substitution instead, so "git could not answer" and
+# "the answer is nothing" stay distinguishable.
+staged_status=0
+staged="$(git diff --cached --name-only --diff-filter=ACM -- '*.dart')" || staged_status=$?
+if [ "$staged_status" -ne 0 ]; then
+  echo "" >&2
+  echo "✖ Could not list the staged Dart files (git exit $staged_status)." >&2
+  echo "  The format and color-literal gates below cannot run, so this commit is" >&2
+  echo "  refused rather than passed unchecked." >&2
+  exit 1
+fi
+files=()
+while IFS= read -r staged_file; do
+  [ -n "$staged_file" ] && files+=("$staged_file")
+done <<< "$staged"
 if [ "${#files[@]}" -eq 0 ]; then
   exit 0
 fi
@@ -42,16 +124,63 @@ color_allowlist=(
 # alpha (`Colors.black.withValues(...)`) is still caught by the `Colors.` rule.
 # `Colors.transparent` is structural ("no color", no theme role exists) and is
 # stripped before matching so it is not flagged.
-color_pattern='\bColors\.|\bColor\(0x'
+#
+# THE THREE ALTERNATIVES ARE SHAPES, NOT A LIST OF SPELLINGS, because a list of
+# spellings is what let `Color.fromARGB` -- the form Flutter's own docs reach for
+# first -- through a hook written to stop exactly that:
+#   1. `Colors.<anything>`: the Material palette, whatever the swatch is called.
+#   2. `Color(0…`: the default constructor over a numeric literal. `0` rather than
+#      `0x`, so the uppercase `0X` prefix Dart also accepts, and a plain decimal
+#      ARGB, are covered too; no identifier can begin with a digit, so nothing
+#      that is not a literal matches.
+#   3. `Color.from…` (and the HSL/HSV builders): every named constructor that
+#      builds a colour out of component numbers is spelled `from<something>`.
+#      `Color.lerp` and the rest are deliberately NOT matched -- they take colours
+#      rather than digits, so their inputs are caught wherever those came from.
+color_pattern='\bColors\.|\bColor\(0|\b(Color|HSLColor|HSVColor)\.from'
 
 violations=""
 for f in "${files[@]}"; do
   for allowed in "${color_allowlist[@]}"; do
     [ "$f" = "$allowed" ] && continue 2
   done
-  # Added lines only: keep '+' lines, drop the '+++' header, strip the leading '+'.
-  added="$(git diff --cached -U0 -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+' | sed -E 's/^\+//' || true)"
-  hits="$(printf '%s\n' "$added" | sed -E 's/Colors\.transparent//g' | grep -E "$color_pattern" || true)"
+  # Added lines only: drop the '+++' header, keep '+' lines, strip the leading '+'.
+  #
+  # One `sed -n` rather than the `grep -E '^\+' | grep -vE '^\+\+\+' | sed` pipeline
+  # this replaces. Every `grep` stage answered 1 for "no added lines" and 2 for "I
+  # could not run", and under `pipefail` a leading stage's 2 is masked by the
+  # trailing stage's 1 -- so the pipeline had no honest status left to test, and the
+  # `|| true` on the end made that moot anyway. `sed -n` has no such overload:
+  # printing nothing is not an error. That leaves `git diff` as the only step here
+  # that can fail, and it is now checked on a line of its own.
+  diff_status=0
+  diff_out="$(git diff --cached -U0 -- "$f")" || diff_status=$?
+  if [ "$diff_status" -ne 0 ]; then
+    echo "" >&2
+    echo "✖ Could not read the staged diff for $f (git exit $diff_status)." >&2
+    echo "  The color-literal check cannot run, so this commit is refused rather" >&2
+    echo "  than passed unchecked." >&2
+    exit 1
+  fi
+  added="$(printf '%s\n' "$diff_out" | sed -nE '/^[+][+][+]/d; s/^[+]//p')"
+  scrubbed="$(printf '%s\n' "$added" | sed -E 's/Colors\.transparent//g')"
+
+  # `grep` answers 0 = matched, 1 = matched nothing, 2 = the run itself failed --
+  # most plausibly because `color_pattern` above stopped being a valid POSIX ERE.
+  # `|| true` collapsed all three into "matched nothing": with a broken pattern grep
+  # printed `grep: Unmatched ( or \(` and the hook still exited 0, so the gate was
+  # off while every commit still looked clean. A check that cannot run must not be
+  # allowed to answer "nothing found" -- keep the three outcomes apart and stop on
+  # the third.
+  grep_status=0
+  hits="$(grep -E "$color_pattern" <<< "$scrubbed")" || grep_status=$?
+  if [ "$grep_status" -gt 1 ]; then
+    echo "" >&2
+    echo "✖ The color-literal check could not run (grep exit $grep_status; see above)." >&2
+    echo "  color_pattern in tool/hooks/pre-commit is not a valid POSIX ERE, so the" >&2
+    echo "  gate is off. Fix the pattern; do not commit around it." >&2
+    exit 1
+  fi
   if [ -n "$hits" ]; then
     violations+="  $f:"$'\n'
     while IFS= read -r line; do

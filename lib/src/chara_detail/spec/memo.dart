@@ -11,6 +11,9 @@ import '/src/chara_detail/chara_detail_record.dart';
 import '/src/chara_detail/spec/base.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/spec/parser.dart';
+// For [commitStorageChange]: the rating and memo columns are one storage mechanism over
+// two files, and a refusal has to reach the user in one voice from both.
+import '/src/chara_detail/spec/rating.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
@@ -18,6 +21,7 @@ import '/src/core/utils.dart';
 import '/src/gui/chara_detail/column_spec_dialog.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/record_image.dart';
 
 part 'memo.mapper.dart';
 
@@ -27,6 +31,27 @@ const tr_memo = "pages.chara_detail.column_predicate.memo";
 // Sentinel marking "argument not provided" in copyWith, so a description can be
 // explicitly cleared back to null (which `?? this` would never allow).
 const _unset = Object();
+
+/// Persists [memo] for [recordId], announcing a refusal. Answers whether it was saved.
+bool saveMemo(RefBase ref, {required String storageKey, required String recordId, required String? memo}) {
+  final controller = ref.read(charaDetailRecordMemoProvider(storageKey).notifier);
+  return commitStorageChange(() => controller.updateMemo(recordId: recordId, memo: memo));
+}
+
+/// The title the memo dialog is headed with, or null when the storage failed to load.
+///
+/// Asked here, at the tap, rather than inside the dialog: the title is the one read
+/// that refuses a storage which did not load ([CharaDetailRecordMemoController.title]
+/// throws rather than answer with the default title), and a throw from inside the
+/// dialog's `build` would replace the dialog with a grey error box that explains
+/// nothing. Null means the user has already been told, and the dialog must not open —
+/// every memo typed into it would be refused.
+String? memoDialogTitle(RefBase ref, String storageKey) {
+  final controller = ref.read(charaDetailRecordMemoProvider(storageKey).notifier);
+  String? title;
+  commitStorageChange(() => title = controller.title);
+  return title;
+}
 
 @MappableClass()
 class RegExpPredicate with RegExpPredicateMappable {
@@ -137,7 +162,10 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 
   @override
   List<String?> parse(RefBase ref, List<CharaDetailRecord> records) {
-    final memos = ref.watch(charaDetailRecordMemoProvider(storageKey));
+    // The per-key controller is an AsyncNotifier (its build reads the memo file
+    // async, so web can load it from OPFS). Until the first load lands, fall back
+    // to empty data; when it lands, the watch triggers a rebuild with real values.
+    final memos = ref.watch(charaDetailRecordMemoProvider(storageKey)).value ?? MemoData.empty;
     return List<String?>.from(records.map((e) => memos.data[parser.parse(e)]));
   }
 
@@ -154,12 +182,21 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
     // ref in at tap time instead (see [CellSelectedCallback]).
     return TrinaCell(value: value ?? "_" * 20)..setUserData(
       MemoCellData(value, (RefBase ref, TrinaGridOnSelectedEvent event) {
+        // Asked before anything else is looked up: a dialog whose memos would all be
+        // refused must not open at all, and the refusal belongs on the tap that asked
+        // for it. Answering `true` still counts the tap as handled, so the grid does
+        // not fall through to its default cell action on top of the warning.
+        final dialogTitle = memoDialogTitle(ref, storageKey);
+        if (dialogTitle == null) {
+          return true;
+        }
         final record = event.row!.getUserData<CharaDetailRecord>()!;
-        final memos = ref.read(charaDetailRecordMemoProvider(storageKey));
+        final memos = ref.read(charaDetailRecordMemoProvider(storageKey)).value ?? MemoData.empty;
         _RecordMemoDialog.show(
           ref,
           recordId: record.id,
           storageKey: storageKey,
+          dialogTitle: dialogTitle,
           initialMemo: memos.data[record.id] ?? "",
         );
         return true;
@@ -207,13 +244,33 @@ class MemoColumnSpec extends ColumnSpec<String?> with MemoColumnSpecMappable {
 class _RecordMemoDialog extends ConsumerStatefulWidget {
   final String recordId;
   final String storageKey;
+
+  /// Resolved by [memoDialogTitle] before this dialog was opened, so the read that
+  /// can refuse an unreadable storage happens on the tap rather than in `build`.
+  final String dialogTitle;
   final String initialMemo;
 
-  const _RecordMemoDialog({required this.recordId, required this.storageKey, required this.initialMemo});
+  const _RecordMemoDialog({
+    required this.recordId,
+    required this.storageKey,
+    required this.dialogTitle,
+    required this.initialMemo,
+  });
 
-  static void show(RefBase ref, {required String recordId, required String storageKey, required String initialMemo}) {
+  static void show(
+    RefBase ref, {
+    required String recordId,
+    required String storageKey,
+    required String dialogTitle,
+    required String initialMemo,
+  }) {
     CardDialog.show(ref, (_) {
-      return _RecordMemoDialog(recordId: recordId, storageKey: storageKey, initialMemo: initialMemo);
+      return _RecordMemoDialog(
+        recordId: recordId,
+        storageKey: storageKey,
+        dialogTitle: dialogTitle,
+        initialMemo: initialMemo,
+      );
     });
   }
 
@@ -243,19 +300,18 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
       return dismissForMissingRecord(ref.base);
     }
     final iconPath = traineeIconPathIn(recordDirOf(ref.read(pathInfoProvider), source, record));
-    final memoStorage = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
     return ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 800, maxHeight: 400),
       child: CardDialog(
-        dialogTitle: memoStorage.title,
+        dialogTitle: widget.dialogTitle,
         closeButtonTooltip: "$tr_memo.dialog.close_button.tooltip".tr(),
         usePageView: false,
         content: Expanded(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.file(
-                iconPath.toFile(),
+              RecordImage(
+                iconPath,
                 // Archived records keep their trainee icon, but guard against a
                 // missing/corrupt file so the dialog shows a placeholder instead
                 // of a red error box.
@@ -270,7 +326,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
                   focusNode: focusNode,
                   controller: controller,
                   onSubmitted: (value) {
-                    memoStorage.update(recordId: record.id, memo: controller.text);
+                    saveMemo(ref.base, storageKey: widget.storageKey, recordId: record.id, memo: controller.text);
                     CardDialog.dismiss(ref.base);
                   },
                 ),
@@ -287,7 +343,7 @@ class _RecordMemoDialogState extends ConsumerState<_RecordMemoDialog> {
                 icon: const Icon(Symbols.check_circle_rounded),
                 label: Text("$tr_memo.dialog.ok_button.label".tr()),
                 onPressed: () {
-                  memoStorage.update(recordId: record.id, memo: controller.text);
+                  saveMemo(ref.base, storageKey: widget.storageKey, recordId: record.id, memo: controller.text);
                   CardDialog.dismiss(ref.base);
                 },
               ),
@@ -412,7 +468,7 @@ class _NotationSelectorState extends ConsumerState<_NotationSelector> {
       });
 
       final memoController = ref.read(charaDetailRecordMemoProvider(widget.storageKey).notifier);
-      memoController.updateTitle(title: title);
+      commitStorageChange(() => memoController.updateTitle(title: title));
 
       final memoStorageController = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
       memoStorageController.update((state) {
@@ -478,16 +534,16 @@ class _StorageController extends ConsumerWidget {
       children: [
         TextButton(
           onPressed: () {},
-          onLongPress: () {
+          onLongPress: () async {
             final memoStorageController = ref.read(charaDetailRecordMemoStorageDataProvider.notifier);
             memoStorageController.update((state) {
               state.removeWhere((e) => e.key == storageKey);
               return [...state];
             });
 
-            final storageFile = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$storageKey.json");
-            if (storageFile.existsSync()) {
-              storageFile.deleteSyncWithCheck();
+            final storageFile = ref.read(pathInfoProvider).charaDetailMemoDir.filePath("$storageKey.json");
+            if (await storageFile.exists()) {
+              await storageFile.deleteWithCheck();
             }
 
             ref.read(currentColumnSpecsLoaderProvider.notifier).removeIfExists(specId);

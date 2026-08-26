@@ -8,7 +8,7 @@ import 'package:version/version.dart';
 const String settingsBoxDirName = "settings";
 
 class Const {
-  static String get moduleUrlRoot => "https://umasagashi.com/data/umacapture";
+  static String get moduleUrlRoot => "https://data.umacapture.com/umacapture";
 
   static String get appUrlRoot => "https://github.com/umasagashi/umacapture/releases/latest/download";
 
@@ -27,6 +27,17 @@ class Const {
   static String appExeUrl({required Version version}) => "$appUrlRoot/umacapture-v${version.toString()}-windows.exe";
 
   static String appZipUrl({required Version version}) => "$appUrlRoot/umacapture-v${version.toString()}-windows.zip";
+
+  /// The project's public home, and the two places its users talk to each other.
+  ///
+  /// The same three the README publishes under "Community"; the X account is the one the README
+  /// still lists under its old twitter.com hostname. Kept here rather than beside the card that
+  /// links to them, next to [appUrlRoot] which addresses the same repository.
+  static String get githubUrl => "https://github.com/umasagashi/umacapture";
+
+  static String get discordUrl => "https://discord.gg/Ph9hEGHR4M";
+
+  static String get xUrl => "https://x.com/umasagashi";
 
   static RegExp get uninstallerPattern => RegExp(r"unins[0-9]+\.exe");
 
@@ -68,5 +79,32 @@ class CurrentPlatform {
 
   static bool hasWindowFrame() {
     return !isWeb() && isDesktop();
+  }
+
+  /// Whether the platform has an OS file manager that a path can be revealed
+  /// in. The web has no OS file manager, and OPFS paths are virtual, so
+  /// `PathEntity.launch()` call sites gate on this rather than on [isWeb]
+  /// directly. Mirrors [hasWindowFrame] today (the app only ships desktop and
+  /// web), kept as its own name because the two capabilities are conceptually
+  /// distinct and may diverge later.
+  static bool canRevealInFileManager() {
+    return hasWindowFrame();
+  }
+
+  /// Whether files can be dropped onto the app's window.
+  ///
+  /// True on the desktop hosts and in a browser: `desktop_drop` registers a web
+  /// implementation alongside the desktop ones, so a drop zone is worth offering
+  /// there too — the browser simply yields a blob-backed file with no filesystem
+  /// path, which the call site applies from its bytes instead. False on mobile,
+  /// which has no such surface.
+  ///
+  /// Deliberately *not* [isDesktop] on its own: that reports the **host OS**, so
+  /// it is true inside a desktop browser and would also claim the drop works on
+  /// a mobile browser. Nor [hasWindowFrame] on its own, which excludes the
+  /// browser the capability does cover — this is the union of the two, which is
+  /// why it earns its own name.
+  static bool supportsFileDrop() {
+    return isWeb() || isDesktop();
   }
 }

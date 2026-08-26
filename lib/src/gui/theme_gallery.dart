@@ -317,6 +317,8 @@ class _ColorSchemeSection extends StatelessWidget {
 /// Note shown for a `ColorScheme` role the app never references.
 String _unusedNote(String role) => switch (role) {
   'shadow' => 'Not used as a role; ThemeData.shadowColor drives shadows instead.',
+  'onSecondaryContainer' =>
+    'Never referenced directly; Material pairs it with secondaryContainer on its own (chips, avatars).',
   _ => 'Not used in the app.',
 };
 
@@ -362,6 +364,29 @@ class _BlendSection extends StatelessWidget {
         _SwatchRow(
           _BlendSwatch('modal scrim', overlay: cs.scrim.withValues(alpha: 0.5), base: cs.surface, baseLabel: 'surface'),
           'Dim backdrop behind modal dialogs (scrim role).',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'capture preview hint',
+            overlay: cs.scrim.withValues(alpha: 0.6),
+            base: s.onAccent,
+            baseLabel: 'worst-case frame',
+          ),
+          'Scrim of the "click to show / hide" hint drawn over the whole capture-preview frame while the '
+          'pointer is on it (hover only -- the keyboard gets a primary focus ring instead). The base shown '
+          'is the worst case it can face (a white game frame); the icon and caption on top are onAccent '
+          '(always light), which clears 4.5:1 on this composite in both themes.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
+            'capture message',
+            overlay: s.info.withValues(alpha: 0.15),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Background of the capture card\'s status banner and of every message tile built on it (the event '
+          'line, the import gate, the unsupported-browser notice). The overlay is whichever semantic tone the '
+          'message carries, always at 15%; info is shown.',
         ),
         _SwatchRow(
           _BlendSwatch('tag glow', overlay: cs.primary.withValues(alpha: 0.45), base: cs.surface, baseLabel: 'surface'),
@@ -451,7 +476,13 @@ class _SemanticSection extends StatelessWidget {
       ('warning', s.warning, null, 'Toast warning, capture requirement unsure, addon timeout, script error icon.'),
       ('info', s.info, null, 'Info toasts, addon running status.'),
       ('danger', s.danger, null, 'Toast error, capture requirement insufficient (wired to colorScheme.error).'),
-      ('onAccent', s.onAccent, s.success, 'Text/icons drawn on a filled accent (toast chips, requirement chips).'),
+      (
+        'onAccent',
+        s.onAccent,
+        s.success,
+        'Text/icons drawn on a filled accent (toast chips, requirement chips) and on the capture-preview hint '
+            'scrim, where it has to stay light in both brightnesses.',
+      ),
       ('ratingAccent', s.ratingAccent, null, 'Rating star icons.'),
       ('noticeContainer', s.noticeContainer, s.onNoticeContainer, 'Updater card title band; archive row overlay.'),
       ('onNoticeContainer', s.onNoticeContainer, s.noticeContainer, 'Text/icons on noticeContainer.'),
@@ -506,18 +537,23 @@ class _CodeHighlightSection extends StatelessWidget {
 // Snapshot of what each ColorScheme role is used for in the app. Derived from a
 // scan of `lib/`; re-check if relied upon for a refactor.
 const Map<String, String> _roleUsages = {
-  'primary': 'Brand accent: add-column button, drag/slot accents, data-table accents, progress.',
-  'onPrimary': 'Text and icons on primary fills (add-column button, data-table accents).',
+  'primary': 'Brand accent: add-column button, drag/slot accents, data-table accents, progress, feedback drawer.',
+  'onPrimary': 'Text and icons on primary fills (add-column button, data-table accents, feedback drawer).',
   'primaryContainer':
       'Light accent fills: selected filter/choice chips (global chipTheme); NoteCard, logic-column and '
       'column-builder group borders; character avatar; table/stat accents.',
   'secondaryContainer':
-      'Subtle highlight backgrounds: capture info panel, dashboard, data-table; tag chip drag highlight.',
-  'onSecondaryContainer': 'Text on secondaryContainer (capture info panel).',
+      'Subtle highlight backgrounds: dashboard and data-table avatars; tag chip drag highlight. Also the '
+      'source the pale surfaceContainerLowest/Low/Bright tints are lerped from.',
   'secondary': 'Accent text: script cost / zero-record warnings; experimental-warning card border.',
   'tertiary': 'Card and dialog header band (ListCard, CardDialog) and the experimental-warning card background.',
   'onTertiary': 'Text and icons on the card/dialog header band and the experimental-warning card.',
-  'error': 'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs, task failures.',
+  'onTertiaryContainer':
+      'Never painted under this name: the role consolidation in app_widget.dart remaps it onto onTertiary, '
+      'so this is the source of the card/dialog header band\'s text color.',
+  'error':
+      'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs, task failures, and '
+      'the import-report dialog\'s failure card.',
   'onError': 'Text and icons on error surfaces.',
   'errorContainer': 'Error/warning card and chip backgrounds.',
   'onErrorContainer': 'Text and icons on errorContainer backgrounds.',
@@ -534,7 +570,7 @@ const Map<String, String> _roleUsages = {
   'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules.',
   'outlineVariant':
       'Faint outlines: the app-wide chip border (global chipTheme), the column-chip "settings group" frame, and the inset per-row dividers in the column/table settings dialogs.',
-  'scrim': 'Dim backdrop behind modal dialogs (DialogLayer).',
+  'scrim': 'Dim backdrop behind modal dialogs (DialogLayer), and the capture-preview hover/focus hint.',
   'onInverseSurface': 'Text on the inverse surface (column builder dialog).',
 };
 

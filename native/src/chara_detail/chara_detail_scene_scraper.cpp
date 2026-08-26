@@ -1,6 +1,6 @@
 #include "chara_detail/chara_detail_scene_scraper.h"
 
-#include <map>
+#include <cstdint>
 
 namespace uma::chara_detail {
 
@@ -57,6 +57,21 @@ constexpr double kThumbBottomFlushPx = 2.0;
 // refinement is what shrank the jitter here: without it the whole-pixel tips quantize the change into ±1 px
 // steps, which is why the historical gate needed the extra headroom.
 constexpr double kRescaleThumbChangePx = 2.0;
+
+// Sentinel for a shift proposeVerticalShifts could not score (its overlap was degenerate on one side). A real
+// zero-mean normalized correlation lies in [-1, 1], so any value below -1 is unreachable and unambiguous.
+// kBelowNoCorrelation stands in for the two neighbours just outside the array during the local-maxima walk,
+// and is strictly smaller so that a genuinely scored sample at either END can still be a peak.
+constexpr double kNoCorrelation = -2.0;
+constexpr double kBelowNoCorrelation = -3.0;
+
+// Variance floor below which a signature overlap is treated as carrying no alignment evidence. The variance
+// is computed over block MEAN intensities on the 0-255 scale -- the signature stores each block's undivided
+// pixel sum, and proposeVerticalShifts applies the block's own divisor before this gate, precisely so the
+// units this constant is calibrated in survive that change. A variance of 1e-6 is a spread of 1/1000 of one
+// intensity level -- far below the quantisation of the pixels it is averaged from, i.e. flat. The guard is
+// needed because the correlation divides by the two standard deviations: on a uniform band that is 0/0.
+constexpr double kSignatureVarianceEpsilon = 1e-6;
 
 }  // namespace
 
@@ -356,135 +371,234 @@ std::optional<double> ScrollBarOffsetEstimator::scrollGuess(const Frame &from, c
 }
 
 ImageOffsetEstimator::ImageOffsetEstimator(const ImageOffsetEstimatorConfig &config)
-    : detector(
-          cv::AKAZE::create(
-              cv::AKAZE::DESCRIPTOR_MLDB_UPRIGHT,
-              0,
-              config.descriptor_channels,
-              config.descriptor_threshold,
-              config.octaves,
-              config.octave_layers,
-              cv::KAZE::DIFF_PM_G2))
-    , matcher(
-          cv::makePtr<cv::FlannBasedMatcher>(
-              cv::makePtr<cv::flann::LshIndexParams>(config.table_number, config.key_size, config.probe_level)))
-    , trust_ratio(config.trust_ratio)
-    , minimum_overlap_score(config.minimum_overlap_score)
+    : minimum_overlap_score(config.minimum_overlap_score)
     , minimum_overlap_fraction(config.minimum_overlap_fraction)
-    , minimum_key_points(config.minimum_key_points) {}
+    , signature_blocks(config.signature_blocks)
+    , proposal_count(config.proposal_count) {}
 
 ImageOffsetEstimator::ImageOffsetEstimator()
     : ImageOffsetEstimator(ImageOffsetEstimatorConfig()) {}
 
-std::vector<OffsetCandidate> detectOffsetCandidates(const std::vector<double> &displacements, size_t count_threshold) {
-    if (displacements.empty()) {
-        return {};
+BlockTiling blockTiling(int width, int blocks) {
+    BlockTiling tiling;
+    tiling.begin.resize(static_cast<size_t>(blocks) + 1);
+    tiling.count.resize(static_cast<size_t>(blocks));
+    for (int block = 0; block <= blocks; ++block) {
+        // int64 so the boundaries stay exact for any width: consecutive blocks share an endpoint, so the
+        // blocks tile the row with no gap and no overlap even when width is not a multiple of `blocks`.
+        tiling.begin[static_cast<size_t>(block)] = static_cast<int>(static_cast<int64_t>(width) * block / blocks);
     }
-
-    // 1-px bins keyed by the rounded displacement; std::map keeps them ordered for the local-maxima walk.
-    std::map<long, int> bins;
-    for (const double displacement : displacements) {
-        bins[std::lround(displacement)]++;
+    for (int block = 0; block < blocks; ++block) {
+        const int count = tiling.begin[static_cast<size_t>(block) + 1] - tiling.begin[static_cast<size_t>(block)];
+        tiling.count[static_cast<size_t>(block)] = count;
+        tiling.max_count = std::max(tiling.max_count, count);
     }
-    const auto countAt = [&bins](long bin) {
-        const auto it = bins.find(bin);
-        return it != bins.end() ? it->second : 0;
-    };
-
-    std::vector<OffsetCandidate> candidates;
-    for (const auto &[bin, count] : bins) {
-        // Local maximum with ties resolved to the leftmost bin, so a spike split evenly across a bin
-        // boundary yields one peak instead of two 1-px-apart twins.
-        if (count <= countAt(bin - 1) || count < countAt(bin + 1)) {
-            continue;
-        }
-
-        // Merge the +-1 px neighbours: genuine spikes are 1-2 px wide, and thresholding the merged count
-        // keeps a boundary-split spike above the threshold even when no single bin reaches it alone.
-        std::vector<double> members;
-        for (const double displacement : displacements) {
-            if (std::abs(std::lround(displacement) - bin) <= 1) {
-                members.push_back(displacement);
-            }
-        }
-        if (members.size() < count_threshold) {
-            continue;
-        }
-
-        const auto median_iterator = members.begin() + static_cast<long>(members.size() / 2);
-        std::nth_element(members.begin(), median_iterator, members.end());
-        candidates.push_back({*median_iterator, static_cast<int>(members.size())});
-    }
-    return candidates;
+    return tiling;
 }
 
-std::optional<double> ImageOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
+std::vector<float> columnBlockSignature(const cv::Mat &gray, const BlockTiling &tiling) {
+    const int height = gray.rows;
+    const int blocks = tiling.blocks();
+    std::vector<float> signature(static_cast<size_t>(height) * static_cast<size_t>(blocks), 0.0f);
+    for (int block = 0; block < blocks; ++block) {
+        const int begin = tiling.begin[static_cast<size_t>(block)];
+        const int end = tiling.begin[static_cast<size_t>(block) + 1];
+        for (int y = 0; y < height; ++y) {
+            const uchar *row = gray.ptr<uchar>(y);
+            // uint32 is exact and cannot overflow: a whole row of an 8K frame sums to 1.96e6.
+            uint32_t sum = 0;
+            for (int x = begin; x < end; ++x) {
+                sum += row[x];
+            }
+            // Block-major: one block's column of rows is contiguous, which is what lets the correlation walk
+            // it as a single dot product. The sum is stored undivided -- see the header for why.
+            signature[static_cast<size_t>(block) * static_cast<size_t>(height) + static_cast<size_t>(y)] =
+                static_cast<float>(sum);
+        }
+    }
+    return signature;
+}
+
+double blockCrossAccumulate(const float *from, const float *to, int rows) {
+    double d0 = 0.0, d1 = 0.0, d2 = 0.0, d3 = 0.0;
+    int i = 0;
+    for (; i + 4 <= rows; i += 4) {
+        d0 += static_cast<double>(from[i]) * static_cast<double>(to[i]);
+        d1 += static_cast<double>(from[i + 1]) * static_cast<double>(to[i + 1]);
+        d2 += static_cast<double>(from[i + 2]) * static_cast<double>(to[i + 2]);
+        d3 += static_cast<double>(from[i + 3]) * static_cast<double>(to[i + 3]);
+    }
+    double total = (d0 + d1) + (d2 + d3);
+    for (; i < rows; ++i) {
+        total += static_cast<double>(from[i]) * static_cast<double>(to[i]);
+    }
+    return total;
+}
+
+std::vector<ShiftProposal> proposeVerticalShifts(
+    const std::vector<float> &from_signature,
+    const std::vector<float> &to_signature,
+    const BlockTiling &tiling,
+    int height,
+    double minimum_overlap_fraction,
+    int top_k) {
+    const int blocks = tiling.blocks();
+    const auto stride = static_cast<size_t>(height);
+
+    // assert_ is a no-op in Release; this documents the exactness the whole kernel rests on rather than
+    // enforcing it at runtime. Checked against the geometry actually in hand rather than assumed from the
+    // shipped one. Both bounds hold with five orders of magnitude to spare at every width this product can
+    // be pointed at (see BlockTiling), so a Debug build could only trip this on a frame far outside it.
+    assert_(tiling.maxBlockSum() <= 16777216.0);  // float's exact-integer ceiling, 2^24
+    assert_(tiling.maxCrossAccumulation(height) <= 9007199254740992.0);  // double's, 2^53
+
+    // Prefix sums of the block MEAN intensities and of their squares, per row, so each shift's overlap mean
+    // and variance are two subtractions instead of a rescan. Element [y] is the sum over rows [0, y). The
+    // signature stores sums, so the per-block divisor is applied here -- which keeps every quantity below in
+    // mean-brightness units, the units kSignatureVarianceEpsilon is calibrated in.
+    std::vector<double> from_sum(height + 1, 0.0), from_square_sum(height + 1, 0.0);
+    std::vector<double> to_sum(height + 1, 0.0), to_square_sum(height + 1, 0.0);
+    for (int y = 0; y < height; ++y) {
+        double from_row = 0.0, from_row_square = 0.0, to_row = 0.0, to_row_square = 0.0;
+        for (int block = 0; block < blocks; ++block) {
+            const size_t index = static_cast<size_t>(block) * stride + static_cast<size_t>(y);
+            const double divisor = static_cast<double>(tiling.divisorAt(block));
+            const double from_value = static_cast<double>(from_signature[index]) / divisor;
+            const double to_value = static_cast<double>(to_signature[index]) / divisor;
+            from_row += from_value;
+            from_row_square += from_value * from_value;
+            to_row += to_value;
+            to_row_square += to_value * to_value;
+        }
+        from_sum[y + 1] = from_sum[y] + from_row;
+        from_square_sum[y + 1] = from_square_sum[y] + from_row_square;
+        to_sum[y + 1] = to_sum[y] + to_row;
+        to_square_sum[y + 1] = to_square_sum[y] + to_row_square;
+    }
+
+    // The same overlap floor the full-resolution verifier applies (a fraction of the HEIGHT), so a shift the
+    // verifier would score 0 on is never proposed in the first place.
+    const int max_shift = height - static_cast<int>(std::ceil(minimum_overlap_fraction * height));
+    std::vector<double> scores(static_cast<size_t>(2 * max_shift + 1), kNoCorrelation);
+    for (int shift = -max_shift; shift <= max_shift; ++shift) {
+        // Sign convention, identical to overlapScore: row y of `to` lands at row y + shift of `from`.
+        const int from_begin = shift >= 0 ? shift : 0;
+        const int to_begin = shift >= 0 ? 0 : -shift;
+        const int rows = height - std::abs(shift);
+        if (rows <= 0) {
+            continue;
+        }
+        // One exact dot product per block over contiguous memory, divided by that block's own width squared
+        // (the two means the term stands for share the divisor) and folded in ascending block order. Each
+        // accumulator is an exact integer, so the only rounding in the whole cross term is the `blocks`
+        // divisions and the fold -- against a9a1d20's two roundings per element plus its accumulation.
+        double cross = 0.0;
+        for (int block = 0; block < blocks; ++block) {
+            const float *from_column = &from_signature[static_cast<size_t>(block) * stride]
+                                     + static_cast<size_t>(from_begin);
+            const float *to_column = &to_signature[static_cast<size_t>(block) * stride]
+                                   + static_cast<size_t>(to_begin);
+            const double divisor = static_cast<double>(tiling.divisorAt(block));
+            cross += blockCrossAccumulate(from_column, to_column, rows) / (divisor * divisor);
+        }
+        const double count = static_cast<double>(rows) * static_cast<double>(blocks);
+        const double from_mean = (from_sum[from_begin + rows] - from_sum[from_begin]) / count;
+        const double to_mean = (to_sum[to_begin + rows] - to_sum[to_begin]) / count;
+        const double from_variance =
+            (from_square_sum[from_begin + rows] - from_square_sum[from_begin]) / count - from_mean * from_mean;
+        const double to_variance =
+            (to_square_sum[to_begin + rows] - to_square_sum[to_begin]) / count - to_mean * to_mean;
+        // A (near-)uniform band correlates with anything; leaving the shift unscored keeps it out of the
+        // proposal list entirely rather than letting a degenerate 1.0 outrank a genuine peak.
+        if (from_variance <= kSignatureVarianceEpsilon || to_variance <= kSignatureVarianceEpsilon) {
+            continue;
+        }
+        const double correlation = (cross - count * from_mean * to_mean)
+                                 / (count * std::sqrt(from_variance) * std::sqrt(to_variance));
+        scores[static_cast<size_t>(shift + max_shift)] = std::isfinite(correlation) ? correlation : kNoCorrelation;
+    }
+
+    // Local maxima of the curve. Ties resolve to the left, so a plateau yields one peak and not one per
+    // sample. Unscored shifts are excluded outright (they are not evidence of anything), and the notional
+    // neighbours past either end are lower still, so a peak sitting at the extreme scanned shift still counts.
+    std::vector<ShiftProposal> peaks;
+    for (int index = 0; index < static_cast<int>(scores.size()); ++index) {
+        const double here = scores[static_cast<size_t>(index)];
+        const double left = index > 0 ? scores[static_cast<size_t>(index - 1)] : kBelowNoCorrelation;
+        const double right =
+            index + 1 < static_cast<int>(scores.size()) ? scores[static_cast<size_t>(index + 1)] : kBelowNoCorrelation;
+        if (here <= kNoCorrelation || here <= left || here < right) {
+            continue;
+        }
+        peaks.push_back({index - max_shift, here});
+    }
+    std::sort(peaks.begin(), peaks.end(), [](const ShiftProposal &a, const ShiftProposal &b) {
+        return a.score != b.score ? a.score > b.score : a.offset < b.offset;
+    });
+    if (static_cast<int>(peaks.size()) > top_k) {
+        peaks.resize(static_cast<size_t>(top_k));
+    }
+    return peaks;
+}
+
+std::optional<int> ImageOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
     // A mid-scroll resolution change makes pixel offsets between the frames meaningless (and the overlap
-    // verification below would reject every candidate anyway). Bail up front.
+    // verification below would reject every proposal anyway). Bail up front.
+    // This bail is also what lets the whole estimator work in raw pixels with no scale handling anywhere: the
+    // signature is a per-row reduction, so two signatures can only be correlated row-for-row if the frames
+    // have the same height, and the block means are only comparable if they cover the same content. Making
+    // this function accept differing sizes -- by scaling one side onto the other, say -- would make the offset
+    // it returns ambiguous about WHICH frame's pixels it counts, and every consumer reads it as pixels of the
+    // frame they are latching. So change those consumers in the same breath if this ever goes.
     if (!(from.frame.size() == to.frame.size())) {
         return std::nullopt;
     }
 
-    detectKeyPoints(from);
-    detectKeyPoints(to);
-
-    // A near-uniform fragment yields zero AKAZE keypoints and an empty descriptor Mat; FLANN's knnMatch
-    // can throw on empty/too-small train or query sets. k=2 needs at least two train rows. Bail early with
-    // the same "unreliable -> nullopt" semantics as an empty candidate list below.
-    if (from.descriptors.empty() || to.descriptors.empty() || from.descriptors.rows < 2
-        || to.descriptors.rows < 2) {
-        return std::nullopt;
-    }
-
-    std::vector<std::vector<cv::DMatch>> matches;
-    matcher->knnMatch(from.descriptors, to.descriptors, matches, 2);
-
-    // Collect every trusted match's vertical displacement, unwindowed. The scroll-bar guess deliberately
-    // plays no part here: on the terminating (bottom-clipped) frame the thumb's remaining travel collapses,
-    // the guess with it, and a window centred on it rejects the true offset -- the exact frame where offset
-    // accuracy decides whether the last row is captured.
-    std::vector<double> displacements;
-    for (const auto &knn_match : matches) {
-        // If the 2nd is closer to the 1st, the higher the probability that the 2nd is the correct one.
-        if (knn_match.size() != 2 || knn_match[0].distance >= knn_match[1].distance * trust_ratio) {
-            continue;
-        }
-        const auto &key_point_of_from = from.key_points[knn_match[0].queryIdx].pt;
-        const auto &key_point_of_to = to.key_points[knn_match[0].trainIdx].pt;
-        displacements.push_back(key_point_of_from.y - key_point_of_to.y);
-    }
-
-    const auto candidates = detectOffsetCandidates(displacements, static_cast<size_t>(minimum_key_points));
-    if (candidates.empty()) {
-        return std::nullopt;
-    }
-
-    // Let pixel evidence choose: the candidate with the strongest full-resolution overlap wins, regardless
-    // of how many keypoints voted for it. A keypoint majority is NOT trustworthy on this content -- factor
-    // rows repeat at a constant pitch, so an alias one row-pitch off can collect more matches than the true
-    // offset while overlaying visibly wrong pixels.
     const cv::Mat &from_gray = grayFrame(from);
     const cv::Mat &to_gray = grayFrame(to);
-    double best_offset = 0.0;
+    if (from_gray.empty()) {
+        return std::nullopt;
+    }
+
+    // Propose whole-pixel shifts from the reduced signatures. The scroll-bar guess deliberately plays no part
+    // here: on the terminating (bottom-clipped) frame the thumb's remaining travel collapses, the guess with
+    // it, and a window centred on it rejects the true offset -- the exact frame where offset accuracy decides
+    // whether the last row is captured. A pair with no vertical structure to correlate (a uniform fragment)
+    // yields no peak at all, which is the same "unreliable -> nullopt" outcome as a failed verification.
+    // One tiling, shared by both signatures and by the correlation: the block widths the reducer summed over
+    // are the divisors the correlation folds with, so they have to be the same object and not the same
+    // formula evaluated twice.
+    const BlockTiling tiling = blockTiling(from_gray.cols, signature_blocks);
+    const auto proposals = proposeVerticalShifts(
+        columnBlockSignature(from_gray, tiling),
+        columnBlockSignature(to_gray, tiling),
+        tiling,
+        from_gray.rows,
+        minimum_overlap_fraction,
+        proposal_count);
+    if (proposals.empty()) {
+        return std::nullopt;
+    }
+
+    // Let pixel evidence choose: the proposal with the strongest FULL-RESOLUTION overlap wins, regardless of
+    // how the signature correlation ranked them. The reduced signature is not trustworthy on its own on this
+    // content -- factor rows repeat at a constant pitch, so an alias one row-pitch off can out-correlate the
+    // true offset in the reduction while overlaying visibly wrong pixels. This is also the only acceptance
+    // test the estimator has: there is deliberately no threshold on the proposal's own score, because a
+    // proposal is a hypothesis and the verifier is what judges it.
+    int best_offset = 0;
     double best_score = -1.0;
-    for (const auto &candidate : candidates) {
-        const double score = overlapScore(from_gray, to_gray, std::lround(candidate.offset));
+    for (const auto &proposal : proposals) {
+        const double score = overlapScore(from_gray, to_gray, proposal.offset);
         if (score > best_score) {
             best_score = score;
-            best_offset = candidate.offset;
+            best_offset = proposal.offset;
         }
     }
     if (best_score < minimum_overlap_score) {
         return std::nullopt;
     }
     return best_offset;
-}
-
-void ImageOffsetEstimator::detectKeyPoints(FrameDescriptor &descriptor) const {
-    if (!descriptor.key_points.empty()) {
-        return;
-    }
-    detector->detectAndCompute(descriptor.frame.data(), cv::noArray(), descriptor.key_points, descriptor.descriptors);
 }
 
 const cv::Mat &ImageOffsetEstimator::grayFrame(FrameDescriptor &descriptor) {
@@ -554,7 +668,7 @@ std::optional<double> ScrollAreaOffsetEstimator::position(const FrameDescriptor 
     return scroll_bar_offset_estimator.position(descriptor.scroll_bar_frame);
 }
 
-std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
+std::optional<int> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from, FrameDescriptor &to) const {
     const auto offset = image_offset_estimator.estimate(from, to);
     if (!offset) {
         return std::nullopt;
@@ -573,7 +687,9 @@ std::optional<double> ScrollAreaOffsetEstimator::estimate(FrameDescriptor &from,
     // sharpens this outlier veto; the offset itself still comes from the image estimator.
     if (const auto guess = scroll_bar_offset_estimator.scrollGuess(from.scroll_bar_frame, to.scroll_bar_frame)) {
         const double margin = from.scroll_bar_frame.anchor().scaleToPixels(guess_window_margin);
-        if (std::abs(offset.value() - guess.value()) > margin) {
+        // The guess is sub-pixel (refined thumb tips) and the offset is an exact integer; the distance between
+        // them is compared in real numbers, so the offset's own quantisation never eats into the window.
+        if (std::abs(static_cast<double>(offset.value()) - guess.value()) > margin) {
             return std::nullopt;
         }
     }
@@ -954,38 +1070,57 @@ std::shared_ptr<PageScrapingBox> SceneScrapingBox::recreate(
 }
 
 StationaryFrameCatcher::StationaryFrameCatcher(
-    uint64 stationary_time, int minimum_color, uint64 stationary_color, const Rect<double> &rect)
+    uint64 stationary_time, int minimum_color, double stationary_ratio, const Rect<double> &rect)
     : target_rect(rect)
     , stationary_time(stationary_time)
     , minimum_color(minimum_color)
-    , stationary_color(stationary_color) {}
+    , stationary_ratio(stationary_ratio) {}
 
 void StationaryFrameCatcher::update(const Frame &frame) {
+    // RETAINED BY SHALLOW cv::Mat COPY, DELIBERATELY -- the three assignments below do not clone.
+    //
+    // The catcher holds one frame across many later ones and diffs against it, so it does need those pixels to
+    // stay as they arrived; the hazard a clone used to buy protection from ("a capture source that reuses its
+    // frame buffer") is real. It is simply no longer this function's to pay for: frame_shaper::shapeCapturedFrame
+    // THROWS unless frame_shaper::ownsPixelsSolely(image) holds, for every shaping mode that forwards the
+    // producer's buffer by reference, and every production producer asks for such a mode. So a buffer that
+    // arrives here is one whose allocation nothing else holds -- and once this Frame references it, a producer
+    // decoding into "the same" Mat gets a fresh buffer, because cv::Mat::create reallocates above refcount 1.
+    // Copying the pixels a second time here would only re-buy a guarantee the seam already enforces.
+    //
+    // Retaining a reference also KEEPS THE ALLOCATION ALIVE, which is what makes this correct for the callers
+    // that hand over a temporary (the interpreters pass frame.copy(scroll_area_rect), itself a fresh clone).
+    //
+    // Pinned by "StationaryFrameCatcher retains the caller's pixels instead of copying them" and
+    // "StationaryFrameCatcher retains the caller's pixels on every branch of update"
+    // (native/test/chara_detail/test_scraper_estimators.cpp).
     if (previous_frame.empty()) {
-        // Frame copy is a shallow cv::Mat header copy; clone so the retained previous frame owns its pixels
-        // and cannot be mutated by a capture source that reuses its frame buffer.
-        previous_frame = frame.clone();
+        previous_frame = frame;
         return;
     }
 
     if (previous_frame.size() != frame.size()) {
-        // A capture resolution change makes pixelDifference throw on the size mismatch (see frame.h). Letting
+        // A capture resolution change makes diffStats throw on the size mismatch (see frame.h). Letting
         // that throw unwind would leave previous_frame stuck at the old size, so it would rethrow on every
         // later frame and never detect stationarity again. Match the other size-sensitive paths: treat the
         // mismatch as non-stationary and re-baseline to the new size so the catcher self-heals.
         first_timestamp = std::nullopt;
-        previous_frame = frame.clone();
+        previous_frame = frame;
         return;
     }
 
-    if (previous_frame.pixelDifference(frame, target_rect, minimum_color) < stationary_color) {
+    // "This fraction of the region moved." Counting changed pixels and dividing by the pixels examined -- not
+    // summing their distances -- for the reason kFactorChangeRatioThreshold states in the header: a
+    // handful of large-delta pixels must not stand in for a region in motion. Normalising the *sum* instead
+    // would keep that vulnerability and only fix the area dependence.
+    if (previous_frame.diffStats(frame, target_rect, minimum_color).ratio() < stationary_ratio) {
         if (!first_timestamp) {
             first_timestamp = previous_frame.timestamp();
         }
     } else {
         first_timestamp = std::nullopt;
     }
-    previous_frame = frame.clone();
+    previous_frame = frame;
 }
 
 bool StationaryFrameCatcher::ready() const {
@@ -1088,7 +1223,7 @@ void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
     }
 
     FrameDescriptor current_descriptor = {frame.copy(scroll_area_rect), frame.copy(scroll_bar_rect)};
-    if (offset_estimator.estimate(initial_descriptor, current_descriptor).value_or(-1.0) > initial_scroll) {
+    if (offset_estimator.estimate(initial_descriptor, current_descriptor).value_or(-1) > initial_scroll) {
         startScrolling(initial_descriptor);
         // didn't get a stationary image, so won't send a ready.
         return;
@@ -1116,16 +1251,14 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
     // stationary (a scrollbar re-scale, not a real scroll), so the offset stays under minimum_scroll and
     // no strip is latched -- exactly the case a latch-coupled scan misses. Skip frames with no usable
     // offset (rescale non-match); the bar stays visible ~1 s (30+ frames), so a valid frame always comes.
-    if (offset.has_value()
-        && scraping_box->detectGreenTerminator(current_fragment.frame, std::lround(offset.value()))) {
+    if (offset.has_value() && scraping_box->detectGreenTerminator(current_fragment.frame, offset.value())) {
         // The bar can fire on the very frame the last factor scrolled in (and the return below skips the
         // regular addScrollArea latch), so without latching first the last card's bottom rows exist only
         // in the live frame and the crop cannot recover them -- the stitcher then papers over the gap with
         // background, clipping the last card. Latch the revealed rows above the bar, then crop the saved
         // fragments to the same bottom line the gray-completion path uses, so the trailing background
         // below the last factor is a fixed margin regardless of which terminator ended the tab.
-        const int trim_offset_pixels =
-            scraping_box->latchUpToGreenTerminator(current_fragment.frame, std::lround(offset.value()));
+        const int trim_offset_pixels = scraping_box->latchUpToGreenTerminator(current_fragment.frame, offset.value());
         scraping_box->trimScrollAreaToFactorEnd(current_fragment.frame, trim_offset_pixels);
         // Report the final position before going Ready so the UI progress reaches 100% for the tab,
         // matching the gray-completion path below (which emits via addScrollArea). Without this, a
@@ -1137,11 +1270,19 @@ void ScrollableScrapingInterpreter::updateScrolling(const Frame &frame) {
         return;
     }
 
-    if (offset.value_or(-1.0) <= minimum_scroll) {
+    // The gate and the latch below read the SAME number. That is a property of the estimator, not a
+    // coincidence to be maintained here: it reports whole pixels only (see ImageOffsetEstimator::estimate),
+    // so there is no rounding step left between "the offset cleared the threshold" and "these rows were
+    // latched". The threshold itself stays real-valued -- it is a fraction of the frame height -- which is
+    // exactly the comparison an integer measurement against a real threshold should be. It used to be
+    // otherwise: the gate compared a sub-pixel estimate while the latch consumed std::lround of it, so which
+    // frames became fragments depended on the estimator's sub-pixel behaviour rather than on the rows it
+    // could actually place.
+    if (offset.value_or(-1) <= minimum_scroll) {
         return;
     }
 
-    scraping_box->addScrollArea(current_fragment.frame, std::lround(offset.value()));
+    scraping_box->addScrollArea(current_fragment.frame, offset.value());
 
     // Report the position of the fragment just latched (current), not the previous one. position() reads only
     // the current frame's scrollbar geometry, so it is valid on current_fragment.
@@ -1223,7 +1364,7 @@ void SceneScraper::build(const Frame &frame) {
     const auto stationary_catcher = StationaryFrameCatcher(
         config.stationary_time_threshold,
         config.minimum_color_threshold,
-        config.stationary_color_threshold,
+        config.stationary_change_ratio_threshold,
         config.scroll_area_stationary_rect);
 
     if (scroll_bar_offset_estimator.hasScrollbar(scroll_bar_frame)) {
@@ -1245,7 +1386,7 @@ void SceneScraper::build(const Frame &frame) {
     tab_button_catcher = std::make_unique<StationaryFrameCatcher>(
         config.stationary_time_threshold,
         config.minimum_color_threshold,
-        config.stationary_color_threshold,
+        config.stationary_change_ratio_threshold,
         config.tab_button_rect);
 
     state = Updatable;
@@ -1324,7 +1465,7 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const event_util::Sender<int> &on_page_ready,
     const event_util::Sender<RecordInfo> &on_completed,
     const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
-    const event_util::Sender<> &on_restarted,
+    const event_util::Sender<DiscardedSession> &on_restarted,
     const scraper_config::CharaDetailSceneScraperConfig &config,
     const std::filesystem::path &scraping_dir,
     const io_util::DirectoryHooks &directory_hooks)
@@ -1392,9 +1533,15 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
     // spot a later character switch on the factor tab.
     factor_scroll_ready = event_util::makeDirectConnection<>();
     factor_scroll_ready->listen([this]() {
-        // Retained across many later frames and diffed in maybeResetOnFactorChange; a shallow Frame copy
-        // would share pixels with a capture source that reuses its buffer, so clone to own the pixels
-        // (same hazard StationaryFrameCatcher::update guards against).
+        // Retained across many later frames and diffed in maybeResetOnFactorChange. THE CLONE IS NOT WHAT MAKES
+        // THAT SAFE, and the old justification here ("a capture source may reuse its buffer") no longer holds:
+        // frame_shaper::shapeCapturedFrame refuses at the seam any producer frame that is not solely owned, and
+        // for a refcounted allocation cv::Mat::create reallocates rather than overwriting once a downstream copy
+        // exists -- so a retained shallow copy cannot be written out from under this. That is exactly why
+        // StationaryFrameCatcher::update retains its previous frame WITHOUT cloning, and why current_full_frame
+        // itself is already a shallow copy of the producer's frame. The deep copy is kept here as a deliberate,
+        // unmeasured choice, not as a correctness requirement; it runs once per factor scroll-ready rather than
+        // per frame, so dropping it is an open candidate with a small and unquantified gain.
         factor_probe_reference = current_full_frame.clone();
         // Capture the flush header position alongside the reference; both are taken on this settled, at-top frame,
         // so maybeResetOnFactorChange can later reject a tiny scroll by comparing the header against it.
@@ -1417,7 +1564,7 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         scraper_impl::StationaryFrameCatcher{
             active_common->stationary_time_threshold,
             active_common->minimum_color_threshold,
-            active_common->stationary_color_threshold,
+            active_common->stationary_change_ratio_threshold,
             active_common->base_image_stationary_rect,
         },
         active_common->base_image_rect,
@@ -1493,7 +1640,12 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     log_trace("delay={}", chrono_util::to_timestamp(chrono_util::local_now()) - frame.timestamp());
 }
 
-void CharaDetailSceneScraper::release() {
+DiscardedSession CharaDetailSceneScraper::release() {
+    // Read the session out BEFORE anything below clears it: ready() stops being answerable once scraping_state
+    // goes Null, and current_record_info survives this function but not the buildSession a reset performs
+    // immediately after. One snapshot, taken once, at the only moment both are still true.
+    const DiscardedSession discarded{current_record_info, ready()};
+
     skill_scraper = nullptr;
     factor_scraper = nullptr;
     campaign_scraper = nullptr;
@@ -1503,12 +1655,16 @@ void CharaDetailSceneScraper::release() {
     active_common = nullptr;
     scraping_state = scraper_impl::Null;
     resetMonitors();
+    return discarded;
 }
 
 void CharaDetailSceneScraper::resetSession(record::RecordType record_type) {
-    release();
+    // The discarded session comes from release() itself, which is what makes the reported contents unable to
+    // describe the session built on the next line. See release().
+    const DiscardedSession discarded = release();
     buildSession(record_type);
-    on_restarted->send();
+    log_debug("session discarded (id={}, completed={})", discarded.info.record_id, discarded.completed);
+    on_restarted->send(discarded);
 }
 
 std::unique_ptr<scraper_impl::SceneScraper> CharaDetailSceneScraper::makeTabScraper(
@@ -1647,6 +1803,15 @@ std::optional<int> CharaDetailSceneScraper::factorHeaderTopY(const Frame &frame)
     return std::nullopt;
 }
 
+double CharaDetailSceneScraper::factorChangeRatio(
+    const Frame &current_area, const Frame &reference_area, const Rect<double> &diff_rect) {
+    return current_area.diffStats(reference_area, diff_rect, kFactorChangePixelDiffThreshold).ratio();
+}
+
+bool CharaDetailSceneScraper::isFactorChanged(double ratio) {
+    return ratio >= kFactorChangeRatioThreshold;
+}
+
 void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, record::RecordType record_type) {
     if (factor_probe_reference.empty() || active_common == nullptr) {
         factor_change_pending_since = std::nullopt;
@@ -1688,8 +1853,8 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(const Frame &frame, recor
     const auto reference_area = factor_probe_reference.copy(active_common->scroll_area_rect);
     const auto current_area = frame.copy(active_common->scroll_area_rect);
     const auto &diff_rect = active_common->scroll_area_stationary_rect;
-    const double ratio = current_area.diffStats(reference_area, diff_rect, kFactorChangePixelDiffThreshold).ratio();
-    if (ratio < kFactorChangeRatioThreshold) {
+    const double ratio = factorChangeRatio(current_area, reference_area, diff_rect);
+    if (!isFactorChanged(ratio)) {
         factor_change_pending_since = std::nullopt;  // Same character still shown (only render noise).
         return;
     }
