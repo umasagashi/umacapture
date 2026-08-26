@@ -4,7 +4,7 @@
 # Usage (Git Bash):
 #   bash native/wasm/build.sh
 #
-# Emits, into $BUILD_DIR (default C:/Projects/wasm-poc/app-build):
+# Emits, into $BUILD_DIR (default C:/Projects/umacapture-wasm-toolchain/app-build):
 #   umacapture_core.js    (ES6 module, MODULARIZE factory)
 #   umacapture_core.wasm
 #   umacapture_core.worker.js / .ww.js  (pthread worker glue, if the toolchain emits it)
@@ -14,9 +14,9 @@
 set -euo pipefail
 
 # --- Locations ---------------------------------------------------------------
-EMSDK_DIR="${EMSDK_DIR:-C:/Projects/wasm-poc/emsdk}"
-OPENCV_DIR="${OPENCV_DIR:-C:/Projects/wasm-poc/opencv-install}"
-BUILD_DIR="${BUILD_DIR:-C:/Projects/wasm-poc/app-build}"
+EMSDK_DIR="${EMSDK_DIR:-C:/Projects/umacapture-wasm-toolchain/emsdk}"
+OPENCV_DIR="${OPENCV_DIR:-C:/Projects/umacapture-wasm-toolchain/opencv-install}"
+BUILD_DIR="${BUILD_DIR:-C:/Projects/umacapture-wasm-toolchain/app-build}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NATIVE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"

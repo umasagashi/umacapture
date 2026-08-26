@@ -8,7 +8,7 @@ import { decodeClipIntoPipeline, IMPORT_UNBRAKED, probeClipTimeline, grabClipFra
 // Runs the umacapture recognition pipeline (scene context -> scraper -> stitcher -> recognizer) off the
 // Flutter main thread, with onnxruntime-web supplying inference over a shared-memory control block. It is a
 // hand-written source (tracked in git), a port of the Stage-4 PoC harness worker
-// (C:/Projects/wasm-poc/harness/worker.js) adapted to the design protocol in
+// (C:/Projects/umacapture-wasm-toolchain/harness/worker.js) adapted to the design protocol in
 // .notes/analysis/wasm_poc6/design.md (§2). The heavy build outputs it loads (umacapture_core.js/.wasm and the
 // onnxruntime-web runtime) are git-ignored under web/wasm/ and produced/vendored locally.
 //
