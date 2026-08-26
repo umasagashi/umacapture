@@ -244,13 +244,41 @@ Future<void> _settleForFrame(WidgetTester tester, int mediaTsMs) => settleUntil(
 /// Lets the real file writes and the PNG decode the widget issues actually run, for the cases that
 /// assert what did *not* happen (an in-flight grab that must not publish, a refusal that publishes
 /// nothing) or that sample the intermediate frames one by one. Those have no arrival to poll for, so
-/// the window has to be a window. It cannot produce a false failure under load — only a weaker
-/// negative — which is why it is left as is while the arrivals above are not.
+/// the window has to be a window, and for a plain negative a slow host can only weaken it.
+///
+/// **That does not extend to an assertion made per sampled frame.** If the frames that could break
+/// the invariant all lie past the end of the window, a slow host does not weaken the check, it
+/// deletes it — and a check with nothing left to look at is green. A case that samples *towards* an
+/// arrival therefore has to keep sampling until the arrival; [_recordUntil] is that.
 Future<void> _settleIo(WidgetTester tester, {int frames = 8}) async {
   for (var i = 0; i < frames; i++) {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
     await tester.pump();
   }
+}
+
+/// Keeps sampling into [out], one entry per pumped frame, until [ready] holds.
+///
+/// This is what makes a trace *provably* span an arrival instead of hoping the arrival fitted inside
+/// a window. It neither replaces nor shortens a window: the caller's [_settleIo] window runs first
+/// and is the measurement; this carries the same sampling on to the arrival the window was silently
+/// relying on.
+///
+/// The sample is taken inside the predicate because [settleUntil] evaluates it exactly once per
+/// pumped frame, so the appended entries are the frames it pumped and the trace has no gap in it.
+/// Delegating the loop keeps `support/settling.dart` the one place a wall-clock bound and its expiry
+/// message are spelled out. Same helper, same shape as the sibling file's
+/// `report_import_preview_flicker_test.dart`.
+Future<void> _recordUntil(
+  WidgetTester tester,
+  List<(double?, String?)> out,
+  bool Function() ready, {
+  required String describe,
+}) {
+  return settleUntil(tester, () {
+    out.add((_previewHeight(tester), _caption(tester)));
+    return ready();
+  }, describe: describe);
 }
 
 /// Opens the dialog on [clip] and waits for [awaiting], which defaults to its first frame being
@@ -672,6 +700,27 @@ void main() {
       trace.add((_previewHeight(tester), _caption(tester)));
     }
 
+    // THE ARRIVAL, sampled rather than merely waited for. The ten frames above stay a fixed window
+    // -- they are the measurement of the intermediate frames -- and this carries the same sampling
+    // on until the stepped-to frame is actually published.
+    //
+    // The note that used to stand here said a slow host "can only weaken" the two assertions below.
+    // That is true of the first, a plain negative, and false of the second, which is the one this
+    // case exists for. A frame whose image and caption disagree can only occur after the new caption
+    // has been published and before its pixels are on screen -- that interval IS the defect, and
+    // stretching it out is precisely what the rejected `gaplessPlayback` fix would do. On a host too
+    // slow to publish within the ten frames, the whole interval falls outside the trace, the loop
+    // below then walks a trace in which the old frame sits under the old caption throughout, and it
+    // agrees with every entry. The host does not make the invariant weaker; it removes every frame
+    // that could break it and the case reports success having inspected nothing. Measured, with the
+    // arrival waited for outside the trace: a one-frame lag between caption and pixels passed.
+    await _recordUntil(
+      tester,
+      trace,
+      () => _caption(tester) == _captionFor(83),
+      describe: 'the 83 ms frame to be decoded and previewed',
+    );
+
     expect(trace.where((e) => e.$1 == 0.0), isEmpty, reason: 'NO FLICKER: the preview never renders without an image');
     for (final sample in trace) {
       final caption = sample.$2;
@@ -679,12 +728,7 @@ void main() {
       final expected = caption == _captionFor(50) ? clip.heights[50] : clip.heights[83];
       expect(sample.$1, expected?.toDouble(), reason: 'THE IMAGE AND ITS CAPTION NEVER DISAGREE: $sample');
     }
-    // THE ARRIVAL, waited for rather than required to have happened within the trace. The trace
-    // above is a fixed window on purpose -- it samples the intermediate frames, and its two
-    // assertions are a negative and a per-sample invariant that a slow host can only weaken. "The
-    // step landed" is the opposite kind of claim, and a fixed window makes it a bet on how much
-    // spare CPU the host has: `settleUntil` is what this file reserves for exactly that.
-    await _settleForFrame(tester, 83);
+    expect(trace.last.$2, _captionFor(83), reason: 'THE TRACE COVERS THE STEP: it ends after the new frame');
     expect(_caption(tester), _captionFor(83), reason: 'and the step did land');
   });
 
