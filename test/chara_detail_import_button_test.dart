@@ -406,12 +406,19 @@ void main() {
       // import to start at all (a run that never starts is the defect), then for it to finish.
       // Reading the record directory instead would be wrong -- it appears mid-transaction, before
       // the publish is verified.
+      // Sampled before each wait, and latched on the toast as well as the spinner. The spinner is a
+      // transient -- raised when the picker answers, dropped in the import's `finally`, ~50 ms apart
+      // for a one-record zip -- so a loop that waited before its first look could arrive after it had
+      // gone out again and conclude the import never ran. That window does not widen on a slow
+      // machine (it is `dart:io` completion time, off the main isolate) while the poll's turnaround
+      // does, so a contended runner samples it less often, not more. A toast that has landed stays
+      // landed, so unlike the spinner it cannot be sampled away.
       for (var i = 0; i < 400; i++) {
+        final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+        started |= spinning || toasts.isNotEmpty;
+        if (started && !spinning) break;
         await Future<void>.delayed(const Duration(milliseconds: 5));
         await tester.pump();
-        final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
-        started |= spinning;
-        if (started && !spinning) break;
       }
     });
     await tester.pump();
