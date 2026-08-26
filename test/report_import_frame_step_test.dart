@@ -700,7 +700,13 @@ void main() {
       final expected = caption == _captionFor(50) ? clip.heights[50] : clip.heights[83];
       expect(sample.$1, expected?.toDouble(), reason: 'THE IMAGE AND ITS CAPTION NEVER DISAGREE: $sample');
     }
-    expect(trace.last.$2, _captionFor(83), reason: 'and the step did land');
+    // THE ARRIVAL, waited for rather than required to have happened within the trace. The trace
+    // above is a fixed window on purpose -- it samples the intermediate frames, and its two
+    // assertions are a negative and a per-sample invariant that a slow host can only weaken. "The
+    // step landed" is the opposite kind of claim, and a fixed window makes it a bet on how much
+    // spare CPU the host has: `_settleFor` is what this file reserves for exactly that.
+    await _settleForFrame(tester, 83);
+    expect(_caption(tester), _captionFor(83), reason: 'and the step did land');
   });
 
   testWidgets(

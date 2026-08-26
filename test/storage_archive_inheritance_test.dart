@@ -21,6 +21,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
 import 'support/records.dart';
+import 'support/settling.dart';
 
 void main() {
   setUpAll(initializeMappers);
@@ -52,12 +53,18 @@ void main() {
   // resolveAllInheritance is fire-and-forget on every platform: it publishes the
   // in-flight flag synchronously and clears it when the run completes, so that
   // flag is what a test waits on.
-  Future<void> settleInheritanceResolution(ProviderContainer container) async {
-    for (var i = 0; i < 200 && container.read(inheritanceResolutionRunningProvider); i++) {
-      await Future<void>.delayed(Duration.zero);
-    }
-    expect(container.read(inheritanceResolutionRunningProvider), isFalse, reason: 'resolution never finished');
-  }
+  //
+  // Bounded by the wall clock rather than by a count of event-loop turns. A turn count reads like a
+  // budget proportional to the awaited chain, but 200 rounds of `Future.delayed(Duration.zero)` are
+  // worth about a millisecond of real time, while the run they wait for writes record.json back for
+  // every changed record through `dart:io` — work that does not happen on the main isolate and that
+  // takes longer on a contended host. The loop then ran out with the flag still set. Polling to a
+  // deadline instead makes a slow host slower rather than red, and names the condition when it
+  // genuinely never clears.
+  Future<void> settleInheritanceResolution(ProviderContainer container) => waitUntil(
+    () => !container.read(inheritanceResolutionRunningProvider),
+    describe: 'the inheritance resolution to finish',
+  );
 
   ProviderContainer makeContainer(DirectoryPath root) {
     return ProviderContainer(

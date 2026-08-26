@@ -37,6 +37,7 @@ import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 const _import = 'pages.chara_detail.report_import.dialog';
 const _screen = 'pages.chara_detail.report_screen.dialog';
@@ -122,6 +123,12 @@ Future<void> _pumpApp(WidgetTester tester, ProviderContainer container) {
 }
 
 /// Lets the real (non-fake-async) file I/O and image decode actually run.
+///
+/// Every use of this that precedes an assertion about a state Send is ALREADY in -- a dialog that
+/// has just opened, a clip whose grab refuses, a screenshot that failed -- is sound as a fixed
+/// window: `_sendDisabled` starts true and those cases require it to have stayed true, so a slow
+/// host can only weaken the negative. The one place a frame has to have ARRIVED (the positive
+/// control at the end of the first case) follows this with [settleUntil] instead; see there.
 Future<void> _settleIo(WidgetTester tester) async {
   for (var i = 0; i < 8; i++) {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
@@ -258,6 +265,15 @@ void main() {
     await tester.pump();
     await tester.tap(find.text(appSentenceAt('$_import.pick_button.label')));
     await _settleIo(tester);
+    // The only ARRIVAL in this file: Send is offered by the `setState` that follows
+    // `RecordImage.preload`, i.e. a real file read and a PNG decode off the main isolate, which no
+    // number of milliseconds spent above bounds. The window stays as the floor -- a poll that can
+    // be satisfied sooner would bring the hover forward, which is a behaviour change and not a fix.
+    await settleUntil(
+      tester,
+      () => !_sendDisabled(tester),
+      describe: 'the first frame to be decoded and previewed, so Send is offered',
+    );
     expect(_sendDisabled(tester), isFalse, reason: 'the first frame landed');
     await _hover(tester, mouse, _sendGate());
     expect(find.text(offered), findsOneWidget, reason: 'the inner Tooltip is reachable again once Send is offered');

@@ -30,6 +30,7 @@ import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 late Directory _tempDir;
 late List<ImportErrorReport> _submitted;
@@ -116,6 +117,12 @@ Future<void> _pumpApp(WidgetTester tester, ProviderContainer container, {double 
   );
 }
 
+/// Lets the real (non-fake-async) file write and PNG decode a grab issues actually run.
+///
+/// Kept as a fixed window *and* followed by [settleUntil] below rather than replaced by it: the
+/// window is also what lets the dialog quiesce after the pick, and a poll that can be satisfied
+/// sooner would move every step after it earlier, which is a behaviour change and not a fix. So
+/// this stays the floor and the poll is the ceiling -- nothing here gets less time than it had.
 Future<void> _settleIo(WidgetTester tester) async {
   for (var i = 0; i < 8; i++) {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
@@ -123,6 +130,14 @@ Future<void> _settleIo(WidgetTester tester) async {
   }
 }
 
+/// Opens the dialog on a fake clip and waits until its first frame is on screen.
+///
+/// The layout cases below measure the rectangle of [_reading], which the dialog publishes only in
+/// the `setState` that follows `RecordImage.preload` -- a real file read plus a PNG decode, neither
+/// of which runs on the main isolate and neither of which is bounded by any number of milliseconds
+/// spent in [_settleIo]. Every grab writes a fresh destination path, so nothing is served from the
+/// image cache and each of the sweep's fifty opens pays for its own decode. Waiting for the reading
+/// to exist states what the case is actually waiting for, so a slow host makes it slower, not red.
 Future<void> _openWithClip(WidgetTester tester, ProviderContainer container) async {
   final clip = _FakeClip();
   container
@@ -139,6 +154,11 @@ Future<void> _openWithClip(WidgetTester tester, ProviderContainer container) asy
   await tester.pump();
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
   await _settleIo(tester);
+  await settleUntil(
+    tester,
+    () => _reading().evaluate().isNotEmpty,
+    describe: "the clip's first frame to be decoded and its time to be printed",
+  );
 }
 
 Finder _slider() => find.byKey(const ValueKey("report_import_time_slider"));
