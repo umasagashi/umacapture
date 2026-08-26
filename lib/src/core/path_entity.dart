@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_mappable/dart_mappable.dart';
@@ -10,6 +11,15 @@ import '/const.dart';
 import '/src/core/fs/fs_backend.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
+
+/// How long a refused delete waits before the next attempt.
+///
+/// This is a **wall-clock** quantity, not a scheduling one: what it waits for is
+/// whoever still holds the file -- an engine image decode, an indexer, a virus
+/// scanner, another process -- to let go, and that release happens in operating
+/// system time whatever any Dart code believes the time to be. Both retry loops
+/// below spend it, and both have to spend it on a clock that measures the world.
+const _deleteRetryBackoff = Duration(milliseconds: 100);
 
 class PathEntity {
   static p.Context context = p.Context();
@@ -66,7 +76,12 @@ class PathEntity {
         if (++attempts >= 3) {
           rethrow; // Exit the loop on failure.
         }
-        sleep(const Duration(milliseconds: 100));
+        // No zone treatment needed here, and that is not an omission: `sleep`
+        // blocks the OS thread, so it is real time by construction. There is no
+        // zone hook it could be routed through and no clock a zone could
+        // substitute -- the wall-clock guarantee [delete] has to ask for
+        // explicitly (see the `Zone.root` note there) this one gets for free.
+        sleep(_deleteRetryBackoff);
       }
     }
   }
@@ -90,7 +105,21 @@ class PathEntity {
         if (++attempts >= 3) {
           rethrow;
         }
-        await Future.delayed(const Duration(milliseconds: 100));
+        // The backoff timer is created on the ROOT zone, never the ambient one.
+        // This wait is the real time an operating-system lock needs to be
+        // released, and a zone-installed clock does not model the OS: whatever
+        // an intervening zone decides the time is, the file goes on being held
+        // or released in wall-clock time regardless, so this wait must not be
+        // captured by such a clock. Concretely, under `testWidgets` the ambient
+        // clock is fake and only advances when the test pumps a *duration* --
+        // the repository's own wait helpers (`test/support/settling.dart`) pump
+        // without one -- so a delay created there never fires, and a delete that
+        // was refused once would never complete for the rest of the test.
+        //
+        // Only the timer leaves the zone. `await` resumes where it was written,
+        // so the retry below, the rethrow, and any error either raises stay in
+        // the caller's zone and remain visible to whatever instruments it.
+        await Zone.root.run(() => Future<void>.delayed(_deleteRetryBackoff));
       }
     }
   }

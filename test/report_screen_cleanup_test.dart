@@ -466,6 +466,14 @@ void main() {
     // is asked, and Send goes offerable before the preview's own decode has released the file, so
     // replacing the window with the poll would tap EARLIER than before. The window keeps the slack it
     // always had; the poll only ever extends it.
+    //
+    // What the window is no longer doing is standing in for a missing fact. Until `PathEntity.delete`
+    // said so, a delete that hit the Windows sharing violation this ordering is about retried behind a
+    // `Future.delayed` created in the fake-async zone a widget test runs in -- a clock the polls above
+    // never advance -- so a refused delete did not land late, it never landed at all, and the only
+    // thing keeping that off the suite was this window making the collision unlikely. The backoff is
+    // taken from the root zone now, and carries the reason there. So a refused delete lands late and a
+    // poll can outlast it; the window stays for the ordering reason stated above, not as the defence.
     await _settleIo(tester);
     await settleUntil(
       tester,
