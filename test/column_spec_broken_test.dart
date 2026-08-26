@@ -6,7 +6,6 @@
 // kept as a BrokenPlaceholderSpec that round-trips verbatim.
 // Run: .fvm/flutter_sdk/bin/flutter test test/column_spec_broken_test.dart
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +16,8 @@ import 'package:umacapture/src/chara_detail/spec/loader.dart';
 import 'package:umacapture/src/chara_detail/spec/logic.dart';
 import 'package:umacapture/src/chara_detail/spec/script.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
+
+import 'support/hive.dart';
 
 Map<String, dynamic> completeFactorMap(String id) => <String, dynamic>{
   'type': 'FactorColumnSpec',
@@ -78,11 +79,14 @@ List<dynamic> storedSpecs() {
 }
 
 void main() {
+  late Future<void> Function() closeHive;
+
   setUpAll(() async {
-    Hive.init(Directory.systemTemp.createTempSync('umacapture_broken_test').path);
     initializeMappers();
-    await Hive.openBox('column_spec');
+    closeHive = await initHiveForTest(['column_spec']);
   });
+
+  tearDownAll(() => closeHive());
 
   setUp(() async {
     await Hive.box('column_spec').clear();

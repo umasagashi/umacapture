@@ -28,8 +28,8 @@ import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/keyboard_activation.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
@@ -226,11 +226,14 @@ Future<void> _moveSlider(WidgetTester tester, double fraction) async {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Future<void> Function() closeHive;
+
   setUpAll(loadAppTranslations);
   // The ready branch calls getSentryReportCount(), which reads the settings box.
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_import_hive').path),
-  );
+  setUpAll(() async {
+    closeHive = await openStorageBoxForTest();
+  });
+  tearDownAll(() => closeHive());
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_import_report_test');

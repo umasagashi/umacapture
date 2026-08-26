@@ -34,8 +34,8 @@ import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/report_screen_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
 
@@ -186,12 +186,15 @@ String _sharedSuffix(String a, String b) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Future<void> Function() closeHive;
+
   setUpAll(loadAppTranslations);
   // Both ready branches call getSentryReportCount(), which reads the settings box; Hive throws if it
   // was never opened. Pointed at a scratch directory so the run cannot touch real preferences.
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_send_reason_hive').path),
-  );
+  setUpAll(() async {
+    closeHive = await openStorageBoxForTest();
+  });
+  tearDownAll(() => closeHive());
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_send_reason_test');

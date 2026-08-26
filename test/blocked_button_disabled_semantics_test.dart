@@ -37,8 +37,8 @@ import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/regenerate_record_dialog.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
@@ -128,10 +128,13 @@ ProviderContainer _container({CharaDetailRecordStorage Function()? storage}) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Future<void> Function() closeHive;
+
   setUpAll(loadAppTranslations);
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_blocked_btn_hive').path),
-  );
+  setUpAll(() async {
+    closeHive = await openStorageBoxForTest();
+  });
+  tearDownAll(() => closeHive());
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_blocked_button_test');

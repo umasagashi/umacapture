@@ -3,8 +3,6 @@
 // thin currentColumnSpecsProvider and survive a fresh ProviderContainer (i.e.
 // the rebuild()/entry.push() round-trips through storage).
 // Run: .fvm/flutter_sdk/bin/flutter test test/column_spec_selection_test.dart
-import 'dart:io';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
@@ -15,14 +13,19 @@ import 'package:umacapture/src/chara_detail/spec/parser.dart';
 import 'package:umacapture/src/chara_detail/spec/ranged_integer.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 
+import 'support/hive.dart';
+
 void main() {
+  late Future<void> Function() closeHive;
+
   setUpAll(() async {
+    initializeMappers();
     // The column_spec box stores a plain JSON string, so no Hive type adapters
     // are required; an in-memory temp dir is enough.
-    Hive.init(Directory.systemTemp.createTempSync('umacapture_cs_test').path);
-    initializeMappers();
-    await Hive.openBox('column_spec');
+    closeHive = await initHiveForTest(['column_spec']);
   });
+
+  tearDownAll(() => closeHive());
 
   setUp(() async {
     await Hive.box('column_spec').clear();

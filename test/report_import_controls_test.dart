@@ -27,8 +27,8 @@ import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
 
@@ -267,10 +267,13 @@ void _expectOnlyFooterOverflow(WidgetTester tester, String at) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Future<void> Function() closeHive;
+
   setUpAll(loadAppTranslations);
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_controls_hive').path),
-  );
+  setUpAll(() async {
+    closeHive = await openStorageBoxForTest();
+  });
+  tearDownAll(() => closeHive());
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_import_controls_test');

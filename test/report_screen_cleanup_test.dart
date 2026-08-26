@@ -26,8 +26,8 @@ import 'package:umacapture/src/gui/chara_detail/report_common.dart';
 import 'package:umacapture/src/gui/chara_detail/report_screen_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/record_image.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/keyboard_activation.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
@@ -166,12 +166,15 @@ Future<void> _hover(WidgetTester tester, TestGesture gesture, Finder finder) asy
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Future<void> Function() closeHive;
+
   setUpAll(loadAppTranslations);
   // The ready branch calls getSentryReportCount(), which reads the settings box; Hive throws if it was
   // never opened. Pointed at a scratch directory so the run cannot touch real preferences.
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_report_hive').path),
-  );
+  setUpAll(() async {
+    closeHive = await openStorageBoxForTest();
+  });
+  tearDownAll(() => closeHive());
 
   setUp(() => _tempDir = Directory.systemTemp.createTempSync('umacapture_screenshot_test'));
   tearDown(() => _tempDir.deleteSync(recursive: true));

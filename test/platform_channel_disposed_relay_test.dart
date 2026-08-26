@@ -52,8 +52,8 @@ import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/chara_detail/report_screen_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/records.dart';
 import 'support/settling.dart';
@@ -163,18 +163,20 @@ FilePath Function(RefBase ref) _requestFor(FilePath path) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late Future<void> Function() closeHive;
+
   setUpAll(() async {
     initializeMappers();
     loadAppTranslations();
     // The dialog's ready() branch reads the settings box, and so does the controller's storage.
-    await StorageBox.ensureOpened(
-      directory: Directory.systemTemp.createTempSync('umacapture_disposed_relay_hive').path,
-    );
+    closeHive = await openStorageBoxForTest();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       PlatformChannel.channel,
       (call) async => null,
     );
   });
+
+  tearDownAll(() => closeHive());
 
   setUp(() {
     _tempRoot = Directory.systemTemp.createTempSync('umacapture_disposed_relay');

@@ -42,8 +42,8 @@ import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/record_image.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
 
@@ -243,10 +243,13 @@ Future<void> _pumpBareImage(WidgetTester tester, String path, {bool gapless = fa
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  late Future<void> Function() closeHive;
+
   setUpAll(loadAppTranslations);
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_h1_flicker_hive').path),
-  );
+  setUpAll(() async {
+    closeHive = await openStorageBoxForTest();
+  });
+  tearDownAll(() => closeHive());
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_h1_flicker');
