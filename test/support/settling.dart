@@ -21,9 +21,22 @@
 // issued but not awaited), it is an arrival like any other and belongs here.
 import 'package:flutter_test/flutter_test.dart';
 
-/// The default hang detector. Long enough that no contended runner reaches it, short enough that a
-/// genuinely stuck condition still reports rather than sitting until the suite-level timeout.
-const _defaultTimeout = Duration(seconds: 30);
+/// The default hang detector. Long enough that no contended runner reaches it, and — the part that
+/// is derived rather than chosen — strictly below the tightest timeout that surrounds a call site.
+///
+/// It has to be below, because the surrounding clock starts first and wins ties: if it fires first
+/// this helper never gets to name its condition, and the run reports the framework's generic
+/// "Test timed out" plus whatever the still-running loop throws once tear-down has torn the world
+/// down. That is not hypothetical — this was 30s, which is exactly `package:test`'s default per-test
+/// timeout for a plain `test()`, so for those the `fail()` below was unreachable by construction.
+/// (`testWidgets` was never affected: `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` is
+/// 10 minutes.) 20s clears the 30s bound with room to spare and still works under the 10-minute one.
+///
+/// The margin is consumed by whatever the test did *before* reaching the helper, so it depends on
+/// the call site, not on this constant. A file whose setup eats into it should raise its own bound
+/// with `@Timeout(...)` — do not raise this number, which would put it back within reach of the
+/// surrounding clock for every other site.
+const _defaultTimeout = Duration(seconds: 20);
 
 /// Pumps until [ready] holds, letting the real (non-fake-async) file I/O and image decodes the
 /// widget under test issues actually run in between.

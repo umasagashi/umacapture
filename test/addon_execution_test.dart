@@ -24,6 +24,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 
 void main() {
   setUpAll(initializeMappers);
@@ -336,10 +337,13 @@ void main() {
       );
 
       controller.run(task, const {"event": "manual"});
-      // The run completes asynchronously; wait for it to leave the active list.
-      while (container.read(addonExecutionControllerProvider).active.isNotEmpty) {
-        await Future<void>.delayed(const Duration(milliseconds: 20));
-      }
+      // The run completes asynchronously; wait for it to leave the active list. The active entry is
+      // dropped in the same state assignment that appends and persists the history row, so observing
+      // the empty list is enough — there is nothing left to settle behind it.
+      await waitUntil(
+        () => container.read(addonExecutionControllerProvider).active.isEmpty,
+        describe: 'the refused webhook run to leave the active list',
+      );
 
       final history = container.read(addonExecutionControllerProvider).history;
       expect(history, hasLength(1));
