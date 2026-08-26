@@ -41,6 +41,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
 import 'support/records.dart';
+import 'support/settling.dart';
 
 const _common = 'pages.chara_detail.report_common.dialog';
 const _regenerate = 'pages.chara_detail.regenerate_record.dialog';
@@ -125,14 +126,6 @@ ProviderContainer _container({CharaDetailRecordStorage Function()? storage}) {
   );
 }
 
-/// Lets the real file I/O and image decode behind the report preview actually run.
-Future<void> _settleIo(WidgetTester tester) async {
-  for (var i = 0; i < 8; i++) {
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
-    await tester.pump();
-  }
-}
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadAppTranslations);
@@ -191,7 +184,14 @@ void main() {
 
     // Offered: a clip was chosen and a frame landed.
     await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
-    await _settleIo(tester);
+    // Send is offered only once `_startGrab` has awaited `RecordImage.preload` -- a real file read
+    // plus a PNG decode, neither of which runs on this isolate. Waiting for the announcement itself
+    // rather than for a fixed number of milliseconds is what keeps a busy host slow instead of red.
+    await settleUntil(
+      tester,
+      () => _announced(tester, sendLabel).isEnabled,
+      describe: "the picked clip's first frame to be decoded, so Send is announced as enabled",
+    );
     final offered = _announced(tester, sendLabel);
     expect(offered.hasEnabledState, isTrue);
     expect(offered.isEnabled, isTrue, reason: 'a fix that never re-enables the button is not a fix');

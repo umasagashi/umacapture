@@ -32,6 +32,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/keyboard_activation.dart';
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 late Directory _tempDir;
 
@@ -139,7 +140,12 @@ Future<void> _pumpApp(WidgetTester tester, ProviderContainer container) {
   );
 }
 
-/// Lets the real (non-fake-async) file I/O the deletes and the image decode issue actually run.
+/// Lets the real (non-fake-async) file I/O the deletes and the image decode issue actually run, for
+/// the cases that assert what did *not* happen. Those have no arrival to poll for, so the window has
+/// to be a window, and a slow host can only weaken the negative rather than invert it. Everything
+/// that waits for something to ARRIVE uses [settleUntil] on that thing instead: `_startGrab` awaits
+/// `RecordImage.preload` (a file read plus a PNG decode) and the frame it replaces is removed by an
+/// `unawaited` `File.delete`, neither of which is bounded by any number of milliseconds spent here.
 Future<void> _settleIo(WidgetTester tester) async {
   for (var i = 0; i < 8; i++) {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
@@ -147,14 +153,48 @@ Future<void> _settleIo(WidgetTester tester) async {
   }
 }
 
+/// The frame-time line the dialog prints under the preview for a frame stamped [mediaTsMs].
+String _frameTimeLine(int mediaTsMs) => appSentenceAt(
+  'pages.chara_detail.report_import.dialog.frame_time',
+).replaceAll('{time}', formatClipTimestamp(mediaTsMs));
+
+/// Whether the frame on screen is the one produced by the most recent grab the fake clip served.
+/// This is the dialog's own "a frame landed" signal: the image and its caption are published in the
+/// same `setState`, after the preload.
+bool _latestFramePreviewed(WidgetTester tester) {
+  if (_grabbedTimes.isEmpty) {
+    return false;
+  }
+  final requested = _grabbedTimes.last;
+  return find.text(_frameTimeLine(requested < 37 ? requested : requested - 37)).evaluate().isNotEmpty;
+}
+
+/// Waits for the frame of the most recent grab to be decoded and previewed.
+Future<void> _settleForFrame(WidgetTester tester) => settleUntil(
+  tester,
+  () => _latestFramePreviewed(tester),
+  describe: 'the frame just grabbed to be decoded and previewed',
+);
+
+/// The sentence a refused clip shows instead of a preview, as a condition to wait for.
+bool Function() _refusalShown(String key) =>
+    () => find.text(appSentenceAt('pages.chara_detail.report_import.dialog.$key')).evaluate().isNotEmpty;
+
 /// Opens the dialog and walks it to the state a user reaches by choosing a clip: probed, with the
-/// first frame previewed.
-Future<void> _openWithClip(WidgetTester tester, ProviderContainer container, {ReportImportDialog? dialog}) async {
+/// first frame previewed. A case whose clip deliberately previews nothing -- no timeline, no
+/// duration, a probe that threw -- states what it is waiting for instead.
+Future<void> _openWithClip(
+  WidgetTester tester,
+  ProviderContainer container, {
+  ReportImportDialog? dialog,
+  bool Function()? awaiting,
+  String describe = "the clip's first frame to be decoded and previewed",
+}) async {
   container.read(dialogBuilderProvider.notifier).show((_) => dialog ?? _dialog());
   await tester.pump(); // Mounts.
   await tester.pump(); // The resolved quota moves the FutureBuilder off loading().
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
-  await _settleIo(tester);
+  await settleUntil(tester, awaiting ?? () => _latestFramePreviewed(tester), describe: describe);
 }
 
 Finder _slider() => find.byKey(const ValueKey("report_import_time_slider"));
@@ -173,7 +213,7 @@ bool _sendDisabled(WidgetTester tester) => tester.widget<Disabled>(_sendGate()).
 
 Future<void> _tapSend(WidgetTester tester) async {
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_common.dialog.ok_button.label')));
-  await _settleIo(tester);
+  await settleUntil(tester, () => _submitted.isNotEmpty, describe: 'the tapped Send to hand a report to the caller');
 }
 
 /// Moves the slider to [fraction] of its track without any dragging animation, so a case can be
@@ -210,7 +250,7 @@ void main() {
     expect(find.byType(Slider), findsOneWidget, reason: 'a probed clip is scrubbable');
     await _moveSlider(tester, 0.5);
     await tester.pump(const Duration(milliseconds: 300)); // Past the debounce.
-    await _settleIo(tester);
+    await _settleForFrame(tester);
 
     await tester.enterText(find.byType(TextFormField), 'この場面で止まりました');
     await tester.pump();
@@ -233,7 +273,7 @@ void main() {
     await _openWithClip(tester, container);
     await _moveSlider(tester, 0.5);
     await tester.pump(const Duration(milliseconds: 300));
-    await _settleIo(tester);
+    await _settleForFrame(tester);
 
     final requested = _grabbedTimes.last;
     // Read out of `ja.json` as a literal and interpolated here, NOT through `.tr()`. An unresolved
@@ -241,9 +281,7 @@ void main() {
     // through a key that has been deleted or renamed — the echo trap this topic has measured three
     // times. `appSentenceAt` throws on a missing key, and a Japanese sentence is something a raw key
     // can never equal.
-    final line = appSentenceAt(
-      'pages.chara_detail.report_import.dialog.frame_time',
-    ).replaceAll('{time}', formatClipTimestamp(requested - 37));
+    final line = _frameTimeLine(requested - 37);
     expect(line, isNot(contains('{time}')), reason: 'the placeholder this line is asserted through must exist');
     expect(find.text(line), findsOneWidget, reason: 'the line under the preview states the frame\'s own timestamp');
     await _tapSend(tester);
@@ -279,7 +317,7 @@ void main() {
     expect(_grabbedTimes, hasLength(1), reason: 'nothing may be grabbed while the selector is still moving');
 
     await tester.pump(const Duration(milliseconds: 300));
-    await _settleIo(tester);
+    await _settleForFrame(tester);
     expect(_grabbedTimes, hasLength(2), reason: 'exactly one grab for the position it was left on');
   });
 
@@ -303,6 +341,8 @@ void main() {
           ),
         ),
       ),
+      awaiting: _refusalShown('no_timeline'),
+      describe: 'the clip to be refused for having no media timeline',
     );
 
     expect(find.byType(Slider), findsNothing);
@@ -329,6 +369,8 @@ void main() {
           ),
         ),
       ),
+      awaiting: _refusalShown('no_duration'),
+      describe: 'the clip to be refused for having no stated duration',
     );
 
     expect(find.byType(Slider), findsNothing);
@@ -346,6 +388,8 @@ void main() {
       tester,
       container,
       dialog: _dialog(clip: _FakeClip(probeFailure: 'probe game_capture.mkv: unsupported codec')),
+      awaiting: _refusalShown('open_error'),
+      describe: 'the producer refusal to be reported',
     );
 
     expect(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.open_error')), findsOneWidget);
@@ -365,7 +409,11 @@ void main() {
 
     await _moveSlider(tester, 0.5);
     await tester.pump(const Duration(milliseconds: 300));
-    await _settleIo(tester);
+    await settleUntil(
+      tester,
+      () => find.text('grab game_capture.mkv: the seek ladder ran out').evaluate().isNotEmpty,
+      describe: 'the failed second grab to report its reason',
+    );
 
     expect(find.text('grab game_capture.mkv: the seek ladder ran out'), findsOneWidget);
     expect(_sendDisabled(tester), isTrue, reason: 'there is no frame to send any more');
@@ -382,7 +430,13 @@ void main() {
 
     container.read(dialogBuilderProvider.notifier).dismiss();
     await tester.pump();
-    await _settleIo(tester);
+    // The delete dispose() issues is `unawaited`, so the absence is being RACED rather than already
+    // established -- the monotone-absence exemption does not apply and this has to be polled.
+    await settleUntil(
+      tester,
+      () => !File(png).existsSync(),
+      describe: "the abandoned frame to be deleted by the dialog's dispose",
+    );
     expect(File(png).existsSync(), isFalse);
   });
 
@@ -394,7 +448,14 @@ void main() {
 
     await _moveSlider(tester, 0.5);
     await tester.pump(const Duration(milliseconds: 300));
-    await _settleIo(tester);
+    // Two off-isolate steps have to land: the replacement's `RecordImage.preload`, and the
+    // `unawaited` delete of the frame it replaced. "Eventually exactly one file, and not the replaced
+    // one" is the claim; a fixed 80 ms window only ever tested it on a host with CPU to spare.
+    await settleUntil(
+      tester,
+      () => !File(first).existsSync() && Directory('${_tempDir.path}/temp').listSync().length == 1,
+      describe: 'the replaced frame to be deleted, leaving only its replacement',
+    );
 
     expect(File(first).existsSync(), isFalse, reason: 'the replaced frame is not left behind');
     expect(Directory('${_tempDir.path}/temp').listSync(), hasLength(1));
@@ -447,7 +508,7 @@ void main() {
 
     expect(pick, findsOneWidget, reason: 'a cancel must not consume the one way into the file dialog');
     await tester.tap(pick);
-    await _settleIo(tester);
+    await _settleForFrame(tester);
 
     expect(picks, 2, reason: 'the second press really did reach the picker');
     expect(_sendDisabled(tester), isFalse, reason: 'the clip chosen on the second press was previewed');
@@ -489,7 +550,7 @@ void main() {
     await _openWithClip(tester, container);
     expect(_sendDisabled(tester), isFalse);
     expect(await tabAndActivate(tester, _sendGate()), isTrue, reason: 'an offered Send is reachable by Tab');
-    await _settleIo(tester);
+    await settleUntil(tester, () => _submitted.isNotEmpty, describe: 'the Enter press to submit the report');
     expect(_submitted, hasLength(1), reason: 'Enter submits when Send is offered');
 
     // The subject: a clip that answers no timeline, so there is nothing to send.
@@ -508,6 +569,8 @@ void main() {
           ),
         ),
       ),
+      awaiting: _refusalShown('no_timeline'),
+      describe: 'the second clip to be refused for having no media timeline',
     );
     expect(_sendDisabled(tester), isTrue);
     expect(await tabAndActivate(tester, _sendGate()), isFalse, reason: 'a withdrawn Send must not take focus');

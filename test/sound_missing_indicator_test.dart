@@ -25,6 +25,7 @@ import 'package:umacapture/src/gui/settings.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart';
 
 import 'support/localization.dart';
+import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
 
 /// The app's own light palette plus the three theme extensions `app_widget.dart` registers, so the
@@ -47,10 +48,17 @@ Finder _pathTooltip(String contents) {
   return find.byWidgetPredicate((widget) => widget is Tooltip && (widget.message?.contains(contents) ?? false));
 }
 
-/// Lets the real filesystem answer the stat, then renders the frame that reflects it. Not
-/// `pumpAndSettle`: the settings rows carry continuous animations, so "no frame scheduled" never
-/// becomes true.
-Future<void> _settle(WidgetTester tester) async {
+/// Lets the real filesystem answer the stat, then renders the frame that reflects it -- waiting until
+/// [ready] describes what is on screen. Not `pumpAndSettle`: the settings rows carry continuous
+/// animations, so "no frame scheduled" never becomes true. Not a fixed window either: the stat goes
+/// through `PathEntity.exists`, a `dart:io` call on the thread pool, so how long it takes is a property
+/// of the host rather than of this test.
+Future<void> _settle(WidgetTester tester, bool Function() ready, {required String describe}) =>
+    settleUntil(tester, ready, describe: describe);
+
+/// One turn of the same real time, for the opening assertion: nothing has ever been flagged there, so
+/// there is no arrival to wait for.
+Future<void> _oneStatTurn(WidgetTester tester) async {
   await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
   await tester.pump();
 }
@@ -84,7 +92,7 @@ void main() {
         ),
       ),
     );
-    await _settle(tester);
+    await _oneStatTurn(tester);
 
     // The bundled default clips are not custom files, so nothing is stat-ed and nothing is flagged.
     expect(_missingIcons(), findsNothing);
@@ -92,14 +100,24 @@ void main() {
 
     // A custom clip that is gone: the row keeps showing the path, so it must say the file is absent.
     container.read(soundSettingProvider(SoundType.error).notifier).setCustomFile(evicted);
-    await _settle(tester);
+    await _settle(
+      tester,
+      () => _missingIcons().evaluate().isNotEmpty,
+      describe: 'the stat of the evicted clip to come back missing',
+    );
     expect(_missingIcons(), findsOneWidget);
     expect(_pathTooltip('ファイルが見つかりません'), findsOneWidget);
     expect(_pathTooltip('evicted.wav'), findsOneWidget);
 
     // Pointing the same row at a file that exists clears the warning through the re-stat listener.
+    // NOT an absence that can be waited out: the warning is on screen right now and the re-stat is what
+    // removes it, so a fixed window asserts before the removal instead of after it.
     container.read(soundSettingProvider(SoundType.error).notifier).setCustomFile(present.path);
-    await _settle(tester);
+    await _settle(
+      tester,
+      () => _missingIcons().evaluate().isEmpty,
+      describe: 'the re-stat of the present clip to clear the warning',
+    );
     expect(_missingIcons(), findsNothing);
     expect(_pathTooltip('present.wav'), findsOneWidget);
     expect(_pathTooltip('ファイルが見つかりません'), findsNothing);

@@ -23,6 +23,7 @@ import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 
 import 'support/hive.dart';
+import 'support/settling.dart';
 
 /// A controller that records the preview pushes instead of sending them to a platform.
 ///
@@ -69,8 +70,11 @@ Future<void> _sendPreviewFrame(Object? arguments) async {
   );
 }
 
-/// Waits for the preview sink's asynchronous upload to settle. The sink runs the decode unawaited, so a
-/// bounded number of microtask/event-loop turns is what the caller has to give it.
+/// Gives the preview sink's unawaited decode a bounded number of event-loop turns, for the case that
+/// asserts nothing was published. A window is the right shape there: it has no arrival to wait for, and
+/// a slow host can only make the negative weaker, never wrong. The case that DOES expect a frame waits
+/// on the frame with [waitUntil] instead -- the decode completes on the engine, off this isolate, so no
+/// number of turns here is a bound on it.
 Future<void> _settle() async {
   for (var i = 0; i < 8; i++) {
     await Future<void>.delayed(Duration.zero);
@@ -345,7 +349,10 @@ void main() {
       // Opaque white: alpha 255 is what makes the premultiplied bgra8888 format equal straight bytes.
       final bgra = Uint8List(width * height * 4)..fillRange(0, width * height * 4, 0xFF);
       await _sendPreviewFrame({'width': width, 'height': height, 'bytes': bgra});
-      await _settle();
+      await waitUntil(
+        () => container.read(capturePreviewFrameProvider).image != null,
+        describe: 'the pushed BGRA frame to be decoded and published to the tile',
+      );
 
       final image = container.read(capturePreviewFrameProvider).image;
       expect(image, isNotNull, reason: 'the raw frame must reach the tile with no decode step');

@@ -45,6 +45,7 @@ import 'package:umacapture/src/gui/record_image.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 late Directory _tempDir;
 late List<int> _grabbedTimes;
@@ -177,9 +178,17 @@ Future<List<_Sample>> _record(WidgetTester tester, int frames, {Set<String> Func
   return out;
 }
 
-Future<void> _settleIo(WidgetTester tester) async {
-  await _record(tester, 8);
-}
+/// Waits for the picked clip's first frame to be decoded and previewed.
+///
+/// NOT a fixed number of `_record` frames: `_startGrab` awaits `RecordImage.preload`, a real file read
+/// plus a PNG decode that does not run on this isolate, so no count of 5 ms turns bounds it. [_record]
+/// itself stays the fixed window it is -- it SAMPLES the intermediate frames, which is exactly what
+/// this file measures, and a window is the right shape for that.
+Future<void> _settleForFirstFrame(WidgetTester tester) => settleUntil(
+  tester,
+  () => _sample(tester).previewHeight != null,
+  describe: "the picked clip's first frame to be decoded and previewed",
+);
 
 Future<void> _openWithClip(WidgetTester tester, ProviderContainer container, {ClipFrameSource? clip}) async {
   final source = clip ?? _FakeClip();
@@ -196,7 +205,7 @@ Future<void> _openWithClip(WidgetTester tester, ProviderContainer container, {Cl
   await tester.pump();
   await tester.pump();
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
-  await _settleIo(tester);
+  await _settleForFirstFrame(tester);
 }
 
 Future<void> _pumpDialogHost(WidgetTester tester, ProviderContainer container) {
@@ -441,6 +450,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300)); // The debounce, in virtual time.
       trace.add(_sample(tester, captionsOf: captionsOf));
       trace.addAll(await _record(tester, 10, captionsOf: captionsOf));
+      // The sampling window above stays a window -- it is the measurement. What cannot be a window is
+      // "the grab landed at all": four sequential `RecordImage.preload`s are four real file reads and
+      // PNG decodes off this isolate, and the count assertions below need every one of them.
+      await settleUntil(
+        tester,
+        () => _sample(tester, captionsOf: captionsOf).caption == _captionFor(_mediaTsOf(_grabbedTimes.last)),
+        describe: 'the frame grabbed at fraction $fraction to be decoded and previewed',
+      );
     }
 
     expect(_grabbedTimes, hasLength(4), reason: 'the first frame plus one grab per slider move');

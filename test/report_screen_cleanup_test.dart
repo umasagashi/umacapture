@@ -30,6 +30,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/keyboard_activation.dart';
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 late Directory _tempDir;
 
@@ -80,7 +81,21 @@ FilePath _writeScreenshot(String name) {
   return path;
 }
 
-/// Lets the real (non-fake-async) file I/O the deletes issue actually run.
+/// Waits until the shot at [path] has actually been removed.
+///
+/// The delete is issued with `unawaited(deleteTransientScreenshot(...))`, so its absence is being
+/// RACED rather than already established: the monotone-absence exemption does not apply, and a fixed
+/// window is a bet on the host having spare CPU. The paired "must still exist" assertions stay
+/// one-shot AFTER this, which is what keeps them proving that the delete was selective.
+Future<void> _settleUntilGone(WidgetTester tester, FilePath path) => settleUntil(
+  tester,
+  () => !File(path.path).existsSync(),
+  describe: 'the transient screenshot ${path.path} to be deleted',
+);
+
+/// Lets the real (non-fake-async) file I/O the deletes issue actually run, for the steps that have no
+/// arrival to wait for -- a shot that must NOT be deleted, a dialog that must stay on screen. A fixed
+/// window can only weaken such a negative, never invert it.
 Future<void> _settleIo(WidgetTester tester) async {
   for (var i = 0; i < 8; i++) {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 10)));
@@ -190,7 +205,7 @@ void main() {
     await tester.pump();
     expect(find.byType(ReportScreenDialog), findsNothing);
 
-    await _settleIo(tester);
+    await _settleUntilGone(tester, path);
     expect(File(path.path).existsSync(), isFalse);
     expect(File(stale.path).existsSync(), isTrue);
   });
@@ -218,7 +233,7 @@ void main() {
 
     container.read(dialogBuilderProvider.notifier).dismiss();
     await tester.pump();
-    await _settleIo(tester);
+    await _settleUntilGone(tester, path);
     expect(File(path.path).existsSync(), isFalse);
   });
 
@@ -251,7 +266,7 @@ void main() {
     // The capture finally finishes, with the dialog long gone.
     _writeScreenshot('screenshot_4.png');
     container.read(latestScreenshotProvider.notifier).set(ScreenshotResult(path, ""));
-    await _settleIo(tester);
+    await _settleUntilGone(tester, path);
     expect(File(path.path).existsSync(), isFalse);
   });
 
@@ -316,7 +331,7 @@ void main() {
     // Only now does the abandoned attempt's capture finish.
     _writeScreenshot('screenshot_6a.png');
     container.read(latestScreenshotProvider.notifier).set(ScreenshotResult(abandoned, ""));
-    await _settleIo(tester);
+    await _settleUntilGone(tester, abandoned);
     expect(File(abandoned.path).existsSync(), isFalse);
     expect(File(current.path).existsSync(), isTrue);
   });
@@ -369,6 +384,11 @@ void main() {
     await _showReadyDialog(tester, container, current);
     container.read(latestScreenshotProvider.notifier).set(ScreenshotResult(current, ""));
     await _settleIo(tester);
+    await settleUntil(
+      tester,
+      () => _previewedPath(tester) == current.path,
+      describe: "this dialog's own shot to be previewed",
+    );
     expect(_previewedPath(tester), current.path, reason: 'its own shot is what it shows');
     expect(_sendDisabled(tester), isFalse);
 
@@ -439,10 +459,26 @@ void main() {
     // Its own shot finally lands, and sending that one is allowed.
     _writeScreenshot('screenshot_9b.png');
     container.read(latestScreenshotProvider.notifier).set(ScreenshotResult(current, ""));
+    // `_settleIo` first and the poll after it, deliberately: the poll may be satisfied the instant it
+    // is asked, and Send goes offerable before the preview's own decode has released the file, so
+    // replacing the window with the poll would tap EARLIER than before. The window keeps the slack it
+    // always had; the poll only ever extends it.
     await _settleIo(tester);
+    await settleUntil(
+      tester,
+      () => !_sendDisabled(tester),
+      describe: "this dialog's own shot to land, so Send is offered",
+    );
     expect(_sendDisabled(tester), isFalse);
     await tester.tap(find.byType(FilledButton));
+    // `captureScreen` is the next owner and releases the frame on every outcome, but the release runs
+    // behind an unawaited send, so both files disappearing is an arrival.
     await _settleIo(tester);
+    await settleUntil(
+      tester,
+      () => !File(current.path).existsSync() && !File(abandoned.path).existsSync(),
+      describe: 'both attempts to release their own shot after the send',
+    );
 
     expect(find.byType(ReportScreenDialog), findsNothing);
     // captureScreen is the next owner and deletes on every outcome; with no hub in tests it deletes
@@ -468,10 +504,20 @@ void main() {
     final landed = _writeScreenshot('screenshot_kbd_ok.png');
     await _showReadyDialog(tester, container, landed);
     container.read(latestScreenshotProvider.notifier).set(ScreenshotResult(landed, ""));
+    // `_settleIo` first and the poll after it, deliberately: the poll may be satisfied the instant it
+    // is asked, and Send goes offerable before the preview's own decode has released the file, so
+    // replacing the window with the poll would tap EARLIER than before. The window keeps the slack it
+    // always had; the poll only ever extends it.
     await _settleIo(tester);
+    await settleUntil(tester, () => !_sendDisabled(tester), describe: 'the landed shot to make Send offerable');
     expect(_sendDisabled(tester), isFalse);
     expect(await tabAndActivate(tester, find.byType(Disabled)), isTrue, reason: 'an offered Send takes Tab focus');
     await _settleIo(tester);
+    await settleUntil(
+      tester,
+      () => find.byType(ReportScreenDialog).evaluate().isEmpty,
+      describe: 'the Enter press to send the report and close the dialog',
+    );
     expect(find.byType(ReportScreenDialog), findsNothing, reason: 'Enter sends when Send is offered');
 
     // The subject: the capture failed, so the result carries a path but no file.
@@ -540,6 +586,7 @@ void main() {
     await _showReadyDialog(tester, container, landed);
     container.read(latestScreenshotProvider.notifier).set(ScreenshotResult(landed, ""));
     await _settleIo(tester);
+    await settleUntil(tester, () => !_sendDisabled(tester), describe: 'the landed shot to make Send offerable');
     expect(_sendDisabled(tester), isFalse);
     await _hover(tester, mouse, find.byType(Disabled));
     expect(find.text(offered), findsOneWidget, reason: 'the inner Tooltip is reachable again once it is offered');
