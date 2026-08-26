@@ -32,6 +32,7 @@ import 'package:umacapture/src/gui/toast.dart';
 import 'support/file_picker.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 
 ThemeData _theme() {
   final base = FlexThemeData.light(scheme: FlexScheme.blue, useMaterial3: true);
@@ -127,13 +128,22 @@ void main() {
     // complete in the fake-async zone a widget test otherwise runs in.
     await tester.runAsync(() async {
       await tester.tap(find.byType(IconButton));
-      for (var i = 0; i < 400; i++) {
+      // The four turns the old capped loop spent before it was allowed to look, kept as a window and
+      // not shortened: the spinner is raised a turn or two after the tap, so "no spinner" only means
+      // "finished" once it has had the chance to appear.
+      for (var i = 0; i < 4; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 5));
         await tester.pump();
-        if (i >= 3 && find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
       }
     });
-    await tester.pump();
+    // Polled on the shared helper rather than capped at 400 turns: the cap was a 2 s budget over real
+    // file I/O that fell out *silently* on expiry, so a contended runner reached the assertions with a
+    // half-finished import and reported it as the assertion being false.
+    await settleUntil(
+      tester,
+      () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+      describe: "the import to finish and the toolbar's spinner to go out",
+    );
     return toasts;
   }
 
