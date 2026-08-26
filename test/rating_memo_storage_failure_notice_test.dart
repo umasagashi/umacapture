@@ -31,6 +31,7 @@ import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 
 /// The one sentence both storages answer a load failure with, as shipped.
 String get _refusalSentence => appSentenceAt('pages.chara_detail.storage_load_failure');
@@ -149,9 +150,14 @@ void main() {
     await ref.read(charaDetailRecordRatingProvider('storage').future);
 
     expect(saveRating(ref, storageKey: 'storage', recordId: 'added', rating: 4, notify: false), isTrue);
-    for (var i = 0; i < 100 && !file.readAsStringSync().contains('added'); i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
+    // The save goes through `compute`: an isolate spawn plus `initializeMappers()` plus the write,
+    // all off this isolate and paced by the CPU the machine can spare. The bound is a hang detector,
+    // not a budget - the former 2 s ceiling was a budget, and expiring it surfaced on the next line
+    // as a content mismatch rather than as the timeout it was.
+    await waitUntil(
+      () => file.readAsStringSync().contains('added'),
+      describe: 'the writer isolate to land the accepted rating into ${file.path}',
+    );
     expect(file.readAsStringSync(), contains('"added":4'));
     expect(file.readAsStringSync(), contains('"kept":3'));
     // The warning belongs to the failure alone: a working storage must not learn to cry wolf.

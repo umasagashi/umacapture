@@ -22,6 +22,7 @@ import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 
+import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
 
 void main() {
@@ -71,12 +72,16 @@ void main() {
     return file;
   }
 
-  // Waits for the writer isolate to land its write, or gives up so the assertion
-  // reports the file contents rather than timing out.
-  Future<void> waitForWrite(File file, bool Function(String contents) done) async {
-    for (var i = 0; i < 100 && !done(file.readAsStringSync()); i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-    }
+  // Waits for the writer isolate to land its write. `save()` goes through `compute`, so the cost is
+  // an isolate spawn plus `initializeMappers()` plus the write itself, all off this isolate and set
+  // by how much CPU the machine can spare - a hang detector, not a budget under test. The former
+  // 2 s ceiling was such a budget, and expiring it surfaced three lines later as a content
+  // mismatch; `waitUntil` reports the timeout as a timeout instead.
+  Future<void> waitForWrite(File file, bool Function(String contents) done, String describe) {
+    return waitUntil(
+      () => done(file.readAsStringSync()),
+      describe: 'the writer isolate to land $describe into ${file.path}',
+    );
   }
 
   test('rating save() during a pending load keeps the stored ratings', () async {
@@ -104,7 +109,7 @@ void main() {
     // The guard only covers the load window: a save after it still persists.
     controller.updateWithoutNotify('later', 4);
     controller.save();
-    await waitForWrite(file, (contents) => contents.contains('later'));
+    await waitForWrite(file, (contents) => contents.contains('later'), 'the rating saved after the load');
     expect(file.readAsStringSync(), contains('"kept":3'));
     expect(file.readAsStringSync(), contains('"later":4'));
   });
@@ -130,7 +135,7 @@ void main() {
     final loaded = await container.read(charaDetailRecordMemoProvider('storage').future);
     expect(loaded.data['kept'], 'note');
     controller.updateMemo(recordId: 'later', memo: 'written');
-    await waitForWrite(file, (contents) => contents.contains('later'));
+    await waitForWrite(file, (contents) => contents.contains('later'), 'the memo saved after the load');
     expect(file.readAsStringSync(), contains('note'));
     expect(file.readAsStringSync(), contains('written'));
   });

@@ -16,6 +16,7 @@ import 'package:umacapture/src/core/version_check.dart';
 import 'package:umacapture/src/gui/toast.dart';
 
 import 'support/records.dart';
+import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
 
 void main() {
@@ -423,7 +424,13 @@ void main() {
 
     expect(rootAcquisitions, 1, reason: 'the second tap must not start another whole-store acquisition');
     release.complete();
-    await pumpUntil(() => !container.read(inheritanceResolutionRunningProvider));
+    // The flag clears from `whenComplete` on the fire-and-forget resolution, i.e. only once the
+    // stable-record-set run and the recovery gate have finished their real `dart:io` probes. The
+    // former bound was 50 zero-duration turns - a CPU rate, unrelated to the rate of those probes.
+    await waitUntil(
+      () => !container.read(inheritanceResolutionRunningProvider),
+      describe: 'the fire-and-forget inheritance resolution to clear its in-flight flag',
+    );
     expect(container.read(inheritanceResolutionRunningProvider), isFalse);
   });
 
@@ -437,9 +444,19 @@ void main() {
     final activeDir = pathInfoFor(root).charaDetailActiveDir;
     writeRecord(activeDir / 'res-d', makeRecord(id: 'res-d', card: 1));
     final release = Completer<void>();
+    // The claim here has no `expect` of its own - it is that nothing throws - so the case can only
+    // be as good as its evidence that the resolution actually ran. Recording when the guarded body
+    // settles gives it something to wait for; without it the case passes just as happily on a
+    // machine where the resolution had not started yet.
+    final bodySettled = Completer<void>();
     final lock = RecordMutationLock((name, mode, action) async {
       if (mode == RecordMutationLockMode.shared) {
         await release.future;
+        try {
+          return await action();
+        } finally {
+          if (!bodySettled.isCompleted) bodySettled.complete();
+        }
       }
       return action();
     });
@@ -455,6 +472,14 @@ void main() {
     // The container goes away while the resolution is still waiting for the lock.
     container.dispose();
     release.complete();
+    // Wait for the body on the wall clock - `waitUntil` fails naming the condition if it never
+    // settles, which is the explicit assertion this case otherwise lacks - and only then spend the
+    // original window, so the unawaited `whenComplete` that clears the flag has run and any
+    // unhandled async error out of it has had turns to surface.
+    await waitUntil(
+      () => bodySettled.isCompleted,
+      describe: 'the orphaned inheritance resolution to run to completion',
+    );
     await pumpMicrotasks(20);
   });
 
@@ -473,7 +498,10 @@ void main() {
     addTearDown(toastSubscription.close);
 
     active.resolveAllInheritance();
-    await pumpUntil(() => !container.read(inheritanceResolutionRunningProvider));
+    await waitUntil(
+      () => !container.read(inheritanceResolutionRunningProvider),
+      describe: 'the refused inheritance resolution to clear its in-flight flag',
+    );
 
     expect(toasts.map((toast) => toast.type), contains(ToastType.error));
     // The flag must be cleared even on failure, or the entry stays disabled forever.
@@ -526,13 +554,6 @@ void main() {
 /// Lets pending microtasks and already-resolved I/O futures run.
 Future<void> pumpMicrotasks([int rounds = 4]) async {
   for (var i = 0; i < rounds; i++) {
-    await Future<void>.delayed(Duration.zero);
-  }
-}
-
-/// Pumps until [done] holds, or gives up (the assertion then reports the state).
-Future<void> pumpUntil(bool Function() done, {int rounds = 50}) async {
-  for (var i = 0; i < rounds && !done(); i++) {
     await Future<void>.delayed(Duration.zero);
   }
 }
