@@ -242,8 +242,30 @@ jobs:
       # routes) that the tests compile against, and skips DistributionInfoBuilder --
       # its release-only license/version assets scan the gitignored
       # windows/{opencv,onnxruntime,clip} dirs, which are not provisioned in this job.
+      #
+      # WHY assets/ IS SNAPSHOTTED AND PUT BACK. A --build-filter run against a COLD asset graph
+      # DELETES the committed generated outputs that fall outside the filter -- the same hazard the
+      # "Verify web license disclosure" step below is ordered around, only there it is stated for the
+      # lib/** outputs. Here it takes out DistributionInfoBuilder's four build_to: source outputs
+      # (assets/{version,license,additional_license,web_license}_info.json), and "Run tests" then
+      # cannot even LOAD test/licence_disclosure_windows_test.dart. The graph is cold whenever the
+      # cache above misses, which any change to pubspec.lock or build.yaml causes, so this is the
+      # normal case on such a branch and not an edge one.
+      # NOT fixed by widening the filter to assets/**: that test exists to catch a committed
+      # disclosure that no longer describes windows/runner/CMakeLists.txt, and a disclosure
+      # regenerated moments earlier always agrees with it -- the check would still look like a check
+      # while having become incapable of failing. The tests must read the COMMITTED bytes, so the
+      # committed bytes are what is restored. The whole directory is snapshotted rather than a list of
+      # four names: nothing else in assets/ changes during this step, and a list would go stale the
+      # first time a fifth generated output lands there.
+      # shell: bash so a failing command fails the step (see "Run JavaScript tests" below).
       - name: Code generation (build_runner)
-        run: dart run build_runner build --force-jit --build-filter "lib/**" --build-filter "test/**"
+        shell: bash
+        run: |
+          committed_assets="$(mktemp -d)"
+          cp -r assets "$committed_assets/assets"
+          dart run build_runner build --force-jit --build-filter "lib/**" --build-filter "test/**"
+          cp -r "$committed_assets/assets/." assets/
 
       # --no-fatal-infos keeps errors and warnings fatal but tolerates pre-existing
       # info-level lints (e.g. annotate_overrides) that also exist on develop.

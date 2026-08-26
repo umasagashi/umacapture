@@ -14,14 +14,25 @@ import 'package:umacapture/main.dart';
 /// half, where `CMakeLists.txt` grew a DLL and codegen was never re-run, leaving a committed
 /// artifact that no longer describes the build.
 void main() {
-  final cmakeLists = File(DistributionInfoBuilder.windowsRunnerCMakeLists).readAsStringSync();
-  final bundled = parseBundledWindowsDlls(cmakeLists);
+  // Read in setUpAll, never at the top of main(): every input here is a file, and a file read that
+  // runs while the suite is being *loaded* turns a missing input into a load failure -- no test name,
+  // no reason string, and none of the assertions below ever run. From setUpAll the same breakage is
+  // one named red entry carrying the path it could not open. The paths are relative, so the suite
+  // requires `flutter test` to run with the package root as the working directory, as it does.
+  late BundledWindowsDlls bundled;
+  late List<Map<String, dynamic>> nativeEntries;
+  late List<Map<String, dynamic>> webEntries;
 
-  final nativeIndex =
-      jsonDecode(File("assets/additional_license_info.json").readAsStringSync()) as Map<String, dynamic>;
-  final nativeEntries = (nativeIndex["entries"] as List).cast<Map<String, dynamic>>();
-  final webIndex = jsonDecode(File("assets/web_license_info.json").readAsStringSync()) as Map<String, dynamic>;
-  final webEntries = (webIndex["entries"] as List).cast<Map<String, dynamic>>();
+  setUpAll(() {
+    final cmakeLists = File(DistributionInfoBuilder.windowsRunnerCMakeLists).readAsStringSync();
+    bundled = parseBundledWindowsDlls(cmakeLists);
+
+    final nativeIndex =
+        jsonDecode(File("assets/additional_license_info.json").readAsStringSync()) as Map<String, dynamic>;
+    nativeEntries = (nativeIndex["entries"] as List).cast<Map<String, dynamic>>();
+    final webIndex = jsonDecode(File("assets/web_license_info.json").readAsStringSync()) as Map<String, dynamic>;
+    webEntries = (webIndex["entries"] as List).cast<Map<String, dynamic>>();
+  });
 
   group("the DLL scan itself", () {
     // Positive control. Every assertion below is of the form "everything found is disclosed",
