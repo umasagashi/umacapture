@@ -22,6 +22,18 @@
 // full height of the frame and then back down -- the whole lower half of the dialog jumps. That is
 // the flicker, and `noteTop` records it directly.
 //
+// WHY THE TWO SLIDER CASES SAMPLE UNTIL THE SWAP RATHER THAN FOR A FIXED COUNT
+// `_grabbedTimes` reaching 2 says the second grab was ISSUED. The frame it produces reaches the
+// screen a real file read and PNG decode later, off this isolate, so "issued" and "on screen" are
+// separated by an unbounded amount of host CPU. A trace that stops in between contains no swap at
+// all, and every "nothing moved" assertion over it is then true of a trace in which nothing
+// happened. That is not a hypothetical: with a second grab that is issued and never lands, the
+// fixed-window form of both cases passed all of their assertions on an idle machine. So each of
+// them keeps its sampling window -- the window IS the measurement of the frames around the swap --
+// and then goes on sampling, one entry per pumped frame, until the new frame's own caption is on
+// screen. The caption is what names the frame here, because both grabs are the same height by
+// construction and a height therefore cannot say which of them is up.
+//
 // WHY THE LAST CASE VARIES THE FRAME SIZE
 // A height that is constant across frames cannot tell "the new frame is up" from "the OLD frame is
 // still up". That distinction is the second half of the requirement -- the rejected fix
@@ -176,6 +188,36 @@ Future<List<_Sample>> _record(WidgetTester tester, int frames, {Set<String> Func
     out.add(_sample(tester, captionsOf: captionsOf));
   }
   return out;
+}
+
+/// The caption of every frame grabbed so far.
+///
+/// Called at every sample rather than computed once, so a frame grabbed since the previous sample is
+/// recognised too.
+Set<String> _grabbedCaptions() => {for (final ms in _grabbedTimes) _captionFor(_mediaTsOf(ms))};
+
+/// Keeps sampling into [out], one entry per pumped frame, until [ready] holds.
+///
+/// This is what makes a trace PROVABLY span an arrival rather than hoping the arrival fitted inside
+/// a window. It does not replace a window and does not shorten one: the caller's `_record` window
+/// runs first and is the measurement; this only carries the same sampling on to the arrival the
+/// window was silently relying on.
+///
+/// The sample is taken inside the predicate because [settleUntil] evaluates it exactly once per
+/// pumped frame, so the appended entries are the frames it pumped and the trace has no gap in it.
+/// Delegating the loop keeps `test/support/settling.dart` the one place a wall-clock bound and its
+/// expiry message are spelled out.
+Future<void> _recordUntil(
+  WidgetTester tester,
+  List<_Sample> out,
+  bool Function() ready, {
+  required String describe,
+  Set<String> Function()? captionsOf,
+}) {
+  return settleUntil(tester, () {
+    out.add(_sample(tester, captionsOf: captionsOf));
+    return ready();
+  }, describe: describe);
 }
 
 /// Waits for the picked clip's first frame to be decoded and previewed.
@@ -399,18 +441,37 @@ void main() {
     await _pumpDialogHost(tester, container);
     await _openWithClip(tester, container);
 
-    final before = _sample(tester);
+    final before = _sample(tester, captionsOf: _grabbedCaptions);
     expect(before.previewHeight, _pngHeight.toDouble());
     expect(_grabbedTimes, hasLength(1));
 
     await _moveSlider(tester, 0.5);
-    final trace = <_Sample>[_sample(tester)];
+    final trace = <_Sample>[_sample(tester, captionsOf: _grabbedCaptions)];
     // Virtual time only: this is the 250 ms debounce elapsing, not a wall-clock wait.
     await tester.pump(const Duration(milliseconds: 300));
-    trace.add(_sample(tester));
-    trace.addAll(await _record(tester, 12));
+    trace.add(_sample(tester, captionsOf: _grabbedCaptions));
+    trace.addAll(await _record(tester, 12, captionsOf: _grabbedCaptions));
 
-    expect(_grabbedTimes, hasLength(2), reason: 'the debounce did fire, so this trace covers a real second grab');
+    expect(_grabbedTimes, hasLength(2), reason: 'the debounce did fire, so a second grab was issued');
+    final second = _captionFor(_mediaTsOf(_grabbedTimes[1]));
+    expect(
+      second,
+      isNot(_captionFor(_mediaTsOf(_grabbedTimes[0]))),
+      reason: 'the two grabs must be distinguishable on screen, or the arrival below is met by the first frame',
+    );
+    // ISSUED IS NOT ON SCREEN, and the assertions below are all negatives, so a trace that stops
+    // short of the swap satisfies every one of them without having watched anything happen. The
+    // window above stays a window; this carries the same sampling on until the new frame is
+    // published, and the short window after it catches a collapse deferred past the publish.
+    await _recordUntil(
+      tester,
+      trace,
+      () => _sample(tester, captionsOf: _grabbedCaptions).caption == second,
+      describe: "the second grab's frame to be decoded and previewed",
+      captionsOf: _grabbedCaptions,
+    );
+    trace.addAll(await _record(tester, 6, captionsOf: _grabbedCaptions));
+    expect(trace.last.caption, second, reason: 'THE TRACE COVERS THE SWAP: it ends after the new frame, not before it');
 
     expect(
       trace.where((e) => e.previewHeight == 0.0),
@@ -442,14 +503,33 @@ void main() {
     await _openWithClip(tester, container);
 
     await _moveSlider(tester, 0.5);
-    final trace = <_Sample>[_sample(tester)];
+    final trace = <_Sample>[_sample(tester, captionsOf: _grabbedCaptions)];
     await tester.pump(const Duration(milliseconds: 100)); // Inside the debounce.
-    trace.add(_sample(tester));
+    trace.add(_sample(tester, captionsOf: _grabbedCaptions));
     await tester.pump(const Duration(milliseconds: 200)); // Past it; the grab starts.
-    trace.add(_sample(tester));
-    trace.addAll(await _record(tester, 12));
+    trace.add(_sample(tester, captionsOf: _grabbedCaptions));
+    trace.addAll(await _record(tester, 12, captionsOf: _grabbedCaptions));
 
-    expect(_grabbedTimes, hasLength(2));
+    expect(_grabbedTimes, hasLength(2), reason: 'the slider move did issue a second grab');
+    final second = _captionFor(_mediaTsOf(_grabbedTimes[1]));
+    expect(
+      second,
+      isNot(_captionFor(_mediaTsOf(_grabbedTimes[0]))),
+      reason: 'the two grabs must be distinguishable on screen, or the arrival below is met by the first frame',
+    );
+    // The two assertions below are negatives about the swap, so they need the swap to be inside the
+    // trace. The windows above are the ones that matter here -- they straddle the debounce, which is
+    // where a spinner would be substituted if one were -- and this only guarantees the trace reaches
+    // past the publish rather than stopping while the first frame is still up.
+    await _recordUntil(
+      tester,
+      trace,
+      () => _sample(tester, captionsOf: _grabbedCaptions).caption == second,
+      describe: "the second grab's frame to be decoded and previewed",
+      captionsOf: _grabbedCaptions,
+    );
+    trace.addAll(await _record(tester, 6, captionsOf: _grabbedCaptions));
+    expect(trace.last.caption, second, reason: 'THE TRACE COVERS THE SWAP: it ends after the new frame, not before it');
     expect(
       trace.any((e) => e.spinner),
       isFalse,
@@ -486,10 +566,18 @@ void main() {
       // The sampling window above stays a window -- it is the measurement. What cannot be a window is
       // "the grab landed at all": four sequential `RecordImage.preload`s are four real file reads and
       // PNG decodes off this isolate, and the count assertions below need every one of them.
-      await settleUntil(
+      //
+      // It SAMPLES while it waits, for the same reason the two slider cases do. The frames between
+      // the window running out and the publish are exactly where the rejected fix would show itself
+      // -- the previous pixels still up beside the new frame's caption -- so dropping them omits the
+      // one interval this case exists to inspect. That the window happens to reach the publish on a
+      // fast host is a property of the host; it is not a fact this case states.
+      await _recordUntil(
         tester,
+        trace,
         () => _sample(tester, captionsOf: captionsOf).caption == _captionFor(_mediaTsOf(_grabbedTimes.last)),
         describe: 'the frame grabbed at fraction $fraction to be decoded and previewed',
+        captionsOf: captionsOf,
       );
     }
 
