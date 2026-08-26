@@ -49,13 +49,16 @@ jobs:
 
       # FFmpeg (BtbN n7.1.5 LGPL shared) is linked only by umacapture_ffv1_tests (the FFV1 recorder/reader
       # round-trip); umacapture_tests stays opencv-only. Cached like OpenCV; the "-slim" key matches the
-      # pruned layout. Bump this key when the ffmpeg pin in tool/fetch_deps.py changes.
+      # pruned layout. Bump this key when the ffmpeg pin in tool/fetch_deps.py changes -- and note that
+      # the FFmpeg version alone is not enough to key on: BtbN re-hosts the same build under several
+      # autobuild tags with differing archive bytes, so a re-pin can leave "n7.1.5" unchanged. The date
+      # suffix is the pinned tag's, which is what actually distinguishes one archive from the next.
       - name: Cache FFmpeg n7.1.5
         id: cache-ffmpeg
         uses: actions/cache@v4
         with:
           path: windows/ffmpeg
-          key: ffmpeg-n7.1.5-lgpl-shared-slim
+          key: ffmpeg-n7.1.5-lgpl-shared-slim-20260630
 
       # uv runs tool/fetch_deps.py (stdlib-only) and native/wasm/check_sources.py.
       # Unconditional: the wasm drift gate below runs on every job, cache hit or not.

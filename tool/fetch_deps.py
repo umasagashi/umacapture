@@ -82,11 +82,20 @@ ONNX_SHA256 = "c5c81710938e68079ff1a192b04897faabe4b43830d48f39f27ecd4e16138bfc"
 # folder holds ``bin/ include/ lib/``. To bump: pick a newer autobuild tag's
 # ``ffmpeg-nX.Y.Z-...-win64-lgpl-shared-X.Y.zip`` asset, download it once, sha256sum it,
 # and update both constants (and the CMake DLL-version names if the major version changes).
+#
+# PICK A MONTHLY TAG, NOT A DAILY ONE. BtbN keeps every daily autobuild tag for only a
+# rolling ~2-3 weeks, but retains the last tag of each month indefinitely (monthly tags go
+# back years). A daily tag therefore 404s a few weeks after it is pinned and breaks every
+# fresh provision, which is exactly what happened to the previous pin here
+# (autobuild-2026-07-10-13-44). The tag below is a surviving end-of-month one; it re-hosts
+# the *same* build as that dead daily tag -- same file name, same FFmpeg commit
+# g7d0e842004 -- with a different archive SHA-256, because BtbN rebuilds the zip per period
+# even when the source commit is unchanged (only the asset *name* is immutable per commit).
 FFMPEG_URL = (
-    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-07-10-13-44"
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-06-30-13-34"
     "/ffmpeg-n7.1.5-1-g7d0e842004-win64-lgpl-shared-7.1.zip"
 )
-FFMPEG_SHA256 = "d31de3f3c69b3f70fbe8babacea0cff8de2b51e259fc0bd0b37b3a5c0d114077"
+FFMPEG_SHA256 = "03a8003e245c08df4277d7b0adc50b93a97ddd4a3aaafea21943c4384df59895"
 
 # The C++ recognizer uses ONNX Runtime's experimental C++ session wrapper, which
 # ships only in the source tree (tagged v1.27.0), not in the win-x64 release zip.
