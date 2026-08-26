@@ -67,6 +67,19 @@ class PathEntity {
     }
 
     // Retry up to 3 times to avoid file lock issues.
+    //
+    // The `catch` below selects on nothing -- it takes `Object` -- for the same
+    // deliberate reasons as the one in [delete], which carries them in full: the
+    // distinction between a refusal that clears and one that never will is real,
+    // but nobody can enumerate the first kind, and the two ways of getting the
+    // predicate wrong are not symmetric. Only the evidence differs. This variant
+    // never reaches web (the web backend's synchronous surface throws
+    // `UnsupportedError` -- which this loop would dutifully retry three times
+    // before rethrowing, one instance of the cost described there), so the
+    // browser measurements cited there bear on [delete] and not on this loop.
+    // What is common to both is that neither platform's set of transient modes
+    // has been enumerated, and desktop -- the platform this loop is for -- has no
+    // measurement of its failure modes at all.
     int attempts = 0;
     while (true) {
       try {
@@ -96,6 +109,39 @@ class PathEntity {
     }
 
     // Retry up to 3 times to avoid file lock issues.
+    //
+    // The `catch` below selects on nothing -- it takes `Object` -- and that
+    // breadth is a decision rather than an oversight. The distinction it declines
+    // to draw does exist, and on web it has been measured: an entry held by an
+    // open writable is refused with `NoModificationAllowedError`, and the *same*
+    // delete succeeds once the holder closes -- exactly the shape this retry was
+    // written for -- while `NotFoundError`, `InvalidModificationError` and
+    // `TypeMismatchError` come back identical on all three attempts, so retrying
+    // them only makes the failure later.
+    //
+    // Narrowing to the recoverable set is refused all the same, for two reasons.
+    // It cannot be enumerated: nothing establishes that every transient mode has
+    // been seen, and the desktop side -- the one this retry was originally
+    // written for -- has no measurement of its failure modes at all, so the only
+    // evidence that retrying rescues anything there is this comment. And the two
+    // ways of being wrong are not symmetric: a `catch` that is too wide spends
+    // one backoff on a failure that was never going to clear, whereas a predicate
+    // that is too narrow drops a transient mode outright, and does it invisibly
+    // -- a rescue that stops happening reports nothing to anyone.
+    //
+    // The price accepted in exchange is stated plainly: a programming error
+    // reaching here -- a `NoSuchMethodError`, a `TypeError` -- is retried three
+    // times and rethrown two backoffs late, so a defect arrives wearing the face
+    // of a timing problem. That is known, and taken, for the reasons above.
+    //
+    // A narrowing by type would also have to begin from what web actually
+    // delivers: a rejected OPFS call arrives here as a bare `JSObject` (a
+    // DOMException), which is not `dart:io`'s `FileSystemException` and not a
+    // Dart `Exception` at all. So no `on FileSystemException` clause selects any
+    // of it, and the obvious tidy-up would silently end every retry on web. The
+    // measurements this note rests on are pinned by
+    // `test/opfs_delete_failure_web_test.dart`, so the next reader who wants to
+    // narrow this starts from them instead of measuring the boundary again.
     int attempts = 0;
     while (true) {
       try {
