@@ -9,7 +9,6 @@ windows/flutter/generated_plugins.cmake       eol=lf
 # Same rationale as above: pin to LF so codegen produces no EOL-only churn.
 *.mapper.dart                                  eol=lf
 *.gr.dart                                      eol=lf
-lib/generated/assets.dart                      eol=lf
 lib/distribution_info.dart                     eol=lf
 assets/license_info.json                       eol=lf
 assets/version_info.json                       eol=lf
@@ -38,3 +37,11 @@ native/wasm/*.sh                               eol=lf
 # SHA-256 would no longer match the pin and tool/fetch_web_deps.py would report
 # drift and overwrite this tracked file. Pin to LF so the checkout matches upstream.
 web/coi-serviceworker.js                       eol=lf
+
+# The native CLI's `build` subcommand regenerates these scene definitions (io_util::write in
+# native/src/util/misc.h, which opens the stream in binary mode so the CRT cannot inject CR).
+# Pin to LF so regeneration matches the committed blob on every platform.
+assets/config/chara_detail/recognizer.json     eol=lf
+assets/config/chara_detail/scene_context.json  eol=lf
+assets/config/chara_detail/scene_scraper.json  eol=lf
+assets/config/chara_detail/scene_stitcher.json eol=lf
