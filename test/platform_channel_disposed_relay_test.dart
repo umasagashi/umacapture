@@ -22,6 +22,14 @@
 // half (`platform_channel_web_ops.dart`) plus the REAL consumer side: every case ends at the
 // thing the user sees, driven through the real `PlatformController.handleNativeMessage`, not at
 // an assertion about what the retention holds.
+//
+// WAITING. Every wait below goes through `support/settling.dart`, the one wait helper this suite
+// has. The reload these cases wait on runs the record loader on a worker isolate, and — unlike
+// `regeneration_controller_test.dart`, which awaits `updated()` — nothing here awaits it: the
+// announcement arrives through a fire-and-forget `handleNativeMessage`, so the isolate's cost falls
+// *inside* the poll. That cost is set by how much CPU the machine can spare, which is why these
+// sites pass two minutes rather than the 30 s default. It is a hang detector, not a budget anything
+// here is measured against.
 @Timeout(Duration(minutes: 5))
 library;
 
@@ -48,6 +56,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
 import 'support/records.dart';
+import 'support/settling.dart';
 
 /// Stands in for `platformControllerLoader`, which needs a module version and an asset bundle.
 /// The controller itself is the real one, because its `handleNativeMessage` is the dispatch every
@@ -82,24 +91,6 @@ String _regenerationFailed(String id) => jsonEncode({'type': 'onRecordRegenerati
 
 String _screenshotTaken(FilePath path, String result) =>
     jsonEncode({'type': 'onScreenshotTaken', 'path': path.path, 'result': result});
-
-/// Polls the real clock until [condition] holds.
-///
-/// The reload these cases wait on runs the record loader through `Isolate.run`, whose cost is set
-/// by how much CPU the machine can spare. [timeout] is a hang detector, not a budget under test.
-Future<void> _waitUntil(
-  bool Function() condition,
-  String description, {
-  Duration timeout = const Duration(minutes: 2),
-}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (DateTime.now().isAfter(deadline)) {
-      fail('Timed out waiting for $description');
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 20));
-  }
-}
 
 late Directory _tempRoot;
 
@@ -212,9 +203,11 @@ void main() {
       _writeRecord('r2', card: 2);
       controller.handleNativeMessage(_updated('r2'));
       _disposedChannelSends(_updated('r1'));
-      await _waitUntil(
+      await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).count == 1,
-        'the record a live channel announced to be counted',
+        describe: 'the record a live channel announced to be counted',
+        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        timeout: const Duration(minutes: 2),
       );
 
       expect(
@@ -228,9 +221,11 @@ void main() {
 
       _successorChannelRegisters(controller);
 
-      await _waitUntil(
+      await waitUntil(
         () => _cardInTable(container, 'r1') == 2,
-        'the successor to complete the batch and publish the regenerated rows',
+        describe: 'the successor to complete the batch and publish the regenerated rows',
+        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        timeout: const Duration(minutes: 2),
       );
       expect(_cardInTable(container, 'r2'), 2, reason: 'the whole batch reaches the table together');
       expect(notifier.successCount, 2);
@@ -247,9 +242,11 @@ void main() {
 
       notifier.beginBatch(2);
       controller.handleNativeMessage(_updated('ok'));
-      await _waitUntil(
+      await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).count == 1,
-        'the record that succeeded to be counted',
+        describe: 'the record that succeeded to be counted',
+        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        timeout: const Duration(minutes: 2),
       );
       // The other record's regeneration failed on the channel the rebuild took away.
       _disposedChannelSends(_regenerationFailed('bad'));
@@ -263,9 +260,11 @@ void main() {
 
       _successorChannelRegisters(controller);
 
-      await _waitUntil(
+      await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).isCompleted,
-        'the batch to complete once the failure is announced',
+        describe: 'the batch to complete once the failure is announced',
+        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        timeout: const Duration(minutes: 2),
       );
       expect(notifier.successCount, 1);
       expect(notifier.failureCount, 1);

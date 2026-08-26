@@ -19,6 +19,7 @@ import 'package:feedback/feedback.dart';
 import 'package:umacapture/src/gui/common.dart';
 
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 /// Mounts the feedback overlay and opens it, answering with the notes that reach `onSubmit`.
 Future<List<String>> _openSheet(WidgetTester tester) async {
@@ -61,10 +62,12 @@ bool _sendEnabled(WidgetTester tester) {
 /// `image.toByteData(format: png)`, a full-surface raster and a PNG encode — and neither has a
 /// bounded duration on a loaded host.
 ///
-/// So [arrived] is polled rather than budgeted: a case that expects a note waits for that note,
-/// with the timeout as the failure path only. A case that expects Send to have done nothing passes
-/// nothing, and keeps a bounded window — there is no arrival to poll for, and a window that is too
-/// short there can only weaken the negative, never turn it red.
+/// So [arrived] is polled rather than budgeted, through [settleUntil] — the one wait helper this
+/// suite has: a case that expects a note waits for that note, with the timeout as the failure path
+/// only. A case that expects Send to have done nothing passes nothing, and keeps a bounded window —
+/// there is no arrival to poll for, and a window that is too short there can only weaken the
+/// negative, never turn it red. That window, and the 400 ms fake-clock pump both branches share,
+/// stay windows.
 Future<void> _tapSend(WidgetTester tester, {bool Function()? arrived}) async {
   await tester.tap(find.text(appSentenceAt('app.feedback.submit')), warnIfMissed: false);
   await tester.pump(const Duration(milliseconds: 400));
@@ -73,14 +76,7 @@ Future<void> _tapSend(WidgetTester tester, {bool Function()? arrived}) async {
     await tester.pumpAndSettle();
     return;
   }
-  final waited = Stopwatch()..start();
-  while (!arrived()) {
-    if (waited.elapsed > const Duration(seconds: 30)) {
-      fail('waited ${waited.elapsed.inSeconds}s for the note to reach onFeedbackSubmitted');
-    }
-    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1)));
-    await tester.pump();
-  }
+  await settleUntil(tester, arrived, describe: 'the note to reach onFeedbackSubmitted');
   await tester.pumpAndSettle();
 }
 
