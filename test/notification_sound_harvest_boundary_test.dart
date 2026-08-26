@@ -36,6 +36,7 @@ import 'package:umacapture/src/core/video_import_ops.dart';
 
 import 'support/localization.dart';
 import 'support/records.dart';
+import 'support/settling.dart';
 
 /// An import that has already ended: the state the stray chime was measured against.
 const _finished = VideoImportState(
@@ -142,7 +143,26 @@ void main() {
   ///
   /// The merge's completion is observed rather than assumed: a rejected duplicate has its
   /// just-written directory discarded, so the directory disappearing is the merge having run.
-  Future<void> harvest(WidgetTester tester, PlatformController controller, String id, {String? origin}) async {
+  ///
+  /// TWO ARRIVALS, NOT ONE. The discard and the cue are separate: the store deletes the rejected
+  /// directory on the merge chain, and the cue only reaches [chiming] on a later pump, once the
+  /// notification layer has seen the store's event. Waiting on the directory alone left the second
+  /// one to a fixed `pumpEventQueue` window, and on a contended host that window expired first --
+  /// the case then read `Expected: [SoundType.error] / Actual: []`, i.e. a timeout wearing the
+  /// costume of a lost chime. Reproduced on this machine under 16 spinners with
+  /// `flutter test --concurrency=32`, both before and after the directory wait was made to fail
+  /// loudly, which is what told the two arrivals apart.
+  ///
+  /// A case that expects a cue passes its sink as [chiming] and the arrival is polled. A case that
+  /// expects SILENCE passes nothing: there is nothing to poll for, so its window stays a window --
+  /// a slow host can only make that negative weaker, never falsely red (`support/settling.dart`).
+  Future<void> harvest(
+    WidgetTester tester,
+    PlatformController controller,
+    String id, {
+    String? origin,
+    List<SoundType>? chiming,
+  }) async {
     final merged = Directory((tempRootActiveDir(id)).path);
     await tester.runAsync(() async {
       controller.handleNativeMessage(
@@ -152,13 +172,22 @@ void main() {
           'origin': ?origin,
         }),
       );
-      final deadline = DateTime.now().add(const Duration(seconds: 30));
-      while (merged.existsSync() && DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
+      // The deadline used to be the loop's own condition, so expiry fell out of the loop in
+      // silence and surfaced three lines later in whichever case called this.
+      await waitUntil(
+        () => !merged.existsSync(),
+        describe: 'the unawaited merge chain to run and discard the duplicate record "$id"',
+      );
       await pumpEventQueue(times: 20);
     });
     await tester.pump();
+    if (chiming != null) {
+      await settleUntil(
+        tester,
+        () => chiming.isNotEmpty,
+        describe: 'the cue for the merged record "$id" to reach the sound sink',
+      );
+    }
   }
 
   testWidgets('the last record of a finished import is merged silently', (tester) async {
@@ -180,7 +209,7 @@ void main() {
     final env = await boot(tester);
     writeRecord(env.activeDir, makeRecord(id: 'live-record', card: 1));
 
-    await harvest(tester, env.controller, 'live-record');
+    await harvest(tester, env.controller, 'live-record', chiming: env.played);
 
     expect(env.played, [SoundType.error], reason: 'live capture must not lose a single chime');
   });
@@ -192,7 +221,7 @@ void main() {
     env.imports.value = _finished;
     writeRecord(env.activeDir, makeRecord(id: 'unlabelled', card: 1));
 
-    await harvest(tester, env.controller, 'unlabelled');
+    await harvest(tester, env.controller, 'unlabelled', chiming: env.played);
 
     expect(env.played, [SoundType.error]);
   });
@@ -207,10 +236,11 @@ void main() {
     await harvest(tester, env.controller, 'import-body', origin: harvestOriginVideoImport);
 
     expect(env.played, isEmpty);
-    // The merge really ran -- otherwise "silent" is vacuous, and the wait above spends thirty
-    // seconds reaching that vacuum. An implementation that skipped merging altogether while an
-    // import is running plays nothing either, and only this line tells the two apart. Every other
-    // case in this file carries it; this one did not.
+    // The merge really ran -- otherwise "silent" is vacuous. An implementation that skipped
+    // merging altogether while an import is running plays nothing either. `harvest`'s `waitUntil`
+    // now names that case at its deadline rather than falling out of the loop in silence, and this
+    // line is the assertion it used to be left to. Every other case in this file carries it; this
+    // one did not.
     expect(Directory((env.activeDir / 'import-body').path).existsSync(), isFalse);
   });
 }

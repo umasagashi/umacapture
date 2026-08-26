@@ -241,6 +241,27 @@ Future<void> _pumpBareImage(WidgetTester tester, String path, {bool gapless = fa
   );
 }
 
+/// The rendered height of the bare `Image.file` the calibration cases pump.
+double _bareHeight(WidgetTester tester) => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+
+/// Waits for a bare `Image.file`'s decode to land, i.e. for the render box to reach [height].
+///
+/// `Image.file` issues a real file read and an `instantiateImageCodec`, neither of which runs on
+/// this isolate, so no count of 5 ms turns bounds them. When a `_record` window expired with the
+/// decode still outstanding, `RenderImage` had no image and took `constraints.smallest` -- zero
+/// under a `Center` -- and the calibration assertion below it read `Expected: <135.0> /
+/// Actual: <0.0>`, which is a statement about the host's spare CPU and not about Flutter's image
+/// pipeline. Reproduced on this machine under 16 spinners with `flutter test --concurrency=32`.
+///
+/// The `_record` windows themselves are untouched: they SAMPLE the intermediate frames, which is
+/// what this file measures, and a window is the right shape for that. This only adds the arrival
+/// they were silently relying on.
+Future<void> _settleForBareImage(WidgetTester tester, double height) => settleUntil(
+  tester,
+  () => _bareHeight(tester) == height,
+  describe: 'the bare Image.file to decode and render at $height px',
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Future<void> Function() closeHive;
@@ -268,6 +289,7 @@ void main() {
     tester,
   ) async {
     await _pumpBareImage(tester, _writePng('a.png'));
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
     final samples = await _record(tester, 8);
     expect(
@@ -291,8 +313,9 @@ void main() {
     final a = _writePng('a.png');
     final b = _writePng('b.png');
     await _pumpBareImage(tester, a);
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
-    double h() => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+    double h() => _bareHeight(tester);
     expect(h(), _pngHeight.toDouble(), reason: 'the first image is up');
 
     await _pumpBareImage(tester, b);
@@ -303,6 +326,11 @@ void main() {
       await tester.pump();
       trace.add(h());
     }
+    // The ten sampled frames stay a window -- they are the measurement of the collapse. That b's
+    // decode eventually LANDS is an arrival, so it is polled after the window rather than assumed
+    // to have fitted inside it, and the landed frame is appended to the same trace.
+    await _settleForBareImage(tester, _pngHeight.toDouble());
+    trace.add(h());
     expect(collapsed, 0.0, reason: 'INSTRUMENT REACTS: the frame right after the swap has no image at all');
     expect(trace.last, _pngHeight.toDouble(), reason: 'and it comes back once the decode lands');
   });
@@ -313,8 +341,9 @@ void main() {
     final a = _writePng('a.png');
     final b = _writePng('b.png');
     await _pumpBareImage(tester, a, gapless: true);
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
-    double h() => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+    double h() => _bareHeight(tester);
     expect(h(), _pngHeight.toDouble());
 
     await _pumpBareImage(tester, b, gapless: true);
@@ -332,8 +361,9 @@ void main() {
   ) async {
     final a = _writePng('a.png');
     await _pumpBareImage(tester, a);
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
-    double h() => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+    double h() => _bareHeight(tester);
     await _pumpBareImage(tester, a);
     expect(h(), _pngHeight.toDouble(), reason: 'a rebuild with an unchanged provider keeps the image');
   });

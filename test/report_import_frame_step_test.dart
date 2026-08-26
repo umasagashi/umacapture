@@ -46,6 +46,7 @@ import 'package:umacapture/src/gui/record_image.dart';
 
 import 'support/hive.dart';
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 late Directory _tempDir;
 late List<ImportErrorReport> _submitted;
@@ -228,40 +229,13 @@ Future<void> _pumpHost(WidgetTester tester, ProviderContainer container) {
   );
 }
 
-/// One turn of real time for the real file writes and the PNG decode the widget issues, then the
-/// frame that shows what landed. The unit [_settleFor] polls.
-Future<void> _ioTurn(WidgetTester tester) async {
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1)));
-  await tester.pump();
-}
-
-/// Drives [_ioTurn] until [describe] is true of what is on screen.
-///
-/// **Why this exists rather than a fixed number of fixed-length sleeps.** The work being waited for
-/// is a real `File.writeAsBytesSync` in the fixture plus `RecordImage.preload`'s
-/// `instantiateImageCodec`; neither runs under the fake clock, and neither has a bounded duration
-/// when the host is busy — a CI runner has four vCPU and runs four suites on them at once. A fixed
-/// budget is therefore a guess about the host's spare CPU, and every assertion downstream of it
-/// fails when the guess is wrong. Polling the outcome states what the case is actually waiting for,
-/// so a slow machine makes the case slower instead of red. [timeout] is the failure path only.
-Future<void> _settleFor(
-  WidgetTester tester,
-  bool Function() ready, {
-  required String describe,
-  Duration timeout = const Duration(seconds: 30),
-}) async {
-  final waited = Stopwatch()..start();
-  while (!ready()) {
-    if (waited.elapsed > timeout) {
-      fail('waited ${waited.elapsed.inSeconds}s for $describe, which never happened');
-    }
-    await _ioTurn(tester);
-  }
-  await tester.pump();
-}
-
 /// Waits until the frame whose stamp is [mediaTsMs] is the one being previewed.
-Future<void> _settleForFrame(WidgetTester tester, int mediaTsMs) => _settleFor(
+///
+/// The work being waited for is a real `File.writeAsBytesSync` in the fixture plus
+/// `RecordImage.preload`'s `instantiateImageCodec`; neither runs under the fake clock, so
+/// `settleUntil` (`support/settling.dart`) is what this file uses for it. This was a verbatim
+/// local copy of that helper — same default, same expiry message — until it was folded back in.
+Future<void> _settleForFrame(WidgetTester tester, int mediaTsMs) => settleUntil(
   tester,
   () => _caption(tester) == _captionFor(mediaTsMs),
   describe: 'the $mediaTsMs ms frame to be decoded and previewed',
@@ -304,7 +278,7 @@ Future<ProviderContainer> _open(
   await tester.pump();
   await tester.pump();
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
-  await _settleFor(tester, awaiting ?? () => _caption(tester) != null, describe: describe);
+  await settleUntil(tester, awaiting ?? () => _caption(tester) != null, describe: describe);
   return container;
 }
 
@@ -709,7 +683,7 @@ void main() {
     // above is a fixed window on purpose -- it samples the intermediate frames, and its two
     // assertions are a negative and a per-sample invariant that a slow host can only weaken. "The
     // step landed" is the opposite kind of claim, and a fixed window makes it a bet on how much
-    // spare CPU the host has: `_settleFor` is what this file reserves for exactly that.
+    // spare CPU the host has: `settleUntil` is what this file reserves for exactly that.
     await _settleForFrame(tester, 83);
     expect(_caption(tester), _captionFor(83), reason: 'and the step did land');
   });
