@@ -13,7 +13,7 @@
 # OVERWRITE five live objects with whatever the old origin serves at that moment,
 # so they sit behind the same 'yes' gate the sibling scripts use.
 #
-# See .notes/analysis/wasm_poc5/r2_setup_runbook.md (Step-by-step 1-5).
+# See testdata/evidence/wasm_poc5/r2_setup_runbook.md (Step-by-step 1-5).
 #
 # Run from Git Bash:  bash tool/cloudflare/r2_stage1_setup.sh
 # Credentials come from tool/cloudflare/.env (copy .env.example first).

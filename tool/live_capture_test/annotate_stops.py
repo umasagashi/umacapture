@@ -24,8 +24,8 @@ clamps it to frame 0, so the run synchronises against a stop that was never foun
 procedure calls mandatory cannot be expressed on stderr alone, because `--write && scenario_run.py …`
 walks straight past it. `--allow-warnings` is how you say you read them and understood them.
 
-    uv run tool/live_capture_test/annotate_stops.py --clip .notes/player_standard_5.mkv --write
-    uv run tool/live_capture_test/annotate_stops.py --clip .notes/my_clip.mkv --report  # the numbers
+    uv run tool/live_capture_test/annotate_stops.py --clip testdata/clips/golden/player_standard_5.mkv --write
+    uv run tool/live_capture_test/annotate_stops.py --clip testdata/clips/my_clip.mkv --report  # the numbers
 
 The full procedure, including how to verify an annotation before trusting it, is in
 docs/live-capture-harness.md.
@@ -460,7 +460,7 @@ def main() -> int:
     out = Path(args.out) if args.out else clip.with_suffix(".stops.json")
     if args.write:
         # A sidecar carries hand edits that nothing re-derives (see the module docstring), and it
-        # lives beside the clip under .notes/, which is test material rather than scratch. So an
+        # lives beside the clip under testdata/, which is test material rather than scratch. So an
         # overwrite that would change the file has to be asked for. An overwrite that would change
         # nothing loses nothing, and stays silent.
         changes = differing_fields(out, sidecar) if out.exists() else []

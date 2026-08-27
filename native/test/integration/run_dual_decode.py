@@ -212,7 +212,7 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", required=True, type=Path, help="path to umacapture_cli(.exe)")
-    parser.add_argument("--data-dir", type=Path, default=HERE.parents[2] / ".notes")
+    parser.add_argument("--data-dir", type=Path, default=HERE.parents[2] / "testdata" / "clips" / "golden")
     parser.add_argument("--assets-dir", type=Path, default=HERE.parents[2] / "assets" / "config")
     parser.add_argument("--modules-dir", type=Path, default=HERE.parents[2] / "sandbox" / "modules")
     parser.add_argument("--cases", type=Path, default=HERE / "cases.json")

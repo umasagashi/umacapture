@@ -36,7 +36,8 @@ import 'support/settling.dart';
 
 late Directory _tempDir;
 
-/// A clip whose first frame is **not** at zero, because no real one is: `.notes/player_standard*.mp4`
+/// A clip whose first frame is **not** at zero, because no real one is:
+/// `testdata/clips/golden/player_standard*.mp4`
 /// starts at 50.033 ms. A fixture starting at 0 would let a selector that ignored `firstFrameMs`
 /// pass every case below.
 const _timeline = VideoFrameTimeline(

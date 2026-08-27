@@ -9,8 +9,8 @@ Drives the real ``umacapture_cli`` over recorded clips and compares the recogniz
 ``video`` case goes through the ``video`` subcommand (OpenCV decode of a plain clip),
 a ``replay`` case is a lossless FFV1 recording driven through ``replay`` (the recorded
 frames enter the pipeline directly). This exercises the full ONNX/WinRT/FFmpeg pipeline
-end to end, so it depends on local-only assets (the ``.notes`` clips and the
-``sandbox/modules`` ONNX models, neither committed).
+end to end, so it depends on local-only assets (the ``testdata/clips/golden`` clips and
+the ``sandbox/modules`` ONNX models, neither committed).
 
 EVERY CASE STATES THE CONFIGURATION IT RUNS UNDER. ``frame_resize`` is required on each manifest
 entry and is passed to the CLI explicitly, never left to the CLI's default: a golden is a baseline
@@ -725,7 +725,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", required=True, type=Path, help="path to umacapture_cli(.exe)")
     parser.add_argument(
-        "--data-dir", type=Path, default=HERE.parents[2] / ".notes", help="dir holding the input clips"
+        "--data-dir",
+        type=Path,
+        default=HERE.parents[2] / "testdata" / "clips" / "golden",
+        help="dir holding the input clips",
     )
     parser.add_argument(
         "--assets-dir", type=Path, default=HERE.parents[2] / "assets" / "config", help="config assets dir"

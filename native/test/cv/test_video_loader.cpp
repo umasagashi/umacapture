@@ -8,8 +8,8 @@
 // frames that reached the sender, not the calls that reached the host.
 //
 // The clip is written here rather than taken from a fixture: the golden clips live under the gitignored
-// .notes/ and would turn these into yet another conditionally-skipped case. cv::VideoCapture is the only
-// decode backend in this build -- the planar/libav one is behind UMACAPTURE_WITH_PLANAR_DECODER and is
+// testdata/clips/golden/ and would turn these into yet another conditionally-skipped case.
+// cv::VideoCapture is the only decode backend in this build -- the planar/libav one is behind UMACAPTURE_WITH_PLANAR_DECODER and is
 // compiled into umacapture_cli alone -- which the last case pins from this side.
 
 #include <filesystem>

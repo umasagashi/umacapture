@@ -2,7 +2,7 @@
   "version": 1,
   "name": "falsify_truncated_input",
   "description": "FALSIFICATION of the verdict, input side. Identical to player_standard_5 except that playback is restricted to the first 7 clip seconds, so the scene opens (skill tab) and never closes: recognition is incomplete and no record.json is written. The runner must report FAIL with the whole golden removed, not a vacuous pass. sync is off because the annotated stops at frames 161 and 273 lie outside the range and would never fire; record_wait is short because the point is the absence of a record, not how long to hope for one.",
-  "clip": ".notes/player_standard_5.mkv",
+  "clip": "testdata/clips/golden/player_standard_5.mkv",
   "stops": null,
   "golden": "native/test/integration/golden/player_standard_5.json",
   "config": "debug",

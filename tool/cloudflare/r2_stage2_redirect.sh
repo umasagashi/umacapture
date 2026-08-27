@@ -22,7 +22,7 @@
 # Rulesets API. The origin still serves the old URLs directly until the apex is
 # cut over to Pages, so removing the rule restores the prior state immediately.
 #
-# See .notes/analysis/wasm_poc5/r2_setup_runbook.md (Staged migration, Stage 2/3).
+# See testdata/evidence/wasm_poc5/r2_setup_runbook.md (Staged migration, Stage 2/3).
 #
 # Run from Git Bash:  bash tool/cloudflare/r2_stage2_redirect.sh [--promote-301]
 #

@@ -17,7 +17,8 @@ import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 
 /// A clip that starts late and ends where its container says: the ordinary shape.
 ///
-/// 50 ms rather than 0 on purpose — `.notes/player_standard*.mp4` really does start at 50.033 ms —
+/// 50 ms rather than 0 on purpose — `testdata/clips/golden/player_standard*.mp4` really does start at
+/// 50.033 ms —
 /// so a case about the low end cannot pass by accident on a fixture that starts at zero.
 const _ordinary = VideoFrameTimeline(
   firstFrameMs: 50,

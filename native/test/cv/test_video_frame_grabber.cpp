@@ -7,7 +7,8 @@
 // naming the wrong frame, not by disagreeing about a timestamp.
 //
 // The clip is written here rather than taken from a fixture, for the same reason test_video_loader.cpp writes
-// its own: the real clips live under the gitignored .notes/ and would turn every case into a conditional skip.
+// its own: the real clips live under the gitignored testdata/clips/ and would turn every case into a
+// conditional skip.
 //
 // WHAT THIS FIXTURE CANNOT REACH, stated so a green run is not read for more than it says. cv::VideoWriter can
 // only produce a CONSTANT-frame-rate clip, and the defect this component exists for is a VARIABLE-frame-rate
@@ -17,7 +18,7 @@
 // ladder is driven from the test, so a deliberately useless backoff must still produce the right frame (which
 // is what says the escalation and the from-the-start fallback are real), and the component was additionally
 // measured against the real variable-frame-rate clips outside this suite --
-// .notes/analysis/video-import-error-report/stage-1a/report.md.
+// testdata/evidence/video-import-error-report/stage-1a/report.md.
 
 #include <algorithm>
 #include <filesystem>

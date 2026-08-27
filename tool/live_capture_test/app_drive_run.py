@@ -56,11 +56,12 @@ from stops_schema import frame_index_fault  # noqa: F401
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 BUILD = ROOT / "native/cmake-build-release"
-# Run artefacts (logs, per-run summaries, captures) are deliberately written OUTSIDE the repository:
-# they are machine-local, large and per-run, exactly like the clips they are produced from. `.notes/`
-# is gitignored, and `.notes/analysis/<topic>/` is where this project keeps analysis output.
-RUNS = ROOT / ".notes/analysis/mimic-player"
-CLIP = ROOT / ".notes/player_standard_5.mkv"
+# Run artefacts (logs, per-run summaries, captures) are deliberately written OUTSIDE version control:
+# they are machine-local, large and per-run, exactly like the clips they are produced from. `testdata/`
+# is gitignored and is where this project keeps its local-only test material; `testdata/harness/` holds
+# what this harness produces, `testdata/clips/` what it consumes.
+RUNS = ROOT / "testdata/harness/runs"
+CLIP = ROOT / "testdata/clips/golden/player_standard_5.mkv"
 FLUTTER = ROOT / ".fvm/flutter_sdk/bin/flutter.bat"
 # Debug and Profile both register the flutter_driver service extension; Release does not
 # (registerServiceExtension is compiled out in AOT release). Profile is the optimised one.
@@ -80,7 +81,7 @@ REAL_SETTINGS = REAL_DATA_ROOT / "settings"
 # the second place a run can leak into (lib/src/core/bootstrap.dart).
 BOOTSTRAP_FILE = APP_SUPPORT / "data_root.json"
 
-SCRATCH_ROOT = ROOT / ".notes/appdrive_root"
+SCRATCH_ROOT = ROOT / "testdata/harness/appdrive_root"
 
 # Per-tab scroll-ready markers in the app's own stdout, at debug level. Tabs 0 and 2 are logged by
 # the `scroll_ready_connection` listener in native_api.cpp, which is a direct connection and so
@@ -755,7 +756,8 @@ def main() -> int:
                              "--sync and a sidecar carrying scroll_end_frame.")
     parser.add_argument("--record-wait", type=float, default=120.0)
     parser.add_argument("--clip", default=None,
-                        help="clip to play (default the S2b/S6c one, .notes/player_standard_5.mkv). "
+                        help="clip to play (default the S2b/S6c one, "
+                             "testdata/clips/golden/player_standard_5.mkv). "
                              "A scenario runner names it; nothing else does.")
     parser.add_argument("--range", nargs=2, type=float, metavar=("A", "B"), default=None,
                         help="restrict playback to [A, B] clip seconds (sent as the player's "

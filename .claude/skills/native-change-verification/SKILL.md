@@ -160,7 +160,8 @@ omits or misstates either, as an unhandled traceback rather than a `FAIL <name>:
 those keys **after** the skip decision, so a case skipped for a missing clip never validates them —
 one more reason a skipped case is not coverage.
 
-Report the **per-case** result. Every golden case is conditional on its clip under `.notes/` and
+Report the **per-case** result. Every golden case is conditional on its clip under
+`testdata/clips/golden/` and
 on the ONNX models under `sandbox/modules/`; a case whose input is absent exits 77 and prints
 `***Skipped`, and a skipped case is not coverage. `integration_golden_coverage` must Pass — it is
 what turns "this machine can exercise fewer cases than it used to" into a failure. It is a
@@ -176,11 +177,15 @@ that runs — and must Pass — everywhere, CI included.
 
 Report the diff and your judgement of it. Regenerate a golden only for an intended behaviour
 change and only after approval. For the two switch cases the statement of correctness is
-`.notes/analysis/android-web-import/cpp/fix1-golden-intent.md` §2, not the previous baseline.
+`testdata/evidence/android-web-import/cpp/fix1-golden-intent.md` §2, not the previous baseline.
+(`verifyAB-report.md` and `fixE-report.md`, cited bare below, are that same directory's.)
 
 ## 3. The encode / scale regression grid — eleven configurations
 
-All clips are in `.notes/captures/`; run each with `umacapture_cli video`, **passing the resize flag
+The grid's material is in `testdata/clips/grid/`, which retains only the **pristine** rung
+(`screen-20260802-214946.mp4`); the ten re-encodes below are ffmpeg derivations of it and are not
+kept, so re-derive them before running the grid and say in the report that you did. Run each with
+`umacapture_cli video`, **passing the resize flag
 explicitly** (`--frame-resize` or `--no-frame-resize`) so the row says which configuration it is.
 Most of the numbers below no longer have to be grepped out of the log: the run's
 `UMACAPTURE_RUN_SUMMARY` line on **stderr** carries `records`, `discarded` (all reset rules, not just
@@ -214,13 +219,14 @@ summary line reports what it actually was. If a width ladder is what you want �
 anything else recorded before the band shipped — run the rungs with `--no-frame-resize`, and say so in
 the report. Do not silently mix the two.
 
-**The `…_540w` / `…_404w` ladder under `.notes/accept_ladder/` is not the same rung despite the same
+**The `…_540w` / `…_404w` ladder under `testdata/clips/ladder/` is not the same rung despite the same
 number.** Those are downscales of the §4 must-fire clips, which were recorded on a differently shaped
 screen: `player_standard_factor_only_1.mp4` is **736 × 1308** (≈ 1 : 1.78), so its `_540w` rung is
 **540 × 960** and its `_404w` rung is **404 × 718**. Same width as `hq_540p.mp4`, a frame **300 rows
 shorter**, a different aspect. A threshold calibrated on one ladder does not transfer to the other by
 name — say which ladder a number came from. **Do not rename any of these files**: the clips live
-under `.notes/`, and `cases.json` and the recorded measurements address them by the names they have.
+under `testdata/clips/`, and `cases.json` and the recorded measurements address them by the names
+they have.
 The `_404w` rungs are the only material anywhere below the band, i.e. the only thing that would take
 the upscale arm. That is not an invitation: see §0 — below 540 nothing is promised, and pinning it is
 not wanted.
@@ -261,13 +267,14 @@ project undertakes to handle, not as a gap to close.
 
 ## 4. The five must-fire clips — now all five are ctests
 
-**These five sit in `.notes/` directly, not in `.notes/captures/`.** That is where `cases.json`
-resolves them: the ctest passes `--data-dir <repo>/.notes` and each entry names a bare file
-(`"video": "player_standard_factor_only_1.mp4"`), so the path is `.notes/<name>.mp4`. Only the
-**regression-grid** clips of §3 live under `.notes/captures/`. Looking for the must-fire five there
-finds nothing and turns into a false "the clips are absent" report.
+**These five sit in `testdata/clips/golden/`, not in `testdata/clips/grid/`.** That is where
+`cases.json` resolves them: the ctest passes `--data-dir <repo>/testdata/clips/golden` and each
+entry names a bare file (`"video": "player_standard_factor_only_1.mp4"`), so the path is
+`testdata/clips/golden/<name>.mp4`. Only the **regression-grid** material of §3 lives under
+`testdata/clips/grid/`. Looking for the must-fire five there finds nothing and turns into a false
+"the clips are absent" report.
 
-| clip (`.notes/`) | required | asserted by |
+| clip (`testdata/clips/golden/`) | required | asserted by |
 |---|---|---|
 | `player_standard_factor_only_1` | 1 reset, 0 records, `closed_before_completed` | `integration_golden.player_standard_factor_only_1` |
 | `player_standard_switch_at_factor_top` | 1 reset, 1 record (character B) | its golden (the record); **reset count not asserted** |
@@ -385,7 +392,7 @@ any of the following, and each has to be run by hand and reported as such.
 | Windows video import | the app's own method-channel import, driven end to end, and its record compared leaf-by-leaf with the CLI's for the same clip |
 | The Windows **video-frame grab** (the error report's frame selector) | its core half *is* covered — `cv/video_frame_grabber.h` is exercised by `native/test/cv/test_video_frame_grabber.cpp` inside `umacapture_tests`, which is also its only compilation (the wasm build links no `opencv_videoio`). The runner service around it, `windows/runner/video_frame_grab_service.h`, is not: no suite reaches `windows/runner/`, so the method-channel round trip and the off-thread answering are hand-verification only. Same shape as `VideoLoader` vs. the Windows import driver |
 | Web import / the browser | rebuild the wasm, repin, `tool/build_web.sh`, then a real browser run on a throwaway profile; compare the web record with the CLI record leaf-by-leaf (`/metadata/recognizer_version` legitimately differs) |
-| Web live capture | no automation of any kind — but **not** unexercised: it has been played through by hand against the real game, and the procedure is written down (`.notes/analysis/firefox-live-capture/playtest-checklist.md`, Firefox, plus that directory's console exports and latency measurements). Follow that checklist rather than inventing one, and compare against those measurements rather than treating your run as the first |
+| Web live capture | no automation of any kind — but **not** unexercised: it has been played through by hand against the real game, and the procedure is written down (`testdata/harness/firefox-live-capture/playtest-checklist.md`, Firefox, plus that directory's console exports and latency measurements). Follow that checklist rather than inventing one, and compare against those measurements rather than treating your run as the first |
 
 ### A missing translation key now degrades to a false success
 

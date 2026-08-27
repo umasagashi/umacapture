@@ -5,7 +5,8 @@ a recorded clip is presented into it, the real Flutter app captures that window 
 the record the app produces is diffed against a committed golden.
 
 > Tooling: `tool/live_capture_test/` (Python + shell) and `native/tool/mimic_player/` (the player).
-> Clips, sidecars and every run artefact live under the gitignored `.notes/`.
+> Clips and sidecars live under the gitignored `testdata/clips/`, and every run artefact under
+> `testdata/harness/`.
 
 ## The gap it fills
 
@@ -51,9 +52,10 @@ golden it is compared against is the same file `integration_golden.player_standa
   the real modules are no longer the ones it was made from — their content hashes are recorded
   beside it — so replacing a model takes effect on the next run and no run recognises with a model
   the copy froze at some earlier date.
-* **A clip and its sidecar under `.notes/`** — `.notes/player_standard_5.mkv` plus
-  `.notes/player_standard_5.stops.json`. Clips are large and machine-local, so they are gitignored,
-  exactly like the clips `native/test/integration/cases.json` references.
+* **A clip and its sidecar under `testdata/clips/golden/`** — `player_standard_5.mkv` plus
+  `player_standard_5.stops.json`. Clips are large and machine-local, so they are gitignored —
+  they are literally the same files `native/test/integration/cases.json` references, in the same
+  directory (`run.py`'s `--data-dir` defaults to it).
 * **The golden** the scenario names, e.g. `native/test/integration/golden/player_standard_5.json`.
 
 ## Building
@@ -144,7 +146,7 @@ Normalisation is not reimplemented: `native/test/integration/run.py` is imported
 tree, so the four volatile keys (`record_id`, `trainer_id`, `captured_date`, `recognizer_version`),
 the record ordering and the byte-exact serialisation are the golden suite's by construction.
 
-Artefacts go to `.notes/analysis/mimic-player/` and never into the repository:
+Artefacts go to `testdata/harness/runs/` and never into the repository:
 `scenario_result_<tag>.json` (the verdict), `app_result_<tag>.json` (the harness summary, including
 `playback_seconds`, `exe_mtime`, `synchronised.held[*]`, `synchronised.rate_events` and
 `synchronised.timeouts`), plus the harness, app-stdout, player and driver logs.
@@ -205,7 +207,7 @@ synchronisation nor slowdown**, and 0 dropped frames at the scraper against debu
 ## Data isolation
 
 Every app run sets **`UMACAPTURE_DATA_ROOT`** in the launched app's own environment only, pointing
-at `.notes/appdrive_root`. `readDataRootOverride()` in `lib/src/core/bootstrap.dart` reads it before
+at `testdata/harness/appdrive_root`. `readDataRootOverride()` in `lib/src/core/bootstrap.dart` reads it before
 the `data_root.json` file mechanism, validating it the same way (absolute, must already exist).
 
 This matters because the real store — `Documents/umacapture/storage/chara_detail/active` — holds
@@ -255,11 +257,11 @@ anything**, naming the file, the tab, the field and the value; `--scroll-rate` a
 ### 1. Produce it
 
 ```
-uv run tool/live_capture_test/annotate_stops.py --clip .notes/my_clip.mkv \
-    --cache .notes/analysis/mimic-player/scan_my_clip.npz --report > report.txt
+uv run tool/live_capture_test/annotate_stops.py --clip testdata/clips/golden/my_clip.mkv \
+    --cache .notes/scan_my_clip.npz --report > report.txt
 # read the report (step 3), then:
-uv run tool/live_capture_test/annotate_stops.py --clip .notes/my_clip.mkv \
-    --cache .notes/analysis/mimic-player/scan_my_clip.npz --write
+uv run tool/live_capture_test/annotate_stops.py --clip testdata/clips/golden/my_clip.mkv \
+    --cache .notes/scan_my_clip.npz --write
 ```
 
 Without `--write` nothing is written. `--cache` stores the single decode pass (~45 s for a 14 s

@@ -19,7 +19,7 @@
 // exists in Node, and the vendored bundle is mediabunny's browser build. The production `probeClipTimeline` /
 // `grabClipFramePng` and the production worker dispatch are the real ones. What this file therefore CANNOT
 // establish is that a real browser's `copyTo` produces the layout the core reads -- that is a browser
-// measurement and is recorded under .notes/analysis/video-import-error-report/stage-2b/.
+// measurement and is recorded under testdata/evidence/video-import-error-report/stage-2b/.
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -549,7 +549,7 @@ test('the probe releases the demuxer and the frame it decoded for the size', asy
 // The millisecond grid and the successor's time
 //
 // Measured against the real mediabunny in headless Firefox 153 as well; the runs, the clips and the two
-// rejected sources for the successor are under .notes/analysis/video-import-error-report/stage-h1-3b/.
+// rejected sources for the successor are under testdata/evidence/video-import-error-report/stage-h1-3b/.
 
 /// A clip whose frames sit at 100.4 / 133.4 / 166.4 ms. The .4 is the point: those stamps are PUBLISHED as
 /// 100 / 133 / 166, so a request made on the raw-seconds grid (`timeMs / 1000`) selects the PREVIOUS frame

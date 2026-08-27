@@ -394,7 +394,7 @@ scrape → stitch → recognize pipeline that no unit test can see.
 Because it runs the real recognizer, it depends on **local-only assets** that are
 not in git:
 
-- the input clips under `.notes/` (`player_standard.mp4`, …), and
+- the input clips under `testdata/clips/golden/` (`player_standard.mp4`, …), and
 - the ONNX models under `sandbox/modules/`.
 
 The goldens themselves (`integration/golden/*.json`) **are** committed — they are
@@ -521,12 +521,22 @@ in the first place: swscale reads untagged HD as BT.601 and gets the original pi
 back, a browser assumes BT.709 for the same bytes and lands ~20 G lower.
 
 ```sh
-ffmpeg -i .notes/analysis/chrome-vs-firefox-2026-08-05/ab/ps5_2pane_2327x1340_toppad.mkv \
-  -vf "crop=2326:1340:0:0,scale=out_color_matrix=bt601:out_range=tv,format=yuv420p,\
+ffmpeg -i testdata/clips/source/ps5_2pane_2327x1340.mkv \
+  -vf "crop=2326:1310:0:0,pad=2326:1340:0:30:color=black,\
+scale=out_color_matrix=bt601:out_range=tv,format=yuv420p,\
 setparams=colorspace=unknown:color_primaries=unknown:color_trc=unknown:range=unknown" \
   -fps_mode passthrough -c:v libx264 -preset medium -crf 12 -an \
-  .notes/landscape_2pane_ps5_toppad.mp4
+  testdata/clips/golden/landscape_2pane_ps5_toppad.mp4
 ```
+
+The input is the **primary FFV1 screen recording** (2327x1340, 374 frames), kept beside the
+other clip sources. It is *pre-correction*: its content sits flush at row 0 with 30 black
+rows at the bottom, so the `crop`/`pad` pair above performs the `_toppad` translation
+described in the next section inline, rather than reading a separately corrected
+intermediate. (An earlier revision of this recipe named a `ps5_2pane_2327x1340_toppad.mkv`
+input; no such file exists — the intermediate was not kept.) Verified 2026-08-27: the
+command above reproduces the committed clip's geometry and per-row luma exactly
+(2326x1340, 374 frames; 0 of 1340 rows differ on frame 0).
 
 #### The `_toppad` correction (2026-08-18)
 
@@ -566,7 +576,8 @@ its 1152-row landmark gap (737.752 against the correct 737.112), so it comes out
 edge exactly on 1340, which the half-open gate admits. See the `g - b` note in
 [`../src/cv/detail_crop_calibrator.h`](../src/cv/detail_crop_calibrator.h).
 
-So the browser's pixels are an asset now, not an anecdote. `.notes/firefox_landscape_2pane_ps5_toppad.mkv`
+So the browser's pixels are an asset now, not an anecdote.
+`testdata/clips/golden/firefox_landscape_2pane_ps5_toppad.mkv`
 carries the 374 frames Firefox 153 handed to the wasm core, recorded losslessly as
 FFV1/bgr0 and registered as a `replay` case. **It is that recording with its rows translated
 afterwards** (see the `_toppad` note above), not a fresh browser run, so it is not
@@ -583,8 +594,8 @@ source clip — the browser must reach the same record the CLI does, which is th
 contract. **That is a measured fact about the file in place**, not an inherited one; see
 "what the harness does and does not say" below for when it was re-measured and how.
 
-It lives at the `.notes/` root, next to the clips every other case names, rather than
-inside the analysis directory it was produced in: `--data-dir` defaults there, every
+It lives in `testdata/clips/golden/`, next to the clips every other case names, rather than
+inside the `.notes/` analysis directory it was produced in: `--data-dir` defaults there, every
 other manifest entry is a bare filename, and a scratch analysis directory is exactly the
 kind of place that gets swept. A machine without the file skips the case like any other.
 

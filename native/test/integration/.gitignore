@@ -1,5 +1,5 @@
 # Written by run.py --coverage: which golden cases were runnable on THIS machine.
 # Machine state, not repository state (the clips it tracks live under the gitignored
-# .notes/), so it is deliberately not committed. The committed cases.json is the
+# testdata/clips/golden/), so it is deliberately not committed. The committed cases.json is the
 # expected set; this file is only the local high-water mark used to catch a shrink.
 coverage_baseline.json

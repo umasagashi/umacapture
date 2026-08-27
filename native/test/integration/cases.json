@@ -135,7 +135,7 @@
     "(the record is the SECOND character's, so the first character's session was lost before completing); the",
     "three zero-record cases state their whole reset count, since a run that completes nothing loses every",
     "session it discards; every other case leaves it at the default zero by not stating it.",
-    "Videos live under .notes/ and are NOT committed; goldens ARE committed (regression baseline).",
+    "Videos live under testdata/clips/golden/ and are NOT committed; goldens ARE committed (baseline).",
     "A case whose video is absent is skipped, so this manifest may list more clips than any one",
     "machine has locally. Add a case here + regenerate its golden with run.py --update-golden."
   ],

@@ -1764,7 +1764,7 @@ test('a clip that declares no duration still reports progress as counts', async 
 
 // --- HARVEST ISOLATION -----------------------------------------------------------------------------------------
 //
-// THE INCIDENT THESE ARE WRITTEN AGAINST (docs/video-import.md; .notes/video-import/old-implementation-review.md).
+// THE INCIDENT THESE ARE WRITTEN AGAINST (docs/video-import.md; testdata/evidence/video-import/old-implementation-review.md).
 // `harvestAndCleanup` sweeps a storage root indiscriminately and Dart writes everything it ships into the real
 // record store. A record regeneration once left its staging directory under that same root, and the sweep wrote
 // the whole batch back as though the session had captured it: deleted records resurrected, `record.json` rolled

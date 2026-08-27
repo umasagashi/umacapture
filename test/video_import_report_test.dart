@@ -28,7 +28,7 @@ import 'package:umacapture/src/gui/capture.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 
 /// The clip under report. `durationMs` is what the correlation's second check compares, and
-/// `firstFrameMs` is deliberately not 0 (`.notes/player_standard*.mp4` starts at 50.033 ms).
+/// `firstFrameMs` is deliberately not 0 (`testdata/clips/golden/player_standard*.mp4` starts at 50.033 ms).
 const _timeline = VideoFrameTimeline(
   firstFrameMs: 50,
   durationMs: 12000,
