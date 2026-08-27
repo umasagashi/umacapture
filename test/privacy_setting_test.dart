@@ -16,17 +16,9 @@ import 'package:umacapture/src/preference/storage_box.dart';
 import 'support/hive.dart';
 
 void main() {
-  late Future<void> Function() closeHive;
-
-  setUpAll(() async {
-    // allowPostUserData() and the notifier both resolve StorageBox(settings); the
-    // notifier also drops the telemetry ID on opt-out, which lives in its own box.
-    closeHive = await initHiveForTest(['settings', 'telemetry_id']);
-  });
-
-  tearDownAll(() async {
-    await closeHive();
-  });
+  // allowPostUserData() and the notifier both resolve StorageBox(settings); the
+  // notifier also drops the telemetry ID on opt-out, which lives in its own box.
+  useHiveForTest(['settings', 'telemetry_id']);
 
   setUp(() async {
     await Hive.box('settings').clear();

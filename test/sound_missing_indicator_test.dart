@@ -64,14 +64,10 @@ Future<void> _oneStatTurn(WidgetTester tester) async {
 }
 
 void main() {
-  late Future<void> Function() closeHive;
-
   setUpAll(() async {
     loadAppTranslations();
-    closeHive = await initHiveForTest(['settings']);
   });
-
-  tearDownAll(() => closeHive());
+  useHiveForTest(['settings']);
 
   testWidgets('warns about a missing custom clip on a backend without a sync surface', (tester) async {
     final tempRoot = Directory.systemTemp.createTempSync('umacapture_sound_indicator_files');

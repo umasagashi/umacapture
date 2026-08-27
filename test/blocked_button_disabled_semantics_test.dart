@@ -128,13 +128,9 @@ ProviderContainer _container({CharaDetailRecordStorage Function()? storage}) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  late Future<void> Function() closeHive;
 
   setUpAll(loadAppTranslations);
-  setUpAll(() async {
-    closeHive = await openStorageBoxForTest();
-  });
-  tearDownAll(() => closeHive());
+  useStorageBoxForTest();
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_blocked_button_test');

@@ -31,15 +31,11 @@ void main() {
   late ProviderContainer container;
   late RefBase ref;
 
-  late Future<void> Function() closeHive;
-
   setUpAll(() async {
     loadAppTranslations();
-    // The paste-image mode is a persisted setting, so the native write path reads the settings box.
-    closeHive = await initHiveForTest(['settings']);
   });
-
-  tearDownAll(() => closeHive());
+  // The paste-image mode is a persisted setting, so the native write path reads the settings box.
+  useHiveForTest(['settings']);
 
   setUp(() {
     tempRoot = Directory.systemTemp.createTempSync('umacapture_clipboard_capability_test');

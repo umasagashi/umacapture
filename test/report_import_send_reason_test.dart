@@ -186,15 +186,11 @@ String _sharedSuffix(String a, String b) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  late Future<void> Function() closeHive;
 
   setUpAll(loadAppTranslations);
   // Both ready branches call getSentryReportCount(), which reads the settings box; Hive throws if it
   // was never opened. Pointed at a scratch directory so the run cannot touch real preferences.
-  setUpAll(() async {
-    closeHive = await openStorageBoxForTest();
-  });
-  tearDownAll(() => closeHive());
+  useStorageBoxForTest();
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_send_reason_test');

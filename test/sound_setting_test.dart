@@ -23,14 +23,8 @@ import 'support/web_like_fs_backend.dart';
 String _entryKey(SoundType type, String field) => ("${SettingsEntryKey.soundEffect.name}${type.name}$field").camelCase;
 
 void main() {
-  late Future<void> Function() closeHive;
-
-  setUpAll(() async {
-    // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
-    closeHive = await initHiveForTest(['settings']);
-  });
-
-  tearDownAll(() => closeHive());
+  // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
+  useHiveForTest(['settings']);
 
   setUp(() async {
     await Hive.box('settings').clear();

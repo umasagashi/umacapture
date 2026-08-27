@@ -48,14 +48,10 @@ void seedLegacy(List<Map<String, dynamic>> maps) {
 }
 
 void main() {
-  late Future<void> Function() closeHive;
-
   setUpAll(() async {
     initializeMappers();
-    closeHive = await initHiveForTest(['column_spec']);
   });
-
-  tearDownAll(() => closeHive());
+  useHiveForTest(['column_spec']);
 
   setUp(() async {
     await Hive.box('column_spec').clear();

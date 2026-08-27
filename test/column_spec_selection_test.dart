@@ -16,16 +16,12 @@ import 'package:umacapture/src/core/mapper_init.dart';
 import 'support/hive.dart';
 
 void main() {
-  late Future<void> Function() closeHive;
-
   setUpAll(() async {
     initializeMappers();
-    // The column_spec box stores a plain JSON string, so no Hive type adapters
-    // are required; an in-memory temp dir is enough.
-    closeHive = await initHiveForTest(['column_spec']);
   });
-
-  tearDownAll(() => closeHive());
+  // The column_spec box stores a plain JSON string, so no Hive type adapters
+  // are required; an in-memory temp dir is enough.
+  useHiveForTest(['column_spec']);
 
   setUp(() async {
     await Hive.box('column_spec').clear();

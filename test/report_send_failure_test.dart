@@ -159,20 +159,15 @@ final _surfaces = <String, _Surface>{
 
 void main() {
   late Directory tempDir;
-  late Future<void> Function() closeHive;
   late ProviderContainer container;
   late List<ToastData> toasts;
   late ProviderSubscription<AsyncValue<ToastData>> subscription;
 
   setUpAll(() async {
     loadAppTranslations();
-    // The monthly counter is Hive-backed and only a *sent* report may touch it.
-    closeHive = await initHiveForTest(['settings']);
   });
-
-  tearDownAll(() async {
-    await closeHive();
-  });
+  // The monthly counter is Hive-backed and only a *sent* report may touch it.
+  useHiveForTest(['settings']);
 
   setUp(() async {
     await Hive.box('settings').clear();

@@ -73,16 +73,9 @@ void main() {
   });
 
   group('the frame_resize the app puts on the wire', () {
-    late Future<void> Function() closeHive;
     final calls = <MethodCall>[];
 
-    setUpAll(() async {
-      closeHive = await initHiveForTest(['settings']);
-    });
-
-    tearDownAll(() async {
-      await closeHive();
-    });
+    useHiveForTest(['settings']);
 
     setUp(() async {
       await Hive.box('settings').clear();
@@ -178,15 +171,7 @@ void main() {
   });
 
   group('forceResizeModeStateProvider', () {
-    late Future<void> Function() closeHive;
-
-    setUpAll(() async {
-      closeHive = await initHiveForTest(['settings']);
-    });
-
-    tearDownAll(() async {
-      await closeHive();
-    });
+    useHiveForTest(['settings']);
 
     setUp(() async {
       await Hive.box('settings').clear();

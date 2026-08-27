@@ -35,13 +35,11 @@ import 'support/records.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late Future<void> Function() closeHive;
   setUpAll(() async {
     initializeMappers();
-    // add() reads the auto-copy setting, which is Hive-backed.
-    closeHive = await initHiveForTest(['settings']);
   });
-  tearDownAll(() => closeHive());
+  // add() reads the auto-copy setting, which is Hive-backed.
+  useHiveForTest(['settings']);
 
   late Directory tempRoot;
   setUp(() {

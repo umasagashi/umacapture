@@ -55,17 +55,11 @@ Future<ThemeData> _pump(WidgetTester tester) async {
 }
 
 void main() {
-  late Future<void> Function() closeHive;
-
   setUpAll(() async {
     loadAppTranslations();
-    // The import dialog reads the monthly report quota out of the settings box on its first build.
-    closeHive = await initHiveForTest(['settings']);
   });
-
-  tearDownAll(() async {
-    await closeHive();
-  });
+  // The import dialog reads the monthly report quota out of the settings box on its first build.
+  useHiveForTest(['settings']);
 
   setUp(() async {
     await Hive.box('settings').clear();

@@ -163,20 +163,17 @@ FilePath Function(RefBase ref) _requestFor(FilePath path) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  late Future<void> Function() closeHive;
-
   setUpAll(() async {
     initializeMappers();
     loadAppTranslations();
-    // The dialog's ready() branch reads the settings box, and so does the controller's storage.
-    closeHive = await openStorageBoxForTest();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
       PlatformChannel.channel,
       (call) async => null,
     );
   });
 
-  tearDownAll(() => closeHive());
+  // The dialog's ready() branch reads the settings box, and so does the controller's storage.
+  useStorageBoxForTest();
 
   setUp(() {
     _tempRoot = Directory.systemTemp.createTempSync('umacapture_disposed_relay');

@@ -45,11 +45,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(initializeMappers);
 
-  late Future<void> Function() closeHive;
-  setUpAll(() async {
-    closeHive = await initHiveForTest(['data_migration']);
-  });
-  tearDownAll(() async => closeHive());
+  useHiveForTest(['data_migration']);
 
   late Directory tempRoot;
   late PathInfo pathInfo;

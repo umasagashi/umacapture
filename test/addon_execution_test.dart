@@ -23,6 +23,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
+import 'support/hive.dart';
 import 'support/riverpod.dart';
 import 'support/settling.dart';
 
@@ -248,18 +249,7 @@ void main() {
   });
 
   group('AddonExecutionController._loadHistory', () {
-    late Directory tempDir;
-
-    setUpAll(() async {
-      tempDir = Directory.systemTemp.createTempSync('umacapture_addon_test');
-      Hive.init(tempDir.path);
-      await Hive.openBox('addon');
-    });
-
-    tearDownAll(() async {
-      await Hive.close();
-      tempDir.deleteSync(recursive: true);
-    });
+    useHiveForTest(['addon']);
 
     setUp(() => Hive.box('addon').clear());
 
@@ -368,18 +358,7 @@ void main() {
   });
 
   group('TaskDefinitionsNotifier.build', () {
-    late Directory tempDir;
-
-    setUpAll(() async {
-      tempDir = Directory.systemTemp.createTempSync('umacapture_addon_tasks_test');
-      Hive.init(tempDir.path);
-      await Hive.openBox('addon');
-    });
-
-    tearDownAll(() async {
-      await Hive.close();
-      tempDir.deleteSync(recursive: true);
-    });
+    useHiveForTest(['addon']);
 
     setUp(() => Hive.box('addon').clear());
 

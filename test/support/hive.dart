@@ -2,26 +2,75 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:recase/recase.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
+/// Registers a Hive fixture for the enclosing group: [boxes] are open for every
+/// test in it, and the temp directory is removed after the last one.
+///
+/// Call this from the group (or `main`) body — not from inside a `setUpAll`.
+/// This is the form to reach for, because it owns both halves of the fixture:
+/// a `setUpAll` that fails before the fixture exists cannot make the teardown
+/// throw a second, unrelated error on top of the real one. Callers that need a
+/// clean box per test can `Hive.box(name).clear()` in `setUp`.
+///
+/// See [_openInMemory] for what these boxes can and cannot do.
+void useHiveForTest(List<String> boxes) => _useFixture(setUpAll, tearDownAll, () => _initHiveForTest(boxes));
+
+/// The per-test counterpart of [useHiveForTest]: a fresh temp directory and a
+/// fresh set of empty boxes for every test in the enclosing group.
+///
+/// Use it only where a test would otherwise have to undo the previous one's
+/// writes; [useHiveForTest] plus `Hive.box(name).clear()` in a `setUp` is the
+/// cheaper form and the common one.
+void useHiveForEachTest(List<String> boxes) => _useFixture(setUp, tearDown, () => _initHiveForTest(boxes));
+
+/// The [StorageBox] counterpart of [useHiveForTest].
+///
+/// Use it when the code under test reaches Hive through `StorageBox` rather
+/// than through named boxes: `ensureOpened` registers the Hive adapters and
+/// opens every `StorageBoxKey` box, neither of which [useHiveForTest] does.
+void useStorageBoxForTest() => _useFixture(setUpAll, tearDownAll, _openStorageBoxForTest);
+
+/// Registers both halves of a fixture, so that no suite has to hold the close
+/// callback itself.
+///
+/// That the callback is unreachable from outside this file is the point: a
+/// suite that stored it in a `late` variable would, whenever its setup failed
+/// before the assignment, answer the teardown with a LateInitializationError
+/// that buries the failure that actually happened. Here it is a nullable local
+/// instead, so a fixture that never opened is simply not closed — and nothing
+/// leaks, because `_hiveInTempDir` removes the directory on that path itself.
+void _useFixture(
+  void Function(dynamic Function()) registerSetUp,
+  void Function(dynamic Function()) registerTearDown,
+  Future<Future<void> Function()> Function() open,
+) {
+  Future<void> Function()? close;
+  registerSetUp(() async => close = await open());
+  registerTearDown(() async {
+    await close?.call();
+    close = null;
+  });
+}
+
 /// Initializes Hive against a throwaway temp directory and opens [boxes].
 ///
-/// Returns a teardown callback that closes Hive and removes the temp directory;
-/// register it with `addTearDown` or invoke it in `tearDownAll`. Callers that
-/// need a clean box per test can `Hive.box(name).clear()` in `setUp`.
-Future<Future<void> Function()> initHiveForTest(List<String> boxes) {
+/// Returns a teardown callback that closes Hive and removes the temp directory.
+/// Private on purpose — see [_useFixture].
+///
+/// The boxes are memory-backed: see [_openInMemory] for what that costs.
+Future<Future<void> Function()> _initHiveForTest(List<String> boxes) {
   return _hiveInTempDir((_) => _openInMemory(boxes));
 }
 
 /// Opens the app's [StorageBox] boxes against a throwaway temp directory.
 ///
-/// The `StorageBox` counterpart of [initHiveForTest], with the same teardown
-/// contract. Use it when the code under test reaches Hive through `StorageBox`
-/// rather than through named boxes: `ensureOpened` registers the Hive adapters
-/// and opens every `StorageBoxKey` box, neither of which [initHiveForTest] does.
-Future<Future<void> Function()> openStorageBoxForTest() {
+/// The `StorageBox` counterpart of [_initHiveForTest], with the same teardown
+/// contract, and private for the same reason.
+Future<Future<void> Function()> _openStorageBoxForTest() {
   return _hiveInTempDir((dir) async {
     // Opened first, and in memory, so that `ensureOpened` finds them already
     // open and its own `Hive.openBox` calls hand back these instead of creating
@@ -43,8 +92,22 @@ Future<Future<void> Function()> openStorageBoxForTest() {
 /// inside a `testWidgets` fake-async zone leaves a continuation that only that
 /// (now discarded) zone could run — so `Hive.close()` waits on the lock forever,
 /// the box file stays open, and on Windows deleting the directory under it fails
-/// with a sharing violation. Measured: nine widget suites hung in `tearDownAll`
-/// on `Hive.close()` and then failed the delete with errno 32.
+/// with a sharing violation. Measured while writing this helper: adding a plain
+/// `Hive.close()` + `deleteSync` teardown to the disk-backed fixtures left nine
+/// widget suites reporting "(tearDownAll) did not complete", with the probe
+/// logging `TimeoutException` from the close and `PathAccessException … errno =
+/// 32` from the delete.
+///
+/// What it costs, and why it is affordable here: a memory box's `writeFrames` is
+/// a no-op, so **a value put into one of these boxes is never encoded** — no
+/// `TypeAdapter` runs, and `Box.put` cannot fail on a missing one. `readValue`,
+/// `compact` and `deleteFromDisk` throw `UnsupportedError`, so
+/// `StorageBox.ensureOpened(reset: true)` cannot be exercised against them. None
+/// of that is a loss for the suites that use this fixture: they store primitives
+/// and JSON strings and read them back within the same process, so Hive is
+/// their fixture and not their subject. A suite that wants to assert Hive's
+/// serialization or its on-disk reset must open a disk box itself, as
+/// `storage_box_reset_test.dart` and `storage_box_test.dart` do.
 Future<void> _openInMemory(List<String> boxes) async {
   for (final box in boxes) {
     await Hive.openBox(box, bytes: Uint8List(0));
@@ -78,10 +141,46 @@ Future<Future<void> Function()> _hiveInTempDir(Future<void> Function(Directory) 
     _remove(dir);
     rethrow;
   }
-  return () async {
+  // Same asymmetry as above, and for the same reason: `Hive.close()` closes
+  // every box in the process, including a disk-backed one some test opened for
+  // itself, so it can genuinely throw here.
+  return () => closeHiveAndRemove(dir);
+}
+
+/// Closes Hive and removes [dir], with a close failure taking precedence over a
+/// removal failure.
+///
+/// Both halves have to happen: a close that throws must not strand the
+/// directory, and the removal must not replace the close error with its own.
+/// `try { close } finally { remove }` buys the first and loses the second — an
+/// exception raised inside a `finally` *replaces* the one already in flight —
+/// and the two failures are not independent. When the close fails because boxes
+/// are still open (the only variant either form has ever been observed on; see
+/// [_openInMemory]), the same handles defeat `deleteSync`, so the removal's
+/// `PathAccessException … errno = 32` **always** buried the close's
+/// `TimeoutException`: the symptom always buried the cause.
+Future<void> closeHiveAndRemove(Directory dir) async {
+  ({Object error, StackTrace stackTrace})? closeFailure;
+  try {
     await Hive.close();
+  } catch (error, stackTrace) {
+    closeFailure = (error: error, stackTrace: stackTrace);
+  }
+  try {
     _remove(dir);
-  };
+  } catch (error, stackTrace) {
+    if (closeFailure == null) {
+      // Nothing else went wrong, so a directory left behind is the failure worth
+      // reporting, and swallowing it is the very leak this helper exists to stop.
+      rethrow;
+    }
+    // Reported rather than thrown: it is the close failure's own consequence,
+    // and the close failure is the one the caller needs to read.
+    printOnFailure('failed to remove ${dir.path} after Hive.close() threw: $error\n$stackTrace');
+  }
+  if (closeFailure case final failure?) {
+    Error.throwWithStackTrace(failure.error, failure.stackTrace);
+  }
 }
 
 void _remove(Directory dir) {
