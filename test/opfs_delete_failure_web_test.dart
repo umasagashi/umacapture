@@ -233,11 +233,16 @@ void main() {
 
     test('an entry held by an open writable is the one case with a lock`s shape', () async {
       // The OPFS analogue of the sharing violation the retry was written for: a
-      // writable stream still holds the file. Whatever the browser does here is
-      // recorded rather than assumed -- if it refuses, the refusal clears once
-      // the writable closes, and that is a transient failure a retry can
-      // genuinely fix. If it succeeds, web has no transient delete failure at
-      // all and the retry is doing nothing for it.
+      // writable stream still holds the file. The refusal clears once the
+      // writable closes, and that is a transient failure a retry can genuinely
+      // fix -- it is the *only* one this suite has found on web, so it is the
+      // whole reason `PathEntity.delete` retries there at all.
+      //
+      // Hence asserted, not merely recorded. A browser that stopped holding the
+      // entry would leave that retry loop doing nothing but delaying the failure
+      // by 200 ms, and the only way anyone learns of it is this line going red;
+      // a case that printed a note and returned would have been green whether it
+      // observed the refusal or not, which is no evidence for the shipped code.
       final handle = await scratch.getFileHandle('held.txt', web.FileSystemGetFileOptions(create: true)).toDart;
       final writable = await handle.createWritable().toDart;
 
@@ -249,15 +254,16 @@ void main() {
       }
 
       if (refusal == null) {
-        // ignore: avoid_print
-        print('[removeEntry(open writable)] succeeded; OPFS did not hold the entry');
+        // Tidy up before failing: an open writable would refuse the tearDown's
+        // recursive removal too, and closing a writable whose entry is already
+        // gone is allowed to fail.
         try {
           await writable.close().toDart;
-        } catch (_) {
-          // Closing a writable whose entry is gone is allowed to fail; the
-          // measurement above is what this test reports.
-        }
-        return;
+        } catch (_) {}
+        fail(
+          'removeEntry succeeded while an open writable held the entry: OPFS no longer has a '
+          'transient delete failure, so re-read the retry rationale in lib/src/core/path_entity.dart.',
+        );
       }
 
       final caught = Caught(refusal);
