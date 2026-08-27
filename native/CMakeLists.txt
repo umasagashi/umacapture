@@ -198,6 +198,7 @@ set(
         test/types/test_color.cpp
         test/types/test_shape.cpp
         test/util/test_misc.cpp
+        test/util/test_io_util.cpp
         test/util/test_error_util.cpp
         test/util/test_stds.cpp
         test/util/test_json_util.cpp

@@ -122,6 +122,14 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   macro expands to — the omit-a-disengaged-optional vs write-a-value asymmetry, a
   missing or explicitly-null key both decoding to `nullopt`, the non-optional path
   throwing on a missing key, and `decodePath`'s UTF-8 `u8path` conversion).
+- `util/test_io_util.cpp` — the byte-level contract of `io_util::read`/`io_util::write`:
+  the bytes handed to `write` reach the disk untranslated (no CRLF expansion, no doubled
+  CR in text that already holds one) and `read` hands back exactly what is on disk, CR
+  included. Each case keeps `io_util` on one side and a raw binary `fstream` on the other,
+  because a round trip through both cannot see the defect — the Windows CRT's two newline
+  translations are exact inverses, which is how the CLI's own `build` round-trip check
+  masked it. Plus the missing-file throw. Tautologically green on POSIX targets, where
+  text and binary mode are the same thing.
 - `cv/test_frame.cpp` — the `Frame` numeric core: `BGR::difference`, `linspace`,
   `FrameAnchor` coordinate round-trips (incl. the zero-size degenerate guard),
   `colorAt`, line sampling (`isIn`/`isAllIn`/`lengthIn`), and the area diff
