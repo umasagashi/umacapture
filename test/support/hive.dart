@@ -16,6 +16,27 @@ import 'package:umacapture/src/preference/storage_box.dart';
 /// throw a second, unrelated error on top of the real one. Callers that need a
 /// clean box per test can `Hive.box(name).clear()` in `setUp`.
 ///
+/// **One live registration at a time — never nested.** None of these fixtures is
+/// scoped to the boxes it opened, because Hive gives them nothing to scope to:
+/// the teardown is `Hive.close()`, which closes `_boxes.values` — every box in
+/// the process — and `Hive.init` assigns one process-wide `homePath`
+/// (`hive_ce/src/hive_impl.dart`). So a second registration inside the extent of
+/// a first — a nested `group`, or a `main`-body call plus a group-level one, and
+/// in any mix of [useHiveForTest], [useHiveForEachTest] and
+/// [useStorageBoxForTest] — closes the *outer* group's boxes at the inner one's
+/// teardown, and the inner `Hive.init` has by then repointed `homePath` at a
+/// directory that same teardown removes. Every test declared after the inner
+/// group fails with `HiveError: Box not found. Did you forget to call
+/// Hive.openBox()?` — measured, and a message that names Hive rather than this
+/// file, which is why it is written down here instead of being left to be
+/// diagnosed.
+///
+/// Sibling groups are not nesting and are fine: `package:test` awaits a group's
+/// `tearDownAll` before the next group's `setUpAll`
+/// (`test_core/src/runner/engine.dart`, `_runGroup`), so two extents never
+/// overlap — that is the shape of every file that registers this twice today.
+/// One call per file, or one per leaf group, never both.
+///
 /// See [_openInMemory] for what these boxes can and cannot do.
 void useHiveForTest(List<String> boxes) => _useFixture(setUpAll, tearDownAll, () => _initHiveForTest(boxes));
 
@@ -25,6 +46,9 @@ void useHiveForTest(List<String> boxes) => _useFixture(setUpAll, tearDownAll, ()
 /// Use it only where a test would otherwise have to undo the previous one's
 /// writes; [useHiveForTest] plus `Hive.box(name).clear()` in a `setUp` is the
 /// cheaper form and the common one.
+///
+/// The no-nesting rule on [useHiveForTest] applies here too, and across the two:
+/// this teardown is the same process-global `Hive.close()`.
 void useHiveForEachTest(List<String> boxes) => _useFixture(setUp, tearDown, () => _initHiveForTest(boxes));
 
 /// The [StorageBox] counterpart of [useHiveForTest].
@@ -32,6 +56,9 @@ void useHiveForEachTest(List<String> boxes) => _useFixture(setUp, tearDown, () =
 /// Use it when the code under test reaches Hive through `StorageBox` rather
 /// than through named boxes: `ensureOpened` registers the Hive adapters and
 /// opens every `StorageBoxKey` box, neither of which [useHiveForTest] does.
+///
+/// The no-nesting rule on [useHiveForTest] applies here too, and across the two:
+/// this teardown is the same process-global `Hive.close()`.
 void useStorageBoxForTest() => _useFixture(setUpAll, tearDownAll, _openStorageBoxForTest);
 
 /// Registers both halves of a fixture, so that no suite has to hold the close
@@ -138,7 +165,18 @@ Future<Future<void> Function()> _hiveInTempDir(Future<void> Function(Directory) 
     } catch (_) {
       // Fall through to the removal; a close failure must not strand the directory.
     }
-    _remove(dir);
+    try {
+      _remove(dir);
+    } catch (error, stackTrace) {
+      // The same precedence [closeHiveAndRemove] applies on the success path, for
+      // the same reason: an unguarded `_remove` here throws *instead of* reaching
+      // the `rethrow` below, so the setup failure the caller has to read is
+      // replaced by its own consequence. When [open] fails after Hive has taken a
+      // handle inside `dir`, those handles are what defeat `deleteSync`, and the
+      // developer is shown `PathAccessException … errno = 32` naming a temp
+      // directory instead of the error that broke the fixture.
+      printOnFailure('failed to remove ${dir.path} after the Hive fixture failed to open: $error\n$stackTrace');
+    }
     rethrow;
   }
   // Same asymmetry as above, and for the same reason: `Hive.close()` closes

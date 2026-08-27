@@ -14,11 +14,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
+
 void main() {
   late Directory tempDir;
 
   setUp(() => tempDir = Directory.systemTemp.createTempSync('umacapture_storagebox_test'));
-  tearDown(() => tempDir.deleteSync(recursive: true));
+  // The fixture teardown from `support/hive.dart`, called directly, for the same reason as in
+  // `storage_box_reset_test.dart`: this suite opens disk boxes itself, so a case that fails before
+  // its own `Hive.close()` leaves eight of them open, and a bare `deleteSync` then raises
+  // `PathAccessException … errno = 32` on top of the real failure and strands the directory.
+  tearDown(() => closeHiveAndRemove(tempDir));
 
   test('box operations no-op after markClosedForMigration instead of throwing', () async {
     await StorageBox.ensureOpened(directory: tempDir.path);
