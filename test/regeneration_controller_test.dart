@@ -21,10 +21,11 @@
 // 200 ms publish tail and the inactivity watchdog -- which `pumpEventQueue` cannot
 // bring forward, so the wait has to turn the real clock. Both take the helper's
 // default timeout: `updated()` awaits the isolate-backed reload *before* the poll
-// starts, so all that is left inside it is that sub-second timer, and 30 s is over a
-// hundred times its length. (Contrast `platform_channel_disposed_relay_test.dart`,
-// where the announcement is fire-and-forget and the reload therefore runs inside the
-// poll; the sites there do widen the timeout, and say so.)
+// starts, so all that is left inside it is that sub-second timer, comfortably inside
+// the helper's default with room to spare rather than close to it. (Contrast
+// `platform_channel_disposed_relay_test.dart`, where the announcement is fire-and-forget
+// and the reload therefore runs inside the poll; the sites there do widen the timeout,
+// and say so.)
 @Timeout(Duration(minutes: 5))
 library;
 

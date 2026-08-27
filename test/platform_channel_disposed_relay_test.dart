@@ -28,7 +28,7 @@
 // `regeneration_controller_test.dart`, which awaits `updated()` — nothing here awaits it: the
 // announcement arrives through a fire-and-forget `handleNativeMessage`, so the isolate's cost falls
 // *inside* the poll. That cost is set by how much CPU the machine can spare, which is why these
-// sites pass two minutes rather than the 30 s default. It is a hang detector, not a budget anything
+// sites pass two minutes rather than the 20 s default. It is a hang detector, not a budget anything
 // here is measured against.
 @Timeout(Duration(minutes: 5))
 library;
@@ -205,7 +205,7 @@ void main() {
       await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).count == 1,
         describe: 'the record a live channel announced to be counted',
-        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        // Two minutes, not the 20 s default: the worker-isolate reload runs inside this poll.
         timeout: const Duration(minutes: 2),
       );
 
@@ -223,7 +223,7 @@ void main() {
       await waitUntil(
         () => _cardInTable(container, 'r1') == 2,
         describe: 'the successor to complete the batch and publish the regenerated rows',
-        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        // Two minutes, not the 20 s default: the worker-isolate reload runs inside this poll.
         timeout: const Duration(minutes: 2),
       );
       expect(_cardInTable(container, 'r2'), 2, reason: 'the whole batch reaches the table together');
@@ -244,7 +244,7 @@ void main() {
       await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).count == 1,
         describe: 'the record that succeeded to be counted',
-        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        // Two minutes, not the 20 s default: the worker-isolate reload runs inside this poll.
         timeout: const Duration(minutes: 2),
       );
       // The other record's regeneration failed on the channel the rebuild took away.
@@ -262,7 +262,7 @@ void main() {
       await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).isCompleted,
         describe: 'the batch to complete once the failure is announced',
-        // Two minutes, not the 30 s default: the worker-isolate reload runs inside this poll.
+        // Two minutes, not the 20 s default: the worker-isolate reload runs inside this poll.
         timeout: const Duration(minutes: 2),
       );
       expect(notifier.successCount, 1);
