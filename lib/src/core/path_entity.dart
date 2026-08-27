@@ -135,13 +135,35 @@ class PathEntity {
     // of a timing problem. That is known, and taken, for the reasons above.
     //
     // A narrowing by type would also have to begin from what web actually
-    // delivers: a rejected OPFS call arrives here as a bare `JSObject` (a
-    // DOMException), which is not `dart:io`'s `FileSystemException` and not a
-    // Dart `Exception` at all. So no `on FileSystemException` clause selects any
-    // of it, and the obvious tidy-up would silently end every retry on web. The
-    // measurements this note rests on are pinned by
-    // `test/opfs_delete_failure_web_test.dart`, so the next reader who wants to
-    // narrow this starts from them instead of measuring the boundary again.
+    // delivers here, and that is two kinds, not one. OPFS rejects with a bare
+    // `JSObject` (a DOMException), but `WebVfs.delete` does not pass all of them
+    // on: every "it is not there" case -- a missing segment in the parent walk,
+    // a file occupying a directory name, a leaf that is already gone -- it
+    // converts into web_vfs's own `FileSystemException`. Only a refusal whose
+    // entry still exists is rethrown raw, and that set is exactly the
+    // interesting one: `InvalidModificationError`, and the
+    // `NoModificationAllowedError` this retry was written for.
+    //
+    // So neither obvious tidy-up is safe, and they fail in opposite directions.
+    // `on FileSystemException` -- meaning `dart:io`'s -- selects nothing web
+    // throws, of either kind, and would silently end every retry there. And
+    // `on Exception` selects the converted half only, so it would go on
+    // retrying the failures measured above to be identical on all three
+    // attempts, while dropping the held-entry refusal that is the one thing
+    // retrying rescues. Getting it exactly backwards is available; getting it
+    // right is not, for the reasons above.
+    //
+    // What the measurements rest on: `test/opfs_delete_failure_web_test.dart`
+    // drives the OPFS API directly, one layer below this `catch`, so read it as
+    // evidence about the browser rather than about this boundary. It pins the
+    // identical-on-three-attempts result for `NotFoundError` and
+    // `InvalidModificationError`, and pins that no refusal is selectable by
+    // `dart:io`'s `FileSystemException`. It does *not* pin the
+    // `NoModificationAllowedError` name: that is a recorded observation, and
+    // what the test asserts is the shape behind it -- whatever the browser
+    // refuses a held entry with, the same delete succeeds once the writable
+    // closes. A browser that stopped refusing at all would leave that case
+    // green, so the name above is worth re-measuring rather than trusting.
     int attempts = 0;
     while (true) {
       try {
