@@ -64,10 +64,14 @@ passages pruned out. These are the project's own answers where it now stays sile
 
 ## Formatting
 
-- The repo complies with standard `dart format`; run it freely. The page width
-  is pinned to **120 columns** via `analysis_options.yaml` (`formatter.page_width`),
-  so `dart format` produces no whole-file churn. Do not hand-format against the
+- The repo complies with standard `dart format`. The page width is pinned to
+  **120 columns** via `analysis_options.yaml` (`formatter.page_width`), so
+  `dart format` produces no whole-file churn. Do not hand-format against the
   legacy "short" style.
+- `dart format` does not read the analyzer's `exclude:` key, so a bare
+  `dart format .` still reaches `testdata/`, which must not be rewritten (see
+  `.claude/rules/test-material.md`). Always give it explicit paths (as CI and
+  the pre-commit hook already do) rather than running it unqualified.
 - A pre-commit hook (`tool/hooks/pre-commit`) rejects unformatted staged Dart
   files. Enable it once per clone with `git config core.hooksPath tool/hooks`.
 - A historical reformat commit is listed in `.git-blame-ignore-revs`; `git blame`
