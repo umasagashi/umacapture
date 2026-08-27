@@ -74,9 +74,12 @@ class PathEntity {
     // but nobody can enumerate the first kind, and the two ways of getting the
     // predicate wrong are not symmetric. Only the evidence differs. This variant
     // never reaches web (the web backend's synchronous surface throws
-    // `UnsupportedError` -- which this loop would dutifully retry three times
-    // before rethrowing, one instance of the cost described there), so the
-    // browser measurements cited there bear on [delete] and not on this loop.
+    // `UnsupportedError`, and so does the backoff: `sleep` calls
+    // `_ProcessUtils._sleep`, which dart2js patches to
+    // `throw UnsupportedError("ProcessUtils._sleep")`. So the loop would make
+    // *one* attempt and the error that escaped would be the backoff's, with the
+    // backend's own -- the one naming the delete -- discarded), so the browser
+    // measurements cited there bear on [delete] and not on this loop.
     // What is common to both is that neither platform's set of transient modes
     // has been enumerated, and desktop -- the platform this loop is for -- has no
     // measurement of its failure modes at all.
@@ -115,9 +118,11 @@ class PathEntity {
     // to draw does exist, and on web it has been measured: an entry held by an
     // open writable is refused with `NoModificationAllowedError`, and the *same*
     // delete succeeds once the holder closes -- exactly the shape this retry was
-    // written for -- while `NotFoundError`, `InvalidModificationError` and
-    // `TypeMismatchError` come back identical on all three attempts, so retrying
-    // them only makes the failure later.
+    // written for -- while `NotFoundError` and `InvalidModificationError` come
+    // back identical on all three attempts, so retrying them only makes the
+    // failure later. (`TypeMismatchError` is a single observation, not a
+    // repeated one, and it was taken on the parent walk rather than on a
+    // delete -- so nothing says whether it clears.)
     //
     // Narrowing to the recoverable set is refused all the same, for two reasons.
     // It cannot be enumerated: nothing establishes that every transient mode has
