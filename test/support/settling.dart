@@ -64,6 +64,23 @@ Future<void> settleUntil(
 
 /// [settleUntil] for a plain `test()` with no [WidgetTester]: turns the event loop until [ready]
 /// holds, bounded by the wall clock.
+///
+/// **Only from a plain `test()`.** Calling this from inside a `testWidgets` body -- directly or
+/// through a helper -- is a hang, not a slow test. There, `Future.delayed` is a *fake* timer that
+/// only fires when something elapses the fake clock, and this loop elapses nothing: it suspends on
+/// the first delay and never resumes, so [ready] is never polled again, the [Stopwatch] below is
+/// never re-read, and the [fail] that would name the condition is unreachable by construction. The
+/// stated contract of these helpers -- "the timeout is the hang detector" -- does not hold under the
+/// fake clock, which is exactly why it has to be said here.
+///
+/// Under a `WidgetTester`, use [settleUntil]: it pumps, and it steps out to real time through
+/// `runAsync` on every turn, which is what makes its own bound reachable. If the wait genuinely has
+/// no tester to hand -- a helper that only has a `ProviderContainer`, say -- the caller can put it
+/// inside `tester.runAsync(...)`, where the real event loop is running and this behaves as written.
+///
+/// `test/pump_loop_bound_guard_test.dart` enforces this: it rejects a call to [waitUntil] reached
+/// from a `testWidgets` body outside a `runAsync`. It matches on the name, so a copy of this loop
+/// under another name is not covered -- do not write one.
 Future<void> waitUntil(bool Function() ready, {required String describe, Duration timeout = _defaultTimeout}) async {
   final waited = Stopwatch()..start();
   while (!ready()) {

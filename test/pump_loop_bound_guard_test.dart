@@ -5,10 +5,13 @@
 // Inside `testWidgets` the body runs in `FakeAsync`: `tester.pump()` elapses the *fake* clock and
 // returns without ever handing control back to the real event loop. A loop whose only suspension
 // point is `pump()` therefore never lets either timer's callback run -- the process spins at 100%
-// CPU until something outside kills it. Measured: two real sites in
-// `delete_record_dialog_test.dart` hung for 23 minutes and 11.5 minutes respectively and had to be
-// killed by hand, while the same shape written with a `Completer` (which does suspend on something
-// real) was cut off at 10 minutes as designed.
+// CPU until something outside kills it. Measured: the two real sites in
+// `delete_record_dialog_test.dart` were left spinning and killed by hand at 23 and 11.5 minutes --
+// those are how long the observer waited, not a bound the run was heading for, because there is no
+// bound. (The commit that capped them quotes 780s for the same shape; that is a third such wait, not
+// a different measurement of the same one.) The contrast is the number that means something: the
+// same shape written with a `Completer` -- which suspends on something real -- was cut off at 10
+// minutes by the binding's own timeout, as designed.
 //
 // So the rule cannot be "every wait has a timeout": a wall-clock bound is exactly what does not
 // reach here. The rule is that a loop the fake clock alone drives has to be bounded by its own
@@ -50,7 +53,17 @@ void main() {
     // Without these the rule passes by having read nothing, or by having stopped recognising the
     // shape it is written to classify -- both of which look exactly like "no violations".
     expect(scanned, greaterThan(100), reason: 'the test tree was not read; this rule observes nothing now');
-    expect(loops, isNotEmpty, reason: 'no fake-advancing pump loop was recognised at all');
+    // Per bound, not `isNotEmpty`: the tree has dozens of `for (final x in xs) { await pump(); }`,
+    // so one lump canary is satisfied by the sturdiest path alone -- collection bound, literal
+    // `pump` -- and stays green with `_Counters`, `_TripConditions` and `_yieldsToRealTime` all
+    // broken. Each class of verdict this rule can reach has to still be reachable.
+    for (final bound in [PumpLoopBound.collection, PumpLoopBound.counter]) {
+      expect(
+        loops.where((e) => e.bound == bound),
+        isNotEmpty,
+        reason: 'no ${bound.name}-bounded pump loop was recognised at all; the scan stopped classifying',
+      );
+    }
 
     expect(
       loops.where((e) => !e.isBounded).map((e) => e.describe()).toList(),
@@ -75,6 +88,36 @@ void main() {
     final source = File(path).readAsStringSync();
     expect(source, contains('runAsync'), reason: '$path no longer has the shape this exempts');
     expect(scanPumpLoops(source, file: path), isEmpty);
+  });
+
+  test('no `testWidgets` body waits on the real clock', () {
+    final files = Directory('test').listSync(recursive: true).whereType<File>().where((e) => e.path.endsWith('.dart'));
+
+    final waits = <FakeClockWait>[];
+    for (final file in files) {
+      waits.addAll(scanFakeClockWaits(file.readAsStringSync(), file: file.path.replaceAll(r'\', '/')));
+    }
+
+    // The seed name has to still exist where the rule thinks it does, or this observes nothing.
+    // Pinned to the file rather than to a count, because the correct count here is zero and a rule
+    // that has stopped working reports zero too.
+    expect(
+      File('test/support/settling.dart').readAsStringSync(),
+      contains('Future<void> waitUntil('),
+      reason: 'the helper this rule is about was renamed or moved; ${_realClockWaitNames.join(", ")} is stale',
+    );
+
+    expect(
+      waits.map((e) => e.describe()).toList(),
+      isEmpty,
+      reason:
+          '`waitUntil` polls with `Future.delayed`, which is fake inside a `testWidgets` body and '
+          'only advances when something pumps. Nothing does, here, so the poll never runs a second '
+          'time: the loop parks, its `Stopwatch` deadline is never re-read, and the `fail()` that '
+          'would name the condition is unreachable. Use `settleUntil`, which takes the '
+          '`WidgetTester` and steps out to real time every turn -- or, if the wait genuinely has no '
+          'tester to pump, put it inside `tester.runAsync(...)`, which this rule allows.',
+    );
   });
 
   // The classification is what the case above rests on, so it is exercised on sources of its own --
@@ -152,6 +195,159 @@ void main() {
       expect(found, hasLength(1));
       expect(found.single.isBounded, isFalse);
     });
+
+    test('re-deriving the loop condition in the body is not a counter', () {
+      // The ordinary spelling of a polling loop, and the one that hung. Nothing counts the turns;
+      // the name on the left of the `=` is simply the same name the condition reads.
+      final found = scan(
+        'var pending = s.hasPending; '
+        'while (pending) { s.settle(); await tester.pump(); pending = s.hasPending; }',
+      );
+      expect(found, hasLength(1));
+      expect(found.single.isBounded, isFalse);
+    });
+
+    test('an assignment that reads the name it writes still counts', () {
+      // The other direction of the same judgement: `i = i + 1` advances, so it must stay a counter.
+      final found = scan('for (var i = 0; s.pending; ) { if (i >= 8) fail("x"); await tester.pump(); i = i + 1; }');
+      expect(found.single.bound, PumpLoopBound.counter);
+    });
+
+    test('a `throw` at the cap counts as loudly as `fail`', () {
+      final found = scan('for (var i = 0; s.pending; i++) { if (i >= 8) throw StateError("x"); await tester.pump(); }');
+      expect(found.single.bound, PumpLoopBound.counter);
+    });
+
+    test('an `expect` at the cap is accepted even though it may pass', () {
+      // Documented on `_TripConditions` as a deliberate let-through: a parse cannot know whether an
+      // `expect` can fail. Pinned so that tightening it later is a decision and not a side effect.
+      final found = scan('for (var i = 0; s.pending; i++) { if (i > 100) expect(w, isEmpty); await tester.pump(); }');
+      expect(found.single.bound, PumpLoopBound.counter);
+    });
+
+    test('a `runAsync` on something that is not a `WidgetTester` exempts the loop anyway', () {
+      // No types are resolved, so this is the cost of the exemption, pinned rather than assumed.
+      expect(scan('while (s.pending) { await pool.runAsync(f); await tester.pump(); }'), isEmpty);
+    });
+
+    test('a loop calling the canonical wait every turn is exempt', () {
+      // The failure message recommends `settleUntil`; a loop that takes the advice must not be
+      // reported for it. `settleUntil` lives in another file, so it is named, not resolved.
+      expect(scan('while (s.pending) { await settleUntil(tester, r, describe: "x"); await tester.pump(); }'), isEmpty);
+    });
+
+    test('`await for` is not bounded by its "collection"', () {
+      // A stream has no length, and one that never closes parks the loop for good.
+      final found = scan('await for (final e in s.stream) { await tester.pump(); }');
+      expect(found.single.bound, PumpLoopBound.none);
+      expect(found.single.header, startsWith('await for ('));
+    });
+
+    test('a synchronous `for-in` is still bounded by its collection', () {
+      expect(scan('for (final e in list) { await tester.pump(); }').single.bound, PumpLoopBound.collection);
+    });
+
+    test('a report names the file and line it came from', () {
+      // The only thing a reader gets when this fails, so it is checked rather than assumed.
+      final found = scanPumpLoops('void main() {\n  while (s.pending) { await tester.pump(); }\n}', file: 'a/b.dart');
+      expect(found.single.describe(), 'a/b.dart:2  while (s.pending)');
+    });
+  });
+
+  // A pump reached through a helper is the same pump: this is how the tree actually spells it
+  // (`_pumpApp`, `_pumpFor`, `_settlePendingDeletes`), so it is exercised as its own group.
+  group('helpers declared in the file', () {
+    test('a loop that pumps through a private helper is reported', () {
+      final found = scanPumpLoops(
+        'void main() { testWidgets("x", (tester) async { while (s.pending) { await _pumpApp(tester); } }); }\n'
+        'Future<void> _pumpApp(WidgetTester tester) async { await tester.pump(); }',
+      );
+      expect(found, hasLength(1));
+      expect(found.single.isBounded, isFalse);
+    });
+
+    test('a helper calling a helper is reported too', () {
+      final found = scanPumpLoops(
+        'void main() { testWidgets("x", (tester) async { while (s.pending) { await _outer(tester); } }); }\n'
+        'Future<void> _outer(WidgetTester tester) async { await _inner(tester); }\n'
+        'Future<void> _inner(WidgetTester tester) async { await tester.pumpAndSettle(); }',
+      );
+      expect(found, hasLength(1));
+    });
+
+    test('a helper that never pumps leaves the loop alone', () {
+      final found = scanPumpLoops(
+        'void main() { testWidgets("x", (tester) async { while (s.pending) { await _quiet(); } }); }\n'
+        'Future<void> _quiet() async { await s.next; }',
+      );
+      expect(found, isEmpty);
+    });
+
+    test('a helper that steps out to real time every turn exempts the loop', () {
+      // The direction that would otherwise turn a correct wait red once helpers are resolved: the
+      // helper does pump, but it hands control back first.
+      final found = scanPumpLoops(
+        'void main() { testWidgets("x", (tester) async { while (s.pending) { await _settle(tester); } }); }\n'
+        'Future<void> _settle(WidgetTester tester) async { await tester.runAsync(f); await tester.pump(); }',
+      );
+      expect(found, isEmpty);
+    });
+
+    test('a helper in another file is out of reach, and says so by being missed', () {
+      // The remaining gap, pinned so it is a known limit rather than a surprise: nothing here
+      // declares `_pumpApp`, so the loop is invisible.
+      expect(
+        scanPumpLoops('void main() { testWidgets("x", (tester) async { while (s.pending) { await _pumpApp(t); } }); }'),
+        isEmpty,
+      );
+    });
+  });
+
+  group('the real-clock wait scan', () {
+    test('`waitUntil` called straight from a `testWidgets` body is reported', () {
+      final found = scanFakeClockWaits(
+        'void main() { testWidgets("x", (tester) async { await waitUntil(r, describe: "y"); }); }',
+        file: 'a/b.dart',
+      );
+      expect(found.single.describe(), 'a/b.dart:1  waitUntil(...)');
+    });
+
+    test('the same call inside `runAsync` is correct and is not reported', () {
+      expect(
+        scanFakeClockWaits(
+          'void main() { testWidgets("x", (tester) async { '
+          'await tester.runAsync(() => waitUntil(r, describe: "y")); }); }',
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a plain `test()` is where this helper belongs', () {
+      expect(
+        scanFakeClockWaits('void main() { test("x", () async { await waitUntil(r, describe: "y"); }); }'),
+        isEmpty,
+      );
+    });
+
+    test('a helper that wraps the wait is reported at the `testWidgets` that reaches it', () {
+      final found = scanFakeClockWaits(
+        'void main() { testWidgets("x", (tester) async { await _await(env); }); }\n'
+        'Future<void> _await(Env env) => waitUntil(env.ready, describe: "y");',
+      );
+      expect(found, hasLength(1));
+    });
+
+    test('a helper that wraps the wait in `runAsync` is not', () {
+      // This is the shape `notification_sound_harvest_boundary_test.dart` uses, and it is correct.
+      expect(
+        scanFakeClockWaits(
+          'void main() { testWidgets("x", (tester) async { await _harvest(tester); }); }\n'
+          'Future<void> _harvest(WidgetTester tester) async { '
+          'await tester.runAsync(() async { await waitUntil(r, describe: "y"); }); }',
+        ),
+        isEmpty,
+      );
+    });
   });
 }
 
@@ -192,9 +388,35 @@ class PumpLoop {
 /// compliance. [file] only labels the results.
 List<PumpLoop> scanPumpLoops(String source, {String file = '<source>'}) {
   final parsed = parseString(content: source, throwIfDiagnostics: false);
-  final visitor = _PumpLoopVisitor(file, parsed.lineInfo);
+  final visitor = _PumpLoopVisitor(file, parsed.lineInfo, _Names.resolve(parsed.unit));
   parsed.unit.accept(visitor);
   return visitor.found;
+}
+
+/// Every call under a `testWidgets` body that waits on the *real* clock from inside the fake one.
+///
+/// `waitUntil` (`test/support/settling.dart`) polls with a bare `Future.delayed`, which only a real
+/// event loop advances. Called from a `testWidgets` body it is the same hang the loop rule removes,
+/// arriving by a different road: nothing turns the fake clock, so the `Stopwatch` it checks is never
+/// read a second time and its `fail()` is unreachable by construction. There is no loop at the call
+/// site -- the loop is inside the helper, in a file the scan exempts -- so [scanPumpLoops] cannot
+/// see it. [file] only labels the results.
+List<FakeClockWait> scanFakeClockWaits(String source, {String file = '<source>'}) {
+  final parsed = parseString(content: source, throwIfDiagnostics: false);
+  final visitor = _FakeClockWaitVisitor(file, parsed.lineInfo, _Names.resolve(parsed.unit));
+  parsed.unit.accept(visitor);
+  return visitor.found;
+}
+
+/// One `waitUntil`-family call reached from a `testWidgets` body.
+class FakeClockWait {
+  FakeClockWait(this.file, this.line, this.call);
+
+  final String file;
+  final int line;
+  final String call;
+
+  String describe() => '$file:$line  $call';
 }
 
 /// Turning the fake clock. Not a list of "pump" spellings: the property is *drives the loop forward
@@ -203,6 +425,14 @@ List<PumpLoop> scanPumpLoops(String source, {String file = '<source>'}) {
 /// `FakeAsync.elapse` / `elapseBlocking` (advance the fake clock outright) as well as the `pump`
 /// family. Anything that suspends on something real -- a `Completer`, a `dart:io` future -- is
 /// deliberately absent: those do yield, and the measured 30s / 10-minute timeouts reach them.
+///
+/// Matched by name, like [_realTimeNames], and with the same limits: no types are resolved, so an
+/// unrelated `idle()` on some other object counts, and a `pump` reached through a helper declared in
+/// *another* file does not. The second of those was the load-bearing gap -- `_pumpTile`, `_pumpFor`,
+/// `_pumpApp`, `_pumpEvent`, `_pump` and `_settlePendingDeletes` all exist in this tree -- so
+/// [_Names] closes over the helpers declared in the file being scanned before any loop is judged.
+/// Helpers that live in `test/support/` are still out of reach; the canonical one is handled by
+/// naming it in [_realTimeNames] instead.
 const _fakeClockNames = {
   'pump',
   'pumpAndSettle',
@@ -216,23 +446,38 @@ const _fakeClockNames = {
   'elapseBlocking',
 };
 
-/// Stepping outside `FakeAsync`. The only one of these that exists is `WidgetTester.runAsync`; a
-/// `Future.delayed` inside a `testWidgets` body is fake too, so it does not qualify.
+/// Stepping outside `FakeAsync`. `WidgetTester.runAsync` is the primitive; a `Future.delayed` inside
+/// a `testWidgets` body is fake too, so it does not qualify.
+///
+/// `settleUntil` is here because it is the wait this rule's own failure message tells people to use,
+/// and it calls `runAsync` on every turn. Without it a loop that took that advice was reported --
+/// the recommendation and the exemption disagreed. It is named rather than resolved because it lives
+/// in `test/support/settling.dart`, outside the file [_Names] can close over; the exemption test
+/// above reads that file, so the day `settleUntil` stops calling `runAsync` this stops being true
+/// loudly rather than quietly. `waitUntil`, its neighbour, is deliberately **not** here: it polls
+/// with `Future.delayed`, which the fake clock does not advance -- see [scanFakeClockWaits].
 ///
 /// Matched by name, which cannot tell a `WidgetTester` from any other object that happens to own a
 /// `runAsync` -- no types are resolved here, only a parse. The exemption is narrowed by *position*
 /// instead (see [_yieldsToRealTime]), which is the part that was actually load-bearing.
-const _realTimeNames = {'runAsync'};
+const _realTimeNames = {'runAsync', 'settleUntil'};
+
+/// The names a `testWidgets` body must not call: waits that poll the real clock with a bare
+/// `Future.delayed`, which nothing under `FakeAsync` advances.
+const _realClockWaitNames = {'waitUntil'};
 
 /// Whether [body] awaits a real-time step on **every** turn of the loop.
 ///
-/// Position matters, not mere presence. A `runAsync` reached only through an `if`, a `try`, a
-/// `switch` or a nested closure leaves turns that never touch real time, and one such turn is
-/// enough for the loop to spin forever -- so an exemption granted on presence alone would excuse
-/// exactly the loops this rule exists to catch. Only statements the loop cannot skip count.
-bool _yieldsToRealTime(Statement body) {
+/// Position matters, not mere presence. A `runAsync` reached only through an `if`, a `switch` or a
+/// nested closure leaves turns that never touch real time, and one such turn is enough for the loop
+/// to spin forever -- so an exemption granted on presence alone would excuse exactly the loops this
+/// rule exists to catch. Only statements the loop cannot skip count, and "cannot skip" is read
+/// literally: this descends into nested [Block]s and nothing else, so a `try` body -- which does run
+/// every turn -- is not credited either. That is the safe direction (a false report, which is loud)
+/// and no site in the tree needs it.
+bool _yieldsToRealTime(Statement body, Set<String> realTimeNames) {
   for (final statement in body is Block ? body.statements : [body]) {
-    if (statement is Block && _yieldsToRealTime(statement)) {
+    if (statement is Block && _yieldsToRealTime(statement, realTimeNames)) {
       return true;
     }
     final Expression? evaluated = switch (statement) {
@@ -244,7 +489,7 @@ bool _yieldsToRealTime(Statement body) {
     };
     if (evaluated is AwaitExpression) {
       final awaited = evaluated.expression;
-      if (awaited is MethodInvocation && _realTimeNames.contains(awaited.methodName.name)) {
+      if (awaited is MethodInvocation && realTimeNames.contains(awaited.methodName.name)) {
         return true;
       }
     }
@@ -252,11 +497,98 @@ bool _yieldsToRealTime(Statement body) {
   return false;
 }
 
+/// Whether [body] -- a whole function body, not a loop body -- always reaches a real-time step.
+bool _bodyYieldsToRealTime(FunctionBody body, Set<String> realTimeNames) => switch (body) {
+  BlockFunctionBody(:final block) => _yieldsToRealTime(block, realTimeNames),
+  ExpressionFunctionBody(:final expression) =>
+    expression is MethodInvocation && realTimeNames.contains(expression.methodName.name),
+  _ => false,
+};
+
+/// The call names that count as turning the fake clock, or as stepping out of it, **in one file**.
+///
+/// The constant sets above name library calls. A test file routinely wraps those in a private helper
+/// (`_pumpApp`, `_settlePendingDeletes`), and a loop that calls the helper is the same loop -- so
+/// every function declared in the unit whose body reaches a known name is folded in, to a fixed
+/// point, before any loop is classified. One pass would already cover the helpers in this tree; the
+/// fixed point is there so that a helper calling a helper does not reopen the gap silently.
+///
+/// Both directions are closed over, and they have to be: crediting `_pumpApp` as a pump without also
+/// crediting a `_settle` that wraps `runAsync` would turn a correct wait into a reported violation.
+class _Names {
+  _Names(this.fakeClock, this.realTime, this.realClockWait);
+
+  static _Names resolve(CompilationUnit unit) {
+    final declarations = _Declarations()..visitNodes([unit]);
+    final realTime = _close(declarations.bodies, _realTimeNames, (body, names) => _bodyYieldsToRealTime(body, names));
+    bool calls(FunctionBody body, Set<String> names) => (_CallNames()..visitNodes([body])).names.any(names.contains);
+    return _Names(
+      _close(declarations.bodies, _fakeClockNames, calls),
+      realTime,
+      // Not `calls`: a helper is only tainted by a real-clock wait it makes *outside* `runAsync`.
+      // `notification_sound_harvest_boundary_test.dart` wraps exactly such a wait in `runAsync` and
+      // is correct; folding it in by mere presence reported all four of its cases.
+      _close(declarations.bodies, _realClockWaitNames, (body, names) {
+        final waits = _RealClockWaits(names);
+        body.accept(waits);
+        return waits.found.isNotEmpty;
+      }),
+    );
+  }
+
+  static Set<String> _close(
+    Map<String, List<FunctionBody>> bodies,
+    Set<String> seeds,
+    bool Function(FunctionBody, Set<String>) reaches,
+  ) {
+    final names = {...seeds};
+    for (var grew = true; grew;) {
+      grew = false;
+      for (final entry in bodies.entries) {
+        if (names.contains(entry.key)) {
+          continue;
+        }
+        if (entry.value.any((body) => reaches(body, names))) {
+          names.add(entry.key);
+          grew = true;
+        }
+      }
+    }
+    return names;
+  }
+
+  final Set<String> fakeClock;
+  final Set<String> realTime;
+
+  /// Names that reach a real-clock poll ([_realClockWaitNames]) -- banned under `testWidgets`.
+  final Set<String> realClockWait;
+}
+
+/// Every function and method declared in the unit, by simple name. Names can collide (two classes
+/// with a `settle()`); both bodies are kept, and either reaching a known name is enough, which is
+/// the safe direction for the real-time set and the reporting direction for the fake-clock set.
+class _Declarations extends _Collector {
+  final Map<String, List<FunctionBody>> bodies = {};
+
+  @override
+  void visitFunctionDeclaration(FunctionDeclaration node) {
+    bodies.putIfAbsent(node.name.lexeme, () => []).add(node.functionExpression.body);
+    super.visitFunctionDeclaration(node);
+  }
+
+  @override
+  void visitMethodDeclaration(MethodDeclaration node) {
+    bodies.putIfAbsent(node.name.lexeme, () => []).add(node.body);
+    super.visitMethodDeclaration(node);
+  }
+}
+
 class _PumpLoopVisitor extends RecursiveAstVisitor<void> {
-  _PumpLoopVisitor(this.file, this.lineInfo);
+  _PumpLoopVisitor(this.file, this.lineInfo, this.names);
 
   final String file;
   final LineInfo lineInfo;
+  final _Names names;
   final List<PumpLoop> found = [];
 
   @override
@@ -275,7 +607,13 @@ class _PumpLoopVisitor extends RecursiveAstVisitor<void> {
   void visitForStatement(ForStatement node) {
     final parts = node.forLoopParts;
     if (parts is ForEachParts) {
-      _consider(node, node.body, const [], 'for (${parts.toSource()})', forEach: true);
+      // `await for` is a `ForEachParts` too, and there the "collection" is a stream: its length is
+      // not known, may be infinite, and a stream that simply never closes leaves the loop parked
+      // forever. Measured, not assumed -- before this line an `await for` scanned as `collection`.
+      // So only a synchronous `for-in` gets the collection bound; an `await for` is judged like any
+      // other loop and needs a counter. Nothing in this tree pumps inside an `await for`.
+      final isAwait = node.awaitKeyword != null;
+      _consider(node, node.body, const [], '${isAwait ? 'await ' : ''}for (${parts.toSource()})', forEach: !isAwait);
     } else if (parts is ForParts) {
       _consider(
         node,
@@ -297,10 +635,10 @@ class _PumpLoopVisitor extends RecursiveAstVisitor<void> {
     List<Expression> updaters = const [],
   }) {
     final calls = _CallNames()..visitNodes([body, ...updaters]);
-    if (!calls.names.any(_fakeClockNames.contains)) {
+    if (!calls.names.any(names.fakeClock.contains)) {
       return;
     }
-    if (_yieldsToRealTime(body)) {
+    if (_yieldsToRealTime(body, names.realTime)) {
       return;
     }
 
@@ -350,25 +688,53 @@ class _Identifiers extends RecursiveAstVisitor<void> {
   void visitSimpleIdentifier(SimpleIdentifier node) => names.add(node.name);
 }
 
-/// Names the loop advances: `i++`, `++i`, `i += n`, `i = i + n`.
+/// Names the loop *advances*: `i++`, `++i`, `i += n`, `i = i + n`.
+///
+/// The distinction between advancing a name and merely writing to it is the whole content of this
+/// class, and getting it wrong is not a near miss. Any assignment used to count would make
+///
+/// ```dart
+/// var pending = store.hasPendingDelete;
+/// while (pending) { store.settle(); await tester.pump(); pending = store.hasPendingDelete; }
+/// ```
+///
+/// "bounded by a counter" -- the ordinary spelling of a polling loop, re-deriving its condition from
+/// the world each turn with nothing capping the turns. That is the exact loop this rule was written
+/// after, and it passed. Measured, not reasoned: renaming the assignment target was enough to flip
+/// the verdict, which is what showed the name, not the arithmetic, was carrying the judgement.
+///
+/// So: `++`/`--` in either position, any compound assignment (`+=`, `-=`, ...), and a plain `=`
+/// only when the right-hand side reads the same name -- `i = i + 1` advances, `pending = f()`
+/// replaces. A counter still has to be *read* by something that ends the test before it caps
+/// anything; that part is in [_PumpLoopVisitor._consider].
 class _Counters extends _Collector {
   final Set<String> names = {};
 
   @override
   void visitPostfixExpression(PostfixExpression node) {
-    _record(node.operand);
+    if (const {'++', '--'}.contains(node.operator.lexeme)) {
+      _record(node.operand);
+    }
     super.visitPostfixExpression(node);
   }
 
   @override
   void visitPrefixExpression(PrefixExpression node) {
-    _record(node.operand);
+    if (const {'++', '--'}.contains(node.operator.lexeme)) {
+      _record(node.operand);
+    }
     super.visitPrefixExpression(node);
   }
 
   @override
   void visitAssignmentExpression(AssignmentExpression node) {
-    _record(node.leftHandSide);
+    final target = node.leftHandSide;
+    final advances =
+        node.operator.lexeme != '=' ||
+        (target is SimpleIdentifier && _identifiersIn(node.rightHandSide).contains(target.name));
+    if (advances) {
+      _record(target);
+    }
     super.visitAssignmentExpression(node);
   }
 
@@ -422,4 +788,48 @@ class _Throws extends _Collector {
 
   @override
   void visitThrowExpression(ThrowExpression node) => any = true;
+}
+
+/// Finds `testWidgets` bodies and reports the real-clock waits reached from inside them.
+class _FakeClockWaitVisitor extends RecursiveAstVisitor<void> {
+  _FakeClockWaitVisitor(this.file, this.lineInfo, this.names);
+
+  final String file;
+  final LineInfo lineInfo;
+  final _Names names;
+  final List<FakeClockWait> found = [];
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    // Prefix rather than equality: `testWidgetsWithLeakTracking` and friends are the same body.
+    if (!node.methodName.name.startsWith('testWidgets')) {
+      super.visitMethodInvocation(node);
+      return;
+    }
+    final waits = _RealClockWaits(names.realClockWait);
+    node.argumentList.accept(waits);
+    for (final call in waits.found) {
+      found.add(FakeClockWait(file, lineInfo.getLocation(call.offset).lineNumber, '${call.methodName.name}(...)'));
+    }
+  }
+}
+
+class _RealClockWaits extends RecursiveAstVisitor<void> {
+  _RealClockWaits(this.banned);
+
+  final Set<String> banned;
+  final List<MethodInvocation> found = [];
+
+  @override
+  void visitMethodInvocation(MethodInvocation node) {
+    if (node.methodName.name == 'runAsync') {
+      // Whatever is passed to `runAsync` runs on the real event loop, so a real-clock poll there is
+      // the correct thing rather than the defect -- do not descend into it.
+      return;
+    }
+    if (banned.contains(node.methodName.name)) {
+      found.add(node);
+    }
+    super.visitMethodInvocation(node);
+  }
 }
