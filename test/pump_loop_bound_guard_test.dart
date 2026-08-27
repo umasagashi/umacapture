@@ -225,6 +225,35 @@ void main() {
       expect(found.single.bound, PumpLoopBound.counter);
     });
 
+    test('a periodic assertion is not a cap', () {
+      // `f` is advanced, and it is read by an `if` that ends the test loudly -- but `f % 10 == 0`
+      // does not stop being satisfiable as `f` grows, so no value of `f` ends this loop. The read
+      // has to be able to end it, not merely to name it.
+      final found = scan('var f = 0; while (!r()) { await tester.pump(); f++; if (f % 10 == 0) expect(x, y); }');
+      expect(found, hasLength(1));
+      expect(found.single.isBounded, isFalse);
+    });
+
+    test('a `+=` whose step comes from the world is not a counter', () {
+      // The condition *is* a cap comparison on `s`, and that is not enough: `store.drained()` may
+      // answer 0 for ever, so `s` need never reach `n`. Only a step the parse can see is constant
+      // makes a compound assignment an advance.
+      final found = scan('var s = 0; while (s < n) { await tester.pump(); s += store.drained(); }');
+      expect(found, hasLength(1));
+      expect(found.single.isBounded, isFalse);
+    });
+
+    test('a cap that lives in a nested loop does not bound the outer one', () {
+      // The inner `for` is bounded, and says so with a counter and a `fail` -- but it is the inner
+      // loop those bound. The outer `while` turns as often as `s.pending` says, and a cap it can
+      // only reach by entering a loop that may run zero times is no cap of its own.
+      final found = scan(
+        'while (s.pending) { for (var i = 0; i < n; i++) { if (i >= 8) fail("x"); } await tester.pump(); }',
+      );
+      expect(found, hasLength(1));
+      expect(found.single.isBounded, isFalse);
+    });
+
     test('a `runAsync` on something that is not a `WidgetTester` exempts the loop anyway', () {
       // No types are resolved, so this is the cost of the exemption, pinned rather than assumed.
       expect(scan('while (s.pending) { await pool.runAsync(f); await tester.pump(); }'), isEmpty);
@@ -359,8 +388,8 @@ enum PumpLoopBound {
   /// The loop walks a collection, so the collection's length caps it.
   collection,
 
-  /// A counter the loop advances is read either by the loop condition or by a guard in the body
-  /// that fails or throws.
+  /// A counter the loop advances by a constant is compared against a bound the loop does not move,
+  /// either by the loop condition or by a guard in the body that fails or throws.
   counter,
 }
 
@@ -646,11 +675,15 @@ class _PumpLoopVisitor extends RecursiveAstVisitor<void> {
     if (forEach) {
       bound = PumpLoopBound.collection;
     } else {
-      // A counter is only a cap once something reads it: the loop condition, or a guard in the body
-      // that ends the test. `i++` on its own bounds nothing.
+      // A counter is only a cap once something reads it *in a way that can end the loop*: the loop
+      // condition, or a guard in the body that ends the test. `i++` on its own bounds nothing, and
+      // neither does a read that no value of the counter can falsify -- see [_CapComparison].
       final counters = _Counters()..visitNodes([body, ...updaters]);
-      final readers = [...conditions, ..._TripConditions.of(body)].map((e) => _identifiersIn(e)).expand((e) => e);
-      bound = counters.names.intersection(readers.toSet()).isEmpty ? PumpLoopBound.none : PumpLoopBound.counter;
+      final caps = _CapComparison.of([...conditions, ..._TripConditions.of(body)]);
+      // The far side must not itself be something the loop advances: `while (i < limit) { i++;
+      // limit++; }` compares a counter against a moving target and never closes.
+      final capped = caps.any((e) => counters.names.contains(e.counter) && !e.against.any(counters.names.contains));
+      bound = capped ? PumpLoopBound.counter : PumpLoopBound.none;
     }
     found.add(PumpLoop(file, lineInfo.getLocation(loop.offset).lineNumber, header, bound));
   }
@@ -669,6 +702,26 @@ abstract class _Collector extends RecursiveAstVisitor<void> {
       node.accept(this);
     }
   }
+}
+
+/// Stops the walk at a nested loop, so that only *this* loop's own text is judged.
+///
+/// Both halves of the counter verdict need this, and for the same reason: an inner loop carries its
+/// own counter and often its own `fail()`, and neither of them says anything about how long the
+/// outer loop turns. `while (s.pending) { for (var i = 0; i < n; i++) { if (i >= 8) fail(...); }
+/// await tester.pump(); }` reads as capped if the walk descends -- `i` is advanced and `i >= 8` is
+/// loud -- while the outer `while` runs for ever, and an inner loop may not even execute once.
+/// [_CallNames] deliberately does *not* mix this in: a pump anywhere inside the outer body, nested
+/// or not, still makes the outer loop this rule's business, and that is the reporting direction.
+mixin _OwnLoopOnly on RecursiveAstVisitor<void> {
+  @override
+  void visitWhileStatement(WhileStatement node) {}
+
+  @override
+  void visitDoStatement(DoStatement node) {}
+
+  @override
+  void visitForStatement(ForStatement node) {}
 }
 
 class _CallNames extends _Collector {
@@ -703,11 +756,21 @@ class _Identifiers extends RecursiveAstVisitor<void> {
 /// after, and it passed. Measured, not reasoned: renaming the assignment target was enough to flip
 /// the verdict, which is what showed the name, not the arithmetic, was carrying the judgement.
 ///
-/// So: `++`/`--` in either position, any compound assignment (`+=`, `-=`, ...), and a plain `=`
-/// only when the right-hand side reads the same name -- `i = i + 1` advances, `pending = f()`
-/// replaces. A counter still has to be *read* by something that ends the test before it caps
-/// anything; that part is in [_PumpLoopVisitor._consider].
-class _Counters extends _Collector {
+/// So: `++`/`--` in either position, `i += 1` / `i -= 1`, and a plain `=` only in the shape
+/// `i = i + 1` -- the target, plus or minus a fixed amount. `pending = f()` replaces.
+///
+/// The *amount* has to be a literal the parse can read, and that is the second half of the same
+/// judgement. `settled += store.drainedCount` differs from `settled = store.drainedCount` by one
+/// keystroke, and the operator alone was carrying the whole difference: credited on `+=` alone, a
+/// step the world may answer `0` to for ever counts as an advance, and the loop is declared bounded
+/// while running exactly as long as the polling loop above. So `+=` is credited only for a constant
+/// non-zero amount. The cost is that `i += step` for a genuinely fixed `step` held in a variable is
+/// not credited -- a parse cannot see that it is fixed, and being reported (loudly) is the safe
+/// direction. `*=` and friends are not credited at all: `i *= 2` from `0` never leaves `0`.
+///
+/// A counter still has to be *read* by something that can end the test before it caps anything; that
+/// part is [_CapComparison], used from [_PumpLoopVisitor._consider].
+class _Counters extends _Collector with _OwnLoopOnly {
   final Set<String> names = {};
 
   @override
@@ -729,9 +792,11 @@ class _Counters extends _Collector {
   @override
   void visitAssignmentExpression(AssignmentExpression node) {
     final target = node.leftHandSide;
-    final advances =
-        node.operator.lexeme != '=' ||
-        (target is SimpleIdentifier && _identifiersIn(node.rightHandSide).contains(target.name));
+    final advances = switch (node.operator.lexeme) {
+      '=' => target is SimpleIdentifier && _isConstantStepFrom(node.rightHandSide, target.name),
+      '+=' || '-=' => _isConstantAmount(node.rightHandSide),
+      _ => false,
+    };
     if (advances) {
       _record(target);
     }
@@ -741,6 +806,81 @@ class _Counters extends _Collector {
   void _record(Expression target) {
     if (target is SimpleIdentifier) {
       names.add(target.name);
+    }
+  }
+}
+
+/// A fixed, non-zero amount written out in the source: `1`, `-1`, `2`. `0` is excluded because a
+/// step of zero is the very thing that makes a loop spin.
+bool _isConstantAmount(Expression expression) {
+  final operand = expression is PrefixExpression && const {'-', '+'}.contains(expression.operator.lexeme)
+      ? expression.operand
+      : expression;
+  return operand is IntegerLiteral && operand.value != null && operand.value != 0;
+}
+
+/// Whether [expression] is [target] displaced by a constant: `i + 1`, `i - 1`, `1 + i`.
+///
+/// `1 - i` is deliberately not accepted -- it oscillates rather than advances -- and neither is
+/// `i + step`, for the reason given on [_Counters].
+bool _isConstantStepFrom(Expression expression, String target) {
+  if (expression is! BinaryExpression || !const {'+', '-'}.contains(expression.operator.lexeme)) {
+    return false;
+  }
+  final left = expression.leftOperand;
+  final right = expression.rightOperand;
+  if (left is SimpleIdentifier && left.name == target) {
+    return _isConstantAmount(right);
+  }
+  return expression.operator.lexeme == '+' &&
+      right is SimpleIdentifier &&
+      right.name == target &&
+      _isConstantAmount(left);
+}
+
+/// A relational comparison of a name against something else: `i < 10`, `turns >= issued`, `n > i`.
+///
+/// This is what turns a counter into a cap, and the reason it is a shape rather than a name is
+/// U2-01's spelling `if (frames % 10 == 0) expect(...)`: `frames` is advanced, and it is read by an
+/// `if` that ends the test loudly, so co-occurrence of the *name* between the two says "bounded"
+/// while the loop runs for ever. What separates the two is that `i >= 8` stops being false once and
+/// stays that way, whereas `frames % 10 == 0` is re-entered every tenth turn.
+///
+/// So the counter has to be a **direct operand** of a `<`/`<=`/`>`/`>=`, not a term inside one.
+/// `==` and `!=` are excluded on the same ground: `while (i != 10)` closes only if the step happens
+/// to land on 10, which a parse cannot know.
+///
+/// Two things this still does not check, both strictly narrower let-throughs than what it replaced:
+/// the *direction* of the comparison against the sign of the step (`if (i < 8) fail(...)` reads as a
+/// cap and trips immediately instead), and whether the comparison sits under a `!`. Neither shape
+/// occurs in this tree.
+class _CapComparison {
+  _CapComparison(this.counter, this.against);
+
+  /// The name being compared.
+  final String counter;
+
+  /// The identifiers on the other side of the comparison.
+  final Set<String> against;
+
+  static List<_CapComparison> of(List<Expression> expressions) => (_CapComparisons()..visitNodes(expressions)).found;
+}
+
+class _CapComparisons extends _Collector {
+  final List<_CapComparison> found = [];
+
+  @override
+  void visitBinaryExpression(BinaryExpression node) {
+    if (const {'<', '<=', '>', '>='}.contains(node.operator.lexeme)) {
+      _record(node.leftOperand, node.rightOperand);
+      _record(node.rightOperand, node.leftOperand);
+    }
+    super.visitBinaryExpression(node);
+  }
+
+  void _record(Expression side, Expression other) {
+    if (side is SimpleIdentifier) {
+      found.add(_CapComparison(side.name, _identifiersIn(other)));
     }
   }
 }
@@ -760,7 +900,7 @@ class _Counters extends _Collector {
 /// forever. The alternative was to demand one exact spelling of a cap, which would reject the
 /// honest variants people write; a guard rule that is wrong about rare deliberate nonsense is
 /// cheaper than one that is wrong about ordinary code.
-class _TripConditions extends _Collector {
+class _TripConditions extends _Collector with _OwnLoopOnly {
   final List<Expression> conditions = [];
 
   static List<Expression> of(Statement body) => (_TripConditions()..visitNodes([body])).conditions;
