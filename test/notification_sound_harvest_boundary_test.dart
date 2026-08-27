@@ -174,14 +174,27 @@ void main() {
       );
       // The deadline used to be the loop's own condition, so expiry fell out of the loop in
       // silence and surfaced three lines later in whichever case called this.
+      //
+      // The 30 s comes with it, rather than dropping to `settling.dart`'s 20 s default: that
+      // default is derived against `package:test`'s 30 s per-test timeout, so a plain `test()`
+      // reaches the helper's `fail()` first. This runs inside `testWidgets`, under
+      // `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` — 10 minutes — so the derivation
+      // does not reach here and nothing about this site asked for the reduction. What does reach
+      // here is the work: an unawaited merge chain doing real filesystem I/O on a runner that may
+      // be running four suites on four vCPU. 30 s is not itself derived — it is a hang detector,
+      // the value this loop has always had, and the derived part is only that it stays far below
+      // the 10-minute bound so expiry is reported here, naming the condition.
       await waitUntil(
         () => !merged.existsSync(),
         describe: 'the unawaited merge chain to run and discard the duplicate record "$id"',
+        timeout: const Duration(seconds: 30),
       );
       await pumpEventQueue(times: 20);
     });
     await tester.pump();
     if (chiming != null) {
+      // Keeps the shared default, deliberately: by the time this runs the merge above has already
+      // completed, so what is left to arrive is a cue dispatched on this isolate, not I/O.
       await settleUntil(
         tester,
         () => chiming.isNotEmpty,

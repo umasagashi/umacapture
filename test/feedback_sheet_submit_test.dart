@@ -68,6 +68,16 @@ bool _sendEnabled(WidgetTester tester) {
 /// there is no arrival to poll for, and a window that is too short there can only weaken the
 /// negative, never turn it red. That window, and the 400 ms fake-clock pump both branches share,
 /// stay windows.
+///
+/// The hang detector is widened to 30 s from the helper's 20 s default, which is what this poll had
+/// before it moved onto the helper. That default is derived against `package:test`'s 30 s per-test
+/// timeout, so that a plain `test()` reaches the helper's own `fail()` first; this call site is
+/// inside `testWidgets`, where the surrounding bound is
+/// `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` — 10 minutes — so the derivation does not
+/// reach here and nothing about this site asked for the reduction. What does reach here is the
+/// paragraph above: a raster and a PNG encode have no bounded duration on a loaded host, so the
+/// number has to be the largest one that still clears the surrounding clock, not the smallest one
+/// that passes today.
 Future<void> _tapSend(WidgetTester tester, {bool Function()? arrived}) async {
   await tester.tap(find.text(appSentenceAt('app.feedback.submit')), warnIfMissed: false);
   await tester.pump(const Duration(milliseconds: 400));
@@ -76,7 +86,12 @@ Future<void> _tapSend(WidgetTester tester, {bool Function()? arrived}) async {
     await tester.pumpAndSettle();
     return;
   }
-  await settleUntil(tester, arrived, describe: 'the note to reach onFeedbackSubmitted');
+  await settleUntil(
+    tester,
+    arrived,
+    describe: 'the note to reach onFeedbackSubmitted',
+    timeout: const Duration(seconds: 30),
+  );
   await tester.pumpAndSettle();
 }
 

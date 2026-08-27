@@ -196,6 +196,24 @@ Future<List<_Sample>> _record(WidgetTester tester, int frames, {Set<String> Func
 /// recognised too.
 Set<String> _grabbedCaptions() => {for (final ms in _grabbedTimes) _captionFor(_mediaTsOf(ms))};
 
+/// The hang detector every wait in this file passes to [settleUntil], and the 30 s these waits had
+/// before that helper's shared default was lowered to 20 s.
+///
+/// This file never hand-rolled a loop — it took the default, so the reduction reached it without
+/// anything being written here about it. The default is derived against `package:test`'s 30 s
+/// per-test timeout: it exists so a plain `test()` reaches [settleUntil]'s `fail()` before the
+/// framework's clock fires. Every wait here is inside `testWidgets`, where the surrounding bound is
+/// `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` — 10 minutes — so that derivation does
+/// not reach this file.
+///
+/// 30 s is not itself derived, and saying so is the point: it is a hang detector, not a budget any
+/// assertion is measured against. What *is* derived is the ceiling — it has to stay far below the
+/// 10-minute bound so that expiry is reported by the helper, naming the condition, instead of by
+/// the framework. The work being detected is a real file write plus `instantiateImageCodec` on a
+/// runner that may be running four suites on four vCPU, which is exactly the case the header above
+/// reproduced under 16 spinners.
+const _decodeHangDetector = Duration(seconds: 30);
+
 /// Keeps sampling into [out], one entry per pumped frame, until [ready] holds.
 ///
 /// This is what makes a trace PROVABLY span an arrival rather than hoping the arrival fitted inside
@@ -205,8 +223,9 @@ Set<String> _grabbedCaptions() => {for (final ms in _grabbedTimes) _captionFor(_
 ///
 /// The sample is taken inside the predicate because [settleUntil] evaluates it exactly once per
 /// pumped frame, so the appended entries are the frames it pumped and the trace has no gap in it.
-/// Delegating the loop keeps `test/support/settling.dart` the one place a wall-clock bound and its
-/// expiry message are spelled out.
+/// Delegating the loop keeps `test/support/settling.dart` the one place the waiting loop and its
+/// expiry message are spelled out; the bound it runs under is stated here, in
+/// [_decodeHangDetector].
 Future<void> _recordUntil(
   WidgetTester tester,
   List<_Sample> out,
@@ -214,10 +233,15 @@ Future<void> _recordUntil(
   required String describe,
   Set<String> Function()? captionsOf,
 }) {
-  return settleUntil(tester, () {
-    out.add(_sample(tester, captionsOf: captionsOf));
-    return ready();
-  }, describe: describe);
+  return settleUntil(
+    tester,
+    () {
+      out.add(_sample(tester, captionsOf: captionsOf));
+      return ready();
+    },
+    describe: describe,
+    timeout: _decodeHangDetector,
+  );
 }
 
 /// Waits for the picked clip's first frame to be decoded and previewed.
@@ -230,6 +254,7 @@ Future<void> _settleForFirstFrame(WidgetTester tester) => settleUntil(
   tester,
   () => _sample(tester).previewHeight != null,
   describe: "the picked clip's first frame to be decoded and previewed",
+  timeout: _decodeHangDetector,
 );
 
 Future<void> _openWithClip(WidgetTester tester, ProviderContainer container, {ClipFrameSource? clip}) async {
@@ -302,6 +327,7 @@ Future<void> _settleForBareImage(WidgetTester tester, double height) => settleUn
   tester,
   () => _bareHeight(tester) == height,
   describe: 'the bare Image.file to decode and render at $height px',
+  timeout: _decodeHangDetector,
 );
 
 void main() {

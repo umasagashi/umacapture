@@ -229,16 +229,34 @@ Future<void> _pumpHost(WidgetTester tester, ProviderContainer container) {
   );
 }
 
+/// The hang detector every wait in this file passes to [settleUntil], and the 30 s the local copy
+/// of that helper carried before it was folded back in.
+///
+/// Not the helper's own 20 s default, because that number is derived against `package:test`'s 30 s
+/// per-test timeout — it exists so a plain `test()` reaches [settleUntil]'s `fail()` before the
+/// framework's clock fires. Every wait here is inside `testWidgets`, where the surrounding bound is
+/// `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` — 10 minutes — so that derivation does
+/// not reach this file, and nothing about these sites motivated the reduction.
+///
+/// 30 s is not itself derived, and saying so is the point: it is a hang detector, not a budget any
+/// assertion is measured against, and it is the value these waits have always had. What *is*
+/// derived is the ceiling — it has to stay far below the 10-minute bound so that expiry is reported
+/// by the helper, naming the condition, instead of by the framework. Raise it here if a site ever
+/// needs longer; do not lower it to match the shared default.
+const _decodeHangDetector = Duration(seconds: 30);
+
 /// Waits until the frame whose stamp is [mediaTsMs] is the one being previewed.
 ///
 /// The work being waited for is a real `File.writeAsBytesSync` in the fixture plus
 /// `RecordImage.preload`'s `instantiateImageCodec`; neither runs under the fake clock, so
 /// `settleUntil` (`support/settling.dart`) is what this file uses for it. This was a verbatim
-/// local copy of that helper — same default, same expiry message — until it was folded back in.
+/// local copy of that helper — same expiry message — until it was folded back in; see
+/// [_decodeHangDetector] for the one thing that did not come across by default.
 Future<void> _settleForFrame(WidgetTester tester, int mediaTsMs) => settleUntil(
   tester,
   () => _caption(tester) == _captionFor(mediaTsMs),
   describe: 'the $mediaTsMs ms frame to be decoded and previewed',
+  timeout: _decodeHangDetector,
 );
 
 /// Lets the real file writes and the PNG decode the widget issues actually run, for the cases that
@@ -266,19 +284,24 @@ Future<void> _settleIo(WidgetTester tester, {int frames = 8}) async {
 ///
 /// The sample is taken inside the predicate because [settleUntil] evaluates it exactly once per
 /// pumped frame, so the appended entries are the frames it pumped and the trace has no gap in it.
-/// Delegating the loop keeps `support/settling.dart` the one place a wall-clock bound and its expiry
-/// message are spelled out. Same helper, same shape as the sibling file's
-/// `report_import_preview_flicker_test.dart`.
+/// Delegating the loop keeps `support/settling.dart` the one place the waiting loop and its expiry
+/// message are spelled out; the bound it runs under is stated here, in [_decodeHangDetector]. Same
+/// helper, same shape as the sibling file's `report_import_preview_flicker_test.dart`.
 Future<void> _recordUntil(
   WidgetTester tester,
   List<(double?, String?)> out,
   bool Function() ready, {
   required String describe,
 }) {
-  return settleUntil(tester, () {
-    out.add((_previewHeight(tester), _caption(tester)));
-    return ready();
-  }, describe: describe);
+  return settleUntil(
+    tester,
+    () {
+      out.add((_previewHeight(tester), _caption(tester)));
+      return ready();
+    },
+    describe: describe,
+    timeout: _decodeHangDetector,
+  );
 }
 
 /// Opens the dialog on [clip] and waits for [awaiting], which defaults to its first frame being
@@ -306,7 +329,12 @@ Future<ProviderContainer> _open(
   await tester.pump();
   await tester.pump();
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
-  await settleUntil(tester, awaiting ?? () => _caption(tester) != null, describe: describe);
+  await settleUntil(
+    tester,
+    awaiting ?? () => _caption(tester) != null,
+    describe: describe,
+    timeout: _decodeHangDetector,
+  );
   return container;
 }
 
