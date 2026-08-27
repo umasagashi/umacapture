@@ -224,7 +224,7 @@ public:
     // WHY THE JOIN IS NO LONGER UNCONDITIONAL. cv::VideoCapture::read can block forever -- measured, not
     // assumed: on an audio-only MP4 the MSMF backend opens the file and then parks inside
     // CvCapture_MSMF::grabVideoFrame waiting for a video sample that never arrives (the cdb stack is under
-    // .notes/analysis/video-import-windows-parity/). probeVideoTrack below turns that particular file away
+    // testdata/evidence/video-import-windows-parity/). probeVideoTrack below turns that particular file away
     // before a read is ever attempted, but "the decoder returned" is not something this class can guarantee
     // in general, and an unconditional join turned any such wedge into a process that survives its own
     // window and needs taskkill.
@@ -555,7 +555,7 @@ private:
     // a read is precisely the call that can never return (see shutdown()).
     //
     // MEASURED, on this machine, with the fixture this refusal exists for
-    // (.notes/analysis/video-import-windows-parity/):
+    // (testdata/evidence/video-import-windows-parity/):
     //   audio-only MP4  -> FFMPEG refuses to open it; MSMF opens it and reports 0 x 0.
     //   real MP4 / MKV  -> every backend that opens reports the true frame size.
     // So a non-positive frame size after a successful open is the discriminator, and it is read off the

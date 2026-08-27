@@ -39,7 +39,8 @@ Definitions (all measured on the configured scroll area, not the whole frame -- 
   stable run    >= --settle consecutive quiet frames.
   scroll onset  first frame of a run of >= --run frames whose scroll-area content shifts
                 vertically by >= --min-shift px (1-D cross-correlation of row-mean profiles, the
-                same estimator as scroll_onset.py).
+                same estimator as `scroll_onset.py`, an earlier throwaway that no longer exists
+                anywhere -- see docs/live-capture-harness.md).
   scroll group  consecutive onsets no more than --group-gap frames apart. One tab's scrolling is a
                 burst of short swipes, so a group is a tab, and group k is tab k.
   stop frame    the last frame before a group's FIRST onset that ends a stable run. Normally
@@ -55,7 +56,8 @@ the region the app's own stationarity test watches (`scroll_area_stationary_rect
 `scroll_area_rect`).
 
 Geometry is resolved from assets/config/chara_detail/scene_scraper.json plus the clip's own frame
-size, rather than hardcoded the way scroll_onset.py does. Normalisation follows the native builder:
+size, rather than hardcoded the way that earlier `scroll_onset.py` did. Normalisation follows the
+native builder:
 BOTH axes normalise on the intersection WIDTH, and the intersection is assumed to be the whole
 frame -- which is what the pipeline latches for this clip ("detail crop latched: (0,0)-(737,1310)").
 `--scroll-area TOP:BOTTOM` overrides the resolved rows for a clip where that is not true.

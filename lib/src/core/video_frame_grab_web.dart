@@ -129,11 +129,11 @@ Future<VideoFrameTimeline> probeVideoFrames(VideoFrameSource source) async {
 /// [timeMs] should already have been put through [VideoFrameTimeline.clampToSelectable]; the producer clamps
 /// as well — on this side too, and that is measured rather than defensive. mediabunny answers `null`, not the
 /// first frame, for any time strictly below a clip's first timestamp, and the probe reports that timestamp in
-/// whole milliseconds: `.notes/player_standard_2.mp4` starts at 50.033 ms, so a selector sitting on its own
-/// published minimum of 50 asked for a time the clip refuses. Headless Chrome 151 refused it while Windows
-/// answered the identical request with the first frame, so the web producer clamps up exactly as
-/// `clampIntoClip` does. An out-of-range time therefore returns the nearest frame rather than failing, and
-/// [GrabbedVideoFrame.mediaTsMs] is then what says which frame that was.
+/// whole milliseconds: `testdata/clips/golden/player_standard_2.mp4` starts at 50.033 ms, so a selector
+/// sitting on its own published minimum of 50 asked for a time the clip refuses. Headless Chrome 151 refused
+/// it while Windows answered the identical request with the first frame, so the web producer clamps up
+/// exactly as `clampIntoClip` does. An out-of-range time therefore returns the nearest frame rather than
+/// failing, and [GrabbedVideoFrame.mediaTsMs] is then what says which frame that was.
 Future<GrabbedVideoFrame> grabVideoFrame({
   required VideoFrameSource source,
   required int timeMs,

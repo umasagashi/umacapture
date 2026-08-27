@@ -9,8 +9,8 @@ import { decodeClipIntoPipeline, IMPORT_UNBRAKED, probeClipTimeline, grabClipFra
 // Flutter main thread, with onnxruntime-web supplying inference over a shared-memory control block. It is a
 // hand-written source (tracked in git), a port of the Stage-4 PoC harness worker
 // (C:/Projects/umacapture-wasm-toolchain/harness/worker.js) adapted to the design protocol in
-// .notes/analysis/wasm_poc6/design.md (§2). The heavy build outputs it loads (umacapture_core.js/.wasm and the
-// onnxruntime-web runtime) are git-ignored under web/wasm/ and produced/vendored locally.
+// testdata/evidence/wasm_poc6/design.md (§2). The heavy build outputs it loads (umacapture_core.js/.wasm and
+// the onnxruntime-web runtime) are git-ignored under web/wasm/ and produced/vendored locally.
 //
 // Message protocol (both directions). The prose below is the only document of it, so it is written to be
 // CHECKED rather than trusted: the authority for the main->worker half is the `switch` in `self.onmessage`

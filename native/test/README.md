@@ -595,9 +595,10 @@ contract. **That is a measured fact about the file in place**, not an inherited 
 "what the harness does and does not say" below for when it was re-measured and how.
 
 It lives in `testdata/clips/golden/`, next to the clips every other case names, rather than
-inside the `.notes/` analysis directory it was produced in: `--data-dir` defaults there, every
-other manifest entry is a bare filename, and a scratch analysis directory is exactly the
-kind of place that gets swept. A machine without the file skips the case like any other.
+inside the scratch analysis directory it was produced in: `--data-dir` defaults to
+`testdata/clips/golden/`, every other manifest entry is a bare filename, and a scratch
+analysis directory is exactly the kind of place that gets swept. A machine without the file
+skips the case like any other.
 
 **Reproducing the dump** (needed only when the web decode path changes, or for another
 browser). It is a three-part harness, and the last part is what makes it trustworthy:

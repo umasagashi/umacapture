@@ -868,9 +868,9 @@ export async function probeClipTimeline(blob, host) {
     // selected with null: the decoder's own error decided the outcome instead of this module's vocabulary,
     // and a mediabunny-internal message is a *failure* (a Sentry issue) rather than a translated refusal.
     //
-    // NOT ZERO FOR EVERY CLIP: .notes/player_standard*.mp4 starts at 50.033 ms, and mediabunny answers null
-    // for any request below a clip's first timestamp -- measured, so this is the selector's floor and not a
-    // nicety.
+    // NOT ZERO FOR EVERY CLIP: testdata/clips/golden/player_standard*.mp4 starts at 50.033 ms, and mediabunny
+    // answers null for any request below a clip's first timestamp -- measured, so this is the selector's
+    // floor and not a nicety.
     let firstTimestamp = 0;
     try {
       const stated = await track.getFirstTimestamp();
@@ -1008,7 +1008,7 @@ function grabRequestSeconds(timeMs) {
 // seek: the decoder is already positioned and the packet after the answer is already queued.
 //
 // WHY NOT THE TWO CHEAPER SOURCES. Measured in headless Firefox 153 against a 92-frame VFR clip and a
-// 92-frame B-frame clip (.notes/analysis/video-import-error-report/stage-h1-3b):
+// 92-frame B-frame clip (testdata/evidence/video-import-error-report/stage-h1-3b):
 //   * `sample.timestamp + sample.duration` names a time for the LAST frame too (3083 ms on a clip that ends
 //     at 3050), so it cannot say "there is no successor" without falling back on the container's duration --
 //     which is the inference this whole component exists to refuse. It was also off by one millisecond on a
@@ -1067,10 +1067,11 @@ export async function grabClipFramePng(blob, timeMs, host) {
     // CLAMPED UP TO THE CLIP'S FIRST TIMESTAMP, exactly as the Windows producer's `clampIntoClip` does
     // (native/src/cv/video_frame_grabber.h), and this is a MEASURED requirement rather than a defensive one.
     // mediabunny answers `null` -- not the first frame -- for any time strictly below `getFirstTimestamp()`,
-    // and the probe reports that timestamp in whole milliseconds: `.notes/player_standard_2.mp4` starts at
-    // 50.033 ms, so the probe publishes 50 and a selector sitting on its own minimum asked for 50.000, which
-    // is below 50.033. Measured in headless Chrome 151: that request was refused while Windows answered the
-    // identical one with the first frame. Below the first frame the first frame is the only truthful answer,
+    // and the probe reports that timestamp in whole milliseconds:
+    // `testdata/clips/golden/player_standard_2.mp4` starts at 50.033 ms, so the probe publishes 50 and a
+    // selector sitting on its own minimum asked for 50.000, which is below 50.033. Measured in headless
+    // Chrome 151: that request was refused while Windows answered the identical one with the first frame.
+    // Below the first frame the first frame is the only truthful answer,
     // and `mediaTsMs` is what says which frame came back -- the mechanism the shared contract already names
     // for an out-of-range request. The upper end needs no counterpart: mediabunny clamps past the end to the
     // last frame by itself (measured across six containers).
@@ -1095,7 +1096,7 @@ export async function grabClipFramePng(blob, timeMs, host) {
     // answer's own `mediaTsMs` walked backwards. Measured before and after in headless Firefox 153: 30 of 92
     // frames of a VFR clip and 44 of 92 of a 29.97 fps clip were non-idempotent under
     // `grab(grab(T).mediaTsMs)` on the old grid, and 0 of 92 on this one
-    // (.notes/analysis/video-import-error-report/stage-h1-3b).
+    // (testdata/evidence/video-import-error-report/stage-h1-3b).
     //
     // A stamp exactly on a half-millisecond is not exotic: 29.97 fps produces them on schedule (500.5 /
     // 1501.5 / 2502.5 ms), and `grabRequestSeconds` above is what keeps those frames on the grid. Measured

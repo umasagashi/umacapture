@@ -37,7 +37,7 @@ A case states what it expects in one of two ways, and CMake registers an
   terminal error tags it must announce, for a clip whose correct outcome is *no records*.
   Such a case carries no golden: a committed ``[]`` would be a baseline that asserts
   nothing (it stays green against a build in which the reset rule does not exist -- measured
-  in ``.notes/analysis/android-web-import/cpp/fix1-golden-intent.md`` §4), so the expectation
+  in ``testdata/evidence/android-web-import/cpp/fix1-golden-intent.md`` §4), so the expectation
   is stated as data instead of as a two-byte file.
 
 A case that states neither has nothing for this suite to assert, exists for

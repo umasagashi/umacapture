@@ -431,10 +431,12 @@ Read this before trusting an annotation of any clip other than the reference one
     field: the annotation says *where* the scrolling is, never how slowly to play it. A wrong rate
     produces no warning anywhere.
 
-A second, independent onset estimator was used while this was being built
-(`.notes/analysis/mimic-player/scroll_onset.py`). It is deliberately **not** part of the committed
-tooling: it hardcodes `737x1310` and rows `596..1131` and silently produces garbage on anything
-else. Use `annotate_stops.py --report` instead.
+A second, independent onset estimator (`scroll_onset.py`) was used while this was being built.
+**It no longer exists anywhere** — it was deliberately never part of the committed tooling, it
+lived in the scratch directory, and it is present today in neither `.notes/` nor `testdata/`, so
+there is nothing to go and find. It hardcoded `737x1310` and rows `596..1131` and silently
+produced garbage on anything else, which is why it was not kept. Use `annotate_stops.py --report`
+instead.
 
 ## Limitations
 

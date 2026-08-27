@@ -148,10 +148,14 @@ class RecordZipService {
 
   /// Maximum total decompressed size accepted from one import zip.
   ///
-  /// Real records measure 4.3-5.5 MB across their 9 files (see
-  /// `.notes/golden_stitched/`); at 1 GiB an import can carry roughly 200
-  /// records in one archive — far beyond a realistic manual batch — while
-  /// still bounding memory use against a crafted or corrupted archive.
+  /// Real records measure 4.3-5.5 MB across their 9 files. That was measured
+  /// on a set of stitched sample records that is **no longer on this machine**
+  /// — it is present neither in the scratch directory it was kept in nor under
+  /// `testdata/`, so the figure cannot be re-derived from the tree; treat it as
+  /// a recorded observation, not a reproducible one. At 1 GiB an import can
+  /// carry roughly 200 records in one archive — far beyond a realistic manual
+  /// batch — while still bounding memory use against a crafted or corrupted
+  /// archive.
   static const int defaultMaxTotalUncompressedBytes = 1 << 30; // 1 GiB
 
   /// Maximum number of entries accepted from one import zip.
@@ -163,10 +167,11 @@ class RecordZipService {
 
   /// Maximum decompressed size accepted for a single zip entry.
   ///
-  /// The largest file in a real record is `campaign.png` at 2.41 MB (see
-  /// `.notes/golden_stitched/`). `import` only ever receives `active/`
-  /// entries — the pre-downscale, largest-size case — so 20 MiB leaves ample
-  /// margin.
+  /// The largest file in a real record is `campaign.png` at 2.41 MB — from the
+  /// same sample set as [defaultMaxTotalUncompressedBytes] above, which is no
+  /// longer on this machine and cannot be re-measured. `import` only ever
+  /// receives `active/` entries — the pre-downscale, largest-size case — so
+  /// 20 MiB leaves ample margin.
   static const int defaultMaxEntryUncompressedBytes = 20 * 1024 * 1024; // 20 MiB
 
   /// Decodes [bytes] as a zip and writes every valid record file under
