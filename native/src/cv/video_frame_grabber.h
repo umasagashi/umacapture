@@ -44,7 +44,7 @@ namespace uma::video {
 //
 // WHY THIS IS NOT `cap.set(CAP_PROP_POS_MSEC, T)` FOLLOWED BY `read()`, WHICH IS THE OBVIOUS SPELLING.
 // Measured on this machine against the shipped OpenCV 4.13 (the full tables are under
-// .notes/analysis/video-import-error-report/spike-windows/):
+// testdata/evidence/video-import-error-report/spike-windows/):
 //   * The plain call is off by up to 474.6 ms / 18 frames on real clips here, and by +1746 ms on an AVI.
 //     The cause is not decoder tolerance: OpenCV's FFmpeg backend converts the millisecond into a frame
 //     ORDINAL using the container's AVERAGE fps, and every phone / game-screen recording in use here is
@@ -85,8 +85,9 @@ namespace uma::video {
 // above ("the frame displayed at T", chosen by decoded timestamps and never by an fps model); only the
 // demuxer differs. Including this header from a wasm translation unit is a link error, by design.
 struct VideoTimeline {
-    // Media time of the first decoded frame. NOT necessarily 0: .notes/player_standard*.mp4 starts at
-    // 50.033 ms. A time selector's minimum is this, not zero, or its first position addresses nothing.
+    // Media time of the first decoded frame. NOT necessarily 0: testdata/clips/golden/player_standard*.mp4
+    // starts at 50.033 ms. A time selector's minimum is this, not zero, or its first position addresses
+    // nothing.
     int64 first_frame_ms = 0;
     // VideoLoader::durationMsOf's answer, i.e. container metadata. 0 means INDETERMINATE -- the same
     // convention VideoLoader reports through OfflineRunHost::on_opened and the browser import uses -- and a

@@ -44,7 +44,7 @@ namespace uma::video {
 // emoji directory, i.e. an ordinary folder name; the file exists, opens fine through every wide API, and
 // std::filesystem::exists says so. The throw landed on VideoImportSession's own thread, whose entry did not
 // then wrap probeVideoTrack at all, so it reached std::terminate and took the process down -- measured, not
-// reasoned: .notes/analysis/video-import-windows-parity/acp-probe/. (The entry is an exception boundary now, so
+// reasoned: testdata/evidence/video-import-windows-parity/acp-probe/. (The entry is an exception boundary now, so
 // the same throw would end as a reported `failed` rather than a crash; see windows/runner/video_import_session.h.)
 //
 // ACP FIRST, UTF-8 ONLY AS THE FALLBACK, so that no path which works today changes backend. Measured on this
@@ -297,7 +297,7 @@ private:
     // `CropPixels`, whose only effect under an absent snapshot is a clone of the whole decoded image, justified
     // by a comment saying cv::VideoCapture reuses `mat` for the next frame. It does not: read() returns a
     // solely-owned, refcounted buffer per frame (FFMPEG backend, measured 2026-08-19 -- see
-    // .notes/analysis/import-perf-remeasure-2026-08-18/I1-clone-settlement.md), and runPlanar's Mat is freshly
+    // testdata/evidence/import-perf-remeasure-2026-08-18/I1-clone-settlement.md), and runPlanar's Mat is freshly
     // allocated by decodedFrameToBgr. The pixels the pipeline receives are byte-identical either way; only the
     // copy is gone. What keeps this honest for a backend nobody here has measured -- cv::VideoCapture picks its
     // backend from the file, and MSMF is reachable on Windows -- is frame_shaper::ownsPixelsSolely, which every

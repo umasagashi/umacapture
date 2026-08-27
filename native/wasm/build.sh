@@ -139,7 +139,7 @@ LINKFLAGS=(
   -sEXPORT_NAME=UmacaptureCore
   -sEXPORTED_RUNTIME_METHODS=['FS','HEAPU8','HEAP32','HEAPF64']
   -sFORCE_FILESYSTEM=1
-  # OFF in the shipped build. Measured 2026-08-14 (.notes/analysis/android-web-import/handover/
+  # OFF in the shipped build. Measured 2026-08-14 (testdata/evidence/android-web-import/handover/
   # Z2-wasm-build-flags.md), this was the one flag in this file with no reason comment, carried
   # over from development. ASSERTIONS also selects emscripten's debug vs. release system-library
   # variant (libc++, the allocator -- tools/system_libs.py's get_default_variation(is_debug=

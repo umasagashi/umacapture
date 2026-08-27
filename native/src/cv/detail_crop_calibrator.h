@@ -30,7 +30,7 @@
 //
 // LANDMARKS
 //   All constants below were measured on 12 full-dialog stills at 3 resolutions plus 4 real web frames; see
-//   the survey under .notes/analysis/detail-crop-auto-calibration/. Normalized coordinates follow
+//   the survey under testdata/evidence/detail-crop-auto-calibration/. Normalized coordinates follow
 //   FrameAnchor: pixel = intersection.topLeft + (xn, yn) * unit, where unit == intersection.width(), so
 //   BOTH axes are divided by the width and a full-height 9:16 frame spans yn in [0, 1.7778].
 //
@@ -186,7 +186,7 @@ inline Bgr bgrAt(const cv::Mat &image, int x, int y) {
 // YUV -> RGB matrix change moves; any replacement number would again be measured on one interpretation.
 // The two remaining tests were re-measured against both interpretations over 22 CLI runs (11 clips x 2
 // matrices, dumping all three probe columns of every calibrateDetailCrop call; survey under
-// .notes/analysis/video-import-colour/):
+// testdata/evidence/video-import-colour/):
 //   * On all ten BT.601 golden trajectories every call's (status, boundary row) is exactly what the floor
 //     produced, so the shipping CLI path does not move at all -- and lowering the floor to any value in
 //     [120, 170] produces that same result, i.e. the floor had no discriminating power left. (A floor

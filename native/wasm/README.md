@@ -5,7 +5,7 @@ umacapture recognition core (scene context -> scraper -> stitcher -> recognizer)
 to a WebAssembly module for Flutter Web. The build outputs are **not committed**;
 each developer builds them locally, exactly like the Windows native
 dependencies. See the Stage-6 design at
-`.notes/analysis/wasm_poc6/design.md` (sections 3 and 6) for the rationale.
+`testdata/evidence/wasm_poc6/design.md` (sections 3 and 6) for the rationale.
 
 ## What lives here
 
