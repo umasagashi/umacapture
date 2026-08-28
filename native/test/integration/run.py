@@ -9,8 +9,8 @@ Drives the real ``umacapture_cli`` over recorded clips and compares the recogniz
 ``video`` case goes through the ``video`` subcommand (OpenCV decode of a plain clip),
 a ``replay`` case is a lossless FFV1 recording driven through ``replay`` (the recorded
 frames enter the pipeline directly). This exercises the full ONNX/WinRT/FFmpeg pipeline
-end to end, so it depends on local-only assets (the ``.notes`` clips and the
-``sandbox/modules`` ONNX models, neither committed).
+end to end, so it depends on local-only assets (the ``testdata/clips/golden`` clips and
+the ``sandbox/modules`` ONNX models, neither committed).
 
 EVERY CASE STATES THE CONFIGURATION IT RUNS UNDER. ``frame_resize`` is required on each manifest
 entry and is passed to the CLI explicitly, never left to the CLI's default: a golden is a baseline
@@ -37,7 +37,7 @@ A case states what it expects in one of two ways, and CMake registers an
   terminal error tags it must announce, for a clip whose correct outcome is *no records*.
   Such a case carries no golden: a committed ``[]`` would be a baseline that asserts
   nothing (it stays green against a build in which the reset rule does not exist -- measured
-  in ``.notes/analysis/android-web-import/cpp/fix1-golden-intent.md`` §4), so the expectation
+  in ``testdata/evidence/android-web-import/cpp/fix1-golden-intent.md`` §4), so the expectation
   is stated as data instead of as a two-byte file.
 
 A case that states neither has nothing for this suite to assert, exists for
@@ -725,7 +725,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cli", required=True, type=Path, help="path to umacapture_cli(.exe)")
     parser.add_argument(
-        "--data-dir", type=Path, default=HERE.parents[2] / ".notes", help="dir holding the input clips"
+        "--data-dir",
+        type=Path,
+        default=HERE.parents[2] / "testdata" / "clips" / "golden",
+        help="dir holding the input clips",
     )
     parser.add_argument(
         "--assets-dir", type=Path, default=HERE.parents[2] / "assets" / "config", help="config assets dir"

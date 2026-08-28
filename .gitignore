@@ -72,6 +72,12 @@ lib/*.g.dart
 .notes/
 .codex/
 
+# Local-only test material: the golden / dual-decode input clips, the accept ladder,
+# the regression-grid and primary source recordings, and the live-capture harness's
+# scratch roots. Large, machine-local and mostly irreproducible, so never committed --
+# but referenced by name from cases.json and the harness scenarios, unlike .notes/.
+testdata/
+
 # Flutter test coverage output
 coverage/
 

@@ -15,6 +15,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/sound_player.dart';
 import 'package:umacapture/src/preference/settings_state.dart';
 
+import 'support/hive.dart';
 import 'support/web_like_fs_backend.dart';
 
 /// Builds the persisted Hive key the notifier uses for [type]'s [field] (e.g. `Path`, `Source`,
@@ -22,11 +23,8 @@ import 'support/web_like_fs_backend.dart';
 String _entryKey(SoundType type, String field) => ("${SettingsEntryKey.soundEffect.name}${type.name}$field").camelCase;
 
 void main() {
-  setUpAll(() async {
-    Hive.init(Directory.systemTemp.createTempSync('umacapture_sound_test').path);
-    // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
-    await Hive.openBox('settings');
-  });
+  // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
+  useHiveForTest(['settings']);
 
   setUp(() async {
     await Hive.box('settings').clear();

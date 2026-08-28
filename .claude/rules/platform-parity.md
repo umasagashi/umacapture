@@ -115,7 +115,7 @@ extend that: goldens cover its decode-and-emit, never the Windows driver around 
 (dedicated thread, session claim, drain barrier, cancel/shutdown).
 
 **Every** golden case is conditional, not just the replay ones: each needs its
-clip under the gitignored `.notes/` and the ONNX models under `sandbox/modules/`,
+clip under the gitignored `testdata/clips/golden/` and the ONNX models under `sandbox/modules/`,
 and CI builds only `umacapture_tests` / `umacapture_ffv1_tests`, never the
 `umacapture_cli` the suite drives. So in CI the whole golden set skips, and
 locally it runs only as far as the clips on that machine reach.

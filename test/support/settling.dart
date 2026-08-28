@@ -21,9 +21,22 @@
 // issued but not awaited), it is an arrival like any other and belongs here.
 import 'package:flutter_test/flutter_test.dart';
 
-/// The default hang detector. Long enough that no contended runner reaches it, short enough that a
-/// genuinely stuck condition still reports rather than sitting until the suite-level timeout.
-const _defaultTimeout = Duration(seconds: 30);
+/// The default hang detector. Long enough that no contended runner reaches it, and — the part that
+/// is derived rather than chosen — strictly below the tightest timeout that surrounds a call site.
+///
+/// It has to be below, because the surrounding clock starts first and wins ties: if it fires first
+/// this helper never gets to name its condition, and the run reports the framework's generic
+/// "Test timed out" plus whatever the still-running loop throws once tear-down has torn the world
+/// down. That is not hypothetical — this was 30s, which is exactly `package:test`'s default per-test
+/// timeout for a plain `test()`, so for those the `fail()` below was unreachable by construction.
+/// (`testWidgets` was never affected: `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` is
+/// 10 minutes.) 20s clears the 30s bound with room to spare and still works under the 10-minute one.
+///
+/// The margin is consumed by whatever the test did *before* reaching the helper, so it depends on
+/// the call site, not on this constant. A file whose setup eats into it should raise its own bound
+/// with `@Timeout(...)` — do not raise this number, which would put it back within reach of the
+/// surrounding clock for every other site.
+const _defaultTimeout = Duration(seconds: 20);
 
 /// Pumps until [ready] holds, letting the real (non-fake-async) file I/O and image decodes the
 /// widget under test issues actually run in between.
@@ -51,6 +64,23 @@ Future<void> settleUntil(
 
 /// [settleUntil] for a plain `test()` with no [WidgetTester]: turns the event loop until [ready]
 /// holds, bounded by the wall clock.
+///
+/// **Only from a plain `test()`.** Calling this from inside a `testWidgets` body -- directly or
+/// through a helper -- is a hang, not a slow test. There, `Future.delayed` is a *fake* timer that
+/// only fires when something elapses the fake clock, and this loop elapses nothing: it suspends on
+/// the first delay and never resumes, so [ready] is never polled again, the [Stopwatch] below is
+/// never re-read, and the [fail] that would name the condition is unreachable by construction. The
+/// stated contract of these helpers -- "the timeout is the hang detector" -- does not hold under the
+/// fake clock, which is exactly why it has to be said here.
+///
+/// Under a `WidgetTester`, use [settleUntil]: it pumps, and it steps out to real time through
+/// `runAsync` on every turn, which is what makes its own bound reachable. If the wait genuinely has
+/// no tester to hand -- a helper that only has a `ProviderContainer`, say -- the caller can put it
+/// inside `tester.runAsync(...)`, where the real event loop is running and this behaves as written.
+///
+/// `test/pump_loop_bound_guard_test.dart` enforces this: it rejects a call to [waitUntil] reached
+/// from a `testWidgets` body outside a `runAsync`. It matches on the name, so a copy of this loop
+/// under another name is not covered -- do not write one.
 Future<void> waitUntil(bool Function() ready, {required String describe, Duration timeout = _defaultTimeout}) async {
   final waited = Stopwatch()..start();
   while (!ready()) {

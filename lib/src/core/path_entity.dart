@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_mappable/dart_mappable.dart';
@@ -10,6 +11,15 @@ import '/const.dart';
 import '/src/core/fs/fs_backend.dart';
 import '/src/core/utils.dart';
 import '/src/gui/toast.dart';
+
+/// How long a refused delete waits before the next attempt.
+///
+/// This is a **wall-clock** quantity, not a scheduling one: what it waits for is
+/// whoever still holds the file -- an engine image decode, an indexer, a virus
+/// scanner, another process -- to let go, and that release happens in operating
+/// system time whatever any Dart code believes the time to be. Both retry loops
+/// below spend it, and both have to spend it on a clock that measures the world.
+const _deleteRetryBackoff = Duration(milliseconds: 100);
 
 class PathEntity {
   static p.Context context = p.Context();
@@ -57,6 +67,22 @@ class PathEntity {
     }
 
     // Retry up to 3 times to avoid file lock issues.
+    //
+    // The `catch` below selects on nothing -- it takes `Object` -- for the same
+    // deliberate reasons as the one in [delete], which carries them in full: the
+    // distinction between a refusal that clears and one that never will is real,
+    // but nobody can enumerate the first kind, and the two ways of getting the
+    // predicate wrong are not symmetric. Only the evidence differs. This variant
+    // never reaches web (the web backend's synchronous surface throws
+    // `UnsupportedError`, and so does the backoff: `sleep` calls
+    // `_ProcessUtils._sleep`, which dart2js patches to
+    // `throw UnsupportedError("ProcessUtils._sleep")`. So the loop would make
+    // *one* attempt and the error that escaped would be the backoff's, with the
+    // backend's own -- the one naming the delete -- discarded), so the browser
+    // measurements cited there bear on [delete] and not on this loop.
+    // What is common to both is that neither platform's set of transient modes
+    // has been enumerated, and desktop -- the platform this loop is for -- has no
+    // measurement of its failure modes at all.
     int attempts = 0;
     while (true) {
       try {
@@ -66,7 +92,12 @@ class PathEntity {
         if (++attempts >= 3) {
           rethrow; // Exit the loop on failure.
         }
-        sleep(const Duration(milliseconds: 100));
+        // No zone treatment needed here, and that is not an omission: `sleep`
+        // blocks the OS thread, so it is real time by construction. There is no
+        // zone hook it could be routed through and no clock a zone could
+        // substitute -- the wall-clock guarantee [delete] has to ask for
+        // explicitly (see the `Zone.root` note there) this one gets for free.
+        sleep(_deleteRetryBackoff);
       }
     }
   }
@@ -81,6 +112,63 @@ class PathEntity {
     }
 
     // Retry up to 3 times to avoid file lock issues.
+    //
+    // The `catch` below selects on nothing -- it takes `Object` -- and that
+    // breadth is a decision rather than an oversight. The distinction it declines
+    // to draw does exist, and on web it has been measured: an entry held by an
+    // open writable is refused with `NoModificationAllowedError`, and the *same*
+    // delete succeeds once the holder closes -- exactly the shape this retry was
+    // written for -- while `NotFoundError` and `InvalidModificationError` come
+    // back identical on all three attempts, so retrying them only makes the
+    // failure later. (`TypeMismatchError` is a single observation, not a
+    // repeated one, and it was taken on the parent walk rather than on a
+    // delete -- so nothing says whether it clears.)
+    //
+    // Narrowing to the recoverable set is refused all the same, for two reasons.
+    // It cannot be enumerated: nothing establishes that every transient mode has
+    // been seen, and the desktop side -- the one this retry was originally
+    // written for -- has no measurement of its failure modes at all, so the only
+    // evidence that retrying rescues anything there is this comment. And the two
+    // ways of being wrong are not symmetric: a `catch` that is too wide spends
+    // one backoff on a failure that was never going to clear, whereas a predicate
+    // that is too narrow drops a transient mode outright, and does it invisibly
+    // -- a rescue that stops happening reports nothing to anyone.
+    //
+    // The price accepted in exchange is stated plainly: a programming error
+    // reaching here -- a `NoSuchMethodError`, a `TypeError` -- is retried three
+    // times and rethrown two backoffs late, so a defect arrives wearing the face
+    // of a timing problem. That is known, and taken, for the reasons above.
+    //
+    // A narrowing by type would also have to begin from what web actually
+    // delivers here, and that is two kinds, not one. OPFS rejects with a bare
+    // `JSObject` (a DOMException), but `WebVfs.delete` does not pass all of them
+    // on: every "it is not there" case -- a missing segment in the parent walk,
+    // a file occupying a directory name, a leaf that is already gone -- it
+    // converts into web_vfs's own `FileSystemException`. Only a refusal whose
+    // entry still exists is rethrown raw, and that set is exactly the
+    // interesting one: `InvalidModificationError`, and the
+    // `NoModificationAllowedError` this retry was written for.
+    //
+    // So neither obvious tidy-up is safe, and they fail in opposite directions.
+    // `on FileSystemException` -- meaning `dart:io`'s -- selects nothing web
+    // throws, of either kind, and would silently end every retry there. And
+    // `on Exception` selects the converted half only, so it would go on
+    // retrying the failures measured above to be identical on all three
+    // attempts, while dropping the held-entry refusal that is the one thing
+    // retrying rescues. Getting it exactly backwards is available; getting it
+    // right is not, for the reasons above.
+    //
+    // What the measurements rest on: `test/opfs_delete_failure_web_test.dart`
+    // drives the OPFS API directly, one layer below this `catch`, so read it as
+    // evidence about the browser rather than about this boundary. It pins the
+    // identical-on-three-attempts result for `NotFoundError` and
+    // `InvalidModificationError`, and pins that no refusal is selectable by
+    // `dart:io`'s `FileSystemException`. It does *not* pin the
+    // `NoModificationAllowedError` name: that is a recorded observation, and
+    // what the test asserts is the shape behind it -- whatever the browser
+    // refuses a held entry with, the same delete succeeds once the writable
+    // closes. A browser that stopped refusing at all would leave that case
+    // green, so the name above is worth re-measuring rather than trusting.
     int attempts = 0;
     while (true) {
       try {
@@ -90,7 +178,21 @@ class PathEntity {
         if (++attempts >= 3) {
           rethrow;
         }
-        await Future.delayed(const Duration(milliseconds: 100));
+        // The backoff timer is created on the ROOT zone, never the ambient one.
+        // This wait is the real time an operating-system lock needs to be
+        // released, and a zone-installed clock does not model the OS: whatever
+        // an intervening zone decides the time is, the file goes on being held
+        // or released in wall-clock time regardless, so this wait must not be
+        // captured by such a clock. Concretely, under `testWidgets` the ambient
+        // clock is fake and only advances when the test pumps a *duration* --
+        // the repository's own wait helpers (`test/support/settling.dart`) pump
+        // without one -- so a delay created there never fires, and a delete that
+        // was refused once would never complete for the rest of the test.
+        //
+        // Only the timer leaves the zone. `await` resumes where it was written,
+        // so the retry below, the rethrow, and any error either raises stay in
+        // the caller's zone and remain visible to whatever instruments it.
+        await Zone.root.run(() => Future<void>.delayed(_deleteRetryBackoff));
       }
     }
   }

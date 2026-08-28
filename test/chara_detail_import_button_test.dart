@@ -34,6 +34,7 @@ import 'package:umacapture/src/gui/toast.dart';
 import 'support/file_picker.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/settling.dart';
 
 ThemeData _theme() {
   final base = FlexThemeData.light(scheme: FlexScheme.blue, useMaterial3: true);
@@ -178,21 +179,69 @@ void main() {
         home: const Scaffold(body: CharaDetailImportButton()),
       ),
     );
+    // A pick that yields nothing takes the one path with no import to wait for: `_pickAndImport`
+    // returns on `result == null || result.files.isEmpty` *before* it raises the spinner, so neither
+    // spinner nor toast ever appears and the latch further down could only expire. Read from the
+    // answer the test loaded rather than from a list of the cases that cancel, so a new cancelling
+    // case needs no entry here.
+    final answer = picker.result;
+    final cancelling = answer == null || answer.files.isEmpty;
+    // Held shut across the tap, so the wait below has something that has genuinely not happened yet.
+    // `FakeFilePicker.pickFiles` records the call *before* awaiting `holdUntil`, so
+    // `picker.calls.isNotEmpty` is already true the moment `tester.tap` returns: a latch on it turns
+    // its loop over zero times and advances the clock by nothing (measured: 0 turns). What is a real
+    // arrival is the picker having *answered*, and holding the dialog is what makes it one.
+    final dialog = cancelling ? Completer<void>() : null;
+    if (dialog != null) {
+      expect(picker.holdUntil, isNull, reason: 'a cancelling case that holds the dialog itself would be overwritten');
+      picker.holdUntil = dialog.future;
+    }
     // Inside `runAsync`: the import reads and writes real files, and `dart:io` futures do not
     // complete in the fake-async zone a widget test otherwise runs in -- the import would simply
     // never finish and `pumpAndSettle` would time out on the button's own spinner.
     await tester.runAsync(() async {
       await tester.tap(find.byType(IconButton));
-      // The spinner is shown exactly while the import runs, so its absence (after giving the tap a
-      // few frames to raise it) is the button telling us it is done. Capped so a hang fails the test
-      // rather than wedging the suite.
-      for (var i = 0; i < 400; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-        await tester.pump();
-        if (i >= 3 && find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
-      }
     });
-    await tester.pump();
+    if (dialog != null) {
+      var answered = false;
+      // Registered after the widget's own `await holdUntil`, and a future runs its callbacks in
+      // registration order, so this one lands once `pickFiles` has resumed and returned.
+      unawaited(dialog.future.whenComplete(() => answered = true));
+      dialog.complete();
+      await settleUntil(tester, () => answered, describe: 'the file picker to answer the tap with no selection');
+      // What this returns to are absences -- no toast, no record directory -- and per
+      // test/support/settling.dart an absence has no arrival to poll for, so its window has to stay
+      // a window. The latch above does not stand in for one: it clears a single turn (~1 ms) after
+      // the pick, and a stand-in that emitted a toast 5 ms later went unseen with the latch alone
+      // and was seen with these four turns. A fixed window cannot make this case falsely red on a
+      // slow host, only weaker, which is the trade that comment prescribes.
+      for (var i = 0; i < 4; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+        await tester.pump();
+      }
+      return toasts;
+    }
+    // Two phases in one predicate, because the spinner is raised only once the picker has answered:
+    // "no spinner" is also true *before* the import starts, so a predicate that only asks for its
+    // absence returns the moment it is first sampled and the assertions below run against an import
+    // that has not begun. Latching "it started" first is what makes the absence mean "finished".
+    //
+    // This replaces a fixed window of four turns of 5 ms spent before the poll was allowed to look,
+    // which was exactly the guess about the host's spare CPU these helpers exist to remove: the
+    // spinner-to-toast transient is ~50 ms for a one-record zip, so 20 ms only ever covered the tap-
+    // to-picker gap on an idle machine. The latch needs no window and none is kept.
+    //
+    // Latched on the toast as well as the spinner: the spinner is a transient that a slow poll can
+    // step over entirely, while a toast that has landed stays landed. Polled on the shared helper
+    // rather than capped at 400 turns: the cap was a 2 s budget over real file I/O that fell out
+    // *silently* on expiry, so a contended runner reached the assertions below with a half-finished
+    // import and reported it as the assertion being false.
+    var started = false;
+    await settleUntil(tester, () {
+      final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+      started |= spinning || toasts.isNotEmpty;
+      return started && !spinning;
+    }, describe: "the import to start and then to finish, with the toolbar's spinner gone out");
     return toasts;
   }
 
@@ -402,26 +451,26 @@ void main() {
       // The old element stays unmounted; this one only reports what the running import does to the
       // flag.
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
-      // Two phases, because the spinner is raised *after* the picker answers: first wait for the
-      // import to start at all (a run that never starts is the defect), then for it to finish.
-      // Reading the record directory instead would be wrong -- it appears mid-transaction, before
-      // the publish is verified.
-      // Sampled before each wait, and latched on the toast as well as the spinner. The spinner is a
-      // transient -- raised when the picker answers, dropped in the import's `finally`, ~50 ms apart
-      // for a one-record zip -- so a loop that waited before its first look could arrive after it had
-      // gone out again and conclude the import never ran. That window does not widen on a slow
-      // machine (it is `dart:io` completion time, off the main isolate) while the poll's turnaround
-      // does, so a contended runner samples it less often, not more. A toast that has landed stays
-      // landed, so unlike the spinner it cannot be sampled away.
-      for (var i = 0; i < 400; i++) {
-        final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
-        started |= spinning || toasts.isNotEmpty;
-        if (started && !spinning) break;
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-        await tester.pump();
-      }
     });
-    await tester.pump();
+    // Two phases in one predicate, because the spinner is raised *after* the picker answers: the
+    // import has to start at all (a run that never starts is the defect) and then finish. Reading the
+    // record directory instead would be wrong -- it appears mid-transaction, before the publish is
+    // verified.
+    // Sampled before each wait (which is where `settleUntil` looks too), and latched on the toast as
+    // well as the spinner. The spinner is a transient -- raised when the picker answers, dropped in
+    // the import's `finally`, ~50 ms apart for a one-record zip -- so a poll that waited before its
+    // first look could arrive after it had gone out again and conclude the import never ran. That
+    // window does not widen on a slow machine (it is `dart:io` completion time, off the main isolate)
+    // while the poll's turnaround does, so a contended runner samples it less often, not more. A
+    // toast that has landed stays landed, so unlike the spinner it cannot be sampled away.
+    // This is the case that actually failed on CI, as `Expected: true / Actual: <false>` from the
+    // `started` assertion below: the old loop was a 2 s cap that expired in silence, so "we ran out
+    // of time" and "the import never started" were the same red. Now the former names itself.
+    await settleUntil(tester, () {
+      final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+      started |= spinning || toasts.isNotEmpty;
+      return started && !spinning;
+    }, describe: 'the selection held back by the dialog to start an import and for that import to finish');
 
     expect(tester.takeException(), isNull);
     expect(started, isTrue, reason: 'the import never started: the selection was dropped');
@@ -502,19 +551,27 @@ void main() {
       // import (record write included) has finished, which no file on disk gives us: the record
       // directory appears mid-transaction, before the publish is verified.
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
-      for (var i = 0; i < 400; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-        await tester.pump();
-        if (i >= 3 && find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
-      }
-      // The spinner going out means the invalidates have been issued; the rebuilds they schedule
-      // land a turn later, so give them one rather than racing the assertions below.
+      // The window the old capped loop kept in front of its first look, unshortened: the fresh
+      // toolbar has to have had the chance to show the flag before its absence means anything.
       for (var i = 0; i < 4; i++) {
         await Future<void>.delayed(const Duration(milliseconds: 5));
         await tester.pump();
       }
     });
-    await tester.pump();
+    await settleUntil(
+      tester,
+      () => find.byType(CircularProgressIndicator).evaluate().isEmpty,
+      describe: "the disposed run's import to finish and clear the app-scoped spinner flag",
+    );
+    // The spinner going out means the invalidates have been issued; the rebuilds they schedule land
+    // a turn later. An arrival, not an absence -- the assertions below say the count *moved* -- so it
+    // is polled rather than given a fixed turn, and a host too busy to deliver the rebuild now says
+    // so instead of surfacing as `Expected: 2 / Actual: 1`.
+    await settleUntil(
+      tester,
+      () => activeBuilds >= 2 && archiveBuilds >= 2,
+      describe: 'the two invalidated record stores to rebuild',
+    );
 
     expect(
       Directory('${activeDir(root).path}${Platform.pathSeparator}uuid-1').existsSync(),
@@ -579,19 +636,32 @@ void main() {
     );
     await tester.runAsync(() async {
       await tester.tap(find.byType(IconButton));
-      for (var i = 0; i < 400; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-        await tester.pump();
-        if (i >= 3 && find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
-      }
-      // Turns the rebuild an invalidate schedules would have landed in. Without them this assertion
-      // would pass on timing rather than on the guard.
-      for (var i = 0; i < 4; i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 5));
-        await tester.pump();
-      }
     });
-    await tester.pump();
+    // Latched, for the reason spelled out in `tapImport`: the spinner is raised only once the picker
+    // has answered, so "no spinner" is also true before the import starts and a predicate asking
+    // only for its absence returns on the first look. The fixed pre-look window this replaces was a
+    // bet that the picker answers within 20 ms, and the assertions below -- including the toast --
+    // then ran against an import that had not begun. The toast is latched alongside the spinner
+    // because the spinner is a transient a slow poll can step over, while a toast that has landed
+    // stays landed.
+    var started = false;
+    await settleUntil(tester, () {
+      final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+      started |= spinning || toasts.isNotEmpty;
+      return started && !spinning;
+    }, describe: 'the import of two refused zips to start and then to finish, with its spinner gone out');
+    // Turns the rebuild an invalidate schedules would have landed in. Without them this assertion
+    // would pass on timing rather than on the guard.
+    //
+    // Deliberately still a window and not `settleUntil`: the assertions below say the stores were
+    // **not** rescanned, and an absence has no arrival to poll for -- see the header of
+    // test/support/settling.dart. Polling would either return on the first look (testing nothing) or
+    // need a condition that can never become true. A slow host only makes this negative weaker here,
+    // never falsely red, which is the trade that comment prescribes.
+    for (var i = 0; i < 4; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump();
+    }
 
     expect(activeBuilds, 1, reason: 'the active store was rescanned for an import that wrote nothing');
     expect(archiveBuilds, 1, reason: 'the archive store was rescanned for an import that wrote nothing');

@@ -15,6 +15,17 @@
 // the machine can spare, and none of these tests assert anything about it, so the
 // default 30 s per-test budget would silently turn into a wall-clock assertion on a
 // contended runner. Widened here so the timeout survives as a hang detector only.
+//
+// WAITING. Both waits below go through `support/settling.dart`, the one wait helper
+// this suite has. What they wait on is a real timer inside the controller -- the
+// 200 ms publish tail and the inactivity watchdog -- which `pumpEventQueue` cannot
+// bring forward, so the wait has to turn the real clock. Both take the helper's
+// default timeout: `updated()` awaits the isolate-backed reload *before* the poll
+// starts, so all that is left inside it is that sub-second timer, comfortably inside
+// the helper's default with room to spare rather than close to it. (Contrast
+// `platform_channel_disposed_relay_test.dart`, where the announcement is fire-and-forget
+// and the reload therefore runs inside the poll; the sites there do widen the timeout,
+// and say so.)
 @Timeout(Duration(minutes: 5))
 library;
 
@@ -31,28 +42,7 @@ import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/version_check.dart';
 
 import 'support/records.dart';
-
-/// Waits until [condition] holds, polling the real clock.
-///
-/// The effects these tests observe land on real timers inside the controller (the
-/// 200 ms publish tail, the inactivity watchdog), so `pumpEventQueue` cannot bring
-/// them forward -- but a fixed `Future.delayed` that is long enough at idle is a
-/// race the moment the machine is contended. Polling costs the same at idle and
-/// simply waits longer when the box is busy, so the wait can be too long but never
-/// too short. [timeout] is a hang detector, not a budget under test.
-Future<void> waitUntil(
-  bool Function() condition,
-  String description, {
-  Duration timeout = const Duration(minutes: 2),
-}) async {
-  final deadline = DateTime.now().add(timeout);
-  while (!condition()) {
-    if (!DateTime.now().isBefore(deadline)) {
-      fail('Timed out waiting until $description.');
-    }
-    await Future<void>.delayed(const Duration(milliseconds: 5));
-  }
-}
+import 'support/settling.dart';
 
 void main() {
   setUpAll(initializeMappers);
@@ -136,7 +126,7 @@ void main() {
       // The delayed tail publishes the store and resets progress to none.
       await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).isEmpty,
-        'the delayed tail resets progress to none',
+        describe: 'the delayed tail to reset progress to none',
       );
       expect(container.read(charaDetailRecordRegenerationControllerProvider).isEmpty, isTrue);
     });
@@ -188,7 +178,7 @@ void main() {
 
       await waitUntil(
         () => container.read(charaDetailRecordRegenerationControllerProvider).isCompleted,
-        'the inactivity watchdog force-closes the batch',
+        describe: 'the inactivity watchdog to force-close the batch',
       );
 
       expect(container.read(charaDetailRecordRegenerationControllerProvider).isCompleted, isTrue);

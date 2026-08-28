@@ -5,7 +5,7 @@ umacapture recognition core (scene context -> scraper -> stitcher -> recognizer)
 to a WebAssembly module for Flutter Web. The build outputs are **not committed**;
 each developer builds them locally, exactly like the Windows native
 dependencies. See the Stage-6 design at
-`.notes/analysis/wasm_poc6/design.md` (sections 3 and 6) for the rationale.
+`testdata/evidence/wasm_poc6/design.md` (sections 3 and 6) for the rationale.
 
 ## What lives here
 
@@ -36,12 +36,13 @@ Windows desktop app uses), guarded for Emscripten where needed.
 Both live outside the repository and are **not** provisioned by `fetch_deps`;
 install them once on the build machine.
 
-1. **emsdk** (Emscripten SDK) — default location `C:/Projects/wasm-poc/emsdk`.
+1. **emsdk** (Emscripten SDK) — default location
+   `C:/Projects/umacapture-wasm-toolchain/emsdk`.
    `build.sh` sources `${EMSDK_DIR}/emsdk_env.sh`, so an activated emsdk under
    that path is all that is required.
 
 2. **A Wasm-target OpenCV static build** — default location
-   `C:/Projects/wasm-poc/opencv-install`. This must be OpenCV compiled *for the
+   `C:/Projects/umacapture-wasm-toolchain/opencv-install`. This must be OpenCV compiled *for the
    Emscripten target* with matching flags (SIMD + pthreads), producing the
    static archives `build.sh` links: `libopencv_imgcodecs.a`,
    `libopencv_imgproc.a`, `libopencv_core.a`, and the bundled 3rd-party
@@ -59,11 +60,11 @@ bash native/wasm/build.sh
 
 Overridable environment variables (defaults shown):
 
-| Variable     | Default                          | Meaning                                  |
-|--------------|----------------------------------|------------------------------------------|
-| `EMSDK_DIR`  | `C:/Projects/wasm-poc/emsdk`     | Activated emsdk root.                     |
-| `OPENCV_DIR` | `C:/Projects/wasm-poc/opencv-install` | Wasm-target OpenCV install prefix.  |
-| `BUILD_DIR`  | `C:/Projects/wasm-poc/app-build` | Where the outputs are written.           |
+| Variable     | Default                                                | Meaning                            |
+|--------------|--------------------------------------------------------|------------------------------------|
+| `EMSDK_DIR`  | `C:/Projects/umacapture-wasm-toolchain/emsdk`          | Activated emsdk root.              |
+| `OPENCV_DIR` | `C:/Projects/umacapture-wasm-toolchain/opencv-install` | Wasm-target OpenCV install prefix. |
+| `BUILD_DIR`  | `C:/Projects/umacapture-wasm-toolchain/app-build`      | Where the outputs are written.     |
 
 ### Drift checks
 

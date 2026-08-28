@@ -15,6 +15,14 @@ include: package:flutter_lints/flutter.yaml
 formatter:
   page_width: 120
 
+# testdata/ holds archived local-only test material (recordings, derived
+# clips, calibration evidence) — not part of this package's own sources, and
+# not written to satisfy any lint. Exclude it so the analyzer reports on the
+# package again instead of on what it archives.
+analyzer:
+  exclude:
+    - testdata/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

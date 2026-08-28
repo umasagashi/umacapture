@@ -83,7 +83,7 @@ typedef LiveRecordSink =
 /// on the main thread).
 ///
 /// This client owns the worker lifecycle and the message protocol
-/// (design `.notes/analysis/wasm_poc6/design.md` §2.2). The web
+/// (design `testdata/evidence/wasm_poc6/design.md` §2.2). The web
 /// `PlatformChannel` (`platform_channel_web.dart`) sits on top and maps the
 /// instance `Dart -> native` methods onto it, relaying the worker's drained
 /// pipeline notifications back into the shared `PlatformController.handleNativeMessage`.

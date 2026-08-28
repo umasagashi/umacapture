@@ -4,7 +4,6 @@
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/addon_tasks_test.dart
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -25,6 +24,7 @@ import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/utils.dart';
 
+import 'support/hive.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
 
@@ -91,18 +91,7 @@ void main() {
   setUpAll(initializeMappers);
 
   group('TaskDefinitionsNotifier mutations', () {
-    late Directory tempDir;
-
-    setUpAll(() async {
-      tempDir = Directory.systemTemp.createTempSync('umacapture_task_def_test');
-      Hive.init(tempDir.path);
-      await Hive.openBox('addon');
-    });
-
-    tearDownAll(() async {
-      await Hive.close();
-      tempDir.deleteSync(recursive: true);
-    });
+    useHiveForTest(['addon']);
 
     setUp(() => Hive.box('addon').clear());
 
@@ -344,18 +333,7 @@ void main() {
   });
 
   group('AddonExecutionController.run', () {
-    late Directory tempDir;
-
-    setUpAll(() async {
-      tempDir = Directory.systemTemp.createTempSync('umacapture_run_test');
-      Hive.init(tempDir.path);
-      await Hive.openBox('addon');
-    });
-
-    tearDownAll(() async {
-      await Hive.close();
-      tempDir.deleteSync(recursive: true);
-    });
+    useHiveForTest(['addon']);
 
     setUp(() => Hive.box('addon').clear());
 

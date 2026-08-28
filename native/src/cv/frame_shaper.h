@@ -122,7 +122,7 @@ inline Point<int> paneCopyOrigin(const PaneModeLatch::Snapshot &snapshot) {
 //
 // MEASURED, 2026-08-19, cv::VideoCapture/FFMPEG backend on this machine: every frame comes back with
 // u != nullptr and refcount == 1, and 40 held frames stayed byte-identical (FNV-1a over the pixels) across the
-// remaining ~257 decodes of the clip. See .notes/analysis/import-perf-remeasure-2026-08-18/I1-clone-settlement.md.
+// remaining ~257 decodes of the clip. See testdata/evidence/import-perf-remeasure-2026-08-18/I1-clone-settlement.md.
 [[nodiscard]] inline bool ownsPixelsSolely(const cv::Mat &image) {
     return image.u != nullptr && image.u->refcount == 1;
 }

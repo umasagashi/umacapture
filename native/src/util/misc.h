@@ -58,8 +58,12 @@ inline std::string to_datetime_string(std::chrono::system_clock::time_point tp) 
 
 namespace uma::io_util {
 
+// Both helpers open in binary mode on purpose. Text mode is a no-op on POSIX (Android, emscripten) but on
+// Windows the CRT translates between "\n" and "\r\n", so the same call would return different bytes per
+// platform: a write would emit CRLF into files that are checked in and diffed as LF, and a read would strip
+// the CR back out, hiding the fact from any round-trip check that goes through these two functions.
 inline std::string read(const std::filesystem::path &path) {
-    std::ifstream file(path);
+    std::ifstream file(path, std::ios::in | std::ios::binary);
     if (!file) {
         throw std::runtime_error("io_util::read: failed to open: " + path.string());
     }
@@ -69,7 +73,7 @@ inline std::string read(const std::filesystem::path &path) {
 }
 
 inline void write(const std::filesystem::path &path, const std::string &text) {
-    std::ofstream file(path, std::ios::out);
+    std::ofstream file(path, std::ios::out | std::ios::binary);
     if (!file) {
         throw std::runtime_error("io_util::write: failed to open: " + path.string());
     }

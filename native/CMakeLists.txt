@@ -198,6 +198,7 @@ set(
         test/types/test_color.cpp
         test/types/test_shape.cpp
         test/util/test_misc.cpp
+        test/util/test_io_util.cpp
         test/util/test_error_util.cpp
         test/util/test_stds.cpp
         test/util/test_json_util.cpp
@@ -441,8 +442,8 @@ add_custom_command(
 # Integration (golden) tests -- drive the real umacapture_cli over recorded clips
 # and diff the recognized record.json against committed goldens. Unlike the unit
 # tests above, this exercises the full ONNX/WinRT/FFmpeg pipeline, so it depends on
-# local-only assets (the .notes clips and sandbox/modules ONNX models, neither of
-# which is committed). Every case self-skips (exit 77) when its inputs are absent,
+# local-only assets (the testdata/clips/golden clips and sandbox/modules ONNX models,
+# neither of which is committed). Every case self-skips (exit 77) when its inputs are absent,
 # so a fresh checkout / CI reports Skipped rather than Failed.
 #
 # ONE CTEST PER CASE, deliberately. ctest suppresses the stdout of a test that
@@ -474,7 +475,7 @@ if(UV_EXECUTABLE)
             ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/run.py"
             --cli $<TARGET_FILE:${PROJECT_NAME}>
             --cases "${INTEGRATION_CASES}"
-            --data-dir "${CMAKE_CURRENT_LIST_DIR}/../.notes"
+            --data-dir "${CMAKE_CURRENT_LIST_DIR}/../testdata/clips/golden"
             --assets-dir "${CMAKE_CURRENT_LIST_DIR}/../assets/config"
             --modules-dir "${CMAKE_CURRENT_LIST_DIR}/../sandbox/modules"
     )
@@ -550,7 +551,7 @@ if(UV_EXECUTABLE)
             ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/run_dual_decode.py"
             --cli $<TARGET_FILE:${PROJECT_NAME}>
             --cases "${INTEGRATION_CASES}"
-            --data-dir "${CMAKE_CURRENT_LIST_DIR}/../.notes"
+            --data-dir "${CMAKE_CURRENT_LIST_DIR}/../testdata/clips/golden"
             --assets-dir "${CMAKE_CURRENT_LIST_DIR}/../assets/config"
             --modules-dir "${CMAKE_CURRENT_LIST_DIR}/../sandbox/modules"
     )

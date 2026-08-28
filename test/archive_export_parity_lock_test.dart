@@ -131,6 +131,18 @@ void main() {
 
     // Give the export every chance to run to completion. It must not: an
     // implementation without the gate reaches `compute` here and writes the zip.
+    // A turn count, not a time budget, and deliberately not one of the `test/support/settling.dart`
+    // helpers: this waits on something that must *not* arrive, the case that file's header excludes
+    // ("no arrival to poll for ... only a weaker negative"). The count is not load-bearing in
+    // either direction: swept against an ungated `ZipExporter._export` it is red at 1, 5, 10, 25,
+    // 50, 100, 200 and 5000 turns, and green at all of them with the gate.
+    //
+    // But the two assertions below do not share the credit for that. Up to 200 turns the one that
+    // fires is `output.existsSync()`: the ungated implementation reaches the filesystem almost
+    // immediately, while its export future is *still pending* -- as the gated one's is -- so
+    // `exportSettled` separates the two only somewhere between 200 and 5000 turns. The barrier
+    // here is the side effect on disk, not the turn budget, which is why "not one byte" is the
+    // assertion to keep if these two ever have to be told apart.
     await pumpEventQueue(times: 200);
     expect(exportSettled, isFalse, reason: 'the export must wait for the exported record\'s mutation lock');
     expect(output.existsSync(), isFalse, reason: 'not one byte of the zip may be written under a foreign lock');

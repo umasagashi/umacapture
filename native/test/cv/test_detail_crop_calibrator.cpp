@@ -8,7 +8,7 @@
 // or so is worse than no result at all, because the caller has no way to tell.
 //
 // The real screenshots the landmark constants were measured on are not committed (they live under the
-// gitignored .notes/), so these tests synthesize the dialog in code instead: makeDialog() paints the header
+// gitignored testdata/), so these tests synthesize the dialog in code instead: makeDialog() paints the header
 // bar, stat band and close button (both of its borders) at their measured normalized positions inside a
 // client rect placed anywhere in a larger frame. That makes the reconstruction check exact enough to catch a
 // wrong constant or a swapped axis, while the negative cases are produced by painting one landmark out or by

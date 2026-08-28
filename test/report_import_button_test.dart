@@ -155,13 +155,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadAppTranslations);
 
-  late Future<void> Function() closeHive;
-  setUpAll(() async {
-    closeHive = await initHiveForTest(['settings']);
-  });
-  tearDownAll(() async {
-    await closeHive();
-  });
+  useHiveForTest(['settings']);
 
   setUp(() async {
     await Hive.box('settings').clear();

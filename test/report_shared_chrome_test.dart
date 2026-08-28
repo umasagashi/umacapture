@@ -88,16 +88,14 @@ const _uploadWarningKey = <String, String>{
 };
 
 void main() {
-  late Future<void> Function() closeHive;
+  useHiveForTest(['settings']);
 
   setUpAll(() async {
     loadAppTranslations();
-    closeHive = await initHiveForTest(['settings']);
     _tempDir = Directory.systemTemp.createTempSync('umacapture_report_chrome_test');
   });
 
   tearDownAll(() async {
-    await closeHive();
     if (_tempDir.existsSync()) {
       _tempDir.deleteSync(recursive: true);
     }

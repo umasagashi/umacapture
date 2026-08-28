@@ -24,8 +24,8 @@ clamps it to frame 0, so the run synchronises against a stop that was never foun
 procedure calls mandatory cannot be expressed on stderr alone, because `--write && scenario_run.py …`
 walks straight past it. `--allow-warnings` is how you say you read them and understood them.
 
-    uv run tool/live_capture_test/annotate_stops.py --clip .notes/player_standard_5.mkv --write
-    uv run tool/live_capture_test/annotate_stops.py --clip .notes/my_clip.mkv --report  # the numbers
+    uv run tool/live_capture_test/annotate_stops.py --clip testdata/clips/golden/player_standard_5.mkv --write
+    uv run tool/live_capture_test/annotate_stops.py --clip testdata/clips/my_clip.mkv --report  # the numbers
 
 The full procedure, including how to verify an annotation before trusting it, is in
 docs/live-capture-harness.md.
@@ -39,7 +39,8 @@ Definitions (all measured on the configured scroll area, not the whole frame -- 
   stable run    >= --settle consecutive quiet frames.
   scroll onset  first frame of a run of >= --run frames whose scroll-area content shifts
                 vertically by >= --min-shift px (1-D cross-correlation of row-mean profiles, the
-                same estimator as scroll_onset.py).
+                same estimator as `scroll_onset.py`, an earlier throwaway that no longer exists
+                anywhere -- see docs/live-capture-harness.md).
   scroll group  consecutive onsets no more than --group-gap frames apart. One tab's scrolling is a
                 burst of short swipes, so a group is a tab, and group k is tab k.
   stop frame    the last frame before a group's FIRST onset that ends a stable run. Normally
@@ -55,7 +56,8 @@ the region the app's own stationarity test watches (`scroll_area_stationary_rect
 `scroll_area_rect`).
 
 Geometry is resolved from assets/config/chara_detail/scene_scraper.json plus the clip's own frame
-size, rather than hardcoded the way scroll_onset.py does. Normalisation follows the native builder:
+size, rather than hardcoded the way that earlier `scroll_onset.py` did. Normalisation follows the
+native builder:
 BOTH axes normalise on the intersection WIDTH, and the intersection is assumed to be the whole
 frame -- which is what the pipeline latches for this clip ("detail crop latched: (0,0)-(737,1310)").
 `--scroll-area TOP:BOTTOM` overrides the resolved rows for a clip where that is not true.
@@ -460,7 +462,7 @@ def main() -> int:
     out = Path(args.out) if args.out else clip.with_suffix(".stops.json")
     if args.write:
         # A sidecar carries hand edits that nothing re-derives (see the module docstring), and it
-        # lives beside the clip under .notes/, which is test material rather than scratch. So an
+        # lives beside the clip under testdata/, which is test material rather than scratch. So an
         # overwrite that would change the file has to be asked for. An overwrite that would change
         # nothing loses nothing, and stays silent.
         changes = differing_fields(out, sidecar) if out.exists() else []

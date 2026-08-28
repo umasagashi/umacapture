@@ -12,7 +12,6 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/core/clipboard_alt.dart';
 import 'package:umacapture/src/core/clipboard_image_writer.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
@@ -20,6 +19,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/utils.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/web_like_fs_backend.dart';
 
@@ -33,10 +33,9 @@ void main() {
 
   setUpAll(() async {
     loadAppTranslations();
-    // The paste-image mode is a persisted setting, so the native write path reads the settings box.
-    Hive.init(Directory.systemTemp.createTempSync('umacapture_clipboard_capability_hive').path);
-    await Hive.openBox('settings');
   });
+  // The paste-image mode is a persisted setting, so the native write path reads the settings box.
+  useHiveForTest(['settings']);
 
   setUp(() {
     tempRoot = Directory.systemTemp.createTempSync('umacapture_clipboard_capability_test');

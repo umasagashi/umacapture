@@ -162,14 +162,20 @@ private:
             //        600   | [1e-5, >=5e-4]   | but the must-fire resets have gone by here
             //
             //  * BELOW 1e-5 the base-image catcher stops latching on a crf30 1080p Android re-encode
-            //    (.notes/captures/reenc_1080p_crf30.mp4) and that clip produces no record (measured: fails at
-            //    8e-6 and 9e-6, works at 1e-5, at every dwell from 200 to 600). This failure is ANNOUNCED: the
-            //    run emits onError "closed_before_completed".
+            //    (`reenc_1080p_crf30.mp4`) and that clip produces no record (measured: fails at 8e-6 and
+            //    9e-6, works at 1e-5, at every dwell from 200 to 600). This failure is ANNOUNCED: the run
+            //    emits onError "closed_before_completed".
+            //    THE CLIP IS NOT KEPT: it is a rung of the encode/scale grid and exists in neither the
+            //    scratch directory nor testdata/. Re-derive it from the pristine rung
+            //    testdata/clips/grid/screen-20260802-214946.mp4 -- see the grid table in
+            //    .claude/skills/native-change-verification/SKILL.md section 3 -- before re-measuring.
             //  * ABOVE the upper edge a crf23 540p re-encode of the same recording
-            //    (.notes/captures/screen-20260802-214946_540p.mp4 -- NOT hq_540p.mp4, a different encode of
-            //    the same width) latches its scroll-area catcher earlier and its record silently degrades from
-            //    108 factors to 65, with the self/parent split wrong. This failure is SILENT: success is
+            //    (`screen-20260802-214946_540p.mp4` -- NOT hq_540p.mp4, a different encode of the same
+            //    width) latches its scroll-area catcher earlier and its record silently degrades from 108
+            //    factors to 65, with the self/parent split wrong. This failure is SILENT: success is
             //    reported and the stitched image is visually identical.
+            //    NOT KEPT EITHER, and for the same reason as the crf30 rung above: re-derive it from
+            //    testdata/clips/grid/screen-20260802-214946.mp4 via the grid table before re-measuring.
             //
             // MARGINS AT THE SHIPPED POINT, stated plainly and not rounded up. At a dwell of 200 ms, measured
             // on those two clips: 1.4e-5 is 1.4x above the smallest budget that still works on the loud edge

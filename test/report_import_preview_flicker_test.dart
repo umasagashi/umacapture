@@ -22,6 +22,18 @@
 // full height of the frame and then back down -- the whole lower half of the dialog jumps. That is
 // the flicker, and `noteTop` records it directly.
 //
+// WHY THE TWO SLIDER CASES SAMPLE UNTIL THE SWAP RATHER THAN FOR A FIXED COUNT
+// `_grabbedTimes` reaching 2 says the second grab was ISSUED. The frame it produces reaches the
+// screen a real file read and PNG decode later, off this isolate, so "issued" and "on screen" are
+// separated by an unbounded amount of host CPU. A trace that stops in between contains no swap at
+// all, and every "nothing moved" assertion over it is then true of a trace in which nothing
+// happened. That is not a hypothetical: with a second grab that is issued and never lands, the
+// fixed-window form of both cases passed all of their assertions on an idle machine. So each of
+// them keeps its sampling window -- the window IS the measurement of the frames around the swap --
+// and then goes on sampling, one entry per pumped frame, until the new frame's own caption is on
+// screen. The caption is what names the frame here, because both grabs are the same height by
+// construction and a height therefore cannot say which of them is up.
+//
 // WHY THE LAST CASE VARIES THE FRAME SIZE
 // A height that is constant across frames cannot tell "the new frame is up" from "the OLD frame is
 // still up". That distinction is the second half of the requirement -- the rejected fix
@@ -42,8 +54,8 @@ import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/record_image.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
 
@@ -178,6 +190,60 @@ Future<List<_Sample>> _record(WidgetTester tester, int frames, {Set<String> Func
   return out;
 }
 
+/// The caption of every frame grabbed so far.
+///
+/// Called at every sample rather than computed once, so a frame grabbed since the previous sample is
+/// recognised too.
+Set<String> _grabbedCaptions() => {for (final ms in _grabbedTimes) _captionFor(_mediaTsOf(ms))};
+
+/// The hang detector every wait in this file passes to [settleUntil], and the 30 s these waits had
+/// before that helper's shared default was lowered to 20 s.
+///
+/// This file never hand-rolled a loop — it took the default, so the reduction reached it without
+/// anything being written here about it. The default is derived against `package:test`'s 30 s
+/// per-test timeout: it exists so a plain `test()` reaches [settleUntil]'s `fail()` before the
+/// framework's clock fires. Every wait here is inside `testWidgets`, where the surrounding bound is
+/// `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` — 10 minutes — so that derivation does
+/// not reach this file.
+///
+/// 30 s is not itself derived, and saying so is the point: it is a hang detector, not a budget any
+/// assertion is measured against. What *is* derived is the ceiling — it has to stay far below the
+/// 10-minute bound so that expiry is reported by the helper, naming the condition, instead of by
+/// the framework. The work being detected is a real file write plus `instantiateImageCodec` on a
+/// runner that may be running four suites on four vCPU, which is exactly the case the header above
+/// reproduced under 16 spinners.
+const _decodeHangDetector = Duration(seconds: 30);
+
+/// Keeps sampling into [out], one entry per pumped frame, until [ready] holds.
+///
+/// This is what makes a trace PROVABLY span an arrival rather than hoping the arrival fitted inside
+/// a window. It does not replace a window and does not shorten one: the caller's `_record` window
+/// runs first and is the measurement; this only carries the same sampling on to the arrival the
+/// window was silently relying on.
+///
+/// The sample is taken inside the predicate because [settleUntil] evaluates it exactly once per
+/// pumped frame, so the appended entries are the frames it pumped and the trace has no gap in it.
+/// Delegating the loop keeps `test/support/settling.dart` the one place the waiting loop and its
+/// expiry message are spelled out; the bound it runs under is stated here, in
+/// [_decodeHangDetector].
+Future<void> _recordUntil(
+  WidgetTester tester,
+  List<_Sample> out,
+  bool Function() ready, {
+  required String describe,
+  Set<String> Function()? captionsOf,
+}) {
+  return settleUntil(
+    tester,
+    () {
+      out.add(_sample(tester, captionsOf: captionsOf));
+      return ready();
+    },
+    describe: describe,
+    timeout: _decodeHangDetector,
+  );
+}
+
 /// Waits for the picked clip's first frame to be decoded and previewed.
 ///
 /// NOT a fixed number of `_record` frames: `_startGrab` awaits `RecordImage.preload`, a real file read
@@ -188,6 +254,7 @@ Future<void> _settleForFirstFrame(WidgetTester tester) => settleUntil(
   tester,
   () => _sample(tester).previewHeight != null,
   describe: "the picked clip's first frame to be decoded and previewed",
+  timeout: _decodeHangDetector,
 );
 
 Future<void> _openWithClip(WidgetTester tester, ProviderContainer container, {ClipFrameSource? clip}) async {
@@ -241,12 +308,33 @@ Future<void> _pumpBareImage(WidgetTester tester, String path, {bool gapless = fa
   );
 }
 
+/// The rendered height of the bare `Image.file` the calibration cases pump.
+double _bareHeight(WidgetTester tester) => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+
+/// Waits for a bare `Image.file`'s decode to land, i.e. for the render box to reach [height].
+///
+/// `Image.file` issues a real file read and an `instantiateImageCodec`, neither of which runs on
+/// this isolate, so no count of 5 ms turns bounds them. When a `_record` window expired with the
+/// decode still outstanding, `RenderImage` had no image and took `constraints.smallest` -- zero
+/// under a `Center` -- and the calibration assertion below it read `Expected: <135.0> /
+/// Actual: <0.0>`, which is a statement about the host's spare CPU and not about Flutter's image
+/// pipeline. Reproduced on this machine under 16 spinners with `flutter test --concurrency=32`.
+///
+/// The `_record` windows themselves are untouched: they SAMPLE the intermediate frames, which is
+/// what this file measures, and a window is the right shape for that. This only adds the arrival
+/// they were silently relying on.
+Future<void> _settleForBareImage(WidgetTester tester, double height) => settleUntil(
+  tester,
+  () => _bareHeight(tester) == height,
+  describe: 'the bare Image.file to decode and render at $height px',
+  timeout: _decodeHangDetector,
+);
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
   setUpAll(loadAppTranslations);
-  setUpAll(
-    () => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_h1_flicker_hive').path),
-  );
+  useStorageBoxForTest();
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_h1_flicker');
@@ -265,6 +353,7 @@ void main() {
     tester,
   ) async {
     await _pumpBareImage(tester, _writePng('a.png'));
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
     final samples = await _record(tester, 8);
     expect(
@@ -288,8 +377,9 @@ void main() {
     final a = _writePng('a.png');
     final b = _writePng('b.png');
     await _pumpBareImage(tester, a);
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
-    double h() => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+    double h() => _bareHeight(tester);
     expect(h(), _pngHeight.toDouble(), reason: 'the first image is up');
 
     await _pumpBareImage(tester, b);
@@ -300,6 +390,11 @@ void main() {
       await tester.pump();
       trace.add(h());
     }
+    // The ten sampled frames stay a window -- they are the measurement of the collapse. That b's
+    // decode eventually LANDS is an arrival, so it is polled after the window rather than assumed
+    // to have fitted inside it, and the landed frame is appended to the same trace.
+    await _settleForBareImage(tester, _pngHeight.toDouble());
+    trace.add(h());
     expect(collapsed, 0.0, reason: 'INSTRUMENT REACTS: the frame right after the swap has no image at all');
     expect(trace.last, _pngHeight.toDouble(), reason: 'and it comes back once the decode lands');
   });
@@ -310,8 +405,9 @@ void main() {
     final a = _writePng('a.png');
     final b = _writePng('b.png');
     await _pumpBareImage(tester, a, gapless: true);
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
-    double h() => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+    double h() => _bareHeight(tester);
     expect(h(), _pngHeight.toDouble());
 
     await _pumpBareImage(tester, b, gapless: true);
@@ -329,8 +425,9 @@ void main() {
   ) async {
     final a = _writePng('a.png');
     await _pumpBareImage(tester, a);
+    await _settleForBareImage(tester, _pngHeight.toDouble());
     await _record(tester, 6);
-    double h() => tester.renderObject<RenderBox>(find.byType(Image)).size.height;
+    double h() => _bareHeight(tester);
     await _pumpBareImage(tester, a);
     expect(h(), _pngHeight.toDouble(), reason: 'a rebuild with an unchanged provider keeps the image');
   });
@@ -366,18 +463,37 @@ void main() {
     await _pumpDialogHost(tester, container);
     await _openWithClip(tester, container);
 
-    final before = _sample(tester);
+    final before = _sample(tester, captionsOf: _grabbedCaptions);
     expect(before.previewHeight, _pngHeight.toDouble());
     expect(_grabbedTimes, hasLength(1));
 
     await _moveSlider(tester, 0.5);
-    final trace = <_Sample>[_sample(tester)];
+    final trace = <_Sample>[_sample(tester, captionsOf: _grabbedCaptions)];
     // Virtual time only: this is the 250 ms debounce elapsing, not a wall-clock wait.
     await tester.pump(const Duration(milliseconds: 300));
-    trace.add(_sample(tester));
-    trace.addAll(await _record(tester, 12));
+    trace.add(_sample(tester, captionsOf: _grabbedCaptions));
+    trace.addAll(await _record(tester, 12, captionsOf: _grabbedCaptions));
 
-    expect(_grabbedTimes, hasLength(2), reason: 'the debounce did fire, so this trace covers a real second grab');
+    expect(_grabbedTimes, hasLength(2), reason: 'the debounce did fire, so a second grab was issued');
+    final second = _captionFor(_mediaTsOf(_grabbedTimes[1]));
+    expect(
+      second,
+      isNot(_captionFor(_mediaTsOf(_grabbedTimes[0]))),
+      reason: 'the two grabs must be distinguishable on screen, or the arrival below is met by the first frame',
+    );
+    // ISSUED IS NOT ON SCREEN, and the assertions below are all negatives, so a trace that stops
+    // short of the swap satisfies every one of them without having watched anything happen. The
+    // window above stays a window; this carries the same sampling on until the new frame is
+    // published, and the short window after it catches a collapse deferred past the publish.
+    await _recordUntil(
+      tester,
+      trace,
+      () => _sample(tester, captionsOf: _grabbedCaptions).caption == second,
+      describe: "the second grab's frame to be decoded and previewed",
+      captionsOf: _grabbedCaptions,
+    );
+    trace.addAll(await _record(tester, 6, captionsOf: _grabbedCaptions));
+    expect(trace.last.caption, second, reason: 'THE TRACE COVERS THE SWAP: it ends after the new frame, not before it');
 
     expect(
       trace.where((e) => e.previewHeight == 0.0),
@@ -409,14 +525,33 @@ void main() {
     await _openWithClip(tester, container);
 
     await _moveSlider(tester, 0.5);
-    final trace = <_Sample>[_sample(tester)];
+    final trace = <_Sample>[_sample(tester, captionsOf: _grabbedCaptions)];
     await tester.pump(const Duration(milliseconds: 100)); // Inside the debounce.
-    trace.add(_sample(tester));
+    trace.add(_sample(tester, captionsOf: _grabbedCaptions));
     await tester.pump(const Duration(milliseconds: 200)); // Past it; the grab starts.
-    trace.add(_sample(tester));
-    trace.addAll(await _record(tester, 12));
+    trace.add(_sample(tester, captionsOf: _grabbedCaptions));
+    trace.addAll(await _record(tester, 12, captionsOf: _grabbedCaptions));
 
-    expect(_grabbedTimes, hasLength(2));
+    expect(_grabbedTimes, hasLength(2), reason: 'the slider move did issue a second grab');
+    final second = _captionFor(_mediaTsOf(_grabbedTimes[1]));
+    expect(
+      second,
+      isNot(_captionFor(_mediaTsOf(_grabbedTimes[0]))),
+      reason: 'the two grabs must be distinguishable on screen, or the arrival below is met by the first frame',
+    );
+    // The two assertions below are negatives about the swap, so they need the swap to be inside the
+    // trace. The windows above are the ones that matter here -- they straddle the debounce, which is
+    // where a spinner would be substituted if one were -- and this only guarantees the trace reaches
+    // past the publish rather than stopping while the first frame is still up.
+    await _recordUntil(
+      tester,
+      trace,
+      () => _sample(tester, captionsOf: _grabbedCaptions).caption == second,
+      describe: "the second grab's frame to be decoded and previewed",
+      captionsOf: _grabbedCaptions,
+    );
+    trace.addAll(await _record(tester, 6, captionsOf: _grabbedCaptions));
+    expect(trace.last.caption, second, reason: 'THE TRACE COVERS THE SWAP: it ends after the new frame, not before it');
     expect(
       trace.any((e) => e.spinner),
       isFalse,
@@ -453,10 +588,18 @@ void main() {
       // The sampling window above stays a window -- it is the measurement. What cannot be a window is
       // "the grab landed at all": four sequential `RecordImage.preload`s are four real file reads and
       // PNG decodes off this isolate, and the count assertions below need every one of them.
-      await settleUntil(
+      //
+      // It SAMPLES while it waits, for the same reason the two slider cases do. The frames between
+      // the window running out and the publish are exactly where the rejected fix would show itself
+      // -- the previous pixels still up beside the new frame's caption -- so dropping them omits the
+      // one interval this case exists to inspect. That the window happens to reach the publish on a
+      // fast host is a property of the host; it is not a fact this case states.
+      await _recordUntil(
         tester,
+        trace,
         () => _sample(tester, captionsOf: captionsOf).caption == _captionFor(_mediaTsOf(_grabbedTimes.last)),
         describe: 'the frame grabbed at fraction $fraction to be decoded and previewed',
+        captionsOf: captionsOf,
       );
     }
 

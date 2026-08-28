@@ -56,7 +56,7 @@ class VideoFrameTimeline {
 
   /// Media time of the clip's first decoded frame.
   ///
-  /// **A time selector's minimum, and it is not zero.** `.notes/player_standard*.mp4` starts at
+  /// **A time selector's minimum, and it is not zero.** `testdata/clips/golden/player_standard*.mp4` starts at
   /// 50.033 ms, so a control that began at 0 would spend its first positions addressing nothing.
   final int firstFrameMs;
 

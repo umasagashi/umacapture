@@ -8,15 +8,18 @@
 # re-run it after any change to native/tool/mimic_player/. It says nothing about recognition --
 # that is scenario_run.py.
 #
-# Run artefacts go outside the repository, to .notes/analysis/mimic-player/: result_<tag>.json,
-# out_<tag>.mkv (the capture, ~80 MB) and the two logs.
+# Run artefacts go outside version control, to the gitignored testdata/harness/runs/:
+# result_<tag>.json, out_<tag>.mkv (the capture, ~80 MB) and the two logs.
+#
+# The default SOURCE is a 14-second excerpt of testdata/clips/source/testrun2.mkv and is NOT present
+# on this machine; cut it (or pass a source explicitly) before running without an argument.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
-RUNS="$ROOT/.notes/analysis/mimic-player"
+RUNS="$ROOT/testdata/harness/runs"
 TAG="${1:-run}"
-SOURCE="${2:-$ROOT/.notes/captures/testrun2_2m19-2m33.mkv}"
+SOURCE="${2:-$ROOT/testdata/clips/source/testrun2_2m19-2m33.mkv}"
 OUT="$RUNS/out_$TAG.mkv"
 
 mkdir -p "$RUNS"

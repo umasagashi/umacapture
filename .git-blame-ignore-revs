@@ -1,3 +1,7 @@
 # Migrate to standard `dart format` output at a 120-col page width.
 # Logic-free mechanical reformat; ignore it in `git blame`.
 1165fa35aa4d03aa3223b018e02c29d71de96891
+
+# Normalise twelve Flutter/Visual-Studio-template-derived files to LF.
+# Line-endings-only reformat; ignore it in `git blame`.
+e32359e95a02a41e0379384f4aa425a3a7def73b

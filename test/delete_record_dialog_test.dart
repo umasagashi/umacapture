@@ -82,6 +82,32 @@ class _FakeRecordStorage extends CharaDetailRecordStorage {
   }
 }
 
+/// Settles every delete the fake is already holding, one per pumped frame.
+///
+/// Capped by turns rather than by seconds, because this loop advances only the fake clock:
+/// `tester.pump()` never hands control back to the real event loop, so neither `package:test`'s 30s
+/// nor the binding's 10-minute timeout ever gets a turn to fire, and a loop that spins here spins
+/// until the process is killed with no reason printed.
+///
+/// The cap is the number of deletes issued *before* the loop started, which is not a guess:
+/// [_FakeRecordStorage.settle] completes exactly one gate per turn and one gate exists per
+/// `deleteAllAsync` call, so that many turns always suffice. Needing more means the confirm is
+/// issuing fresh deletes as the old ones settle -- the very failure these cases are about, so it
+/// has to be reported rather than waited out.
+Future<void> _settlePendingDeletes(WidgetTester tester, _FakeRecordStorage storage) async {
+  final issued = storage.deleteAllCalls.length;
+  for (var turns = 0; storage.hasPendingDelete; turns++) {
+    if (turns >= issued) {
+      fail(
+        'the store still held an unsettled delete after $turns turns, one per delete issued; '
+        'confirming is issuing new deletes as the old ones settle',
+      );
+    }
+    storage.settle();
+    await tester.pump();
+  }
+}
+
 class _ShowButton extends ConsumerWidget {
   const _ShowButton();
 
@@ -185,10 +211,7 @@ void main() {
 
     h.storage.settle();
     await tester.pump();
-    while (h.storage.hasPendingDelete) {
-      h.storage.settle();
-      await tester.pump();
-    }
+    await _settlePendingDeletes(tester, h.storage);
     // What the user is told, then why: no batch reported a failure, because only one delete was ever issued.
     expect(h.storage.reported.where((e) => !e.isSuccess), isEmpty);
     expect(h.storage.deleteAllCalls, [
@@ -251,10 +274,7 @@ void main() {
     await tester.pump();
     storage.settle();
     await tester.pump();
-    while (storage.hasPendingDelete) {
-      storage.settle();
-      await tester.pump();
-    }
+    await _settlePendingDeletes(tester, storage);
     expect(storage.reported.where((e) => !e.isSuccess), isEmpty);
     expect(storage.deleteAllCalls, [
       {'a'},

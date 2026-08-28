@@ -271,7 +271,7 @@ public:
         // picked out of the noise. Recall is also NOT monotone in the block count, so "the largest of each
         // width's own minimum" is not a value that satisfies every width.
         //
-        // Where the plateau is measured: .notes/analysis/akaze-alternatives/BC9-verify-bk-and-gate.md
+        // Where the plateau is measured: testdata/evidence/akaze-alternatives/BC9-verify-bk-and-gate.md
         // (sections "The real mechanism, and why it does not stop at 2" and "K >= 3 adds nothing ... is false",
         // over 8 969 frame pairs). At 16 blocks the correct offset ranks first on 8 960 pairs and second on the
         // remaining 9 -- so the top 2 peaks already contain every pair the proposer reaches, a third peak
@@ -853,7 +853,8 @@ private:
 
     // Top margin (fraction of the true placeholder track above the thumb, from topMargin()) at or below which
     // the content is treated as scrolled to the very top. ~0 means flush with the top; the threshold tolerates
-    // a thin idle band. Verify against footage (.notes/player_standard_sequential.mp4) when calibrating.
+    // a thin idle band. Verify against footage (testdata/clips/golden/player_standard_sequential.mp4) when
+    // calibrating.
     //
     // Was 0.03 when topMargin() measured against the config scan line, whose deliberate overshoot past the
     // track biased the reading up by ~0.007. Once topMargin() moved to the true track (commit 0b56fc44) the
@@ -873,7 +874,7 @@ private:
     // plateau does not suppress it, and a window long enough to outlast it (2000 ms) also outlasts every real
     // switch in the accept population, which then measures exactly 0. Taking the minimum ratio over the window
     // (what the pending-since counter below does) also beats taking the mean at every window length tested
-    // (55.0x vs 16.2x separation at 250 ms). Reproduction: .notes/analysis/android-web-import/cpp/
+    // (55.0x vs 16.2x separation at 250 ms). Reproduction: testdata/evidence/android-web-import/cpp/
     // fix1-statistics.md.
     //
     // NOT the stationary latch's dwell. That one is `stationary_time_threshold` in the scraper config and is
@@ -912,7 +913,7 @@ private:
     // Not covered: a switch between two characters with near-identical factor lists. Every accept clip replaces
     // a visibly different list, so the breadth-bound case is unmeasured on the accept side. Raising X is not
     // expected to make it worse (glyph depth does not depend on how many glyphs changed) but that is inference.
-    // Reproduction: .notes/analysis/android-web-import/cpp/fix1-calibration.md (populations, sweep, evidence
+    // Reproduction: testdata/evidence/android-web-import/cpp/fix1-calibration.md (populations, sweep, evidence
     // image) and cpp/fix1-statistics.md (why block mean / temporal averaging / EMA reference were rejected).
     static constexpr int kFactorChangePixelDiffThreshold = 80;
     // Fraction of the factor scroll area that must be "changed" (per X above) to treat the content as a

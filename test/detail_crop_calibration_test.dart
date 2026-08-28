@@ -118,16 +118,9 @@ void main() {
   });
 
   group('detailCropCalibrationStateProvider', () {
-    late Future<void> Function() closeHive;
     final calls = <MethodCall>[];
 
-    setUpAll(() async {
-      closeHive = await initHiveForTest(['settings']);
-    });
-
-    tearDownAll(() async {
-      await closeHive();
-    });
+    useHiveForTest(['settings']);
 
     setUp(() async {
       await Hive.box('settings').clear();
@@ -207,16 +200,10 @@ void main() {
   // is inert always, and `disabled: !isCapturing` is a one-character mistake that a single-armed case
   // would wave through.
   group('the capture settings group locks both mid-session-inert switches while capturing', () {
-    late Future<void> Function() closeHive;
-
     setUpAll(() async {
       loadAppTranslations();
-      closeHive = await initHiveForTest(['settings']);
     });
-
-    tearDownAll(() async {
-      await closeHive();
-    });
+    useHiveForTest(['settings']);
 
     Future<ProviderContainer> pumpGroup(WidgetTester tester, {required bool capturing}) async {
       final container = ProviderContainer(

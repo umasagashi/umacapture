@@ -14,16 +14,8 @@ import 'support/hive.dart';
 final _flagProvider = BooleanNotifierProvider(() => BooleanNotifier(entryKey: 'test_flag', defaultValue: false));
 
 void main() {
-  late Future<void> Function() closeHive;
-
-  setUpAll(() async {
-    // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
-    closeHive = await initHiveForTest(['settings']);
-  });
-
-  tearDownAll(() async {
-    await closeHive();
-  });
+  // storageBoxProvider opens StorageBox(StorageBoxKey.settings) -> Hive.box('settings').
+  useHiveForTest(['settings']);
 
   setUp(() async {
     await Hive.box('settings').clear();

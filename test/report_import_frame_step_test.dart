@@ -43,9 +43,10 @@ import 'package:umacapture/src/core/video_frame_grab_ops.dart';
 import 'package:umacapture/src/gui/chara_detail/report_import_dialog.dart';
 import 'package:umacapture/src/gui/common.dart';
 import 'package:umacapture/src/gui/record_image.dart';
-import 'package:umacapture/src/preference/storage_box.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
+import 'support/settling.dart';
 
 late Directory _tempDir;
 late List<ImportErrorReport> _submitted;
@@ -228,55 +229,79 @@ Future<void> _pumpHost(WidgetTester tester, ProviderContainer container) {
   );
 }
 
-/// One turn of real time for the real file writes and the PNG decode the widget issues, then the
-/// frame that shows what landed. The unit [_settleFor] polls.
-Future<void> _ioTurn(WidgetTester tester) async {
-  await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 1)));
-  await tester.pump();
-}
-
-/// Drives [_ioTurn] until [describe] is true of what is on screen.
+/// The hang detector every wait in this file passes to [settleUntil], and the 30 s the local copy
+/// of that helper carried before it was folded back in.
 ///
-/// **Why this exists rather than a fixed number of fixed-length sleeps.** The work being waited for
-/// is a real `File.writeAsBytesSync` in the fixture plus `RecordImage.preload`'s
-/// `instantiateImageCodec`; neither runs under the fake clock, and neither has a bounded duration
-/// when the host is busy — a CI runner has four vCPU and runs four suites on them at once. A fixed
-/// budget is therefore a guess about the host's spare CPU, and every assertion downstream of it
-/// fails when the guess is wrong. Polling the outcome states what the case is actually waiting for,
-/// so a slow machine makes the case slower instead of red. [timeout] is the failure path only.
-Future<void> _settleFor(
-  WidgetTester tester,
-  bool Function() ready, {
-  required String describe,
-  Duration timeout = const Duration(seconds: 30),
-}) async {
-  final waited = Stopwatch()..start();
-  while (!ready()) {
-    if (waited.elapsed > timeout) {
-      fail('waited ${waited.elapsed.inSeconds}s for $describe, which never happened');
-    }
-    await _ioTurn(tester);
-  }
-  await tester.pump();
-}
+/// Not the helper's own 20 s default, because that number is derived against `package:test`'s 30 s
+/// per-test timeout — it exists so a plain `test()` reaches [settleUntil]'s `fail()` before the
+/// framework's clock fires. Every wait here is inside `testWidgets`, where the surrounding bound is
+/// `AutomatedTestWidgetsFlutterBinding.defaultTestTimeout` — 10 minutes — so that derivation does
+/// not reach this file, and nothing about these sites motivated the reduction.
+///
+/// 30 s is not itself derived, and saying so is the point: it is a hang detector, not a budget any
+/// assertion is measured against, and it is the value these waits have always had. What *is*
+/// derived is the ceiling — it has to stay far below the 10-minute bound so that expiry is reported
+/// by the helper, naming the condition, instead of by the framework. Raise it here if a site ever
+/// needs longer; do not lower it to match the shared default.
+const _decodeHangDetector = Duration(seconds: 30);
 
 /// Waits until the frame whose stamp is [mediaTsMs] is the one being previewed.
-Future<void> _settleForFrame(WidgetTester tester, int mediaTsMs) => _settleFor(
+///
+/// The work being waited for is a real `File.writeAsBytesSync` in the fixture plus
+/// `RecordImage.preload`'s `instantiateImageCodec`; neither runs under the fake clock, so
+/// `settleUntil` (`support/settling.dart`) is what this file uses for it. This was a verbatim
+/// local copy of that helper — same expiry message — until it was folded back in; see
+/// [_decodeHangDetector] for the one thing that did not come across by default.
+Future<void> _settleForFrame(WidgetTester tester, int mediaTsMs) => settleUntil(
   tester,
   () => _caption(tester) == _captionFor(mediaTsMs),
   describe: 'the $mediaTsMs ms frame to be decoded and previewed',
+  timeout: _decodeHangDetector,
 );
 
 /// Lets the real file writes and the PNG decode the widget issues actually run, for the cases that
 /// assert what did *not* happen (an in-flight grab that must not publish, a refusal that publishes
 /// nothing) or that sample the intermediate frames one by one. Those have no arrival to poll for, so
-/// the window has to be a window. It cannot produce a false failure under load — only a weaker
-/// negative — which is why it is left as is while the arrivals above are not.
+/// the window has to be a window, and for a plain negative a slow host can only weaken it.
+///
+/// **That does not extend to an assertion made per sampled frame.** If the frames that could break
+/// the invariant all lie past the end of the window, a slow host does not weaken the check, it
+/// deletes it — and a check with nothing left to look at is green. A case that samples *towards* an
+/// arrival therefore has to keep sampling until the arrival; [_recordUntil] is that.
 Future<void> _settleIo(WidgetTester tester, {int frames = 8}) async {
   for (var i = 0; i < frames; i++) {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
     await tester.pump();
   }
+}
+
+/// Keeps sampling into [out], one entry per pumped frame, until [ready] holds.
+///
+/// This is what makes a trace *provably* span an arrival instead of hoping the arrival fitted inside
+/// a window. It neither replaces nor shortens a window: the caller's [_settleIo] window runs first
+/// and is the measurement; this carries the same sampling on to the arrival the window was silently
+/// relying on.
+///
+/// The sample is taken inside the predicate because [settleUntil] evaluates it exactly once per
+/// pumped frame, so the appended entries are the frames it pumped and the trace has no gap in it.
+/// Delegating the loop keeps `support/settling.dart` the one place the waiting loop and its expiry
+/// message are spelled out; the bound it runs under is stated here, in [_decodeHangDetector]. Same
+/// helper, same shape as the sibling file's `report_import_preview_flicker_test.dart`.
+Future<void> _recordUntil(
+  WidgetTester tester,
+  List<(double?, String?)> out,
+  bool Function() ready, {
+  required String describe,
+}) {
+  return settleUntil(
+    tester,
+    () {
+      out.add((_previewHeight(tester), _caption(tester)));
+      return ready();
+    },
+    describe: describe,
+    timeout: _decodeHangDetector,
+  );
 }
 
 /// Opens the dialog on [clip] and waits for [awaiting], which defaults to its first frame being
@@ -304,7 +329,12 @@ Future<ProviderContainer> _open(
   await tester.pump();
   await tester.pump();
   await tester.tap(find.text(appSentenceAt('pages.chara_detail.report_import.dialog.pick_button.label')));
-  await _settleFor(tester, awaiting ?? () => _caption(tester) != null, describe: describe);
+  await settleUntil(
+    tester,
+    awaiting ?? () => _caption(tester) != null,
+    describe: describe,
+    timeout: _decodeHangDetector,
+  );
   return container;
 }
 
@@ -423,8 +453,9 @@ List<String> _notFromTranslations(List<String> shown, {required Set<String> allo
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
   setUpAll(loadAppTranslations);
-  setUpAll(() => StorageBox.ensureOpened(directory: Directory.systemTemp.createTempSync('umacapture_h14b_hive').path));
+  useStorageBoxForTest();
 
   setUp(() {
     _tempDir = Directory.systemTemp.createTempSync('umacapture_h14b');
@@ -693,6 +724,27 @@ void main() {
       trace.add((_previewHeight(tester), _caption(tester)));
     }
 
+    // THE ARRIVAL, sampled rather than merely waited for. The ten frames above stay a fixed window
+    // -- they are the measurement of the intermediate frames -- and this carries the same sampling
+    // on until the stepped-to frame is actually published.
+    //
+    // The note that used to stand here said a slow host "can only weaken" the two assertions below.
+    // That is true of the first, a plain negative, and false of the second, which is the one this
+    // case exists for. A frame whose image and caption disagree can only occur after the new caption
+    // has been published and before its pixels are on screen -- that interval IS the defect, and
+    // stretching it out is precisely what the rejected `gaplessPlayback` fix would do. On a host too
+    // slow to publish within the ten frames, the whole interval falls outside the trace, the loop
+    // below then walks a trace in which the old frame sits under the old caption throughout, and it
+    // agrees with every entry. The host does not make the invariant weaker; it removes every frame
+    // that could break it and the case reports success having inspected nothing. Measured, with the
+    // arrival waited for outside the trace: a one-frame lag between caption and pixels passed.
+    await _recordUntil(
+      tester,
+      trace,
+      () => _caption(tester) == _captionFor(83),
+      describe: 'the 83 ms frame to be decoded and previewed',
+    );
+
     expect(trace.where((e) => e.$1 == 0.0), isEmpty, reason: 'NO FLICKER: the preview never renders without an image');
     for (final sample in trace) {
       final caption = sample.$2;
@@ -700,12 +752,7 @@ void main() {
       final expected = caption == _captionFor(50) ? clip.heights[50] : clip.heights[83];
       expect(sample.$1, expected?.toDouble(), reason: 'THE IMAGE AND ITS CAPTION NEVER DISAGREE: $sample');
     }
-    // THE ARRIVAL, waited for rather than required to have happened within the trace. The trace
-    // above is a fixed window on purpose -- it samples the intermediate frames, and its two
-    // assertions are a negative and a per-sample invariant that a slow host can only weaken. "The
-    // step landed" is the opposite kind of claim, and a fixed window makes it a bet on how much
-    // spare CPU the host has: `_settleFor` is what this file reserves for exactly that.
-    await _settleForFrame(tester, 83);
+    expect(trace.last.$2, _captionFor(83), reason: 'THE TRACE COVERS THE STEP: it ends after the new frame');
     expect(_caption(tester), _captionFor(83), reason: 'and the step did land');
   });
 

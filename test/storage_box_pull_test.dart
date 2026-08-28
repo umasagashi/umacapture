@@ -12,11 +12,8 @@ import 'package:umacapture/src/preference/storage_box.dart';
 import 'support/hive.dart';
 
 void main() {
-  late Future<void> Function() teardown;
-
   // 'settings' is StorageBoxKey.settings.name.snakeCase, the box StorageBox opens.
-  setUp(() async => teardown = await initHiveForTest(['settings']));
-  tearDown(() async => teardown());
+  useHiveForEachTest(['settings']);
 
   test('pull degrades to null when the stored type does not match T', () {
     final box = StorageBox(StorageBoxKey.settings);

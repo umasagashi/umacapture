@@ -90,17 +90,15 @@ final _dialogs = <String, _DialogBuilder>{
 };
 
 void main() {
-  late Future<void> Function() closeHive;
+  // The limit-reached branch reads the Hive-backed monthly counter.
+  useHiveForTest(['settings']);
 
   setUpAll(() async {
     loadAppTranslations();
-    // The limit-reached branch reads the Hive-backed monthly counter.
-    closeHive = await initHiveForTest(['settings']);
     _tempDir = Directory.systemTemp.createTempSync('umacapture_report_strings_test');
   });
 
   tearDownAll(() async {
-    await closeHive();
     if (_tempDir.existsSync()) {
       _tempDir.deleteSync(recursive: true);
     }

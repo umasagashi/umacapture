@@ -9,7 +9,6 @@ windows/flutter/generated_plugins.cmake       eol=lf
 # Same rationale as above: pin to LF so codegen produces no EOL-only churn.
 *.mapper.dart                                  eol=lf
 *.gr.dart                                      eol=lf
-lib/generated/assets.dart                      eol=lf
 lib/distribution_info.dart                     eol=lf
 assets/license_info.json                       eol=lf
 assets/version_info.json                       eol=lf
@@ -38,3 +37,33 @@ native/wasm/*.sh                               eol=lf
 # SHA-256 would no longer match the pin and tool/fetch_web_deps.py would report
 # drift and overwrite this tracked file. Pin to LF so the checkout matches upstream.
 web/coi-serviceworker.js                       eol=lf
+
+# The native CLI's `build` subcommand regenerates these scene definitions (io_util::write in
+# native/src/util/misc.h, which opens the stream in binary mode so the CRT cannot inject CR).
+# Pin to LF so regeneration matches the committed blob on every platform.
+assets/config/chara_detail/recognizer.json     eol=lf
+assets/config/chara_detail/scene_context.json  eol=lf
+assets/config/chara_detail/scene_scraper.json  eol=lf
+assets/config/chara_detail/scene_stitcher.json eol=lf
+
+# `flutter create` / the Visual Studio Windows-runner template wrote these with
+# CRLF; we did not generate them. Pin to LF so a fresh clone matches the
+# committed blob and doesn't report spurious CRLF diffs. Pin each path on its
+# own: windows/runner/ also holds Runner.rc and main.cpp, which are already LF
+# here and are not part of this set, and a glob would silently take them over.
+.metadata                                         eol=lf
+analysis_options.yaml                             eol=lf
+android/app/src/main/res/values-night/styles.xml  eol=lf
+android/app/src/main/res/values/styles.xml        eol=lf
+android/gradle.properties                         eol=lf
+windows/flutter/CMakeLists.txt                    eol=lf
+windows/runner/resource.h                         eol=lf
+windows/runner/runner.exe.manifest                eol=lf
+windows/runner/utils.cpp                          eol=lf
+windows/runner/utils.h                            eol=lf
+windows/runner/win32_window.h                     eol=lf
+
+# native/.gitignore is hand-written, not template-derived, but was also checked
+# out CRLF; pinned separately (not lumped with the template group above) so the
+# comment above stays accurate if this file's origin is ever revisited.
+native/.gitignore                                 eol=lf

@@ -17,13 +17,13 @@ import 'package:flex_color_scheme/flex_color_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hive_ce/hive.dart';
 import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/sound_player.dart';
 import 'package:umacapture/src/gui/settings.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/settling.dart';
 import 'support/web_like_fs_backend.dart';
@@ -66,9 +66,8 @@ Future<void> _oneStatTurn(WidgetTester tester) async {
 void main() {
   setUpAll(() async {
     loadAppTranslations();
-    Hive.init(Directory.systemTemp.createTempSync('umacapture_sound_indicator_test').path);
-    await Hive.openBox('settings');
   });
+  useHiveForTest(['settings']);
 
   testWidgets('warns about a missing custom clip on a backend without a sync surface', (tester) async {
     final tempRoot = Directory.systemTemp.createTempSync('umacapture_sound_indicator_files');

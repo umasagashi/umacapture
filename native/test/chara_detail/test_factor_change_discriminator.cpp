@@ -4,7 +4,7 @@
 // Why these exist at all: the discriminator's only other cover is the golden integration suite, which compares
 // *record sets*. Three of the five clips that must trigger a reset produce zero records both with the rule and
 // with the rule deleted, so their signal (the reset count) is invisible to that format
-// (.notes/analysis/android-web-import/cpp/fix1-golden-intent.md). These tests assert the discriminator's
+// (testdata/evidence/android-web-import/cpp/fix1-golden-intent.md). These tests assert the discriminator's
 // property directly instead, so a future change to it fails here rather than silently.
 //
 // The property, stated without re-encoding today's constants:

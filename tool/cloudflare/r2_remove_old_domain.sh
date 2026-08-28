@@ -12,7 +12,7 @@
 # bucket, its objects, or the umacapture.com domain. Safe to no-op if the domain
 # was never connected.
 #
-# See .notes/analysis/wasm_poc5/r2_setup_runbook.md.
+# See testdata/evidence/wasm_poc5/r2_setup_runbook.md.
 #
 # Run from Git Bash:  bash tool/cloudflare/r2_remove_old_domain.sh
 #

@@ -468,6 +468,14 @@ jobs:
       #   where `Future.timeout`'s `onTimeout` is checked against the future's
       #   runtime type argument. Returning `null` from it threw a TypeError on every
       #   boot and left OPFS on evictable storage.
+      # * opfs_delete_failure_web_test.dart -- what a rejected OPFS call hands to
+      #   a Dart `catch`. `PathEntity.delete`'s retry catches `Object`, and
+      #   whether that may be narrowed to `on FileSystemException` turns on the
+      #   measured answer: every reachable failure arrives as a bare `JSObject`
+      #   (a DOMException) that is neither `dart:io`'s `FileSystemException` nor
+      #   even a Dart `Exception`, so a narrowed clause would select none of
+      #   them. It also pins the one failure a retry genuinely recovers on web --
+      #   `NoModificationAllowedError`, an entry held by an open writable.
       #
       # Add browser-only coverage as another suite here; a file not named on the
       # command below is not run by anything.
@@ -497,4 +505,8 @@ jobs:
       # exit, so a failing suite could ship green.
       - name: Run browser tests
         shell: bash
-        run: dart test --platform chrome test/record_mutation_lock_web_test.dart test/storage_persistence_web_test.dart
+        run: >-
+          dart test --platform chrome
+          test/record_mutation_lock_web_test.dart
+          test/storage_persistence_web_test.dart
+          test/opfs_delete_failure_web_test.dart

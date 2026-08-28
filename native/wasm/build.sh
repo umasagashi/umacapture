@@ -4,7 +4,7 @@
 # Usage (Git Bash):
 #   bash native/wasm/build.sh
 #
-# Emits, into $BUILD_DIR (default C:/Projects/wasm-poc/app-build):
+# Emits, into $BUILD_DIR (default C:/Projects/umacapture-wasm-toolchain/app-build):
 #   umacapture_core.js    (ES6 module, MODULARIZE factory)
 #   umacapture_core.wasm
 #   umacapture_core.worker.js / .ww.js  (pthread worker glue, if the toolchain emits it)
@@ -14,9 +14,9 @@
 set -euo pipefail
 
 # --- Locations ---------------------------------------------------------------
-EMSDK_DIR="${EMSDK_DIR:-C:/Projects/wasm-poc/emsdk}"
-OPENCV_DIR="${OPENCV_DIR:-C:/Projects/wasm-poc/opencv-install}"
-BUILD_DIR="${BUILD_DIR:-C:/Projects/wasm-poc/app-build}"
+EMSDK_DIR="${EMSDK_DIR:-C:/Projects/umacapture-wasm-toolchain/emsdk}"
+OPENCV_DIR="${OPENCV_DIR:-C:/Projects/umacapture-wasm-toolchain/opencv-install}"
+BUILD_DIR="${BUILD_DIR:-C:/Projects/umacapture-wasm-toolchain/app-build}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NATIVE_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -139,7 +139,7 @@ LINKFLAGS=(
   -sEXPORT_NAME=UmacaptureCore
   -sEXPORTED_RUNTIME_METHODS=['FS','HEAPU8','HEAP32','HEAPF64']
   -sFORCE_FILESYSTEM=1
-  # OFF in the shipped build. Measured 2026-08-14 (.notes/analysis/android-web-import/handover/
+  # OFF in the shipped build. Measured 2026-08-14 (testdata/evidence/android-web-import/handover/
   # Z2-wasm-build-flags.md), this was the one flag in this file with no reason comment, carried
   # over from development. ASSERTIONS also selects emscripten's debug vs. release system-library
   # variant (libc++, the allocator -- tools/system_libs.py's get_default_variation(is_debug=

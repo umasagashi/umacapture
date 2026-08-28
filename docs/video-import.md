@@ -12,7 +12,7 @@ nothing" were rewritten rather than left standing. The Windows work itself is de
 [The Windows path](#the-windows-path-end-to-end), which carries its own provenance warning: it was
 written from the source, not from a run.
 
-> Sources. Four read-only investigations under the gitignored `.notes/video-import/`:
+> Sources. Four read-only investigations under the gitignored `testdata/evidence/video-import/`:
 > `old-implementation-review.md`, `decode-options-survey.md`, `session-policy-feasibility.md`,
 > `decode-ab-comparison.md`. Claims below carry the file:line or the report that establishes them;
 > anything unestablished is in [Open questions](#open-questions) and nowhere else.
@@ -73,7 +73,7 @@ option on paper and is rejected on four grounds, in ascending order of weight
    knob that destroys its frame yield: presentation is capped at the display refresh, so past roughly
    `refresh_rate / source_fps` the loss is arithmetic. B2's honest speed is 1× realtime.
 2. **A hidden tab collapses it, and a merely occluded window counts as hidden.** This repo measured
-   it (`.notes/analysis/firefox-live-capture/design-comparison.md`): while `hidden`, rVFC yields
+   it (`testdata/harness/firefox-live-capture/design-comparison.md`): while `hidden`, rVFC yields
    **0.2 fps on Chromium and 0.5 fps on Firefox**, and both engines flip `visibilityState` to
    `hidden` ~2 s (Chrome) / ~3 s (Firefox) after another window fully covers the browser. Against a
    ~30 fps source that is ~99 % shed. The scraper tolerates shedding to ~83 % with a measured cliff
@@ -122,7 +122,7 @@ destination *name* depends on the configuration: OpenCV's plugin loader asks for
 the `opencv_world` that loaded it, so a Debug build looks for `…_64d.dll`, and the vendored package
 ships only the release-named file. The alternative — the built-in Media Foundation backend, zero extra bytes —
 **cannot open Matroska**, which is OBS's default container and the format of this project's own test
-clips under `.notes/`. Shipping only MSMF would make Windows narrower than web on the single most
+clips under `testdata/clips/`. Shipping only MSMF would make Windows narrower than web on the single most
 likely input.
 
 | | bytes | note |
@@ -426,7 +426,7 @@ the conversion below is still what makes such a folder *import* rather than mere
 `video::capturePathString` (`native/src/cv/video_loader.h`) is the one conversion both the probe and
 `VideoLoader::runCapture` now go through: ACP first so that no path which works today changes
 backend, UTF-8 only when that throws. Measured under
-`.notes/analysis/video-import-windows-parity/acp-probe/`: FFmpeg opens either encoding (its
+`testdata/evidence/video-import-windows-parity/acp-probe/`: FFmpeg opens either encoding (its
 `win32_open` tries UTF-8 and falls back to ACP), while MSMF widens the bytes naively and accepts only
 ASCII or ACP. **The residue**: MSMF is what opens an audio-only MP4 and reports 0 × 0, so under a
 name the ACP cannot represent that clip fails to open at all and is refused as `not_a_video` instead
@@ -588,7 +588,7 @@ no format) is still refused **by name**, which beats a silent zero-record import
 Three colour predicates gate the pane latch, and all three were sized against BT.601 footage only.
 They were re-derived from measured pixels — 22 CLI runs, 11 clips × 2 matrices, dumping every
 `calibrateDetailCrop` call's probe columns (survey under the gitignored
-`.notes/analysis/video-import-colour/`).
+`testdata/evidence/video-import-colour/`).
 
 | predicate | defined in | before | after |
 | --- | --- | --- | --- |
@@ -1121,7 +1121,7 @@ off the logs; do not assume it.
 
 | surface | reachable by |
 | --- | --- |
-| Windows `VideoLoader` decode | the golden suite already drives it through `umacapture_cli video` — but every case is conditional on local clips under `.notes/` and models under `sandbox/modules/`, and **CI builds no CLI, so all of them skip there** |
+| Windows `VideoLoader` decode | the golden suite already drives it through `umacapture_cli video` — but every case is conditional on local clips under `testdata/clips/golden/` and models under `sandbox/modules/`, and **CI builds no CLI, so all of them skip there** |
 | web demux, decode order, timestamps, media-time conversion | Node, in the harness style already in the tree (`tool/test_web_frame_shaping.mjs`, `tool/test_web_live_content.mjs` stub `globalThis.self` and import `web/worker.js`). Mediabunny documents a file-path source for Node |
 | the flow-gate arithmetic | Node, pure integer code against a stubbed `Module` |
 | the `VideoDecoder` step and `sample.copyTo` | **browser only** |
@@ -1276,7 +1276,7 @@ From the colour work specifically:
 * **The golden suite never runs Android.** The Android agreement above rests solely on that manual
   stage, on one device and one Chrome build.
 * **Both colour assets are conditional**, like every other case: they need their clip under the
-  gitignored `.notes/` and the models under `sandbox/modules/`, and CI builds no CLI at all. On a
+  gitignored `testdata/clips/golden/` and the models under `sandbox/modules/`, and CI builds no CLI at all. On a
   machine without the files they skip. Read the coverage off the ctest log.
 
 ## Open questions
