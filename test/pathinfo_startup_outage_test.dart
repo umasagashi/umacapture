@@ -23,6 +23,7 @@ import 'package:umacapture/src/gui/chara_detail/storage_status_banner.dart';
 import 'package:umacapture/src/gui/record_store_banner.dart';
 
 import 'support/localization.dart';
+import 'support/long_read_declarations.dart';
 import 'support/riverpod.dart';
 
 const _busyRootLock = RecordMutationLockBusy('umacapture:v1:root', Duration(seconds: 150));
@@ -41,10 +42,10 @@ final class _FailingMaintenance implements RootStorageMaintenance {
   final Object failure;
 
   @override
-  Future<void> run(RootStorageMaintenanceRequest request) async => throw failure;
+  Future<RootMaintenanceOutcome> run(RootStorageMaintenanceRequest request) async => throw failure;
 
   @override
-  Future<void> runUnlocked(RootStorageMaintenanceRequest request) async => throw failure;
+  Future<RootMaintenanceOutcome> runUnlocked(RootStorageMaintenanceRequest request) async => throw failure;
 }
 
 Future<void> _pumpBanner(WidgetTester tester, RecordStoreUnavailable? outage) {
@@ -62,7 +63,11 @@ void main() {
 
   test('a busy root lock leaves the startup boundary as a transient store outage', () async {
     await expectLater(
-      runPathInfoStartupMaintenance(_pathInfo, maintenance: _FailingMaintenance(_busyRootLock)),
+      runPathInfoStartupMaintenance(
+        _pathInfo,
+        declaration: undeclaredInTest,
+        maintenance: _FailingMaintenance(_busyRootLock),
+      ),
       throwsA(
         isA<RecordStoreUnavailable>()
             .having((e) => e.transient, 'transient', isTrue)
@@ -83,6 +88,7 @@ void main() {
     await expectLater(
       runPathInfoStartupMaintenance(
         _pathInfo,
+        declaration: undeclaredInTest,
         maintenance: _FailingMaintenance(StateError('the record lock is unavailable')),
       ),
       throwsA(isA<RecordStoreUnavailable>().having((e) => e.transient, 'transient', isFalse)),
@@ -90,7 +96,7 @@ void main() {
   });
 
   test('a successful startup stays silent', () async {
-    await runPathInfoStartupMaintenance(_pathInfo, maintenance: _SilentMaintenance());
+    await runPathInfoStartupMaintenance(_pathInfo, declaration: undeclaredInTest, maintenance: _SilentMaintenance());
   });
 
   test('a startup outage settles at once instead of retrying behind a spinner', () async {
@@ -150,8 +156,9 @@ void main() {
 
 final class _SilentMaintenance implements RootStorageMaintenance {
   @override
-  Future<void> run(RootStorageMaintenanceRequest request) async {}
+  Future<RootMaintenanceOutcome> run(RootStorageMaintenanceRequest request) async => RootMaintenanceOutcome.none;
 
   @override
-  Future<void> runUnlocked(RootStorageMaintenanceRequest request) async {}
+  Future<RootMaintenanceOutcome> runUnlocked(RootStorageMaintenanceRequest request) async =>
+      RootMaintenanceOutcome.none;
 }
