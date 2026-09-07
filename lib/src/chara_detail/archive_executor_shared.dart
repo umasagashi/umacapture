@@ -3,6 +3,7 @@ import '/src/core/fs/record_directory_transaction.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 
 import 'archive_executor_types.dart';
@@ -57,7 +58,18 @@ Future<bool> archiveRecordAsync(
 }) {
   final source = DirectoryPath(args.srcDirPath);
   final gate = recoveryGate ?? createPlatformRecordRecoveryGate(mutationLock: mutationLock);
-  return gate.runForRecord(source.parent.parent.parent, source.name, () => _archiveRecordAsyncLocked(args));
+  return gate.runForRecord(
+    source.parent.parent.parent,
+    source.name,
+    () => _archiveRecordAsyncLocked(args),
+    // Same claim as the desktop leg's, and it is deliberately not taken here:
+    // this leg locks one record at a time, so claiming per record would release
+    // a batch a record at a time and bring the early ones back live while the
+    // rest still had handles open.
+    declaration: const LongReadDeclaration.none(
+      reason: 'CharaArchiveController.archive holds the claim for the whole batch, above this platform leg',
+    ),
+  );
 }
 
 Future<bool> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async {
@@ -82,21 +94,6 @@ Future<bool> _archiveRecordAsyncLocked(ArchiveRecordArgs args) async {
     logger.e('Failed to archive record ${args.srcDirPath}.', error, stackTrace);
     return false;
   }
-}
-
-/// Startup/retry recovery for pending archive manifests. The same record lock
-/// protects every resumed transition. Completed records receive the same
-/// best-effort image disposition as a foreground archive.
-Future<List<RecordTransactionRecovery>> recoverArchiveTransactions(
-  DirectoryPath dataRoot, {
-  RecordMutationLock? mutationLock,
-}) {
-  final lock = mutationLock ?? platformRecordMutationLock;
-  return lock.runForRoot(() async {
-    final recoveries = await recoverArchiveTransactionsUnlocked(dataRoot);
-    await cleanupRecoveredArchiveTransactionsUnlocked(recoveries);
-    return recoveries;
-  });
 }
 
 /// Recovers manifests while the caller holds the whole-store mutation lock.

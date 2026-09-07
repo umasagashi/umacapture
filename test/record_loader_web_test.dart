@@ -23,6 +23,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
+import 'support/long_read_declarations.dart';
 
 void main() {
   late DirectoryPath storage;
@@ -73,6 +74,7 @@ void main() {
     // every cause is per-record, so one bad record must not hide every record.
     final (:results, :unavailable) = await loadRecordsUnder(
       active,
+      declaration: undeclaredInTest,
       mutationLock: _lock,
       recoverRecordUnlocked: (_, id) async {
         if (id == 'one') await blocked(active, id);
@@ -113,6 +115,7 @@ void main() {
     final stranded = active / 'stranded';
     final (:results, :unavailable) = await loadRecordsUnder(
       active,
+      declaration: undeclaredInTest,
       mutationLock: _lock,
       recoverRecordUnlocked: (_, _) async {},
       snapshotDirectories: (_) async => [moved, stranded],
@@ -160,6 +163,7 @@ void main() {
       final loaded = <String>[];
       await loadRecordsUnder(
         activeRoot,
+        declaration: undeclaredInTest,
         mutationLock: _lock,
         recoverRecordUnlocked: (_, _) async {},
         loadAction: (directory) async {
@@ -192,6 +196,7 @@ void main() {
 
       final (:results, :unavailable) = await loadRecordsUnder(
         activeRoot,
+        declaration: undeclaredInTest,
         mutationLock: _lock,
         recoverRecordUnlocked: (_, _) async {},
         snapshotDirectories: (_) async => [unusable],
@@ -227,6 +232,7 @@ void main() {
 
       final (:results, :unavailable) = await loadRecordsUnder(
         activeRoot,
+        declaration: undeclaredInTest,
         mutationLock: _lock,
         recoverRecordUnlocked: (_, _) async {},
         snapshotDirectories: (_) async => [stranded],

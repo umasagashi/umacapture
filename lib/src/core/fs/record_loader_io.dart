@@ -7,6 +7,7 @@ import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/record_store_unavailable.dart';
 import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 
 /// Number of isolates the bulk record scan fans out across.
@@ -86,17 +87,54 @@ RecordLoadResult _loadRecord(DirectoryPath directory) {
 /// the bare lock error, which the record page could only paint as a raw
 /// exception. Anything else thrown by the scan itself keeps propagating
 /// unwrapped; only the acquisition is a store-scope outage.
+///
+/// [declaration] is announced around **the whole of this function**, not
+/// forwarded into the acquisition below, and `record_loader_web.dart` announces
+/// the same object the same way. That is what makes the two legs' claims one
+/// claim rather than two that merely started life in the same builder: the web
+/// leg's root acquisition covers its listing only, so a declaration handed to
+/// the gate would be released there while its decode loop — and the quarantine
+/// moves in it — ran on unannounced. The registry's window is the *operation's*
+/// and not the lock's (`long_read_registry.dart` says so of every claim), which
+/// is the same window on both legs even though the lock's is not.
 Future<RecordScanResult> loadRecordsUnder(
   DirectoryPath directory, {
+  required LongReadDeclaration declaration,
   RecordRecoveryGate? recoveryGate,
   RecordMutationLock? mutationLock,
-}) async {
+}) {
+  return declaration.runDeclared(() => _loadRecordsUnderDeclared(directory, recoveryGate, mutationLock));
+}
+
+/// What every scan costs, with the caller's declaration already applied one
+/// frame above.
+const _declaredByTheScanFrame = LongReadDeclaration.none(
+  reason: "the scan's declaration is applied by loadRecordsUnder, around the whole pass and not only this acquisition",
+);
+
+Future<RecordScanResult> _loadRecordsUnderDeclared(
+  DirectoryPath directory,
+  RecordRecoveryGate? recoveryGate,
+  RecordMutationLock? mutationLock,
+) async {
   final gate = recoveryGate ?? createPlatformRecordRecoveryGate(mutationLock: mutationLock);
   // `<dataRoot>/storage/chara_detail/{active,archive}` -> `<dataRoot>/storage`,
   // the same storage root `record_loader_web.dart` derives from its scan root.
   final storageRoot = directory.parent.parent;
   try {
-    return await gate.runForRoot(storageRoot, () => _scanRecordsUnder(directory));
+    // Native installs the write journal's recovery too
+    // (`record_recovery_gate_io.dart`), so the reason selects here as it does on
+    // web: a scan wants the cheap intent, which a leg may answer from its memo of
+    // an earlier sweep.
+    return await gate.runForRoot(
+      storageRoot,
+      (_) => _scanRecordsUnder(directory),
+      declaration: _declaredByTheScanFrame,
+      reason: RootMaintenanceReason.readyToUse,
+      beforeMaintenance: const BeforeRootMaintenance.none(
+        reason: 'a scan removes nothing, so there is no set of entries the drain could add to',
+      ),
+    );
   } catch (error, stackTrace) {
     if (error is! RecordMutationLockBusy && error is! RecordMutationLockUnavailable) {
       rethrow;

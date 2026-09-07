@@ -33,6 +33,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/utils.dart';
 
+import 'support/long_read_declarations.dart';
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
 
@@ -117,7 +118,7 @@ void main() {
     // this test says so.
     final entered = Completer<void>();
     final release = Completer<void>();
-    final holder = gate.runForRecord(info.storageDir, 'record-1', () async {
+    final holder = gate.runForRecord(info.storageDir, 'record-1', declaration: undeclaredInTest, () async {
       entered.complete();
       await release.future;
     });

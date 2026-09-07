@@ -6,18 +6,17 @@
 /// `gui/storage_settings.dart` owns only the UI state and delegates here.
 library;
 
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:hive_ce_flutter/adapters.dart';
 import 'package:path/path.dart' as p;
-import 'package:window_manager/window_manager.dart';
 
+import '/src/core/app_restart.dart';
 import '/src/core/bootstrap.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 import '/src/preference/storage_box.dart';
 
@@ -60,6 +59,29 @@ enum MigrationOutcome {
   };
 }
 
+/// What a relocation driven by [controller] announces to the long-read registry.
+///
+/// **Its roots are read off [DataRootMigrationController.movedRoots], not
+/// written out here.** The claim has to hold what the copy moves, and the only
+/// way to keep those two answers equal when a fourth tree is added to the
+/// migration is to derive them from one enumeration; a list repeated at the
+/// claim would be the same defect `record_scan_claim.dart` documents.
+///
+/// **Three roots is not a list that could have been one.** `storage/` is not an
+/// ancestor of the other two, and the storage view offers a delete over each of
+/// them separately (`StorageGroupId.modules`, `StorageGroupId.settings`), so a
+/// claim over `storage/` alone would leave two live delete buttons over
+/// directories being renamed away. The comment this replaced asserted the
+/// opposite — that moving `storage/` covers "every path any delete surface can
+/// name" — and the group table says otherwise.
+LongReadDeclaration dataRootRelocationLongReadDeclaration(RefBase ref, DataRootMigrationController controller) {
+  return LongReadDeclaration.claim(
+    registry: ref.read(longReadRegistryProvider.notifier),
+    kind: LongReadKind.relocate,
+    paths: controller.movedRoots,
+  );
+}
+
 /// Drives a data-root relocation: classification, the file migration, and the
 /// process control (quit / relaunch) that must follow it on Windows.
 ///
@@ -77,10 +99,30 @@ class DataRootMigrationController {
   /// The transient `temp` directory is intentionally excluded; only the durable
   /// `storage` / `modules` / `settings` trees are moved.
   List<({DirectoryPath src, DirectoryPath dst})> pairs(PathInfo target) => [
-    (src: source.storageDir, dst: target.storageDir),
-    (src: source.modulesDir, dst: target.modulesDir),
-    (src: source.settingsDir, dst: target.settingsDir),
+    for (final tree in _movedTrees) (src: tree(source), dst: tree(target)),
   ];
+
+  /// The trees a relocation moves, as accessors rather than as directories, so
+  /// [pairs] and [movedRoots] read the *same* enumeration.
+  ///
+  /// Written this way because there are now two derivations of "what does a
+  /// relocation move": the copy itself, and the long-read claim that has to hold
+  /// every one of them for the copy's length. A second literal list would be
+  /// free to disagree with the first, and the disagreement would be a delete
+  /// button offered over a directory being renamed away.
+  static final List<DirectoryPath Function(PathInfo)> _movedTrees = [
+    (info) => info.storageDir,
+    (info) => info.modulesDir,
+    (info) => info.settingsDir,
+  ];
+
+  /// The current locations of the trees [migrate] will move.
+  ///
+  /// Three roots and not one: with no data-root override in force these do not
+  /// share a parent at all (`storage/` and the settings box sit under the
+  /// documents directory, `modules/` under the support directory), so there is
+  /// no single ancestor a claim could name instead.
+  List<DirectoryPath> get movedRoots => [for (final tree in _movedTrees) tree(source)];
 
   /// Classifies a chosen [root] (`null` = reset to native defaults).
   MigrationKind classify(DirectoryPath? root) {
@@ -123,9 +165,63 @@ class DataRootMigrationController {
   /// The [MigrationOutcome] distinguishes a failure that closed Hive from one
   /// refused before it, because only the caller can act on that and only it
   /// knows there is a user waiting on a dialog with no way out.
+  /// `blockedBy` is which registered long reader, if any, is holding one of the
+  /// trees this relocation would rename away — a value read at the call site, for
+  /// the same reason `isCapturing` is one: this class is deliberately free of
+  /// Riverpod (see the class doc) and a registry is only reachable through a ref.
+  ///
+  /// **`isCapturing` is not the other half of that question, and a video import
+  /// is not missing from it.** It is a live *capture* session and nothing else —
+  /// the flag exists so [stopCapture] can be called, not so a relocation can be
+  /// refused — and `capturingStateProvider` is false throughout a video import.
+  /// What refuses an import is `blockedBy`: the import announces its session as
+  /// [LongReadKind.videoImport] over the record store, and `movedRoots` contains
+  /// `storage/`, which contains it. So the registry is where that collision is
+  /// written down, exactly as it is for a zip, an archive and a scan, and there
+  /// is nothing for this parameter to say about it.
+  ///
+  /// **A live capture now announces itself too, and the caller subtracts it from
+  /// `blockedBy` rather than this method ignoring it.** Since
+  /// [LongReadKind.liveCapture] exists, the registry carries the same fact
+  /// `isCapturing` does — but the two seams want opposite things done with it:
+  /// every other surface withholds a control for a holder, while this one has a
+  /// remedy of its own and takes it. Handing that decision to `blockedBy`'s
+  /// producer keeps this method's rule the simple one it was ("a holder is a
+  /// refusal") and leaves the exception written at the site that owns the
+  /// remedy, where `stopCapture` is passed in the same call.
+  ///
+  /// **Why that refusal is here and not on the dialog's confirm button.** The root
+  /// record scope below already refuses a relocation that collides with a *scope
+  /// holder* — a bulk scan, an archive repair — and that refusal is inside this
+  /// method, where every caller reaches it. But the scope is not what a long
+  /// reader takes: `StorageZipProgress.begin` and
+  /// `CharaDetailRecordRegenerationController._claimBatch` both claim the registry
+  /// directly, with no gate and therefore no lock, so a relocation begun while a
+  /// zip is bundling `storage/` acquires the scope with nothing in its way and
+  /// renames the directory out from under the reader. The registry is the only
+  /// place that collision is written down, so the question belongs beside the
+  /// acquisition that answers the other half of it.
+  ///
+  /// **And it answers the wait, not only the collision.** For a holder that *does*
+  /// take the scope, the acquisition below waits out its whole timeout before
+  /// reporting [MigrationOutcome.refusedSessionIntact] — a progress dialog saying
+  /// 「データを移行しています」 for as long as that takes, while nothing is being
+  /// moved. Asked first, the same outcome is reached at once.
+  ///
+  /// **A refusal and not a withheld button, which is the one place this diverges
+  /// from the record surfaces.** Those grey their confirm and put the reason in
+  /// the dialog body. Here the dialog already ships a sentence for exactly this
+  /// outcome (`pages.storage.dialog.refused`, whose first clause is 「他の処理が
+  /// レコードを使用中のため、移行を開始できませんでした」), reached through
+  /// [MigrationOutcome.sessionUsable] with the back/close buttons that go with it;
+  /// withholding the button instead would need a second sentence saying the same
+  /// thing, and a button greyed without one is the defect this whole seam exists
+  /// to remove.
   Future<MigrationOutcome> migrate(
     DirectoryPath? targetRoot, {
     required bool isCapturing,
+    required LongReadDeclaration declaration,
+    required LongReadKind? blockedBy,
     Future<void> Function()? stopCapture,
     RecordRecoveryGate? recoveryGate,
   }) async {
@@ -134,6 +230,12 @@ class DataRootMigrationController {
     // (DataRootTile) is hidden on web; this guard makes the controller inert
     // even if it is ever reached.
     if (kIsWeb) return MigrationOutcome.refusedSessionIntact;
+    // Before anything is acquired, closed or copied: see the doc above for why a
+    // registered long reader is a refusal the root record scope cannot answer.
+    if (blockedBy != null) {
+      logger.i("Data root migration declined: ${blockedBy.name} is holding a tree it would move.");
+      return MigrationOutcome.refusedSessionIntact;
+    }
     // Moving `storage/` moves every record directory at once, so this is the
     // widest record mutation the app performs and it takes the same exclusive
     // root scope the bulk scan and the archive geometry repair take — acquired
@@ -150,7 +252,32 @@ class DataRootMigrationController {
     try {
       final swapped = await gate.runForRoot(
         source.storageDir,
-        () => _migrateLocked(targetRoot, isCapturing, stopCapture),
+        (_) => _migrateLocked(targetRoot, isCapturing, stopCapture),
+        // **The widest long reader there is, and it now announces itself.**
+        // Passed in rather than built here because this class is deliberately
+        // free of Riverpod (see the class doc) and a registry is only reachable
+        // through a ref; what it has to be is
+        // [dataRootRelocationLongReadDeclaration], which reads its paths off
+        // [movedRoots] so the claim cannot name a different set from the copy.
+        //
+        // **A refusal is inside the claim too, and that is the point of putting
+        // it here rather than around `_migrateLocked`.** The claim opens before
+        // the acquisition below and closes after it, so the window covers the
+        // wait for the root scope as well as the copy — which is the half a
+        // caller cannot see, because a relocation queued behind a startup scan
+        // is holding nothing yet and is still an operation the user is waiting
+        // on. The release is `LongReadRegistry.hold`'s `finally`, so both the
+        // refusal path and the success path give it back with nothing written
+        // here.
+        declaration: declaration,
+        // Desktop-only (the `kIsWeb` guard above returns before this), so no
+        // recovery hook is installed for the reason to select between. It is
+        // [RootMaintenanceReason.readyToUse] on its merits too: the relocation
+        // moves `storage/` whole, journals included, and removes nothing.
+        reason: RootMaintenanceReason.readyToUse,
+        beforeMaintenance: const BeforeRootMaintenance.none(
+          reason: 'the relocation moves the store whole and removes nothing, so no set of entries has to be fixed',
+        ),
       );
       // Every failure _migrateLocked can report happens after StorageBox was
       // neutralized and Hive.close() was attempted, so there is no third case
@@ -185,7 +312,7 @@ class DataRootMigrationController {
     // writer that fires before the restart (window move/resize, preference
     // notifiers, sentry counters, version checks, addon history) no-ops instead
     // of throwing on a closed box.
-    StorageBox.markClosedForMigration();
+    StorageBox.markHiveClosed();
     try {
       await Hive.close();
     } catch (error, stackTrace) {
@@ -302,69 +429,17 @@ class DataRootMigrationController {
   }
 
   /// Quits the app, falling back to a hard exit if the window cannot be closed.
-  Future<void> quit() async {
-    // windowManager.destroy()/exit(0) are desktop-only; there is no app window
-    // to close on web. Reached only through the (web-hidden) migration dialog.
-    if (kIsWeb) return;
-    try {
-      await windowManager.destroy();
-    } catch (_) {
-      exit(0);
-    }
-  }
-
-  /// Relaunches the app, then quits.
   ///
-  /// Two Windows constraints shape this:
-  /// - The native runner enforces a single instance via a named mutex
-  ///   (`windows/runner/main.cpp`), so a new instance spawned while we are
-  ///   still alive sees the mutex, foregrounds us, and exits. The relaunch must
-  ///   therefore wait until this process has fully exited (releasing the mutex).
-  /// - A child started with `Process.start(detached)` does NOT survive this
-  ///   process exiting (verified empirically). A process created via PowerShell
-  ///   `Start-Process` is reparented to the session and does survive.
-  ///
-  /// So we write a tiny relay script and launch it through `Start-Process`
-  /// (awaited, so it exists before we quit). The relay waits for our PID to
-  /// vanish, then starts a fresh instance — which re-reads the bootstrap file
-  /// and opens Hive at the migrated location. If scheduling fails the dialog
-  /// stays put so the user can still quit and relaunch manually.
-  Future<void> restart() async {
-    // The relaunch is a Windows PowerShell/Process dance with no web meaning.
-    // Reached only through the (web-hidden) migration dialog.
-    if (kIsWeb) return;
-    final exePath = Platform.resolvedExecutable;
-    final exeDir = FilePath.resolvedExecutable.parent.path;
-    final relayScript =
-        'param([int]\$ParentPid)\n'
-        'Wait-Process -Id \$ParentPid -ErrorAction SilentlyContinue\n'
-        'Start-Process -FilePath ${_psQuote(exePath)} -WorkingDirectory ${_psQuote(exeDir)}\n'
-        'Remove-Item -LiteralPath \$PSCommandPath -ErrorAction SilentlyContinue\n';
-    try {
-      // Build the temp path with package:path so a systemTemp path using forward slashes or a trailing
-      // separator cannot produce a malformed path; pass the native path straight to _psQuote (which quotes
-      // spaces, apostrophes, and backslashes) instead of hand-swapping separators. flush so the script is on
-      // disk before quit() relaunches through it.
-      final relayFile = File(p.join(Directory.systemTemp.path, 'umacapture_restart_$pid.ps1'));
-      relayFile.writeAsStringSync(relayScript, flush: true);
-      final relayPath = relayFile.path;
-      await Process.run("powershell", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        "Start-Process powershell -WindowStyle Hidden -ArgumentList "
-            "'-NoProfile','-ExecutionPolicy','Bypass','-File',${_psQuote(relayPath)},'$pid'",
-      ]);
-    } catch (error, stackTrace) {
-      logger.e("Failed to schedule a restart.", error, stackTrace);
-      return;
-    }
-    await quit();
-  }
+  /// Delegated since the storage view's settings delete gained the same need: it ends a
+  /// session that can no longer read a setting, exactly as a completed migration
+  /// does, and it is not a migration. The per-platform bodies, and the Windows
+  /// relaunch constraints, are in `app_restart.dart`.
+  Future<void> quit() => quitApp();
 
-  /// Wraps [value] as a PowerShell single-quoted literal, escaping embedded
-  /// single quotes by doubling them (PowerShell's literal-string escape). Without
-  /// this a path containing an apostrophe (e.g. `C:\Users\O'Brien\...`) would
-  /// terminate the string early and break the relaunch.
-  static String _psQuote(String value) => "'${value.replaceAll("'", "''")}'";
+  /// Relaunches the app, then quits. See [quit] for why this is delegated.
+  ///
+  /// False when the relaunch could not be scheduled; this dialog offers quit
+  /// beside restart on the branch that reaches here with Hive closed, so the
+  /// user still has a way out that does not depend on the relaunch working.
+  Future<bool> restart() => restartApp();
 }

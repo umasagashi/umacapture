@@ -8,6 +8,7 @@ import '/src/core/fs/record_id_safety.dart';
 import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 
@@ -496,7 +497,16 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     RecordMutationLock? mutationLock,
   }) {
     final gate = recoveryGate ?? createPlatformRecordRecoveryGate(mutationLock: mutationLock);
-    return gate.runForRecord(directory.parent.parent.parent, directory.name, () => loadAsyncUnlocked(directory));
+    return gate.runForRecord(
+      directory.parent.parent.parent,
+      directory.name,
+      () => loadAsyncUnlocked(directory),
+      // One `record.json` read and decode. It is not a long read by any measure
+      // a delete surface cares about, and it holds nothing after it returns.
+      declaration: const LongReadDeclaration.none(
+        reason: 'one record.json decode; it is over before a button repaints',
+      ),
+    );
   }
 
   /// Variant of [loadAsync] for a caller which already owns [directory]'s
@@ -527,7 +537,7 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
   /// moved aside instead of being deleted, so its images and json survive for
   /// later inspection or recovery.
   static RecordLoadResult _quarantineOnFailure(DirectoryPath directory, Object exception, StackTrace stackTrace) {
-    logger.e("Failed to load record.json.", exception, stackTrace);
+    _reportRecordLoadFailure(directory, exception, stackTrace, absent: !_recordJsonExistsSync(directory));
     try {
       logger.i(directory.listSync().map((e) => e.name).join(", "));
     } catch (_) {
@@ -535,8 +545,66 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
       // directory (vanished concurrently, or not a directory at all), and
       // that must not escalate one bad record into a scan-wide failure.
     }
-    captureException(exception, stackTrace);
     return RecordQuarantined(quarantine(directory));
+  }
+
+  /// Says what a failed load *was*, and reports it only if it was a defect.
+  ///
+  /// **Absent and undecodable are the same thing to do with and two different
+  /// things to say.** Either way the directory is quarantined: a record whose
+  /// `record.json` is gone is exactly as unloadable as one whose json will not
+  /// parse, and moving it aside is what keeps the next scan from meeting it
+  /// again. What differs is the report. An unparseable `record.json` is a defect
+  /// — this app wrote it and cannot read it back — and is worth a crash report.
+  /// A *missing* one is a thing the user is allowed to do: the storage tab hands
+  /// them a delete button for any file in the store, and deleting `record.json`
+  /// with it used to send a `logger.e` and a `captureException` on the very next
+  /// rescan, reporting the user's own action as a fault.
+  ///
+  /// [absent] is answered by re-probing the file rather than by classifying
+  /// [exception], because the type does not carry the answer on either platform:
+  /// `dart:io` raises `PathNotFoundException`, OPFS a `NotFoundError`
+  /// `DOMException`, and the two reach here through `FsBackend`, which names
+  /// neither. The probe races — the file could be created or removed between the
+  /// failed read and it — and both ways round it is answered on the safe side: a
+  /// file that reappears is reported, and a decode failure is never silenced by
+  /// it, because a decode failure only happens when the read succeeded.
+  static void _reportRecordLoadFailure(
+    DirectoryPath directory,
+    Object exception,
+    StackTrace stackTrace, {
+    required bool absent,
+  }) {
+    if (absent) {
+      // Still logged: it is a breadcrumb, so a later report from this session
+      // still shows that the record went and when. It is not an error, so it
+      // raises nothing.
+      logger.i("record.json is not there for ${directory.name}; quarantining the leftovers.");
+      return;
+    }
+    logger.e("Failed to load record.json.", exception, stackTrace);
+    captureException(exception, stackTrace);
+  }
+
+  /// Whether `record.json` is still there — `false` only when the probe itself
+  /// says so.
+  ///
+  /// A probe that throws answers "present", so an unreadable directory keeps the
+  /// full report instead of being silenced by a second failure of the same kind.
+  static bool _recordJsonExistsSync(DirectoryPath directory) {
+    try {
+      return directory.filePath("record.json").existsSync();
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<bool> _recordJsonExists(DirectoryPath directory) async {
+    try {
+      return await directory.filePath("record.json").exists();
+    } catch (_) {
+      return true;
+    }
   }
 
   /// Moves a record directory whose `record.json` could not be decoded into a
@@ -575,13 +643,12 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     Object exception,
     StackTrace stackTrace,
   ) async {
-    logger.e("Failed to load record.json.", exception, stackTrace);
+    _reportRecordLoadFailure(directory, exception, stackTrace, absent: !await _recordJsonExists(directory));
     try {
       logger.i(await directory.list().map((e) => e.name).join(", "));
     } catch (_) {
       // Diagnostic-only; the directory may already have changed.
     }
-    captureException(exception, stackTrace);
     return RecordQuarantined(await quarantineAsyncUnlocked(directory));
   }
 

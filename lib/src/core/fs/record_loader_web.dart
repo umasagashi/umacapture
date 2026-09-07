@@ -5,9 +5,16 @@ import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/record_store_unavailable.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 
 typedef RecordDirectorySnapshot = Future<List<DirectoryPath>> Function(DirectoryPath directory);
+
+/// What one record's decode announces: nothing. The same call the desktop
+/// loader makes per record, and the same reason — it is one `record.json`.
+const _oneRecordDecode = LongReadDeclaration.none(
+  reason: 'one record.json decode; it is over before a button repaints',
+);
 
 /// Loads one record through the async OPFS-safe path.
 Future<RecordLoadResult> loadRecord(
@@ -20,7 +27,12 @@ Future<RecordLoadResult> loadRecord(
   initializeMappers();
   final gate = _resolveGate(recoveryGate, mutationLock, recoverRecordUnlocked);
   final load = loadAction ?? CharaDetailRecord.loadAsyncUnlocked;
-  return gate.runForRecord(directory.parent.parent.parent, directory.name, () => load(directory));
+  return gate.runForRecord(
+    directory.parent.parent.parent,
+    directory.name,
+    () => load(directory),
+    declaration: _oneRecordDecode,
+  );
 }
 
 /// Loads every record under [directory] sequentially on the main isolate.
@@ -93,14 +105,50 @@ Future<RecordLoadResult> loadRecord(
 /// There is no partial result then, so it is raised as a [RecordStoreUnavailable]
 /// carrying the transient/blocked verdict instead of leaking the bare lock or
 /// recovery error, which the record page could only paint as a raw exception.
+///
+/// [declaration] is announced around **the whole of this function**, not
+/// forwarded into the root acquisition below, and `record_loader_io.dart`
+/// announces the same object the same way. Forwarding it would be the one
+/// arrangement that gives the two legs different claims out of the same builder:
+/// the root acquisition here covers the listing only, so the claim would come off
+/// before the decode loop below — the long half, and the half that quarantines —
+/// had started. The lock's window stays narrower here than on desktop, for the
+/// reason stated above; the registry's window is the operation's on both.
 Future<RecordScanResult> loadRecordsUnder(
   DirectoryPath directory, {
+  required LongReadDeclaration declaration,
   RecordRecoveryGate? recoveryGate,
   RecordMutationLock? mutationLock,
   Future<void> Function(DirectoryPath storageDir, String recordId)? recoverRecordUnlocked,
   Future<RecordLoadResult> Function(DirectoryPath directory)? loadAction,
   RecordDirectorySnapshot? snapshotDirectories,
-}) async {
+}) {
+  return declaration.runDeclared(
+    () => _loadRecordsUnderDeclared(
+      directory,
+      recoveryGate,
+      mutationLock,
+      recoverRecordUnlocked,
+      loadAction,
+      snapshotDirectories,
+    ),
+  );
+}
+
+/// What every scan costs, with the caller's declaration already applied one
+/// frame above.
+const _declaredByTheScanFrame = LongReadDeclaration.none(
+  reason: "the scan's declaration is applied by loadRecordsUnder, around the whole pass and not only this acquisition",
+);
+
+Future<RecordScanResult> _loadRecordsUnderDeclared(
+  DirectoryPath directory,
+  RecordRecoveryGate? recoveryGate,
+  RecordMutationLock? mutationLock,
+  Future<void> Function(DirectoryPath storageDir, String recordId)? recoverRecordUnlocked,
+  Future<RecordLoadResult> Function(DirectoryPath directory)? loadAction,
+  RecordDirectorySnapshot? snapshotDirectories,
+) async {
   initializeMappers();
   final gate = _resolveGate(recoveryGate, mutationLock, recoverRecordUnlocked);
   final load = loadAction ?? CharaDetailRecord.loadAsyncUnlocked;
@@ -108,10 +156,20 @@ Future<RecordScanResult> loadRecordsUnder(
   final List<DirectoryPath> recordDirectories;
   final unavailable = <String, Object>{};
   try {
-    recordDirectories = await gate.runForRoot(storageDir, () async {
-      final listed = await (snapshotDirectories ?? _snapshotRecordDirectories)(directory);
-      return _quarantineUnusableNames(listed, unavailable);
-    });
+    recordDirectories = await gate.runForRoot(
+      storageDir,
+      (_) async {
+        final listed = await (snapshotDirectories ?? _snapshotRecordDirectories)(directory);
+        return _quarantineUnusableNames(listed, unavailable);
+        // The scan reads the store and removes nothing from the journals, so a
+        // sweep this session already completed is an answer that still holds.
+      },
+      declaration: _declaredByTheScanFrame,
+      reason: RootMaintenanceReason.readyToUse,
+      beforeMaintenance: const BeforeRootMaintenance.none(
+        reason: 'a scan removes nothing, so there is no set of entries the drain could add to',
+      ),
+    );
   } catch (error, stackTrace) {
     logger.e('The store scan of ${directory.path} could not open the record store at all.', error, stackTrace);
     Error.throwWithStackTrace(RecordStoreUnavailable.from(error), stackTrace);
@@ -126,7 +184,7 @@ Future<RecordScanResult> loadRecordsUnder(
     // so no `on` clause can single it out without a test dependency here).
     Object? decodeFailure;
     try {
-      final result = await gate.runForRecord(storageDir, recordDirectory.name, () async {
+      final result = await gate.runForRecord(storageDir, recordDirectory.name, declaration: _oneRecordDecode, () async {
         try {
           return await load(recordDirectory);
         } catch (error) {

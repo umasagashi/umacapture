@@ -25,6 +25,8 @@ import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 
+import 'support/long_read_declarations.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -65,12 +67,25 @@ void main() {
     final release = Completer<void>();
 
     // Stands in for a bulk scan in flight: the same name, the same mode.
-    final holder = gate.runForRoot(source.storageDir, () => release.future);
+    final holder = gate.runForRoot(
+      source.storageDir,
+      (_) => release.future,
+      declaration: undeclaredInTest,
+      reason: RootMaintenanceReason.readyToUse,
+      beforeMaintenance: const BeforeRootMaintenance.none(reason: 'this holder surveys nothing'),
+    );
     var stopCalled = false;
 
-    final outcome = await DataRootMigrationController(
-      source: source,
-    ).migrate(target, isCapturing: true, stopCapture: () async => stopCalled = true, recoveryGate: gate);
+    final outcome = await DataRootMigrationController(source: source).migrate(
+      target,
+      isCapturing: true,
+      // No registered long reader in these cases: they are about the root record
+      // scope, which is the other half of the refusal.
+      blockedBy: null,
+      declaration: undeclaredInTest,
+      stopCapture: () async => stopCalled = true,
+      recoveryGate: gate,
+    );
 
     expect(outcome.isSuccess, isFalse);
     // Nothing was done, not merely "not finished": the acquisition sits ahead of
@@ -97,14 +112,21 @@ void main() {
     // reacting. Same call, same observation points, only the holder removed.
     //
     // Deliberately last in the file: a relocation that gets this far calls
-    // `StorageBox.markClosedForMigration()`, which is one-way for the process.
+    // `StorageBox.markHiveClosed()`, which is one-way for the process.
     final locks = InProcessNamedLocks(acquireTimeout: const Duration(milliseconds: 100));
     final gate = RecordRecoveryGate(mutationLock: RecordMutationLock(locks.run));
     var stopCalled = false;
 
-    final outcome = await DataRootMigrationController(
-      source: source,
-    ).migrate(target, isCapturing: true, stopCapture: () async => stopCalled = true, recoveryGate: gate);
+    final outcome = await DataRootMigrationController(source: source).migrate(
+      target,
+      isCapturing: true,
+      // No registered long reader in these cases: they are about the root record
+      // scope, which is the other half of the refusal.
+      blockedBy: null,
+      declaration: undeclaredInTest,
+      stopCapture: () async => stopCalled = true,
+      recoveryGate: gate,
+    );
 
     // The control for the refusal's `sessionUsable`: a relocation that got in
     // did close Hive, so the same bit has to come back false. Otherwise the

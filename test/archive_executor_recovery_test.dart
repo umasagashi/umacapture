@@ -2,8 +2,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/archive_executor.dart';
+import 'package:umacapture/src/chara_detail/archive_executor_shared.dart';
 import 'package:umacapture/src/core/fs/record_directory_transaction.dart';
-import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 
@@ -64,7 +64,10 @@ void main() {
     expect(File('${tempRoot.path}/archive/$id/prediction.json').existsSync(), isTrue);
 
     fsBackend = originalBackend;
-    final recovered = await recoverArchiveTransactions(DirectoryPath(tempRoot.path));
+    // The two entry points the web startup sweep runs, in the order it runs
+    // them; `JournalRootStorageMaintenance` supplies the root lock around both.
+    final recovered = await recoverArchiveTransactionsUnlocked(DirectoryPath(tempRoot.path));
+    await cleanupRecoveredArchiveTransactionsUnlocked(recovered);
     expect(recovered.single.result, RecordTransactionResult.completed);
     expect(File('${tempRoot.path}/archive/$id/prediction.json').existsSync(), isFalse);
   });
@@ -105,19 +108,6 @@ void main() {
     expect(Directory('${tempRoot.path}/archive/a').existsSync(), isTrue);
     expect(Directory('${tempRoot.path}/archive/b').existsSync(), isTrue);
     expect(Directory('${tempRoot.path}/archive/c').existsSync(), isTrue);
-  });
-
-  test('startup archive recovery takes the global root lock before scanning', () async {
-    final calls = <(String, RecordMutationLockMode)>[];
-    final lock = RecordMutationLock((name, mode, action) async {
-      calls.add((name, mode));
-      return action();
-    });
-
-    expect(await recoverArchiveTransactions(DirectoryPath(tempRoot.path), mutationLock: lock), isEmpty);
-    expect(calls, hasLength(1));
-    expect(calls.single.$1, contains(':root'));
-    expect(calls.single.$2, RecordMutationLockMode.exclusive);
   });
 }
 

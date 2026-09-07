@@ -13,7 +13,8 @@
 /// tree entry by entry and then erase the source, which is interruptible at every
 /// step. [archiveRecordAsync] therefore drives a [RecordDirectoryTransaction],
 /// whose on-disk manifest is what lets a reload resume or roll back a half-moved
-/// record ([recoverArchiveTransactions]). The manifest is not a stylistic choice:
+/// record: the startup sweep a web session runs replays it through
+/// `recoverArchiveTransactionsUnlocked`. The manifest is not a stylistic choice:
 /// it is the substitute for the atomicity the platform does not provide.
 ///
 /// Locking is *not* part of that divergence, and both entry points take the
@@ -37,11 +38,6 @@
 library;
 
 export 'archive_executor_shared.dart'
-    show
-        archiveRecordAsync,
-        archiveRecordOnNative,
-        archiveRecordsAsync,
-        archiveRecordsOnNative,
-        recoverArchiveTransactions;
+    show archiveRecordAsync, archiveRecordOnNative, archiveRecordsAsync, archiveRecordsOnNative;
 export 'archive_executor_types.dart';
 export 'archive_executor_io.dart' if (dart.library.js_interop) 'archive_executor_web.dart' show archiveRecords;
