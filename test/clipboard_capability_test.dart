@@ -88,7 +88,7 @@ void main() {
     expect(missingCalls, 0);
   });
 
-  test('pasteFile stats the path asynchronously and reports a missing file', () async {
-    expect(await ClipboardAlt.pasteFile(ref, filePath('gone.png')), isFalse);
+  test('pasteEntity stats the path asynchronously and reports a missing file', () async {
+    expect(await ClipboardAlt.pasteEntity(ref, filePath('gone.png')), isFalse);
   });
 }

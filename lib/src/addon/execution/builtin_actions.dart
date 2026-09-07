@@ -268,7 +268,7 @@ final builtinActionRegistry = <String, BuiltinActionDescriptor>{
     run: (ref, payload, argument, secondaryArgument) async {
       final record = _requireRecord(ref, payload);
       final path = _recordFilePath(ref, record, (argument ?? "trainee").trim());
-      final ok = await ClipboardAlt.pasteFile(ref, path, silent: true);
+      final ok = await ClipboardAlt.pasteEntity(ref, path, silent: true);
       if (!ok) throw StateError("Failed to copy file to clipboard.");
     },
   ),

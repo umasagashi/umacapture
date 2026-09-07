@@ -84,7 +84,10 @@ Future<ClipboardWriteOutcome> copyImageToClipboard(RefBase ref, ClipboardImageRe
   return missing ? ClipboardWriteOutcome.missing : ClipboardWriteOutcome.failed;
 }
 
-Future<ClipboardWriteOutcome> copyFileReferenceToClipboard(FilePath path) async => ClipboardWriteOutcome.unavailable;
+/// Always [ClipboardWriteOutcome.unavailable], for a file and for a directory
+/// alike: the async clipboard has no filesystem-reference representation at all,
+/// so there is nothing to probe for here and nothing a retry would change.
+Future<ClipboardWriteOutcome> copyFileReferenceToClipboard(PathEntity path) async => ClipboardWriteOutcome.unavailable;
 
 /// "There is no image to copy", travelling as a throw because the browser leaves it no other route.
 ///
