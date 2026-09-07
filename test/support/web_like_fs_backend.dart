@@ -28,14 +28,73 @@ class WebLikeFsBackend implements FsBackend {
 
   final FsBackend inner;
 
+  /// How many times [length] has been called through this backend.
+  ///
+  /// Counted because "does not call it" is a real requirement and not a style
+  /// preference: on OPFS every `length()` re-walks the handle chain from the
+  /// storage root, so a directory aggregation that probes per entry is O(N·d)
+  /// where the listing already carried the sizes. A test can assert the absence
+  /// of the call; it cannot assert the absence of the cost.
+  int lengthCalls = 0;
+
+  /// How many times [list] has been called through this backend, for the other
+  /// half of the same claim: one enumeration, not one per entry.
+  int listCalls = 0;
+
+  /// How many times [readBytes] has been called through this backend.
+  ///
+  /// Counted for the preview decision, where "a file classified as binary
+  /// has none of its content read" is a requirement rather than an
+  /// optimisation: `.onnx` module sets and the font cache run to megabytes, and
+  /// on web the read is a copy into the wasm heap that no widget will ever use.
+  /// The absence of the call is the only observable form of that requirement --
+  /// the returned value is identical whether or not the bytes were fetched and
+  /// thrown away.
+  int readBytesCalls = 0;
+
+  /// How many times [readString] has been called through this backend, for the
+  /// same claim by its other route. `WebVfs.readString` is
+  /// `utf8.decode(await readBytes(path))`, so a preview that reaches it on
+  /// binary content both reads the file and throws.
+  int readStringCalls = 0;
+
+  /// How many times [readHead] has been called through this backend, and the
+  /// bound each call carried.
+  ///
+  /// The preview adapter has to reach the file through *this* method rather
+  /// than [readBytes]: the two return the same bytes for a short file, so the
+  /// choice of primitive is observable only as which one was called.
+  final List<int> readHeadBounds = [];
+
+  /// Zeroes the counters, so a test can exclude its own fixture setup.
+  void resetCallCounts() {
+    lengthCalls = 0;
+    listCalls = 0;
+    readBytesCalls = 0;
+    readStringCalls = 0;
+    readHeadBounds.clear();
+  }
+
   @override
   Future<bool> exists(String path) => inner.exists(path);
 
   @override
-  Future<String> readString(String path) => inner.readString(path);
+  Future<String> readString(String path) {
+    readStringCalls++;
+    return inner.readString(path);
+  }
 
   @override
-  Future<Uint8List> readBytes(String path) => inner.readBytes(path);
+  Future<Uint8List> readBytes(String path) {
+    readBytesCalls++;
+    return inner.readBytes(path);
+  }
+
+  @override
+  Future<Uint8List> readHead(String path, int maxBytes) {
+    readHeadBounds.add(maxBytes);
+    return inner.readHead(path, maxBytes);
+  }
 
   @override
   Future<void> writeString(String path, String contents) => inner.writeString(path, contents);
@@ -44,8 +103,23 @@ class WebLikeFsBackend implements FsBackend {
   Future<void> writeBytes(String path, List<int> bytes) => inner.writeBytes(path, bytes);
 
   @override
-  Future<List<FsEntry>> list(String path, {bool recursive = false, bool followLinks = false}) {
-    return inner.list(path, recursive: recursive, followLinks: followLinks);
+  Future<List<FsEntry>> list(
+    String path, {
+    bool recursive = false,
+    bool followLinks = false,
+    bool withMetadata = false,
+  }) async {
+    listCalls++;
+    final entries = await inner.list(path, recursive: recursive, followLinks: followLinks, withMetadata: withMetadata);
+    // The one place the metadata surface is *not* left at io semantics. A
+    // directory has no timestamp on web at all (`FileSystemDirectoryHandle`
+    // exposes no metadata), so io's answer is one web can never produce, and a
+    // caller that reads it here would compile and pass on the VM and find `null`
+    // in the browser. Sizes need no such treatment: both backends already agree
+    // that a directory has none.
+    return entries
+        .map((e) => e.isDirectory ? (path: e.path, isDirectory: true, size: null, modified: null) : e)
+        .toList();
   }
 
   @override
@@ -61,13 +135,33 @@ class WebLikeFsBackend implements FsBackend {
   Future<void> copyFile(String source, String destination) => inner.copyFile(source, destination);
 
   @override
-  Future<int> length(String path) => inner.length(path);
+  Future<int> length(String path) {
+    lengthCalls++;
+    return inner.length(path);
+  }
 
   @override
   Future<bool> sameFileBytes(String a, String b) => inner.sameFileBytes(a, b);
 
   @override
   Future<bool> isFile(String path) => inner.isFile(path);
+
+  /// The web backend's *second* prohibition, modelled for the same reason as the
+  /// sync surface: a directory has no last-modified time on OPFS, so asking for
+  /// one throws there. Forwarding to io would answer a question the browser
+  /// cannot, and shared code written against that answer would only fail once it
+  /// reached a real browser. A missing path still falls through to io, whose
+  /// throw is the behaviour both backends agree on.
+  @override
+  Future<DateTime> modified(String path) async {
+    if (!await inner.isFile(path) && await inner.exists(path)) {
+      throw UnsupportedError(
+        'FsBackend.modified is not available for a directory on web '
+        '(FileSystemDirectoryHandle exposes no metadata): $path',
+      );
+    }
+    return inner.modified(path);
+  }
 
   @override
   bool existsSync(String path) => throw _sync('existsSync');
@@ -82,7 +176,8 @@ class WebLikeFsBackend implements FsBackend {
   void writeStringSync(String path, String contents) => throw _sync('writeStringSync');
 
   @override
-  List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false}) => throw _sync('listSync');
+  List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false, bool withMetadata = false}) =>
+      throw _sync('listSync');
 
   @override
   void deleteSync(String path, {bool recursive = false}) => throw _sync('deleteSync');

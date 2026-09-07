@@ -21,6 +21,15 @@ import '/src/gui/toast.dart';
 /// below spend it, and both have to spend it on a clock that measures the world.
 const _deleteRetryBackoff = Duration(milliseconds: 100);
 
+/// One child of a directory listed with [DirectoryPath.listWithMetadata]: the
+/// typed path plus the metadata the enumeration resolved for it.
+///
+/// [size] and [modified] follow the [FsEntry] contract exactly — a directory has
+/// no [size] on either platform, and no [modified] on web — because this is that
+/// record with its path already wrapped in the matching [PathEntity] subtype. The
+/// kind is not repeated as a field: it is [entity]'s type.
+typedef FsListing = ({PathEntity entity, int? size, DateTime? modified});
+
 class PathEntity {
   static p.Context context = p.Context();
 
@@ -60,6 +69,13 @@ class PathEntity {
   DirectoryPath get parent {
     return DirectoryPath(segments.sublist(0, segments.length - 1));
   }
+
+  /// The last-modified timestamp of this path.
+  ///
+  /// Throws when nothing is there, and — on web, for a [DirectoryPath] only —
+  /// [UnsupportedError]; `FsBackend.modified` carries the platform constraint
+  /// behind that and what a caller can do instead.
+  Future<DateTime> modified() => fsBackend.modified(path);
 
   void deleteSync({bool recursive = false, bool emptyOk = false}) {
     if (emptyOk && !existsSync()) {
@@ -428,6 +444,27 @@ class DirectoryPath extends PathEntity {
     for (final entry in await fsBackend.list(path, recursive: recursive, followLinks: followLinks)) {
       yield _typed(entry);
     }
+  }
+
+  /// Lists this directory's children together with the size and timestamp the
+  /// enumeration itself resolved.
+  ///
+  /// This is the listing a browsing UI wants, and the only one in this class that
+  /// keeps [FsEntry.size] / [FsEntry.modified]: [list] and [listSync] drop them
+  /// through [_typed], which is right for the tree walks that use those and would
+  /// otherwise pay for metadata nobody reads (see [FsEntry]).
+  ///
+  /// Returns a list rather than a stream because the caller sizes, sorts and
+  /// totals a whole directory level before it can draw any of it, and the backend
+  /// already materialises the level to hand it over.
+  ///
+  /// Each entry's kind stays readable off [FsListing.entity] — it is a [FilePath]
+  /// or a [DirectoryPath], so `isFileSync` is a constant, not a second probe.
+  /// Nothing here re-derives the kind, and no caller should: the listing decided
+  /// it once.
+  Future<List<FsListing>> listWithMetadata({bool recursive = false, bool followLinks = false}) async {
+    final entries = await fsBackend.list(path, recursive: recursive, followLinks: followLinks, withMetadata: true);
+    return entries.map((e) => (entity: _typed(e), size: e.size, modified: e.modified)).toList();
   }
 
   Future<void> create({bool recursive = false}) => fsBackend.createDir(path, recursive: recursive);
