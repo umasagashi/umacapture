@@ -18,6 +18,7 @@ import '/src/core/mapper_init.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 // For [statedReportContext] / [reportValueNotStated]. The sweep lives beside the video-import
 // report because that is where the device measurement that produced it was taken, and it is a
@@ -354,6 +355,112 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
   }
 }
 
+/// Runs the region of a module install that rewrites [modulesDir], with that
+/// directory announced to [longReadRegistryProvider] for its whole length.
+///
+/// **Every route that replaces the installed module goes through here**, which
+/// is the whole of what this function is for: the four of them (the desktop
+/// manual install, the web manual install, the desktop auto-updater and the web
+/// bootstrap/refresh) share no other seam. `installModuleArchiveFile` runs in a
+/// `compute` isolate and `installModuleArchiveBytes` is a pure function of its
+/// bytes, so neither can take the claim itself — a registration made inside a
+/// worker is invisible to the container the subscribers watch, for the reason
+/// `InProcessNamedLocks` gives about its own state. The claim therefore has to
+/// be taken on this side of the hand-off, by the one caller that holds a `ref`.
+///
+/// The subscribers that ask about `modules/` — the record page's export dialog,
+/// the storage view's zip/copy/save and its delete — are readers of exactly what
+/// this replaces, which is what the claim withholds them from.
+///
+/// **What it does about a reader that is already running is [contention], and
+/// the caller says which.** [LongReadRegistry.holdWhenFree] either parks this
+/// call until nothing is holding [modulesDir] and then claims it, or refuses
+/// outright, so in neither case can an install begin underneath a reader that
+/// has the module open.
+///
+/// Three of the four routes pass [LongReadContention.defer]: the desktop
+/// auto-updater and the web bootstrap/refresh are started by a version check
+/// rather than by a press, so they have no surface to refuse on, and the only
+/// outcome they can report is `setUpdateFailed(true)`, "更新に失敗しました", which
+/// would be a lie about a state that is not a failure. Deferring is the same
+/// answer the withheld buttons give (see [longReadBusyMessage]): the work runs
+/// when the job holding the folder finishes.
+///
+/// **The fourth route passes [LongReadContention.refuse], and the asymmetry is
+/// the surface.** A user is standing in front of `ModuleManualUpdateDialog`,
+/// whose only two exits — the barrier and the × — are shut for the length of the
+/// install, and there is no cancel; parking that dialog behind a re-recognition
+/// batch or a video import leaves the whole app inert on a spinner for as long
+/// as somebody else's job takes, which is worse than telling the user to come
+/// back. The dialog asks the registry itself once its picker returns and toasts
+/// [longReadBusyMessage], and that check is the one the user sees; **this one is
+/// the backstop for the window after it** — on the byte route that window is the
+/// whole of `readBytes()`, an entire archive read into memory. Both manual
+/// routes (path and bytes) come through here, so the refusal reaches both, and
+/// it is the same sentence either way: [LongReadNotStartedException.busy] is
+/// caught below and answered with [longReadBusyMessage], never with the manual
+/// update's failure toast.
+///
+/// **What it is still not.** It is not a lock: a reader that starts *after* this
+/// claim is taken is not excluded, and it pushes no work back — see
+/// [LongReadKind.moduleInstall]. What the registration buys is that such a
+/// reader is not *offered* while this is running.
+///
+/// **Which readers this waits for is not a list here.** It is whatever the
+/// registry holds over [modulesDir] — today a record export (which streams
+/// `modules/labels.json` into the user's zip), the storage view's zip of the
+/// `modules` row, a data-root relocation, a re-recognition batch and a video
+/// import (both of which recognise out of the module, per record, on Windows).
+/// A reader added tomorrow defers this without this function being edited, which
+/// is the property the registry exists for and the reason the question is asked
+/// of the paths rather than of a set of kinds.
+///
+/// The download that precedes an automatic install is deliberately outside: it
+/// writes into `temp/`, touches nothing under [modulesDir], and holding the
+/// modules row for the length of a network transfer would refuse a zip for a
+/// window in which nothing is being rewritten.
+Future<T> runModuleInstall<T>(
+  RefBase ref,
+  DirectoryPath modulesDir,
+  Future<T> Function() install, {
+  required LongReadContention contention,
+}) {
+  return ref
+      .read(longReadRegistryProvider.notifier)
+      .holdWhenFree(
+        kind: LongReadKind.moduleInstall,
+        paths: [modulesDir],
+        action: (_) => install(),
+        contention: contention,
+      );
+}
+
+/// Answers a manual install that never started, without reporting a failure.
+///
+/// Shared by both manual routes so the two say the same thing, and taken out of
+/// their `catch` below so that neither of these states can reach
+/// `captureException` or "更新に失敗しました": nothing was attempted, so there is
+/// no failure to report and nothing for a crash report to explain.
+///
+/// A refusal ([LongReadNotStartedException.busy]) is the app's one long-read
+/// sentence, the same one the dialog's own pre-check toasts and the same one
+/// every withheld control carries — this one is simply noticed later, once the
+/// archive has been read and the registry is asked again. An abandonment says
+/// nothing: the container it would speak through is the one that went away.
+///
+/// Returns false, which is what both routes return for "no install landed", and
+/// what the dialog re-opens its exits on.
+bool _reportManualInstallNotStarted(LongReadNotStartedException exception) {
+  final heldBy = exception.heldBy;
+  if (heldBy == null) {
+    logger.i("A manual module install was dropped: the app went away while it was deferred.");
+    return false;
+  }
+  logger.i("A manual module install was refused: $heldBy is holding the modules directory.");
+  Toaster.show(ToastData.error(description: longReadBusyMessage()));
+  return false;
+}
+
 /// Installs a manually provided modules zip into the modules directory.
 ///
 /// The zip is extracted into the parent of [PathInfo.modulesDir] exactly like
@@ -373,7 +480,14 @@ Future<void> deleteDownloadedArchive(FilePath path) async {
 Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
   try {
     final pathInfo = await ref.read(pathInfoLoader.future);
-    await compute(installModuleArchiveFile, (zipPath, pathInfo.modulesDir.parent));
+    await runModuleInstall(
+      ref,
+      pathInfo.modulesDir,
+      () => compute(installModuleArchiveFile, (zipPath, pathInfo.modulesDir.parent)),
+      contention: LongReadContention.refuse,
+    );
+  } on LongReadNotStartedException catch (exception) {
+    return _reportManualInstallNotStarted(exception);
   } catch (exception, stackTrace) {
     logger.e("Failed to install module from zip: path=${zipPath.path}", exception, stackTrace);
     captureException(exception, stackTrace);
@@ -407,7 +521,14 @@ Future<bool> installModuleFromZip(RefBase ref, FilePath zipPath) async {
 Future<bool> installModuleFromZipBytes(RefBase ref, List<int> bytes) async {
   try {
     final pathInfo = await ref.read(pathInfoLoader.future);
-    await extractModuleZipBytes(bytes, pathInfo.modulesDir);
+    await runModuleInstall(
+      ref,
+      pathInfo.modulesDir,
+      () => extractModuleZipBytes(bytes, pathInfo.modulesDir),
+      contention: LongReadContention.refuse,
+    );
+  } on LongReadNotStartedException catch (exception) {
+    return _reportManualInstallNotStarted(exception);
   } catch (exception, stackTrace) {
     logger.e("Failed to install module from zip bytes: size=${bytes.length}", exception, stackTrace);
     captureException(exception, stackTrace);
@@ -511,8 +632,7 @@ final moduleUpdateFailedProvider = settableNotifierProvider<bool>(false);
 /// different install lifecycles, so gating them on the same marker would strand
 /// one when only the other landed. In particular, a browser that already ran the
 /// Stage-5 bootstrap has `version_info.json` present but never extracted the ONNX
-/// — a naive shared marker would skip the fetch forever (the "migration trap" in
-/// the Stage-6 design §3.2). Written LAST, after every ONNX entry, so a partial
+/// — a naive shared marker would skip the fetch forever. Written LAST, after every ONNX entry, so a partial
 /// extraction re-runs cleanly on the next boot.
 const _onnxSentinelFileName = ".onnx_ready";
 
@@ -526,7 +646,7 @@ const _onnxSentinelFileName = ".onnx_ready";
 /// A boot on which **either** marker is missing downloads [Const.moduleZipUrl]
 /// once and installs both payloads out of it — the first web boot, where both
 /// are absent, and the migration boot of a browser that ran the Stage-5
-/// bootstrap and so has only the JSON marker (design §3.2). The missing half is
+/// bootstrap and so has only the JSON marker. The missing half is
 /// never installed on its own: the recognizer set is read through the top-level
 /// JSON that shipped with it (labels, thresholds, `recognizer.json`'s model
 /// paths), so half of the current release beside half of the previous one is a
@@ -555,7 +675,12 @@ Future<ModuleVersion?> _bootstrapWebModule(Ref ref) async {
   void setUpdateFailed(bool value) => ref.read(moduleUpdateFailedProvider.notifier).set(value);
 
   try {
-    await _downloadAndExtractModuleToOpfs(modulesDir);
+    await _downloadAndExtractModuleToOpfs(ref.base, modulesDir);
+  } on LongReadNotStartedException {
+    // The container went away while the extraction was deferred (this route never
+    // refuses). Nothing was written and nothing failed; raising the banner below
+    // would report a failure that did not happen, on an element that is gone.
+    return null;
   } catch (exception, stackTrace) {
     await logNetworkException(
       operation: "bootstrap_web_module",
@@ -671,7 +796,11 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
       return local?.toModuleVersion();
     case WebModuleRefreshVerdict.updateAvailable:
       try {
-        await _downloadAndExtractModuleToOpfs(modulesDir);
+        await _downloadAndExtractModuleToOpfs(ref.base, modulesDir);
+      } on LongReadNotStartedException {
+        // As in the bootstrap above: the element went away while this was
+        // deferred, which is neither an install nor a failure to report.
+        return local?.toModuleVersion();
       } catch (exception, stackTrace) {
         await logNetworkException(
           operation: "download_modules",
@@ -697,7 +826,14 @@ Future<ModuleVersion?> _refreshWebModule(Ref ref, DirectoryPath modulesDir, File
 /// writes the pair; selecting one half would install it next to whatever the
 /// previous release left behind. [installModuleArchiveBytes] keeps the selector
 /// because the manual byte install is handed an archive it did not fetch.
-Future<void> _downloadAndExtractModuleToOpfs(DirectoryPath modulesDir) async {
+///
+/// Takes [ref] so the extraction below can be announced by [runModuleInstall]
+/// *here* rather than at each of the two callers. Both of them — the first-boot
+/// bootstrap and the every-boot refresh — write the same directory the same way,
+/// and a third caller written later inherits the claim instead of being owed
+/// one. Only the extraction is inside it; the download above is not, for the
+/// reason [runModuleInstall] gives.
+Future<void> _downloadAndExtractModuleToOpfs(RefBase ref, DirectoryPath modulesDir) async {
   logger.i("Bootstrapping web module data from ${Const.moduleZipUrl}");
   final response = await createDiagnosticDio(
     operation: "bootstrap_web_module",
@@ -706,7 +842,15 @@ Future<void> _downloadAndExtractModuleToOpfs(DirectoryPath modulesDir) async {
   // served with a 200, a truncated transfer) must not reach the extraction, or
   // the markers would be committed over an empty archive and the fetch would
   // never be attempted again. See [installModuleArchiveBytes].
-  await installModuleArchiveBytes(response.data ?? const <int>[], modulesDir, extractJson: true, extractOnnx: true);
+  await runModuleInstall(
+    ref,
+    modulesDir,
+    () => installModuleArchiveBytes(response.data ?? const <int>[], modulesDir, extractJson: true, extractOnnx: true),
+    // Nobody pressed anything to get here — both callers are a boot-time version
+    // check — so there is no surface to refuse on and nothing that could be told
+    // to come back later. See [runModuleInstall].
+    contention: LongReadContention.defer,
+  );
 }
 
 /// Writes the requested payloads of an already-decoded module [archive] into
@@ -786,7 +930,7 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
   // same network source the desktop app uses, then reads the local
   // version_info.json back. Both the display-layer top-level JSON (read by the
   // UI) and the recognizer ONNX set (read by the Wasm worker) are extracted,
-  // each gated on its own commit marker (Stage-6 design §3.2).
+  // each gated on its own commit marker.
   if (kIsWeb) {
     return _bootstrapWebModule(ref);
   }
@@ -859,7 +1003,21 @@ final moduleVersionLoader = FutureProvider<ModuleVersion?>((ref) async {
     await createDiagnosticDio(operation: "download_modules").download(Const.moduleZipUrl, downloadPath.path);
     // Refuses a body that is not a module before writing anything, and so
     // reaches the catch below instead of the success toast underneath it.
-    await compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent));
+    await runModuleInstall(
+      ref.base,
+      pathInfo.modulesDir,
+      () => compute(installModuleArchiveFile, (downloadPath, pathInfo.modulesDir.parent)),
+      // Started by this version check and not by a press, so it waits rather
+      // than refusing. See [runModuleInstall].
+      contention: LongReadContention.defer,
+    );
+  } on LongReadNotStartedException {
+    // Only the abandoned form can arrive here (this route never refuses): the
+    // container went away while the install was parked. Nothing was written and
+    // nothing failed, so this must not reach the handler below — `setUpdateFailed`
+    // would raise the update-failed banner for a state that is not a failure, and
+    // on a disposed element it throws on the way to doing so.
+    return local?.toModuleVersion();
   } catch (exception, stackTrace) {
     await logNetworkException(
       operation: "download_modules",

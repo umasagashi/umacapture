@@ -16,7 +16,17 @@
 /// on one side, that is said on the value itself rather than by giving it a second name.
 library;
 
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/video_frame_grab_ops.dart';
+
+/// The namespace this feature's sentences live under.
+///
+/// Declared here rather than in the front end that renders them, because [videoImportBlockerKey]
+/// answers with a **full** key and a key is a property of the feature and not of a widget. The
+/// three other files that name this prefix (`capture.dart`, `settings.dart`,
+/// `regenerate_record_dialog.dart`) already import this library.
+// ignore: constant_identifier_names
+const tr_video_import = "pages.capture.video_import";
 
 /// Where an import is in its life cycle.
 ///
@@ -76,8 +86,9 @@ enum VideoImportPhase {
 /// that let the gates disagree in the first place.
 ///
 /// **The two report dialogs are not values here, and that is deliberate.** Both open through
-/// `CardDialog.show`, and `DialogController` holds exactly one dialog, so a second dialog would
-/// *replace* the first rather than join it. While either is up, `DialogLayer`
+/// `CardDialog.show`, and a dialog opened that way *replaces* the one already up rather than
+/// joining it. (`DialogController` can stack, but only for a caller that asks with `over: true`,
+/// which is the storage view opening its own previews and confirmations and nothing here.) While either is up, `DialogLayer`
 /// (`lib/src/gui/common.dart`) withdraws the app behind it from **both** input devices: a scrim
 /// that swallows taps, and an `ExcludeFocus` that takes the whole page out of focus traversal so
 /// Tab cannot walk out of the dialog and Enter cannot fire a control under the scrim. Only the
@@ -174,6 +185,26 @@ enum VideoImportBlocker {
   /// An import is already running. One clip at a time; the worker refuses a second
   /// start rather than acknowledging it, so this keeps the user off that path.
   importing,
+
+  /// A registered long reader is holding one of the trees this import needs: the record store it
+  /// writes into, or `modules/`, which the recognition it runs reads out of.
+  ///
+  /// **Last, and the precedence is the same argument `resolveRegenerateAllBlocker` makes.** A
+  /// running import holds a [LongReadKind.videoImport] claim over exactly these paths, so this
+  /// condition is true for the whole of the most common case; ranked above [importing] it would
+  /// rename the reason the user's own import is refused into "some other job is busy".
+  ///
+  /// **`modules/` is why this fires while nothing whatever holds the record store.** A zip of the
+  /// storage view's `modules` row, a module install, a relocation — any of them holds that folder
+  /// alone and greys this control. Both trees come from one derivation,
+  /// `videoImportLongReadPaths`, which the claim and this question are read from alike, so the
+  /// set cannot be widened on one side only.
+  ///
+  /// It carries no sentence of its own: it is worded by `longReadBusyKey`, the one refusal every
+  /// long reader produces, so this member cost no translation entry. Naming the holder is what
+  /// that sentence deliberately does not do -- see `longReadBusyMessage` -- which is also why the
+  /// resolver below is given a bool and not the kind.
+  longRead,
 }
 
 /// Which blocker (if any) forbids starting an import right now, in precedence order.
@@ -224,12 +255,27 @@ enum VideoImportBlocker {
 /// nearer one. **It never reaches the pre-flight that way**: an import posting its clip is not
 /// blocked by its own dialog, so `VideoImportButton._preflight` resolves the activity with its own
 /// state left out, and the regeneration gate this function exists for is answered exactly as before.
+/// **[heldByLongRead] is the fifth gate, and it is answered last.** An import points the core at
+/// the record store and the core writes records into it for the whole session, and on Windows it
+/// opens `modules/version_info.json` once per record it produces -- so a job already walking
+/// *either* tree is holding something this needs. It is the same question
+/// `CharaDetailImportButton` asks before it writes zips there, over the same derivation
+/// (`videoImportLongReadPaths`, `recordImportLongReadPaths`). **Which jobs those are is not a
+/// list here**, and that is the property the registry exists for: it is whatever holds those two
+/// paths -- today a zip, an archive move, a relocation, a re-recognition batch, and a module
+/// install whether a press or a version check started it. A holder added tomorrow withholds this
+/// control without this file being edited.
+/// A bool rather than the holding [LongReadKind], because the sentence it produces names no
+/// holder on purpose (`longReadBusyMessage`), so the identity would be a value nothing could act
+/// on. Last in the order for the reason [VideoImportBlocker.longRead] states: a running import
+/// holds this claim itself.
 VideoImportBlocker? resolveVideoImportBlocker({
   required bool available,
   required bool supported,
   required bool controllerReady,
   required CaptureActivity activity,
   required bool regenerating,
+  required bool heldByLongRead,
 }) {
   if (!available) {
     return VideoImportBlocker.unavailable;
@@ -252,10 +298,20 @@ VideoImportBlocker? resolveVideoImportBlocker({
   if (regenerating) {
     return VideoImportBlocker.regenerating;
   }
+  if (heldByLongRead) {
+    return VideoImportBlocker.longRead;
+  }
   return null;
 }
 
-/// The `…video_import.blocked.<key>` translation key for [blocker].
+/// The **full** translation key for [blocker]'s sentence.
+///
+/// Full keys rather than leaves under one `blocked` map, for the reason `regenerateAllBlockerKey`
+/// gives beside its own switch: [VideoImportBlocker.longRead] is worded by `longReadBusyKey`,
+/// which belongs to no screen and is therefore not under this feature's namespace. A leaf plus a
+/// prefix at the call site cannot express that, and spelling this feature's one shared refusal
+/// again under `blocked.` would give the registry's single sentence a second copy that nothing
+/// compares -- which is the whole of what `longReadBusyMessage` exists to prevent.
 ///
 /// An explicit, exhaustive switch rather than `blocker.name`, because the two vocabularies
 /// do not agree: the enum is camelCase and the translation file is snake_case, so
@@ -266,13 +322,17 @@ VideoImportBlocker? resolveVideoImportBlocker({
 /// which the pipeline is still starting — an ordinary path on every web page load, not an
 /// edge case. Exhaustive so that a new blocker cannot be added without being given a line.
 String videoImportBlockerKey(VideoImportBlocker blocker) => switch (blocker) {
-  VideoImportBlocker.unavailable => 'unavailable',
-  VideoImportBlocker.unsupported => 'unsupported',
-  VideoImportBlocker.notReady => 'not_ready',
-  VideoImportBlocker.capturing => 'capturing',
-  VideoImportBlocker.regenerating => 'regenerating',
-  VideoImportBlocker.picking => 'picking',
-  VideoImportBlocker.importing => 'importing',
+  VideoImportBlocker.unavailable => '$tr_video_import.blocked.unavailable',
+  VideoImportBlocker.unsupported => '$tr_video_import.blocked.unsupported',
+  VideoImportBlocker.notReady => '$tr_video_import.blocked.not_ready',
+  VideoImportBlocker.capturing => '$tr_video_import.blocked.capturing',
+  VideoImportBlocker.regenerating => '$tr_video_import.blocked.regenerating',
+  VideoImportBlocker.picking => '$tr_video_import.blocked.picking',
+  VideoImportBlocker.importing => '$tr_video_import.blocked.importing',
+  // Not a sentence of this feature's own, and that is the point: the one refusal every long
+  // reader produces is worded once, in `long_read_registry.dart`, so this entry cost no new
+  // string. Named through the exported constant rather than spelled again here.
+  VideoImportBlocker.longRead => longReadBusyKey,
 };
 
 /// Re-evaluates [resolveVideoImportBlocker] at the moment it is called.

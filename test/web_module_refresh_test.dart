@@ -205,7 +205,7 @@ void main() {
       expect(end, greaterThan(start), reason: 'the declaration after the bootstrap moved; update this test');
       final body = source.substring(start, end);
 
-      expect(body, contains('_downloadAndExtractModuleToOpfs(modulesDir)'));
+      expect(body, contains('_downloadAndExtractModuleToOpfs(ref.base, modulesDir)'));
       // Not "does it pass true": passing the marker state under any spelling is
       // the defect, so the arguments must not be there to pass at all.
       expect(body, isNot(contains('extractJson')));

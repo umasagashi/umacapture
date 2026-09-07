@@ -9,6 +9,9 @@ import '/src/core/app_logger.dart';
 // The io leg of `platform_channel.dart`, imported directly rather than through that facade: this
 // file is itself an io leg, so naming the concrete transport is a fact rather than a choice.
 import '/src/core/platform_channel_io.dart';
+// For `LongReadDeclaration` alone — the type of the session announcement this leg is handed. No
+// registry and no `Ref` is reached from here; this layer has neither.
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/video_file_dialog_io.dart';
 import '/src/core/video_import_ops.dart';
 // For `VideoImportSlots` / `videoImportOutcomeOf` / `videoImportProgressTimeout`, which are VM-pure
@@ -86,7 +89,16 @@ VideoImportPathPicker videoImportPathPicker = pickVideoFile;
 /// auto-starts after a module update). The capture page disables the button on the same predicate,
 /// but a disabled button is only a rendering of a past state; this re-check, immediately before the
 /// path is posted, is the gate. See `resolveVideoImportBlocker`.
-Future<void> startVideoImport({required VideoImportPreflight preflight}) async {
+///
+/// [declaration] announces the session to the long-read registry, and is passed in for the same
+/// reason [preflight] is: the registry is Riverpod state this layer cannot read. It wraps the
+/// stretch below in which the *runner* owns the record store — from the post to the terminal
+/// message — and deliberately not the file dialog above it, which owns nothing. See
+/// [LongReadKind.videoImport], and `video_import_web.dart`'s twin of this call.
+Future<void> startVideoImport({
+  required VideoImportPreflight preflight,
+  required LongReadDeclaration declaration,
+}) async {
   if (_state.value.isBusy) {
     return;
   }
@@ -155,65 +167,81 @@ Future<void> startVideoImport({required VideoImportPreflight preflight}) async {
       );
       return;
     }
-    _state.value = VideoImportState(phase: VideoImportPhase.starting, fileName: fileName);
-    // Armed *before* the post, not after: the inactivity bound has to cover a start the runner never
-    // acknowledges and never refuses, which is exactly the window between these two lines.
-    final armed = _slots.arm();
-    try {
-      await PlatformChannel.startVideoImport(path);
-    } catch (error, stackTrace) {
-      // The post itself failed (no handler registered, the runner threw before it could answer), so no
-      // `videoImportDone` is coming and nothing else would ever settle the terminal slot.
-      //
-      // The error text is the runner's, not this side's: `video_import_session.h` answers
-      // `"startVideoImport failed: " + e.what()` and `native_controller.h` parses the request — which
-      // holds the path — before either. So it is put through `withoutSecrets` rather than trusted;
-      // whether some `what()` three layers down quotes the file it failed on is not a fact this side
-      // can check, and the whole point of the ruling is that it must not have to.
-      logger.e(
-        'Video import of a "$container" clip could not be started',
-        withoutSecrets('$error', [path, fileName]),
-        stackTrace,
-      );
-      // SETTLED WITH THE PRODUCER'S OWN SENTENCE, not with `release()`'s constant. `release()` settles
-      // `message: 'the import never started'`, which is a restatement of `reason: neverStarted` and
-      // therefore the one free-text field of the import error report saying nothing the reason did not
-      // already say. The text that is actually diagnostic is the one caught here — the runner answers
-      // `"startVideoImport failed: " + e.what()` (`windows/runner/video_import_session.h`) — and
-      // `buildImportErrorReportScope` publishes `VideoImportOutcome.message` to Sentry verbatim, which is
-      // what the doc on that field already promises Windows does. The web leg has always done this on its
-      // equivalent path (`video_import_web.dart`'s catch).
-      //
-      // REDACTED AT THIS BOUNDARY rather than left to the `withoutSecrets` on the settled message below,
-      // and spelled out again rather than hoisted into a local the log line shares. Each boundary the
-      // runner's sentence crosses applies the rule itself — the breadcrumb above, the payload here —
-      // because "a later line redacts it" is the property that stops holding the moment the later line
-      // moves; `test/app_root_scrub_test.dart` scans this file for exactly that shortcut, and
-      // `test/video_import_breadcrumb_privacy_test.dart` reads the log statement for the same call.
-      // The second pass below then runs over text that is already clean, which is a no-op.
-      //
-      // `settle` rather than `release` because only `release` carries the constant. The one behavioural
-      // difference is that `settle` also completes the start slot instead of dropping it, which this leg
-      // never awaits (it awaits `armed.terminal` alone); the tidier home for this would be a message
-      // parameter on `VideoImportSlots.release` in `wasm_worker_ops.dart`.
-      _slots.settle(
-        VideoImportOutcome(
-          kind: VideoImportOutcomeKind.refused,
-          reason: VideoImportReason.neverStarted,
-          message: withoutSecrets('$error', [path, fileName]),
-        ),
-      );
-    }
-    final settled = await armed.terminal;
-    // THE SECOND HALF OF THE SAME RULING, on the payload rather than on the log. This message is the
-    // producer's own sentence — `video_import_session.h` relays a throw as `"the video import thread
-    // threw: " + e.what()`, and `native/src/cv/video_loader.h` builds one of those `what()`s out of
-    // the path (`"Failed to open: " << narrow_path`) — and `buildImportErrorReportScope` publishes it
-    // to Sentry as `import.message`. Redacted HERE, and not at that publish site, because this is the
-    // last layer that still holds the absolute path: the report builder is given only the leaf, so a
-    // redaction there would strip the file name and leave `C:\Users\<person>\Videos\` standing.
-    final outcome = settled.withMessage(withoutSecrets(settled.message, [path, fileName]));
-    _state.value = VideoImportState(phase: VideoImportPhase.finished, fileName: fileName, outcome: outcome);
+    // THE SESSION, AND THE ONE THING THAT ANNOUNCES IT. Everything below this line is the stretch in
+    // which the runner has the record store open: it opens `directory.storage_dir` — resolved once,
+    // when the pipeline was built — and writes each finished record into it, with no Dart frame on
+    // the stack to hang a claim off. So the claim is the session's rather than a write's, and it is
+    // taken HERE and not around the dialog above: `VideoImportPhase.picking` owns no session and no
+    // decoder, and `storageActionBlocker` already rules that phase out with that reason.
+    //
+    // `runDeclared` and not a claim written here, so the release is `LongReadRegistry.hold`'s
+    // `finally`: the clip running out, a cancel, a post that threw and a throw nothing anticipated
+    // all give the claim back by the same path.
+    //
+    // `path` is bound to a second name because a closure does not carry the promotion the null check
+    // above earned: inside one it is `String?` again, and the alternative to this line is four `!`s.
+    final clipPath = path;
+    await declaration.runDeclared(() async {
+      _state.value = VideoImportState(phase: VideoImportPhase.starting, fileName: fileName);
+      // Armed *before* the post, not after: the inactivity bound has to cover a start the runner never
+      // acknowledges and never refuses, which is exactly the window between these two lines.
+      final armed = _slots.arm();
+      try {
+        await PlatformChannel.startVideoImport(clipPath);
+      } catch (error, stackTrace) {
+        // The post itself failed (no handler registered, the runner threw before it could answer), so no
+        // `videoImportDone` is coming and nothing else would ever settle the terminal slot.
+        //
+        // The error text is the runner's, not this side's: `video_import_session.h` answers
+        // `"startVideoImport failed: " + e.what()` and `native_controller.h` parses the request — which
+        // holds the path — before either. So it is put through `withoutSecrets` rather than trusted;
+        // whether some `what()` three layers down quotes the file it failed on is not a fact this side
+        // can check, and the whole point of the ruling is that it must not have to.
+        logger.e(
+          'Video import of a "$container" clip could not be started',
+          withoutSecrets('$error', [clipPath, fileName]),
+          stackTrace,
+        );
+        // SETTLED WITH THE PRODUCER'S OWN SENTENCE, not with `release()`'s constant. `release()` settles
+        // `message: 'the import never started'`, which is a restatement of `reason: neverStarted` and
+        // therefore the one free-text field of the import error report saying nothing the reason did not
+        // already say. The text that is actually diagnostic is the one caught here — the runner answers
+        // `"startVideoImport failed: " + e.what()` (`windows/runner/video_import_session.h`) — and
+        // `buildImportErrorReportScope` publishes `VideoImportOutcome.message` to Sentry verbatim, which is
+        // what the doc on that field already promises Windows does. The web leg has always done this on its
+        // equivalent path (`video_import_web.dart`'s catch).
+        //
+        // REDACTED AT THIS BOUNDARY rather than left to the `withoutSecrets` on the settled message below,
+        // and spelled out again rather than hoisted into a local the log line shares. Each boundary the
+        // runner's sentence crosses applies the rule itself — the breadcrumb above, the payload here —
+        // because "a later line redacts it" is the property that stops holding the moment the later line
+        // moves; `test/app_root_scrub_test.dart` scans this file for exactly that shortcut, and
+        // `test/video_import_breadcrumb_privacy_test.dart` reads the log statement for the same call.
+        // The second pass below then runs over text that is already clean, which is a no-op.
+        //
+        // `settle` rather than `release` because only `release` carries the constant. The one behavioural
+        // difference is that `settle` also completes the start slot instead of dropping it, which this leg
+        // never awaits (it awaits `armed.terminal` alone); the tidier home for this would be a message
+        // parameter on `VideoImportSlots.release` in `wasm_worker_ops.dart`.
+        _slots.settle(
+          VideoImportOutcome(
+            kind: VideoImportOutcomeKind.refused,
+            reason: VideoImportReason.neverStarted,
+            message: withoutSecrets('$error', [clipPath, fileName]),
+          ),
+        );
+      }
+      final settled = await armed.terminal;
+      // THE SECOND HALF OF THE SAME RULING, on the payload rather than on the log. This message is the
+      // producer's own sentence — `video_import_session.h` relays a throw as `"the video import thread
+      // threw: " + e.what()`, and `native/src/cv/video_loader.h` builds one of those `what()`s out of
+      // the path (`"Failed to open: " << narrow_path`) — and `buildImportErrorReportScope` publishes it
+      // to Sentry as `import.message`. Redacted HERE, and not at that publish site, because this is the
+      // last layer that still holds the absolute path: the report builder is given only the leaf, so a
+      // redaction there would strip the file name and leave `C:\Users\<person>\Videos\` standing.
+      final outcome = settled.withMessage(withoutSecrets(settled.message, [clipPath, fileName]));
+      _state.value = VideoImportState(phase: VideoImportPhase.finished, fileName: fileName, outcome: outcome);
+    });
   } finally {
     // THE UNWIND, and the reason it is one `finally` rather than a guard at each hazard: the defect it
     // closes is a property of the STRETCH above, not of any line in it. Between the `picking` write and

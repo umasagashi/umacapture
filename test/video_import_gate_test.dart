@@ -132,7 +132,11 @@ void main() {
       // an exhaustive key map is that a blocker added later cannot silently ship without a line —
       // and `blocked.unavailable` was missing from the file outright.
       for (final blocker in VideoImportBlocker.values) {
-        final key = 'pages.capture.video_import.blocked.${videoImportBlockerKey(blocker)}';
+        // The whole key, as the function now answers it: one blocker (`longRead`) is worded by
+        // `app.long_read_busy`, which is filed outside this feature's namespace on purpose, so a
+        // prefix applied here would build a key that does not exist for exactly the member whose
+        // point is that it needed no new string.
+        final key = videoImportBlockerKey(blocker);
         expect(key.tr(), isNot(key), reason: '$blocker has no translated line');
         // AND IT HAS TO SAY SOMETHING. `isNot(key)` passes for `""`, which is what a placeholder
         // left in the translation file produces, and an empty line is a refusal that states no

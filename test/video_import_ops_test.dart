@@ -7,6 +7,7 @@
 // blocker forbids one, how the worker's terminal reason becomes an outcome, and what the
 // progress bar may claim.
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 
 VideoImportBlocker? blocker({
@@ -15,6 +16,7 @@ VideoImportBlocker? blocker({
   bool controllerReady = true,
   CaptureActivity activity = CaptureActivity.idle,
   bool regenerating = false,
+  bool heldByLongRead = false,
 }) {
   return resolveVideoImportBlocker(
     available: available,
@@ -22,6 +24,7 @@ VideoImportBlocker? blocker({
     controllerReady: controllerReady,
     activity: activity,
     regenerating: regenerating,
+    heldByLongRead: heldByLongRead,
   );
 }
 
@@ -127,6 +130,20 @@ void main() {
       expect(blocker(activity: CaptureActivity.capturing, regenerating: false), VideoImportBlocker.capturing);
       expect(blocker(activity: CaptureActivity.idle, regenerating: false), isNull);
     });
+
+    test('a long reader holding the record store withholds the import, and is answered last', () {
+      // The fifth gate. An import points the core at the record store for its whole session, so a
+      // zip, an archive move or a relocation already walking that tree is holding what it would
+      // write under.
+      expect(blocker(heldByLongRead: true), VideoImportBlocker.longRead);
+      // Last, and this is the precedence that matters: a RUNNING import holds this claim itself,
+      // so both conditions are true for the whole of the most common case. Ranked above the
+      // activity it would rename the user's own import into "some other job is busy".
+      expect(blocker(activity: CaptureActivity.importing, heldByLongRead: true), VideoImportBlocker.importing);
+      expect(blocker(regenerating: true, heldByLongRead: true), VideoImportBlocker.regenerating);
+      // And the control: nothing holding the store is not a refusal.
+      expect(blocker(heldByLongRead: false), isNull);
+    });
   });
 
   group('videoImportOutcomeKind', () {
@@ -190,7 +207,17 @@ void main() {
       // button tooltip showed `pages.capture.video_import.blocked.notReady` to every user for the
       // seconds-long window in which the pipeline is still starting -- an ordinary path on every web
       // page load. Nothing warns; only a rendered-string assertion catches it.
-      expect(videoImportBlockerKey(VideoImportBlocker.notReady), 'not_ready');
+      expect(videoImportBlockerKey(VideoImportBlocker.notReady), 'pages.capture.video_import.blocked.not_ready');
+    });
+
+    test('the long-read refusal is the registry s one sentence, not a copy of it under this feature', () {
+      // The reason this function answers with a whole key. `longRead` is worded by the sentence
+      // every withheld control in the app shows, which is filed under `app.` precisely because it
+      // belongs to no screen; a leaf under `blocked.` could only have been a second spelling of it.
+      // Compared against the exported constant, because a literal spelling that is mistyped
+      // resolves to itself.
+      expect(videoImportBlockerKey(VideoImportBlocker.longRead), longReadBusyKey);
+      expect(videoImportBlockerKey(VideoImportBlocker.longRead), isNot(startsWith(tr_video_import)));
     });
 
     test('gives every blocker a key, so a new one cannot ship without a line', () {

@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/video_import_ops.dart';
 
 /// Default-leg stub: this front end has no import path, so the capture page mounts no
@@ -23,9 +24,13 @@ bool get videoImportSupported => false;
 /// cannot use — the same reason the capture-capability stub shares one.
 ValueListenable<VideoImportState> get videoImportState => _neverImports;
 
-/// Desktop stub: nothing to start. Returns immediately without touching [preflight],
-/// which exists only so the shared UI can be written once.
-Future<void> startVideoImport({required VideoImportPreflight preflight}) async {}
+/// Desktop stub: nothing to start. Returns immediately without touching [preflight] or
+/// [declaration], which exist only so the shared UI can be written once — no session is ever
+/// opened here, so there is nothing for the registry to be told about.
+Future<void> startVideoImport({
+  required VideoImportPreflight preflight,
+  required LongReadDeclaration declaration,
+}) async {}
 
 /// Desktop stub: nothing to cancel.
 void cancelVideoImport() {}
