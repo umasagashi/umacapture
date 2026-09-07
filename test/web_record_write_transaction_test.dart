@@ -151,6 +151,99 @@ void main() {
     expect(await finalDir.filePath('new.bin').readAsBytes(), [1, 2]);
   });
 
+  group('a publication interrupted twice', () {
+    // One interruption leaves the record being replaced parked in the slot and
+    // the staged tree part-copied over `active/<id>/`. A second one arrives
+    // with the park already occupied, and the tree standing in `active/<id>/`
+    // is then not the record being replaced but the half-copy the first call
+    // left. Parking that too merges the two trees file by file, and what comes
+    // out is neither version.
+    //
+    // Both cases share the two interruptions and differ in what happens after,
+    // because the two things at risk are different: what is parked, and
+    // whether the publication can still finish once the half-copy is dropped.
+    const id = 'twice';
+
+    /// The overlay shares a name with the seeded record (`old.bin`) and holds a
+    /// name of its own. A merge is visible only through the shared one: every
+    /// file of the old record survives it, so any check weaker than the whole
+    /// tree passes on the mixture.
+    List<WebRecordWriteFile> overlay() => [
+      (relativeSegments: ['record.json'], bytes: _recordJson(id)),
+      (relativeSegments: ['old.bin'], bytes: Uint8List.fromList([9])),
+      (relativeSegments: ['new.bin'], bytes: Uint8List.fromList([1, 2])),
+    ];
+
+    /// Drives the two interruptions and returns the slot, plus a byte copy of
+    /// the record as it stood before any of it.
+    Future<(DirectoryPath slot, DirectoryPath before)> interruptTwice() async {
+      final finalDir = await _seed(dataRoot, id);
+      final before = DirectoryPath(root.path) / 'before-$id';
+      await finalDir.copyTreeInto(before);
+
+      // First: the copy of `desired/` over `active/<id>/` gets one file in and
+      // dies there, which is what leaves a half-copy standing in the store.
+      final firstCrash = WebRecordWriteTransaction(
+        copyTree: (source, target) async {
+          if (source.name == 'desired') {
+            await target.create(recursive: true);
+            await target.filePath('old.bin').writeAsBytes(Uint8List.fromList([9]));
+            throw StateError('stop mid-copy');
+          }
+          return source.copyTreeInto(target);
+        },
+      );
+      expect(await firstCrash.publish(dataRoot, id, overlay()), WebRecordWriteResult.incomplete);
+      final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(id);
+      expect(await sameDirectoryTree(slot / 'superseded', before), isTrue);
+      expect(await finalDir.filePath('old.bin').readAsBytes(), [9]);
+      expect(await finalDir.filePath('new.bin').exists(), isFalse);
+
+      // Second: an ordinary recovery, stopped immediately after it decides what
+      // to do with the tree standing in `active/<id>/`.
+      final secondCrash = WebRecordWriteTransaction(
+        onCheckpoint: (point) async {
+          if (point == WebRecordWriteCheckpoint.finalSetAside) throw StateError('stop');
+        },
+      );
+      expect((await secondCrash.recoverAll(dataRoot)).single.result, WebRecordWriteResult.incomplete);
+      return (slot, before);
+    }
+
+    test('keeps the version it is replacing whole rather than merging the half-copy into it', () async {
+      final (slot, before) = await interruptTwice();
+      expect(
+        await sameDirectoryTree(slot / 'superseded', before),
+        isTrue,
+        reason: 'the parked copy of the version being replaced is a merge of it and the new one',
+      );
+
+      // And that is the tree the user is handed: a slot given up on promotes
+      // its parked copy to `quarantine/`, which the app counts and shows as
+      // records to recover.
+      await (slot / 'desired').delete(recursive: true, emptyOk: true);
+      expect(await WebRecordWriteTransaction().recoverAll(dataRoot), hasLength(1));
+      expect(
+        await sameDirectoryTree(dataRoot / 'quarantine' / id, before),
+        isTrue,
+        reason: 'quarantine holds a tree that is neither the old version nor the new one',
+      );
+    });
+
+    test('still publishes the staged tree when a later recovery finishes it', () async {
+      // The positive control for dropping the half-copy: `desired/` is what it
+      // was copied from and is still there, so nothing about the publication
+      // has been given up on.
+      final (slot, _) = await interruptTwice();
+      expect((await WebRecordWriteTransaction().recoverAll(dataRoot)).single.result, WebRecordWriteResult.completed);
+      final finalDir = dataRoot / 'active' / id;
+      expect(await finalDir.filePath('new.bin').readAsBytes(), [1, 2]);
+      expect(await finalDir.filePath('old.bin').readAsBytes(), [9]);
+      expect(await slot.exists(), isFalse);
+      expect(await (dataRoot / 'quarantine').exists(), isFalse);
+    });
+  });
+
   test('a publication finished by a later call leaves quarantine empty, however often it is interrupted', () async {
     // The half of the crash-window guarantee that a *local* variable could not
     // give. The copy is taken by one call and dropped by whichever call reaches
@@ -318,7 +411,7 @@ void main() {
     expect(await WebRecordWriteTransaction().recoverAll(dataRoot), isEmpty);
   });
 
-  test('slot names that are not ours are carried into retired/, byte for byte', () async {
+  test('slot names that are not ours are carried into quarantine/, byte for byte', () async {
     // Ownership is read off the slot *name*, and that is the only thing the
     // scan still asks. A manifest whose owner, version, root or final path is
     // not ours no longer earns its own answer -- the slot is ours, nothing in
@@ -327,9 +420,15 @@ void main() {
     // A name no writer of ours produced used to be left standing instead. What
     // ownership decides now is *where* it goes, not whether it may be touched:
     // left standing it was stranded, because every later sweep derives only the
-    // names this version writes and so never looked at it again. It goes to
-    // `retired/` -- not `quarantine/`, whose children are counted at the user
-    // as records the app could not read, and this is not a record of theirs.
+    // names this version writes and so never looked at it again.
+    //
+    // It goes to `quarantine/`. The name establishes who minted the slot and
+    // nothing about whose bytes are inside it, and another version's
+    // interrupted first publication holds the whole of a record in its
+    // `desired/` exactly as ours does. `retired/`'s delete is offered at the
+    // weakest friction on the stated basis that nothing in there is the only
+    // copy of anything, and that is not a claim this build can make about a
+    // manifest it cannot read.
     final finalDir = await _seed(dataRoot, 'safe');
     final before = DirectoryPath(root.path) / 'before';
     await finalDir.copyTreeInto(before);
@@ -351,13 +450,13 @@ void main() {
     for (var index = 0; index < names.length; index++) {
       expect(await manifests[index].exists(), isFalse, reason: names[index]);
       expect(
-        await (dataRoot / 'retired' / names[index]).filePath('manifest.json').readAsBytes(),
+        await (dataRoot / 'quarantine' / names[index]).filePath('manifest.json').readAsBytes(),
         bytes[index],
         reason: names[index],
       );
     }
     expect(await sameDirectoryTree(finalDir, before), isTrue);
-    expect(await (dataRoot / 'quarantine').exists(), isFalse);
+    expect(await (dataRoot / 'retired').exists(), isFalse);
   });
 
   test('a manifest of ours we cannot resume takes its staging to quarantine, not the bin', () async {
@@ -585,10 +684,12 @@ void main() {
     expect(await transaction.publish(dataRoot, 'ordering', _overlay('ordering')), WebRecordWriteResult.completed);
   });
 
-  test('a manifest-less directory that is not one of our slots is retired, not discarded', () async {
+  test('a manifest-less directory that is not one of our slots is quarantined, not discarded', () async {
     // The name is what makes it not ours, and a slot of ours with no manifest
     // is *discarded* one test below. This one is carried out whole instead:
     // nothing of somebody else's is thrown away just because we cannot read it.
+    // And onto the shelf whose delete says so to the user, because "not ours to
+    // read" is not the same fact as "not the user's".
     final foreign = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / 'not-our-slot';
     await foreign.create(recursive: true);
     await foreign.filePath('keep.bin').writeAsBytes([5]);
@@ -597,7 +698,8 @@ void main() {
 
     expect(recovered.single.result, WebRecordWriteResult.incomplete);
     expect(await foreign.exists(), isFalse);
-    expect(await (dataRoot / 'retired' / 'not-our-slot').filePath('keep.bin').readAsBytes(), [5]);
+    expect(await (dataRoot / 'quarantine' / 'not-our-slot').filePath('keep.bin').readAsBytes(), [5]);
+    expect(await (dataRoot / 'retired').exists(), isFalse);
   });
 
   test('startup removes an owned building crash slot without touching final', () async {
@@ -611,7 +713,365 @@ void main() {
     expect(recovered.single.result, WebRecordWriteResult.completed);
     expect(await slot.exists(), isFalse);
     expect(await sameDirectoryTree(finalDir, before), isTrue);
+    // The slot this case builds has no `desired/`, so the three assertions above
+    // hold whichever shelf the staging would have gone to. Stated here so the
+    // case below is the one that decides it, and so this one cannot be read as
+    // already covering the question.
+    expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
   });
+
+  test('an interrupted write staging is retired, not shown as a record that could not be read', () async {
+    // The `desired/` an interrupted update leaves is `active/<id>/` with the
+    // overlay applied — a whole, readable copy of a record that is still there.
+    // On `quarantine/` it was counted at the user as a record the app had failed
+    // to read, one more per interruption, with nothing that ever collected them.
+    final finalDir = await _seed(dataRoot, 'building');
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('building');
+    await slot.create(recursive: true);
+    await slot.filePath('manifest.json').writeAsString(jsonEncode(_manifest(dataRoot, 'building', state: 'building')));
+    await finalDir.copyTreeInto(slot / 'desired');
+
+    final recovered = await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(recovered.single.result, WebRecordWriteResult.completed);
+    expect(await slot.exists(), isFalse);
+    expect(
+      await _childrenOf(dataRoot / 'quarantine'),
+      isEmpty,
+      reason: 'the banner would count a copy of a record the user can still open',
+    );
+    expect(
+      await (dataRoot / 'retired' / 'building').filePath('old.bin').readAsBytes(),
+      [7],
+      reason: 'the staging has to be kept, on the shelf that is not counted at anyone',
+    );
+  });
+
+  test('a first publication interrupted before ready with its overlay whole is published, not retired', () async {
+    // No `active/<id>/` and no other store holding the id: the staging is not a
+    // copy of anything, it is the record. Not reaching `ready` says the write
+    // was interrupted, and the manifest says where: it names the two files the
+    // publication set out to write and how long each was to be, and both of them
+    // are staged at that length, so the tree is the record and not a piece of one.
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('brand-new');
+    await slot.create(recursive: true);
+    await slot
+        .filePath('manifest.json')
+        .writeAsString(
+          jsonEncode(
+            _manifest(
+              dataRoot,
+              'brand-new',
+              state: 'building',
+              overlays: {'record.json': _recordJson('brand-new').length, 'half.bin': 1},
+            ),
+          ),
+        );
+    await (slot / 'desired').create(recursive: true);
+    await (slot / 'desired').filePath('record.json').writeAsBytes(_recordJson('brand-new'));
+    await (slot / 'desired').filePath('half.bin').writeAsBytes([9]);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    // Asserted before the publication below, so that a regression reads as the
+    // sentence it breaks rather than as a file that is not where it was looked
+    // for.
+    expect(
+      await _childrenOf(dataRoot / 'retired'),
+      isEmpty,
+      reason:
+          'the only copy of this record is in retired/, whose delete is offered at the weakest friction on the '
+          'stated basis that nothing in there is the only copy of anything',
+    );
+    expect(
+      await (dataRoot / 'active' / 'brand-new').filePath('half.bin').readAsBytes(),
+      [9],
+      reason: 'recovery owes the only copy the publication the interrupted write was on its way to',
+    );
+    expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
+    expect(await slot.exists(), isFalse);
+  });
+
+  test('a first publication interrupted mid-overlay is quarantined, not listed as a record', () async {
+    // The other half of the case above, and the reason the manifest carries the
+    // overlay paths at all. The same slot, the same absent `active/<id>/` — and
+    // one of the two files the publication was writing never arrived. Publishing
+    // it puts a record with its images missing into the user's list as the real
+    // one, and nothing downstream ever says otherwise: the loader reads a
+    // `record.json` and reports the record loaded.
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('brand-new');
+    await slot.create(recursive: true);
+    await slot
+        .filePath('manifest.json')
+        .writeAsString(
+          jsonEncode(
+            _manifest(
+              dataRoot,
+              'brand-new',
+              state: 'building',
+              overlays: {'record.json': _recordJson('brand-new').length, 'half.bin': 1},
+            ),
+          ),
+        );
+    await (slot / 'desired').create(recursive: true);
+    await (slot / 'desired').filePath('record.json').writeAsBytes(_recordJson('brand-new'));
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(
+      await _childrenOf(dataRoot / 'active'),
+      isEmpty,
+      reason: 'a fragment of a record must not stand in the list as the record',
+    );
+    expect(
+      await (dataRoot / 'quarantine' / 'brand-new').filePath('record.json').exists(),
+      isTrue,
+      reason: 'it is still the only copy of what the user was saving, on the shelf that says the app gave up on it',
+    );
+    expect(
+      await _childrenOf(dataRoot / 'retired'),
+      isEmpty,
+      reason: 'retired/ is deleted on the stated basis that nothing in it is the only copy of anything',
+    );
+    expect(await slot.exists(), isFalse);
+  });
+
+  test('a manifest that predates the overlay paths cannot vouch for its staging', () async {
+    // Backward compatibility, decided on the safe side. A slot an earlier build
+    // staged carries the eight original keys and no record of what it was
+    // writing, so "the staging is whole" is not a fact this build can establish
+    // about it — and the fixture below is a tree that looks complete. Reading
+    // the silence as completeness is the defect this whole case exists over,
+    // one build removed.
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('older-build');
+    await slot.create(recursive: true);
+    await slot
+        .filePath('manifest.json')
+        .writeAsString(jsonEncode(_manifest(dataRoot, 'older-build', state: 'building')));
+    await (slot / 'desired').create(recursive: true);
+    await (slot / 'desired').filePath('record.json').writeAsBytes(_recordJson('older-build'));
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await _childrenOf(dataRoot / 'active'), isEmpty);
+    expect(await (dataRoot / 'quarantine' / 'older-build').filePath('record.json').exists(), isTrue);
+    expect(await slot.exists(), isFalse);
+  });
+
+  test('a manifest naming the overlay key by its old name is not read as vouching for anything', () async {
+    // The key was `overlayPaths`, a bare list of paths, when the completeness
+    // test was existence. It carries no lengths, so nothing this build could do
+    // with it would establish the fact it now needs; reading it anyway is the
+    // silent acceptance the rename exists to stop. It is an unknown key here,
+    // which is the manifest-this-version-cannot-read path — the staging is set
+    // aside, never published on a claim this build cannot check.
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('old-key');
+    await slot.create(recursive: true);
+    await slot
+        .filePath('manifest.json')
+        .writeAsString(
+          jsonEncode({
+            ..._manifest(dataRoot, 'old-key', state: 'building'),
+            'overlayPaths': ['record.json'],
+          }),
+        );
+    await (slot / 'desired').create(recursive: true);
+    await (slot / 'desired').filePath('record.json').writeAsBytes(_recordJson('old-key'));
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await _childrenOf(dataRoot / 'active'), isEmpty);
+    expect(await (dataRoot / 'quarantine' / 'old-key').filePath('record.json').exists(), isTrue);
+    expect(await slot.exists(), isFalse);
+  });
+
+  test('the last file a zip import leaves half written is quarantined, not published as the record', () async {
+    // The interruption that lands *inside* a file rather than between two of
+    // them. `File.writeAsBytes` creates and truncates before it writes, so what
+    // is left is a `trainee.jpg` that exists and holds four of its eight bytes —
+    // and every file the publication named is on disk. Existence alone called
+    // that whole and put a record with a truncated image into the user's list as
+    // the real one, with nothing downstream to say otherwise: the loader reads
+    // `record.json` and reports the record loaded.
+    await _crashedFirstPublication(
+      dataRoot,
+      'truncated',
+      _zipImportOverlayWithImage('truncated'),
+      writesBeforeCrash: 2,
+      bytesBeforeCrash: 4,
+    );
+    expect(
+      await (dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('truncated') / 'desired')
+          .filePath('trainee.jpg')
+          .length(),
+      4,
+      reason: 'the fixture has to leave a file that exists and is short, or the case tests nothing',
+    );
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(
+      await _childrenOf(dataRoot / 'active'),
+      isEmpty,
+      reason: 'a record whose image is half its bytes must not stand in the list as the record',
+    );
+    expect((await _childrenOf(dataRoot / 'quarantine' / 'truncated'))..sort(), [
+      'prediction.json',
+      'record.json',
+      'trainee.jpg',
+    ]);
+    expect(
+      await (dataRoot / 'quarantine' / 'truncated').filePath('trainee.jpg').length(),
+      4,
+      reason: 'the bytes that did arrive are still the only copy of them there is',
+    );
+    expect(await _childrenOf(dataRoot / 'retired'), isEmpty);
+  });
+
+  test('the last file a zip import leaves created but empty is quarantined, not published', () async {
+    // The same interruption in the shape OPFS leaves it: `getFileHandle(create:
+    // true)` resolves before the writable stream is closed, so a tab that goes
+    // away mid-file leaves the entry with none of its bytes rather than some of
+    // them. Distinct from the case above because "not empty" would pass one of
+    // the two, and from the missing-file cases because the path is there.
+    await _crashedFirstPublication(
+      dataRoot,
+      'emptied',
+      _zipImportOverlayWithImage('emptied'),
+      writesBeforeCrash: 2,
+      bytesBeforeCrash: 0,
+    );
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await _childrenOf(dataRoot / 'active'), isEmpty);
+    expect((await _childrenOf(dataRoot / 'quarantine' / 'emptied'))..sort(), [
+      'prediction.json',
+      'record.json',
+      'trainee.jpg',
+    ]);
+    expect(await _childrenOf(dataRoot / 'retired'), isEmpty);
+  });
+
+  test('control: an overlay the zip legitimately left empty is published, not shelved as a fragment', () async {
+    // The negative control for the two above, and the reason the test is a
+    // length and not "the file is not empty". A zip entry may hold no bytes, and
+    // `publish` refuses an overlay for its *path*, never for its length, so a
+    // zero-byte overlay is a file the publication meant to write exactly as it
+    // is. Shelving this tree would cost the user a rescue from `quarantine/` for
+    // a save that finished.
+    await _crashedFirstPublication(dataRoot, 'blank-entry', [
+      (relativeSegments: ['record.json'], bytes: _recordJson('blank-entry')),
+      (relativeSegments: ['notes.txt'], bytes: Uint8List(0)),
+    ], crashAtOverlayApplied: true);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect((await _childrenOf(dataRoot / 'active' / 'blank-entry'))..sort(), ['notes.txt', 'record.json']);
+    expect(
+      await (dataRoot / 'active' / 'blank-entry').filePath('notes.txt').length(),
+      0,
+      reason: 'the empty file is what the publication set out to write, and it is published as written',
+    );
+    expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
+    expect(await _childrenOf(dataRoot / 'retired'), isEmpty);
+  });
+
+  test('the overlay a live harvest interrupts before its last file is quarantined', () async {
+    // Reached by the producer's own ordering: the wasm worker writes
+    // `prediction.json`, `trainee.jpg`, then `record.json` last, and this dies
+    // before the last of them. The slot is left exactly as a closed tab leaves
+    // it — `publish`'s own catch clause deletes nothing here, because a process
+    // that is gone does not run it.
+    await _crashedFirstPublication(dataRoot, 'harvest', _harvestOverlay('harvest'), writesBeforeCrash: 2);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await _childrenOf(dataRoot / 'active'), isEmpty);
+    expect((await _childrenOf(dataRoot / 'quarantine' / 'harvest'))..sort(), ['prediction.json', 'trainee.jpg']);
+    expect(await _childrenOf(dataRoot / 'retired'), isEmpty);
+  });
+
+  test('the overlay a zip import interrupts after record.json is quarantined, not published', () async {
+    // The same interruption on the other producer's ordering, and the one that
+    // makes the fragment indistinguishable from a record downstream: a zip's
+    // entries arrive in the archive's own order, `record.json` is not last, and
+    // a tree holding only it loads as a record with every image missing.
+    await _crashedFirstPublication(dataRoot, 'imported', _zipImportOverlay('imported'), writesBeforeCrash: 2);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(
+      await _childrenOf(dataRoot / 'active'),
+      isEmpty,
+      reason: 'the loader would report this fragment as a record it read',
+    );
+    expect((await _childrenOf(dataRoot / 'quarantine' / 'imported'))..sort(), ['prediction.json', 'record.json']);
+    expect(await _childrenOf(dataRoot / 'retired'), isEmpty);
+  });
+
+  test('an overlay that finished, interrupted before the ready manifest, is published', () async {
+    // The positive control for the two above, and the case a previous fix was
+    // about: every file the publication set out to write is on disk and only
+    // the `ready` manifest never reached the device. Without this, quarantining
+    // every `building` slot would pass both of them.
+    await _crashedFirstPublication(dataRoot, 'complete', _zipImportOverlay('complete'), crashAtOverlayApplied: true);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect((await _childrenOf(dataRoot / 'active' / 'complete'))..sort(), [
+      'prediction.json',
+      'record.json',
+      'trainee.jpg',
+    ]);
+    expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
+    expect(await _childrenOf(dataRoot / 'retired'), isEmpty);
+  });
+
+  test('control: a first publication whose id the archive store holds is retired, not published', () async {
+    // The other half of the same question. Publishing here would put one record
+    // id in two stores at once, which is the invariant `publish` refuses over
+    // before it stages anything, so the staging really is a duplicate and the
+    // shelf is right for it.
+    final archived = dataRoot / 'archive' / 'brand-new';
+    await archived.create(recursive: true);
+    await archived.filePath('record.json').writeAsBytes(_recordJson('brand-new'));
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('brand-new');
+    await slot.create(recursive: true);
+    await slot.filePath('manifest.json').writeAsString(jsonEncode(_manifest(dataRoot, 'brand-new', state: 'building')));
+    await (slot / 'desired').create(recursive: true);
+    await (slot / 'desired').filePath('half.bin').writeAsBytes([9]);
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await (dataRoot / 'retired' / 'brand-new').filePath('half.bin').readAsBytes(), [9]);
+    expect(await _childrenOf(dataRoot / 'active'), isEmpty);
+    expect(await _childrenOf(dataRoot / 'quarantine'), isEmpty);
+  });
+
+  test('control: a ready staging the app is giving up on still goes to quarantine', () async {
+    // The other shelf, and the reason the two are separate calls: this staging
+    // is the record the user asked to have saved, and the app is giving up on
+    // it. A change that retired everything would take this with it.
+    await _seed(dataRoot, 'given-up');
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName('given-up');
+    await slot.create(recursive: true);
+    // A manifest that parses but names nothing this version can resume, so the
+    // slot is abandoned rather than resumed.
+    await slot.filePath('manifest.json').writeAsString('{ not json');
+    await (slot / 'desired').create(recursive: true);
+    await (slot / 'desired').filePath('record.json').writeAsBytes(_recordJson('given-up'));
+
+    await WebRecordWriteTransaction().recoverAll(dataRoot);
+
+    expect(await _childrenOf(dataRoot / 'quarantine'), isNotEmpty);
+  });
+}
+
+/// The names directly under [directory], or none when it is not there.
+Future<List<String>> _childrenOf(DirectoryPath directory) async {
+  if (!await directory.exists()) return const [];
+  return [await for (final entry in directory.list(recursive: false, followLinks: false)) entry.name];
 }
 
 Future<DirectoryPath> _seed(DirectoryPath dataRoot, String id) async {
@@ -621,6 +1081,74 @@ Future<DirectoryPath> _seed(DirectoryPath dataRoot, String id) async {
   await directory.filePath('old.bin').writeAsBytes([7]);
   return directory;
 }
+
+/// Leaves the slot a first publication that died part-way through leaves.
+///
+/// `deleteDirectory` is a no-op for the whole call, because `publish`'s catch
+/// clause tidying the slot away is exactly what a closed tab, a killed process
+/// or a lost device does *not* do. Either the overlay write at
+/// [writesBeforeCrash] throws, or -- with [crashAtOverlayApplied] -- every
+/// overlay lands and the throw happens before the `ready` manifest is written.
+///
+/// [bytesBeforeCrash] says where inside that write the interruption lands: null
+/// for before it, so the file never appears, and a count for a file that is
+/// created and left holding that many of its bytes. Both are real -- desktop's
+/// `writeAsBytes` creates and truncates before writing, so any prefix can
+/// survive, and OPFS resolves `getFileHandle(create: true)` before the writable
+/// stream is closed, so the entry is there with none of them. The write is
+/// driven through the transaction's own injection point rather than through the
+/// backend, which is why this reaches the VM at all: `WebLikeFsBackend`
+/// deliberately models nothing about how a partial write is left.
+Future<void> _crashedFirstPublication(
+  DirectoryPath dataRoot,
+  String id,
+  List<WebRecordWriteFile> overlays, {
+  int? writesBeforeCrash,
+  int? bytesBeforeCrash,
+  bool crashAtOverlayApplied = false,
+}) async {
+  var written = 0;
+  final transaction = WebRecordWriteTransaction(
+    onCheckpoint: (point) async {
+      if (crashAtOverlayApplied && point == WebRecordWriteCheckpoint.overlayApplied) {
+        throw StateError('the tab went away');
+      }
+    },
+    deleteDirectory: (_) async {},
+    writeFile: (target, bytes) async {
+      if (written++ == writesBeforeCrash) {
+        if (bytesBeforeCrash != null) await target.writeAsBytes(bytes.sublist(0, bytesBeforeCrash));
+        throw StateError('the tab went away');
+      }
+      await target.writeAsBytes(bytes);
+    },
+  );
+  expect(await transaction.publish(dataRoot, id, overlays), WebRecordWriteResult.incomplete);
+}
+
+/// The order the live producers write in: sidecars first, `record.json` last.
+List<WebRecordWriteFile> _harvestOverlay(String id) => [
+  (relativeSegments: ['prediction.json'], bytes: Uint8List.fromList([1])),
+  (relativeSegments: ['trainee.jpg'], bytes: Uint8List.fromList([2])),
+  (relativeSegments: ['record.json'], bytes: _recordJson(id)),
+];
+
+/// The order a zip import writes in: the archive's own entry order, in which
+/// `record.json` is not last.
+List<WebRecordWriteFile> _zipImportOverlay(String id) => [
+  (relativeSegments: ['prediction.json'], bytes: Uint8List.fromList([1])),
+  (relativeSegments: ['record.json'], bytes: _recordJson(id)),
+  (relativeSegments: ['trainee.jpg'], bytes: Uint8List.fromList([2])),
+];
+
+/// The same order, with a last entry long enough to be left *part* written.
+/// The one-byte sidecars above can only be absent or whole, which is the
+/// distinction the length in the manifest exists to make.
+List<WebRecordWriteFile> _zipImportOverlayWithImage(String id) => [
+  (relativeSegments: ['record.json'], bytes: _recordJson(id)),
+  (relativeSegments: ['prediction.json'], bytes: Uint8List.fromList([1])),
+  (relativeSegments: ['trainee.jpg'], bytes: Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8])),
+];
 
 List<WebRecordWriteFile> _overlay(String id) => [
   (relativeSegments: ['record.json'], bytes: _recordJson(id)),
@@ -647,6 +1175,11 @@ Map<String, Object?> _manifest(
   String? dataRootPath,
   String? finalPath,
   String state = 'ready',
+  // Omitted by default, so every case that does not name it is testing against
+  // a manifest in the shape builds before this field wrote one. Keyed by the
+  // relative path and valued by the length the publication set out to write
+  // there, which is the pair the manifest stores.
+  Map<String, int>? overlays,
 }) => {
   'version': version,
   'owner': owner,
@@ -656,4 +1189,8 @@ Map<String, Object?> _manifest(
   'dataRootPath': dataRootPath ?? dataRoot.path,
   'finalPath': finalPath ?? (dataRoot / 'active' / id).path,
   'state': state,
+  if (overlays case final planned?)
+    'overlays': [
+      for (final entry in planned.entries) {'path': entry.key, 'bytes': entry.value},
+    ],
 };

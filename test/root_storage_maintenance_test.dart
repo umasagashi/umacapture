@@ -8,20 +8,25 @@ import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_directory_transaction.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/fs/root_storage_maintenance.dart';
-import 'package:umacapture/src/core/fs/root_storage_maintenance_web.dart';
+import 'package:umacapture/src/core/fs/root_storage_maintenance_io.dart' as io_leg;
+import 'package:umacapture/src/core/fs/root_storage_maintenance_shared.dart';
 import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 
+import 'support/long_read_declarations.dart';
 import 'support/web_like_fs_backend.dart';
 
 void main() {
-  final request = RootStorageMaintenanceRequest(recordDataRoot: DirectoryPath(['storage', 'chara_detail']));
+  final request = RootStorageMaintenanceRequest(
+    recordDataRoot: DirectoryPath(['storage', 'chara_detail']),
+    reason: RootMaintenanceReason.readyToUse,
+  );
   late FsBackend originalBackend;
 
-  // root_storage_maintenance_web.dart is web-only, so it is exercised against
-  // `WebLikeFsBackend`: a sync FS call added here by reflex fails on the VM
-  // instead of passing CI and breaking only on web. That pins OPFS's
+  // `JournalRootStorageMaintenance` runs on web as well, so it is exercised
+  // against `WebLikeFsBackend`: a sync FS call added here by reflex fails on the
+  // VM instead of passing CI and breaking only on web. That pins OPFS's
   // *synchronous* prohibition and nothing else -- see
   // `support/web_like_fs_backend.dart` for what this backend does not model.
   setUp(() {
@@ -29,6 +34,19 @@ void main() {
     fsBackend = WebLikeFsBackend(originalBackend);
   });
   tearDown(() => fsBackend = originalBackend);
+
+  // A data root with no journal on disk has no slot to drain and therefore none
+  // the sweep could fail to drain. Asserted rather than assumed because the
+  // delete that reads this value refuses over whatever it names: a leg that
+  // reported a slot it had not looked for would make every delete of the retired
+  // group refuse on a healthy install. That the desktop leg does drain a slot
+  // when there is one is `storage_journal_desktop_recovery_test.dart`.
+  test('the desktop leg reports nothing undrained when there is no journal', () async {
+    final maintenance = io_leg.createRootStorageMaintenance();
+
+    expect((await maintenance.run(request)).undrained, isEmpty);
+    expect((await maintenance.runUnlocked(request)).undrained, isEmpty);
+  });
 
   test('pathInfo startup boundary invokes maintenance once for the record root', () async {
     final info = PathInfo(
@@ -39,7 +57,7 @@ void main() {
     );
     final maintenance = _RecordingMaintenance();
 
-    await runPathInfoStartupMaintenance(info, maintenance: maintenance);
+    await runPathInfoStartupMaintenance(info, declaration: undeclaredInTest, maintenance: maintenance);
 
     expect(maintenance.requests, hasLength(1));
     expect(maintenance.requests.single.recordDataRoot.path, info.charaDetailDir.path);
@@ -55,7 +73,7 @@ void main() {
       events.add('lock-exit');
       return result;
     });
-    final maintenance = WebRootStorageMaintenance(
+    final maintenance = JournalRootStorageMaintenance.bothJournals(
       mutationLock: lock,
       recoverWrites: (dataRoot) async {
         expect(dataRoot.path, request.recordDataRoot.path);
@@ -84,7 +102,7 @@ void main() {
     final cleanupStarted = Completer<void>();
     final finishCleanup = Completer<void>();
     final events = <String>[];
-    final maintenance = WebRootStorageMaintenance(
+    final maintenance = JournalRootStorageMaintenance.bothJournals(
       mutationLock: lock,
       recover: (_) async => const <RecordTransactionRecovery>[],
       cleanup: (_) async {
@@ -111,7 +129,7 @@ void main() {
   test('a data root is swept once per session, and a failed sweep is retried', () async {
     var sweeps = 0;
     var fail = true;
-    final maintenance = WebRootStorageMaintenance(
+    final maintenance = JournalRootStorageMaintenance.bothJournals(
       mutationLock: RecordMutationLock((_, _, action) => action()),
       recoverWrites: (_) async {
         sweeps++;
@@ -136,8 +154,29 @@ void main() {
     expect(sweeps, 2);
 
     // A different data root is still swept.
-    await maintenance.run(RootStorageMaintenanceRequest(recordDataRoot: DirectoryPath(['other', 'chara_detail'])));
+    await maintenance.run(
+      RootStorageMaintenanceRequest(
+        recordDataRoot: DirectoryPath(['other', 'chara_detail']),
+        reason: RootMaintenanceReason.readyToUse,
+      ),
+    );
     expect(sweeps, 3);
+
+    // ...and the memo answers only the reason it is true for. A caller about to
+    // remove the journals needs the store as it is *now*, because a write that
+    // failed since the sweep above left a slot in it.
+    await maintenance.run(
+      RootStorageMaintenanceRequest(
+        recordDataRoot: request.recordDataRoot,
+        reason: RootMaintenanceReason.beforeDestroyingJournals,
+      ),
+    );
+    expect(sweeps, 4);
+
+    // Sweeping for that reason still records the root, so the cheap reason keeps
+    // being answered from the memo afterwards.
+    await maintenance.run(request);
+    expect(sweeps, 4);
   });
 
   // The sweep no longer classifies what recovery could not finish. It used to
@@ -157,9 +196,9 @@ void main() {
   test('no web record write outcome stops the sweep', () async {
     for (final result in WebRecordWriteResult.values) {
       final events = <String>[];
-      final maintenance = WebRootStorageMaintenance(
+      final maintenance = JournalRootStorageMaintenance.bothJournals(
         mutationLock: RecordMutationLock((_, _, action) => action()),
-        recoverWrites: (_) async => [WebRecordWriteRecovery(recordId: 'id', result: result)],
+        recoverWrites: (_) async => [WebRecordWriteRecovery(recordId: 'id', result: result, slot: null, reason: null)],
         recover: (_) async {
           events.add('archive');
           return const [];
@@ -174,12 +213,12 @@ void main() {
   test('no archive recovery outcome stops the sweep', () async {
     for (final result in RecordTransactionResult.values) {
       final events = <String>[];
-      final maintenance = WebRootStorageMaintenance(
+      final maintenance = JournalRootStorageMaintenance.bothJournals(
         mutationLock: RecordMutationLock((_, _, action) => action()),
         recoverWrites: (_) async => const [],
         recover: (_) async {
           events.add('recover');
-          return [RecordTransactionRecovery(null, result)];
+          return [RecordTransactionRecovery(null, result, slot: null, reason: null)];
         },
         cleanup: (_) async => events.add('cleanup'),
       );
@@ -210,7 +249,7 @@ void main() {
       WebRecordWriteResult.incomplete,
     );
     var archives = 0;
-    final maintenance = WebRootStorageMaintenance(
+    final maintenance = JournalRootStorageMaintenance.bothJournals(
       mutationLock: RecordMutationLock((_, _, action) => action()),
       recoverWrites: WebRecordWriteTransaction(
         copyTree: (source, target) async {
@@ -229,7 +268,9 @@ void main() {
     // the copy, so the final tree really is mid-replacement. It used to abort
     // the sweep. It no longer does -- archive recovery runs behind it, and the
     // slot is still there for the resume that works.
-    await maintenance.run(RootStorageMaintenanceRequest(recordDataRoot: dataRoot));
+    await maintenance.run(
+      RootStorageMaintenanceRequest(recordDataRoot: dataRoot, reason: RootMaintenanceReason.readyToUse),
+    );
     expect(archives, 1);
     expect((await WebRecordWriteTransaction().recoverAll(dataRoot)).single.result, WebRecordWriteResult.completed);
     expect(await finalDir.filePath('new.bin').readAsBytes(), [1]);
@@ -250,13 +291,15 @@ final class _RecordingMaintenance implements RootStorageMaintenance {
   final requests = <RootStorageMaintenanceRequest>[];
 
   @override
-  Future<void> run(RootStorageMaintenanceRequest request) async {
+  Future<RootMaintenanceOutcome> run(RootStorageMaintenanceRequest request) async {
     requests.add(request);
+    return RootMaintenanceOutcome.none;
   }
 
   @override
-  Future<void> runUnlocked(RootStorageMaintenanceRequest request) async {
+  Future<RootMaintenanceOutcome> runUnlocked(RootStorageMaintenanceRequest request) async {
     requests.add(request);
+    return RootMaintenanceOutcome.none;
   }
 }
 

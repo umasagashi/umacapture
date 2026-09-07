@@ -7,6 +7,7 @@ import '/src/core/fs/record_mutation_lock.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/web_record_write_transaction.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 
 typedef RecordPersistenceFile = ({String recordId, List<String> relativeSegments, Uint8List bytes});
@@ -38,8 +39,9 @@ final class WebRecordPersistenceResult extends SetBase<String> {
   /// [WebRecordWriteResult] the transaction refused with.
   ///
   /// [WebRecordPersistenceStatus.failed] collapses invalid input, an invalid
-  /// manifest, corrupt staging, a prior pending cleanup and an outright throw
-  /// into one value; keeping the reason means a caller (and a bug report) can
+  /// manifest, corrupt staging, a prior pending cleanup, a recovery that could
+  /// not make the record ready, and an outright throw into one value; keeping
+  /// the reason means a caller (and a bug report) can
   /// still tell them apart instead of the cause being discarded at the `catch`.
   final Map<String, Object> failures;
 
@@ -94,22 +96,93 @@ final class WebRecordPersistence {
   /// still guarantees is the ordering: the caller's read happens after that
   /// recovery, under the same acquisition.
   Future<void> ensureRecordRecovered(DirectoryPath storageDir, String recordId) {
-    return _recoveryGate.runForRecord(storageDir, recordId, () async {});
+    return _recoveryGate.runForRecord(
+      storageDir,
+      recordId,
+      () async {},
+      // The body is empty: all this call does is take the acquisition so the
+      // gate's own per-record recovery runs before the caller's read. There is
+      // no work here to hold anything open for.
+      declaration: const LongReadDeclaration.none(reason: 'an empty body; the acquisition is the whole of the call'),
+    );
   }
 
   Future<void> ensureRecordRecoveredUnlocked(DirectoryPath storageDir, String recordId) {
     return _recoveryGate.ensureReadyUnlocked(storageDir, recordId);
   }
 
-  Future<WebRecordPersistenceResult> persistFiles(DirectoryPath storageDir, List<RecordPersistenceFile> files) {
-    if (files.isEmpty) return Future.value(WebRecordPersistenceResult(const {}));
+  Future<WebRecordPersistenceResult> persistFiles(DirectoryPath storageDir, List<RecordPersistenceFile> files) async {
+    if (files.isEmpty) return WebRecordPersistenceResult(const {});
     final grouped = _validatedPayloads(files);
-    final recordIds = grouped.keys.toSet();
-    Future<WebRecordPersistenceResult> action() => _persistFilesUnlocked(storageDir, grouped);
-    if (recordIds.length == 1) {
-      return _recoveryGate.runForRecord(storageDir, recordIds.single, action);
-    }
-    return _recoveryGate.runForRecords(storageDir, recordIds, action);
+    final statuses = <String, WebRecordPersistenceStatus>{};
+    final failures = <String, Object>{};
+    // A publication writes the files it was handed and returns; the caller that
+    // *produced* those bytes (an import, a capture) is the operation with a
+    // window, and it is the one that would announce.
+    const declaration = LongReadDeclaration.none(
+      reason: 'writes the files it was handed; the producer above owns the window, not this publication',
+    );
+    // Per record and not per batch, because the whole output of this method is
+    // one verdict per record it was handed. A record the gate cannot make ready
+    // is one `failed` entry among those verdicts -- the same thing a record
+    // whose publication throws already is -- and not the end of the import: the
+    // other records in the same zip are the user's data too, and a batch that
+    // stopped at the first of them would report nothing about any of them.
+    //
+    // One record takes the same acquisition either way: the lock's
+    // `runForRecords` over a single id is the root name shared and that record's
+    // name exclusive, exactly what `runForRecord` takes.
+    await _recoveryGate.runPerRecord(
+      storageDir,
+      grouped,
+      (recordId, payload) async {
+        try {
+          final (status, failure) = await _publishRecordUnlocked(storageDir, recordId, payload);
+          statuses[recordId] = status;
+          if (failure != null) failures[recordId] = failure;
+        } catch (error, stackTrace) {
+          // The user has just captured or imported this record; losing the reason
+          // here leaves nothing anywhere to explain why it was not stored.
+          _recordFailure(
+            statuses,
+            failures,
+            recordId,
+            error,
+            stackTrace,
+            'Failed to persist record $recordId to persistent storage.',
+          );
+        }
+      },
+      declaration: declaration,
+      onNotReady: (recordId, error, stackTrace) => _recordFailure(
+        statuses,
+        failures,
+        recordId,
+        error,
+        stackTrace,
+        'Record $recordId was not persisted: its recovery failed, so nothing may write to it.',
+      ),
+    );
+    return WebRecordPersistenceResult(statuses, failures);
+  }
+
+  /// Files one record's outcome as a failure, with the cause kept and logged.
+  ///
+  /// Both ways a record can fail here -- its recovery threw, or its publication
+  /// threw -- end in the same two entries and the same log line, so they are
+  /// written once. A cause that only reached the `catch` is a cause nobody can
+  /// read afterwards.
+  static void _recordFailure(
+    Map<String, WebRecordPersistenceStatus> statuses,
+    Map<String, Object> failures,
+    String recordId,
+    Object error,
+    StackTrace stackTrace,
+    String message,
+  ) {
+    logger.e(message, error, stackTrace);
+    statuses[recordId] = WebRecordPersistenceStatus.failed;
+    failures[recordId] = error;
   }
 
   /// Runs the platform regeneration read/compute/publish sequence under one
@@ -135,7 +208,24 @@ final class WebRecordPersistence {
   /// (see `recordMutationLockAcquireTimeout`), so a starved reader surfaces a
   /// [RecordMutationLockBusy] instead of hanging forever.
   Future<bool> persistRecordUpdate(DirectoryPath storageDir, String recordId, PlatformRecordUpdateBuilder build) {
-    return _recoveryGate.runForRecord(storageDir, recordId, () async {
+    // **The longest read in this file, and the claim for it is taken a level up.**
+    // [build] runs the recognition worker inside this acquisition, bounded only by
+    // the worker's 120 s timeout, and the record's directory is rewritten at the
+    // end of it. What the user started is not this call, though: it is
+    // `CharaDetailRecordRegenerationController`'s batch, which spans a run of
+    // them and claims every `active/<id>` in it for the whole run
+    // ([LongReadKind.regeneration]).
+    //
+    // Claiming here as well would not add a window, it would subtract one:
+    // per-call claims come and go once per record, so a record the batch has not
+    // reached yet would be offered for deletion right up to the moment it was
+    // reached. It is also the only leg that *could* claim here — desktop hands
+    // the id to the native process and has no Dart frame around the work at all —
+    // so a claim written at this seam would exist on web and nowhere else.
+    const declaration = LongReadDeclaration.none(
+      reason: 'the regeneration batch above this call claims every record in it, for its whole length',
+    );
+    return _recoveryGate.runForRecord(storageDir, recordId, declaration: declaration, () async {
       final harvested = await build();
       if (harvested == null) return false;
       final harvestedList = harvested.toList(growable: false);
@@ -153,28 +243,6 @@ final class WebRecordPersistence {
       final (status, _) = await _publishRecordUnlocked(storageDir, recordId, payload);
       return status == WebRecordPersistenceStatus.completed || status == WebRecordPersistenceStatus.cleanupPending;
     });
-  }
-
-  Future<WebRecordPersistenceResult> _persistFilesUnlocked(
-    DirectoryPath storageDir,
-    Map<String, List<RecordPersistenceFile>> grouped,
-  ) async {
-    final statuses = <String, WebRecordPersistenceStatus>{};
-    final failures = <String, Object>{};
-    for (final entry in grouped.entries) {
-      try {
-        final (status, failure) = await _publishRecordUnlocked(storageDir, entry.key, entry.value);
-        statuses[entry.key] = status;
-        if (failure != null) failures[entry.key] = failure;
-      } catch (error, stackTrace) {
-        // The user has just captured or imported this record; losing the reason
-        // here leaves nothing anywhere to explain why it was not stored.
-        logger.e('Failed to persist record ${entry.key} to persistent storage.', error, stackTrace);
-        statuses[entry.key] = WebRecordPersistenceStatus.failed;
-        failures[entry.key] = error;
-      }
-    }
-    return WebRecordPersistenceResult(statuses, failures);
   }
 
   /// Publishes one record, returning its status and — when it did not commit —

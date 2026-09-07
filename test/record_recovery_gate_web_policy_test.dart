@@ -19,6 +19,7 @@ import 'package:umacapture/src/core/fs/record_store_unavailable.dart';
 import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
+import 'support/long_read_declarations.dart';
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
 
@@ -69,7 +70,7 @@ void main() {
     var read = 0;
     // Nothing about a pending cleanup makes the record unreadable, and refusing
     // it would strand the record for good.
-    await gate.runForRecord(storageRoot, id, () async => read++);
+    await gate.runForRecord(storageRoot, id, () async => read++, declaration: undeclaredInTest);
     expect(read, 1);
   });
 
@@ -87,7 +88,7 @@ void main() {
 
     final gate = createPlatformRecordRecoveryGate(mutationLock: passThroughLock);
     var read = 0;
-    await gate.runForRecord(storageRoot, id, () async => read++);
+    await gate.runForRecord(storageRoot, id, () async => read++, declaration: undeclaredInTest);
     expect(read, 1);
     expect(await (activeRoot / id).filePath('extra.bin').readAsBytes(), [1]);
   });
@@ -113,14 +114,20 @@ void main() {
 
     final gate = createPlatformRecordRecoveryGate(mutationLock: passThroughLock);
     var read = 0;
-    await gate.runForRecord(storageRoot, id, () async => read++);
+    await gate.runForRecord(storageRoot, id, () async => read++, declaration: undeclaredInTest);
     expect(read, 1);
     // Carried out of the transaction root, never destroyed: the sweep above
-    // moved it into `retired/` byte-for-byte, and `retired/` rather than
-    // `quarantine/` because it is not the user's record and the banner counts
-    // `quarantine/`'s children as records the app could not read.
+    // moved it into `quarantine/` byte-for-byte, and `quarantine/` rather than
+    // `retired/` because the name says only that another version minted it. What
+    // that version staged may be the only copy of a record it saved for the
+    // user, and `retired/`'s delete is offered on the basis that nothing on it
+    // is the only copy of anything.
     expect(await slot.exists(), isFalse);
-    expect(await (dataRoot / 'retired' / 'not-one-of-ours').filePath('manifest.json').readAsString(), foreignManifest);
+    expect(
+      await (dataRoot / 'quarantine' / 'not-one-of-ours').filePath('manifest.json').readAsString(),
+      foreignManifest,
+    );
+    expect(await (dataRoot / 'retired').exists(), isFalse);
     expect(await (activeRoot / id).filePath('record.json').exists(), isTrue);
   });
 
@@ -132,6 +139,7 @@ void main() {
 
     final (:results, :unavailable) = await loadRecordsUnder(
       activeRoot,
+      declaration: undeclaredInTest,
       mutationLock: passThroughLock,
       recoverRecordUnlocked: (_, id) async {
         if (id == 'bad') throw StateError('record $id is unrecoverable');
@@ -168,6 +176,7 @@ void main() {
 
     final (:results, :unavailable) = await loadRecordsUnder(
       activeRoot,
+      declaration: undeclaredInTest,
       mutationLock: busyLock,
       recoverRecordUnlocked: (_, _) async {},
       snapshotDirectories: (_) async => [good, busy],
@@ -191,6 +200,7 @@ void main() {
     await expectLater(
       loadRecordsUnder(
         activeRoot,
+        declaration: undeclaredInTest,
         mutationLock: passThroughLock,
         recoverRecordUnlocked: (_, _) async {},
         snapshotDirectories: (_) async => [one],
@@ -213,7 +223,12 @@ void main() {
     });
 
     await expectLater(
-      loadRecordsUnder(activeRoot, mutationLock: busyRootLock, recoverRecordUnlocked: (_, _) async {}),
+      loadRecordsUnder(
+        activeRoot,
+        declaration: undeclaredInTest,
+        mutationLock: busyRootLock,
+        recoverRecordUnlocked: (_, _) async {},
+      ),
       throwsA(
         isA<RecordStoreUnavailable>()
             .having((error) => error.transient, 'transient', isTrue)
@@ -228,11 +243,11 @@ void main() {
     // verdict the UI turns on must differ from the busy case above.
     final gate = RecordRecoveryGate(
       mutationLock: passThroughLock,
-      ensureRootReady: (_) async => throw StateError('whole-store migration cannot finish'),
+      ensureRootReady: (_, _) async => throw StateError('whole-store migration cannot finish'),
     );
 
     await expectLater(
-      loadRecordsUnder(activeRoot, recoveryGate: gate),
+      loadRecordsUnder(activeRoot, declaration: undeclaredInTest, recoveryGate: gate),
       throwsA(
         isA<RecordStoreUnavailable>()
             .having((error) => error.transient, 'transient', isFalse)
@@ -246,6 +261,7 @@ void main() {
 
     final (:results, :unavailable) = await loadRecordsUnder(
       activeRoot,
+      declaration: undeclaredInTest,
       mutationLock: passThroughLock,
       recoverRecordUnlocked: (_, _) async {},
       snapshotDirectories: (_) async => [one],
