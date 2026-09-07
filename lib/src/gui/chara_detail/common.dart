@@ -303,6 +303,18 @@ class ConfirmActionRow extends StatelessWidget {
   /// archive image option) has been made.
   final bool enabled;
 
+  /// Whether the cancel button accepts input.
+  ///
+  /// True everywhere by default: cancelling before the action starts is always
+  /// allowed, and this row's own doc says cancel always dismisses. It is set
+  /// false only for the window in which cancelling would no longer cancel
+  /// anything — once a destructive action has been confirmed and is running, the
+  /// work carries on regardless and dismissing merely removes the surface that
+  /// has to report the outcome. Kept apart from [enabled], which answers "may
+  /// this be started?" rather than "may this be left?": the two are false at
+  /// opposite moments, and one flag could not be both.
+  final bool cancelEnabled;
+
   const ConfirmActionRow({
     super.key,
     required this.dismissRef,
@@ -314,6 +326,7 @@ class ConfirmActionRow extends StatelessWidget {
     required this.destructive,
     required this.onConfirm,
     this.enabled = true,
+    this.cancelEnabled = true,
   });
 
   @override
@@ -327,7 +340,7 @@ class ConfirmActionRow extends StatelessWidget {
           child: OutlinedButton.icon(
             icon: const Icon(Symbols.cancel_rounded),
             label: Text(cancelLabel),
-            onPressed: () => CardDialog.dismiss(dismissRef),
+            onPressed: cancelEnabled ? () => CardDialog.dismiss(dismissRef) : null,
           ),
         ),
         const SizedBox(width: 8),
@@ -384,6 +397,16 @@ class BulkConfirmDialog extends StatelessWidget {
   /// a required choice has been made.
   final bool confirmEnabled;
 
+  /// Forwarded to [ConfirmActionRow.cancelEnabled] and
+  /// [CardDialog.closeButtonEnabled], which are the two exits this widget owns.
+  ///
+  /// One flag rather than two, because the pair is never usefully split: they are
+  /// shut together for the window in which leaving would no longer cancel
+  /// anything, and the caller that shuts them also has to freeze the barrier,
+  /// which it can only do through [DialogController.setBarrierDismissible]. True
+  /// by default, so every existing caller keeps the behaviour it had.
+  final bool leaveEnabled;
+
   const BulkConfirmDialog({
     super.key,
     required this.dismissRef,
@@ -401,6 +424,7 @@ class BulkConfirmDialog extends StatelessWidget {
     required this.destructive,
     required this.onConfirm,
     this.confirmEnabled = true,
+    this.leaveEnabled = true,
   });
 
   @override
@@ -411,6 +435,7 @@ class BulkConfirmDialog extends StatelessWidget {
       child: CardDialog(
         dialogTitle: dialogTitle,
         closeButtonTooltip: closeTooltip,
+        closeButtonEnabled: leaveEnabled,
         usePageView: false,
         content: Expanded(
           child: Padding(
@@ -436,6 +461,7 @@ class BulkConfirmDialog extends StatelessWidget {
           destructive: destructive,
           onConfirm: onConfirm,
           enabled: confirmEnabled,
+          cancelEnabled: leaveEnabled,
         ),
       ),
     );
