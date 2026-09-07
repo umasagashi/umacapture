@@ -201,6 +201,14 @@ class CodeHighlightColors extends ThemeExtension<CodeHighlightColors> {
       'subst': TextStyle(color: Color(0xFF001080)),
       'variable': TextStyle(color: Color(0xFF001080)),
       'params': TextStyle(color: Color(0xFF001080)),
+      // JSON's object-key class (highlight has no Dart equivalent). Deliberately
+      // the SAME value as 'variable'/'subst'/'params' above, not a new hue: VS
+      // Code's own Light+/Dark+ themes paint a JSON key in the same blue as a
+      // variable (the dark value below, #9CDCFE, matches Dark+ exactly), so this
+      // extends that theme's existing rule instead of inventing a JSON-specific
+      // color. It exists to read differently from 'string' (JSON values), which
+      // is the distinction that matters for a key/value preview.
+      'attr': TextStyle(color: Color(0xFF001080)),
     },
   );
 
@@ -222,6 +230,8 @@ class CodeHighlightColors extends ThemeExtension<CodeHighlightColors> {
       'subst': TextStyle(color: Color(0xFF9CDCFE)),
       'variable': TextStyle(color: Color(0xFF9CDCFE)),
       'params': TextStyle(color: Color(0xFF9CDCFE)),
+      // See the light-theme 'attr' entry above for why this reuses 'variable'.
+      'attr': TextStyle(color: Color(0xFF9CDCFE)),
     },
   );
 
