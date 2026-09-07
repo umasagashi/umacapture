@@ -18,12 +18,17 @@ Map<String, dynamic> manifestOf({required Map<String, dynamic> files, List<Strin
 }
 
 /// A pinned entry for content written by [writeWebFile].
+///
+/// An upstream entry carries a `linked_note`, because an upstream artifact that discloses
+/// neither linked components nor a reason is itself a failure -- see the `linked` group below.
+/// Every other test here is about something else, and would otherwise report two problems.
 Map<String, dynamic> pinnedEntry(String sha256, {String origin = "upstream"}) {
   return {
     "sha256": sha256,
     "bytes": pinnedContent.length,
     "origin": origin,
     "license": {"id": "MIT", "asset": "assets/license/example.txt"},
+    if (origin == "upstream") "linked_note": "Nothing to link: fixture.",
   };
 }
 
@@ -252,6 +257,72 @@ void main() {
       writeWebFile("vendor.mjs");
       final manifest = manifestOf(files: {"vendor.mjs": pinnedEntry(pinnedSha256)});
       expect(verifyWebLicenses(manifest), [contains("is not committed")]);
+    });
+
+    // EVERY CHECK ABOVE ASKS WHETHER A CLAIM IS SOUND; THIS ONE ASKS WHETHER ONE WAS MADE.
+    // Nothing used to: an upstream binary could name its own top-level license, say nothing
+    // about the projects statically linked into it, and pass -- which is how the ONNX Runtime
+    // backend shipped under MIT alone. The first two tests are a pair, and the second is what
+    // makes the first mean "a missing disclosure was detected" rather than "some field was
+    // required": an artifact that really contains nothing third-party has to stay expressible,
+    // and it is, by writing down why instead of by silence.
+    test("rejects an upstream artifact that discloses no third-party content at all", () {
+      final entry = pinnedEntry(pinnedSha256)..remove("linked_note");
+      expect(verifyWebLicenses(manifestOf(files: {"vendor.wasm": entry})), [contains("claims no third-party content")]);
+    });
+
+    test("accepts the same artifact once linked_note says why it has none", () {
+      expect(verifyWebLicenses(manifestOf(files: {"vendor.wasm": pinnedEntry(pinnedSha256)})), isEmpty);
+    });
+
+    test("accepts an upstream artifact that lists its linked components instead", () {
+      final entry = pinnedEntry(pinnedSha256)
+        ..remove("linked_note")
+        ..["linked"] = [
+          {
+            "name": "SomeLib",
+            "version": "1.0",
+            "license": {"id": "BSD-3-Clause", "asset": "assets/license/somelib.txt"},
+          },
+        ];
+      expect(verifyWebLicenses(manifestOf(files: {"vendor.wasm": entry})), isEmpty);
+    });
+
+    test("rejects an empty linked list as loudly as a missing one", () {
+      final entry = pinnedEntry(pinnedSha256)
+        ..remove("linked_note")
+        ..["linked"] = <dynamic>[];
+      expect(verifyWebLicenses(manifestOf(files: {"vendor.wasm": entry})), [contains("claims no third-party content")]);
+    });
+
+    test("rejects a blank linked_note, which discloses nothing", () {
+      final entry = pinnedEntry(pinnedSha256)..["linked_note"] = "   ";
+      expect(verifyWebLicenses(manifestOf(files: {"vendor.wasm": entry})), [contains("claims no third-party content")]);
+    });
+
+    // The manifest is checked whether or not the tree was provisioned: web/wasm/ is gitignored
+    // and absent in CI and in a Windows-only checkout, and a disclosure that only fails on the
+    // machine that happens to hold the bytes is not a gate. Note the file is never written here.
+    test("checks an absent upstream entry too, unlike the claim-level checks", () {
+      final entry = pinnedEntry(pinnedSha256)..remove("linked_note");
+      expect(verifyWebLicenses(manifestOf(files: {"wasm/absent.wasm": entry})), [
+        contains("claims no third-party content"),
+      ]);
+    });
+
+    // In-tree artifacts are this repository's own build; what is compiled into them is pinned by
+    // `build.sources`, so they are deliberately outside this check rather than accidentally so.
+    test("leaves in-tree artifacts to build.sources", () {
+      writeWebFile("core.wasm");
+      final manifest = manifestOf(
+        files: {
+          "core.wasm": {
+            ...pinnedEntry(pinnedSha256, origin: "in-tree"),
+            "license": {"id": "MIT", "asset": "LICENSE"},
+          },
+        },
+      );
+      expect(verifyWebLicenses(manifest), isEmpty);
     });
   });
 

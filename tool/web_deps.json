@@ -28,6 +28,16 @@
     "  upstream     -- url / package / version of the artifact the bytes come from. When the",
     "                  artifact is an archive, 'member' names the path inside it; without",
     "                  'member' the url is the file itself.",
+    "  linked       -- the third-party projects compiled or bundled INTO this artifact, each with",
+    "                  its own license block and an 'evidence' line saying how it was established.",
+    "                  A shipped file's own license covers the file, never what is inside it, so",
+    "                  this list is the disclosure for anything statically linked.",
+    "  linked_note  -- the escape for an 'origin: upstream' artifact that genuinely contains no",
+    "                  third-party code. Every upstream entry must carry one or the other: an",
+    "                  empty 'linked' used to be indistinguishable from a nobody-looked, and that",
+    "                  is exactly how the ONNX Runtime backend shipped disclosing only its own",
+    "                  MIT text. Say what was checked and what the check found, so the claim can",
+    "                  be disagreed with; do not invent a 'linked' entry to satisfy the rule.",
     "  license      -- SPDX-ish id plus 'asset', a repo-relative path to the committed text.",
     "                  Optional 'parent' marks the text as a *sub-notice* of an already",
     "                  disclosed package (e.g. fmt inside spdlog): the license page shows it",
@@ -119,6 +129,7 @@
         "id": "MIT",
         "asset": "assets/license/coi_serviceworker.txt"
       },
+      "linked_note": "Nothing to link: this is a single 4.7 kB hand-written service worker, shipped as its own source, and its only copyright banner is the author's.",
       "source_form": {
         "form": "npm-tarball",
         "url": "https://registry.npmjs.org/coi-serviceworker/-/coi-serviceworker-0.1.7.tgz",
@@ -141,6 +152,7 @@
         "id": "MIT",
         "asset": "assets/license/onnxruntime.txt"
       },
+      "linked_note": "Nothing to link: this is ONNX Runtime Web's own TypeScript, bundled and minified. It is the wasm-only bundle, so it excludes the WebGPU kernels -- the part of that source tree that carries third-party (TensorFlow.js derived) code under lib/wasm/jsep/webgpu/ops/3rd-party/. Checked in the shipped bytes: no 'tensorflow', 'tfjs', 'conv2d_mm' or '3rd-party' string occurs, and the only copyright banner is Microsoft's.",
       "source_form": {
         "form": "npm-tarball",
         "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
@@ -162,6 +174,14 @@
         "id": "MIT",
         "asset": "assets/license/onnxruntime.txt"
       },
+      "linked": [
+        {
+          "name": "Emscripten runtime (JS loader glue emitted by em++)",
+          "version": "as shipped in onnxruntime-web 1.27.0",
+          "license": {"id": "MIT OR NCSA", "asset": "assets/license/emscripten.txt"},
+          "evidence": "This file is em++-generated loader glue for ort-wasm-simd-threaded.wasm, minified by Closure: it carries no banner, but the emitted runtime is recognisable from 'em-pthread' (Emscripten's pthread worker name), 'HEAPU8' and the 'moduleArg' entry point. Only the glue is Emscripten's; the components linked into the .wasm are listed on that entry."
+        }
+      ],
       "source_form": {
         "form": "npm-tarball",
         "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
@@ -183,12 +203,24 @@
         "id": "MIT",
         "asset": "assets/license/onnxruntime.txt"
       },
+      "linked": [
+        {
+          "name": "ONNX Runtime bundled third-party components (reproduced as the publisher's notice set, not derived from this binary)",
+          "version": "as published with ONNX Runtime 1.27.0",
+          "license": {
+            "id": "Multiple (MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, BSL-1.0 and others; each stated in the notice text)",
+            "asset": "assets/license/onnxruntime_third_party.txt",
+            "parent": "onnxruntime"
+          },
+          "evidence": "The .wasm keeps the source paths of the ONNX Runtime build it came from, and they name the dependencies fetched into it: '_deps/protobuf-src/src/google/protobuf/parse_context.h', '_deps/abseil_cpp-src/absl/base/internal/spinlock.h', 'core/flatbuffers/flatbuffers_utils.cc', 'EigenNonBlockingThreadPool.h' and 'Eigen::ThreadPoolInterface', plus the mangled symbol 'N8nlohmann16json_abi_v3_11_36detail10type_errorE' and 'SafeIntExceptionHandler<onnxruntime::OnnxRuntimeException>'. That establishes the components are present, NOT that the notice set matches the binary: the text is the whole set ONNX Runtime publishes for the release (67 notices, covering builds this one is not -- CUDA, Android, react-native and more), reproduced as published rather than filtered, because deciding which sections a prebuilt binary really pulled in is a judgement the publisher makes and this repository cannot. Same reasoning, and same shape, as the OpenCV notices in lib/distribution_info.dart."
+        }
+      ],
       "source_form": {
         "form": "npm-tarball",
         "url": "https://registry.npmjs.org/onnxruntime-web/-/onnxruntime-web-1.27.0.tgz",
         "sha256": "b59c9819434a7519f334f77e8d4bf22b69808d531a57724cabc4bb2c0704c835",
         "git_url": "https://github.com/microsoft/onnxruntime/tree/v1.27.0/js/web",
-        "note": "This prebuilt .wasm statically links the ONNX Runtime C++ core and its own third-party dependencies. Its component licenses are the ones ONNX Runtime discloses for the v1.27.0 tag; only the top-level MIT text is reproduced here."
+        "note": "This prebuilt .wasm statically links the ONNX Runtime C++ core and its own third-party dependencies, which the 'linked' list above discloses. The onnxruntime-web npm tarball ships NO notice file of any kind -- no LICENSE, no ThirdPartyNotices -- so the text was taken from the Windows binary distribution of the same release (windows/onnxruntime/ThirdPartyNotices.txt, VERSION_NUMBER 1.27.0, GIT_COMMIT_ID 8f0278c77bf44b0cc83c098c6c722b92a36ac4b5). assets/license/onnxruntime.txt, the MIT text these entries already pointed at, came from that same distribution and is byte-identical to its LICENSE, so both texts have one provenance."
       }
     },
     "wasm/mediabunny/mediabunny.mjs": {
@@ -205,6 +237,7 @@
         "id": "MPL-2.0",
         "asset": "assets/license/mediabunny.txt"
       },
+      "linked_note": "Nothing to link: the bundle is mediabunny's own TypeScript with no bundled dependencies, and 'Copyright (c) 2026-present, Vanilagy and contributors' is the only copyright banner in the 1.37 MB of shipped bytes. It demuxes through the browser's own WebCodecs, so no codec is carried here.",
       "source_form": {
         "form": "npm-tarball",
         "url": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.52.3.tgz",
@@ -227,6 +260,7 @@
         "id": "MPL-2.0",
         "asset": "assets/license/mediabunny.txt"
       },
+      "linked_note": "Nothing to link: this entry is a license text, not code.",
       "source_form": {
         "form": "npm-tarball",
         "url": "https://registry.npmjs.org/mediabunny/-/mediabunny-1.52.3.tgz",
@@ -241,8 +275,8 @@
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
-        "git_commit": null,
-        "git_commit_note": "git_commit is null on purpose, not left blank by oversight: no commit reproduces these bytes on its own. This module was rebuilt 2026-08-28 against the UNCOMMITTED working tree of fix/test-harness-and-wasm-toolchain, to clear the build.sources.digest staleness that comment-only edits under native/src and native/wasm/build.sh (stale path citations corrected in prose) had introduced; the edits, these artifacts and this repin land together in one commit that did not exist when the build ran. Even once it exists it is internal to a branch that has never been pushed, so a squash or rebase merge into develop would orphan it -- which is exactly what the previous value, 9bca991b, already was, and it was additionally one commit older than the misc.h state it described. build.sources.digest is the durable identity here: it is content-addressed over native/src, native/vendor and native/wasm with line endings normalised, so it survives any history rewrite, and it is the field the checks actually compare (nothing reads git_commit). Name a commit here again only once one exists that reproduces these bytes by itself -- i.e. after this branch lands on develop. EVIDENCE OF AN ACTUAL REBUILD: build.sh recompiles unconditionally (no incremental skip), and this run compiled all 11 translation units and linked once in 130 s; the 11 obj/*.o mtimes and both outputs fall in a single window 00:47:05-00:48:48 on 2026-08-28, strictly after the invocation started. RESULT: both artifacts came out BYTE-IDENTICAL to the previous pin (umacapture_core.js sha256 57693fa4..., 125370 bytes; umacapture_core.wasm sha256 3befc2ce..., 3622922 bytes). That is the expected outcome, not a skipped build: every changed line under the digest roots is a comment, and the toolchain paths that bake into the module via __FILE__ did not move this time. So sha256 and bytes are unchanged and only build.sources.digest moved, 52a52a24... -> aac99172.... Toolchain unchanged at its C:/Projects/umacapture-wasm-toolchain defaults for EMSDK_DIR/OPENCV_DIR/BUILD_DIR.",
+        "git_commit": "4c7dad29",
+        "git_commit_note": "git_commit names 4c7dad29, a commit reachable from develop whose native/src, native/vendor and native/wasm are identical to the tree these bytes were built from -- verified with `git merge-base --is-ancestor 4c7dad29 develop` (exit 0) and an empty `git diff 4c7dad29 develop -- native/src native/vendor native/wasm`. This field was null for a while and the reason is worth keeping, because it is the condition under which it must go back to null: the module was rebuilt 2026-08-28 against the UNCOMMITTED working tree of fix/test-harness-and-wasm-toolchain, to clear the build.sources.digest staleness that comment-only edits under native/src and native/wasm/build.sh (stale path citations corrected in prose) had introduced, so at the moment of the repin no commit reproduced these bytes on its own. The value before that, 9bca991b, was orphaned by a squash merge and was additionally one commit older than the misc.h state it described. So: name a commit here only while one exists that reproduces these bytes by itself, and set this back to null the next time a rebuild runs against an uncommitted or unpushed tree. build.sources.digest remains the durable identity: it is content-addressed over native/src, native/vendor and native/wasm with line endings normalised, so it survives any history rewrite, and it is the field the checks actually compare (nothing reads git_commit). EVIDENCE OF AN ACTUAL REBUILD: build.sh recompiles unconditionally (no incremental skip), and this run compiled all 11 translation units and linked once in 130 s; the 11 obj/*.o mtimes and both outputs fall in a single window 00:47:05-00:48:48 on 2026-08-28, strictly after the invocation started. RESULT: both artifacts came out BYTE-IDENTICAL to the previous pin (umacapture_core.js sha256 57693fa4..., 125370 bytes; umacapture_core.wasm sha256 3befc2ce..., 3622922 bytes). That is the expected outcome, not a skipped build: every changed line under the digest roots is a comment, and the toolchain paths that bake into the module via __FILE__ did not move this time. So sha256 and bytes are unchanged and only build.sources.digest moved, 52a52a24... -> aac99172.... Toolchain unchanged at its C:/Projects/umacapture-wasm-toolchain defaults for EMSDK_DIR/OPENCV_DIR/BUILD_DIR.",
         "emscripten": "6.0.3",
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
@@ -274,8 +308,8 @@
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
-        "git_commit": null,
-        "git_commit_note": "git_commit is null on purpose, not left blank by oversight: no commit reproduces these bytes on its own. This module was rebuilt 2026-08-28 against the UNCOMMITTED working tree of fix/test-harness-and-wasm-toolchain, to clear the build.sources.digest staleness that comment-only edits under native/src and native/wasm/build.sh (stale path citations corrected in prose) had introduced; the edits, these artifacts and this repin land together in one commit that did not exist when the build ran. Even once it exists it is internal to a branch that has never been pushed, so a squash or rebase merge into develop would orphan it -- which is exactly what the previous value, 9bca991b, already was, and it was additionally one commit older than the misc.h state it described. build.sources.digest is the durable identity here: it is content-addressed over native/src, native/vendor and native/wasm with line endings normalised, so it survives any history rewrite, and it is the field the checks actually compare (nothing reads git_commit). Name a commit here again only once one exists that reproduces these bytes by itself -- i.e. after this branch lands on develop. EVIDENCE OF AN ACTUAL REBUILD: build.sh recompiles unconditionally (no incremental skip), and this run compiled all 11 translation units and linked once in 130 s; the 11 obj/*.o mtimes and both outputs fall in a single window 00:47:05-00:48:48 on 2026-08-28, strictly after the invocation started. RESULT: both artifacts came out BYTE-IDENTICAL to the previous pin (umacapture_core.js sha256 57693fa4..., 125370 bytes; umacapture_core.wasm sha256 3befc2ce..., 3622922 bytes). That is the expected outcome, not a skipped build: every changed line under the digest roots is a comment, and the toolchain paths that bake into the module via __FILE__ did not move this time. So sha256 and bytes are unchanged and only build.sources.digest moved, 52a52a24... -> aac99172.... Toolchain unchanged at its C:/Projects/umacapture-wasm-toolchain defaults for EMSDK_DIR/OPENCV_DIR/BUILD_DIR.",
+        "git_commit": "4c7dad29",
+        "git_commit_note": "git_commit names 4c7dad29, a commit reachable from develop whose native/src, native/vendor and native/wasm are identical to the tree these bytes were built from -- verified with `git merge-base --is-ancestor 4c7dad29 develop` (exit 0) and an empty `git diff 4c7dad29 develop -- native/src native/vendor native/wasm`. This field was null for a while and the reason is worth keeping, because it is the condition under which it must go back to null: the module was rebuilt 2026-08-28 against the UNCOMMITTED working tree of fix/test-harness-and-wasm-toolchain, to clear the build.sources.digest staleness that comment-only edits under native/src and native/wasm/build.sh (stale path citations corrected in prose) had introduced, so at the moment of the repin no commit reproduced these bytes on its own. The value before that, 9bca991b, was orphaned by a squash merge and was additionally one commit older than the misc.h state it described. So: name a commit here only while one exists that reproduces these bytes by itself, and set this back to null the next time a rebuild runs against an uncommitted or unpushed tree. build.sources.digest remains the durable identity: it is content-addressed over native/src, native/vendor and native/wasm with line endings normalised, so it survives any history rewrite, and it is the field the checks actually compare (nothing reads git_commit). EVIDENCE OF AN ACTUAL REBUILD: build.sh recompiles unconditionally (no incremental skip), and this run compiled all 11 translation units and linked once in 130 s; the 11 obj/*.o mtimes and both outputs fall in a single window 00:47:05-00:48:48 on 2026-08-28, strictly after the invocation started. RESULT: both artifacts came out BYTE-IDENTICAL to the previous pin (umacapture_core.js sha256 57693fa4..., 125370 bytes; umacapture_core.wasm sha256 3befc2ce..., 3622922 bytes). That is the expected outcome, not a skipped build: every changed line under the digest roots is a comment, and the toolchain paths that bake into the module via __FILE__ did not move this time. So sha256 and bytes are unchanged and only build.sources.digest moved, 52a52a24... -> aac99172.... Toolchain unchanged at its C:/Projects/umacapture-wasm-toolchain defaults for EMSDK_DIR/OPENCV_DIR/BUILD_DIR.",
         "emscripten": "6.0.3",
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",

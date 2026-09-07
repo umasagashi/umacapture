@@ -425,7 +425,8 @@ bool hasCompleteSourceForm(Map<String, dynamic>? sourceForm) {
 /// Covers everything the *disclosure* depends on, as opposed to the bytes: a present file
 /// with nothing to disclose, a present file the manifest itself says is misplaced, a
 /// third-party file waved through as covered by this repository's own license -- whether it is
-/// shipped as itself or statically linked into something that is -- a referenced text that is not
+/// shipped as itself or statically linked into something that is -- an upstream artifact that
+/// discloses no third-party content and does not say why, a referenced text that is not
 /// committed, one text claimed under two ids, and an MPL text without the source form section 3.2
 /// requires.
 List<String> verifyWebLicenses(Map<String, dynamic> manifest) {
@@ -463,6 +464,41 @@ List<String> verifyWebLicenses(Map<String, dynamic> manifest) {
         "$licenseAssetDirectory; third-party bytes cannot be covered by this repository's own license",
       );
     }
+  }
+
+  // Everything above asks whether a claim that WAS made is sound. This asks whether one was
+  // made at all, which nothing did: an upstream artifact naming its own top-level license and
+  // stopping there passed every check while the third-party code compiled into it went
+  // undisclosed. That is not hypothetical -- it is how the ONNX Runtime backend shipped with
+  // MIT and nothing else, and no check could tell that apart from an artifact that genuinely
+  // contains no third-party code.
+  //
+  // Which is why an empty list is not the failure: "there is nothing to link" is a real state,
+  // and the escape is to say so in `linked_note` rather than to invent an entry. That turns
+  // silence into a written claim someone can disagree with, and keeps the reviewer's question
+  // ("did anyone look?") answerable from the manifest.
+  //
+  // Reads `files` rather than the present ones on purpose: this is a property of the manifest,
+  // not of the disk, so it has to hold in CI and in a Windows-only checkout, where nothing
+  // under `provisioned_root` exists at all and the claim loop below sees none of these entries.
+  // `origin: in-tree` is out of scope here -- those artifacts are this repository's own build
+  // and their third-party content is the build's inputs, which `build.sources` already pins.
+  for (final entry in files.entries) {
+    final value = (entry.value as Map).cast<String, dynamic>();
+    if (value["origin"] != "upstream") {
+      continue;
+    }
+    if ((value["linked"] as List? ?? const <dynamic>[]).isNotEmpty) {
+      continue;
+    }
+    if ((value["linked_note"] as String? ?? "").trim().isNotEmpty) {
+      continue;
+    }
+    problems.add(
+      "web/${entry.key} is origin 'upstream' but claims no third-party content: it has no "
+      "'linked' entries and no 'linked_note' in $webDepsManifest saying why it has none. An "
+      "upstream artifact that bundles or statically links other projects must disclose them",
+    );
   }
 
   final claimedIds = <String, String>{};

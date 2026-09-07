@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as path;
 import 'package:umacapture/distribution_info.dart';
 import 'package:umacapture/main.dart';
 
@@ -108,6 +110,66 @@ void main() {
     });
   });
 
+  group("the disclaimers about the DLL's recorded build information", () {
+    // Several lines make a checkable factual claim about a file this repository redistributes:
+    // that the DLL's own recorded build information does not name the component. Read that
+    // information back out of the binary instead of taking the claim's word for it -- flatbuffers
+    // carried this wording while `Flatbuffers: builtin/3rdparty (25.9.23)` sat in the block.
+    //
+    // Which entries make the claim is decided by the phrase in the committed artifact, never by a
+    // list of package names here: the next component to be moved off the claim must not need this
+    // test edited to stay honest.
+    const claim = "recorded build information does not name it";
+
+    late File dll;
+    late String? buildInformation;
+
+    setUpAll(() {
+      dll = File(openCvReleaseDllPath(File(DistributionInfoBuilder.windowsRunnerCMakeLists).readAsStringSync()));
+      buildInformation = dll.existsSync() ? openCvBuildInformation(dll.readAsBytesSync()) : null;
+    });
+
+    test("reads the build information out of the shipped DLL", () {
+      // Positive control for the two assertions below, both of which a scan that finds nothing
+      // would pass trivially. The DLL is gitignored and provisioned by tool/fetch_deps.py, so on
+      // a machine that has not provisioned it this skips rather than failing.
+      if (!dll.existsSync()) {
+        markTestSkipped("${dll.path} is not provisioned on this machine");
+        return;
+      }
+      expect(buildInformation, isNotNull, reason: "${dll.path} carries no OpenCV build information block");
+      expect(buildInformation, contains("Other third-party libraries:"));
+    });
+
+    test("names no component whose line says it is not named there", () {
+      final information = buildInformation;
+      if (information == null) {
+        markTestSkipped("${dll.path} is not provisioned on this machine");
+        return;
+      }
+      final disclaiming = <String>[];
+      final rest = <String>[];
+      for (final entry in nativeEntries) {
+        final package = entry["package"] as String;
+        final lines = (entry["components"] as List).cast<String>();
+        (lines.any((line) => line.contains(claim)) ? disclaiming : rest).add(package);
+      }
+      expect(disclaiming, isNotEmpty, reason: "nothing makes the claim this test checks");
+      // Positive control for the matcher: it has to be able to find a name that is in there.
+      expect(rest.where((package) => namedInBuildInformation(information, package)), isNotEmpty);
+      for (final package in disclaiming) {
+        expect(
+          namedInBuildInformation(information, package),
+          isFalse,
+          reason:
+              "$package says ${dll.path}'s build information does not name it, but that "
+              "information names it; rewrite the line in lib/distribution_info.dart to say what "
+              "is recorded, then re-run 'dart run build_runner build --force-jit'",
+        );
+      }
+    });
+  });
+
   group("platform selection", () {
     List<Map<String, dynamic>> select(String platform) =>
         platformDisclosures(nativeEntries: nativeEntries, webEntries: webEntries, platform: platform);
@@ -149,4 +211,65 @@ void main() {
       }
     });
   });
+}
+
+/// The OpenCV release DLL, resolved out of `windows/runner/CMakeLists.txt`.
+///
+/// Spelling the path here would make a version, architecture or toolset bump turn this guard into
+/// a silent skip -- the file would simply no longer be there. Those three live in that CMakeLists
+/// as variables, so the path is rebuilt from them; if the variable disappears the caller fails
+/// rather than skipping.
+String openCvReleaseDllPath(String cmakeLists) {
+  final variables = <String, String>{
+    "CMAKE_CURRENT_LIST_DIR": path.dirname(DistributionInfoBuilder.windowsRunnerCMakeLists),
+  };
+  for (final match in RegExp(r'^\s*set\(\s*(\w+)\s+"([^"]*)"\s*\)', multiLine: true).allMatches(cmakeLists)) {
+    variables[match.group(1)!] = match.group(2)!;
+  }
+  final template = variables["OpenCV_RELEASE_DLL"];
+  expect(template, isNotNull, reason: "windows/runner/CMakeLists.txt no longer sets OpenCV_RELEASE_DLL");
+  var resolved = template!;
+  final reference = RegExp(r'\$\{(\w+)\}');
+  // Bounded rather than "until nothing changes": a CMakeLists that referred a variable to itself
+  // would otherwise hang the suite instead of failing it.
+  for (var round = 0; round < 8 && reference.hasMatch(resolved); round++) {
+    resolved = resolved.replaceAllMapped(reference, (m) => variables[m.group(1)!] ?? m.group(0)!);
+  }
+  expect(resolved, isNot(contains(r'${')), reason: "unresolved CMake variable in $resolved");
+  return path.normalize(resolved);
+}
+
+/// The `General configuration for OpenCV` block OpenCV compiles into its own binary, or null when
+/// the bytes carry none. It is a NUL-terminated C string, so the terminator bounds it.
+String? openCvBuildInformation(Uint8List bytes) {
+  final marker = latin1.encode("General configuration for OpenCV");
+  final start = _indexOfBytes(bytes, marker);
+  if (start < 0) {
+    return null;
+  }
+  var end = start;
+  while (end < bytes.length && bytes[end] != 0) {
+    end++;
+  }
+  return latin1.decode(bytes.sublist(start, end));
+}
+
+/// Whether [information] names [component] as a word.
+///
+/// Word-bounded on purpose: `ade` occurs inside the block's own `Shaders:` line, and a substring
+/// test would report every disclaimer about it as a violation.
+bool namedInBuildInformation(String information, String component) =>
+    RegExp("(?<![A-Za-z0-9])${RegExp.escape(component)}(?![A-Za-z0-9])", caseSensitive: false).hasMatch(information);
+
+int _indexOfBytes(Uint8List haystack, List<int> needle) {
+  outer:
+  for (var i = 0; i + needle.length <= haystack.length; i++) {
+    for (var j = 0; j < needle.length; j++) {
+      if (haystack[i + j] != needle[j]) {
+        continue outer;
+      }
+    }
+    return i;
+  }
+  return -1;
 }

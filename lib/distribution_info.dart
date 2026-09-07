@@ -81,13 +81,46 @@ class DistributionInfoBuilder implements Builder {
   /// License texts refreshed from a provisioned dependency under a name of our own.
   ///
   /// [nativePackageDirectories] takes one `LICENSE*` per directory, and the OpenCV Windows
-  /// distribution carries a second one: `LICENSE_FFMPEG.txt`, the LGPL-2.1 terms of the
-  /// prebuilt FFmpeg the videoio plugin DLL is built from. That DLL is shipped
-  /// (`windows/runner/CMakeLists.txt` copies it next to the executable), so its terms have to
-  /// be disclosed under a package of their own rather than folded into OpenCV's Apache-2.0.
+  /// distribution carries many more: `LICENSE_FFMPEG.txt`, the LGPL-2.1 terms of the prebuilt
+  /// FFmpeg the videoio plugin DLL is built from, and the whole third-party notice set under
+  /// `build/etc/licenses/` that its publisher attached to `opencv_world*.dll`. Those DLLs are
+  /// shipped (`windows/runner/CMakeLists.txt` copies them next to the executable), so their
+  /// terms have to be disclosed under packages of their own rather than folded into OpenCV's
+  /// Apache-2.0.
+  ///
+  /// The source path is recorded here rather than the copy being made once by hand, so an
+  /// OpenCV bump that reworded a notice shows up as a diff in the committed text instead of
+  /// leaving this repository shipping the previous version's terms. Both source directories
+  /// are pruned by `tool/fetch_deps.py --slim` (what CI provisions with), which is why
+  /// [_refreshLicenseText] treats an absent source with a committed target as normal.
+  ///
+  /// Not listed here: `assets/license/intel_ipp.txt`, whose upstream form is a Word RTF
+  /// document that cannot be copied verbatim into a plain-text licence page --
+  /// see [_openCvBundledComponents].
   static const Map<String, String> extraNativeLicenseTexts = {
     "assets/license/ffmpeg.txt": "windows/opencv/LICENSE_FFMPEG.txt",
+    // ONNX Runtime publishes one aggregate notice file next to its LICENSE; [_getLicenseFile]
+    // matches `LICENSE*` and so can never pick it up. See [_desktopDisclosures] for what the
+    // set is and why it is reproduced whole.
+    "assets/license/onnxruntime_third_party.txt": "windows/onnxruntime/ThirdPartyNotices.txt",
+    "assets/license/libtiff.txt": "$_openCvLicenses/libtiff-LICENSE.md",
+    "assets/license/libopenjp2.txt": "$_openCvLicenses/libopenjp2-LICENSE",
+    "assets/license/openexr.txt": "$_openCvLicenses/openexr-LICENSE",
+    "assets/license/protobuf.txt": "$_openCvLicenses/protobuf-LICENSE",
+    // The BSD-3-Clause half of ittnotify's dual licensing; see [_openCvBundledComponents].
+    "assets/license/ittnotify.txt": "$_openCvLicenses/ittnotify-BSD-3-Clause.txt",
+    "assets/license/opencl_headers.txt": "$_openCvLicenses/opencl-headers-LICENSE.txt",
+    // The one component whose text the licences directory omits; it lives with the sources.
+    "assets/license/libwebp.txt": "windows/opencv/sources/3rdparty/libwebp/COPYING",
+    "assets/license/ade.txt": "$_openCvLicenses/ade-LICENSE",
+    "assets/license/dlpack.txt": "$_openCvLicenses/dlpack-LICENSE",
+    "assets/license/flatbuffers.txt": "$_openCvLicenses/flatbuffers-LICENSE.txt",
+    "assets/license/mscr.txt": "$_openCvLicenses/mscr-chi_table_LICENSE.txt",
+    "assets/license/vasot.txt": "$_openCvLicenses/vasot-LICENSE.txt",
   };
+
+  /// Where the prebuilt OpenCV Windows distribution keeps the notices of what it bundles.
+  static const String _openCvLicenses = "windows/opencv/build/etc/licenses";
 
   /// Where the Windows build declares the DLLs it places next to `umacapture.exe`.
   ///
@@ -166,7 +199,10 @@ class DistributionInfoBuilder implements Builder {
           "Every file the Windows build redistributes (parsed from $windowsRunnerCMakeLists) is "
           "claimed by an entry below. The components listed as 'statically linked into' a file "
           "are read from that file's own recorded build information; they are not derived from "
-          "its code. Operating-system redistributables copied out of ${bundled.systemDirectory} "
+          "its code. A prebuilt binary's publisher may also ship notices for components its "
+          "build information does not name: those are reproduced as published, and each says "
+          "so in its own line rather than claiming a link. Operating-system redistributables "
+          "copied out of ${bundled.systemDirectory} "
           "are covered by their own redistribution terms and are not listed.",
       "entries": [for (final disclosure in disclosures) disclosure.toJson()],
     });
@@ -271,6 +307,35 @@ class DistributionInfoBuilder implements Builder {
               "OpenCV 4.13.0 -- statically linked into $openCv",
         ],
       ),
+      ..._openCvBundledComponents(openCv),
+      // The other prebuilt binary whose contents the DLL-level gate cannot see. ONNX Runtime
+      // ships one aggregate `ThirdPartyNotices.txt` beside its MIT `LICENSE`, and
+      // [_getLicenseFile] takes a single `LICENSE*` per directory, so it could never arrive
+      // through the `onnxruntime` entry above.
+      //
+      // Reproduced whole, exactly as published. That set is the release's, not this binary's: it
+      // carries 67 notices and covers builds this one is not (CUDA, Android, react-native), while
+      // the DLL's own strings corroborate only some of them. Filtering it would mean deciding on
+      // the publisher's behalf which of its own bundled sources its build pulled in -- the same
+      // judgement [_openCvBundledComponents] declines to make -- so the line below claims the
+      // publication, not a link.
+      //
+      // Windows-only, like every other entry here, and for the usual reason: web reaches ONNX
+      // Runtime through `web/wasm/ort/ort-wasm-simd-threaded.wasm`, which
+      // `assets/web_license_info.json` discloses from `tool/web_deps.json` with its own
+      // provenance. The same notice text is disclosed on both platforms; only the mechanism that
+      // gets it there differs.
+      _Disclosure(
+        package: "onnxruntime",
+        asset: "assets/license/onnxruntime_third_party.txt",
+        platforms: windowsOnly,
+        subNoticeOf: "onnxruntime",
+        components: [
+          "ONNX Runtime bundled third-party components -- the third-party notices ONNX Runtime "
+              "1.27.0 publishes with $onnxRuntime. Which of them this build links is not something "
+              "this repository can state, so the set is reproduced as published",
+        ],
+      ),
       _Disclosure(
         package: "spdlog",
         asset: "assets/license/fmt.txt",
@@ -281,6 +346,110 @@ class DistributionInfoBuilder implements Builder {
               "together with spdlog",
         ],
       ),
+    ];
+  }
+
+  /// The third-party components the prebuilt OpenCV Windows distribution bundles into [openCv].
+  ///
+  /// OpenCV's own Apache-2.0 text reproduces none of these notices, and [_getLicenseFile] takes a
+  /// single `LICENSE*` per directory, so they cannot arrive through the `windows/opencv` entry.
+  ///
+  /// **What this set is:** the third-party notice set the publisher of that binary attached to
+  /// it -- `build/etc/licenses/` in the OpenCV Windows distribution, plus libwebp's `COPYING`,
+  /// which that directory omits. It is reproduced as published rather than re-derived from the
+  /// binary. Every line states which of two footings it stands on, so the split is read off the
+  /// lines themselves and is deliberately not restated here as a tally: a component the DLL's
+  /// own recorded build information corroborates says what that information records about it,
+  /// and one it does not name says exactly that instead of claiming a link. The unnamed ones are
+  /// still disclosed, because what this repository redistributes is that upstream binary
+  /// together with the notices shipped with it, and dropping them would mean deciding on the
+  /// publisher's behalf which of its own bundled sources its build really pulled in.
+  ///
+  /// `test/licence_disclosure_windows_test.dart` holds that split to the binary: it re-reads the
+  /// build information out of the shipped DLL and fails if a line that disclaims being named
+  /// there is named there after all.
+  ///
+  /// That is a different question from the over-disclosure `lib/main.dart` warns about, which
+  /// is about a build advertising components a *different platform* carries. Every entry here
+  /// is Windows-only: the web build reaches OpenCV through `web/wasm/umacapture_core.wasm`,
+  /// which `tool/web_deps.json` records as `core`, `imgproc` and `imgcodecs` only, and that
+  /// carries none of them.
+  List<_Disclosure> _openCvBundledComponents(String openCv) {
+    _Disclosure entry(String name, String component, {String? extraNotice, String? subNoticeOf}) => _Disclosure(
+      package: name,
+      asset: "assets/license/$name.txt",
+      platforms: const ["windows"],
+      subNoticeOf: subNoticeOf,
+      components: [component],
+      extraNotice: extraNotice,
+    );
+    // Named by the DLL's own recorded build information, the same source the zlib / libpng /
+    // libjpeg-turbo lines above are read from.
+    String linked(String component) => "$component -- statically linked into $openCv";
+    // Published with the DLL but absent from that build information. The line says so instead
+    // of claiming a link this repository cannot attest to, and these entries carry no
+    // `subNoticeOf`: that field renders "bundled inside opencv", which is the very claim the
+    // line declines to make.
+    String publishedWith(String component) =>
+        "$component -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows "
+        "distribution publishes with $openCv. That DLL's own recorded build information does "
+        "not name it, so whether this build links it is not something this repository can state";
+    return [
+      entry("libtiff", linked("libtiff 4.7.1"), subNoticeOf: "opencv"),
+      entry("libopenjp2", linked("OpenJPEG (libopenjp2) 2.5.3"), subNoticeOf: "opencv"),
+      entry("openexr", linked("OpenEXR and IlmBase 2.3.0"), subNoticeOf: "opencv"),
+      entry("protobuf", linked("Protocol Buffers 3.19.1"), subNoticeOf: "opencv"),
+      entry("libwebp", linked("libwebp (decoder 0x0210)"), subNoticeOf: "opencv"),
+      entry(
+        "ittnotify",
+        linked("Intel Instrumentation and Tracing Technology (ittnotify) 3.25.4"),
+        subNoticeOf: "opencv",
+        extraNotice:
+            "ittnotify is offered under a choice of two licenses, BSD-3-Clause or GPL-2.0-only, "
+            "and the distribution ships both texts without stating a choice. This distribution "
+            "takes the BSD-3-Clause option: the text below is that option in full, and none of "
+            "the GPL-2.0-only terms are taken up here.",
+      ),
+      entry(
+        "intel_ipp",
+        linked(
+          "Intel Integrated Performance Primitives 2022.2.0 and Intel IPP Integration Wrappers "
+          "2022.2.0 (ippicv and ippiw)",
+        ),
+        subNoticeOf: "opencv",
+        extraNotice:
+            "Both components are covered by one text, the Intel Simplified Software License. The "
+            "distribution ships it twice, as ippicv-EULA.rtf and ippiw-EULA.rtf, and the two "
+            "files are byte-identical (SHA-256 "
+            "37f11c79f36fb5e1b00aca31c1234a7435c2929d83e181ee802a349ca8571749), so it is "
+            "disclosed once under both names. That upstream text is an RTF document and this "
+            "page renders plain text only, so it is reproduced below with the RTF markup removed "
+            "and no other change.",
+      ),
+      entry(
+        "opencl_headers",
+        "OpenCL headers (Khronos) -- the OpenCL support recorded in $openCv's build information "
+            "is compiled against them. Headers contribute no object code, so no Khronos code is "
+            "redistributed; the notice is reproduced because the distribution publishes it with the "
+            "binary",
+        subNoticeOf: "opencv",
+      ),
+      // Named by that build information like the `linked` lines above, but header-only like
+      // `opencl_headers` -- and, unlike opencl_headers, its headers do reach the binary as code:
+      // the DLL exports OpenCV's TFLite importer, which instantiates them. So it can claim
+      // neither "statically linked into" nor "contribute no object code", and says both halves.
+      entry(
+        "flatbuffers",
+        "FlatBuffers 25.9.23 -- $openCv's build information records it as `builtin/3rdparty`, the "
+            "copy bundled with that distribution's own sources. Those sources are headers only, so "
+            "nothing links it as a library; the templates they define are compiled into the TFLite "
+            "importer the DLL carries",
+        subNoticeOf: "opencv",
+      ),
+      entry("ade", publishedWith("ade")),
+      entry("dlpack", publishedWith("DLPack")),
+      entry("mscr", publishedWith("MSCR chi_table (Per-Erik Forssen)")),
+      entry("vasot", publishedWith("vasot")),
     ];
   }
 
@@ -501,7 +670,7 @@ class _Disclosure {
   /// Package this text is a sub-notice of, or `null` when it stands alone.
   final String? subNoticeOf;
 
-  /// Terms this license imposes beyond reproducing its text.
+  /// Terms this license imposes, or provenance this entry has to state, beyond its text.
   final String? extraNotice;
 
   String get _notice {
