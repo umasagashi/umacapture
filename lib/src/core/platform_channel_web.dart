@@ -44,7 +44,7 @@ const List<String> _trackSettingKeys = [
 /// (`platform_channel_io.dart`) version but backed by a [WasmWorkerClient]
 /// instead of a Flutter `MethodChannel`.
 ///
-/// The instance `Dart -> native` methods are mapped onto the worker (design §1.2), all of
+/// The instance `Dart -> native` methods are mapped onto the worker, all of
 /// them and no count of them — see `platform_channel.dart` for why the number is not stated:
 /// `setConfig` rewrites the config for web and starts the worker pipeline; the
 /// worker's drained pipeline notifications are relayed 1:1 into [callbackMethod]

@@ -82,8 +82,7 @@ typedef LiveRecordSink =
 /// thread (it needs `SharedArrayBuffer` + blocking `Atomics`, which are illegal
 /// on the main thread).
 ///
-/// This client owns the worker lifecycle and the message protocol
-/// (design `testdata/evidence/wasm_poc6/design.md` §2.2). The web
+/// This client owns the worker lifecycle and the message protocol. The web
 /// `PlatformChannel` (`platform_channel_web.dart`) sits on top and maps the
 /// instance `Dart -> native` methods onto it, relaying the worker's drained
 /// pipeline notifications back into the shared `PlatformController.handleNativeMessage`.
@@ -97,7 +96,7 @@ typedef LiveRecordSink =
 /// no-op (design course-correction, Stage-4 review point). One carrying a *different*
 /// module set is not: see [init].
 ///
-/// Lifecycle (design §2.7 Option A): `init` performs only the one-time setup (core
+/// Lifecycle: `init` performs only the one-time setup (core
 /// instantiation, ORT sessions, inference bridge) and does **not** start the
 /// pipeline event loop. Each capture session is one event loop: [startLive]
 /// (re-)starts it and [stopLive] joins it (flush + harvest + teardown). The next
@@ -594,7 +593,7 @@ class WasmWorkerClient {
   /// recognizer [ortModels] and [moduleFiles].
   ///
   /// The core is instantiated and the ORT sessions created here, then reused for
-  /// every session (design §2.7 Option A); the pipeline event loop is **not**
+  /// every session; the pipeline event loop is **not**
   /// started -- that happens per-session in [startLive]. Resolves when the worker
   /// reports `ready`.
   ///
@@ -944,7 +943,7 @@ class WasmWorkerClient {
     });
   }
 
-  /// Begins a live-capture session in the worker (design §4.3 / §Q7): (re-)starts
+  /// Begins a live-capture session in the worker: (re-)starts
   /// the pipeline event loop and resolves when the worker acknowledges with
   /// `liveStarted`. After this resolves, a Stage-2 frame source feeds RGBA frames
   /// via [startLiveFromTrack]; end the session with [stopLive] to flush + harvest.
@@ -1242,8 +1241,8 @@ class WasmWorkerClient {
   ///
   /// The element is created once per page load and reused by every later session
   /// (only its `srcObject` changes): Firefox was observed to degrade when `<video>`
-  /// elements and track clones are churned within one page load (design comparison
-  /// §2.4, review D10), and reuse also makes "no accumulation across sessions"
+  /// elements and track clones are churned within one page load (measured while
+  /// comparing browsers), and reuse also makes "no accumulation across sessions"
   /// trivially true rather than something disposal has to get right every time.
   Future<void> _attachLiveVideoSink(web.MediaStreamTrack videoTrack, int token) async {
     _liveFrameSupplyErrors = 0;

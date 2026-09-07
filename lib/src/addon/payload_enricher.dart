@@ -119,8 +119,9 @@ void _addModulePlaceholders(RefBase ref, PayloadMap p) {
   p["modules_dir"] = modulesDir.path;
 }
 
-/// Runs [f], returning null instead of throwing — used to treat a not-yet-loaded
-/// sync provider (which throws on `.value!`) as "placeholder unavailable".
+/// Runs [f], returning null instead of throwing — used to treat a sync provider
+/// that has not resolved yet (which throws rather than answering) as
+/// "placeholder unavailable".
 T? _safe<T>(T Function() f) {
   try {
     return f();

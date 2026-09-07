@@ -10,8 +10,10 @@
 /// The three operations **throw [UnsupportedError]** rather than returning something empty. There is
 /// no empty value that is not a lie: a timeline has to state a size and a grab has to name a file
 /// that exists, and inventing either would send the developer a report about pixels nobody ever
-/// decoded. [UnsupportedError] and not [UnimplementedError], which is what the web leg throws while
-/// it is being written: this leg is not unfinished, it is a front end that has no such capability.
+/// decoded. [UnsupportedError] and not [UnimplementedError], because the two say different things
+/// and only one of them is true here: this leg is not unfinished, it is a front end that has no
+/// such capability. Neither of the other two legs throws [UnimplementedError] for this — both are
+/// finished and answer for real — so nothing in the tree offers the other reading.
 library;
 
 import 'package:flutter/foundation.dart';
