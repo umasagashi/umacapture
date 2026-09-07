@@ -43,8 +43,16 @@ make_repo() {
   git -C "$dir" add lib/seed.dart
   git -C "$dir" commit -q -m seed
   # Stands in for .fvm/flutter_sdk/bin/dart: accepts `run tool/check_web_pins.dart`
-  # and `format`, and reports success for both.
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/bin/dart-stub"
+  # and `format`, and reports success for both. It also appends its own argument
+  # list to dart-calls.log (relative to $dir, which run_hook cd's into) so a case
+  # can assert that a given path was actually handed to `dart format`, not just
+  # that the hook's overall exit code was some particular value. This does not
+  # change the stub's exit-0 behaviour, so it has no effect on any existing case.
+  cat > "$dir/bin/dart-stub" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> dart-calls.log
+exit 0
+STUB
   chmod +x "$dir/bin/dart-stub"
   cp "$hook" "$dir/bin/pre-commit"
   echo "$dir"
@@ -166,6 +174,133 @@ printf 'not an index\n' > "$d/broken-index"
 out="$(cd "$d" && GIT_INDEX_FILE="$d/broken-index" DART="$d/bin/dart-stub" bash "$d/bin/pre-commit" 2>&1)"
 st=$?
 check "an unreadable index refuses the commit" 1 "$st" "$out"
+rm -rf "$d"
+
+# --- 9. every spelling .claude/CLAUDE.md's `## Colors` section names -----------
+#        One case per spelling, driven off a table, because the gate's own history
+#        is that a hand-picked subset looks complete: the rule named `Colors.*` and
+#        `Color(0x…)` only, and `Color.fromARGB` went through both the rule and
+#        this hook. `Color(4278190080)` did the same a second time -- the pattern
+#        said `Color\(0`, and a decimal ARGB does not start with a zero.
+#
+#        A spelling added to the convention must gain a row here. The row is the
+#        cheap part; noticing it is missing is not, so keep the two lists ordered
+#        the same way the convention lists them.
+#        The row counter is not decoration. A `while read` over an emptied table
+#        runs zero times and the suite still ends "all N checks passed" -- a check
+#        that passes on no input is the same failure this file was written about.
+rejected_rows=0
+while IFS='|' read -r label sample; do
+  [ -z "$label" ] && continue
+  d="$(make_repo)"
+  printf '%s\n' "$sample" > "$d/lib/bad.dart"
+  git -C "$d" add lib/bad.dart
+  out="$(run_hook "$d")"; st=$?
+  check "rejected: $label" 1 "$st" "$out"
+  rejected_rows=$((rejected_rows + 1))
+  rm -rf "$d"
+done <<'SPELLINGS'
+Colors.<swatch>|const c = Colors.red;
+Color(0x…)|const c = Color(0xFF112233);
+Color(0X…)|const c = Color(0XFF112233);
+Color(<decimal ARGB>)|const c = Color(4278190080);
+Color(<spaced literal>)|const c = Color( 0xFF112233 );
+Color.fromARGB|const c = Color.fromARGB(255, 1, 2, 3);
+Color.fromRGBO|const c = Color.fromRGBO(1, 2, 3, 1.0);
+Color.from|const c = Color.from(alpha: 1, red: 0, green: 0, blue: 0);
+HSLColor.fromAHSL|final c = HSLColor.fromAHSL(1, 0, 0, 0).toColor();
+HSVColor.fromAHSV|final c = HSVColor.fromAHSV(1, 0, 0, 0).toColor();
+Colors.transparent + alpha|const c = Colors.transparent.withValues(alpha: 1);
+SPELLINGS
+check "the rejected-spelling table was not empty" 11 "$rejected_rows" ""
+
+# --- 10. and the negative side: things that must NOT be refused ----------------
+#         A gate that rejects everything passes case 9 in full. These are the rows
+#         that keep it honest -- identifiers that merely contain the word, and the
+#         constructors that take colours rather than digits.
+allowed_rows=0
+while IFS='|' read -r label sample; do
+  [ -z "$label" ] && continue
+  d="$(make_repo)"
+  printf '%s\n' "$sample" > "$d/lib/fine.dart"
+  git -C "$d" add lib/fine.dart
+  out="$(run_hook "$d")"; st=$?
+  check "accepted: $label" 0 "$st" "$out"
+  allowed_rows=$((allowed_rows + 1))
+  rm -rf "$d"
+done <<'ALLOWED'
+Colors.transparent|const c = Colors.transparent;
+two of them on a line|const l = [Colors.transparent, Colors.transparent];
+ColoredBox|const w = ColoredBox(color: x);
+AppSemanticColors|final c = AppSemanticColors.of(context).ok;
+Color over a variable|final c = Color(myValue);
+Color.lerp|final c = Color.lerp(a, b, 0.5);
+theme role with alpha|final c = scheme.scrim.withValues(alpha: 0.3);
+ALLOWED
+check "the accepted-spelling table was not empty" 7 "$allowed_rows" ""
+
+# --- 11. added lines only: an untouched literal stays grandfathered -------------
+#         Pre-existing literals are awaiting migration. If the gate read the file
+#         instead of the diff, editing any unrelated line of a legacy widget would
+#         refuse the commit -- which is how a gate gets switched off for good.
+d="$(make_repo)"
+printf 'const c = Color(0xFF112233);\nvoid f() {}\n' > "$d/lib/legacy.dart"
+git -C "$d" add lib/legacy.dart
+git -C "$d" commit -q -m legacy
+printf 'const c = Color(0xFF112233);\nvoid f() {\n  g();\n}\n' > "$d/lib/legacy.dart"
+git -C "$d" add lib/legacy.dart
+out="$(run_hook "$d")"; st=$?
+check "an untouched legacy literal does not refuse the commit" 0 "$st" "$out"
+rm -rf "$d"
+
+# --- 12. RENAME: a colour literal added at the renamed path must still be caught -
+#         `git mv` plus an edit lands as a single `R` diff entry once similarity is
+#         above git's default ~50% threshold. `--diff-filter=ACM` never named `R`,
+#         so `files` came back empty and the commit exited 0 via the "nothing
+#         staged" early return before either gate ran -- reproduced against the
+#         real repo in X3's pass-7 audit (`git mv` + one added `Color(0x…)` line,
+#         `R096`, `--diff-filter=ACM --name-only` empty). This is that failure
+#         mode, reproduced against the hook this file tests.
+d="$(make_repo)"
+printf 'import "x.dart";\nWidget b() => Text(style: t.bodyLarge);\nWidget c() => Text(style: t.bodyLarge);\n' > "$d/lib/from_name.dart"
+git -C "$d" add lib/from_name.dart
+git -C "$d" commit -q -m "add a file to rename"
+git -C "$d" mv lib/from_name.dart lib/to_name.dart
+printf 'const c = Color(0xFF112233);\n' >> "$d/lib/to_name.dart"
+git -C "$d" add lib/to_name.dart
+status_line="$(git -C "$d" diff --cached --name-status -- lib/from_name.dart lib/to_name.dart | head -1)"
+case "$status_line" in
+  R*) ;;
+  *) fail "rename case did not stage as R (got: '$status_line') -- the test itself is stale" ;;
+esac
+out="$(run_hook "$d")"; st=$?
+check "a colour literal added at a renamed path is rejected" 1 "$st" "$out"
+# Non-counted internal check (like break_pattern's self-check above): confirms
+# the renamed path was actually handed to the format gate too, not just that the
+# colour gate fired. Not a full check of the format gate itself -- the stub
+# always exits 0, so it cannot show the format gate would have refused an
+# unformatted rename (see "the $DART stub" in the file header / X3's finding).
+if ! grep -q 'lib/to_name.dart' "$d/dart-calls.log" 2>/dev/null; then
+  fail "the renamed path never reached \$DART format -- the diff-filter fix did not restore the format gate for renames either"
+fi
+rm -rf "$d"
+
+# --- 13. RENAME, CONTRAST: a pure rename with unchanged content still passes ----
+#         Keeps case 12 honest: a fix that rejected every rename outright would
+#         pass case 12 for the wrong reason.
+d="$(make_repo)"
+printf 'import "x.dart";\nWidget b() => Text(style: t.bodyLarge);\n' > "$d/lib/from_clean.dart"
+git -C "$d" add lib/from_clean.dart
+git -C "$d" commit -q -m "add a file to rename cleanly"
+git -C "$d" mv lib/from_clean.dart lib/to_clean.dart
+git -C "$d" add lib/to_clean.dart
+status_line="$(git -C "$d" diff --cached --name-status -- lib/from_clean.dart lib/to_clean.dart | head -1)"
+case "$status_line" in
+  R*) ;;
+  *) fail "clean rename case did not stage as R (got: '$status_line') -- the test itself is stale" ;;
+esac
+out="$(run_hook "$d")"; st=$?
+check "a pure rename with no colour literal still passes" 0 "$st" "$out"
 rm -rf "$d"
 
 echo ""
