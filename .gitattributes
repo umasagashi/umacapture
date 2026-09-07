@@ -32,6 +32,12 @@ tool/**/*.sh                                   eol=lf
 # Same shebang trap for the wasm PoC build script, which is run with bash.
 native/wasm/*.sh                               eol=lf
 
+# Same shebang trap for the copied OpenCV-toolchain scripts. They are kept as a
+# reproduction record rather than run routinely, but the one occasion they are
+# needed is the one where the toolchain has to be rebuilt from nothing, so a
+# CRLF shebang would fail exactly then.
+docs/wasm-toolchain/*.sh                       eol=lf
+
 # Pinned byte-for-byte in tool/web_deps.json (it is a verbatim upstream release
 # file). With core.autocrlf=true a fresh clone would check it out as CRLF, so its
 # SHA-256 would no longer match the pin and tool/fetch_web_deps.py would report

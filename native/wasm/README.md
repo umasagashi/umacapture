@@ -50,6 +50,9 @@ install them once on the build machine.
    `lib/opencv4/3rdparty/`. A desktop OpenCV install will **not** work; it must
    be the Wasm build.
 
+To build that OpenCV from scratch — configure flags, the `imgwarp.cpp` `-O1` pin,
+and the driver scripts — see [`docs/wasm-toolchain/`](../../docs/wasm-toolchain/).
+
 ## Build
 
 From the repository root, in Git Bash:
