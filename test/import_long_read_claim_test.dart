@@ -31,10 +31,11 @@
 // claim is owed. Each sample is taken from the container, which is what a
 // storage surface would read.
 //
-// The flag goes up one line *before* `pathInfoLoader` is awaited, which is what
-// lets the sampling cases park that loader on a `Completer` and hold the spinner
-// up until they let go: the start of the run stops being a transient to catch
-// sight of. `runImportSampling` says what that repairs.
+// The flag goes up one line *before* `pathInfoLoader` is awaited, and the first
+// zip is read one line *inside* the claim, which is what lets the sampling cases
+// park the run on a `Completer` at each end and hold the spinner up in between:
+// neither edge of the run is a transient to catch sight of. `runImportSampling`
+// says what that repairs.
 //
 // WHAT THIS SUITE CANNOT REACH.
 //  * The real web build. The web leg is exercised over `WebLikeFsBackend` on the
@@ -99,6 +100,16 @@ Uint8List _recordJson(String id) => Uint8List.fromList(
   ),
 );
 
+/// How many frames `runImportSampling` samples while it is holding the run open.
+///
+/// More than one, because a claim that appeared for a single frame and went away
+/// again would satisfy a sampler that only looked once; small, because every
+/// further frame is spent inside a window the helper has already opened and is
+/// keeping open, so nothing is being waited *for* here and a larger number would
+/// only make the suite slower. It is not a budget the run has to finish inside —
+/// that is exactly what this file used to get wrong.
+const _sampledFrames = 3;
+
 void main() {
   setUpAll(loadAppTranslations);
 
@@ -162,6 +173,10 @@ void main() {
   /// waits out the helper's whole 20 s bound on an import that finished long
   /// before. That is not hypothetical: CI hit it on two different cases of this
   /// file, and neither reproduces on an idle machine.
+  ///
+  /// This gate holds the run's *start* and nothing else, so on its own it moves
+  /// the same race one line down — the claim is still taken and given back inside
+  /// a window narrower than a poll. `runImportSampling` holds the other end.
   ProviderContainer containerFor(PathInfo info, {Future<void>? layoutGate}) => ProviderContainer(
     overrides: [
       pathInfoLoader.overrideWith((ref) async {
@@ -201,31 +216,52 @@ void main() {
   bool recordLanded(PathInfo info, String id) =>
       Directory('${info.charaDetailActiveDir.path}${Platform.pathSeparator}$id').existsSync();
 
-  /// Taps the button, releases [layoutGate] once the import is provably running,
-  /// and samples the registry on every frame the spinner is up, answering what
-  /// was seen. The samples are `(claim count, what the relocation's question
-  /// answers)`.
+  /// Taps the button, opens the run's two edges in turn, and samples the registry
+  /// on the frames between them, answering what was seen. The samples are
+  /// `(claim count, what the relocation's question answers)`.
   ///
-  /// **Two awaited edges, and deliberately not one compound predicate.** This
-  /// used to latch `started |= spinning` and return on `started && !spinning`,
-  /// which asks one predicate of two different moments: a poll that never landed
-  /// while the spinner was up left `started` false for ever, and the wait then
-  /// expired naming a condition that had already happened. Raising the timeout
-  /// cannot help — the run is shorter than the first poll interval — so the
-  /// spinner is held up by [layoutGate] instead, and "it started" is awaited on
-  /// its own before "it finished" is.
+  /// **Both edges belong to the test, and for one reason.** The whole run is over
+  /// in a fraction of a second — a claim measured at ~80 ms with two zips and
+  /// ~120 ms on the web leg, on one unloaded machine, so the number is an order
+  /// of magnitude and not a bound — while every poll loop in this suite turns on
+  /// a real event-loop delay. One turn on a contended runner is wider than the
+  /// entire window, and the sampler steps over it. The previous shape held
+  /// only the *start* edge on [layoutGate] and then went looking for the claim
+  /// with a poll — which is the same race one line further on, and it failed on
+  /// CI exactly there: `waited 20s for the import to announce its claim`
+  /// alongside `Expected: Set:[1] / Actual: Set:[0]`, the empty sample list of a
+  /// run that had finished before the first observation. Reproduced locally by
+  /// widening that poll to 60 ms (two of the three cases below) and to 300 ms
+  /// (all three).
+  ///
+  /// So the end edge is held too. [firstReadGate] is handed to the first file of
+  /// the selection, which does not answer `readAsBytes` until this helper
+  /// completes it — and `_pickAndImport` reads that file *inside*
+  /// `LongReadRegistry.hold`, past the claim. The run therefore parks with the
+  /// claim registered, the spinner up and nothing written, for as long as the
+  /// sampling wants, and none of the assertions below depend on how fast anything
+  /// ran. That is what makes [_sampledFrames] a legitimate fixed count rather
+  /// than another guess about the host: it is spent inside a window this helper
+  /// opened and has not yet closed, not aimed at one it hopes is still open.
   ///
   /// The start edge is latched on a landed toast as well, the way
   /// `chara_detail_import_button_test.dart` and `import_refusal_surface_test.dart`
   /// latch theirs: every run this helper drives ends in one, and a toast that has
-  /// landed stays landed. That is a diagnosability net rather than the fix — on
-  /// its own it would only turn the 20 s wait into the empty `samples` list the
-  /// callers already assert against, which is why the gate is there too.
+  /// landed stays landed. That is a diagnosability net — a run that never raised
+  /// the spinner reaches the claim wait and names it, instead of hanging here.
+  ///
+  /// The claim is *also* watched rather than only sampled. A frame sampler can
+  /// only speak for the frames it took, and this helper's guaranteed frames are
+  /// all in the first zip; a `hold` that released and re-took the claim between
+  /// two zips would be invisible to it. `container.listen` cannot miss a
+  /// transition, so the count sequence is asserted here, once, for every case
+  /// that comes through: up to one claim, and back to none.
   Future<List<(int, LongReadKind?)>> runImportSampling(
     WidgetTester tester,
     ProviderContainer container,
     PathInfo info, {
     required Completer<void> layoutGate,
+    required Completer<void> firstReadGate,
   }) async {
     // The question the relocation dialog asks, built the way it builds it: over
     // the controller's own enumeration of the trees it is about to rename, so a
@@ -233,56 +269,75 @@ void main() {
     // being edited.
     final movedRoots = DataRootMigrationController(source: info).movedRoots;
     final samples = <(int, LongReadKind?)>[];
+    final claimCounts = <int>[];
     final toasts = <ToastData>[];
-    final subscription = container.listen<AsyncValue<ToastData>>(
+    final toastSubscription = container.listen<AsyncValue<ToastData>>(
       plainToastEventProvider,
       (_, current) => current.whenData(toasts.add),
     );
-    addTearDown(subscription.close);
+    addTearDown(toastSubscription.close);
+    final registrySubscription = container.listen(
+      longReadRegistryProvider,
+      (_, current) => claimCounts.add(current.length),
+    );
+    addTearDown(registrySubscription.close);
     bool spinning() => find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+    void sample() {
+      final claims = container.read(longReadRegistryProvider).values;
+      samples.add((claims.length, storageDeleteBlockedBy(StorageDeletePathsRequest(movedRoots), claims)));
+    }
 
     await tester.runAsync(() async {
       await tester.tap(find.byType(IconButton));
     });
     await settleUntil(tester, () => spinning() || toasts.isNotEmpty, describe: 'the import to raise its spinner');
-    await tester.runAsync(() async {
-      layoutGate.complete();
-      // Completing the gate resumes `_pickAndImport` at its `pathInfoLoader`
-      // await, and from there it reaches `LongReadRegistry.hold` — which
-      // registers the claim before its own first await — without suspending, so
-      // this drain lands past the claim rather than in front of it and the
-      // samples below cannot open with a frame that owes one but has not taken
-      // it yet. Waited for rather than spent as a fixed number of turns, and
-      // abandoned the moment the spinner goes out so that a run which claimed
-      // nothing fails on the empty sample list rather than here.
-      await waitUntil(
-        () => container.read(longReadRegistryProvider).isNotEmpty || !spinning(),
-        describe: 'the import to announce its claim',
-      );
-    });
+    // Resumes `_pickAndImport` at its `pathInfoLoader` await; from there it
+    // reaches `hold`, which registers the claim before its own first await, and
+    // parks on the gated read one line inside the action.
+    layoutGate.complete();
+    await settleUntil(
+      tester,
+      () => container.read(longReadRegistryProvider).isNotEmpty,
+      describe: 'the import to announce its claim',
+    );
+    for (var frame = 0; frame < _sampledFrames; frame++) {
+      sample();
+      await tester.pump();
+    }
+    firstReadGate.complete();
     await settleUntil(tester, () {
       if (!spinning()) {
         return true;
       }
-      final claims = container.read(longReadRegistryProvider).values;
-      samples.add((claims.length, storageDeleteBlockedBy(StorageDeletePathsRequest(movedRoots), claims)));
+      sample();
       return false;
     }, describe: "the import to finish and its spinner to go out");
+    expect(claimCounts, [
+      1,
+      0,
+    ], reason: 'the import must take one claim and give it back once, not one per zip and not none');
     return samples;
   }
 
   group('the claim', () {
     testWidgets('is held for the whole run, and the relocation\'s own question refuses while it is', (tester) async {
       final info = pathInfoFor(DirectoryPath(tempRoot.path));
+      final firstReadGate = Completer<void>();
       picker.answerWithPaths([
         writeZip('part1.zip', ['uuid-1']),
         writeZip('part2.zip', ['uuid-2']),
-      ]);
+      ], firstReadGate: firstReadGate.future);
       final layoutGate = Completer<void>();
       final container = containerFor(info, layoutGate: layoutGate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
 
-      final samples = await runImportSampling(tester, container, info, layoutGate: layoutGate);
+      final samples = await runImportSampling(
+        tester,
+        container,
+        info,
+        layoutGate: layoutGate,
+        firstReadGate: firstReadGate,
+      );
 
       // The window sampled above has to be a window in which records were being
       // written; otherwise every assertion below holds vacuously.
@@ -313,14 +368,21 @@ void main() {
       // own header for what it does not model.
       fsBackend = WebLikeFsBackend(originalBackend);
       final info = pathInfoFor(DirectoryPath(tempRoot.path));
+      final firstReadGate = Completer<void>();
       picker.answerWithPaths([
         writeZip('web.zip', ['uuid-web']),
-      ]);
+      ], firstReadGate: firstReadGate.future);
       final layoutGate = Completer<void>();
       final container = containerFor(info, layoutGate: layoutGate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
 
-      final samples = await runImportSampling(tester, container, info, layoutGate: layoutGate);
+      final samples = await runImportSampling(
+        tester,
+        container,
+        info,
+        layoutGate: layoutGate,
+        firstReadGate: firstReadGate,
+      );
 
       expect(recordLanded(info, 'uuid-web'), isTrue);
       expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
@@ -337,12 +399,26 @@ void main() {
       // and fail here only if the throw escaped — so what this asserts is that
       // nothing is left held when the run produced no record at all.
       final info = pathInfoFor(DirectoryPath(tempRoot.path));
-      picker.answerWithPaths([writeRejectedZip('bad1.zip'), writeRejectedZip('bad2.zip')]);
+      final firstReadGate = Completer<void>();
+      // The gate is on the *read*, which is above the rejection: a zip this
+      // service throws on is thrown on after its bytes are in hand and before
+      // anything is written, so a gate placed at the write would never be reached
+      // by this case at all and it would keep racing while the two above stopped.
+      picker.answerWithPaths([
+        writeRejectedZip('bad1.zip'),
+        writeRejectedZip('bad2.zip'),
+      ], firstReadGate: firstReadGate.future);
       final layoutGate = Completer<void>();
       final container = containerFor(info, layoutGate: layoutGate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
 
-      final samples = await runImportSampling(tester, container, info, layoutGate: layoutGate);
+      final samples = await runImportSampling(
+        tester,
+        container,
+        info,
+        layoutGate: layoutGate,
+        firstReadGate: firstReadGate,
+      );
 
       expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
       expect(samples.map((sample) => sample.$1).toSet(), {1}, reason: 'a failing import holds the store too');
