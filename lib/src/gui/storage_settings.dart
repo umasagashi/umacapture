@@ -11,12 +11,51 @@ import '/src/core/data_root_migration.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/gui/common.dart';
+import '/src/gui/storage_tree.dart';
 import '/src/gui/toast.dart';
 
 // ignore: constant_identifier_names
 const tr_storage = "pages.settings.storage";
+
+/// The System card's own namespace, for the rows that live in it.
+///
+/// Spelled out rather than imported from `settings.dart`'s `tr_settings`: that
+/// file imports this one, and reaching back for a constant would make the pair
+/// mutually dependent for the sake of one prefix.
+// ignore: constant_identifier_names
+const tr_settings_system = "pages.settings.system";
+
+/// Which registered long reader, if any, refuses a relocation driven by [controller].
+///
+/// **A function and not an expression at the call site, because a suite has to be able to ask the
+/// question the dialog asks.** `_DataRootMigrationDialog._migrate` is private, so the long-read
+/// gate used to be asserted against a copy of this fold written in the test — which agrees with the
+/// dialog exactly until one of them changes, and one of them just did.
+///
+/// Asked over [DataRootMigrationController.movedRoots] — the controller's own enumeration of what
+/// the copy moves, which the relocation's claim also reads — so the question and the claim cannot
+/// name different sets, and through the app's single containment predicate rather than a comparison
+/// written here.
+///
+/// **[LongReadKind.liveCapture] is subtracted, and it is the only kind that is.** A running session
+/// announces itself over the record store, which `movedRoots` contains, so asked plainly this fold
+/// would refuse every relocation attempted while the user is capturing. That is not this seam's
+/// rule: a relocation *stops* a capture rather than refusing for one — `DataRootMigrationController.migrate`
+/// takes `isCapturing` and `stopCapture` for exactly that, and its doc says the flag is there so the
+/// capture can be stopped and not so the relocation can be refused. The subtraction lives here,
+/// beside the caller that passes those two arguments, rather than inside `migrate`, whose rule stays
+/// the simple one it was: a holder is a refusal.
+@visibleForTesting
+LongReadKind? dataRootRelocationBlockedBy(DataRootMigrationController controller, Iterable<LongReadClaim> claims) {
+  return storageDeleteBlockedBy(
+    StorageDeletePathsRequest(controller.movedRoots),
+    claims.where((claim) => claim.kind != LongReadKind.liveCapture),
+  );
+}
 
 /// A single settings row, meant to live inside the System settings card, that
 /// shows where the app currently keeps its data (records/images, recognition
@@ -27,16 +66,49 @@ const tr_storage = "pages.settings.storage";
 /// breakdown and offers the relocate / reset actions. The chosen root is
 /// persisted via the bootstrap file (`bootstrap.dart`) so the next launch
 /// resolves all paths under it.
+///
+/// **It reads the layout loader, not `pathInfoProvider`.** Everything this row
+/// and its dialog touch is *where* the app's directories are, and
+/// `pathLayoutLoader` resolves that before the record store is prepared on top
+/// of it — so a store outage does not take it down. `pathInfoProvider` is
+/// the layout *plus* the statement that the record store was prepared in it, so
+/// it throws whenever that has not happened — during a store outage, and equally
+/// during the `AsyncLoading` before the first resolution, which nothing gates the
+/// settings page behind; the
+/// `RenderErrorBox` that replaced this row then claimed about a hundred thousand
+/// pixels of the System card, pushing the row below it — [StorageManagerTile],
+/// the only way into the screen that exists to repair exactly that outage
+/// — and every card after it off the bottom of the settings page. See
+/// `pathLayoutLoader`, and `storage_tree.dart`, which reads it for the same
+/// reason.
 class DataRootTile extends ConsumerWidget {
   const DataRootTile({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final pathInfo = ref.watch(pathInfoProvider);
-    final location = pathInfo.dataRoot?.path ?? "$tr_storage.data_root.default_label".tr();
+    // `unwrapPrevious`, as `StorageTreeView` does: a refresh keeps the old value
+    // in riverpod 3, and a stale path here is a path the user might act on.
+    final layout = ref.watch(pathLayoutLoader).unwrapPrevious();
+    // Non-null exactly in the `AsyncData` arm below, `unwrapPrevious` having
+    // already dropped the value a refresh would otherwise have kept.
+    final source = layout.value;
+    final location = switch (layout) {
+      AsyncData(:final value) => value.dataRoot?.path ?? "$tr_storage.data_root.default_label".tr(),
+      // Not the default-location sentence. "No override is set" and "the app
+      // could not work out where anything is" are different facts, and only the
+      // first one means the data is where the defaults put it. This is the
+      // sentence `StorageTreeView` already shows for this same failure, so the
+      // two screens do not describe it two ways.
+      AsyncError() => "pages.storage.status.layout_failed".tr(),
+      _ => "pages.storage.status.loading".tr(),
+    };
     final errorStyle = theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.error);
     return ListTile(
+      // The dialog relocates the resolved directories, so there is nothing for
+      // it to move until they are resolved. Disabled rather than silently inert:
+      // a row that does nothing when tapped is the same defect in a quieter form.
+      enabled: source != null,
       // When degraded the subtitle carries two lines (warning + the unreachable
       // path) so the user knows which drive to reconnect; give it the room.
       isThreeLine: dataRootDegraded && configuredDataRoot != null,
@@ -59,7 +131,7 @@ class DataRootTile extends ConsumerWidget {
           color: dataRootDegraded ? theme.colorScheme.error : null,
         ),
       ),
-      onTap: () => _DataRootMigrationDialog.show(ref.base),
+      onTap: source == null ? null : () => _DataRootMigrationDialog.show(ref.base, source),
     );
   }
 }
@@ -320,16 +392,27 @@ enum _Phase { overview, confirm, migrating, result }
 /// skipped), writes the bootstrap override, then asks the user to restart. The
 /// source data is left intact so the move is always reversible.
 class _DataRootMigrationDialog extends ConsumerStatefulWidget {
-  const _DataRootMigrationDialog();
+  const _DataRootMigrationDialog({required this.source});
 
-  static void show(RefBase ref) {
+  /// The resolved layout this dialog migrates *from*, handed over by
+  /// [DataRootTile] instead of read from a provider here.
+  ///
+  /// The row already has to resolve the layout to say where the data is, and
+  /// only offers this dialog once it has; taking it as a value makes that an
+  /// invariant of the constructor rather than an ordering this file has to
+  /// trust. Reading `pathInfoProvider` here instead put the same `value!` the
+  /// row was just cured of one tap away — a row that draws during an outage and
+  /// then throws when pressed is the same defect moved, not fixed.
+  final PathInfo source;
+
+  static void show(RefBase ref, PathInfo source) {
     // Non-dismissible: a migration that gets past its record-scope acquisition
     // closes Hive, after which the only safe exit is a restart, and a stray tap
     // on the scrim would drop the user back into an app with no open boxes. The
     // close button is offered back by the steps that know the session survived
     // (see [closeButtonTooltip] in `build`); the scrim cannot know, so it stays
     // off throughout.
-    CardDialog.show(ref, (_) => const _DataRootMigrationDialog(), barrierDismissible: false);
+    CardDialog.show(ref, (_) => _DataRootMigrationDialog(source: source), barrierDismissible: false);
   }
 
   @override
@@ -350,7 +433,7 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   /// once Hive has been closed, where quit and restart are the only safe exits.
   bool _sessionUsable = false;
 
-  late final PathInfo _source = ref.read(pathInfoProvider);
+  PathInfo get _source => widget.source;
   late final DataRootMigrationController _controller = DataRootMigrationController(source: _source);
 
   /// The destination chosen on the overview step. `null` means "reset to the
@@ -400,11 +483,38 @@ class _DataRootMigrationDialogState extends ConsumerState<_DataRootMigrationDial
   }
 
   Future<void> _migrate() async {
+    // **Read before the first await, and handed to the closure rather than
+    // captured by it.** `stopCapture` is not called where it is written: the
+    // gate's `runForRoot` awaits `ensureRootReadyUnlocked` before it invokes the
+    // action, so `_migrateLocked` reaches this closure with at least one
+    // suspension behind it. A `WidgetRef` captured here would therefore be read
+    // after this dialog could have been unmounted, and `ConsumerStatefulElement`
+    // throws a plain `StateError` there in release as well as debug. Today the
+    // three exits are all shut for this phase (the scrim at [show], the × in
+    // `build`), so nothing the user can press reaches it — which is exactly why
+    // this must not depend on them: the day one of those is handed back, the
+    // failure lands with capture still running and Hive about to close, and
+    // `_migrateLocked` swallows it (it logs and carries on), so the copy goes
+    // ahead against files the capture still holds open.
+    //
+    // `isCapturing` needs no such treatment: it is a value, read here and passed
+    // by the time the call is made.
+    final base = ref.read(containerRefProvider);
     setState(() => _phase = _Phase.migrating);
     final outcome = await _controller.migrate(
       _targetRoot,
       isCapturing: ref.read(capturingStateProvider),
-      stopCapture: () async => ref.read(platformControllerProvider)?.stopCapture(),
+      // Read here and passed by value, like `isCapturing` and for the same
+      // reason. Asked over `movedRoots` — the controller's own enumeration of
+      // what the copy moves — so the question and the claim cannot name
+      // different sets, and through the app's single containment predicate
+      // rather than a comparison written here.
+      blockedBy: dataRootRelocationBlockedBy(_controller, ref.read(longReadRegistryProvider).values),
+      // Built off the container-scoped ref for the same reason `stopCapture` is:
+      // the claim is registered inside `migrate`, after this dialog could have
+      // gone away, so a `WidgetRef` read there would throw.
+      declaration: dataRootRelocationLongReadDeclaration(base, _controller),
+      stopCapture: () async => base.read(platformControllerProvider)?.stopCapture(),
     );
     if (!mounted) return;
     setState(() {
@@ -864,6 +974,70 @@ class _MessageBlock extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The settings row that opens the storage-management view — the only way in.
+///
+/// The view itself is unchanged; only the way in is. It used to be a top-level
+/// tab, and it is a rarely-used one — an outlet for "it broke, it will not
+/// delete, I want one file out" rather than something a session passes through —
+/// so it now hangs off the System card next to [DataRootTile], which is the row
+/// that says *where* the data is. This one shows *what* is in it.
+///
+/// **Ungated, on purpose.** Every other row in that card is platform-gated, and
+/// on web all of those gates close; a gate here would take the whole feature
+/// away from the browser build, and on web this view is not a convenience but
+/// the only way to see the app's data at all — OPFS is reachable from neither
+/// the OS file manager nor the browser's own UI. `settings.dart` asserts the card is
+/// drawn on web for exactly this row.
+class StorageManagerTile extends ConsumerWidget {
+  const StorageManagerTile({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return ListTile(
+      title: Text("pages.storage.title".tr()),
+      subtitle: Text("$tr_settings_system.storage_manager.description".tr()),
+      trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.folder_managed_rounded)),
+      onTap: () => StorageManagerDialog.show(ref.base),
+    );
+  }
+}
+
+/// The storage-management view as a dialog over the settings page.
+///
+/// **Why the dialog and not a page.** `storage_file_preview.dart` states the
+/// case for [CardDialog] at length for the preview; the same two properties
+/// decide it here. It is an overlay over the whole scaffold, so it is above the
+/// navigation drawer this app collapses into at narrow widths and is identical
+/// on both platforms, and it is dismissed by [DialogController] rather than by
+/// the router — which is what gives this entry the unmount that
+/// [FreshStorageTree] hangs the per-visit re-read on.
+///
+/// **`usePageView: false`, and it is not a style choice.** The default wraps the
+/// content in a `SingleChildScrollView`, and [StorageTreeView] is one
+/// `ListView.builder` over a flattened row list. Nesting the two hands the list
+/// an unbounded height, which builds every row a group holds instead of the
+/// twenty on screen — the lazy build the tree exists for. `Expanded` instead
+/// gives the tree the height the card has left, so it scrolls itself, and the
+/// card fills the space `DialogLayer` leaves (the whole window less its 32-pixel
+/// inset), which is what a file tree wants.
+class StorageManagerDialog extends ConsumerWidget {
+  const StorageManagerDialog({super.key});
+
+  static void show(RefBase ref) {
+    CardDialog.show(ref, (_) => const StorageManagerDialog());
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return CardDialog(
+      dialogTitle: "pages.storage.title".tr(),
+      closeButtonTooltip: "$tr_settings_system.storage_manager.close_button".tr(),
+      usePageView: false,
+      content: const Expanded(child: FreshStorageTree()),
     );
   }
 }

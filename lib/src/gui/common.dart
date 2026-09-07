@@ -669,19 +669,24 @@ class _WheelZoomViewerState extends State<WheelZoomViewer> {
 }
 
 class CardDialog extends ConsumerStatefulWidget {
-  /// Shows [builder] as the single dialog and returns its token.
+  /// Shows [builder] as the dialog and returns its token.
   ///
   /// Pass the token to [dismiss] when the close happens later than the dialog's
   /// own lifetime — see [DialogController.dismiss].
+  ///
+  /// [over] opens on top of the dialog already up instead of replacing it, for
+  /// a dialog opened *from* another one; [DialogController] says which view
+  /// needs that and why nothing else does.
   static int show(
     RefBase ref,
     WidgetBuilder builder, {
     bool barrierDismissible = true,
     AlignmentGeometry alignment = Alignment.center,
+    bool over = false,
   }) {
     return ref
         .read(dialogBuilderProvider.notifier)
-        .show(builder, barrierDismissible: barrierDismissible, alignment: alignment);
+        .show(builder, barrierDismissible: barrierDismissible, alignment: alignment, over: over);
   }
 
   /// Closes the current dialog, or only the dialog [token] identifies.
@@ -701,6 +706,17 @@ class CardDialog extends ConsumerStatefulWidget {
   /// Ignored when [dialogTitle] is null: that case renders no title bar at all,
   /// so there is no close button to label.
   final String? closeButtonTooltip;
+
+  /// Whether the title bar's × accepts a press.
+  ///
+  /// True for every dialog the user may leave whenever they like, which is all
+  /// of them until one starts work it cannot take back. Set it false for as long
+  /// as that work runs: the × is the one exit a dialog cannot guard from the
+  /// outside, since it is drawn by this widget and not by the content, and a
+  /// press on it unmounts the dialog just as the barrier does. Greyed rather than
+  /// hidden, so the button does not move about and the tooltip still names it.
+  final bool closeButtonEnabled;
+
   final Widget content;
   final Widget? bottom;
   final bool usePageView;
@@ -715,6 +731,7 @@ class CardDialog extends ConsumerStatefulWidget {
     super.key,
     this.dialogTitle,
     this.closeButtonTooltip,
+    this.closeButtonEnabled = true,
     required this.content,
     this.bottom,
     this.usePageView = true,
@@ -760,11 +777,26 @@ class _CardDialogState extends ConsumerState<CardDialog> {
                   : Tooltip(
                       message: widget.closeButtonTooltip,
                       child: IconButton(
-                        icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onTertiary),
+                        // The tile is `tertiary`, so the button's `onSurface` default would not read
+                        // against it and the colour has to be named here. Named through the button's
+                        // style rather than on the `Icon`, because an `Icon.color` is one colour for
+                        // every state: it overrode the disabled resolution, and a shut × went on
+                        // painting at full strength while the Cancel button beside it greyed out.
+                        // Handing the pair to `styleFrom` lets the framework pick per state, so a
+                        // state this code never enumerated still gets a colour that suits the tile.
+                        // 38% is the same strength the framework greys that Cancel button to
+                        // (`onSurface(0.38)`); only the role differs, because the surfaces do.
+                        style: IconButton.styleFrom(
+                          foregroundColor: theme.colorScheme.onTertiary,
+                          disabledForegroundColor: theme.colorScheme.onTertiary.withValues(alpha: 0.38),
+                        ),
+                        icon: const Icon(Symbols.close_rounded),
                         splashRadius: 24,
-                        onPressed: () {
-                          CardDialog.dismiss(ref.base);
-                        },
+                        onPressed: !widget.closeButtonEnabled
+                            ? null
+                            : () {
+                                CardDialog.dismiss(ref.base);
+                              },
                       ),
                     ),
             ),
@@ -1098,24 +1130,54 @@ class FeedbackLayer extends StatelessWidget {
 /// never migrates at all) leaves the session untouched. The scrim cannot tell
 /// those outcomes apart, so it stays off for the whole flow and each step offers
 /// its own close button or withholds it.
-typedef DialogEntry = ({WidgetBuilder builder, bool barrierDismissible, AlignmentGeometry alignment});
+typedef DialogEntry = ({int token, WidgetBuilder builder, bool barrierDismissible, AlignmentGeometry alignment});
 
-/// Holds the one dialog the [DialogLayer] renders.
+/// Holds the dialogs the [DialogLayer] renders, innermost last.
 ///
-/// Only a single dialog exists at a time, so an unconditional [dismiss] closes
-/// whatever is on screen — including a dialog someone else opened in the
-/// meantime. That matters for callers that dismiss from a delayed callback: the
-/// web capture tutorial banner, for instance, closes when `startCapture()`
-/// settles, which can be long after the user moved on to another dialog.
-/// [show] therefore hands out a token identifying that particular dialog, and
-/// `dismiss(token)` closes it only while it is still the one on screen.
+/// **One at a time is still the rule, and [show] still enforces it.** A dialog
+/// opened the ordinary way *replaces* whatever was up, so for every caller but
+/// one this is the single slot it always was: the state exposed by
+/// [dialogBuilderProvider] is the dialog on top, `null` when none is open, and
+/// an unconditional [dismiss] closes what the user is looking at — including a
+/// dialog someone else opened in the meantime. That matters for callers that
+/// dismiss from a delayed callback: the web capture tutorial banner, for
+/// instance, closes when `startCapture()` settles, which can be long after the
+/// user moved on. [show] therefore hands out a token identifying that
+/// particular dialog, and `dismiss(token)` closes it only while it is still
+/// open.
+///
+/// **`over: true` is the exception, and it exists because one view is itself a
+/// dialog.** The storage-management view is entered from the settings page as a
+/// dialog, and it is a file browser: it opens previews, delete confirmations and
+/// delete result panels of its own. Replacing would unmount the tree the user
+/// opened them from, so looking at two files — or deleting two — meant
+/// re-entering the view and re-walking the whole store each time. Those dialogs
+/// therefore stack on top of it instead, and closing one uncovers the tree
+/// exactly as it was. Nothing else stacks: `over` defaults to false, so every
+/// other call site keeps the replacement it was written against.
+///
+/// The stack is the controller's own list rather than the exposed state so that
+/// "is a dialog open" and "which one is the user in" stay the single value they
+/// have always been. Every mutation changes the top — [dismiss] with a token
+/// drops that entry *and everything above it* — so a listener watching the state
+/// sees every change, and the token in each entry keeps two otherwise identical
+/// records distinct.
 class DialogController extends Notifier<DialogEntry?> {
   /// Monotonic id of the most recently shown dialog. Never reset, so a token
   /// from a closed dialog can never match a later one.
   int _token = 0;
 
+  /// The open dialogs, bottom first. [state] is the last of these, or null.
+  final List<DialogEntry> _entries = [];
+
   @override
-  DialogEntry? build() => null;
+  DialogEntry? build() {
+    _entries.clear();
+    return null;
+  }
+
+  /// The open dialogs, bottom first, for [DialogLayer] to render.
+  List<DialogEntry> get entries => List.unmodifiable(_entries);
 
   /// Token of the dialog currently on screen (0 before the first [show]).
   ///
@@ -1126,23 +1188,75 @@ class DialogController extends Notifier<DialogEntry?> {
   /// caller off `WidgetRef`, which throws once the dialog is unmounted.
   int get currentToken => _token;
 
-  /// Replaces the current dialog with [builder] and returns its token.
-  int show(WidgetBuilder builder, {bool barrierDismissible = true, AlignmentGeometry alignment = Alignment.center}) {
+  /// Shows [builder] and returns its token.
+  ///
+  /// Replaces every open dialog unless [over] is set, in which case [builder]
+  /// opens on top of them and closing it uncovers the one underneath.
+  int show(
+    WidgetBuilder builder, {
+    bool barrierDismissible = true,
+    AlignmentGeometry alignment = Alignment.center,
+    bool over = false,
+  }) {
     _token += 1;
-    state = (builder: builder, barrierDismissible: barrierDismissible, alignment: alignment);
+    if (!over) {
+      _entries.clear();
+    }
+    _entries.add((token: _token, builder: builder, barrierDismissible: barrierDismissible, alignment: alignment));
+    state = _entries.last;
     return _token;
   }
 
-  /// Closes the current dialog.
+  /// Freezes or releases the barrier of the dialog [token] identifies.
   ///
-  /// With a [token] from [show], closes it only if that dialog is still the
-  /// current one; otherwise does nothing. Without a token, closes whatever is
-  /// currently shown.
-  void dismiss([int? token]) {
-    if (token != null && token != _token) {
+  /// **For a dialog that becomes un-leavable partway through its own life.** A
+  /// confirmation is dismissible while it is asking the question and must not be
+  /// once it has been answered and the work is running: the operation goes on
+  /// either way, so a scrim tap there does not cancel anything — it only takes
+  /// away the surface that has to report what happened. [show]'s flag cannot say
+  /// that, because it is read once, before the dialog knows.
+  ///
+  /// Does nothing for a token that is no longer open, so a caller releasing the
+  /// barrier in a `finally` need not first ask whether it is still there.
+  ///
+  /// Only the entry on top can be interacted with — [DialogLayer] stacks the
+  /// barriers in the same order, so a lower one is covered by every barrier above
+  /// it — which is why re-publishing [state] is enough to make this visible: a
+  /// change to the top entry changes [state], and a change to a covered one
+  /// cannot be reached until whatever covers it has gone.
+  void setBarrierDismissible(int token, {required bool barrierDismissible}) {
+    final index = _entries.indexWhere((entry) => entry.token == token);
+    if (index < 0) {
       return;
     }
-    state = null;
+    final entry = _entries[index];
+    _entries[index] = (
+      token: entry.token,
+      builder: entry.builder,
+      barrierDismissible: barrierDismissible,
+      alignment: entry.alignment,
+    );
+    state = _entries.last;
+  }
+
+  /// Closes the dialog on top, or the one [token] identifies.
+  ///
+  /// With a [token] from [show], closes that dialog only if it is still open —
+  /// together with anything opened over it, which was opened against a dialog
+  /// that is going away. Without a token, closes whatever is on top.
+  void dismiss([int? token]) {
+    if (token == null) {
+      if (_entries.isNotEmpty) {
+        _entries.removeLast();
+      }
+    } else {
+      final index = _entries.indexWhere((entry) => entry.token == token);
+      if (index < 0) {
+        return;
+      }
+      _entries.removeRange(index, _entries.length);
+    }
+    state = _entries.isEmpty ? null : _entries.last;
   }
 }
 
@@ -1160,7 +1274,10 @@ class DialogLayer extends ConsumerStatefulWidget {
 class _DialogLayerState extends ConsumerState<DialogLayer> {
   @override
   Widget build(BuildContext context) {
+    // Watched for the top, read for the rest: every mutation changes the top
+    // (see [DialogController]), so this rebuilds whenever the stack does.
     final entry = ref.watch(dialogBuilderProvider);
+    final entries = ref.read(dialogBuilderProvider.notifier).entries;
     final theme = Theme.of(context);
     return Stack(
       alignment: Alignment.center,
@@ -1186,16 +1303,30 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
         // change the element tree's shape and discard the [State] of the entire
         // page every time a dialog opened or closed.
         ExcludeFocus(excluding: entry != null, child: widget.child),
-        if (entry != null) ...[
+        // Bottom dialog first, each behind its own barrier. A dialog opened
+        // `over` another is withdrawn from neither device by accident: its
+        // barrier covers the dialog below just as the first one covers the app,
+        // and everything but the top is excluded from focus traversal, so Tab
+        // cannot walk down into a tree the user cannot see or click.
+        //
+        // ONLY THE BOTTOM BARRIER IS TINTED. The scrim says "the app behind is
+        // withdrawn", and stacking a second one would say it twice — the view
+        // under a preview would darken a step further for no reason the user
+        // could name. The upper barriers are transparent and still swallow every
+        // tap, which is the half that has to hold on all of them.
+        for (final (index, item) in entries.indexed) ...[
           GestureDetector(
             // A non-dismissible barrier still swallows the tap (empty callback)
-            // so it never falls through to the app behind the dialog.
-            onTap: entry.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss() : () {},
-            child: Container(color: theme.colorScheme.scrim.withValues(alpha: 0.5)),
+            // so it never falls through to whatever is behind the dialog.
+            onTap: item.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss(item.token) : () {},
+            child: Container(color: index == 0 ? theme.colorScheme.scrim.withValues(alpha: 0.5) : Colors.transparent),
           ),
-          Padding(
-            padding: const EdgeInsets.all(32),
-            child: Align(alignment: entry.alignment, child: entry.builder(context)),
+          ExcludeFocus(
+            excluding: item.token != entry?.token,
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Align(alignment: item.alignment, child: item.builder(context)),
+            ),
           ),
         ],
       ],
