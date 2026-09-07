@@ -31,6 +31,11 @@
 // claim is owed. Each sample is taken from the container, which is what a
 // storage surface would read.
 //
+// The flag goes up one line *before* `pathInfoLoader` is awaited, which is what
+// lets the sampling cases park that loader on a `Completer` and hold the spinner
+// up until they let go: the start of the run stops being a transient to catch
+// sight of. `runImportSampling` says what that repairs.
+//
 // WHAT THIS SUITE CANNOT REACH.
 //  * The real web build. The web leg is exercised over `WebLikeFsBackend` on the
 //    VM, which reproduces OPFS's *prohibition* on synchronous FS calls and
@@ -143,9 +148,28 @@ void main() {
     return path;
   }
 
-  ProviderContainer containerFor(PathInfo info) => ProviderContainer(
+  /// A container whose storage layout is parked on [layoutGate] until the test
+  /// opens it, if one is given.
+  ///
+  /// **The start of an import is the test's to decide, not something to catch
+  /// sight of.** `CharaDetailImportButton._pickAndImport` raises the app-scoped
+  /// importing flag — the only thing that draws the spinner — *before* it awaits
+  /// `pathInfoLoader`, so a loader parked here holds the spinner up until this
+  /// gate is completed, and "the import has started" becomes an edge that can be
+  /// awaited rather than a transient a poll has to land on. Without it the whole
+  /// run is tens of milliseconds while one turn of [settleUntil] costs a real
+  /// event-loop turn, so a contended runner steps over the spinner entirely and
+  /// waits out the helper's whole 20 s bound on an import that finished long
+  /// before. That is not hypothetical: CI hit it on two different cases of this
+  /// file, and neither reproduces on an idle machine.
+  ProviderContainer containerFor(PathInfo info, {Future<void>? layoutGate}) => ProviderContainer(
     overrides: [
-      pathInfoLoader.overrideWith((ref) async => info),
+      pathInfoLoader.overrideWith((ref) async {
+        if (layoutGate != null) {
+          await layoutGate;
+        }
+        return info;
+      }),
       moduleVersionLoader.overrideWith((ref) async => null),
     ],
   );
@@ -177,33 +201,73 @@ void main() {
   bool recordLanded(PathInfo info, String id) =>
       Directory('${info.charaDetailActiveDir.path}${Platform.pathSeparator}$id').existsSync();
 
-  /// Taps the button and samples the registry on every frame the spinner is up,
-  /// answering what was seen. The samples are `(claim count, what the
-  /// relocation's question answers)`.
+  /// Taps the button, releases [layoutGate] once the import is provably running,
+  /// and samples the registry on every frame the spinner is up, answering what
+  /// was seen. The samples are `(claim count, what the relocation's question
+  /// answers)`.
+  ///
+  /// **Two awaited edges, and deliberately not one compound predicate.** This
+  /// used to latch `started |= spinning` and return on `started && !spinning`,
+  /// which asks one predicate of two different moments: a poll that never landed
+  /// while the spinner was up left `started` false for ever, and the wait then
+  /// expired naming a condition that had already happened. Raising the timeout
+  /// cannot help — the run is shorter than the first poll interval — so the
+  /// spinner is held up by [layoutGate] instead, and "it started" is awaited on
+  /// its own before "it finished" is.
+  ///
+  /// The start edge is latched on a landed toast as well, the way
+  /// `chara_detail_import_button_test.dart` and `import_refusal_surface_test.dart`
+  /// latch theirs: every run this helper drives ends in one, and a toast that has
+  /// landed stays landed. That is a diagnosability net rather than the fix — on
+  /// its own it would only turn the 20 s wait into the empty `samples` list the
+  /// callers already assert against, which is why the gate is there too.
   Future<List<(int, LongReadKind?)>> runImportSampling(
     WidgetTester tester,
     ProviderContainer container,
-    PathInfo info,
-  ) async {
+    PathInfo info, {
+    required Completer<void> layoutGate,
+  }) async {
     // The question the relocation dialog asks, built the way it builds it: over
     // the controller's own enumeration of the trees it is about to rename, so a
     // fourth tree added to the migration is asked about here without this suite
     // being edited.
     final movedRoots = DataRootMigrationController(source: info).movedRoots;
     final samples = <(int, LongReadKind?)>[];
+    final toasts = <ToastData>[];
+    final subscription = container.listen<AsyncValue<ToastData>>(
+      plainToastEventProvider,
+      (_, current) => current.whenData(toasts.add),
+    );
+    addTearDown(subscription.close);
+    bool spinning() => find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
+
     await tester.runAsync(() async {
       await tester.tap(find.byType(IconButton));
     });
-    var started = false;
+    await settleUntil(tester, () => spinning() || toasts.isNotEmpty, describe: 'the import to raise its spinner');
+    await tester.runAsync(() async {
+      layoutGate.complete();
+      // Completing the gate resumes `_pickAndImport` at its `pathInfoLoader`
+      // await, and from there it reaches `LongReadRegistry.hold` — which
+      // registers the claim before its own first await — without suspending, so
+      // this drain lands past the claim rather than in front of it and the
+      // samples below cannot open with a frame that owes one but has not taken
+      // it yet. Waited for rather than spent as a fixed number of turns, and
+      // abandoned the moment the spinner goes out so that a run which claimed
+      // nothing fails on the empty sample list rather than here.
+      await waitUntil(
+        () => container.read(longReadRegistryProvider).isNotEmpty || !spinning(),
+        describe: 'the import to announce its claim',
+      );
+    });
     await settleUntil(tester, () {
-      final spinning = find.byType(CircularProgressIndicator).evaluate().isNotEmpty;
-      if (spinning) {
-        final claims = container.read(longReadRegistryProvider).values;
-        samples.add((claims.length, storageDeleteBlockedBy(StorageDeletePathsRequest(movedRoots), claims)));
+      if (!spinning()) {
+        return true;
       }
-      started |= spinning;
-      return started && !spinning;
-    }, describe: 'the import to start and then to finish');
+      final claims = container.read(longReadRegistryProvider).values;
+      samples.add((claims.length, storageDeleteBlockedBy(StorageDeletePathsRequest(movedRoots), claims)));
+      return false;
+    }, describe: "the import to finish and its spinner to go out");
     return samples;
   }
 
@@ -214,16 +278,17 @@ void main() {
         writeZip('part1.zip', ['uuid-1']),
         writeZip('part2.zip', ['uuid-2']),
       ]);
-      final container = containerFor(info);
+      final layoutGate = Completer<void>();
+      final container = containerFor(info, layoutGate: layoutGate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
 
-      final samples = await runImportSampling(tester, container, info);
+      final samples = await runImportSampling(tester, container, info, layoutGate: layoutGate);
 
       // The window sampled above has to be a window in which records were being
       // written; otherwise every assertion below holds vacuously.
       expect(recordLanded(info, 'uuid-1'), isTrue);
       expect(recordLanded(info, 'uuid-2'), isTrue);
-      expect(samples, isNotEmpty, reason: 'the spinner was never observed up; nothing was sampled');
+      expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
       expect(
         samples.map((sample) => sample.$1).toSet(),
         {1},
@@ -251,13 +316,14 @@ void main() {
       picker.answerWithPaths([
         writeZip('web.zip', ['uuid-web']),
       ]);
-      final container = containerFor(info);
+      final layoutGate = Completer<void>();
+      final container = containerFor(info, layoutGate: layoutGate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
 
-      final samples = await runImportSampling(tester, container, info);
+      final samples = await runImportSampling(tester, container, info, layoutGate: layoutGate);
 
       expect(recordLanded(info, 'uuid-web'), isTrue);
-      expect(samples, isNotEmpty, reason: 'the spinner was never observed up; nothing was sampled');
+      expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
       expect(samples.map((sample) => sample.$1).toSet(), {1});
       expect(samples.map((sample) => sample.$2).toSet(), {LongReadKind.import});
       expect(container.read(longReadRegistryProvider), isEmpty);
@@ -272,12 +338,13 @@ void main() {
       // nothing is left held when the run produced no record at all.
       final info = pathInfoFor(DirectoryPath(tempRoot.path));
       picker.answerWithPaths([writeRejectedZip('bad1.zip'), writeRejectedZip('bad2.zip')]);
-      final container = containerFor(info);
+      final layoutGate = Completer<void>();
+      final container = containerFor(info, layoutGate: layoutGate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
 
-      final samples = await runImportSampling(tester, container, info);
+      final samples = await runImportSampling(tester, container, info, layoutGate: layoutGate);
 
-      expect(samples, isNotEmpty);
+      expect(samples, isNotEmpty, reason: 'the run was never sampled with its spinner up');
       expect(samples.map((sample) => sample.$1).toSet(), {1}, reason: 'a failing import holds the store too');
       expect(container.read(longReadRegistryProvider), isEmpty);
       expect(tester.widget<IconButton>(find.byType(IconButton)).onPressed, isNotNull);
@@ -312,15 +379,7 @@ void main() {
         writeZip('part1.zip', ['uuid-1']),
       ]);
       final gate = Completer<void>();
-      final container = ProviderContainer(
-        overrides: [
-          pathInfoLoader.overrideWith((ref) async {
-            await gate.future;
-            return info;
-          }),
-          moduleVersionLoader.overrideWith((ref) async => null),
-        ],
-      );
+      final container = containerFor(info, layoutGate: gate.future);
       await pumpWithContainer(tester, container, host(const CharaDetailImportButton()));
       await tester.runAsync(() async {
         await tester.tap(find.byType(IconButton));
