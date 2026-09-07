@@ -10,8 +10,8 @@
 //
 // It was true, and only accidentally so: the sole reason left to fall through was the missing
 // controller, which `disabled_tooltip` happens to describe. A fourth reason added to the disjunction
-// would have inherited the arm and told the user 「ロード中にエラーが発生しました。」 about a load
-// that succeeded. Nothing in the language, and nothing in the suite, would have said so.
+// would have inherited the arm and told the user 「認識モジュールを読み込めていないため…」 about a
+// module set that loaded. Nothing in the language, and nothing in the suite, would have said so.
 //
 // So the cases below never name a reason they were told about: they enumerate
 // `CaptureToggleBlocker.values`, and a new reason fails here before any wording is compared --
@@ -35,12 +35,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_ce/hive.dart';
+import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/capture_preview.dart';
+import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_channel.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
+import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
+import 'package:umacapture/src/core/storage/storage_delete_request.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/gui/capture.dart';
 import 'package:umacapture/src/gui/common.dart';
+import 'package:umacapture/src/gui/storage_tree.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart';
 import 'package:umacapture/src/preference/notifier.dart';
 
@@ -60,15 +66,34 @@ ThemeData _theme() {
   );
 }
 
+/// A resolved layout for the cases that need one, under a directory nothing writes to.
+///
+/// The real `pathLayoutProvider` answers null for the whole of a widget test (its loader never
+/// completes here), which is what keeps every other case in this file free of a long-read term.
+final _layout = PathInfo(
+  documentDir: DirectoryPath('documents'),
+  supportDir: DirectoryPath('support'),
+  executableDir: DirectoryPath('exe'),
+  downloadDir: DirectoryPath('downloads'),
+);
+
+/// The registry entry a live capture takes over [_layout], as the folds see it.
+List<StorageHold> _liveCaptureHolds() => [
+  for (final path in liveCaptureLongReadPaths(_layout)) (directoryPath: path.path, fraction: 0.0),
+];
+
 Future<void> _pumpCard(
   WidgetTester tester, {
   VideoImportState import = VideoImportState.idle,
   bool captureSupported = true,
   bool controllerAvailable = true,
+  bool heldByLongRead = false,
 }) async {
   final container = ProviderContainer(
     overrides: [
       capturingStateProvider.overrideWith((ref) => false),
+      // Null unless a case asks for a holder, which is the state the loader leaves it in here.
+      pathLayoutProvider.overrideWith((ref) => heldByLongRead ? _layout : null),
       platformControllerProvider.overrideWith((ref) {
         if (!controllerAvailable) {
           return null;
@@ -81,6 +106,14 @@ Future<void> _pumpCard(
     ],
   );
   addTearDown(container.dispose);
+  if (heldByLongRead) {
+    // Some OTHER job, deliberately: a `liveCapture` claim would be this control's own session, and
+    // the resolver leaves that one out by name. A zip proves the term reacts to the registry rather
+    // than to any particular kind.
+    container
+        .read(longReadRegistryProvider.notifier)
+        .claimUntilReleased(kind: LongReadKind.zip, paths: liveCaptureLongReadPaths(_layout));
+  }
   final notifier = ValueNotifier<VideoImportState>(import);
   addTearDown(notifier.dispose);
   await tester.pumpWidget(
@@ -123,6 +156,7 @@ Future<void> _pumpFor(WidgetTester tester, CaptureToggleBlocker blocker) => swit
     tester,
     import: const VideoImportState(phase: VideoImportPhase.importing, fileName: 'clip.mkv'),
   ),
+  CaptureToggleBlocker.longRead => _pumpCard(tester, heldByLongRead: true),
   CaptureToggleBlocker.controllerUnavailable => _pumpCard(tester, controllerAvailable: false),
 };
 
@@ -183,23 +217,30 @@ void main() {
     for (final controllerUnavailable in [false, true]) {
       for (final captureUnsupported in [false, true]) {
         for (final activity in CaptureActivity.values) {
-          final blocker = resolveCaptureToggleBlocker(
-            controllerUnavailable: controllerUnavailable,
-            captureUnsupported: captureUnsupported,
-            activity: activity,
-          );
-          produced.add(blocker);
-          // The invariant the split replaced: inert exactly when some reason holds. The activity
-          // half is spelled out rather than folded into one boolean, because `capturing` is the one
-          // running state that must NOT disable this control -- it is the STOP half.
-          final activityBlocks = activity == CaptureActivity.pickingClip || activity == CaptureActivity.importing;
-          expect(
-            blocker != null,
-            controllerUnavailable || captureUnsupported || activityBlocks,
-            reason:
-                'disabled-ness and the reason disagree at '
-                '($controllerUnavailable, $captureUnsupported, $activity)',
-          );
+          for (final heldByLongRead in [false, true]) {
+            final blocker = resolveCaptureToggleBlocker(
+              controllerUnavailable: controllerUnavailable,
+              captureUnsupported: captureUnsupported,
+              activity: activity,
+              heldByLongRead: heldByLongRead,
+            );
+            produced.add(blocker);
+            // The invariant the split replaced: inert exactly when some reason holds. The activity
+            // half is spelled out rather than folded into one boolean, because `capturing` is the one
+            // running state that must NOT disable this control -- it is the STOP half.
+            final activityBlocks = activity == CaptureActivity.pickingClip || activity == CaptureActivity.importing;
+            // And the long-read half carries the same exception, for the same reason at one remove:
+            // a running session holds the claim itself, so the registry's answer is this control's
+            // own and may not be turned into a refusal.
+            final longReadBlocks = heldByLongRead && activity != CaptureActivity.capturing;
+            expect(
+              blocker != null,
+              controllerUnavailable || captureUnsupported || activityBlocks || longReadBlocks,
+              reason:
+                  'disabled-ness and the reason disagree at '
+                  '($controllerUnavailable, $captureUnsupported, $activity, $heldByLongRead)',
+            );
+          }
         }
       }
     }
@@ -211,10 +252,12 @@ void main() {
       bool controller = true,
       bool supported = true,
       CaptureActivity activity = CaptureActivity.idle,
+      bool heldByLongRead = false,
     }) => resolveCaptureToggleBlocker(
       controllerUnavailable: !controller,
       captureUnsupported: !supported,
       activity: activity,
+      heldByLongRead: heldByLongRead,
     );
 
     expect(resolve(), isNull);
@@ -238,6 +281,73 @@ void main() {
       CaptureToggleBlocker.unsupported,
       reason: 'the permanent reason outranks the two that end on their own',
     );
+    // THE LONG-READ TERM. It was absent while the import control beside this one had it, so a
+    // capture could be started into a folder a zip was bundling or a module install was replacing.
+    expect(resolve(heldByLongRead: true), CaptureToggleBlocker.longRead);
+    expect(
+      resolve(heldByLongRead: true, controller: false),
+      CaptureToggleBlocker.longRead,
+      reason: 'the reason the user can act on outranks the one they cannot, as controllerUnavailable\'s doc says',
+    );
+    expect(
+      resolve(heldByLongRead: true, supported: false),
+      CaptureToggleBlocker.unsupported,
+      reason: 'a browser that cannot capture at all is not asked to wait for a job to finish',
+    );
+    expect(
+      resolve(heldByLongRead: true, activity: CaptureActivity.importing),
+      CaptureToggleBlocker.importing,
+      reason: 'a running import is the nearer reason, and it is the one holding the claim',
+    );
+  });
+
+  test('a running capture is never withheld by the claim it takes itself', () {
+    // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *the long-read term answers the STOP
+    // button with the session's own `LongReadKind.liveCapture` claim, so a capture cannot be
+    // stopped from the control that started it.*
+    //
+    // This is the failure mode the whole registration risked: the session claims exactly the paths
+    // this control asks about, so `heldByLongRead` is true for the entire time the button must stay
+    // live. Nothing about the claim is visible from here -- the resolver takes a bool -- which is
+    // why the exclusion is written on the activity and asserted on the activity.
+    for (final heldByLongRead in [false, true]) {
+      expect(
+        resolveCaptureToggleBlocker(
+          controllerUnavailable: false,
+          captureUnsupported: false,
+          activity: CaptureActivity.capturing,
+          heldByLongRead: heldByLongRead,
+        ),
+        isNull,
+        reason: 'the toggle is the stop half of the very session that holds the claim (held: $heldByLongRead)',
+      );
+    }
+  });
+
+  test('the live-capture claim covers what every gate on the record and settings pages asks about', () {
+    // WHAT THIS CASE IS TRYING TO FALSIFY, in one sentence: *`liveCaptureLongReadPaths` names a set
+    // narrow enough that a surface asking the registry about the record store, or about `modules/`,
+    // is still blind to a running capture -- which is the whole reason the kind was added.*
+    //
+    // Asserted through the app's own containment predicate rather than by comparing strings,
+    // because "inside" is what the folds actually ask and a second derivation of it is the thing
+    // `longReadHoldCovers` exists to prevent.
+    final claims = [(kind: LongReadKind.liveCapture, holds: _liveCaptureHolds())];
+    for (final entry in {
+      'the record store': [_layout.charaDetailDir],
+      'one active record': [recordDirOfId(_layout, RecordSource.active, 'abc')],
+      'the module directory': [_layout.modulesDir],
+      'this session\'s scratch': [_layout.tempDir],
+    }.entries) {
+      expect(
+        storageDeleteBlockedBy(StorageDeletePathsRequest(entry.value), claims),
+        LongReadKind.liveCapture,
+        reason: '${entry.key} is not covered by the claim a live capture takes',
+      );
+    }
+    // The control: a tree no capture writes into stays answerable while one runs, so the assertions
+    // above come from the paths and not from a fold that says yes to everything.
+    expect(storageDeleteBlockedBy(StorageDeletePathsRequest([_layout.settingsDir]), claims), isNull);
   });
 
   testWidgets('the sentence on the toggle is the one for the reason it is inert', (tester) async {
@@ -277,6 +387,9 @@ void main() {
         controllerUnavailable: false,
         captureUnsupported: false,
         activity: activity,
+        // Nothing else is holding anything: this case is about the activity axis alone, and the
+        // long-read axis has cases of its own above.
+        heldByLongRead: false,
       );
       if (activity == CaptureActivity.idle || activity == CaptureActivity.capturing) {
         expect(blocker, isNull, reason: '$activity must leave the toggle pressable');
