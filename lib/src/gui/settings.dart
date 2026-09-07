@@ -20,6 +20,8 @@ import '/src/core/platform_controller.dart';
 import '/src/core/providers.dart';
 import '/src/core/raw_frame_probe.dart';
 import '/src/core/sound_player.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
@@ -32,6 +34,7 @@ import '/src/gui/module_update_dialog.dart';
 import '/src/gui/raw_frame_probe_view.dart';
 import '/src/gui/toast.dart';
 import '/src/gui/storage_settings.dart';
+import '/src/gui/storage_tree.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/theme_gallery.dart';
 import '/src/gui/video_import.dart';
@@ -426,9 +429,20 @@ class _SoundSettingTileState extends ConsumerState<_SoundSettingTile> {
     );
     if (file == null) return;
     if (kIsWeb) {
+      // The layout and not `pathInfoProvider`: a custom sound is written next to the settings and
+      // not into the record store, so choosing one is offered during a store outage -- and reading
+      // the store-prepared layout there would have thrown out of the picker's callback instead of
+      // reporting anything. Null only while the app has not resolved its own directories, which is
+      // the same outcome for the user as a failed write, so it is reported as one.
+      final soundDir = ref.read(pathLayoutProvider)?.customSoundDir;
+      if (soundDir == null) {
+        logger.e("Failed to persist custom sound: the directory layout is not resolved");
+        Toaster.show(ToastData.error(description: "$tr_sound.save_failure".tr()));
+        return;
+      }
       try {
         final stored = await persistCustomSound(
-          directory: ref.read(pathInfoProvider).customSoundDir,
+          directory: soundDir,
           type: _type,
           originalName: file.name,
           bytes: await file.readAsBytes(),
@@ -558,19 +572,36 @@ class _VolumeSliderState extends State<_VolumeSlider> {
   }
 }
 
+/// Whether this build is the web one — as a **dependency**, not as a constant
+/// read at each use site.
+///
+/// `kIsWeb` is a compile-time `false` under `flutter test`, so a use site that
+/// reads it directly makes the web arrangement of this card not merely untested
+/// but *unreachable* from the VM: the branch is folded away before the test
+/// runs. That matters here because the two rows below are the ones that close on
+/// web, and what is left when they do — [StorageManagerTile], the one row the
+/// browser build has to keep, because on web that view is the only way to see the
+/// app's data at all — is exactly what a VM test could not otherwise see. Same reasoning, and same shape, as `storageOnWebProvider`
+/// in `storage_tree.dart` and `clipboardFileReferenceSupportProvider` in
+/// `clipboard_alt.dart`; the default is `kIsWeb`, so the shipped behaviour is
+/// unchanged.
+final settingsOnWebProvider = Provider<bool>((ref) => kIsWeb);
+
 class SystemGroup extends ConsumerWidget {
   const SystemGroup({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Built as a list rather than inlined so the empty case is decidable: every
-    // row here is platform-gated, and on web both gates close, which would
-    // otherwise leave a titled card band with nothing under it.
+    final onWeb = ref.watch(settingsOnWebProvider);
+    // Built as a list rather than inlined so the empty case stays decidable. Two
+    // of the three rows are platform-gated and both gates close on web; the
+    // storage row is not gated, which is what keeps the card from coming out
+    // empty there — see [StorageManagerTile] for why that row may not be gated.
     final rows = <Widget>[
       // Browsers can copy image bytes after a user gesture, but cannot place
       // native file references on the system clipboard, so there is no mode
       // choice to expose on web.
-      if (!kIsWeb)
+      if (!onWeb)
         DropdownButtonWidget<ClipboardPasteImageMode?>(
           title: "$tr_settings.system.clipboard_paste_image_mode.title".tr(),
           description: "$tr_settings.system.clipboard_paste_image_mode.description".tr(),
@@ -583,7 +614,10 @@ class SystemGroup extends ConsumerWidget {
       // there rather than offering a broken migration. The web build reports
       // the host OS via defaultTargetPlatform (isWindows() is true in a Windows
       // browser), so exclude web explicitly.
-      if (!CurrentPlatform.isWeb() && CurrentPlatform.isWindows()) const DataRootTile(),
+      if (!onWeb && CurrentPlatform.isWindows()) const DataRootTile(),
+      // Where the data is, then what is in it. Ungated: this is the only way
+      // into the storage view on web, where the two rows above are absent.
+      const StorageManagerTile(),
     ];
     if (rows.isEmpty) {
       return const SizedBox.shrink();
@@ -684,11 +718,31 @@ class _LicensePageDialog extends ConsumerWidget {
 class AboutGroup extends ConsumerWidget {
   const AboutGroup({super.key});
 
+  /// What the module row shows while the version check has not answered.
+  ///
+  /// Two sentences and not one, because `loading` covers two states that differ
+  /// by minutes. An automatic install that reaches a held `modules/` parks until
+  /// the reader lets go ([LongReadRegistry.holdWhenFree]), and the loader this
+  /// row reads stays `loading` for the whole park — so the row said 「確認中...」
+  /// about a check that had already finished, for as long as a whole-store
+  /// re-recognition takes. The park is a state the registry carries
+  /// ([longReadDeferralsProvider]), so the row is told which of the two it is
+  /// rather than inferring it from how long it has been waiting.
+  String moduleVersionLoadingLabel(WidgetRef ref) {
+    return ref.watch(longReadDeferralsProvider).containsKey(LongReadKind.moduleInstall)
+        ? "$tr_settings.about.version.waiting".tr()
+        : "$tr_settings.about.version.checking".tr();
+  }
+
   String moduleVersion(WidgetRef ref) {
+    // Read before the `when`, so the row rebuilds when the park begins or ends:
+    // a watch inside the `loading` branch is only established while that branch
+    // is the one being built, which is true here but rests on it.
+    final loadingLabel = moduleVersionLoadingLabel(ref);
     return ref
         .watch(moduleVersionLoader)
         .when(
-          loading: () => "checking...",
+          loading: () => loadingLabel,
           error: (e, _) => "ERROR: $e",
           data: (data) {
             return data?.recognizerVersion.toLocal().toString() ?? "$tr_settings.about.version.unknown_version".tr();
@@ -699,7 +753,11 @@ class AboutGroup extends ConsumerWidget {
   String appVersion(WidgetRef ref) {
     return ref
         .watch(appVersionCheckLoader)
-        .when(loading: () => "checking...", error: (e, _) => "ERROR: $e", data: (data) => data.local.toString());
+        .when(
+          loading: () => "$tr_settings.about.version.checking".tr(),
+          error: (e, _) => "ERROR: $e",
+          data: (data) => data.local.toString(),
+        );
   }
 
   String versionString(WidgetRef ref) {
@@ -739,6 +797,60 @@ class AboutGroup extends ConsumerWidget {
   }
 }
 
+/// Why the "re-resolve parent/child links across the whole store" entry may not be pressed right
+/// now.
+///
+/// A closed set for the same reason [RegenerateAllBlocker] is one: the tile shipped with a single
+/// reason and a ternary, and the moment a second reason arrived the ternary would have paired it
+/// with whichever arm it fell into, silently. With an exhaustive [resolveInheritanceBlockerKey] a
+/// third reason cannot be added without the compiler demanding a sentence for it.
+@visibleForTesting
+enum ResolveInheritanceBlocker {
+  /// A resolution started here is already in flight; a second tap would take a second whole-store
+  /// lock acquisition. Fire-and-forget with no progress UI, so this flag is the only sign of it.
+  resolving,
+
+  /// A registered long reader is holding the record store this resolution reads and writes back.
+  ///
+  /// **This is the direction the tile was blind to.** `resolveAllInheritance` announces itself
+  /// (`LongReadKind.inherit` over the record store root), so every *other* surface was already
+  /// withheld while a resolution ran — but the tile itself asked nothing, and a resolution could be
+  /// started on top of a zip, an export, a scan or a module relocation that had the same tree open.
+  /// Named last on purpose; see [resolveInheritanceBlockerOf].
+  longRead,
+}
+
+/// Which reason (if any) makes the inheritance-resolution entry inert, in precedence order.
+///
+/// **[longRead] is last, for the reason [resolveRegenerateAllBlocker] states.** A resolution that is
+/// running holds a claim of its own over the whole record store, so [resolving] and a non-null
+/// [heldBy] are true together for the whole of the most common case — and there 「再解決の実行中です」
+/// is both true and specific, while the long reader's sentence would answer "why?" with 「他の処理」
+/// about the user's own resolution.
+@visibleForTesting
+ResolveInheritanceBlocker? resolveInheritanceBlockerOf({required bool resolving, required LongReadKind? heldBy}) {
+  if (resolving) {
+    return ResolveInheritanceBlocker.resolving;
+  }
+  if (heldBy != null) {
+    return ResolveInheritanceBlocker.longRead;
+  }
+  return null;
+}
+
+/// The **full** translation key for [blocker]'s sentence.
+///
+/// Exhaustive and explicit, not `blocker.name`, for the reason [regenerateAllBlockerKey] gives:
+/// easy_localization renders a key it cannot find *as the key*, so a mistyped one ships `pages.…`
+/// into a tooltip instead of failing anywhere.
+@visibleForTesting
+String resolveInheritanceBlockerKey(ResolveInheritanceBlocker blocker) => switch (blocker) {
+  ResolveInheritanceBlocker.resolving => "$tr_settings.about.resolve_inheritance.blocked.resolving",
+  // Not a sentence of this control's own: the one refusal every long reader produces is worded
+  // once, in `long_read_registry.dart`, so this arm cost no new string.
+  ResolveInheritanceBlocker.longRead => longReadBusyKey,
+};
+
 /// The "re-resolve parent/child links across the whole store" entry of [AboutGroup].
 ///
 /// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a seam
@@ -746,9 +858,8 @@ class AboutGroup extends ConsumerWidget {
 ///
 /// The resolution is asynchronous and fire-and-forget, so the entry disables itself while one is
 /// in flight instead of letting a second tap start another whole-store lock acquisition — and it
-/// **says so**. A silent grey tile is exactly the defect [RegenerateAllBlocker] was introduced ten
-/// lines below to remove; leaving its immediate neighbour silent would have reproduced it. There is
-/// one reason here and no closed set is needed for it, but the obligation is the same: `disabled`
+/// **says so**. A silent grey tile is exactly the defect [RegenerateAllBlocker] was introduced
+/// below to remove; leaving its immediate neighbour silent would have reproduced it. `disabled`
 /// and `tooltip` are decided by one expression, so "is it inert" and "why" cannot disagree.
 class ResolveInheritanceTile extends ConsumerWidget {
   const ResolveInheritanceTile({super.key});
@@ -756,9 +867,28 @@ class ResolveInheritanceTile extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final resolving = ref.watch(inheritanceResolutionRunningProvider);
+    // Watched, not read: a long read can end while the settings page is open, and the tile has to
+    // come back on its own when it does.
+    final claims = ref.watch(longReadRegistryProvider).values;
+    // The layout and not `pathInfoProvider`: this tile only needs to know where the store is, and
+    // it is drawn during a store outage -- the one state in which the app knows that and could not
+    // open the store. Watched for the same reason the claims are: the layout resolves a few frames
+    // into a launch and the tile has to start answering when it does.
+    final layout = ref.watch(pathLayoutProvider);
+    // **The record store root, which is the path the resolution itself claims.** Both stores are
+    // read in full and the changed records are written back to whichever one owns them, so the
+    // honest question is the one `CharaDetailRecordStorage.resolveAllInheritance` answers about
+    // itself: `rootDirectory.parent`, the parent of `active/` and `archive/`. Asking about either
+    // half, or about a list of record ids, would be a second derivation of the same fact -- and the
+    // one that goes stale when the store gains another directory.
+    final heldBy = storageDeleteBlockedBy(
+      layout == null ? null : StorageDeletePathsRequest([layout.charaDetailDir]),
+      claims,
+    );
+    final blocker = resolveInheritanceBlockerOf(resolving: resolving, heldBy: heldBy);
     return Disabled(
-      disabled: resolving,
-      tooltip: resolving ? "$tr_settings.about.resolve_inheritance.blocked.resolving".tr() : null,
+      disabled: blocker != null,
+      tooltip: blocker == null ? null : resolveInheritanceBlockerKey(blocker).tr(),
       child: ListTile(
         title: Text("$tr_settings.about.resolve_inheritance.title".tr()),
         subtitle: Text("$tr_settings.about.resolve_inheritance.description".tr()),
@@ -771,11 +901,63 @@ class ResolveInheritanceTile extends ConsumerWidget {
   }
 }
 
+/// Why the "apply a manually downloaded modules.zip" entry may not be pressed right now.
+///
+/// A closed set for the reason [RegenerateAllBlocker] is one, and the same reason the ternary this
+/// replaced was not enough: a second condition added beside a ternary inherits an arm silently.
+@visibleForTesting
+enum ModuleInstallBlocker {
+  /// A video import owns the event loop, and installing modules would tear it down.
+  ///
+  /// The install invalidates `moduleVersionLoader`, which `platformControllerLoader` watches, so the
+  /// rebuild takes the worker -- and the import riding it -- with it. It is also a regeneration
+  /// entry point without a regeneration UI: on success it calls `checkRecordVersion()`, which
+  /// auto-starts a whole-store batch the worker would refuse record by record.
+  importing,
+
+  /// A registered long reader is holding `modules/`, which this install rewrites.
+  ///
+  /// **This is the direction that stayed open when the install learnt to announce itself.**
+  /// `runModuleInstall` claims `modulesDir` for the length of the extraction, so the record page's
+  /// export and the storage view's zip/copy/save of the `modules` row are withheld while an install
+  /// runs. The registry is not a lock, though, so that says nothing about the opposite order: an
+  /// export already walking `modules/labels.json`, or a data-root relocation moving `modules/`
+  /// wholesale, could be overwritten by an install started on top of it. This is the tile asking the
+  /// same question of itself that it makes everyone else ask of it.
+  longRead,
+}
+
+/// Which reason (if any) makes the manual module install inert, in precedence order.
+///
+/// [importing] first for the reason [RegenerateAllBlocker.importing] states: of the two it is the
+/// one the user can go and stop. A long read has no stop and can only be waited out.
+@visibleForTesting
+ModuleInstallBlocker? resolveModuleInstallBlocker({required bool importing, required LongReadKind? heldBy}) {
+  if (importing) {
+    return ModuleInstallBlocker.importing;
+  }
+  if (heldBy != null) {
+    return ModuleInstallBlocker.longRead;
+  }
+  return null;
+}
+
+/// The **full** translation key for [blocker]'s sentence.
+///
+/// Exhaustive and explicit for the reason [regenerateAllBlockerKey] gives, and neither arm is a
+/// string of this control's own: the import refusal is the shared line every regeneration gate
+/// reads, and the long-read refusal is the app's one.
+@visibleForTesting
+String moduleInstallBlockerKey(ModuleInstallBlocker blocker) => switch (blocker) {
+  ModuleInstallBlocker.importing => "$tr_video_import.blocks_regeneration",
+  ModuleInstallBlocker.longRead => longReadBusyKey,
+};
+
 /// The "apply a manually downloaded modules.zip" entry of [AboutGroup].
 ///
 /// A widget of its own for the same reason [RegenerateAllRecordsTile] is: so its gate has a
 /// seam a test can mount without dragging in the version loaders and the license page.
-class ModuleManualUpdateTile extends StatelessWidget {
+class ModuleManualUpdateTile extends ConsumerWidget {
   /// The import state to gate on, defaulting to the front end's own. Injectable because
   /// `video_import.dart` resolves to the desktop stub under `flutter test`, where the
   /// notifier is a constant idle and the gate would be permanently open.
@@ -784,27 +966,37 @@ class ModuleManualUpdateTile extends StatelessWidget {
   const ModuleManualUpdateTile({super.key, this.importState});
 
   @override
-  Widget build(BuildContext context) {
-    // A manual install is a regeneration entry point without a regeneration UI: on success it
-    // calls `checkRecordVersion()`, which auto-starts a whole-store batch. It is also the one
-    // entry that can destroy a running import outright -- installing modules invalidates
-    // `moduleVersionLoader`, which `platformControllerLoader` watches, so the rebuild tears the
-    // worker (and the import riding it) down. Worded from the key the other regeneration gates
-    // use, so the user meets one explanation and not four.
+  Widget build(BuildContext context, WidgetRef ref) {
     return ValueListenableBuilder<VideoImportState>(
       valueListenable: importState ?? videoImportState,
-      builder: (context, import, _) => Disabled(
-        disabled: import.isRunning,
-        tooltip: import.isRunning ? "$tr_video_import.blocks_regeneration".tr() : null,
-        child: Consumer(
-          builder: (context, ref, _) => ListTile(
+      builder: (context, import, _) {
+        // Watched, not read: an export or a relocation can end while the settings page is open, and
+        // the entry has to come back on its own.
+        final claims = ref.watch(longReadRegistryProvider).values;
+        // The layout and not `pathInfoProvider`, for the reason [ResolveInheritanceTile] states: a
+        // module install does not need the record store to have opened, and this entry is drawn
+        // while it has not.
+        final layout = ref.watch(pathLayoutProvider);
+        // **`modulesDir`, which is the path `runModuleInstall` claims.** The desktop leg unpacks
+        // into `modulesDir.parent`, but what it replaces is `modules/` -- and asking about the
+        // parent would withhold the entry for a claim on `settings/` next door. One derivation of
+        // "where a module install lands", stated on both sides of the same question.
+        final heldBy = storageDeleteBlockedBy(
+          layout == null ? null : StorageDeletePathsRequest([layout.modulesDir]),
+          claims,
+        );
+        final blocker = resolveModuleInstallBlocker(importing: import.isRunning, heldBy: heldBy);
+        return Disabled(
+          disabled: blocker != null,
+          tooltip: blocker == null ? null : moduleInstallBlockerKey(blocker).tr(),
+          child: ListTile(
             title: Text("$tr_settings.module_update.entry.title".tr()),
             subtitle: Text("$tr_settings.module_update.entry.description".tr()),
             trailing: const Padding(padding: EdgeInsets.only(right: 16), child: Icon(Symbols.download_rounded)),
             onTap: () => ModuleManualUpdateDialog.show(ref.base),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -837,16 +1029,42 @@ enum RegenerateAllBlocker {
   /// the tile is disabled for the whole length of a batch the user themselves started, which is
   /// strictly the longer-lived and more often met of the two states.
   regenerating,
+
+  /// A registered long reader is holding the active store this batch would rewrite.
+  ///
+  /// The tile stopped a batch of this kind before it explained one:
+  /// `CharaDetailRecordRegenerationController.start` — the funnel all five regeneration entry
+  /// points share — refuses while a long reader holds the records, so the tap did nothing and
+  /// said nothing. This is that refusal, given a reason.
+  ///
+  /// Named last on purpose; see [resolveRegenerateAllBlocker].
+  longRead,
 }
 
 /// Which reason (if any) makes the whole-store regeneration entry inert, in precedence order.
+///
+/// **[longRead] is last because a running batch holds a claim of its own.** While
+/// [regenerating] is true so is [heldBy] — `CharaDetailRecordRegenerationController` claims every
+/// `active/<id>` it was handed for the length of the batch — so the two are true together for the
+/// whole of the most common case. 「再認識の実行中です」 is both true and specific there, while the
+/// long reader's sentence would answer "why?" with 「他の処理」 about the user's own batch.
+///
+/// [importing] stays first for the reason its own member states: it is the one of the three the
+/// user can go and stop.
 @visibleForTesting
-RegenerateAllBlocker? resolveRegenerateAllBlocker({required bool regenerating, required bool importing}) {
+RegenerateAllBlocker? resolveRegenerateAllBlocker({
+  required bool regenerating,
+  required bool importing,
+  required LongReadKind? heldBy,
+}) {
   if (importing) {
     return RegenerateAllBlocker.importing;
   }
   if (regenerating) {
     return RegenerateAllBlocker.regenerating;
+  }
+  if (heldBy != null) {
+    return RegenerateAllBlocker.longRead;
   }
   return null;
 }
@@ -867,6 +1085,10 @@ RegenerateAllBlocker? resolveRegenerateAllBlocker({required bool regenerating, r
 String regenerateAllBlockerKey(RegenerateAllBlocker blocker) => switch (blocker) {
   RegenerateAllBlocker.importing => "$tr_video_import.blocks_regeneration",
   RegenerateAllBlocker.regenerating => "$tr_settings.about.regenerate.blocked.regenerating",
+  // Not a sentence of this control's own, and that is the point: the one refusal every long
+  // reader produces is worded once, in `long_read_registry.dart`, so this entry cost no new
+  // string. Named through the exported constant rather than spelled again here.
+  RegenerateAllBlocker.longRead => longReadBusyKey,
 };
 
 /// The whole-store "re-recognize captured records" entry of [AboutGroup].
@@ -895,11 +1117,30 @@ class RegenerateAllRecordsTile extends ConsumerWidget {
     return ValueListenableBuilder<VideoImportState>(
       valueListenable: importState ?? videoImportState,
       builder: (context, import, _) {
+        // Watched, not read: a long read can end while the settings page is open, and the tile
+        // has to come back on its own when it does.
+        final claims = ref.watch(longReadRegistryProvider).values;
+        // The layout and not `pathInfoProvider`, for the reason [ResolveInheritanceTile] states.
+        final layout = ref.watch(pathLayoutProvider);
+        // **The active store's root, not a list of records**, which is what a null `recordIds`
+        // asks `regenerateRecordLongReadPaths` for: a whole-store batch cannot know which
+        // records it will touch until `checkRecordVersion` has walked the store, so the honest
+        // question is about the one directory that contains all of them. Asked through that
+        // derivation rather than written out here, so this tile carries the other half of what a
+        // batch writes — the write transaction journal — without a second list saying so. A
+        // hand-written enumeration of destinations is what this seam exists to stop.
+        final heldBy = storageDeleteBlockedBy(
+          layout == null
+              ? null
+              : StorageDeletePathsRequest(regenerateRecordLongReadPaths(pathInfo: layout, recordIds: null)),
+          claims,
+        );
         // One expression decides both halves, so "is it inert" and "why" cannot disagree. They did:
         // the disjunction listed two reasons and the tooltip covered one of them.
         final blocker = resolveRegenerateAllBlocker(
           regenerating: !ref.watch(charaDetailRecordRegenerationControllerProvider).isEmpty,
           importing: import.isRunning,
+          heldBy: heldBy,
         );
         return Disabled(
           disabled: blocker != null,

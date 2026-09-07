@@ -7,9 +7,12 @@ import '/src/chara_detail/exporter.dart';
 import '/src/chara_detail/spec/loader.dart';
 import '/src/chara_detail/storage.dart';
 import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/gui/chara_detail/common.dart';
 import '/src/gui/common.dart';
+import '/src/gui/storage_tree.dart';
 
 // ignore: constant_identifier_names
 const tr_chara_detail = "pages.chara_detail";
@@ -146,12 +149,49 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
   @override
   Widget build(BuildContext context) {
     final count = widget.recordIds.length;
+    // Watched, not read: a long read can end while this dialog is open, and the
+    // confirm has to come back on its own when it does.
+    //
+    // The source is read rather than watched, and it is the same snapshot
+    // [_confirm] takes: the dropdown is inert while the selection this dialog was
+    // opened from is live, so there is nothing here for a watch to observe.
+    final claims = ref.watch(longReadRegistryProvider).values;
+    // Asked over [recordExportLongReadPaths] and no longer over the record ids
+    // alone: the desktop zip also reads `modules/labels.json`, and that file
+    // belongs to an unlocked group whose writers announce themselves and nothing
+    // else. Going through the export's own derivation is what keeps the set this
+    // button asks about equal to the set the export claims — the two used to be
+    // written separately, and the modules half existed in neither.
+    // The layout and not `pathInfoProvider`, the step
+    // `_BulkDeleteRecordDialogState.build` explains: an export needs to know
+    // where the store is, not that it was successfully prepared, and the second
+    // throws while it has not been.
+    final layout = ref.read(pathLayoutProvider);
+    final awaitingExtraction =
+        layout != null &&
+        storageDeleteBlockedBy(
+              StorageDeletePathsRequest(
+                recordExportLongReadPaths(
+                  pathInfo: layout,
+                  source: ref.read(recordSourceProvider),
+                  recordIds: widget.recordIds,
+                  isWeb: ref.read(exportIsWebProvider),
+                ),
+              ),
+              claims,
+            ) !=
+            null;
     return BulkConfirmDialog(
       dismissRef: ref.base,
       dialogTitle: "$tr_chara_detail.export.dialog.title".tr(),
       closeTooltip: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
       maxWidth: 560,
-      maxHeight: 520,
+      // Taller by exactly the card the refusal adds. The four format options and
+      // their descriptions already fill the 520, and this dialog has no caution
+      // box for the refusal to take the place of the way the archive and delete
+      // dialogs do — so the alternative to growing is a body that overflows its
+      // own card.
+      maxHeight: awaitingExtraction ? 600 : 520,
       message: "$tr_chara_detail.export.dialog.message".tr(namedArgs: {"count": "$count"}),
       bodyExtras: [
         RadioGroup<ExportFormat>(
@@ -175,15 +215,25 @@ class _ExportRecordDialogState extends ConsumerState<ExportRecordDialog> {
             ],
           ),
         ),
+        // Stated as body text and not only as the confirm's tooltip, for the
+        // reason the delete dialogs give: a tooltip needs a hover, and the dialog
+        // has already taken the whole screen to ask a question that cannot be
+        // answered yet.
+        if (awaitingExtraction) Center(child: NoteCard(description: Text(longReadBusyMessage()))),
       ],
       cancelLabel: "$tr_chara_detail.export.dialog.cancel_button.label".tr(),
       cancelTooltip: "$tr_chara_detail.export.dialog.cancel_button.tooltip".tr(),
       confirmLabel: "$tr_chara_detail.export.dialog.ok_button.label".tr(),
-      confirmTooltip: "$tr_chara_detail.export.dialog.ok_button.tooltip".tr(),
+      confirmTooltip: awaitingExtraction
+          ? longReadBusyMessage()
+          : "$tr_chara_detail.export.dialog.ok_button.tooltip".tr(),
       confirmIcon: Symbols.download_rounded,
       // Export is non-destructive: confirm on a plain tap, no error palette.
       destructive: false,
       onConfirm: _confirm,
+      confirmEnabled: !awaitingExtraction,
+      // Not narrowed by the refusal: leaving is the remedy it asks for, so the
+      // way out stays open for exactly the window the confirm is shut.
     );
   }
 }

@@ -15,6 +15,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/core/path_entity.dart';
+import 'package:umacapture/src/core/providers.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/utils.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/gui/common.dart';
@@ -46,17 +49,45 @@ class _ParkedRegeneration extends CharaDetailRecordRegenerationController {
   Progress build() => _progress;
 }
 
-Future<void> _pumpTile(WidgetTester tester, VideoImportState state, {bool regenerating = false}) async {
+/// A data root the tile can ask about. Nothing is written to it: the gate is a
+/// question about paths, and no file has to exist for a path to be covered.
+final _layout = PathInfo(
+  documentDir: DirectoryPath('/tmp/uma_regen_tile/documents'),
+  supportDir: DirectoryPath('/tmp/uma_regen_tile/support'),
+  executableDir: DirectoryPath('/tmp/uma_regen_tile/exe'),
+  downloadDir: DirectoryPath('/tmp/uma_regen_tile/downloads'),
+);
+
+Future<void> _pumpTile(
+  WidgetTester tester,
+  VideoImportState state, {
+  bool regenerating = false,
+  List<PathEntity> held = const [],
+}) async {
   final importState = ValueNotifier<VideoImportState>(state);
   addTearDown(importState.dispose);
+  final container = ProviderContainer.test(
+    overrides: [
+      pathInfoProvider.overrideWithValue(_layout),
+      // The tile asks the *layout* where the store is, so that it can answer during a store
+      // outage; the store-prepared provider above is left in place for anything else this tree
+      // reaches.
+      pathLayoutProvider.overrideWithValue(_layout),
+      if (regenerating)
+        charaDetailRecordRegenerationControllerProvider.overrideWith(
+          () => _ParkedRegeneration(Progress(count: 1, total: 4)),
+        ),
+    ],
+  );
+  if (held.isNotEmpty) {
+    // A kind that is not `regeneration`, so that "a long reader holds the store"
+    // and "a batch of my own is running" stay separable: the tile's precedence
+    // between them is what the resolver cases below pin.
+    container.read(longReadRegistryProvider.notifier).claimUntilReleased(kind: LongReadKind.zip, paths: held);
+  }
   await tester.pumpWidget(
-    ProviderScope(
-      overrides: [
-        if (regenerating)
-          charaDetailRecordRegenerationControllerProvider.overrideWith(
-            () => _ParkedRegeneration(Progress(count: 1, total: 4)),
-          ),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: MaterialApp(
         theme: _theme(),
         home: Scaffold(body: RegenerateAllRecordsTile(importState: importState)),
@@ -160,19 +191,27 @@ void main() {
       reason: 'two reasons are explained with the same sentence, so one of them is mislabelled: $byBlocker',
     );
     expect(RegenerateAllBlocker.values.map(regenerateAllBlockerKey).toSet().length, RegenerateAllBlocker.values.length);
+    // The long reader's sentence is not this control's own: it is the one every withheld surface
+    // in the app shows. Pinned here because the tile names it by *key* while everything else
+    // renders it through `longReadBusyMessage`, and two spellings of one key is exactly the state
+    // easy_localization cannot report -- it renders an unknown key as the key.
+    expect(regenerateAllBlockerKey(RegenerateAllBlocker.longRead), longReadBusyKey);
+    expect(byBlocker[RegenerateAllBlocker.longRead], longReadBusyMessage());
   });
 
   test('no regeneration blocker is unreachable, and inertness and the reason agree everywhere', () {
     final produced = <RegenerateAllBlocker?>{};
     for (final regenerating in [false, true]) {
       for (final importing in [false, true]) {
-        final blocker = resolveRegenerateAllBlocker(regenerating: regenerating, importing: importing);
-        produced.add(blocker);
-        expect(
-          blocker != null,
-          regenerating || importing,
-          reason: 'disabled-ness and the reason disagree at ($regenerating, $importing)',
-        );
+        for (final heldBy in <LongReadKind?>[null, LongReadKind.zip]) {
+          final blocker = resolveRegenerateAllBlocker(regenerating: regenerating, importing: importing, heldBy: heldBy);
+          produced.add(blocker);
+          expect(
+            blocker != null,
+            regenerating || importing || heldBy != null,
+            reason: 'disabled-ness and the reason disagree at ($regenerating, $importing, $heldBy)',
+          );
+        }
       }
     }
     // A reason no input can produce is a rule the app does not have, written down as if it did.
@@ -180,12 +219,90 @@ void main() {
   });
 
   test('the resolver names the reason that actually applies, in precedence order', () {
-    expect(resolveRegenerateAllBlocker(regenerating: false, importing: false), isNull);
-    expect(resolveRegenerateAllBlocker(regenerating: true, importing: false), RegenerateAllBlocker.regenerating);
-    expect(resolveRegenerateAllBlocker(regenerating: false, importing: true), RegenerateAllBlocker.importing);
+    expect(resolveRegenerateAllBlocker(regenerating: false, importing: false, heldBy: null), isNull);
+    expect(
+      resolveRegenerateAllBlocker(regenerating: true, importing: false, heldBy: null),
+      RegenerateAllBlocker.regenerating,
+    );
+    expect(
+      resolveRegenerateAllBlocker(regenerating: false, importing: true, heldBy: null),
+      RegenerateAllBlocker.importing,
+    );
+    expect(
+      resolveRegenerateAllBlocker(regenerating: false, importing: false, heldBy: LongReadKind.zip),
+      RegenerateAllBlocker.longRead,
+    );
     // Not reachable in practice -- each of the two refuses to start while the other runs -- so this
     // only pins which true sentence a race would show. It is the one the tile showed before, and the
     // one the funnel every entry shares would refuse with.
-    expect(resolveRegenerateAllBlocker(regenerating: true, importing: true), RegenerateAllBlocker.importing);
+    expect(
+      resolveRegenerateAllBlocker(regenerating: true, importing: true, heldBy: null),
+      RegenerateAllBlocker.importing,
+    );
+    // This pair IS reachable, and routinely: a running batch claims every `active/<id>` it was
+    // handed, so `heldBy` is non-null for the whole of it. 「再認識の実行中です」 is true and
+    // specific there, and 「他の処理が使用中」 would be a vaguer way of saying the same thing about
+    // the user's own batch.
+    expect(
+      resolveRegenerateAllBlocker(regenerating: true, importing: false, heldBy: LongReadKind.regeneration),
+      RegenerateAllBlocker.regenerating,
+    );
+    // And an import outranks a long read for the reason it outranks a batch: it is the one of the
+    // three the user can go and stop.
+    expect(
+      resolveRegenerateAllBlocker(regenerating: false, importing: true, heldBy: LongReadKind.zip),
+      RegenerateAllBlocker.importing,
+    );
+  });
+
+  // THE OTHER SILENT HALF. `start()` -- the funnel all five regeneration entry points share --
+  // already refused while a long reader held the records, so this tile started a batch that died
+  // at the first step with a log line and no UI. The tap was not merely useless: it was silent.
+
+  testWidgets('is inert while a long reader holds the active store, and says why', (tester) async {
+    await _pumpTile(tester, VideoImportState.idle, held: [_layout.charaDetailActiveDir]);
+
+    expect(_isInert(tester), isTrue, reason: 'the batch would be refused record by record at the funnel');
+    expect(_reasonShown(tester), longReadBusyMessage());
+    // Rendered, not merely computed: `Disabled` only wraps a Tooltip while it is disabled.
+    final tooltips = [for (final t in tester.widgetList<Tooltip>(find.byType(Tooltip))) t.message ?? ''];
+    expect(tooltips, contains(longReadBusyMessage()));
+    // And it resolved. `.tr()` renders an unknown key as the key, which would satisfy the two
+    // assertions above by being the wrong thing entirely.
+    expect(_reasonShown(tester), appSentenceAt(longReadBusyKey));
+  });
+
+  testWidgets('is inert while a long reader holds the write transaction journal', (tester) async {
+    // Not the active store and no record's folder: on web every record a whole-store
+    // batch rewrites is published through a slot under this directory, and 「アプリの残骸」
+    // offers a zip and a delete over it. The tile asks `regenerateRecordLongReadPaths`
+    // with no record ids — the same derivation the batch claims — so the journal is in
+    // the question here for the same reason it is in the claim.
+    await _pumpTile(tester, VideoImportState.idle, held: [_layout.charaDetailWriteTransactionDir]);
+
+    expect(_isInert(tester), isTrue);
+    expect(_reasonShown(tester), longReadBusyMessage());
+  });
+
+  testWidgets('a long read somewhere else in the data root leaves the tile alone', (tester) async {
+    // The control that separates this gate from "any claim at all disables it". The archive store
+    // is held by a real registered kind and is nowhere near what this batch touches — it rewrites
+    // `active/`, publishes through the write-transaction journal and recognises out of `modules/`,
+    // and 殿堂入り is none of the three. (`modules/` used to be this control and no longer can be:
+    // a batch names it now, because the recognizer re-reads it per record.)
+    await _pumpTile(tester, VideoImportState.idle, held: [_layout.charaDetailArchiveDir]);
+
+    expect(_isInert(tester), isFalse);
+    expect(_reasonShown(tester), isNull);
+  });
+
+  testWidgets('the batch s own claim does not rename the reason it is inert', (tester) async {
+    // A running batch holds `active/` itself, so both reasons are true at once for the whole of
+    // the most common case. The user started this one and the specific sentence is the true one.
+    await _pumpTile(tester, VideoImportState.idle, regenerating: true, held: [_layout.charaDetailActiveDir]);
+
+    expect(_isInert(tester), isTrue);
+    expect(_reasonShown(tester), appSentenceAt('pages.settings.about.regenerate.blocked.regenerating'));
+    expect(_reasonShown(tester), isNot(longReadBusyMessage()));
   });
 }
