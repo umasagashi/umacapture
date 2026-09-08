@@ -457,6 +457,17 @@ class _BlendSection extends StatelessWidget {
         ),
         _SwatchRow(
           _BlendSwatch(
+            'menu entry icon',
+            overlay: cs.onSurface.withValues(alpha: 0.7),
+            base: cs.surface,
+            baseLabel: 'surface',
+          ),
+          'Icon of a live, non-destructive entry in the storage view\'s row menus. Reproduces what the context-menu '
+          'package\'s own MenuItem paints, so the destructive entry\'s error red and a withheld entry\'s '
+          'disabledColor are the only departures from it.',
+        ),
+        _SwatchRow(
+          _BlendSwatch(
             'disabled dialog close icon',
             overlay: cs.onTertiary.withValues(alpha: 0.38),
             base: cs.tertiary,
@@ -570,19 +581,25 @@ const Map<String, String> _roleUsages = {
       'Never painted under this name: the role consolidation in app_widget.dart remaps it onto onTertiary, '
       'so this is the source of the card/dialog header band\'s text color.',
   'error':
-      'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs, the storage tree\'s '
-      'per-row delete buttons, task failures, and the import-report dialog\'s failure card.',
+      'Error/danger emphasis: storage warnings, script errors, delete/regenerate dialogs, task failures, and the '
+      'import-report dialog\'s failure card. In the storage view it moved off the row: the delete button became '
+      'the one destructive entry of the row menu, which resolves this role itself, and only while that entry is '
+      'live -- a withheld one takes disabledColor instead.',
   'onError': 'Text and icons on error surfaces.',
   'errorContainer': 'Error/warning card and chip backgrounds.',
   'onErrorContainer': 'Text and icons on errorContainer backgrounds.',
-  'surface': 'Base backgrounds: card surfaces (global cardTheme), data-table, window chrome, side preview, script.',
+  'surface':
+      'Base backgrounds: card surfaces (global cardTheme), data-table, window chrome, side preview, script, and '
+      'the resting entries of the storage view\'s row menus.',
   'onSurface': 'Default body text and icon color.',
   'onSurfaceVariant': 'Secondary text: setting descriptions, captions, muted labels.',
   'surfaceBright': 'Pale water-blue tint filling the NoteCard body (paired with a primaryContainer border).',
   'surfaceContainerLowest':
       'Pale water-blue tint: logic-column and column-builder group backgrounds; data-table striped rows.',
   'surfaceContainerLow': 'Script name-copy chips; recolored to a pale water-blue tint.',
-  'surfaceContainer': 'Panel backgrounds (addon list, side preview); striped script rows.',
+  'surfaceContainer':
+      'Panel backgrounds (addon list, side preview); striped script rows; the focused entry of the storage '
+      'view\'s row menus.',
   'surfaceContainerHigh': 'Chip backgrounds (global chipTheme) and the page background (scaffold).',
   'surfaceContainerHighest': 'Raised backgrounds: table menu bar, input fields, module-update, statistics.',
   'outline': 'Borders and dividers: data-table grid lines, preset bar, script frame, settings-group header rules.',
@@ -597,6 +614,9 @@ const Map<String, String> _themeDataUsages = {
   'cardColor': 'Card background on the license page (Card with an explicit cardColor).',
   'dividerColor': 'Divider and border lines (dialog frames, table borders).',
   'shadowColor': 'Elevation shadow color for raised Material surfaces (cards, dialogs).',
-  'disabledColor': 'Disabled-state elements (data-table, family registration, script).',
+  'disabledColor':
+      'Disabled-state elements (data-table, family registration, script), and the withheld entries of the storage '
+      'view\'s row menus -- where it outranks the destructive red, so an entry that cannot act reads as dead '
+      'rather than as danger.',
   'hintColor': 'Input placeholders and hints (task dialog, column builder, script).',
 };
