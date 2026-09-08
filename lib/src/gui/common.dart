@@ -458,10 +458,28 @@ class Disabled extends StatelessWidget {
 /// outwards, so the child's own recognizer enters the arena before this one, and the arena's sweep
 /// hands the win to its first member. This only ever collects a press the child itself declined.
 ///
-/// **Deliberately narrow.** It takes the pointer for a *tap* only: it does not wrap the subtree in
-/// [IgnorePointer] or [AbsorbPointer], so hover still reaches the child and the tooltip explaining
-/// the refusal still appears. Long presses, secondary taps and drags still travel to the ancestor —
-/// wrap those explicitly if a screen needs them stopped too.
+/// **Deliberately narrow, and it is the arena — not hit testing — that makes it so.** Nothing here
+/// is taken off the hit-test path: an opaque box adds itself when the child misses and every
+/// ancestor still adds itself as the recursion unwinds, so the ancestor's recogniser does enter the
+/// arena. This one merely enters it first, being nearer the target, and `GestureArenaManager.sweep`
+/// hands the win to the first member and rejects every other. That settles only a gesture that waits
+/// for the sweep, which is to say a tap. A recogniser that declares victory on its own resolves the
+/// arena before the sweep runs and takes the pointer over this widget's head — a long press when its
+/// deadline expires, a drag when the pointer passes the touch slop — and a secondary tap is never
+/// contested at all, since the detector below claims the primary button only. **An ancestor's long
+/// press, drag or right-click is therefore not stopped here.** Refuse those where they are declared,
+/// as the storage tree's row menu does at its own `onLongPressStart` and `onPointerDown`; the addon
+/// task row needs nothing because its tile carries only `onTap`.
+///
+/// **It does not absorb, on purpose.** An [AbsorbPointer] around the child would not stop the
+/// fall-through anyway (see [Disabled]'s doc: it registers no recogniser of its own), but it would
+/// keep the child off the hit-test path, and with it the hover that raises the disabled control's
+/// tooltip — the only thing carrying *why* the control is refusing. The workaround the framework
+/// settled on, `GestureDetector(onTap: () {}, child: AbsorbPointer(...))` in flutter/flutter#10593,
+/// is exactly this widget plus that inner half; the inner half is dropped because the greying here
+/// is already done by a null callback or by [Disabled], and paying for it with the tooltip would
+/// leave the user a dead button and no reason for it. The issue is closed — as no longer
+/// reproducible in its own reduction, not as fixed in general — so nothing is pending upstream.
 ///
 /// Semantics are excluded on purpose. This is a hole-filler, not a control: announcing it would lay
 /// a tappable node over a button that has just announced itself as disabled, so a screen reader and
