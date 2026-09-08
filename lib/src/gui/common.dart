@@ -362,6 +362,35 @@ class _IntStepperFieldState extends State<IntStepperField> {
   }
 }
 
+/// Greys [child] out and withdraws it from the pointer and the keyboard while [disabled], with
+/// [tooltip] saying why.
+///
+/// **A PRESS ON A WITHDRAWN CHILD IS NOT SWALLOWED — IT IS HANDED TO WHATEVER IS BEHIND.**
+/// [IgnorePointer] takes the subtree out of hit testing; it does not take the press out of the
+/// gesture arena. So a press aimed at the greyed control lands on the first ancestor that wants one,
+/// and the same is true of a control that is merely handed a null callback (it registers no
+/// recognizer, so the ancestor's wins the arena uncontested). On a screen where nothing behind the
+/// control is tappable that is invisible; put this inside a row, tile or card that carries its own
+/// `onTap` and the user presses a control announced as unavailable and gets that row's action
+/// instead. Measured twice on this codebase: the storage tree's withheld ⋮ collapsed the group it
+/// sat on, and the addon task list's greyed ▶ opened the task's edit dialog.
+///
+/// [AbsorbPointer] does not cure it either, and not only because it stops hover along with the
+/// press (which silences the tooltip explaining the refusal — the one thing the user needs most at
+/// that moment). It does not even stop the fall-through. `RenderAbsorbPointer.hitTest` returns
+/// `size.contains(position)` while absorbing and adds **nothing** to the result: it reports a hit to
+/// its parent without putting itself or its child on the hit-test path. The path is then completed
+/// as the recursion unwinds — every ancestor adds itself — so the row's recognizer is still in the
+/// arena, and the absorber has registered none of its own to contest it. Measured: swapping
+/// [TapSink] for an `AbsorbPointer` in the addon task row reopened the edit dialog *and* killed the
+/// tooltip.
+///
+/// Only a tappable **ancestor** can steal the press this way. A tappable sibling painted *below* in
+/// a [Stack] cannot, because the stack stops probing lower siblings once an upper one hit-tests true.
+///
+/// **So this widget answers the press itself**, through a [TapSink] it builds around its own
+/// subtree — see [wrappedChild]. Callers wrap nothing extra; [TapSink] stays public for the controls
+/// that go dead through a null callback alone, without passing through here.
 class Disabled extends StatelessWidget {
   final bool disabled;
   final String? tooltip;
@@ -387,11 +416,22 @@ class Disabled extends StatelessWidget {
     // widget in and out would change the element tree's shape and discard the child's [State] every
     // time the control changed availability (the capture toggle's in-flight marker, an
     // [AnimatedSwitcher]'s running transition).
-    return ExcludeFocus(
-      excluding: disabled,
-      child: IgnorePointer(
-        ignoring: disabled,
-        child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
+    //
+    // WITHDRAWN FROM THE ANCESTOR AS WELL. The [IgnorePointer] above takes the child out of hit
+    // testing but leaves the press to fall to whatever ancestor wants one, which is the defect this
+    // class's doc opens with. The [TapSink] collects it here rather than at each call site, for the
+    // reason the paragraph above gives about [ExcludeFocus]: a caller that forgets is the failure
+    // mode this primitive exists to prevent, and it has now been measured twice (the storage tree's
+    // ⋮, the addon task list's ▶). `active:` is toggled and the widget itself is unconditional, for
+    // the same [State]-preserving reason.
+    return TapSink(
+      active: disabled,
+      child: ExcludeFocus(
+        excluding: disabled,
+        child: IgnorePointer(
+          ignoring: disabled,
+          child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
+        ),
       ),
     );
   }
@@ -403,6 +443,54 @@ class Disabled extends StatelessWidget {
     } else {
       return wrappedChild();
     }
+  }
+}
+
+/// Terminates a tap at [child] instead of letting it reach a tappable ancestor.
+///
+/// Put this around a control that lives inside a row, tile or card with its own `onTap` and that can
+/// become unavailable. An unavailable control — one handed a null callback, or wrapped in
+/// [Disabled], or both — registers no tap recognizer of its own, so the ancestor's recognizer is
+/// alone in the gesture arena and the press it wins is one the user aimed somewhere else. That is
+/// not "nothing happened"; it is a different action, chosen by geometry the user could not see.
+///
+/// **An available control keeps its press.** Gestures are dispatched from the hit-test target
+/// outwards, so the child's own recognizer enters the arena before this one, and the arena's sweep
+/// hands the win to its first member. This only ever collects a press the child itself declined.
+///
+/// **Deliberately narrow.** It takes the pointer for a *tap* only: it does not wrap the subtree in
+/// [IgnorePointer] or [AbsorbPointer], so hover still reaches the child and the tooltip explaining
+/// the refusal still appears. Long presses, secondary taps and drags still travel to the ancestor —
+/// wrap those explicitly if a screen needs them stopped too.
+///
+/// Semantics are excluded on purpose. This is a hole-filler, not a control: announcing it would lay
+/// a tappable node over a button that has just announced itself as disabled, so a screen reader and
+/// the screen would disagree about what is pressable.
+///
+/// [active] exists for [Disabled], which builds one of these around every child it greys and has to
+/// stop collecting the moment the child is available again. Toggled rather than inserted and
+/// removed, so the subtree's [State] survives the change. While inactive this is a plain proxy:
+/// `deferToChild` puts hit testing back in the child's hands and the null callback registers no
+/// recognizer, so a press reaches exactly what it reached before.
+class TapSink extends StatelessWidget {
+  const TapSink({super.key, this.active = true, required this.child});
+
+  /// Whether presses are collected here. Defaults to true: a call site that wraps a control
+  /// explicitly is wrapping one it has already decided can go dead.
+  final bool active;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      // Opaque while collecting, because the point is to answer a press the child refused: with
+      // `deferToChild` the refusal would propagate and this widget would never be hit at all.
+      behavior: active ? HitTestBehavior.opaque : HitTestBehavior.deferToChild,
+      excludeFromSemantics: true,
+      onTap: active ? () {} : null,
+      child: child,
+    );
   }
 }
 
