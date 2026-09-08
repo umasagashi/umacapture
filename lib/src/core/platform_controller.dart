@@ -38,6 +38,45 @@ final capturingStateProvider = Provider<bool>((ref) {
       );
 });
 
+/// The import state every gate outside the capture card reads, as a substitutable value.
+///
+/// `videoImportState` is a top-level `ValueListenable` chosen by conditional export, and the
+/// notifier behind it is private to its front end. The capture card reaches it directly because
+/// its widgets already carry a `debugVideoImportState` seam of their own; a gate anywhere else has
+/// no such seam, and a rule that cannot be driven from a test is a rule that ships unmeasured.
+final videoImportListenableProvider = Provider<ValueListenable<VideoImportState>>((_) => videoImportState);
+
+/// **What the capture card is doing right now, as a Riverpod value.**
+///
+/// [resolveCaptureActivity] is the app's one answer to that question and this provider does not
+/// give a second one -- it calls it. What it adds is a subscription: the capture half arrives from
+/// a provider and the import half from a `ValueListenable`, and a consumer that is not the capture
+/// card has no `ValueListenableBuilder` around it to notice the second one moving.
+///
+/// **Why this exists at all.** `video_import_ops.dart` records what happened when four gates each
+/// read `capturingStateProvider` and `VideoImportState` separately and combined them their own way:
+/// they disagreed, and an open file dialog was explained as a running import. A fifth reader that
+/// took only the capture half would repeat that in a quieter form -- it would not disagree about
+/// what is running, it would simply not see half of it.
+final captureActivityProvider = NotifierProvider<CaptureActivityNotifier, CaptureActivity>(CaptureActivityNotifier.new);
+
+class CaptureActivityNotifier extends Notifier<CaptureActivity> {
+  @override
+  CaptureActivity build() {
+    // Watched, so a change to the capture half re-runs this whole method and the listener below is
+    // re-attached to whatever listenable is current then.
+    final capturing = ref.watch(capturingStateProvider);
+    final imports = ref.watch(videoImportListenableProvider);
+    void onImportChanged() {
+      state = resolveCaptureActivity(capturing: capturing, importState: imports.value);
+    }
+
+    imports.addListener(onImportChanged);
+    ref.onDispose(() => imports.removeListener(onImportChanged));
+    return resolveCaptureActivity(capturing: capturing, importState: imports.value);
+  }
+}
+
 /// The live capture session's frame geometry and rate, as the capture page's two badges
 /// render them -- and **only** a live session's.
 ///
@@ -821,6 +860,11 @@ final platformControllerLoader = FutureProvider<PlatformController?>((ref) async
       controller.setDetailCropCalibration(enable);
     });
     listenCapturePreview(ref, controller);
+    // Beside the preview wiring and for the same structural reason: both are session-scoped
+    // listeners that have to exist before a session can begin, and this element is the one whose
+    // life a session is nested inside. See `listenLiveCaptureLongRead` for what a rebuild does to
+    // a claim that is already on.
+    listenLiveCaptureLongRead(ref);
 
     // Never autostart on web: live capture opens getDisplayMedia, which requires a user gesture, so a
     // load-time start would only reject and play the error chime on every page load. The kIsWeb guard

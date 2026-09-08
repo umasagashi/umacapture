@@ -1251,7 +1251,7 @@ Future<void> _runWithSentry(AppRunner runner) async {
     // user-writable, persistent location under the app support directory (the same base
     // PathInfo uses), as recommended by the Sentry docs for production deployments.
     final supportDir = await getApplicationSupportDirectory();
-    final nativeDatabasePath = p.join(supportDir.path, "sentry-native");
+    final nativeDatabasePath = p.join(supportDir.path, sentryNativeDirName);
     // sentry-native does not create missing parent directories, so the crash DB
     // (and thus native crash capture) is silently dropped unless we create it.
     await Directory(nativeDatabasePath).create(recursive: true);

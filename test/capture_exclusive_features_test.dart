@@ -13,7 +13,8 @@
 // TWELVE COMBINATIONS, TWO KINDS. Four features against the other three is twelve pairs. Nine of
 // them are refusals a control has to make, and this file checks them. The three where a *report
 // dialog* is the thing already running are structurally unreachable instead: both dialogs open
-// through `CardDialog.show`, `DialogController` holds exactly one dialog, and `DialogLayer` puts
+// through `CardDialog.show`, which replaces whatever is up rather than stacking on it (only the
+// storage view asks to stack, with `over: true`), and `DialogLayer` puts
 // the whole app behind a barrier -- so while either is up nothing on the card behind it can be
 // reached, and a second dialog would replace the first rather than join it. That is why
 // `CaptureActivity` has no value for "a report dialog is open": a state nothing can observe and
@@ -91,6 +92,10 @@ void main() {
         // handing the gate an activity the card could never be in.
         activity: resolveCaptureActivity(capturing: inputs.capturing, importState: inputs.importState),
         regenerating: false,
+        // Held at "nothing else is holding the store": this file is about the exclusivity rule, and
+        // the long-read gate is asserted where the control reads the registry
+        // (`video_import_long_read_gate_test.dart`).
+        heldByLongRead: false,
       );
       if (activity == CaptureActivity.idle) {
         expect(blocker, isNull, reason: 'nothing is running, so the import must be offered');
@@ -121,6 +126,7 @@ void main() {
           controllerReady: true,
           activity: resolveCaptureActivity(capturing: inputs.capturing, importState: inputs.importState),
           regenerating: false,
+          heldByLongRead: false,
         ),
         named[activity],
         reason: '$activity',
@@ -142,6 +148,7 @@ void main() {
         // because the import that is asking IS that activity and would otherwise refuse itself.
         activity: resolveCaptureActivity(capturing: false, importState: VideoImportState.idle),
         regenerating: false,
+        heldByLongRead: false,
       ),
       isNull,
     );
@@ -155,6 +162,7 @@ void main() {
         controllerReady: true,
         activity: resolveCaptureActivity(capturing: false, importState: VideoImportState.idle),
         regenerating: true,
+        heldByLongRead: false,
       ),
       VideoImportBlocker.regenerating,
     );

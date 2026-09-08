@@ -22,6 +22,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/platform_channel.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/video_import_io.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/core/wasm_worker_ops.dart';
@@ -51,6 +52,15 @@ Map<String, dynamic> _done({String reason = 'completed', Object? records = 0, St
   'matrixConverted': '',
   'message': '',
 };
+
+/// What these cases announce to the long-read registry: nothing, and why.
+///
+/// They drive the front end's own state machine over a method channel, with no provider
+/// container anywhere in reach; what the session holds is asserted in
+/// `video_import_long_read_claim_test.dart`, which builds a real claim instead.
+const _declaresNothing = LongReadDeclaration.none(
+  reason: 'this suite drives the import front end directly; the registry is another suite\'s subject',
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -265,7 +275,7 @@ void main() {
     void notify(Map<String, dynamic> payload) => controller.handleNativeMessage(jsonEncode(payload));
 
     test('the discarded session and the empty finish reach the import that was running', () async {
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
 
       notify({'type': 'videoImportStarted'});
@@ -289,7 +299,7 @@ void main() {
       notify(_restarted(completed: false));
       notify({'type': 'onCharaDetailFinished', 'success': false, 'id': 'live-tail'});
 
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
       notify({'type': 'videoImportStarted'});
       notify(_done(records: 5));
@@ -301,7 +311,7 @@ void main() {
     });
 
     test('a live capture after the import is not charged to it either', () async {
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
       notify({'type': 'videoImportStarted'});
       notify(_done(records: 5));

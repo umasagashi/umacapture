@@ -15,6 +15,8 @@ import '/src/chara_detail/storage.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/storage_delete_request.dart';
 import '/src/core/utils.dart';
 import '/src/core/version_check.dart';
 import '/src/core/video_import.dart';
@@ -30,6 +32,7 @@ import '/src/gui/chara_detail/side_preview.dart';
 import '/src/gui/chara_detail/storage_status_banner.dart';
 import '/src/gui/common.dart';
 import '/src/gui/record_store_banner.dart';
+import '/src/gui/storage_tree.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/toast.dart';
 import '/src/preference/settings_state.dart';
@@ -47,7 +50,10 @@ final charaDetailInitialDataLoader = FutureProvider(retry: retryUnlessStoreOutag
   // sync with the downscaled image. Runs before the stores load so the preview
   // reads the corrected geometry. Idempotent and gated, so it is a no-op after the
   // first launch.
-  await runArchiveGeometryMigrationIfNeeded(pathInfo);
+  await runArchiveGeometryMigrationIfNeeded(
+    pathInfo,
+    declaration: archiveGeometryRepairLongReadDeclaration(ref.base, pathInfo),
+  );
   return Future.wait([ref.watch(moduleInfoLoaders.future), ref.watch(charaDetailRecordStorageLoaderProvider.future)]);
 });
 
@@ -299,6 +305,27 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
     // its own storage root) and would then reach the batch teardown with the import still decoding.
     // Read rather than watched because a context menu is built afresh each time it is opened.
     final importing = videoImportState.value.isRunning;
+    // Re-recognition is also withheld while a registered long reader holds a
+    // folder the batch writes: an archive move, a zip or a relocation is reading
+    // or renaming that very directory. `CharaDetailRecordRegenerationController.start`
+    // refuses the same thing where all five entrances funnel, which is what covers
+    // the two that are not controls; this is the half that lets the menu show the
+    // entry as unavailable rather than accepting a press that quietly does
+    // nothing.
+    //
+    // Asked over `regenerateRecordLongReadPaths` — the derivation the batch itself
+    // claims — and not over the record id: the batch writes `active/<id>` and, on
+    // web, the write transaction journal it publishes through, and that function's
+    // doc carries why. `source` does not enter it because the entry is active-only
+    // and the batch names the active directory whatever the page shows. Read
+    // rather than watched for the same reason [importing] is: a context menu is
+    // built afresh each time it is opened.
+    final regenerationHeld =
+        storageDeleteBlockedBy(
+          StorageDeletePathsRequest(regenerateRecordLongReadPaths(pathInfo: pathInfo, recordIds: [record.id])),
+          ref.read(longReadRegistryProvider).values,
+        ) !=
+        null;
     final isPinned = ref.read(pinnedRecordIdsProvider).contains(record.id);
     DirectoryPath dirOf(CharaDetailRecord r) => recordDirOf(pathInfo, source, r);
     const constraints = BoxConstraints(minHeight: 40);
@@ -400,11 +427,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
         if (source == RecordSource.active)
           MenuItem(
             constraints: constraints,
-            enabled: !selecting && !importing,
+            enabled: !selecting && !importing && !regenerationHeld,
             icon: Icon(
               Symbols.autorenew,
               weight: iconWeight,
-              color: (selecting || importing) ? theme.disabledColor : null,
+              color: (selecting || importing || regenerationHeld) ? theme.disabledColor : null,
             ),
             onSelected: (_) async {
               final moduleVersion = await ref.read(moduleVersionLoader.future);
@@ -420,7 +447,11 @@ class _CharaDetailDataTableWidgetState extends ConsumerState<_CharaDetailDataTab
             },
             label: Text(
               "$tr_chara_detail.context_menu.regenerate_record".tr(),
-              style: (selecting || importing) ? disabledStyle : style,
+              // Greyed with no sentence beside it, which is a known gap and not a
+              // choice made here: `MenuItem` takes no tooltip, so none of this
+              // menu's withheld entries can say why. The dialog this entry opens
+              // for an unsupported version does carry the sentence.
+              style: (selecting || importing || regenerationHeld) ? disabledStyle : style,
             ),
           ),
         if (source == RecordSource.active && isSentryAvailable())

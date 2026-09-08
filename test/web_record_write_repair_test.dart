@@ -8,10 +8,19 @@
 // were publish it or delete it, and one of those is destructive.
 //
 // It no longer has to choose: the staged tree is moved into `quarantine/` and
-// the slot goes. The one question that is still asked is whether the staged tree
-// is the *only* copy — `active/<id>/` missing and no other store holding the id
-// — because publishing the only copy is strictly better than setting it aside.
-// These tests pin that question and its two refusals.
+// the slot goes. Two questions are still asked, and both have to answer yes
+// before anything is published: whether the staged tree is the *only* copy —
+// `active/<id>/` missing and no other store holding the id — because publishing
+// the only copy is strictly better than setting it aside, and whether the
+// manifest can show the tree holds every file its publication set out to write,
+// because publishing a fragment puts a record with files missing into the user's
+// list as the real one. A manifest this build cannot read answers the second
+// question with silence, and silence is not a yes.
+//
+// These tests pin those questions and their refusals, one dimension at a time:
+// a staging whose manifest vouches for it is published when nothing else holds
+// the record and retired when the archive store does, and one whose manifest
+// cannot be read is quarantined either way.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/web_record_write_repair_test.dart
 import 'dart:convert';
@@ -59,39 +68,91 @@ void main() {
     return slot;
   }
 
+  /// Writes the slot an interrupted publication leaves when every file it set
+  /// out to write did reach the device whole: a `building` manifest that names
+  /// them with the length each was to be, and a `desired/` holding all of them
+  /// at that length.
+  Future<DirectoryPath> wholeSlot(String id) async {
+    final slot = dataRoot / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(id);
+    await slot.create(recursive: true);
+    await slot
+        .filePath('manifest.json')
+        .writeAsString(
+          jsonEncode({
+            'version': 1,
+            'owner': 'umacapture.web-record-persistence',
+            'operation': 'publish-active-record',
+            'transactionId': '123e4567-e89b-42d3-a456-426614174000',
+            'recordId': id,
+            'dataRootPath': dataRoot.path,
+            'finalPath': (dataRoot / 'active' / id).path,
+            'state': 'building',
+            'overlays': [
+              {'path': 'record.json', 'bytes': _recordJson(id).length},
+              {'path': 'new.bin', 'bytes': 2},
+            ],
+          }),
+        );
+    final desired = slot / 'desired';
+    await desired.create(recursive: true);
+    await desired.filePath('record.json').writeAsBytes(_recordJson(id));
+    await desired.filePath('new.bin').writeAsBytes([1, 2]);
+    return slot;
+  }
+
   test('recovery never resurrects an archived record into the active store', () async {
-    final slot = await tearManifest('archived');
+    final slot = await wholeSlot('archived');
     final archived = dataRoot / 'archive' / 'archived';
     await archived.create(recursive: true);
     await archived.filePath('record.json').writeAsBytes(_recordJson('archived'));
 
-    expect(await WebRecordWriteTransaction().recoverRecord(dataRoot, 'archived'), WebRecordWriteResult.incomplete);
+    // Committed, because a `building` slot leaves nothing for a later
+    // publication of this record to trip on once it is gone. It says nothing
+    // about where the staging went, which is what the assertions below are for.
+    expect(await WebRecordWriteTransaction().recoverRecord(dataRoot, 'archived'), WebRecordWriteResult.completed);
 
     // One record id belongs to one store. The staged tree looks publishable —
-    // `active/<id>/` is missing and the staging is a complete record — and the
-    // only thing that stops it is the other-store question `publish` asks before
-    // it stages anything.
+    // `active/<id>/` is missing, and its manifest names both files it set out
+    // to write and both are there — and the only thing that stops it is the
+    // other-store question `publish` asks before it stages anything.
     expect(await (dataRoot / 'active' / 'archived').exists(), isFalse);
-    // Nothing is lost: it is set aside rather than published.
-    final quarantined = dataRoot / 'quarantine' / 'archived';
-    expect(await quarantined.filePath('new.bin').readAsBytes(), [1, 2]);
+    // Nothing is lost: it is set aside rather than published. `retired/` and not
+    // `quarantine/` because this staging really does duplicate a record the app
+    // lists, which is the one thing that shelf's delete is offered on.
+    expect(await (dataRoot / 'retired' / 'archived').filePath('new.bin').readAsBytes(), [1, 2]);
     expect(await slot.exists(), isFalse);
   });
 
-  test('recovery publishes the staged tree when it is the only copy left', () async {
+  test('recovery publishes the staged tree when it is the whole of the only copy left', () async {
     // The positive control for the test above: with no other store holding the
     // id, the very same slot is published instead of quarantined. Without it,
     // "quarantine everything" would pass the archived case too.
-    final slot = await tearManifest('orphan');
+    final slot = await wholeSlot('orphan');
     expect(await (dataRoot / 'active' / 'orphan').exists(), isFalse);
 
-    expect(await WebRecordWriteTransaction().recoverRecord(dataRoot, 'orphan'), WebRecordWriteResult.incomplete);
+    expect(await WebRecordWriteTransaction().recoverRecord(dataRoot, 'orphan'), WebRecordWriteResult.completed);
 
     expect(await (dataRoot / 'active' / 'orphan').filePath('new.bin').readAsBytes(), [1, 2]);
     expect(await (dataRoot / 'quarantine' / 'orphan').exists(), isFalse);
     expect(await slot.exists(), isFalse);
     // And the record is readable again, which is the point of the exercise.
     expect(await WebRecordWriteTransaction().recoverRecord(dataRoot, 'orphan'), WebRecordWriteResult.completed);
+  });
+
+  test('a manifest that cannot be read cannot vouch for its staging, so the only copy is set aside', () async {
+    // The same arrangement as the positive control above in everything the
+    // machine can see except one thing: the manifest is torn, so nothing on
+    // disk says what the publication was writing. The staged tree may be all of
+    // a record or the first two files of one, and this build cannot tell which,
+    // so it does not put it in the user's list as the record.
+    final slot = await tearManifest('torn');
+    expect(await (dataRoot / 'active' / 'torn').exists(), isFalse);
+
+    expect(await WebRecordWriteTransaction().recoverRecord(dataRoot, 'torn'), WebRecordWriteResult.incomplete);
+
+    expect(await (dataRoot / 'active' / 'torn').exists(), isFalse);
+    expect(await (dataRoot / 'quarantine' / 'torn').filePath('new.bin').readAsBytes(), [1, 2]);
+    expect(await slot.exists(), isFalse);
   });
 
   test('recovery keeps the stored record and sets the staging aside when active is intact', () async {
@@ -121,11 +182,16 @@ void main() {
 
     final recovered = await WebRecordWriteTransaction().recoverAll(dataRoot);
     expect(recovered.single.result, WebRecordWriteResult.incomplete);
-    // Carried out whole rather than left standing: `retired/` for what is not
-    // the user's, `quarantine/` for what is, and neither is a deletion.
+    // Carried out whole rather than left standing, and onto `quarantine/`: the
+    // name settles who minted the slot and nothing about whose bytes are in it,
+    // so it is filed by the worst thing the name allows. `retired/` is for
+    // entries the app can say duplicate something, and this is not one.
     expect(await foreign.exists(), isFalse);
-    expect(await (dataRoot / 'retired' / 'not-one-of-ours').filePath('manifest.json').readAsString(), '{"version":1}');
-    expect(await (dataRoot / 'quarantine').exists(), isFalse);
+    expect(
+      await (dataRoot / 'quarantine' / 'not-one-of-ours').filePath('manifest.json').readAsString(),
+      '{"version":1}',
+    );
+    expect(await (dataRoot / 'retired').exists(), isFalse);
   });
 }
 

@@ -1,5 +1,5 @@
 {
-    "disclosure_scope": "Every file the Windows build redistributes (parsed from windows/runner/CMakeLists.txt) is claimed by an entry below. The components listed as 'statically linked into' a file are read from that file's own recorded build information; they are not derived from its code. Operating-system redistributables copied out of C:/Windows/System32 are covered by their own redistribution terms and are not listed.",
+    "disclosure_scope": "Every file the Windows build redistributes (parsed from windows/runner/CMakeLists.txt) is claimed by an entry below. The components listed as 'statically linked into' a file are read from that file's own recorded build information; they are not derived from its code. A prebuilt binary's publisher may also ship notices for components its build information does not name: those are reproduced as published, and each says so in its own line rather than claiming a link. Operating-system redistributables copied out of C:/Windows/System32 are covered by their own redistribution terms and are not listed.",
     "entries": [
         {
             "package": "google_fonts",
@@ -225,6 +225,188 @@
             ],
             "shipped_files": [],
             "notice": "Included in the umacapture Windows build.\n\nOpenCV core: softfloat (Berkeley SoftFloat 3c and FDLIBM derived) as shipped in OpenCV 4.13.0 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "libtiff",
+            "asset": "assets/license/libtiff.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "libtiff 4.7.1 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nlibtiff 4.7.1 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "libopenjp2",
+            "asset": "assets/license/libopenjp2.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "OpenJPEG (libopenjp2) 2.5.3 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nOpenJPEG (libopenjp2) 2.5.3 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "openexr",
+            "asset": "assets/license/openexr.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "OpenEXR and IlmBase 2.3.0 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nOpenEXR and IlmBase 2.3.0 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "protobuf",
+            "asset": "assets/license/protobuf.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "Protocol Buffers 3.19.1 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nProtocol Buffers 3.19.1 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "libwebp",
+            "asset": "assets/license/libwebp.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "libwebp (decoder 0x0210) -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nlibwebp (decoder 0x0210) -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "ittnotify",
+            "asset": "assets/license/ittnotify.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "Intel Instrumentation and Tracing Technology (ittnotify) 3.25.4 -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nIntel Instrumentation and Tracing Technology (ittnotify) 3.25.4 -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice.\n\nittnotify is offered under a choice of two licenses, BSD-3-Clause or GPL-2.0-only, and the distribution ships both texts without stating a choice. This distribution takes the BSD-3-Clause option: the text below is that option in full, and none of the GPL-2.0-only terms are taken up here."
+        },
+        {
+            "package": "intel_ipp",
+            "asset": "assets/license/intel_ipp.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "Intel Integrated Performance Primitives 2022.2.0 and Intel IPP Integration Wrappers 2022.2.0 (ippicv and ippiw) -- statically linked into opencv_world4130.dll"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nIntel Integrated Performance Primitives 2022.2.0 and Intel IPP Integration Wrappers 2022.2.0 (ippicv and ippiw) -- statically linked into opencv_world4130.dll\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice.\n\nBoth components are covered by one text, the Intel Simplified Software License. The distribution ships it twice, as ippicv-EULA.rtf and ippiw-EULA.rtf, and the two files are byte-identical (SHA-256 37f11c79f36fb5e1b00aca31c1234a7435c2929d83e181ee802a349ca8571749), so it is disclosed once under both names. That upstream text is an RTF document and this page renders plain text only, so it is reproduced below with the RTF markup removed and no other change."
+        },
+        {
+            "package": "opencl_headers",
+            "asset": "assets/license/opencl_headers.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "OpenCL headers (Khronos) -- the OpenCL support recorded in opencv_world4130.dll's build information is compiled against them. Headers contribute no object code, so no Khronos code is redistributed; the notice is reproduced because the distribution publishes it with the binary"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nOpenCL headers (Khronos) -- the OpenCL support recorded in opencv_world4130.dll's build information is compiled against them. Headers contribute no object code, so no Khronos code is redistributed; the notice is reproduced because the distribution publishes it with the binary\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "flatbuffers",
+            "asset": "assets/license/flatbuffers.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "opencv",
+            "components": [
+                "FlatBuffers 25.9.23 -- opencv_world4130.dll's build information records it as `builtin/3rdparty`, the copy bundled with that distribution's own sources. Those sources are headers only, so nothing links it as a library; the templates they define are compiled into the TFLite importer the DLL carries"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nFlatBuffers 25.9.23 -- opencv_world4130.dll's build information records it as `builtin/3rdparty`, the copy bundled with that distribution's own sources. Those sources are headers only, so nothing links it as a library; the templates they define are compiled into the TFLite importer the DLL carries\n\nDisclosed under opencv because it is bundled inside it, and opencv's own license text does not reproduce this notice."
+        },
+        {
+            "package": "ade",
+            "asset": "assets/license/ade.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "ade -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nade -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+        },
+        {
+            "package": "dlpack",
+            "asset": "assets/license/dlpack.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "DLPack -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nDLPack -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+        },
+        {
+            "package": "mscr",
+            "asset": "assets/license/mscr.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "MSCR chi_table (Per-Erik Forssen) -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nMSCR chi_table (Per-Erik Forssen) -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+        },
+        {
+            "package": "vasot",
+            "asset": "assets/license/vasot.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": null,
+            "components": [
+                "vasot -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nvasot -- listed in the third-party notices the upstream OpenCV 4.13.0 Windows distribution publishes with opencv_world4130.dll. That DLL's own recorded build information does not name it, so whether this build links it is not something this repository can state"
+        },
+        {
+            "package": "onnxruntime",
+            "asset": "assets/license/onnxruntime_third_party.txt",
+            "platforms": [
+                "windows"
+            ],
+            "sub_notice_of": "onnxruntime",
+            "components": [
+                "ONNX Runtime bundled third-party components -- the third-party notices ONNX Runtime 1.27.0 publishes with onnxruntime.dll. Which of them this build links is not something this repository can state, so the set is reproduced as published"
+            ],
+            "shipped_files": [],
+            "notice": "Included in the umacapture Windows build.\n\nONNX Runtime bundled third-party components -- the third-party notices ONNX Runtime 1.27.0 publishes with onnxruntime.dll. Which of them this build links is not something this repository can state, so the set is reproduced as published\n\nDisclosed under onnxruntime because it is bundled inside it, and onnxruntime's own license text does not reproduce this notice."
         },
         {
             "package": "spdlog",

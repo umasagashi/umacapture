@@ -4,6 +4,9 @@ import 'package:web/web.dart' as web;
 // `app_logger.dart` directly rather than through `utils.dart`'s re-export: this file needs
 // `withoutSecrets` as well as `logger`, and the two belong to the same boundary.
 import '/src/core/app_logger.dart';
+// For `LongReadDeclaration` alone — the type of the session announcement this leg is handed. No
+// registry and no `Ref` is reached from here; this layer has neither.
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/video_file_dialog_web.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/core/wasm_worker_client.dart';
@@ -34,7 +37,16 @@ final ValueNotifier<VideoImportState> _state = ValueNotifier<VideoImportState>(V
 /// the file dialog is open — a batch auto-starts after a module update. The capture page
 /// disables the button on the same predicate, but a disabled button is only a rendering
 /// of a past state; this re-check, immediately before the clip is posted, is the gate.
-Future<void> startVideoImport({required VideoImportPreflight preflight}) async {
+///
+/// [declaration] announces the session to the long-read registry, and is passed in for the same
+/// reason [preflight] is: the registry is Riverpod state this layer cannot read. It wraps the
+/// stretch below in which the *worker* owns the record store — from the post to the terminal
+/// outcome — and deliberately not the file dialog above it, which owns nothing. See
+/// `LongReadKind.videoImport`, and `video_import_io.dart`'s twin of this call.
+Future<void> startVideoImport({
+  required VideoImportPreflight preflight,
+  required LongReadDeclaration declaration,
+}) async {
   if (_state.value.isBusy) {
     return;
   }
@@ -93,55 +105,72 @@ Future<void> startVideoImport({required VideoImportPreflight preflight}) async {
       );
       return;
     }
-    _state.value = VideoImportState(phase: VideoImportPhase.starting, fileName: fileName);
-    final client = WasmWorkerClient();
-    client.videoImportProgress.addListener(_onProgress);
-    try {
-      final settled = await client.startVideoImport(file);
-      // The twin of the io leg's redaction, and deliberately identical: this message is the worker's
-      // own sentence and `buildImportErrorReportScope` publishes it to Sentry as `import.message`.
-      // Only the leaf is passed, because that is the whole of what a browser `File` discloses — it has
-      // no directory — which is the same asymmetry the `withoutSecrets` call below already carries.
-      final outcome = settled.withMessage(withoutSecrets(settled.message, [fileName]));
-      _state.value = VideoImportState(phase: VideoImportPhase.finished, fileName: fileName, outcome: outcome);
-    } catch (error, stackTrace) {
-      // Only a start that never opened a session throws (the worker refuses one, or never answers);
-      // every ending after that is an outcome. Reported as a refusal because that is what the user
-      // needs to know — the import did not begin — and the detail is in the log and in Sentry.
-      // `withoutSecrets` for the same reason the io twin does it: the sentence is the worker's, and
-      // whether a decoder error three layers down quotes the file it failed on is not a fact this
-      // side can check. Today `web/worker.js` and `web/video_import.mjs` never name the file, which
-      // is a property of those files rather than of this call.
-      // READ THE REASON OFF THE RAW TEXT, BEFORE THE REDACTION. `withoutSecrets` is a plain
-      // substring substitution, and the worker's tag — `[video_import_reason=already_importing]` —
-      // is ordinary prose to it: a leaf spelled `reason`, `import` or `video` rewrites the tag into
-      // something `videoImportReasonInText` no longer matches, and the user is handed the generic
-      // hedge while this side knew the cause exactly. Extension-less names are reachable because a
-      // file dialog's `accept` is advice, not a filter. Classifying first and redacting after costs
-      // nothing: the reason is a closed vocabulary this app owns and carries no text of the clip's.
-      final reason = videoImportReasonInText('$error');
-      final detail = withoutSecrets('$error', [fileName]);
-      logger.e('Video import of a "$container" clip could not be started', detail, stackTrace);
-      _state.value = VideoImportState(
-        phase: VideoImportPhase.finished,
-        fileName: fileName,
-        outcome: VideoImportOutcome(
-          kind: VideoImportOutcomeKind.refused,
-          // A start refused before a session existed has no `videoImportDone` to carry a reason field, so the
-          // worker tags its kind into the message and it is opened here — the one place this error object is
-          // turned into something a user reads. See `videoImportReasonInText`. A refusal with no tag (a start
-          // that timed out, a worker that was gone) keeps the generic line rather than being given a cause.
-          //
-          // The REDACTED text on the message, because this one is published to Sentry as
-          // `import.message` exactly like the settled one above. The reason beside it was taken
-          // from the unredacted text a few lines up, for the reason written there.
-          reason: reason,
-          message: detail,
-        ),
-      );
-    } finally {
-      client.videoImportProgress.removeListener(_onProgress);
-    }
+    // THE SESSION, AND THE ONE THING THAT ANNOUNCES IT — the twin of the io leg's block and
+    // deliberately identical in extent. Everything below this line is the stretch in which the
+    // worker has the record store open: it writes each finished record into its own OPFS
+    // `storage_dir` for `onLiveRecordsHarvested` to merge, with no Dart frame on the stack to hang a
+    // claim off. So the claim is the session's rather than a write's, and it is taken HERE and not
+    // around the dialog above: `VideoImportPhase.picking` owns no session and no decoder, and
+    // `storageActionBlocker` already rules that phase out with that reason.
+    //
+    // `runDeclared` and not a claim written here, so the release is `LongReadRegistry.hold`'s
+    // `finally`: the clip running out, a cancel, a start the worker refused and a throw nothing
+    // anticipated all give the claim back by the same path.
+    //
+    // `file` is bound to a second name because a closure does not carry the promotion the null check
+    // above earned: inside one it is `File?` again, and the alternative to this line is a `!`.
+    final clip = file;
+    await declaration.runDeclared(() async {
+      _state.value = VideoImportState(phase: VideoImportPhase.starting, fileName: fileName);
+      final client = WasmWorkerClient();
+      client.videoImportProgress.addListener(_onProgress);
+      try {
+        final settled = await client.startVideoImport(clip);
+        // The twin of the io leg's redaction, and deliberately identical: this message is the worker's
+        // own sentence and `buildImportErrorReportScope` publishes it to Sentry as `import.message`.
+        // Only the leaf is passed, because that is the whole of what a browser `File` discloses — it has
+        // no directory — which is the same asymmetry the `withoutSecrets` call below already carries.
+        final outcome = settled.withMessage(withoutSecrets(settled.message, [fileName]));
+        _state.value = VideoImportState(phase: VideoImportPhase.finished, fileName: fileName, outcome: outcome);
+      } catch (error, stackTrace) {
+        // Only a start that never opened a session throws (the worker refuses one, or never answers);
+        // every ending after that is an outcome. Reported as a refusal because that is what the user
+        // needs to know — the import did not begin — and the detail is in the log and in Sentry.
+        // `withoutSecrets` for the same reason the io twin does it: the sentence is the worker's, and
+        // whether a decoder error three layers down quotes the file it failed on is not a fact this
+        // side can check. Today `web/worker.js` and `web/video_import.mjs` never name the file, which
+        // is a property of those files rather than of this call.
+        // READ THE REASON OFF THE RAW TEXT, BEFORE THE REDACTION. `withoutSecrets` is a plain
+        // substring substitution, and the worker's tag — `[video_import_reason=already_importing]` —
+        // is ordinary prose to it: a leaf spelled `reason`, `import` or `video` rewrites the tag into
+        // something `videoImportReasonInText` no longer matches, and the user is handed the generic
+        // hedge while this side knew the cause exactly. Extension-less names are reachable because a
+        // file dialog's `accept` is advice, not a filter. Classifying first and redacting after costs
+        // nothing: the reason is a closed vocabulary this app owns and carries no text of the clip's.
+        final reason = videoImportReasonInText('$error');
+        final detail = withoutSecrets('$error', [fileName]);
+        logger.e('Video import of a "$container" clip could not be started', detail, stackTrace);
+        _state.value = VideoImportState(
+          phase: VideoImportPhase.finished,
+          fileName: fileName,
+          outcome: VideoImportOutcome(
+            kind: VideoImportOutcomeKind.refused,
+            // A start refused before a session existed has no `videoImportDone` to carry a reason field, so the
+            // worker tags its kind into the message and it is opened here — the one place this error object is
+            // turned into something a user reads. See `videoImportReasonInText`. A refusal with no tag (a start
+            // that timed out, a worker that was gone) keeps the generic line rather than being given a cause.
+            //
+            // The REDACTED text on the message, because this one is published to Sentry as
+            // `import.message` exactly like the settled one above. The reason beside it was taken
+            // from the unredacted text a few lines up, for the reason written there.
+            reason: reason,
+            message: detail,
+          ),
+        );
+      } finally {
+        client.videoImportProgress.removeListener(_onProgress);
+      }
+    });
   } finally {
     // THE UNWIND, the twin of the io leg's and deliberately identical — the defect it closes is the
     // shape of the stretch above rather than any line in it. Between the `picking` write and the

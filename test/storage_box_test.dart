@@ -3,7 +3,7 @@
 // box, so the many non-interactive writers that may still fire before the forced
 // restart cannot crash.
 //
-// NOTE: StorageBox.markClosedForMigration() flips a process-global, one-way flag.
+// NOTE: StorageBox.markHiveClosed() flips a process-global, one-way flag.
 // This lives in its own test file so the flag never leaks into other Hive-backed
 // tests (flutter test isolates each file).
 //
@@ -26,7 +26,7 @@ void main() {
   // `PathAccessException … errno = 32` on top of the real failure and strands the directory.
   tearDown(() => closeHiveAndRemove(tempDir));
 
-  test('box operations no-op after markClosedForMigration instead of throwing', () async {
+  test('box operations no-op after markHiveClosed instead of throwing', () async {
     await StorageBox.ensureOpened(directory: tempDir.path);
 
     // A long-lived instance holding the open box, like WindowStateBox does.
@@ -34,7 +34,7 @@ void main() {
     box.push<int>('k', 1);
     expect(box.pull<int>('k'), 1);
 
-    StorageBox.markClosedForMigration();
+    StorageBox.markHiveClosed();
     await Hive.close();
 
     // The long-lived instance keeps a reference to the now-closed box: writes and

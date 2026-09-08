@@ -47,7 +47,10 @@ Future<ClipboardWriteOutcome> copyImageToClipboard(RefBase ref, ClipboardImageRe
   }
 }
 
-Future<ClipboardWriteOutcome> copyFileReferenceToClipboard(FilePath path) async {
+/// Hands the OS the path itself, whether it names a file or a directory: the
+/// native clipboard format is a path list, so a directory needs no separate
+/// call, and `exists()` already answers for both kinds on both backends.
+Future<ClipboardWriteOutcome> copyFileReferenceToClipboard(PathEntity path) async {
   if (!await path.exists()) {
     return ClipboardWriteOutcome.missing;
   }

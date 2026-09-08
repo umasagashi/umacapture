@@ -87,10 +87,16 @@ class _TaskRow extends ConsumerWidget {
         style: theme.textTheme.bodySmall,
         overflow: TextOverflow.ellipsis,
       ),
-      trailing: IconButton(
-        icon: const Icon(Symbols.play_arrow_rounded),
-        tooltip: "$tr_addon.task.run".tr(),
-        onPressed: isRunning ? null : () => ref.read(addonExecutionControllerProvider.notifier).runManual(task),
+      // The whole tile opens the edit dialog, so the run button has to answer its own presses even
+      // when it has none to answer: with a null callback it registers no recognizer, and the press
+      // aimed at a greyed ▶ went to the tile and opened the editor instead. [TapSink] gives it
+      // somewhere to land without touching the button's greying, its tooltip or its semantics.
+      trailing: TapSink(
+        child: IconButton(
+          icon: const Icon(Symbols.play_arrow_rounded),
+          tooltip: "$tr_addon.task.run".tr(),
+          onPressed: isRunning ? null : () => ref.read(addonExecutionControllerProvider.notifier).runManual(task),
+        ),
       ),
       onTap: () => TaskEditDialog.show(ref.base, task, isNew: false),
     );

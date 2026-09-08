@@ -17,6 +17,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/platform_channel_io.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/video_import_io.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 
@@ -32,6 +33,15 @@ class _DisposedContainer implements Exception {
   @override
   String toString() => 'Bad state: Tried to read a provider from a ProviderContainer that was disposed';
 }
+
+/// What these cases announce to the long-read registry: nothing, and why.
+///
+/// They drive the front end's own state machine over a method channel, with no provider
+/// container anywhere in reach; what the session holds is asserted in
+/// `video_import_long_read_claim_test.dart`, which builds a real claim instead.
+const _declaresNothing = LongReadDeclaration.none(
+  reason: 'this suite drives the import front end directly; the registry is another suite\'s subject',
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -73,6 +83,7 @@ void main() {
 
       await expectLater(
         startVideoImport(
+          declaration: _declaresNothing,
           preflight: () {
             if (asked++ == 0) {
               return null;
@@ -101,7 +112,10 @@ void main() {
       // before `picking` is ever written, so it would prove nothing about the unwind.
       var asked = 0;
       await expectLater(
-        startVideoImport(preflight: () => asked++ == 0 ? null : throw const _DisposedContainer()),
+        startVideoImport(
+          declaration: _declaresNothing,
+          preflight: () => asked++ == 0 ? null : throw const _DisposedContainer(),
+        ),
         throwsA(isA<_DisposedContainer>()),
       );
       expect(asked, 2);
@@ -121,7 +135,7 @@ void main() {
       // only because the unwind never runs, the first case in this group goes red.
       videoImportPathPicker = () async => throw MissingPluginException('No implementation found for pickFile');
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       expect(videoImportState.value.phase, VideoImportPhase.finished);
       expect(videoImportState.value.outcome?.kind, VideoImportOutcomeKind.failed);
@@ -131,7 +145,7 @@ void main() {
 
   group('the negative control: a picker that behaves is untouched by the unwind', () {
     test('a whole import still reaches its outcome', () async {
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
 
       expect(videoImportState.value.phase, VideoImportPhase.starting);
@@ -154,7 +168,7 @@ void main() {
     test('a dismissed dialog is still a silent return to idle', () async {
       videoImportPathPicker = () async => null;
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       expect(videoImportState.value.phase, VideoImportPhase.idle);
       expect(videoImportState.value.outcome, isNull, reason: 'a cancel earns no result line');

@@ -70,3 +70,12 @@ Match the repo convention (see recent merged PRs):
 - Commit messages and PR descriptions must not reference paths that are not part
   of the repository — gitignored files and local-only notes such as `.notes/`.
   Describe the rationale inline instead.
+- **Exception: `testdata/evidence/<X>/`.** `.claude/rules/test-material.md`
+  defines that directory as the primary material a shipped constant, threshold,
+  or behaviour cites **as its derivation source**. A commit or PR body may
+  reference it for that purpose — and only that purpose. Even then, don't cite
+  the path alone: write in prose what was derived and why (the value and the
+  reasoning), so the body is self-contained for a reader who doesn't have that
+  material on hand. `.notes/` and paths under `~/.claude/` remain off limits —
+  they are temporary working material with no naming contract, unlike
+  `testdata/evidence/`.

@@ -4,14 +4,12 @@ import '/src/chara_detail/archive_executor_shared.dart';
 import 'record_directory_transaction.dart';
 import 'record_mutation_lock.dart';
 import 'record_recovery_gate_shared.dart';
-import 'root_storage_maintenance.dart';
-import 'web_record_write_transaction.dart';
 
 RecordRecoveryGate createPlatformRecordRecoveryGate({RecordMutationLock? mutationLock}) {
   return RecordRecoveryGate(
     mutationLock: mutationLock ?? platformRecordMutationLock,
     ensureReady: _ensureRecordReady,
-    ensureRootReady: _ensureRootReady,
+    ensureRootReady: ensureRootReadyThroughPlatformMaintenance,
   );
 }
 
@@ -32,18 +30,14 @@ final RecordRecoveryGate platformRecordRecoveryGate = createPlatformRecordRecove
 /// still declines a record whose slot recovers as cleanup-pending, and
 /// `RecordDirectoryTransaction.execute` still resumes its own manifest before
 /// starting a second move.
+/// The write journal's recovery is the shared one — desktop installs the very
+/// same function — and the archive journal's is web's alone, because only web
+/// stages an archive move through a manifest (`archive_executor.dart`).
 Future<void> _ensureRecordReady(DirectoryPath storageRoot, String recordId) async {
-  final dataRoot = storageRoot / 'chara_detail';
-  await recoverWebRecordWriteTransactionUnlocked(dataRoot, recordId);
+  await ensureWriteJournalRecordReadyUnlocked(storageRoot, recordId);
   await recoverRecordDirectoryTransactionsUnlocked(
-    dataRoot,
+    storageRoot / 'chara_detail',
     recordId,
     beforeCommittedCleanup: (spec) => cleanupCommittedArchiveTransactionUnlocked(spec, failOnError: true),
-  );
-}
-
-Future<void> _ensureRootReady(DirectoryPath storageRoot) {
-  return platformRootStorageMaintenance.runUnlocked(
-    RootStorageMaintenanceRequest(recordDataRoot: storageRoot / 'chara_detail'),
   );
 }

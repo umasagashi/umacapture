@@ -14,7 +14,11 @@ import '/src/core/capture_capability.dart';
 import '/src/core/live_content_freeze.dart';
 import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
 import '/src/core/sentry_util.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/storage_delete_request.dart';
+import '/src/core/storage/storage_group.dart';
 import '/src/core/utils.dart';
 import '/src/core/video_frame_grab.dart';
 import '/src/core/video_import.dart';
@@ -25,6 +29,7 @@ import '/src/gui/chara_detail/report_screen_dialog.dart';
 import '/src/gui/common.dart';
 import '/src/gui/settings.dart';
 import '/src/gui/storage_persistence_banner.dart';
+import '/src/gui/storage_tree.dart';
 import '/src/gui/theme_extensions.dart';
 import '/src/gui/video_import.dart';
 import '/src/preference/notifier.dart';
@@ -708,6 +713,124 @@ String? captureBlockedSentence(CaptureActivity activity) {
   return key == null ? null : "$tr_capture.capture_control.blocked.$key".tr();
 }
 
+/// Every path a live capture session holds open for its whole length.
+///
+/// **Read off the group table rather than listed here.** [StorageGroup.writtenByLiveCapture] is
+/// where "a live capture writes into this" is already written down, group by group, with the
+/// writers named one by one at the field; a second list in this file would be right today and go
+/// stale the first time a group is added or the flag moves. Four groups carry it today — `active/`,
+/// `archive/`, `quarantine/` and this session's `temp/` — and a fifth is claimed without this
+/// function being edited.
+///
+/// **And the module it recognises with, which no group flag can express**, for the reason
+/// [regenerateRecordLongReadPaths] states at length about the same directory: a claim is over what
+/// a job holds *open*, not over what it dirties, and `modules/` is read rather than written — so
+/// the field above, which is about writers, is silent on it by construction. A live capture is the
+/// recognition core pointed at a shared screen: on Windows `CharaDetailRecognizer::recognize` opens
+/// `modules/version_info.json` once per record it produces, so a module replaced mid-session is
+/// read half-and-half; on web the install rewrites the OPFS copy and invalidates
+/// `moduleVersionLoader`, which rebuilds the pipeline and takes the session's own screen-share
+/// tracks down with it (`platform_channel_web.dart`'s `dispose`, against
+/// `platform_channel_io.dart`'s, which returns false because a desktop session lives in the native
+/// runner). Naming it here is what withholds both manual module installs while a capture runs and
+/// what defers the automatic one (`runModuleInstall` → `LongReadRegistry.holdWhenFree`).
+List<PathEntity> liveCaptureLongReadPaths(PathInfo pathInfo) => [
+  for (final group in storageGroups)
+    if (group.writtenByLiveCapture) ...group.resolve(pathInfo),
+  pathInfo.modulesDir,
+];
+
+/// Whether a registered long reader is holding what a live capture would write into.
+///
+/// The delete fold and not the extract one, for `videoImportBlockedBy`'s reason: a capture writes
+/// where a delete, a bundle and a relocation all act, so what matters is that *something* holds the
+/// tree.
+LongReadKind? liveCaptureBlockedBy(PathInfo pathInfo, Iterable<LongReadClaim> claims) =>
+    storageDeleteBlockedBy(StorageDeletePathsRequest(liveCaptureLongReadPaths(pathInfo)), claims);
+
+/// Announces a live capture session to the long-read registry for as long as one is running.
+///
+/// **A listener and not a `hold`, because no Dart block spans the session.** The core owns both
+/// edges: a session begins and ends with a `captureTriggered` event, which reaches Dart as
+/// [capturingStateProvider], and nothing here is on the stack in between —
+/// [LongReadKind.liveCapture] states that at the member. That is the same situation
+/// `StorageZipProgress` and `CharaDetailRecordRegenerationController` are in, and the same answer:
+/// [LongReadRegistry.claimUntilReleased] with the release written at every way the session can end.
+///
+/// **Wired from `platformControllerLoader`, so the claim's lifetime is that element's.** A rebuild
+/// of the controller disposes this listener and releases; the freshly wired one reads the flag
+/// through `fireImmediately` and claims again if the session outlived the rebuild, which on desktop
+/// it does — `platform_channel_io.dart`'s `dispose` returns false precisely because the native
+/// runner keeps capturing. Without the immediate read that session would be held by nothing for the
+/// rest of its life.
+///
+/// **It must not be called from a provider's synchronous build, and `fireImmediately` is why.** A
+/// claim is a write to another provider, which Riverpod refuses while an element is initialising
+/// (`Providers are not allowed to modify other providers during their initialization`) — and with an
+/// immediate read the very first thing this does can be that write. `platformControllerLoader` calls
+/// it well past the first `await` of its own body, so the element is built by then; a caller that
+/// wired it from a bare `Provider` body would fail on the first session that was already running.
+///
+/// Public rather than `@visibleForTesting`, unlike `listenCapturePreview` beside its own call: that
+/// one is annotated and called from the file it lives in, while this is called across the seam from
+/// `platform_controller.dart`, where the annotation would be a warning at the only production
+/// caller.
+void listenLiveCaptureLongRead(Ref ref) {
+  // Held from the wiring rather than read again at the release, for the reason
+  // `CharaDetailRecordRegenerationController._claimant` gives: the disposal path below runs inside
+  // a Riverpod life-cycle callback, where `ref.read` throws. [LongReadRegistry.release] carries its
+  // own `ref.mounted` guard for the case where the container went away first.
+  final registry = ref.read(longReadRegistryProvider.notifier);
+  LongReadToken? token;
+  // **[defer] is the framework's requirement at the disposal end, not a preference**, and the
+  // reasoning is `CharaDetailRecordRegenerationController._releaseClaim`'s, which is in the same
+  // position: `release` writes another provider's state, and doing that straight from
+  // `ref.onDispose` fails Riverpod's `_debugCallbackStack` assertion rather than merely being
+  // discouraged. A microtask leaves the callback and still runs in the same turn, and it carries
+  // *this* wiring's token, so the freshly built listener that claimed for the surviving session in
+  // between does not lose its own claim to it. When the container is what went away, the registry
+  // went with it and `release` finds its own `ref.mounted` false.
+  void release({bool defer = false}) {
+    final held = token;
+    // Cleared before the release, so a rebuild the release triggers cannot see a token that no
+    // longer names anything.
+    token = null;
+    if (held == null) {
+      return;
+    }
+    if (defer) {
+      scheduleMicrotask(() => registry.release(held));
+      return;
+    }
+    registry.release(held);
+  }
+
+  ref.onDispose(() => release(defer: true));
+  ref.listen<bool>(capturingStateProvider, (_, capturing) {
+    if (!capturing) {
+      release();
+      return;
+    }
+    // A session already announced must not be announced twice: the flag can be republished without
+    // an edge (the provider re-reads its stream on rebuild), and a second token is a claim whose
+    // release nobody holds.
+    if (token != null) {
+      return;
+    }
+    // The layout and not `pathInfoProvider`: this needs to know where the store is, not that it
+    // was successfully prepared, and the second throws while it has not been — inside a listener,
+    // where the throw would escape as an unhandled asynchronous error. A null layout announces
+    // nothing, which is the same statement `pathLayoutProvider`'s own doc makes about a gate:
+    // nothing can be holding a path under a root the app has not resolved.
+    final layout = ref.read(pathLayoutProvider);
+    if (layout == null) {
+      logger.w('A live capture started before the data root resolved; the session announced nothing.');
+      return;
+    }
+    token = registry.claimUntilReleased(kind: LongReadKind.liveCapture, paths: liveCaptureLongReadPaths(layout));
+  }, fireImmediately: true);
+}
+
 /// Why the live-capture toggle may not be pressed right now.
 ///
 /// The same shape as [CaptureActivity] and for the same reason, against a defect that was one
@@ -715,8 +838,8 @@ String? captureBlockedSentence(CaptureActivity activity) {
 /// **nested ternary** — `captureUnsupported ? … : (importBlocking ? … : disabled_tooltip)` — whose
 /// last arm was a *fallthrough, not a case*. It happened to be true, because the only reason left to
 /// fall through was [controllerUnavailable]; a fourth reason added to the disjunction would have
-/// inherited 「ロード中にエラーが発生しました…」 and told the user about a load error that never
-/// happened. Nothing in the language or the suite would have said so.
+/// inherited 「認識モジュールを読み込めていないため…」 and told the user to reinstall a module set that
+/// was never the reason. Nothing in the language or the suite would have said so.
 ///
 /// Now the disjunction exists **once**, in [resolveCaptureToggleBlocker]: `disabled` is
 /// `blocker != null` and the sentence is that same blocker's, so the two cannot disagree, and a
@@ -738,6 +861,26 @@ enum CaptureToggleBlocker {
   /// 動画取り込み is decoding a clip ([CaptureActivity.importing]).
   importing,
 
+  /// A registered long reader is holding one of the trees a session would write into: the record
+  /// store's groups that a capture stages through, or `modules/`, which the recognition it runs
+  /// reads out of. See `liveCaptureLongReadPaths` for the derivation.
+  ///
+  /// **The sibling of [VideoImportBlocker.longRead], and it was missing here while that one
+  /// shipped.** Both controls start the same core over the same folders, and only one of them
+  /// asked whether anything else had them open, so a capture could be started into a folder a zip
+  /// was bundling or a module install was replacing.
+  ///
+  /// **It carries no sentence of its own**: it is worded by `longReadBusyKey`, the one refusal
+  /// every long reader produces, so this member cost no translation entry. Naming the holder is
+  /// what that sentence deliberately does not do -- see `longReadBusyMessage` -- which is also why
+  /// [resolveCaptureToggleBlocker] is given a bool and not the kind.
+  ///
+  /// **A running capture never reaches this**, and the reason is not precedence but exclusion: a
+  /// session holds a [LongReadKind.liveCapture] claim over exactly these paths, so the condition
+  /// is true for the whole of the state in which this control is the STOP button.
+  /// [resolveCaptureToggleBlocker] leaves it out there by name.
+  longRead,
+
   /// The platform controller failed to load, so there is nothing to start. Last because it is the
   /// one the user can do nothing about; when it holds together with either of the others, the
   /// actionable sentence is the better one to show.
@@ -754,6 +897,7 @@ CaptureToggleBlocker? resolveCaptureToggleBlocker({
   required bool controllerUnavailable,
   required bool captureUnsupported,
   required CaptureActivity activity,
+  required bool heldByLongRead,
 }) {
   if (captureUnsupported) {
     return CaptureToggleBlocker.unsupported;
@@ -770,6 +914,20 @@ CaptureToggleBlocker? resolveCaptureToggleBlocker({
   };
   if (byActivity != null) {
     return byActivity;
+  }
+  // **THE ONE ACTIVITY THIS TERM IS NOT ASKED ABOUT IS THIS CONTROL'S OWN.** A live capture
+  // announces itself as [LongReadKind.liveCapture] over the folders it writes into, which is the
+  // whole point of the member -- but this control is the STOP half of that session, and a claim
+  // taken *by* the session would answer "held" for the entire time the button has to stay live.
+  // Excluding it here rather than filtering the claim list at the call site keeps the rule inside
+  // the function the suite drives, and next to the switch above that answers `capturing` with null
+  // for the same reason.
+  //
+  // Ranked above [controllerUnavailable] by the rule that member's own doc states: it is the one
+  // the user can do nothing about, so an actionable sentence -- here, "wait for the other job" --
+  // is the better one to show when both hold.
+  if (activity != CaptureActivity.capturing && heldByLongRead) {
+    return CaptureToggleBlocker.longRead;
   }
   if (controllerUnavailable) {
     return CaptureToggleBlocker.controllerUnavailable;
@@ -796,6 +954,11 @@ String captureToggleBlockerKey(CaptureToggleBlocker blocker) => switch (blocker)
   CaptureToggleBlocker.unsupported => "$tr_capture.capture_control.web.unsupported",
   CaptureToggleBlocker.clipPicking => "$tr_capture.capture_control.clip_picking",
   CaptureToggleBlocker.importing => "$tr_capture.capture_control.web.video_importing",
+  // Not a sentence of this control's own, and that is the point: the one refusal every long reader
+  // produces is worded once, in `long_read_registry.dart`, so this entry cost no new string. Named
+  // through the exported constant rather than spelled again here — the same thing
+  // `videoImportBlockerKey` does for its own long-read member.
+  CaptureToggleBlocker.longRead => longReadBusyKey,
   CaptureToggleBlocker.controllerUnavailable => "$tr_capture.capture_control.disabled_tooltip",
 };
 
@@ -1530,6 +1693,11 @@ class CaptureControlGroup extends ConsumerWidget {
     // the STOP half of the toggle is safe by construction, because `capturing` outranks the import
     // phases in [resolveCaptureActivity] and the toggle's own switch answers null for it.
     final activity = resolveCaptureActivity(capturing: ref.watch(capturingStateProvider), importState: import);
+    // The registry's answer for the toggle below, resolved beside the activity because it is the
+    // other half of the same question: what is running here, and what is running somewhere else
+    // over the same folders.
+    final claims = ref.watch(longReadRegistryProvider).values;
+    final layout = ref.watch(pathLayoutProvider);
     return ListCard(
       title: "$tr_capture.capture_control.title".tr(),
       children: [
@@ -1575,6 +1743,17 @@ class CaptureControlGroup extends ConsumerWidget {
                 controllerUnavailable: controllerUnavailable,
                 captureUnsupported: captureUnsupported,
                 activity: activity,
+                // Watched, not read, for the reason the import control beside it states about its
+                // own gate: the claim this control has to respect is normally taken long after it
+                // was built -- a zip, an archive move, a relocation started from the storage dialog
+                // -- and is released again while this card is still up.
+                //
+                // Asked over `liveCaptureLongReadPaths`, the same derivation the session claims, so
+                // the control withheld here is withheld for exactly the trees the session goes on
+                // to hold. The layout and not `pathInfoProvider`, for the reason `video_import.dart`
+                // states: this control needs to know where the store is, not that it was
+                // successfully prepared, and the second throws while it has not been.
+                heldByLongRead: layout != null && liveCaptureBlockedBy(layout, claims) != null,
               ),
               // Guarded here as well as inside the button: an unavailable import renders a zero-sized
               // child, and a zero-sized child still takes a Wrap gap -- which would push the capture
@@ -1617,6 +1796,7 @@ class CaptureControlGroup extends ConsumerWidget {
     required bool controllerUnavailable,
     required bool captureUnsupported,
     required CaptureActivity activity,
+    required bool heldByLongRead,
   }) {
     // One expression decides both halves. `disabled` used to be a disjunction and the sentence a
     // nested ternary over the same three booleans, which is two places that had to agree by hand.
@@ -1624,6 +1804,7 @@ class CaptureControlGroup extends ConsumerWidget {
       controllerUnavailable: controllerUnavailable,
       captureUnsupported: captureUnsupported,
       activity: activity,
+      heldByLongRead: heldByLongRead,
     );
     return Disabled(
       disabled: blocker != null,

@@ -6,6 +6,7 @@ import '/src/core/fs/web_record_persistence.dart';
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/fs/web_record_write_transaction.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 
 /// Why a record the zip carried was not written into the store.
 ///
@@ -121,7 +122,17 @@ class RecordZipService {
   /// view names the active store on re-import (mirroring [import]) — which the
   /// write transaction then refuses while the archived copy still exists, and
   /// [import] reports as [RecordImportRefusal.alreadyArchived].
-  static Future<Uint8List> export(List<DirectoryPath> recordDirs, {RecordRecoveryGate? recoveryGate}) async {
+  ///
+  /// [declaration] is required and has no default for the same reason the gate's
+  /// own argument does: this method reads every file of every record it is given
+  /// and is the web leg of an operation whose desktop half declares a claim, so a
+  /// caller that announced nothing here would be a silent divergence between the
+  /// two legs rather than a decision.
+  static Future<Uint8List> export(
+    List<DirectoryPath> recordDirs, {
+    RecordRecoveryGate? recoveryGate,
+    required LongReadDeclaration declaration,
+  }) async {
     if (recordDirs.isEmpty) return Uint8List.fromList(ZipEncoder().encodeBytes(Archive()));
     final storageRoots = recordDirs.map((directory) => directory.parent.parent.parent.path).toSet();
     if (storageRoots.length != 1) {
@@ -129,21 +140,26 @@ class RecordZipService {
     }
     final storageRoot = recordDirs.first.parent.parent.parent;
     final gate = recoveryGate ?? platformRecordRecoveryGate;
-    return gate.runForRecords(storageRoot, recordDirs.map((directory) => directory.name), () async {
-      final archive = Archive();
-      for (final dir in recordDirs) {
-        final recordId = dir.name;
-        // Record directories are flat (the nine per-record files, no nested
-        // directories), so every listed entry is a file; read each through the
-        // async backend and store it verbatim.
-        await for (final entry in dir.list()) {
-          final bytes = await entry.asFilePath.readAsBytes();
-          final name = "chara_detail/active/$recordId/${entry.name}";
-          archive.addFile(ArchiveFile.noCompress(name, bytes.length, bytes));
+    return gate.runForRecords(
+      storageRoot,
+      recordDirs.map((directory) => directory.name),
+      declaration: declaration,
+      () async {
+        final archive = Archive();
+        for (final dir in recordDirs) {
+          final recordId = dir.name;
+          // Record directories are flat (the nine per-record files, no nested
+          // directories), so every listed entry is a file; read each through the
+          // async backend and store it verbatim.
+          await for (final entry in dir.list()) {
+            final bytes = await entry.asFilePath.readAsBytes();
+            final name = "chara_detail/active/$recordId/${entry.name}";
+            archive.addFile(ArchiveFile.noCompress(name, bytes.length, bytes));
+          }
         }
-      }
-      return ZipEncoder().encodeBytes(archive);
-    });
+        return ZipEncoder().encodeBytes(archive);
+      },
+    );
   }
 
   /// Maximum total decompressed size accepted from one import zip.

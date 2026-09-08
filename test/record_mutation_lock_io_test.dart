@@ -21,6 +21,8 @@ import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
+import 'support/long_read_declarations.dart';
+
 void main() {
   test('the platform lock is a real one, not a pass-through', () async {
     // A pass-through runner would let the second request enter while the first
@@ -57,7 +59,7 @@ void main() {
     counter.writeAsStringSync('0');
     final gate = createPlatformRecordRecoveryGate();
 
-    Future<void> increment() => gate.runForRecord(storageRoot, 'record', () async {
+    Future<void> increment() => gate.runForRecord(storageRoot, 'record', declaration: undeclaredInTest, () async {
       final read = int.parse(await counter.readAsString());
       await _eventLoop();
       await counter.writeAsString('${read + 1}');

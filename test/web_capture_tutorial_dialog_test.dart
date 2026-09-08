@@ -200,8 +200,9 @@ void main() {
     await tester.pump();
     expect(find.byType(WebCaptureTutorialDialog), findsOneWidget);
 
-    // Only one dialog exists at a time, so showing another one replaces the banner. The pending start must
-    // not take that unrelated dialog down with it when it finally settles.
+    // An ordinary `show` replaces whatever is up, so showing another one replaces the banner (only the
+    // storage view asks to stack, with `over: true`). The pending start must not take that unrelated
+    // dialog down with it when it finally settles.
     container
         .read(dialogBuilderProvider.notifier)
         .show(

@@ -7,14 +7,80 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_symbols_icons/symbols.dart';
 
 import '/src/chara_detail/storage.dart';
+import '/src/core/path_entity.dart';
 import '/src/core/platform_controller.dart';
+import '/src/core/providers.dart';
+import '/src/core/storage/long_read_registry.dart';
+import '/src/core/storage/storage_delete_request.dart';
+import '/src/core/utils.dart';
 import '/src/core/video_import.dart';
 import '/src/core/video_import_ops.dart';
 import '/src/gui/capture.dart';
 import '/src/gui/common.dart';
+import '/src/gui/storage_tree.dart';
 
-// ignore: constant_identifier_names
-const tr_video_import = "pages.capture.video_import";
+/// Every path a video import holds open for its whole session.
+///
+/// **The record store root, and not the records the clip turns out to contain.**
+/// Which ids a clip yields is not known until the producer has recognised them, and the window this
+/// claim exists for opens before the first frame is decoded; a claim that grew as the records
+/// arrived would leave the store unheld over exactly the stretch the defect lives in.
+///
+/// **Not `storageDir`, which is what the core is pointed at.** That is the parent, and holding it
+/// would withhold the storage view's controls over `storage/sound` — a folder no import has ever
+/// written to. A relocation is refused all the same: `storageDeleteAwaitsExtraction` places a target
+/// inside a hold *or* a hold inside a target, so a claim on the record store answers a question
+/// asked about `storage/`. `recordImportLongReadPaths` names the same root for the zip import, and
+/// for the same reason — both write records and nothing else.
+///
+/// **And the module it recognises with**, for the reason `regenerateRecordLongReadPaths` states at
+/// length for the same directory: an import is the recognition core applied to a clip, and on
+/// Windows `CharaDetailRecognizer::recognize` opens `modules/version_info.json` once per record it
+/// produces. A module replaced under a running import is therefore read half-and-half by it. Naming
+/// it here is also what defers an automatic install (`runModuleInstall` →
+/// `LongReadRegistry.holdWhenFree`) until the import has finished, and what withholds the storage
+/// view's `modules` delete and zip while it runs. Named on both platforms although only Windows
+/// re-reads it per record, by the rule that derivation gives.
+List<PathEntity> videoImportLongReadPaths(PathInfo pathInfo) => [pathInfo.charaDetailDir, pathInfo.modulesDir];
+
+/// What a video import announces to the long-read registry.
+///
+/// Built here and handed to `startVideoImport` rather than resolved inside it, for the reason
+/// `dataRootRelocationLongReadDeclaration` is built at its call site: the two front ends are
+/// deliberately free of Riverpod — that is why they take `preflight` as a closure — and a registry
+/// is only reachable through a ref.
+///
+/// **Off a [RefBase] and not this widget's `ref`**, like the preflight beside it: the session it
+/// announces outlives the file dialog and can outlive this page, and the container's ref stays
+/// answerable for as long as the import can run.
+///
+/// Reading [pathInfoProvider] here is safe for the same reason the import toolbar's guard makes it
+/// safe there: it throws until the data root has resolved, and a control that can reach this point
+/// has already been gated on `platformControllerProvider` being up, which the data root precedes.
+/// Whether a registered long reader is holding what an import would write into.
+///
+/// **One derivation, one subscription** — the shape `_importBlockedBy` states for the zip import
+/// beside it, less the second half: this control asks in `build` only. The re-check the zip import
+/// makes once its picker returns is deliberately absent here, because the two windows are not the
+/// same. [LongReadKind.videoImport] owns "the session, and deliberately not the file dialog": the
+/// claim opens when a clip is posted, and `storageActionBlocker` already answers `null` for
+/// `VideoImportPhase.picking` with that reason written out. A refusal issued at the moment the
+/// dialog closes would be this control speaking for a stretch its own registration says it does
+/// not cover.
+///
+/// The delete fold and not the extract one, for `_importBlockedBy`'s reason: an import writes
+/// where a delete, a bundle and a relocation all act, so what matters is that *something* holds
+/// the store.
+LongReadKind? videoImportBlockedBy(PathInfo pathInfo, Iterable<LongReadClaim> claims) =>
+    storageDeleteBlockedBy(StorageDeletePathsRequest(videoImportLongReadPaths(pathInfo)), claims);
+
+LongReadDeclaration videoImportLongReadDeclaration(RefBase ref) {
+  return LongReadDeclaration.claim(
+    registry: ref.read(longReadRegistryProvider.notifier),
+    kind: LongReadKind.videoImport,
+    paths: videoImportLongReadPaths(ref.read(pathInfoProvider)),
+  );
+}
 
 /// The video import lives inside the capture control card, not in a card of their own, and its
 /// pieces are placed by **what kind of statement each one is** rather than by which feature owns
@@ -69,12 +135,24 @@ mixin _VideoImportFacade {
   /// "an import is running" before the resolver could see them apart, which is why the control
   /// explained an open file dialog with 「動画の取り込み中です。」.
   VideoImportBlocker? resolveBlocker(WidgetRef ref, VideoImportState state) {
+    // Watched, not read, for the reason the zip import's toolbar states about its own gate: the
+    // claim this control has to respect is normally taken long after it was built -- a zip, an
+    // archive move or a relocation started from the storage dialog -- and is released again while
+    // the capture card is still up. A gate that answered once would be wrong in both directions.
+    final claims = ref.watch(longReadRegistryProvider).values;
+    // The layout and not `pathInfoProvider`, for the reason `import_button.dart` states: this
+    // control needs to know where the store is, not that it was successfully prepared, and the
+    // second throws while it has not been.
+    final layout = ref.watch(pathLayoutProvider);
     return resolveVideoImportBlocker(
       available: true,
       supported: supported ?? videoImportSupported,
       controllerReady: ref.watch(platformControllerProvider) != null,
       activity: resolveCaptureActivity(capturing: ref.watch(capturingStateProvider), importState: state),
       regenerating: !ref.watch(charaDetailRecordRegenerationControllerProvider).isCompleted,
+      // Asked over `videoImportLongReadPaths`, the same derivation the session claims, so the set
+      // withheld here is the set the import goes on to hold.
+      heldByLongRead: layout != null && videoImportBlockedBy(layout, claims) != null,
     );
   }
 }
@@ -157,7 +235,17 @@ class VideoImportButton extends ConsumerWidget with _VideoImportFacade {
                 label: Text("$tr_video_import.pick_button".tr()),
                 onPressed: blocker != null
                     ? null
-                    : () => unawaited(startVideoImport(preflight: () => preflight(container))),
+                    : () => unawaited(
+                        startVideoImport(
+                          preflight: () => preflight(container),
+                          // Resolved at the press and not inside the session, so the claim names the
+                          // store this import was started against even if the page goes away while
+                          // the dialog is open. It is only *registered* when a clip is actually
+                          // posted — `runDeclared` is called at the session boundary — so a
+                          // cancelled pick announces nothing.
+                          declaration: videoImportLongReadDeclaration(container.read(containerRefProvider)),
+                        ),
+                      ),
               ),
       ),
     );
@@ -203,6 +291,13 @@ class VideoImportButton extends ConsumerWidget with _VideoImportFacade {
         importState: VideoImportState.idle,
       ),
       regenerating: !container.read(charaDetailRecordRegenerationControllerProvider).isCompleted,
+      // **The long-read gate is deliberately not re-asked here**, and it is the one gate of the
+      // five that is not. See [videoImportBlockedBy]: this import's own window opens when the clip
+      // is posted and expressly excludes the file dialog, so refusing a clip at the moment the
+      // dialog closes would have the control speak for a stretch its registration says it does not
+      // cover. The regeneration gate above is re-asked precisely because it has no such window --
+      // a batch can auto-start while the dialog is open and nothing below the front end can see it.
+      heldByLongRead: false,
     );
   }
 }
@@ -264,8 +359,11 @@ class VideoImportGateNotice extends ConsumerWidget with _VideoImportFacade {
 /// camelCase, the translation file is snake_case, and easy_localization renders a missing
 /// key as the key itself — so `blocker.name` printed the literal
 /// `pages.capture.video_import.blocked.notReady` at the user.
-String videoImportBlockerText(VideoImportBlocker blocker) =>
-    "$tr_video_import.blocked.${videoImportBlockerKey(blocker)}".tr();
+///
+/// **Nothing is prefixed here.** [videoImportBlockerKey] answers with the whole key, because one
+/// of the blockers is worded by a sentence that belongs to no screen (`longReadBusyKey`) and a
+/// prefix applied at this end cannot express that.
+String videoImportBlockerText(VideoImportBlocker blocker) => videoImportBlockerKey(blocker).tr();
 
 /// The translated line a finished import states, in order of how much it actually knows.
 ///

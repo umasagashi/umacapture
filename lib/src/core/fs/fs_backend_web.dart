@@ -29,14 +29,22 @@ class WebFsBackend implements FsBackend {
   Future<Uint8List> readBytes(String path) => _vfs.readBytes(path);
 
   @override
+  Future<Uint8List> readHead(String path, int maxBytes) => _vfs.readHead(path, maxBytes);
+
+  @override
   Future<void> writeString(String path, String contents) => _vfs.writeString(path, contents);
 
   @override
   Future<void> writeBytes(String path, List<int> bytes) => _vfs.writeBytes(path, bytes);
 
   @override
-  Future<List<FsEntry>> list(String path, {bool recursive = false, bool followLinks = false}) {
-    return _vfs.list(path, recursive: recursive);
+  Future<List<FsEntry>> list(
+    String path, {
+    bool recursive = false,
+    bool followLinks = false,
+    bool withMetadata = false,
+  }) {
+    return _vfs.list(path, recursive: recursive, withMetadata: withMetadata);
   }
 
   @override
@@ -53,6 +61,9 @@ class WebFsBackend implements FsBackend {
 
   @override
   Future<int> length(String path) => _vfs.length(path);
+
+  @override
+  Future<DateTime> modified(String path) => _vfs.modified(path);
 
   @override
   Future<bool> sameFileBytes(String a, String b) => _vfs.sameFileBytes(a, b);
@@ -73,7 +84,8 @@ class WebFsBackend implements FsBackend {
   void writeStringSync(String path, String contents) => throw _sync('writeStringSync');
 
   @override
-  List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false}) => throw _sync('listSync');
+  List<FsEntry> listSync(String path, {bool recursive = false, bool followLinks = false, bool withMetadata = false}) =>
+      throw _sync('listSync');
 
   @override
   void deleteSync(String path, {bool recursive = false}) => throw _sync('deleteSync');

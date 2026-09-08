@@ -15,6 +15,7 @@
 // and that field has a public setter, so the seam already exists in the package
 // and needs no counterpart in production code.
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -67,7 +68,15 @@ class FakeFilePicker extends FilePickerPlatform {
 
   /// Answers with the files at [paths], as a native dialog would: a name, a size
   /// and a path, and no bytes (`withData` is off on every call this app makes).
-  void answerWithPaths(List<String> paths) => answerWith([for (final path in paths) platformFileAt(path)]);
+  ///
+  /// With [firstReadGate] given, the *first* file of the selection does not hand
+  /// over its bytes until that future completes — see [gatedPlatformFileAt] for
+  /// what that is for. The rest of the selection is read at full speed, so what
+  /// the gate lengthens is the run's opening and not the run.
+  void answerWithPaths(List<String> paths, {Future<void>? firstReadGate}) => answerWith([
+    for (final (index, path) in paths.indexed)
+      if (index == 0 && firstReadGate != null) gatedPlatformFileAt(path, firstReadGate) else platformFileAt(path),
+  ]);
 
   @override
   Future<FilePickerResult?> pickFiles({
@@ -117,6 +126,47 @@ class FakeFilePicker extends FilePickerPlatform {
 PlatformFile platformFileAt(String path) {
   final file = File(path);
   return PlatformFile(path: path, name: file.uri.pathSegments.last, size: file.lengthSync());
+}
+
+/// A [platformFileAt] whose content read parks on [gate] before it answers.
+///
+/// **The end of a run the test has to sample is the test's to decide, in the
+/// same way its start is.** A consumer that reads a picked file inside some
+/// window — a claim, a transaction, a progress report — opens that window and
+/// closes it again inside a fraction of a second, so a test that samples the
+/// window by polling is asking a poll to land inside a stretch that can be
+/// shorter than one turn of the loop it polls with. Handing the consumer a
+/// file that will not answer until the test says so turns the window from a race
+/// into an interval with two ends the test holds: whatever the consumer did
+/// before its first read stays on the registry, on screen and on disk for as
+/// long as the sampler wants it there, at any poll interval.
+///
+/// The first read, rather than every read, so that only the entry to the window
+/// is held: a selection is still imported in the order and at the speed it
+/// normally is once the gate opens.
+///
+/// `readAsBytes` is the seam because it is what `PlatformFile` offers a consumer
+/// that picked with `withData: false` — which is what this app picks with, on
+/// desktop and on web alike — so a gate here is on the path both platforms take
+/// and needs nothing from the filesystem backend underneath. That matters: a
+/// backend-level gate would miss a consumer that rejects a file before writing
+/// anything.
+PlatformFile gatedPlatformFileAt(String path, Future<void> gate) => _GatedPlatformFile(platformFileAt(path), gate);
+
+/// [PlatformFile] with its content read held behind a future.
+///
+/// Subclassing is the package's own extension point for this — `AndroidPlatformFile`
+/// is built the same way, out of a plain [PlatformFile] plus one behaviour.
+class _GatedPlatformFile extends PlatformFile {
+  _GatedPlatformFile(PlatformFile file, this._gate) : super(path: file.path, name: file.name, size: file.size);
+
+  final Future<void> _gate;
+
+  @override
+  Future<Uint8List> readAsBytes() async {
+    await _gate;
+    return super.readAsBytes();
+  }
 }
 
 /// Installs a [FakeFilePicker] as the platform instance for the current test and

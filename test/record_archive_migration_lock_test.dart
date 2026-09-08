@@ -37,6 +37,7 @@ import 'package:umacapture/src/core/providers.dart';
 
 import 'support/hive.dart';
 import 'support/records.dart';
+import 'support/long_read_declarations.dart';
 
 /// One observation of a lock acquisition boundary, with the world state at it.
 typedef _Event = ({String tag, String phase, String lockName, RecordMutationLockMode mode, bool migrated, bool moved});
@@ -141,8 +142,12 @@ void main() {
     // Started in the same turn of the event loop, exactly as app startup does:
     // one provider chain runs the migration while another starts a store scan.
     await Future.wait([
-      runArchiveGeometryMigrationIfNeeded(pathInfo, recoveryGate: recordingGate(locks, 'migration', events)),
-      loadRecordsUnder(archiveDir, recoveryGate: recordingGate(locks, 'scan', events)),
+      runArchiveGeometryMigrationIfNeeded(
+        pathInfo,
+        declaration: undeclaredInTest,
+        recoveryGate: recordingGate(locks, 'migration', events),
+      ),
+      loadRecordsUnder(archiveDir, declaration: undeclaredInTest, recoveryGate: recordingGate(locks, 'scan', events)),
     ]);
 
     // Both parties acquired, and both acquired the *same* name exclusively.
@@ -207,7 +212,11 @@ void main() {
       }),
     );
 
-    final migration = runArchiveGeometryMigrationIfNeeded(pathInfo, recoveryGate: holdingGate);
+    final migration = runArchiveGeometryMigrationIfNeeded(
+      pathInfo,
+      declaration: undeclaredInTest,
+      recoveryGate: holdingGate,
+    );
     await migrationDone.future;
 
     // The scan runs to completion while the migration is still inside, through a
@@ -217,6 +226,7 @@ void main() {
     // the trace is a genuine nesting.
     await loadRecordsUnder(
       archiveDir,
+      declaration: undeclaredInTest,
       recoveryGate: RecordRecoveryGate(
         mutationLock: RecordMutationLock((name, mode, action) async {
           events.add((tag: 'scan', phase: 'enter', lockName: name, mode: mode, migrated: migrated(), moved: moved()));

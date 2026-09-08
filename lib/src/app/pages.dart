@@ -40,6 +40,9 @@ class Pages {
       selectedIcon: const Icon(Symbols.extension_rounded, fill: 1),
       unselectedIcon: const Icon(Symbols.extension_rounded),
     ),
+    // Storage management is not here: it is not something a session passes
+    // through, so it is entered from the settings page as a dialog
+    // (`StorageManagerTile` in `storage_settings.dart`) rather than as a tab.
     PageLabel(
       route: const SettingsRoute(),
       label: "pages.settings.title".tr(),

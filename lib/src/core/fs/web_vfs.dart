@@ -8,6 +8,7 @@ import 'package:web/web.dart' as web;
 import 'byte_compare.dart';
 import 'fs_backend.dart' show FsEntry;
 import 'storage_persistence_web.dart' show requestPersistOnce;
+import 'vfs_path.dart' show vfsChildPath;
 
 /// Path separators accepted by the VFS. Hoisted because [WebVfs._split] runs at
 /// the head of every single filesystem operation.
@@ -175,6 +176,27 @@ class WebVfs {
     return buffer.toDart.asUint8List();
   }
 
+  /// The first [maxBytes] bytes of the file at [path]; see `FsBackend.readHead`
+  /// for the contract.
+  ///
+  /// `getFile()` yields a `File`, which is a `Blob`, and `Blob.slice` returns a
+  /// *view*: no byte is fetched until the returned blob's `arrayBuffer()` is
+  /// awaited, which is why the same construction already bounds
+  /// [sameFileBytes] to two chunks. The end offset is clamped to `file.size`
+  /// because `slice` clamps silently and a bound larger than the file would
+  /// otherwise read as an error the caller cannot see.
+  Future<Uint8List> readHead(String path, int maxBytes) async {
+    final handle = await _file(path, create: false);
+    if (handle == null) {
+      throw _notFound(path);
+    }
+    if (maxBytes <= 0) {
+      return Uint8List(0);
+    }
+    final file = await handle.getFile().toDart;
+    return _blobBytes(file.slice(0, math.min(maxBytes, file.size)));
+  }
+
   Future<String> readString(String path) async => utf8.decode(await readBytes(path));
 
   /// The size of the file at [path], in bytes.
@@ -187,6 +209,32 @@ class WebVfs {
       throw _notFound(path);
     }
     return (await handle.getFile().toDart).size;
+  }
+
+  /// The last-modified timestamp of the file at [path].
+  ///
+  /// **A directory throws [UnsupportedError] — this is the web side of the
+  /// divergence documented on `FsBackend.modified`, and the browser API is what
+  /// forces it.** OPFS resolves a directory to a `FileSystemDirectoryHandle`,
+  /// whose entire interface is `name` / `kind` / `isSameEntry` plus the child
+  /// accessors: it exposes no timestamp, no size, and nothing that could be
+  /// derived into one, and no proposal adds any. There is no `getFile()`
+  /// equivalent to fall back on the way [length] does for a file. Faking it —
+  /// returning the epoch, or the newest child's timestamp — would put a number
+  /// in front of the user that the platform never measured, so the absence is
+  /// reported instead.
+  Future<DateTime> modified(String path) async {
+    final handle = await _file(path, create: false);
+    if (handle == null) {
+      if (await isDirectory(path)) {
+        throw UnsupportedError(
+          'FsBackend.modified is not available for a directory on web '
+          '(FileSystemDirectoryHandle exposes no metadata): $path',
+        );
+      }
+      throw _notFound(path);
+    }
+    return DateTime.fromMillisecondsSinceEpoch((await handle.getFile().toDart).lastModified);
   }
 
   /// Whether the files at [left] and [right] hold exactly the same bytes.
@@ -308,17 +356,23 @@ class WebVfs {
   /// `_dir(create: false)` collapses both failures into `null` (its probing
   /// callers want absence as a value), so the kind is re-probed here to report
   /// the distinguishing error.
-  Future<List<FsEntry>> list(String path, {bool recursive = false}) async {
+  Future<List<FsEntry>> list(String path, {bool recursive = false, bool withMetadata = false}) async {
     final dir = await _dir(_split(path), create: false);
     if (dir == null) {
       throw await isFile(path) ? _notADirectory(path) : _notFound(path);
     }
     final result = <FsEntry>[];
-    await _walk(dir, path, recursive, result);
+    await _walk(dir, path, recursive, withMetadata, result);
     return result;
   }
 
-  Future<void> _walk(web.FileSystemDirectoryHandle dir, String prefix, bool recursive, List<FsEntry> out) async {
+  Future<void> _walk(
+    web.FileSystemDirectoryHandle dir,
+    String prefix,
+    bool recursive,
+    bool withMetadata,
+    List<FsEntry> out,
+  ) async {
     final iterator = _DirIterable(dir).values();
     while (true) {
       final step = await iterator.next().toDart;
@@ -326,11 +380,42 @@ class WebVfs {
       final value = step.value;
       if (value == null) break;
       final handle = value as web.FileSystemHandle;
-      final childPath = '$prefix/${handle.name}';
+      // [vfsChildPath], not a literal join: the OPFS root is the empty path, so
+      // the rule has to be stated somewhere a test can reach. See that function.
+      final childPath = vfsChildPath(prefix, handle.name);
       final isDirectory = handle.kind == 'directory';
-      out.add((path: childPath, isDirectory: isDirectory));
+      // The metadata comes off the handle the walk is already holding, so no
+      // path is re-resolved from the root; `getFile()` reads the entry's
+      // metadata record and not its bytes. A directory child carries neither
+      // field: `FileSystemDirectoryHandle` has no metadata at all (the same
+      // constraint [modified] throws for), and a directory's *size* is absent on
+      // io as well, by the shared contract on `FsEntry`.
+      //
+      // A rejected `getFile()` costs this entry its metadata and nothing more.
+      // The listing and the metadata read are two unsynchronized steps, so an
+      // entry the iterator just handed out can be gone (or held by an open
+      // writable) by the time it is asked for its size — a `temp/` directory a
+      // capture is writing into does exactly that. The io backend answers the
+      // same situation with a pair of `null`s (`metadataFromStat`), because
+      // `FsEntry` contracts that "one unreachable child must not fail the whole
+      // enumeration"; letting the rejection out here would make web throw away a
+      // whole directory listing over one vanished file.
+      web.File? file;
+      if (withMetadata && !isDirectory) {
+        try {
+          file = await (handle as web.FileSystemFileHandle).getFile().toDart;
+        } catch (_) {
+          file = null;
+        }
+      }
+      out.add((
+        path: childPath,
+        isDirectory: isDirectory,
+        size: file?.size,
+        modified: file == null ? null : DateTime.fromMillisecondsSinceEpoch(file.lastModified),
+      ));
       if (recursive && isDirectory) {
-        await _walk(handle as web.FileSystemDirectoryHandle, childPath, recursive, out);
+        await _walk(handle as web.FileSystemDirectoryHandle, childPath, recursive, withMetadata, out);
       }
     }
   }

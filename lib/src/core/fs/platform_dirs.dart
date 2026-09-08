@@ -8,7 +8,7 @@ import 'platform_dirs_io.dart' if (dart.library.js_interop) 'platform_dirs_web.d
 /// On desktop/VM the io backend defers to `path_provider` (and
 /// [Platform.resolvedExecutable]); on web there is no OS filesystem, so the web
 /// backend returns fixed **virtual** roots that map 1:1 onto nested OPFS
-/// directories (see the web backend and design §3). Keeping the resolution
+/// directories (see the web backend). Keeping the resolution
 /// behind this facade lets `pathInfoLoader` stay platform-agnostic while the
 /// `path_provider` calls never enter the web execution path.
 abstract interface class PlatformDirs {

@@ -13,11 +13,32 @@ import '/src/core/fs/record_store_unavailable.dart';
 import '/src/core/fs/root_storage_maintenance.dart';
 import '/src/core/fs/temp_session.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 import '/src/core/utils.dart';
 
 final packageInfoLoader = FutureProvider<PackageInfo>((ref) {
   return PackageInfo.fromPlatform();
 });
+
+/// A [RefBase] that belongs to the container rather than to a widget.
+///
+/// **For work that outlives the widget that started it.** `WidgetRef.base` stops
+/// working the moment its widget is unmounted — `ConsumerStatefulElement` throws
+/// a plain `StateError`, in release as well as debug — so an operation that
+/// awaits anything can be closed out from under its own `ref` and then fail
+/// halfway through: the part that already happened is done, and the part that
+/// says so never runs. Read this before the first await and hand *it* to the
+/// runner, the way a notifier read before an await is.
+///
+/// Not a general substitute for `ref.base`: it registers no dependency and
+/// belongs to no build, so a widget that wants to rebuild must still watch
+/// through its own ref. This one is for `read`/`invalidate` after an await —
+/// **never `watch`**, which here is not merely useless but destructive: `Ref.watch`
+/// subscribes this provider to the watched one, so the first time that one
+/// changes, this provider is invalidated and its element disposed — and *every*
+/// [RefBase] already handed out from it starts throwing `UnmountedRefException`,
+/// including ones belonging to operations already in flight.
+final containerRefProvider = Provider<RefBase>((ref) => ref.base);
 
 /// A module-level broadcast event stream exposed as a [StreamProvider].
 ///
@@ -57,6 +78,28 @@ class SettableNotifier<T> extends Notifier<T> {
 NotifierProvider<SettableNotifier<T>, T> settableNotifierProvider<T>(T initial) {
   return NotifierProvider<SettableNotifier<T>, T>(() => SettableNotifier<T>(initial));
 }
+
+/// Directory name of the archive move's transaction journal.
+const charaDetailArchiveTransactionDirName = '.umacapture-transactions';
+
+/// Directory name of the active-record write transaction's journal.
+const charaDetailWriteTransactionDirName = '.umacapture-write-transactions';
+
+/// The archive transaction's journal root, given the record store's own root
+/// (`…/storage/chara_detail`).
+///
+/// A free function as well as a [PathInfo] getter because the writer never holds
+/// a [PathInfo]: `RecordDirectoryTransactionSpec.dataRoot` derives the record
+/// store root from the record being moved, and that is all it has. Both spellings
+/// of the location therefore come from here — the point of moving the name out of
+/// `record_directory_transaction.dart`, where it was a literal no enumeration of
+/// this app's directories could see.
+DirectoryPath charaDetailArchiveTransactionDirOf(DirectoryPath charaDetailDir) =>
+    charaDetailDir / charaDetailArchiveTransactionDirName;
+
+/// The write transaction's journal root, for the same reason.
+DirectoryPath charaDetailWriteTransactionDirOf(DirectoryPath charaDetailDir) =>
+    charaDetailDir / charaDetailWriteTransactionDirName;
 
 class PathInfo {
   final DirectoryPath documentDir;
@@ -132,18 +175,117 @@ class PathInfo {
   /// active and archive sets.
   DirectoryPath get charaDetailArchiveDir => charaDetailDir / "archive";
 
+  /// Sibling of [charaDetailActiveDir] holding the user's own data the app could
+  /// not read, kept for recovery. Its contents are counted straight into a
+  /// banner that calls them records.
+  ///
+  /// Three routes lead here, and the third is not a record directory:
+  ///
+  ///  * a captured or stored record whose `record.json` will not decode
+  ///    (`CharaDetailRecord.quarantine` and its unlocked variant);
+  ///  * the staging or the superseded copy of a transaction this build gave up
+  ///    on, when that is the only copy of the record left
+  ///    (`WebRecordWriteTransaction`, `RecordDirectoryTransaction`);
+  ///  * **a transaction slot of either journal minted by a version this build
+  ///    cannot read** (`quarantineForeignSlot`), carried here whole and
+  ///    unopened. Its name establishes only that someone else wrote it. What it
+  ///    stages may be the only copy of a record that version saved for the user
+  ///    — a first publication holds the whole record in its staging until the
+  ///    transaction advances — and this build cannot read its manifest to tell.
+  ///    So the entry is filed by the worst thing its name allows, which is what
+  ///    this shelf is for. "Cannot read" is decided by the app's own derivation
+  ///    and nothing else: a name that decodes cleanly but records an operation
+  ///    no commit of this app has ever written is still another writer's, and
+  ///    still comes here.
+  ///
+  /// The third route is why a reader of this directory must not assume every
+  /// child is a record directory: one of them can be a slot, holding a manifest
+  /// and a `desired/` tree and no `record.json` of its own. Nothing here decodes
+  /// what it holds, and neither does anything that lists, sizes or deletes this
+  /// directory.
   DirectoryPath get charaDetailQuarantineDir => charaDetailDir / "quarantine";
 
   /// Sibling of [charaDetailQuarantineDir] holding the app's own leftovers.
   ///
   /// The two are split by *whose data it is*, not by how broken it is:
-  /// [charaDetailQuarantineDir] holds records — the user's — that the app could
-  /// not read, and its contents are counted straight into a banner that calls
-  /// them records. This one holds what the app itself left behind, such as a
-  /// transaction slot written by a version that no longer exists. Those are
-  /// duplicates of a record that still stands elsewhere, so there is nothing for
-  /// the user to recover from them and nothing a count of them would prompt.
+  /// [charaDetailQuarantineDir] holds what is the user's, and this one holds
+  /// what the app itself left behind — the staging of a write transaction that
+  /// never reached `ready` while the record it copies still stands in a store
+  /// the app lists, and a stray file under a transaction root. Those are
+  /// duplicates of a record that still stands elsewhere, or no one's data at
+  /// all, so there is nothing for the user to recover from them and nothing a
+  /// count of them would prompt.
+  ///
+  /// **A slot of *either* journal minted by anything but this app is not among
+  /// them, and used to be.** Whose data that is cannot be settled from the name,
+  /// which is all this build can read of it, so it goes to
+  /// [charaDetailQuarantineDir] instead (`quarantineForeignSlot`). The split is
+  /// unchanged; what changed is which side a name this app did not derive falls
+  /// on — and a name recording an operation no commit of this app has ever
+  /// written is one of those, however cleanly it decodes.
+  ///
+  /// **The sentence above is about the two journals' *foreign* slots, and the
+  /// journals differ again over the ones this build did mint.** A slot of
+  /// [charaDetailArchiveTransactionDir] is a staged copy of a record that still
+  /// stands in `active/` or already in `archive/`, so it really is a duplicate. A
+  /// slot of [charaDetailWriteTransactionDir] need not be: a record being
+  /// published for the first time exists *only* there until the transaction
+  /// advances, so a stalled one is not a copy of anything — it is the record.
+  ///
+  /// **What actually recovers one, checked rather than assumed:** the record
+  /// scan takes the exclusive root gate on both platforms
+  /// (`record_loader_io.dart` / `record_loader_web.dart` →
+  /// `RecordRecoveryGate.runForRoot`), whose hook runs
+  /// `JournalRootStorageMaintenance` — write-transaction recovery on both legs,
+  /// archive recovery on web, the only leg that writes that journal — so a slot
+  /// a previous session left is finished, or given up on and promoted into
+  /// `quarantine/`, before any record is listed. **The archive journal's
+  /// *foreign* slots are carried out on both legs**, because who minted a slot
+  /// is read off its name and moving it needs neither a manifest nor the rename
+  /// desktop has instead of one (`root_storage_maintenance_io.dart`); what is
+  /// web's alone is replaying a manifest this build wrote. Desktop reaches this journal
+  /// because the code that writes it is shared: the zip import publishes through
+  /// `WebRecordWriteTransaction` on Windows too, whatever the name says.
+  /// **And this view is not on that path at all** — it enumerates the filesystem
+  /// and takes no gate to build its rows — so what keeps a live slot off the
+  /// screen is that the app has already scanned its records, not anything here.
+  ///
+  /// So: "there is nothing in here to lose" is a claim this directory earns and
+  /// the write journal does not.
   DirectoryPath get charaDetailRetiredDir => charaDetailDir / "retired";
+
+  /// Journal root of the archive move's directory transaction — the manifests and
+  /// staged payloads `RecordDirectoryTransaction` writes while a record is being
+  /// moved out of `active/`.
+  ///
+  /// A sibling of the record stores rather than a child of one, so a record scan
+  /// never reads staging data as a record. It is named here — and not only where
+  /// the transaction builds it — because a directory this app writes that no
+  /// getter names is a directory the storage view cannot show, total or delete;
+  /// that is exactly what both journals were until now.
+  DirectoryPath get charaDetailArchiveTransactionDir => charaDetailArchiveTransactionDirOf(charaDetailDir);
+
+  /// Journal root of the active-record write transaction, for the same reason.
+  ///
+  /// Separate from [charaDetailArchiveTransactionDir] because they are two state
+  /// machines with two on-disk formats; a slot of one is not readable as a slot of
+  /// the other, and each sweeps only its own root.
+  DirectoryPath get charaDetailWriteTransactionDir => charaDetailWriteTransactionDirOf(charaDetailDir);
+
+  /// Both journals, as one list, for the callers that care what a root *is*
+  /// rather than which state machine wrote it.
+  ///
+  /// Removing either destroys slots that whole-store recovery would otherwise
+  /// have drained into `active/` or into a shelf the app owns, so an operation
+  /// that removes one owes that drain first
+  /// ([RootMaintenanceReason.beforeDestroyingJournals]). That question is asked
+  /// of a *path*, and answering it by naming the two getters again at the asking
+  /// site is how a third journal comes to be covered nowhere: it is enumerated
+  /// here, beside the two definitions, and nowhere else.
+  List<DirectoryPath> get charaDetailTransactionJournalDirs => [
+    charaDetailArchiveTransactionDir,
+    charaDetailWriteTransactionDir,
+  ];
 
   DirectoryPath get charaDetailMetadataDir => charaDetailDir / "metadata";
 
@@ -190,18 +332,29 @@ class PathInfo {
   String toString() => 'PathInfo{documentDir: $documentDir, supportDir: $supportDir, dataRoot: $dataRoot}';
 }
 
-/// Resolves the app's directory layout and prepares the record store.
+/// Resolves the app's directory layout, and nothing else.
 ///
-/// Declares [retryUnlessStoreOutage] because it can now fail with a store
-/// outage: nearly everything watches this provider, so the framework's automatic
-/// ten-attempt retry would re-enter a root-lock acquisition that has already
-/// waited out its whole budget, and would keep this loader — and therefore the
-/// whole app — in `AsyncLoading` for minutes before admitting anything is wrong.
-final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (ref) async {
+/// Split out of [pathInfoLoader] so that a failure to *prepare the record store*
+/// cannot take the *layout* down with it. The two were never actually entangled
+/// — the loader built the whole [PathInfo] before calling
+/// [runPathInfoStartupMaintenance] — but the throw discarded it, so a store
+/// outage left every consumer without so much as a directory name.
+///
+/// The storage-management tab is why that distinction has to exist as code: it
+/// is the screen for repairing a store the app could not open, so it is the one
+/// screen that must still open during an outage. Everything else wants the store
+/// to have been checked and must keep watching [pathInfoLoader]; watching this
+/// one means "I only need to know where things are".
+///
+/// A provider and not a function, because the resolution must happen exactly
+/// once per app: it claims a temp session, and a second resolution would claim a
+/// second one and leave a second scratch directory behind for the startup sweep
+/// to find.
+final pathLayoutLoader = FutureProvider<PathInfo>((ref) async {
   final appName = (await ref.watch(packageInfoLoader.future)).appName;
   // Resolve the OS base directories through the platform_dirs facade: the io
-  // backend defers to path_provider, the web backend returns fixed virtual roots
-  // (design §3), so this loader stays platform-agnostic.
+  // backend defers to path_provider, the web backend returns fixed virtual roots,
+  // so this loader stays platform-agnostic.
   final documentDir = await platformDirs.documentsDir();
   final supportDir = await platformDirs.supportDir();
   // downloadsDir is null on Android/web/unsupported platforms; fall back to the
@@ -223,11 +376,69 @@ final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (
   // app knows where its own directories are, and every log line from here on can therefore name the
   // place inside the app's tree rather than being reduced to "<redacted>" (app_logger.dart).
   registerAppRoots(info.appOwnedRoots.map((e) => e.path));
-  // Native startup is a no-op. On web, archive transaction recovery and its
-  // cleanup complete before this PathInfo can reach active/archive scanners.
-  await runPathInfoStartupMaintenance(info);
   return info;
 });
+
+/// Resolves the app's directory layout and prepares the record store.
+///
+/// Declares [retryUnlessStoreOutage] because it can now fail with a store
+/// outage: nearly everything watches this provider, so the framework's automatic
+/// ten-attempt retry would re-enter a root-lock acquisition that has already
+/// waited out its whole budget, and would keep this loader — and therefore the
+/// whole app — in `AsyncLoading` for minutes before admitting anything is wrong.
+final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (ref) async {
+  final info = await ref.watch(pathLayoutLoader.future);
+  // Write transaction recovery completes on both platforms, and archive
+  // transaction recovery and its cleanup on web, before this PathInfo can reach
+  // active/archive scanners.
+  //
+  // The declaration is built here, at the one call site, because this is where
+  // a container to read the registry off exists: the boundary below is also
+  // driven by suites that have no container at all, so it takes what to
+  // announce rather than reaching for it. **It is built on both platforms**,
+  // and both have a sweep to announce: the write journal is written by shared
+  // code, so a Windows startup walks it exactly as a browser one does, and web
+  // adds the archive journal to the same pass. On the second and later calls of
+  // either leg, `runUnlocked` returns immediately once this data root has been
+  // swept, and that early return is inside the boundary, so a sweep that does
+  // nothing still claims.
+  await runPathInfoStartupMaintenance(info, declaration: startupStorageMaintenanceLongReadDeclaration(ref.base, info));
+  return info;
+});
+
+/// What [runPathInfoStartupMaintenance] announces to the long-read registry.
+///
+/// **Announced although the lock is taken outside the gate, because the two are
+/// not the same question.** `root_storage_maintenance_shared.dart` takes the root
+/// lock directly, and it has a permanent reason to (routing it through
+/// `RecordRecoveryGate` would run the sweep from inside its own
+/// `ensureRootReadyUnlocked` hook). That reason is about *how the exclusion is
+/// acquired*. The registry is not an exclusion — `long_read_registry.dart` opens
+/// by saying so — so it is a separate decision, and the sweep being a bypass is
+/// no reason for it to stay unannounced. Before this, a startup sweep of the
+/// whole store left every delete button over that store live, and pressing one
+/// queued it behind the sweep's root lock instead of withholding it.
+///
+/// **Here rather than in the web implementation**, for the reason
+/// [runPathInfoStartupMaintenance]'s own doc gives about the outage verdict: this
+/// is the boundary both platforms share, so neither leg can be given a claim the
+/// other does not have, and a maintenance step added to either is announced
+/// without being edited to know about the registry.
+///
+/// **One root and no list.** The sweep walks both transaction journals and every
+/// slot they name, promoting a slot it cannot finish into `retired/` and
+/// committing the rest into `active/` or `archive/`; the same derivation
+/// `record_scan_claim.dart` sets out applies unchanged, and its conclusion is
+/// that only the store root is a description that stays true when the store
+/// gains another directory. [PathInfo.charaDetailDir] is exactly the root the
+/// request below names.
+LongReadDeclaration startupStorageMaintenanceLongReadDeclaration(RefBase ref, PathInfo info) {
+  return LongReadDeclaration.claim(
+    registry: ref.read(longReadRegistryProvider.notifier),
+    kind: LongReadKind.recover,
+    paths: [info.charaDetailDir],
+  );
+}
 
 /// Testable startup boundary called exactly once by [pathInfoLoader].
 ///
@@ -240,10 +451,24 @@ final pathInfoLoader = FutureProvider<PathInfo>(retry: retryUnlessStoreOutage, (
 /// scan-root scopes stopped doing. Wrapping it here rather than in the web
 /// implementation keeps the verdict platform-agnostic: it is the boundary both
 /// platforms share, so a maintenance step added to either cannot escape it.
-Future<void> runPathInfoStartupMaintenance(PathInfo info, {RootStorageMaintenance? maintenance}) async {
+Future<void> runPathInfoStartupMaintenance(
+  PathInfo info, {
+  required LongReadDeclaration declaration,
+  RootStorageMaintenance? maintenance,
+}) async {
   try {
-    await (maintenance ?? platformRootStorageMaintenance).run(
-      RootStorageMaintenanceRequest(recordDataRoot: info.charaDetailDir),
+    // **Inside the `try`, and that placement is load-bearing.** Everything this
+    // function raises is converted to [RecordStoreUnavailable] below, and nearly
+    // every provider in the app is waiting on it; a claim opened outside the
+    // `try` would give the registry — and `LongReadRegistry.hold`'s `finally` —
+    // an escape route for an untranslated exception past the one place that
+    // states the outage in the app's own terms.
+    await declaration.runDeclared(
+      () => (maintenance ?? platformRootStorageMaintenance).run(
+        // The startup reason, and the only place the memo below it is allowed to
+        // matter: this runs to make the store fit to open, and destroys nothing.
+        RootStorageMaintenanceRequest(recordDataRoot: info.charaDetailDir, reason: RootMaintenanceReason.readyToUse),
+      ),
     );
   } catch (error, stackTrace) {
     logger.e('Startup maintenance could not open the record store at all.', error, stackTrace);
@@ -251,8 +476,62 @@ Future<void> runPathInfoStartupMaintenance(PathInfo info, {RootStorageMaintenanc
   }
 }
 
+/// The app's directory layout as soon as it is known, or null while the app is
+/// still working out where its own directories are.
+///
+/// The synchronous counterpart of [pathLayoutLoader], for a widget that has to
+/// name a directory inside `build`. [DataRootTile] and `storage_tree.dart`
+/// already reach for the loader directly for the reason stated there: what they
+/// need is *where things are*, and a store outage does not un-know that.
+///
+/// **Nullable, because "the app does not know where its directories are" is a
+/// state and not an accident.** It is the state the settings page is in for the
+/// first frames of every launch — nothing gates that page behind either loader —
+/// and the state it stays in when the layout resolution itself fails. A reader
+/// that must answer a question about a path during those frames has to be given
+/// something to answer with; the previous shape gave it `pathInfoProvider`,
+/// whose `!` made the answer an exception thrown out of `build`.
+///
+/// The long-read gates are exactly those readers. Each asks "is a long reader
+/// holding a path I am about to write?", and a claim's paths are themselves
+/// derived from this layout — nothing can be holding a path under a root the app
+/// has not resolved yet. So a null layout is passed on as a null
+/// [StorageDeleteRequest], whose documented meaning ("a row that offers no
+/// delete has nothing to withhold") is the same statement.
+final pathLayoutProvider = Provider<PathInfo?>((ref) {
+  // `unwrapPrevious`, as [DataRootTile] and `StorageTreeView` do: a refresh
+  // keeps the old value in riverpod 3, and a stale path is a path a gate would
+  // answer a live question about.
+  return ref.watch(pathLayoutLoader).unwrapPrevious().value;
+});
+
+/// The layout of a record store that has been prepared — the layout *and* the
+/// statement that startup maintenance opened the store in it.
+///
+/// Reading this is that statement, so the two states it has no answer for are
+/// contract violations rather than values, and it says which one happened. It
+/// used to be `pathInfoLoader.value!`, which reported both as
+/// `Null check operator used on a null value` from inside whichever `build`
+/// happened to be running; during a store outage that was three `RenderErrorBox`
+/// widgets in the settings page's About card, each claiming the full height it
+/// was offered.
+///
+/// A reader that can be built before the store is prepared — anything that only
+/// needs to know where a directory is — reads [pathLayoutProvider] instead, and
+/// a reader that needs to *report* the outage reads [pathInfoOutageProvider].
 final pathInfoProvider = Provider<PathInfo>((ref) {
-  return ref.watch(pathInfoLoader).value!;
+  return switch (ref.watch(pathInfoLoader)) {
+    AsyncData(:final value) => value,
+    // The store outage itself, rethrown with its own stack: it is a
+    // [RecordStoreUnavailable] the app can state in its own words, and losing it
+    // behind a `TypeError` is what left the settings page with no idea what had
+    // gone wrong.
+    AsyncError(:final error, :final stackTrace) => Error.throwWithStackTrace(error, stackTrace),
+    _ => throw StateError(
+      'pathInfoProvider was read before the record store was prepared. '
+      'Read pathLayoutProvider instead if only the directory layout is needed.',
+    ),
+  };
 });
 
 /// The store outage that refused the app's own startup, or null when there is

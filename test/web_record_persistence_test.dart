@@ -8,6 +8,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
+import 'package:umacapture/src/core/fs/record_mutation_lock_shared.dart';
+import 'package:umacapture/src/core/fs/record_recovery_gate.dart';
 import 'package:umacapture/src/core/fs/web_record_persistence.dart';
 import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
@@ -352,14 +354,16 @@ void main() {
     final slot = storageDir / 'chara_detail' / WebRecordWriteTransaction.transactionRootName / 'v1' / _slotName(id);
     // A save whose slot removal throws leaves the slot behind at `published`,
     // which is what a later publish finds and recovers as `cleanupPending`.
-    WebRecordPersistence retainingCleanup() => WebRecordPersistence(
-      transaction: WebRecordWriteTransaction(
-        deleteDirectory: (target) async {
-          if (target.path == slot.path) throw StateError('synthetic retained cleanup');
-          await target.delete(recursive: true, emptyOk: true);
-        },
-      ),
-    );
+    //
+    // Injected into the *backend* rather than into this transaction's
+    // `deleteDirectory`, because the recovery gate under `persistFiles` finishes
+    // this record's slot before the publish begins, on both platform legs. A
+    // failure only one object knows about would be cleaned up by the gate's own
+    // transaction and the state under test would never reach `publish`. A
+    // cleanup that keeps failing is also the only way the state is reachable in
+    // production, so this is the fault that belongs here.
+    fsBackend = _ThrowOnSlotDeleteBackend(originalBackend, slot.path);
+    WebRecordPersistence retainingCleanup() => WebRecordPersistence();
     final first = await retainingCleanup().persistFiles(storageDir, [
       (recordId: id, relativeSegments: ['record.json'], bytes: _recordJson(id)),
       (recordId: id, relativeSegments: ['new.bin'], bytes: Uint8List.fromList([1])),
@@ -403,13 +407,60 @@ void main() {
     // the exception the bare `catch (_)` used to swallow whole.
     fsBackend = _ThrowOnSlotProbeBackend(originalBackend, _slotName('boom'));
 
-    final result = await WebRecordPersistence().persistFiles(storageDir, [
-      (recordId: 'boom', relativeSegments: ['record.json'], bytes: _recordJson('boom')),
-    ]);
+    // A gate that only locks. The platform gate probes the same slot one step
+    // earlier -- its `ensureReady` hook runs the very same recovery, on desktop
+    // as well as on web since `record_recovery_gate_io.dart` installs it -- so
+    // this backend would throw out of the gate and the probe under test would
+    // never be reached. What the throw does once it is *inside* `publish` is a
+    // property of `publish`, and this is where it is asserted.
+    final result =
+        await WebRecordPersistence(
+          recoveryGate: RecordRecoveryGate(mutationLock: RecordMutationLock(InProcessNamedLocks().run)),
+        ).persistFiles(storageDir, [
+          (recordId: 'boom', relativeSegments: ['record.json'], bytes: _recordJson('boom')),
+        ]);
 
     expect(result.statuses['boom'], WebRecordPersistenceStatus.failed);
     expect(result.committedIds, isEmpty);
     expect(result.failures['boom'], isA<StateError>());
+  });
+
+  test('a gate exception for one record fails that record and still stores the rest', () async {
+    // The gate's per-record hook is a per-record statement, so its failure is a
+    // per-record outcome. On web it throws by design when a committed archive
+    // cleanup keeps failing (`record_recovery_gate_web.dart` passes
+    // `failOnError: true`), and on desktop when the slot probe hits an FS error.
+    // While that throw left the batch's action unrun, one such record made a zip
+    // carrying it store *nothing*: `RecordZipService.import` has no try/catch,
+    // so the exception went out past the result its refusals are derived from,
+    // and the healthy records in the same archive were never even attempted.
+    final persistence = WebRecordPersistence(
+      recoveryGate: RecordRecoveryGate(
+        mutationLock: RecordMutationLock(InProcessNamedLocks().run),
+        ensureReady: (_, id) async {
+          if (id == 'boom') throw StateError('synthetic gate failure');
+        },
+      ),
+    );
+
+    final WebRecordPersistenceResult result;
+    try {
+      result = await persistence.persistFiles(storageDir, [
+        (recordId: 'boom', relativeSegments: ['record.json'], bytes: _recordJson('boom')),
+        (recordId: 'fine', relativeSegments: ['record.json'], bytes: _recordJson('fine')),
+      ]);
+    } catch (error) {
+      fail(
+        "one record's gate exception stopped the whole import: nothing was stored and no per-record "
+        'failure was reported ($error)',
+      );
+    }
+
+    expect(result.statuses, {'boom': WebRecordPersistenceStatus.failed, 'fine': WebRecordPersistenceStatus.completed});
+    expect(result.committedIds, {'fine'});
+    expect(result.failures['boom'], isA<StateError>());
+    expect(await (storageDir / 'chara_detail' / 'active' / 'fine').filePath('record.json').exists(), isTrue);
+    expect(await (storageDir / 'chara_detail' / 'active' / 'boom').exists(), isFalse);
   });
 
   test('write failure releases the lock and leaves the active record unchanged', () async {
@@ -464,6 +515,23 @@ String _slotName(String id) => base64Url.encode(utf8.encode('publish-active-reco
 
 /// Fails the very first filesystem probe `WebRecordWriteTransaction.publish`
 /// makes for one record's slot, which sits outside its own error handling.
+/// Refuses to remove one slot directory, for as long as it exists.
+///
+/// The persistent form of "a cleanup that will not complete": every transaction
+/// object that touches this store hits it, including the one the recovery gate
+/// builds for itself.
+final class _ThrowOnSlotDeleteBackend extends WebLikeFsBackend {
+  _ThrowOnSlotDeleteBackend(super.inner, this.slotPath);
+
+  final String slotPath;
+
+  @override
+  Future<void> delete(String path, {bool recursive = false}) {
+    if (path == slotPath) throw StateError('synthetic retained cleanup');
+    return super.delete(path, recursive: recursive);
+  }
+}
+
 final class _ThrowOnSlotProbeBackend extends WebLikeFsBackend {
   _ThrowOnSlotProbeBackend(super.inner, this.slotName);
 

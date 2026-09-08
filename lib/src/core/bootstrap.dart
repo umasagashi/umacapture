@@ -94,7 +94,7 @@ Future<String?> readDataRootOverride() async {
   dataRootDegraded = false;
   configuredDataRoot = null;
   // Web has no relocatable data root: OPFS is the storage root, and there is no
-  // OS-managed support directory to hold the bootstrap file (design §3). Skip
+  // OS-managed support directory to hold the bootstrap file. Skip
   // the whole override concept so the path_provider call never runs on web.
   if (kIsWeb) {
     resolvedDataRoot = null;

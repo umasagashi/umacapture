@@ -28,16 +28,14 @@ const tr_columns = "pages.chara_detail.columns";
 final moduleInfoLoaders = FutureProvider((ref) async {
   return Future.wait([ref.watch(moduleVersionLoader.future)]).then((_) {
     return Future.wait([
-      ref.watch(labelMapLoader.future),
-      ref.watch(_skillInfoLoader.future),
-      ref.watch(_skillTagLoader.future),
-      ref.watch(factorInfoLoader.future),
-      ref.watch(_factorTagLoader.future),
-      ref.watch(charaRankBorderLoader.future),
-      ref.watch(_charaCardInfoLoader.future),
-      ref.watch(raceTitleInfoLoader.future),
-      ref.watch(_charaDetailRecordRatingStorageDataLoader.future),
-      ref.watch(_charaDetailRecordMemoStorageDataLoader.future),
+      // Spread from [moduleFileLoaders] rather than listed here, so that list —
+      // which the storage tab's invalidate table also reads — has a production
+      // consumer and cannot fall behind the set of module files the app loads.
+      ...moduleFileLoaders.map((loader) => ref.watch(loader.future)),
+      // Not module files: these two read the user's own rating and memo stores,
+      // and are awaited here only because the column specs below need them.
+      ref.watch(charaDetailRecordRatingStorageDataLoader.future),
+      ref.watch(charaDetailRecordMemoStorageDataLoader.future),
     ]).then((_) {
       return Future.wait([ref.watch(currentColumnSpecsLoaderProvider.future)]);
     });
@@ -167,6 +165,32 @@ final raceTitleInfoProvider = Provider<List<RaceTitleInfo>>((ref) {
   return ref.watch(raceTitleInfoLoader).value!;
 });
 
+/// Every loader whose value was read out of a file in `modulesDir`.
+///
+/// **One list with two consumers, so it cannot go stale.** [moduleInfoLoaders]
+/// awaits exactly these at startup, and the storage tab invalidates exactly these
+/// after deleting something under `modules/` (the modules row of its table, in
+/// `storage_delete_invalidation.dart`). A loader added to the boot batch is
+/// therefore added to the invalidation table by the same edit; a second,
+/// hand-kept list beside the delete path would instead be silently short by one,
+/// and the symptom — one recognition table still showing data from a module set
+/// the user just deleted — is not one anybody would trace back to a missing list
+/// entry.
+///
+/// [moduleVersionLoader] is deliberately not a member: it gates the batch below
+/// rather than joining it, because the files here are described by the version it
+/// resolves.
+final moduleFileLoaders = <FutureProvider<Object?>>[
+  labelMapLoader,
+  _skillInfoLoader,
+  _skillTagLoader,
+  factorInfoLoader,
+  _factorTagLoader,
+  charaRankBorderLoader,
+  _charaCardInfoLoader,
+  raceTitleInfoLoader,
+];
+
 // Resolves a grade tag (e.g. "grade_g1") to the sids of every race title that
 // carries it. Memoized per grade and recomputed when [raceTitleInfoProvider]
 // changes, so a grade-driven column automatically follows game-data updates.
@@ -226,10 +250,39 @@ class StorageLoadFailure implements Exception {
 /// The resulting `AsyncError` reports nothing by itself: no `ProviderObserver` is
 /// registered, so an undecodable file would otherwise reach neither the log nor a
 /// crash report - while every later change to that storage is refused.
-Future<T> _readStorageFile<T>(FilePath path, String description, T Function(String json) decode) async {
+///
+/// **A file that is not there is not a failure, and [whenAbsent] is that answer.**
+/// The caller's `exists()` check answers the ordinary "nothing rated yet" case, but
+/// it cannot answer the racing one: the storage tab drops the owning controller
+/// *before* it deletes the file (`runStorageDeleteSerialized`), so the rebuild that
+/// invalidate starts can pass the check and then find the file gone by the time it
+/// reads. Reporting that as a load failure sends the user a crash report for an
+/// ordinary delete - and leaves the controller stuck on an `AsyncError`, which
+/// [StorageLoadFailure] then refuses every later edit against.
+///
+/// **Only absence is silenced, and it is decided by asking the filesystem rather
+/// than by classifying the exception.** A read can fail on either platform with a
+/// type neither this layer nor `FsBackend` names (`PathNotFoundException` on io, a
+/// `NotFoundError` `DOMException` on OPFS), so matching on the error would have to
+/// enumerate both and would answer a third one wrongly. Re-probing `exists()`
+/// states the thing that actually decides the answer: the file is gone, so empty
+/// is what it holds. Everything else - a truncated or hand-edited JSON, a decode
+/// that throws, an I/O error on a file that is still there - still goes to the log
+/// and to Sentry exactly as before, because silencing those would show the user
+/// "no ratings" for data that is still on disk.
+Future<T> _readStorageFile<T>(
+  FilePath path,
+  String description,
+  T Function(String json) decode, {
+  required T Function() whenAbsent,
+}) async {
   try {
     return decode(await path.readAsString());
   } catch (exception, stackTrace) {
+    if (!await path.exists()) {
+      logger.d("Skipped $description: path=${path.path} was removed while it was being read");
+      return whenAbsent();
+    }
     logger.e("Failed to load $description: path=${path.path}", exception, stackTrace);
     captureException(exception, stackTrace);
     rethrow;
@@ -314,7 +367,12 @@ class CharaDetailRecordRatingController extends AsyncNotifier<RatingData> {
     // the ratings file from OPFS; on desktop it is a fast local-disk read.
     path = ref.watch(pathInfoProvider).charaDetailRatingDir.filePath("$key.json");
     return (await path.exists())
-        ? await _readStorageFile(path, "rating storage $key", RatingDataMapper.fromJson)
+        ? await _readStorageFile(
+            path,
+            "rating storage $key",
+            RatingDataMapper.fromJson,
+            whenAbsent: () => RatingData.empty,
+          )
         : RatingData.empty;
   }
 
@@ -396,7 +454,7 @@ Future<List<RatingStorageData>> _loadRatings(DirectoryPath directoryPath) async 
   return result;
 }
 
-final _charaDetailRecordRatingStorageDataLoader = FutureProvider<List<RatingStorageData>>((ref) {
+final charaDetailRecordRatingStorageDataLoader = FutureProvider<List<RatingStorageData>>((ref) {
   final path = ref.watch(pathInfoProvider).charaDetailRatingDir;
   return _loadRatings(path);
 });
@@ -410,7 +468,7 @@ abstract class _StorageDataNotifier<T> extends Notifier<List<T>> {
 
 class CharaDetailRecordRatingStorageDataNotifier extends _StorageDataNotifier<RatingStorageData> {
   @override
-  List<RatingStorageData> build() => ref.watch(_charaDetailRecordRatingStorageDataLoader).value!;
+  List<RatingStorageData> build() => ref.watch(charaDetailRecordRatingStorageDataLoader).value!;
 }
 
 final charaDetailRecordRatingStorageDataProvider =
@@ -469,7 +527,7 @@ class CharaDetailRecordMemoController extends AsyncNotifier<MemoData> {
     // the memo file from OPFS; on desktop it is a fast local-disk read.
     path = ref.watch(pathInfoProvider).charaDetailMemoDir.filePath("$key.json");
     return (await path.exists())
-        ? await _readStorageFile(path, "memo storage $key", MemoDataMapper.fromJson)
+        ? await _readStorageFile(path, "memo storage $key", MemoDataMapper.fromJson, whenAbsent: () => MemoData.empty)
         : MemoData.empty;
   }
 
@@ -561,14 +619,14 @@ Future<List<MemoStorageData>> _loadMemos(DirectoryPath directoryPath) async {
   return result;
 }
 
-final _charaDetailRecordMemoStorageDataLoader = FutureProvider<List<MemoStorageData>>((ref) {
+final charaDetailRecordMemoStorageDataLoader = FutureProvider<List<MemoStorageData>>((ref) {
   final path = ref.watch(pathInfoProvider).charaDetailMemoDir;
   return _loadMemos(path);
 });
 
 class CharaDetailRecordMemoStorageDataNotifier extends _StorageDataNotifier<MemoStorageData> {
   @override
-  List<MemoStorageData> build() => ref.watch(_charaDetailRecordMemoStorageDataLoader).value!;
+  List<MemoStorageData> build() => ref.watch(charaDetailRecordMemoStorageDataLoader).value!;
 }
 
 final charaDetailRecordMemoStorageDataProvider =

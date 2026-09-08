@@ -4,7 +4,9 @@ import 'package:uuid/uuid.dart';
 
 import '/src/core/fs/fs_backend.dart';
 import '/src/core/fs/record_id_safety.dart';
+import '/src/core/fs/record_recovery_reason.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/providers.dart' show charaDetailArchiveTransactionDirOf;
 import '/src/core/utils.dart';
 
 /// Durable state of a copy/publish/delete directory move.
@@ -25,10 +27,12 @@ enum RecordTransactionState { copying, staged, publishing, published, sourceDele
 /// broken — torn manifest, unreadable manifest, a manifest of another version,
 /// staging that no longer matched its source. Every one of them existed so that
 /// something downstream could decide whether it was allowed to **delete** the
-/// slot. Nothing deletes any more: a slot this version cannot resume has its
-/// staging carried into `quarantine/` (or, when it is not ours, into
-/// `retired/`) and is removed, whatever the reason was. With the deletion gone
-/// the taxonomy answers a question nobody asks.
+/// slot. Nothing deletes any more: a slot of ours this version cannot resume has
+/// its staging carried into `quarantine/` and is removed, and a slot no writer
+/// of ours minted is carried into `quarantine/` whole — whatever the reason was.
+/// No slot of this journal reaches `retired/` at all; the only thing this root
+/// retires is a stray *file* sitting beside the slots, which is no slot of
+/// anyone's. With the deletion gone the taxonomy answers a question nobody asks.
 enum RecordTransactionResult {
   completed,
   cleanupPending,
@@ -84,10 +88,28 @@ final class RecordDirectoryTransactionSpec {
 }
 
 final class RecordTransactionRecovery {
-  const RecordTransactionRecovery(this.spec, this.result);
+  const RecordTransactionRecovery(this.spec, this.result, {required this.slot, required this.reason});
 
   final RecordDirectoryTransactionSpec? spec;
   final RecordTransactionResult result;
+
+  /// The entry in the transaction root this recovery was about, or null when no
+  /// entry was reached.
+  ///
+  /// Required of every construction site rather than defaulted, and for the same
+  /// reason [reason] is: the store-wide sweep's answer is read by a delete that
+  /// has to leave a slot it could not empty alone, and a site that omitted the
+  /// path would silently hand that delete a slot it cannot name — which it
+  /// resolves by deleting it.
+  final PathEntity? slot;
+
+  /// What recovery could not do with this slot, or null when it finished.
+  /// [result] alone is a status, and the user is owed a sentence.
+  ///
+  /// A value and not the words: the log wants the developer's clause and the
+  /// delete result panel wants a sentence in the user's language. See
+  /// [RecordRecoveryIncompleteReason].
+  final RecordRecoveryIncompleteReason? reason;
 }
 
 /// Recoverable directory move for OPFS-like filesystems without atomic rename.
@@ -111,25 +133,23 @@ final class RecordDirectoryTransaction {
   /// The one move this state machine performs, and the prefix of every slot
   /// name it owns.
   ///
-  /// It was an enum with a second member, `quarantine`, until quarantining
-  /// moved to [DirectoryPath.moveAsyncSafe]: quarantine copies a record aside
-  /// and deletes nothing that is not duplicated, so no crash window of it can
-  /// lose bytes and there was nothing for a transaction to protect. Archiving
-  /// is the opposite — it deletes the source once the destination verifies —
-  /// so the commit this machine spans is real, and this constant is what is
-  /// left of the distinction.
-  static const _operation = 'archive';
-
-  /// Slot key prefixes this application has written but this version no longer
-  /// performs.
+  /// Quarantining is the neighbouring move that is deliberately *not* one of
+  /// these: it copies a record aside and deletes nothing that is not
+  /// duplicated, so no crash window of it can lose bytes and there is nothing
+  /// for a transaction to protect — it runs through
+  /// [DirectoryPath.moveAsyncSafe]. Archiving is the opposite, deleting the
+  /// source once the destination verifies, so the commit this machine spans is
+  /// real.
   ///
-  /// Not "another writer's": a `quarantine:` slot is *ours*, left by a version
-  /// that ran the quarantine move through this state machine. Classifying it as
-  /// foreign would leave it in the transaction root forever — nothing derives
-  /// that name any more, so no sweep and no repair would ever reach it again,
-  /// and on OPFS it would hold a full staged copy of a record's images out of
-  /// the user's sight. It is retired instead; see [_retireLegacySlot].
-  static const _retiredOperations = {'quarantine'};
+  /// **One prefix, and only ever one.** No commit of this application has
+  /// written a slot under any other operation name, so a name in the
+  /// transaction root that decodes to a different one was not minted here at
+  /// all. That is what lets [_ownedRecordIdOf] answer *is this ours* with a
+  /// single round trip through [_transactionDirFor], with no second list of
+  /// spellings to keep in step with it — and it is why there is no third
+  /// disposition between "ours" and "another writer's": a slot naming a move
+  /// this application has never performed is, by that name alone, foreign.
+  static const _operation = 'archive';
   static const _formatVersion = 1;
 
   Future<RecordTransactionResult> execute(
@@ -302,6 +322,25 @@ final class RecordDirectoryTransaction {
               if (!await sameDirectoryTree(spec.source, payload)) {
                 return RecordTransactionResult.incomplete;
               }
+              // **This removes the source even where a Windows read-only
+              // attribute refuses an ordinary delete.** Measured:
+              // `Directory.delete(recursive: true)` takes a read-only file with
+              // no exception. Overriding the flag is a decision the app took,
+              // not a licence this site alone claims: the storage view's
+              // per-entry delete retries an entry refused with
+              // `ERROR_ACCESS_DENIED` through that same recursive call
+              // (`_deletedByClearingReadOnly`, `core/storage/storage_delete.dart`),
+              // so a read-only file is removed there too rather than reported as
+              // a survivor. The agreement reaches a read-only *file*, which is
+              // as far as the VM's recursive delete goes — measured here as
+              // well: a nested read-only *directory* refuses this call with the
+              // same errno 5, and the storage view, whose retry is gated on
+              // `isFile`, keeps it as a survivor. So neither path removes one.
+              // Deleting entry by entry here would only make the move able to
+              // fail halfway, and `RecordTransactionResult` has no word for
+              // "published, but the original stayed". The publish above still
+              // does not carry the flag to the destination, for the reasons
+              // written at `_copyTreeWithoutOverwrite`.
               await spec.source.delete(recursive: true);
               await _checkpoint(RecordTransactionCheckpoint.sourceDeleted);
               if (await spec.source.exists()) return RecordTransactionResult.incomplete;
@@ -371,13 +410,21 @@ final class RecordDirectoryTransaction {
   /// Recovers every valid manifest under [dataRoot], leaving the transaction
   /// root holding only slots this version can still carry.
   ///
-  /// A slot of ours that names no transition this version can take has its
-  /// staging moved into `quarantine/` and is removed. Anything else under the
-  /// root — a slot whose name no writer of ours produced, a slot whose manifest
-  /// points outside this data root, a stray file — is carried into `retired/`.
+  /// A slot of ours that names no transition this version can take — including
+  /// one whose manifest points outside this data root — has its `payload/` moved
+  /// into `quarantine/` and is removed. A slot whose name **no writer of ours
+  /// produced** is carried into `quarantine/` whole and unopened
+  /// ([quarantineForeignSlot]); a name that decodes to an operation this
+  /// application has never written is one of those, because [_operation] is the
+  /// only prefix any commit of it has ever produced. What is left — a stray
+  /// file, which is no slot of anyone's — is carried into `retired/`.
+  ///
   /// The split is by whose data it is, not by how broken it is: `quarantine/`
   /// is counted and shown to the user as records the app could not read, and
-  /// none of these is a record.
+  /// nothing this build can vouch for is a record. Being unable to *read* an
+  /// entry is not the same as knowing it is the app's, which is why the foreign
+  /// slot is the one thing here that goes to the shelf with the stronger
+  /// warning rather than the weaker one.
   ///
   /// Leaving foreign entries where they are is what this used to do. It reads
   /// as the careful choice and is the opposite: every later sweep derives only
@@ -386,14 +433,12 @@ final class RecordDirectoryTransaction {
   /// it holds. Moving is not deleting; the bytes stay, one directory over,
   /// where a person can find them.
   ///
-  /// What is reported is not symmetric, and the asymmetry is the intended one:
-  /// a slot of *ours* from an operation this version retired drops out of the
-  /// report once it has been carried away, because there is no verdict to give
-  /// about a move this version does not perform. Everything else is reported
-  /// whether or not its move worked. So a `RecordTransactionRecovery(null,
-  /// incomplete)` reaching the caller means either "a retirement is still stuck
-  /// here" or "something that was not a slot was in this root" — never "a
-  /// retired slot was dealt with".
+  /// Everything found in the root is reported, whether or not its move worked,
+  /// so a root that had something in it is never indistinguishable from an
+  /// empty one. A `RecordTransactionRecovery(null, incomplete)` reaching the
+  /// caller therefore means "an entry this version can give no verdict about
+  /// was in this root", and the [RecordTransactionRecovery.reason] on it says
+  /// which kind.
   Future<List<RecordTransactionRecovery>> recoverAll(
     DirectoryPath dataRoot, {
     RecordTransactionProtector? protect,
@@ -409,25 +454,23 @@ final class RecordDirectoryTransaction {
         // reported and left, for the reason in this method's doc — and still
         // reported, whether or not the move worked, so a root that had
         // something in it is never indistinguishable from an empty one.
-        await _retireEntry(dataRoot, entry, entry.name, 'it is not a transaction slot');
-        recovered.add(const RecordTransactionRecovery(null, RecordTransactionResult.incomplete));
+        const reason = RecordRecoveryIncompleteReason.strayEntry;
+        await _retireEntry(dataRoot, entry.asFilePath, entry.name, reason.clause);
+        recovered.add(RecordTransactionRecovery(null, RecordTransactionResult.incomplete, slot: entry, reason: reason));
         continue;
       }
       final slot = entry.asDirectoryPath;
-      final operation = _slotOperationOf(dataRoot, slot);
-      if (operation != null && operation != _operation) {
-        // Ours, but from an operation this version retired. Dealt with here and
-        // dropped from the report rather than classified: there is no verdict
-        // about a move this version does not perform, and a slot that has been
-        // moved out of the root is not something the caller has to act on. A
-        // retirement that fails falls through and is classified as usual, so
-        // the slot stays visible until it succeeds.
-        if (await _retireLegacySlot(dataRoot, slot, operation)) continue;
-      }
       final manifestFile = slot.filePath(_manifestName);
       final manifest = await _readManifest(manifestFile);
       if (manifest == null) {
-        recovered.add(RecordTransactionRecovery(null, await _setUnresumableSlotAside(dataRoot, slot, manifestFile)));
+        recovered.add(
+          RecordTransactionRecovery(
+            null,
+            await _setUnresumableSlotAside(dataRoot, slot, manifestFile),
+            slot: slot,
+            reason: RecordRecoveryIncompleteReason.unreadableManifest,
+          ),
+        );
         continue;
       }
       final spec = manifest.toSpec();
@@ -435,14 +478,75 @@ final class RecordDirectoryTransaction {
         // A manifest that parses but names paths this version will not act on.
         // Its slot name decides where it goes, which is the same question
         // [_setUnresumableSlotAside] asks and needs no look at the manifest.
-        recovered.add(RecordTransactionRecovery(null, await _setUnresumableSlotAside(dataRoot, slot, manifestFile)));
+        recovered.add(
+          RecordTransactionRecovery(
+            null,
+            await _setUnresumableSlotAside(dataRoot, slot, manifestFile),
+            slot: slot,
+            reason: RecordRecoveryIncompleteReason.unresumableManifest,
+          ),
+        );
         continue;
       }
       Future<RecordTransactionResult> action() => execute(spec, beforeCommittedCleanup: beforeCommittedCleanup);
       final result = protect == null ? await action() : await protect(spec, action);
-      recovered.add(RecordTransactionRecovery(spec, result));
+      recovered.add(
+        RecordTransactionRecovery(
+          spec,
+          result,
+          slot: slot,
+          reason: result.isCommitted ? null : RecordRecoveryIncompleteReason.archiveMoveIncomplete,
+        ),
+      );
     }
     return recovered;
+  }
+
+  /// Carries every slot of this journal **another version minted** into
+  /// `quarantine/`, and resumes nothing.
+  ///
+  /// For the leg that does not write this journal at all — desktop, whose
+  /// archive move is an atomic native rename that stages no manifest
+  /// (`root_storage_maintenance_io.dart` states the divergence). Replaying a
+  /// manifest is what that leg has no business doing: it starts no transaction
+  /// of this kind, so there is no protocol of its own to finish. But *whose* a
+  /// slot is is answered by the name alone ([_ownedRecordIdOf]), and carrying
+  /// one out needs neither a manifest to read nor the atomic rename the
+  /// divergence is about — so this half runs wherever the journal can be found,
+  /// and the half that needs what the platform lacks is the only half that does
+  /// not.
+  ///
+  /// **Leaving them instead is what "this leg does not write that journal"
+  /// used to be taken to license, and the two are not the same claim.** Not
+  /// writing it says nothing about who else has; the data root is the user's to
+  /// point at (`data_root.json`), so a folder another build left is an ordinary
+  /// input. A slot standing there when 「アプリの残骸」 is emptied goes with the
+  /// journal at one confirmation, on that group's stated basis that nothing on
+  /// it is the only copy of anything (`storage_group.dart`) — which is a claim
+  /// about bytes that a name this build cannot decode does not support.
+  ///
+  /// A slot whose name *does* round-trip through this build's own derivation is
+  /// left where it is: what disposes of one is the recovery this leg does not
+  /// run. A stray file is likewise left — it is no slot of anyone's, and
+  /// [recoverAll] puts it on the shelf the same delete empties, so moving it
+  /// would change nothing.
+  ///
+  /// Reports what it carried, whether or not the move worked, so a slot still
+  /// standing reaches the caller that has to refuse a delete over it — the same
+  /// contract [recoverAll] answers with.
+  Future<List<RecordTransactionRecovery>> quarantineForeignSlots(DirectoryPath dataRoot) async {
+    final root = _transactionRoot(dataRoot);
+    if (!await root.exists()) return const [];
+    final carried = <RecordTransactionRecovery>[];
+    await for (final entry in root.list(recursive: false, followLinks: false)) {
+      if (await entry.isFile()) continue;
+      final slot = entry.asDirectoryPath;
+      if (_ownedRecordIdOf(dataRoot, slot) != null) continue;
+      const reason = RecordRecoveryIncompleteReason.foreignArchiveSlotName;
+      await quarantineForeignSlot(dataRoot, slot, reason.clause);
+      carried.add(RecordTransactionRecovery(null, RecordTransactionResult.incomplete, slot: slot, reason: reason));
+    }
+    return carried;
   }
 
   /// Recovers the deterministic archive slot for [recordId].
@@ -453,7 +557,7 @@ final class RecordDirectoryTransaction {
   /// Still a list, and still the caller's job to fold: it mirrors what that
   /// sweep returns for this record. A slot an older version wrote under a name
   /// this one does not derive is not reachable from here at all; [recoverAll]
-  /// lists the directory and carries it into `retired/`.
+  /// lists the directory and carries it into `quarantine/`.
   Future<List<RecordTransactionRecovery>> recoverRecord(
     DirectoryPath dataRoot,
     String recordId, {
@@ -462,7 +566,14 @@ final class RecordDirectoryTransaction {
     if (!isSafeRecordId(recordId)) {
       // No slot name is derivable from an id this version would not write, so
       // there is nothing here to carry and nothing was committed.
-      return const [RecordTransactionRecovery(null, RecordTransactionResult.incomplete)];
+      return const [
+        RecordTransactionRecovery(
+          null,
+          RecordTransactionResult.incomplete,
+          slot: null,
+          reason: RecordRecoveryIncompleteReason.unmintableSlotName,
+        ),
+      ];
     }
     final recovery = await _recoverSlot(dataRoot, recordId, beforeCommittedCleanup: beforeCommittedCleanup);
     return recovery == null ? const [] : [recovery];
@@ -481,16 +592,32 @@ final class RecordDirectoryTransaction {
     if (manifest == null) {
       // The slot was built from [_transactionDirFor] with an id the caller
       // already validated, so it is provably ours; no name check is needed.
-      return RecordTransactionRecovery(null, await _setUnresumableSlotAside(dataRoot, slot, manifestFile));
+      return RecordTransactionRecovery(
+        null,
+        await _setUnresumableSlotAside(dataRoot, slot, manifestFile),
+        slot: slot,
+        reason: RecordRecoveryIncompleteReason.unreadableManifest,
+      );
     }
     final spec = manifest.toSpec();
     if (!_isRecoverableSpec(dataRoot, slot, spec) || spec.recordId != recordId) {
       // Built from [_transactionDirFor], so the slot is provably ours whatever
       // its manifest claims: set aside, not left for a sweep that derives the
       // same name and reaches the same verdict for ever.
-      return RecordTransactionRecovery(null, await _setUnresumableSlotAside(dataRoot, slot, manifestFile));
+      return RecordTransactionRecovery(
+        null,
+        await _setUnresumableSlotAside(dataRoot, slot, manifestFile),
+        slot: slot,
+        reason: RecordRecoveryIncompleteReason.unresumableManifest,
+      );
     }
-    return RecordTransactionRecovery(spec, await execute(spec, beforeCommittedCleanup: beforeCommittedCleanup));
+    final result = await execute(spec, beforeCommittedCleanup: beforeCommittedCleanup);
+    return RecordTransactionRecovery(
+      spec,
+      result,
+      slot: slot,
+      reason: result.isCommitted ? null : RecordRecoveryIncompleteReason.archiveMoveIncomplete,
+    );
   }
 
   /// Clears a slot that names no transaction this version can resume.
@@ -502,12 +629,20 @@ final class RecordDirectoryTransaction {
   /// about ownership — and that decides a *destination*, not an amount:
   ///
   /// * ours (the name round-trips through [_transactionDirFor]) — the staging
-  ///   is a copy of the user's record, so it goes to `quarantine/`;
-  /// * not ours — whatever it holds, it is not a record of the user's, so the
-  ///   whole entry goes to `retired/` and is not counted at them as one.
+  ///   is a copy of the user's record, so its `payload/` goes to `quarantine/`;
+  /// * not ours — the name decodes to nothing any writer of ours derives, so it
+  ///   says who minted the slot and nothing whatever about what is inside. The
+  ///   whole entry goes to `quarantine/`, by [quarantineForeignSlot] and for the
+  ///   reason stated there: another version's interrupted transaction can hold
+  ///   the only copy of a record it saved for the user, and this build cannot
+  ///   read its manifest to tell.
   ///
   /// Neither needs the slot to be looked into: the name answers it, and the
   /// answer is about whose bytes they are rather than about how broken they are.
+  /// A name that decodes to an operation other than [_operation] falls on the
+  /// *foreign* side, because no commit of this application has written one —
+  /// so that name is evidence about the writer and none at all about the
+  /// contents, and nothing may be claimed about them.
   ///
   /// Reports [RecordTransactionResult.incomplete] either way, including when the
   /// move out fails. Whether a manifest was there at all used to be reported
@@ -520,7 +655,12 @@ final class RecordDirectoryTransaction {
   ) async {
     final recordId = _ownedRecordIdOf(dataRoot, slot);
     if (recordId == null) {
-      await _retireEntry(dataRoot, slot, slot.name, 'its name is not one this version writes');
+      // The name is the only thing about this slot the build has read, and it
+      // did not come out of our own derivation. Every way of failing that test
+      // -- undecodable bytes, no separator, an operation nothing here writes,
+      // an id no scan of ours would accept -- says the same thing about the
+      // writer and nothing at all about the contents.
+      await quarantineForeignSlot(dataRoot, slot, RecordRecoveryIncompleteReason.foreignArchiveSlotName.clause);
       return RecordTransactionResult.incomplete;
     }
     final reason = await manifestFile.exists() ? 'its manifest could not be resumed' : 'it holds no manifest';
@@ -618,8 +758,14 @@ final class RecordDirectoryTransaction {
     }
   }
 
+  /// The journal root, from the one place that names it.
+  ///
+  /// `charaDetailArchiveTransactionDirOf` rather than a literal here, because the
+  /// storage view has to be able to enumerate this directory: a name spelled only
+  /// inside this class is a directory the app writes and no list of the app's
+  /// directories contains.
   static DirectoryPath _transactionRoot(DirectoryPath dataRoot) {
-    return dataRoot / '.umacapture-transactions' / 'v1';
+    return charaDetailArchiveTransactionDirOf(dataRoot) / 'v1';
   }
 
   static DirectoryPath _transactionDir(RecordDirectoryTransactionSpec spec) {
@@ -661,21 +807,6 @@ final class RecordDirectoryTransaction {
   /// rather than how much of it may be destroyed — see
   /// [_setUnresumableSlotAside].
   static String? _ownedRecordIdOf(DirectoryPath dataRoot, DirectoryPath slot) {
-    if (_slotOperationOf(dataRoot, slot) != _operation) return null;
-    final key = utf8.decode(base64Url.decode(base64Url.normalize(slot.name)));
-    return key.substring(key.indexOf(':') + 1);
-  }
-
-  /// The operation a slot name encodes, or `null` if the name is not one this
-  /// application writes or has written.
-  ///
-  /// The membership test is "some writer of ours produced this name", which is
-  /// deliberately wider than [_operation]: a name is claimed when re-encoding
-  /// its own decoded key reproduces it, so [_retiredOperations] are recognised
-  /// by exactly the derivation that wrote them. Anything else is another
-  /// writer's, which is the one distinction the scans still draw and the one
-  /// that sends it to `retired/` instead of `quarantine/`.
-  static String? _slotOperationOf(DirectoryPath dataRoot, DirectoryPath slot) {
     final String key;
     try {
       key = utf8.decode(base64Url.decode(base64Url.normalize(slot.name)));
@@ -683,53 +814,21 @@ final class RecordDirectoryTransaction {
       return null;
     }
     final separator = key.indexOf(':');
-    if (separator < 0) return null;
-    final operation = key.substring(0, separator);
-    if (operation != _operation && !_retiredOperations.contains(operation)) return null;
+    if (separator < 0 || key.substring(0, separator) != _operation) return null;
     final recordId = key.substring(separator + 1);
     if (!isSafeRecordId(recordId)) return null;
-    final encoded = base64Url.encode(utf8.encode('$operation:$recordId')).replaceAll('=', '');
-    return _samePath(_transactionRoot(dataRoot) / encoded, slot) ? operation : null;
+    return _samePath(_transactionDirFor(dataRoot, recordId), slot) ? recordId : null;
   }
 
-  /// Moves a slot left by a retired operation out of the transaction root and
-  /// into `retired/`, returning whether it is no longer there.
+  /// Carries one stray file out of the transaction root and into `retired/`
+  /// under [name], returning whether it is no longer where it was.
   ///
-  /// **Not `quarantine/`,** which is the obvious-looking destination and the
-  /// wrong one. That folder's children are counted, unexamined, into a banner
-  /// that calls them records the app could not read, so putting a slot there
-  /// makes the count say something false and gives the user a number no rescan
-  /// can bring down: a slot's `payload/` is a copy of a record that still
-  /// stands somewhere else, so there is nothing in it to recover and no action
-  /// the count could prompt. `retired/` is a sibling, equally visible, for what
-  /// the app left behind rather than what the user made.
-  ///
-  /// This version cannot finish the move the slot describes, and must not: the
-  /// operation it names is not one it performs. The three other dispositions
-  /// are all worse. Resuming it would run a move nobody asked for; deleting it
-  /// would destroy a staged copy without the user's say-so, which is the whole
-  /// thing quarantine exists to avoid; and reporting it as foreign — which is
-  /// what this code did before — strands it, because every later sweep derives
-  /// only the names this version writes and so never looks at it again.
-  ///
-  /// Retiring loses nothing. The slot's `payload/` is a copy made *from* the
-  /// record, and the record itself is still at the move's source or at its
-  /// destination, so the bytes carried away are at worst a duplicate. No
-  /// classification is needed to know that, which is why none is done here: the
-  /// slot is moved whatever state its manifest claims.
-  static Future<bool> _retireLegacySlot(DirectoryPath dataRoot, DirectoryPath slot, String operation) async {
-    final key = utf8.decode(base64Url.decode(base64Url.normalize(slot.name)));
-    final recordId = key.substring(key.indexOf(':') + 1);
-    return _retireEntry(dataRoot, slot, '${recordId}_${operation}_slot', 'this version does not perform that move');
-  }
-
-  /// Carries one entry out of the transaction root and into `retired/` under
-  /// [name], returning whether it is no longer where it was.
-  ///
-  /// Takes a [PathEntity] because the root holds both kinds and both have to
-  /// leave: a directory is copied and removed ([DirectoryPath.moveAsyncSafe],
-  /// since OPFS has no directory rename), a file is renamed, which is all the
-  /// web backend supports for one.
+  /// A [FilePath] rather than a [PathEntity], because a file is the only thing
+  /// this root retires: every *directory* in it is a slot, and a slot is either
+  /// ours — in which case its `payload/` is dealt with by [_abandonSlot] — or
+  /// another writer's, which goes to `quarantine/` whole. Only an entry that is
+  /// no slot of anyone's is left for this. (The shared `retireEntryInto` still
+  /// takes either kind; the write journal retires directories through it.)
   ///
   /// A collision is resolved by an `_<n>` suffix rather than by overwriting.
   /// The rule is `quarantineDirectoryInto`'s, and it holds for the same reason:
@@ -740,7 +839,7 @@ final class RecordDirectoryTransaction {
   /// A move that fails leaves the entry exactly where it was, for the next
   /// sweep. Nothing retries it in this pass, and nothing has to: the entry is
   /// still whole.
-  static Future<bool> _retireEntry(DirectoryPath dataRoot, PathEntity entry, String name, String reason) async {
+  static Future<bool> _retireEntry(DirectoryPath dataRoot, FilePath entry, String name, String reason) async {
     final destination = await retireEntryInto(dataRoot / 'retired', entry, name);
     if (destination == null) {
       logger.e('Failed to retire ${entry.name}; it stays in the transaction root.');
@@ -778,6 +877,17 @@ Future<List<RecordTransactionRecovery>> recoverRecordDirectoryTransactionsUnlock
   return RecordDirectoryTransaction().recoverRecord(dataRoot, recordId, beforeCommittedCleanup: beforeCommittedCleanup);
 }
 
+/// Carries the archive journal's foreign slots out while the caller holds the
+/// whole-store mutation lock, resuming nothing.
+///
+/// The counterpart of the archive journal's `recoverArchiveTransactionsUnlocked`
+/// for a leg that writes no archive manifest: the same lock and the same
+/// journal, and only the disposition that does not depend on this build having
+/// written what it finds. See [RecordDirectoryTransaction.quarantineForeignSlots].
+Future<List<RecordTransactionRecovery>> quarantineForeignArchiveSlotsUnlocked(DirectoryPath dataRoot) {
+  return RecordDirectoryTransaction().quarantineForeignSlots(dataRoot);
+}
+
 /// Moves [directory] into [quarantineRoot] under [name], resolving a collision
 /// with an already-quarantined entry by an `_<n>` suffix. Returns the
 /// destination, or `null` when the move failed.
@@ -798,17 +908,60 @@ Future<DirectoryPath?> quarantineDirectoryInto(
   return directory.moveAsyncSafe(destination);
 }
 
+/// Carries a transaction slot no writer of ours minted out of a journal root and
+/// into `quarantine/`, whole, reporting whether it is no longer there.
+///
+/// Both journals reach this, and neither looks into what it carries. The slot's
+/// name is the whole of the evidence and it establishes only that another
+/// version wrote it, so the disposition has to hold for the worst thing that
+/// name allows: an interrupted transaction of theirs whose staging is the only
+/// copy of a record the user asked to have saved. That is what `quarantine/` is
+/// counted and shown as — the user's own data the app could not read — and its
+/// delete says so to the user before it runs.
+///
+/// **Not [retireEntryInto],** whose delete is offered at the weakest friction on
+/// the stated basis that nothing on that shelf is the only copy of anything.
+/// That basis is a claim about the bytes, and a name this build cannot decode
+/// does not support it. The two journals' *own* leftovers are a different case
+/// and do go there: this build knows what it staged and what it duplicates.
+///
+/// Named for the slot rather than for a record id, because the id is exactly
+/// what the name failed to yield. A collision takes the `_<n>` suffix every
+/// other route onto this shelf takes ([quarantineDirectoryInto]).
+///
+/// A move that fails leaves the slot exactly where it was, for the next sweep,
+/// as a failed retirement does.
+Future<bool> quarantineForeignSlot(DirectoryPath dataRoot, DirectoryPath slot, String reason) async {
+  final destination = await quarantineDirectoryInto(dataRoot / 'quarantine', slot, slot.name);
+  if (destination == null) {
+    logger.e('Failed to quarantine ${slot.name}; it stays in the transaction root it was found in.');
+    return false;
+  }
+  logger.w('Quarantined ${slot.name} into ${destination.name} because $reason.');
+  return true;
+}
+
 /// Moves [entry] into [retiredRoot] under [name], resolving a collision with an
 /// already-retired entry by an `_<n>` suffix. Returns the destination, or `null`
 /// when the move failed and the entry is still where it was.
 ///
-/// `retired/` is where the app puts what *it* left behind — a slot named by a
-/// writer that is not this version, a stray file under a transaction root —
-/// as opposed to `quarantine/`, which is for the user's own records. The split
-/// is by whose data it is, not by how broken it is, so nothing here has to look
-/// inside what it carries: every caller already knows which of the two it holds.
-/// It matters because `quarantine/` is counted and shown to the user as records
-/// the app could not read, and none of this is a record.
+/// `retired/` is where the app puts what *it* left behind — a stray file under a
+/// transaction root, the staging of a write that never reached `ready` while the
+/// record it copies still stands — as opposed to `quarantine/`, which is for the
+/// user's own data. A *slot* is no longer one of the examples: the archive
+/// journal's slots are dealt with by `quarantineForeignSlot` and `_abandonSlot`,
+/// and the write journal reaches this only for its own staging. The split is by whose data it is, not by how broken it is,
+/// so nothing here has to look inside what it carries: every caller already
+/// knows which of the two it holds. It matters because `quarantine/` is counted
+/// and shown to the user as records the app could not read, and none of this is
+/// a record.
+///
+/// **Being unable to read an entry is not the same as knowing it is the app's.**
+/// A slot of *either* journal whose name this build cannot decode goes to
+/// `quarantine/` for exactly that reason ([quarantineForeignSlot]): the name
+/// settles who minted it and nothing else, and what it stages may be the only
+/// copy of a record that version saved. A caller that cannot name what it is
+/// carrying does not belong here.
 ///
 /// Takes a [PathEntity] because a transaction root holds both kinds and both
 /// have to be able to leave: a directory is copied and removed (OPFS has no
@@ -935,6 +1088,23 @@ Future<bool> _copyTreeWithoutOverwrite(DirectoryPath source, DirectoryPath desti
         // Recheck after creating parents. Cooperating writers cannot race this
         // point because the transaction is inside the record lock.
         if (await target.exists()) return false;
+        // **A Windows read-only attribute on the source does not survive this
+        // line**, because the destination is a file this call creates rather
+        // than a copy of an existing one. Measured, both ways round: stage one
+        // of the same move (`spec.source.copyTreeInto(payload)`, i.e.
+        // `File.copy`) reproduces the flag, and this read-then-write does not.
+        // Losing it is still a side effect of how the bytes are written and not
+        // a decision this file made, but it no longer contradicts the delete: a
+        // read-only file is cleared and removed by the storage view as well
+        // (`_deletedByClearingReadOnly`, `core/storage/storage_delete.dart`), so
+        // this is not a way round a refusal the app elsewhere respects. What it
+        // does mean is that the archived copy is writable where the original was
+        // not, and restoring the attribute at the destination is not a line that
+        // can simply be added: `dart:io` reads a mode through `FileStat` and has
+        // nothing that sets one, and `lib/` imports neither `dart:ffi` nor
+        // `package:win32` — both sit in `pubspec.lock` as transitive
+        // resolutions only, so reaching them means promoting one to a direct,
+        // Windows-only dependency of this package.
         await entity.asFilePath.readAsBytes().then(target.asFilePath.writeAsBytes);
       } else {
         await target.asDirectoryPath.create(recursive: true);
@@ -972,12 +1142,18 @@ final class _Manifest {
   /// rather than ignored.
   ///
   /// The field outlived the enum it used to hold, and dropping it would not be
-  /// free — a `quarantine` manifest an older version left behind names a source
-  /// under `active/` and a destination under `quarantine/`, and an archive spec
-  /// built from it would be rejected only by [RecordDirectoryTransaction._isRecoverableSpec]'s
-  /// path rules. That is the same answer for the wrong reason: it would hold
-  /// only as long as the two layouts stay distinguishable by path. Refusing the
-  /// word keeps the manifest's own account of what it is the thing that decides.
+  /// free: a manifest naming a move this build does not make would then be
+  /// rejected only by [RecordDirectoryTransaction._isRecoverableSpec]'s path
+  /// rules, if its source and destination happened to fall outside them. That is
+  /// the same answer for the wrong reason — it would hold only as long as
+  /// another writer's layout stays distinguishable from this one's by path.
+  /// Refusing the word keeps the manifest's own account of what it is the thing
+  /// that decides.
+  ///
+  /// **Not for an older version of ours: there is no such version.** `git log -S`
+  /// over every ref shows [RecordDirectoryTransaction._operation] has only ever
+  /// been `archive`, so a word other than that one is evidence about a writer
+  /// outside this app and about nothing else.
   factory _Manifest.fromJson(Map<String, dynamic> json) {
     if (json['version'] != RecordDirectoryTransaction._formatVersion ||
         json['transactionId'] is! String ||

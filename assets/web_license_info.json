@@ -21,9 +21,10 @@
             "license_id": "MIT OR NCSA",
             "sub_notice_of": null,
             "components": [
+                "Emscripten runtime (JS loader glue emitted by em++) as shipped in onnxruntime-web 1.27.0 -- statically linked into web/wasm/ort/ort-wasm-simd-threaded.mjs (recorded from the build inputs, not derived from the binary)",
                 "Emscripten runtime (libc syscalls, pthread, embind) 6.0.3 -- statically linked into web/wasm/umacapture_core.wasm (recorded from the build inputs, not derived from the binary)"
             ],
-            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nEmscripten runtime (libc syscalls, pthread, embind) 6.0.3 -- statically linked into web/wasm/umacapture_core.wasm (recorded from the build inputs, not derived from the binary)\n\nLicense: MIT OR NCSA"
+            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nEmscripten runtime (JS loader glue emitted by em++) as shipped in onnxruntime-web 1.27.0 -- statically linked into web/wasm/ort/ort-wasm-simd-threaded.mjs (recorded from the build inputs, not derived from the binary)\n\nEmscripten runtime (libc syscalls, pthread, embind) 6.0.3 -- statically linked into web/wasm/umacapture_core.wasm (recorded from the build inputs, not derived from the binary)\n\nLicense: MIT OR NCSA"
         },
         {
             "package": "eventpp",
@@ -134,6 +135,16 @@
                 "onnxruntime-web 1.27.0 -- shipped as web/wasm/ort/ort.wasm.bundle.min.mjs, web/wasm/ort/ort-wasm-simd-threaded.mjs, web/wasm/ort/ort-wasm-simd-threaded.wasm (bytes hash-pinned in tool/web_deps.json)"
             ],
             "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nonnxruntime-web 1.27.0 -- shipped as web/wasm/ort/ort.wasm.bundle.min.mjs, web/wasm/ort/ort-wasm-simd-threaded.mjs, web/wasm/ort/ort-wasm-simd-threaded.wasm (bytes hash-pinned in tool/web_deps.json)\n\nLicense: MIT"
+        },
+        {
+            "package": "onnxruntime",
+            "asset": "assets/license/onnxruntime_third_party.txt",
+            "license_id": "Multiple (MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, BSL-1.0 and others; each stated in the notice text)",
+            "sub_notice_of": "onnxruntime",
+            "components": [
+                "ONNX Runtime bundled third-party components (reproduced as the publisher's notice set, not derived from this binary) as published with ONNX Runtime 1.27.0 -- statically linked into web/wasm/ort/ort-wasm-simd-threaded.wasm (recorded from the build inputs, not derived from the binary)"
+            ],
+            "notice": "Included in the umacapture web build (inventory: tool/web_deps.json).\n\nONNX Runtime bundled third-party components (reproduced as the publisher's notice set, not derived from this binary) as published with ONNX Runtime 1.27.0 -- statically linked into web/wasm/ort/ort-wasm-simd-threaded.wasm (recorded from the build inputs, not derived from the binary)\n\nLicense: Multiple (MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, BSL-1.0 and others; each stated in the notice text)\n\nDisclosed under onnxruntime because it is bundled inside it, and onnxruntime's own license text does not reproduce this notice."
         },
         {
             "package": "opencv",

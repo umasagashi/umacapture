@@ -278,6 +278,38 @@ jobs:
       - name: Format check
         run: dart format --output=none --set-exit-if-changed lib test tool
 
+      # The step above is the only gate in this workflow that the pre-commit hook
+      # also performs. Its other two -- the colour-literal rule and the pins over
+      # the gitignored web/wasm/* -- have no equivalent here or under test/, so the
+      # hook is the whole of their enforcement, and until this step existed nothing
+      # automatic ever ran the hook's own suite. That is the failure the suite was
+      # written for: a `color_pattern` that stops compiling makes grep exit 2, the
+      # gate reads it as "matched nothing", and every commit still looks clean. A
+      # gate that has switched itself off is indistinguishable from a working one
+      # unless something exercises it, and nothing did.
+      #
+      # WHAT THIS CANNOT SEE:
+      #  * Whether this repository's commits actually went through the hook.
+      #    `core.hooksPath` is opt-in per clone and `--no-verify` bypasses it, so a
+      #    new colour literal can still reach develop unchallenged. This step says
+      #    the gate answers correctly when it is run, not that it was run.
+      #  * The colour literals already in lib/. The gate scans added lines only, so
+      #    the grandfathered ones are outside its subject, and this step inherits
+      #    that scope exactly.
+      #  * Whether `dart format` would refuse an unformatted file. The suite points
+      #    $DART at a stub that always succeeds -- deliberately, since that gate is
+      #    covered by the step above and stubbing it is what lets the suite run
+      #    without an SDK. What the rename case asserts is only that the path
+      #    reached $DART at all.
+      #  * The web-pin gate, for the same reason: it is the first thing the hook
+      #    shells out to $DART for.
+      #
+      # shell: bash for the reason the JavaScript step below spells out at length --
+      # the runner's default pwsh would not fail the step on a non-zero exit.
+      - name: Pre-commit hook gates
+        shell: bash
+        run: bash tool/hooks/test_pre_commit.sh
+
       # Unit/widget only. The Windows-desktop integration_test (needs a full app build + uv)
       # is intentionally excluded. Coverage is deliberately not collected here: --coverage
       # roughly doubles the wall-clock (VM-service instrumentation) for a report that has no
@@ -468,6 +500,18 @@ jobs:
       #   where `Future.timeout`'s `onTimeout` is checked against the future's
       #   runtime type argument. Returning `null` from it threw a TypeError on every
       #   boot and left OPFS on evictable storage.
+      # * bounded_js_answer_web_test.dart -- the generic `awaitBoundedJsAnswer` the
+      #   bool wrapper above is now built on. That `onTimeout` check is per
+      #   instantiation and dart2js reifies the type argument, so the bool suite
+      #   passing says nothing about the object and number instantiations the
+      #   storage estimate uses.
+      # * origin_storage_estimate_web_test.dart --
+      #   lib/src/core/fs/origin_storage_estimate_web.dart, the app's first call to
+      #   `navigator.storage.estimate()`. Pins that an engine answers it with
+      #   numbers, that the never-settles branch gives up as "unknown", and that an
+      #   omitted dictionary member is reported absent rather than converted --
+      #   `package:web` types `usage`/`quota` as non-nullable `int` while the IDL
+      #   marks both optional.
       # * opfs_delete_failure_web_test.dart -- what a rejected OPFS call hands to
       #   a Dart `catch`. `PathEntity.delete`'s retry catches `Object`, and
       #   whether that may be narrowed to `on FileSystemException` turns on the
@@ -476,6 +520,34 @@ jobs:
       #   even a Dart `Exception`, so a narrowed clause would select none of
       #   them. It also pins the one failure a retry genuinely recovers on web --
       #   `NoModificationAllowedError`, an entry held by an open writable.
+      # * settings_box_deletion_web_test.dart -- what removing a settings box's
+      #   backing storage does while `StorageBox.ensureOpened` still holds it
+      #   open, on the platform where a box is an IndexedDB database rather than
+      #   a file. The answer decides how the storage tab may delete settings.
+      # * fs_metadata_web_test.dart -- the browser facts the web side of
+      #   `FsBackend.modified` / a metadata-carrying `FsBackend.list` rests on:
+      #   a `FileSystemFileHandle` yields size and `lastModified` off a handle
+      #   the walk already holds, and a `FileSystemDirectoryHandle` exposes no
+      #   metadata member at all, which is why the directory case throws
+      #   `UnsupportedError` instead of inventing a timestamp.
+      # * fs_ranged_read_web_test.dart -- the browser facts `WebVfs.readHead`
+      #   rests on: the `File` off a handle is a `Blob`, `slice(0, n)` settles
+      #   its length before any byte is fetched and yields exactly the first n
+      #   bytes, and an end offset past the file is clamped rather than
+      #   rejected. Without those, the web half of `FsBackend.readHead` would
+      #   have to read the file and cut -- the read the bound exists to prevent.
+      # * settings_value_render_web_test.dart -- that a settings value written to a
+      #   store comes back unchanged on the platform where a store is an IndexedDB
+      #   database rather than a file, and that SD11's rendering tiers pick the same
+      #   answer there as on Windows. The storage tab's settings group exists in that
+      #   shape precisely because web has no file to show, so the VM suites assert
+      #   its contents against a platform it never runs on.
+      # * storage_zip_export_web_test.dart -- that a folder read out of real OPFS
+      #   comes back out of the storage tab's zip assembler unchanged, and that
+      #   the browser's size limit holds the value it states after `dart2js` has
+      #   compiled it. The archive is built in the tab's own memory from typed
+      #   arrays the browser handed over, and neither of those is what the VM
+      #   suite runs even though it runs the same production functions.
       #
       # Add browser-only coverage as another suite here; a file not named on the
       # command below is not run by anything.
@@ -487,10 +559,19 @@ jobs:
       # `package:test` resolves transitively through `flutter_test`, so no
       # dev_dependency is needed.
       #
-      # No build_runner step: the closure here is record_mutation_lock{,_shared,
-      # _web}.dart and bounded_js_answer.dart plus package:web -- no generated
-      # sources -- and the committed generated outputs cover the rest. Keep it that
-      # way: a suite that reaches package:flutter cannot be compiled by `dart test`.
+      # No build_runner step: the lib/ closure of the ten suites above is
+      # record_mutation_lock{,_shared,_web}.dart, bounded_js_answer.dart,
+      # origin_storage_estimate_web.dart, settings_value_render.dart with the
+      # json_format.dart it imports, and zip_bundle.dart with
+      # zip_export_limit.dart; outside lib/ it is test/support/zip_layout_cases.dart
+      # and the packages web, hive_ce and archive. (The other four --
+      # opfs_delete_failure, fs_metadata, fs_ranged_read and settings_box_deletion
+      # -- import no lib/ source at all: they drive the browser and hive_ce
+      # directly, which is stated at the top of each of those files.) None of that
+      # is generated, and the committed generated outputs cover the rest. Keep it
+      # that way: a suite that reaches package:flutter cannot be compiled by
+      # `dart test`. When a suite is added to the command below, re-derive this
+      # list from its imports rather than assuming it changed nothing.
       #
       # Chrome comes from the windows-2022 image; package:test finds it via
       # CHROME_EXECUTABLE / CHROME_PATH, else %LOCALAPPDATA%/%PROGRAMFILES%
@@ -509,4 +590,11 @@ jobs:
           dart test --platform chrome
           test/record_mutation_lock_web_test.dart
           test/storage_persistence_web_test.dart
+          test/bounded_js_answer_web_test.dart
+          test/origin_storage_estimate_web_test.dart
           test/opfs_delete_failure_web_test.dart
+          test/settings_box_deletion_web_test.dart
+          test/fs_metadata_web_test.dart
+          test/fs_ranged_read_web_test.dart
+          test/settings_value_render_web_test.dart
+          test/storage_zip_export_web_test.dart

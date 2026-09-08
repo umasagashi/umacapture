@@ -1,10 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:umacapture/src/chara_detail/archive_executor.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/fs/record_directory_transaction.dart';
 import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
+import 'package:umacapture/src/core/fs/root_storage_maintenance.dart';
+import 'package:umacapture/src/core/fs/root_storage_maintenance_shared.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
 import 'support/web_like_fs_backend.dart';
@@ -24,7 +25,12 @@ void main() {
     if (root.existsSync()) root.deleteSync(recursive: true);
   });
 
-  test('recovered archive cleanup remains inside the public root lock', () async {
+  // The claim is about the pass production actually runs: `JournalRootStorageMaintenance`
+  // takes the root lock once and calls the unlocked recovery and the deferred
+  // image cleanup inside it. `root_storage_maintenance_test.dart` asserts that
+  // ordering against stubs; this case asserts it against a real journal slot, so
+  // the cleanup observed inside the lock is a real file deletion.
+  test('recovered archive cleanup remains inside the root lock the startup sweep takes', () async {
     const id = 'cleanup-lock';
     final source = Directory('${root.path}/active/$id')..createSync(recursive: true);
     File('${source.path}/record.json').writeAsStringSync('{"id":"$id"}');
@@ -66,10 +72,10 @@ void main() {
       }
     });
 
-    final recoveries = await recoverArchiveTransactions(DirectoryPath(root.path), mutationLock: lock);
+    await JournalRootStorageMaintenance.bothJournals(mutationLock: lock).run(
+      RootStorageMaintenanceRequest(recordDataRoot: DirectoryPath(root.path), reason: RootMaintenanceReason.readyToUse),
+    );
 
-    expect(recoveries, hasLength(1));
-    expect(recoveries.single.result, RecordTransactionResult.completed);
     expect(rootLockCalls, 1);
     expect(cleanupObservedInsideLock, isTrue);
     expect(await destination.filePath('prediction.json').exists(), isFalse);

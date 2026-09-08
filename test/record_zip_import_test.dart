@@ -8,6 +8,7 @@ import 'package:umacapture/src/chara_detail/record_zip.dart';
 import 'package:umacapture/src/core/fs/fs_backend.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
+import 'support/long_read_declarations.dart';
 import 'support/web_like_fs_backend.dart';
 
 void main() {
@@ -185,7 +186,7 @@ void main() {
     await (active / 'uuid-a').filePath('record.json').writeAsBytes(_recordJson('uuid-a'));
     await (active / 'uuid-a').filePath('trainee.jpg').writeAsBytes([9, 8, 7]);
     await (active / 'uuid-b').filePath('record.json').writeAsBytes(_recordJson('uuid-b'));
-    final bytes = await RecordZipService.export([active / 'uuid-a', active / 'uuid-b']);
+    final bytes = await RecordZipService.export([active / 'uuid-a', active / 'uuid-b'], declaration: undeclaredInTest);
     final archive = ZipDecoder().decodeBytes(bytes);
     expect(archive.files.map((entry) => entry.name).toSet(), {
       'chara_detail/active/uuid-a/record.json',

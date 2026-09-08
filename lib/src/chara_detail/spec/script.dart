@@ -1249,7 +1249,7 @@ class ScriptColumnSelector extends ConsumerStatefulWidget {
 
 class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
   late String title;
-  late final DartHighlightController _codeController;
+  late final CodeHighlightController _codeController;
 
   // The last source whose preview succeeded. Only this is committed on OK, so a
   // script that fails to compile / times out / throws is never saved (the only
@@ -1268,7 +1268,7 @@ class _ScriptColumnSelectorState extends ConsumerState<ScriptColumnSelector> {
     super.initState();
     final spec = _clonedSpecProvider.read(ref, widget.specId);
     title = spec.title;
-    _codeController = DartHighlightController(text: spec.source);
+    _codeController = CodeHighlightController(text: spec.source);
     _validatedSource = spec.source;
     _lastText = spec.source;
     // Saving is gated on a passing check: disabled until the user runs the check,

@@ -32,6 +32,7 @@ import 'package:umacapture/src/core/wasm_worker_ops.dart';
 
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
+import 'support/long_read_declarations.dart';
 
 /// Boundary ids, each with the verdict the store's contract requires.
 ///
@@ -214,22 +215,27 @@ void main() {
       expect(swept, hasLength(1));
       // What the sweep *did* is what the id decides now: an id no writer of
       // ours would produce makes the slot name not ours, and a name that is not
-      // ours is carried out to `retired/`. A safe id leaves the slot standing
-      // for the move to be retried. The single result value no longer
-      // distinguishes them -- both are `incomplete` -- so the discriminator is
-      // the disposition rather than the label.
+      // ours is carried out to `quarantine/` -- whole, because the name is all
+      // the build read of it and settles nothing about what is inside. A safe
+      // id leaves the slot standing for the move to be retried. The single
+      // result value no longer distinguishes them -- both are `incomplete` --
+      // so the discriminator is the disposition rather than the label.
       expect(swept.single.result, RecordTransactionResult.incomplete, reason: recordId);
       final stayed = slot.existsSync();
       if (stayed) slot.deleteSync(recursive: true);
-      final retired = Directory('${root.path}/chara_detail/retired');
-      if (retired.existsSync()) retired.deleteSync(recursive: true);
+      // Nothing here should reach `retired/`; asserted rather than merely
+      // cleaned up, so a slot that slipped onto the weaker shelf is a failure
+      // and not a directory that quietly accumulates.
+      expect(Directory('${root.path}/chara_detail/retired').existsSync(), isFalse, reason: recordId);
+      final quarantine = Directory('${root.path}/chara_detail/quarantine');
+      if (quarantine.existsSync()) quarantine.deleteSync(recursive: true);
       return stayed;
     }
 
     // Positive control for the harness: with a safe id the identical manifest is
     // read and acted on, and the state machine refuses on its own grounds and
-    // leaves the slot. So a retired slot below is the *id* being refused, not
-    // the manifest.
+    // leaves the slot. So a slot carried away below is the *id* being refused,
+    // not the manifest.
     expect(await sweepWithManifestNaming('a-record'), isTrue);
 
     for (final id in _cases.entries.where((e) => !e.value).map((e) => e.key)) {
@@ -247,6 +253,7 @@ void main() {
     Future<RecordScanResult> scan(List<String> loaded) {
       return loadRecordsUnder(
         activeRoot,
+        declaration: undeclaredInTest,
         mutationLock: RecordMutationLock((_, _, action) => action()),
         // A no-op gate on purpose: the refusal must be the loader's own, not a
         // side effect of whichever recovery gate happens to be injected.
@@ -319,6 +326,7 @@ void main() {
       final loaded = <String>[];
       final (:results, :unavailable) = await loadRecordsUnder(
         activeRoot,
+        declaration: undeclaredInTest,
         mutationLock: RecordMutationLock((_, _, action) => action()),
         recoverRecordUnlocked: (_, _) async {},
         snapshotDirectories: (_) async => [activeRoot / 'has space', activeRoot / 'ok-1'],
@@ -369,24 +377,26 @@ void main() {
     test('is discarded by the per-record gate too', () async {
       const id = 'C.record_2';
       final archive = ourSlot(id);
-      // The `quarantine:` key an older version wrote. The per-record gate
-      // derives names rather than listing the root, so it reaches only the one
-      // this version writes.
-      final legacy = ourSlot(id, operation: 'quarantine');
+      // A key naming an operation no commit of this app has ever written. The
+      // per-record gate derives names rather than listing the root, so it
+      // reaches only the one this version writes.
+      final alien = ourSlot(id, operation: 'quarantine');
+      final alienName = alien.path.split(RegExp(r'[\\/]')).last;
       final recovered = await RecordDirectoryTransaction().recoverRecord(dataRoot, id);
       expect(recovered.map((e) => e.result), everyElement(RecordTransactionResult.incomplete));
       expect(recovered, hasLength(1));
       expect(archive.existsSync(), isFalse);
-      expect(legacy.existsSync(), isTrue, reason: 'the gate derives one name; it is not the sweep');
+      expect(alien.existsSync(), isTrue, reason: 'the gate derives one name; it is not the sweep');
       // But the leak is closed at the layer that does list the root: the same
       // principle -- a slot nothing will ever resume must not outlive the sweep
-      // -- reaches a retired name too, and reaches it without deleting it.
+      // -- reaches that name too, and reaches it without deleting it.
       await RecordDirectoryTransaction().recoverAll(dataRoot);
-      expect(legacy.existsSync(), isFalse);
-      expect(Directory('${dataRoot.path}/retired/${id}_quarantine_slot').existsSync(), isTrue);
+      expect(alien.existsSync(), isFalse);
+      expect(Directory('${dataRoot.path}/quarantine/$alienName').existsSync(), isTrue);
+      expect(Directory('${dataRoot.path}/retired').existsSync(), isFalse);
     });
 
-    test('is carried into retired/ whole when its name is not one this version writes', () async {
+    test('is carried into quarantine/ whole when its name is not one this version writes', () async {
       // Ownership is still proven before anything happens, and it still rules
       // out the fix that deletes every manifest-less directory in the
       // transaction root — which would destroy another writer's staging, a
@@ -414,14 +424,21 @@ void main() {
       for (final entry in names.entries) {
         expect(Directory('${transactionRoot.path}/${entry.value}').existsSync(), isFalse, reason: entry.key);
         expect(
-          File('${dataRoot.path}/retired/${entry.value}/keep.bin').readAsStringSync(),
+          File('${dataRoot.path}/quarantine/${entry.value}/keep.bin').readAsStringSync(),
           entry.value,
           reason: entry.key,
         );
       }
-      // Not `quarantine/`: none of these is the user's record, and that folder's
-      // children are counted at them as records the app could not read.
-      expect(Directory('${dataRoot.path}/quarantine').existsSync(), isFalse);
+      // Not `retired/`, whose delete is offered at one confirmation on the
+      // stated basis that nothing on it is the only copy of anything. All three
+      // names fail the round trip through this app's own derivation, so all
+      // three say who minted the directory and nothing at all about what is in
+      // it -- and an interrupted transaction of another version's can hold the
+      // only copy of a record it saved for the user. `wrongOperation` is the
+      // sharpest of the three: its base64 decodes perfectly, and it is still
+      // foreign, because the operation it names is not one any commit of this
+      // app has written.
+      expect(Directory('${dataRoot.path}/retired').existsSync(), isFalse);
     });
   });
 }

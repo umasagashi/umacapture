@@ -24,6 +24,7 @@ import 'package:umacapture/src/core/platform_channel_io.dart';
 // The facade, under a prefix, for the one case that is about the conditional export itself rather
 // than about this leg: everything the app imports goes through it, so "the io leg is correct" is
 // only worth anything if the export actually selects it.
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/video_import.dart' as facade;
 import 'package:umacapture/src/core/video_import_io.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
@@ -49,6 +50,15 @@ Map<String, dynamic> _done({
   'matrixConverted': '',
   'message': '',
 };
+
+/// What these cases announce to the long-read registry: nothing, and why.
+///
+/// They drive the front end's own state machine over a method channel, with no provider
+/// container anywhere in reach; what the session holds is asserted in
+/// `video_import_long_read_claim_test.dart`, which builds a real claim instead.
+const _declaresNothing = LongReadDeclaration.none(
+  reason: 'this suite drives the import front end directly; the registry is another suite\'s subject',
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -93,7 +103,7 @@ void main() {
   /// The pending call is returned inside a record, not bare: an `async` helper that returned it
   /// directly would await it, which is the one thing this must not do.
   Future<({Future<void> running})> startAndSettle() async {
-    final running = startVideoImport(preflight: () => null);
+    final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
     await pumpEventQueue();
     return (running: running);
   }
@@ -237,7 +247,7 @@ void main() {
       // terminal slot, and the capture button would stay disabled for the life of the process.
       answer = (call) => throw PlatformException(code: 'no_runner', message: 'boom');
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       final outcome = videoImportState.value.outcome;
       expect(videoImportState.value.phase, VideoImportPhase.finished);
@@ -254,7 +264,7 @@ void main() {
       // developer reading that issue has nothing else to go on but the breadcrumb.
       answer = (call) => throw PlatformException(code: 'no_runner', message: 'CreateFile: access denied');
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       final message = videoImportState.value.outcome?.message;
       expect(message, contains('CreateFile: access denied'));
@@ -321,7 +331,7 @@ void main() {
     test('a blocker before the dialog posts nothing and says nothing', () async {
       // The button was already disabled for this; there is nothing to explain that the page is not
       // showing one line higher.
-      await startVideoImport(preflight: () => VideoImportBlocker.capturing);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => VideoImportBlocker.capturing);
 
       expect(calls, isEmpty);
       expect(videoImportState.value.phase, VideoImportPhase.idle);
@@ -331,7 +341,10 @@ void main() {
       // THE GATE THE CORE CANNOT HOLD. A regeneration batch auto-starts after a module update, which
       // is exactly the kind of thing that begins while the user is standing in the file dialog.
       var asked = 0;
-      await startVideoImport(preflight: () => asked++ == 0 ? null : VideoImportBlocker.regenerating);
+      await startVideoImport(
+        declaration: _declaresNothing,
+        preflight: () => asked++ == 0 ? null : VideoImportBlocker.regenerating,
+      );
 
       expect(asked, 2, reason: 'the gate is re-evaluated immediately before the path is posted');
       expect(calls, isEmpty, reason: 'the path reached the runner despite the gate');
@@ -343,7 +356,7 @@ void main() {
     test('a dialog the user dismissed returns to idle without a result line', () async {
       videoImportPathPicker = () async => null;
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       expect(calls, isEmpty);
       expect(videoImportState.value.phase, VideoImportPhase.idle);
@@ -366,7 +379,7 @@ void main() {
       // silent idle is indistinguishable from a button that does nothing, so it is reported.
       videoImportPathPicker = () async => throw MissingPluginException('No implementation found for pickFile');
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       expect(calls, isEmpty);
       expect(videoImportState.value.phase, VideoImportPhase.finished);

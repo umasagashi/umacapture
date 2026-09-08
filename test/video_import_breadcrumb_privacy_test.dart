@@ -86,6 +86,7 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/platform_channel_io.dart';
 import 'package:umacapture/src/core/sentry_util.dart';
 import 'package:umacapture/src/core/video_frame_grab_ops.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/video_import_io.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 
@@ -130,6 +131,15 @@ const _attachmentPath = r'C:\Users\hazuki\AppData\Local\Temp\video_frame_1.png';
 const _attachmentSecrets = <String>['hazuki', r'C:\Users', 'AppData'];
 
 typedef _Crumb = ({Level level, String message, String error});
+
+/// What these cases announce to the long-read registry: nothing, and why.
+///
+/// They drive the front end's own state machine over a method channel, with no provider
+/// container anywhere in reach; what the session holds is asserted in
+/// `video_import_long_read_claim_test.dart`, which builds a real claim instead.
+const _declaresNothing = LongReadDeclaration.none(
+  reason: 'this suite drives the import front end directly; the registry is another suite\'s subject',
+);
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -188,7 +198,10 @@ void main() {
 
     test('a refusal names the container and the gate, and neither is the file name', () async {
       var asked = 0;
-      await startVideoImport(preflight: () => asked++ == 0 ? null : VideoImportBlocker.regenerating);
+      await startVideoImport(
+        declaration: _declaresNothing,
+        preflight: () => asked++ == 0 ? null : VideoImportBlocker.regenerating,
+      );
 
       expectSaidSomethingButNotTheName();
       // The other half of the ruling, and it is what stops "delete the log line" from passing: the
@@ -208,7 +221,7 @@ void main() {
         message: 'startVideoImport failed: parse error while reading {"path":"$_path"}',
       );
 
-      await startVideoImport(preflight: () => null);
+      await startVideoImport(declaration: _declaresNothing, preflight: () => null);
 
       expectSaidSomethingButNotTheName();
       // Redacted, not dropped: the reader still learns the runner refused and why.
@@ -267,7 +280,7 @@ void main() {
     test('an import that simply worked logs nothing at all', () async {
       // Stated rather than assumed: the happy path is silent, so the cases above are the whole of
       // what this leg can publish about a clip.
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
       videoImportHandleNativeEvent(<String, dynamic>{'type': 'videoImportStarted'});
       videoImportHandleNativeEvent(<String, dynamic>{
@@ -464,7 +477,7 @@ void main() {
       // `"Failed to open: " << narrow_path`; `windows/runner/video_import_session.h` relays a throw
       // out of the import thread as `"the video import thread threw: " + e.what()` and hands it to
       // `notifyVideoImportDone` as the payload's `message`. This is that payload, verbatim in shape.
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
       videoImportHandleNativeEvent(<String, dynamic>{'type': 'videoImportStarted'});
       videoImportHandleNativeEvent(<String, dynamic>{
@@ -503,7 +516,7 @@ void main() {
       videoImportPathPicker = () async => '$_japaneseDirectory$_japaneseLeaf';
       final mangledLeaf = _asIfDumpedWithReplacement(_cp932JapaneseLeaf);
 
-      final running = startVideoImport(preflight: () => null);
+      final running = startVideoImport(declaration: _declaresNothing, preflight: () => null);
       await pumpEventQueue();
       videoImportHandleNativeEvent(<String, dynamic>{'type': 'videoImportStarted'});
       videoImportHandleNativeEvent(<String, dynamic>{

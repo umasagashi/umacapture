@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '/src/core/fs/record_recovery_gate.dart';
 import '/src/core/path_entity.dart';
+import '/src/core/storage/long_read_registry.dart';
 
 import 'archive_executor_shared.dart';
 import 'archive_executor_types.dart';
@@ -32,5 +33,12 @@ Future<List<bool>> archiveRecords(ArchiveBatchArgs args, {RecordRecoveryGate? re
     storageRoot,
     sources.map((source) => source.name),
     () => compute(archiveRecordsOnNative, args),
+    // `CharaArchiveController.archive` claims both ends of every record and the
+    // journal for the whole batch, above the platform seam that chose this leg.
+    // A second claim here would register the same work twice and, on the web
+    // leg, at the wrong granularity — see the comment on that claim.
+    declaration: const LongReadDeclaration.none(
+      reason: 'CharaArchiveController.archive holds the claim for the whole batch, above this platform leg',
+    ),
   );
 }

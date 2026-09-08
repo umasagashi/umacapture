@@ -401,6 +401,18 @@ class RefBase {
 
   T watch<T>(ProviderListenable<T> provider) => _readOnly ? _ref.read(provider) : _ref.watch(provider);
 
+  /// Discards [provider]'s state so the next read rebuilds it.
+  ///
+  /// Here for the same reason [read] is: a [RefBase] stands in for either a `Ref`
+  /// or a `WidgetRef`, and both declare this. Passing a *family* rather than one
+  /// of its instances invalidates every instance, which is what a delete that
+  /// removed a whole directory of keyed files needs — the keys it held are no
+  /// longer readable from anywhere.
+  ///
+  /// Not gated on [_readOnly]: that flag is about not registering a dependency
+  /// while reading, and this neither reads nor subscribes.
+  void invalidate(ProviderOrFamily provider) => _ref.invalidate(provider);
+
   /// A view of this ref whose [watch] behaves like [read], so code that watches
   /// providers through it registers no dependencies and will not be rebuilt.
   RefBase get readOnly => RefBase._(_ref, true);

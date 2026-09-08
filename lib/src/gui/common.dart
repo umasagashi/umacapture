@@ -362,6 +362,35 @@ class _IntStepperFieldState extends State<IntStepperField> {
   }
 }
 
+/// Greys [child] out and withdraws it from the pointer and the keyboard while [disabled], with
+/// [tooltip] saying why.
+///
+/// **A PRESS ON A WITHDRAWN CHILD IS NOT SWALLOWED — IT IS HANDED TO WHATEVER IS BEHIND.**
+/// [IgnorePointer] takes the subtree out of hit testing; it does not take the press out of the
+/// gesture arena. So a press aimed at the greyed control lands on the first ancestor that wants one,
+/// and the same is true of a control that is merely handed a null callback (it registers no
+/// recognizer, so the ancestor's wins the arena uncontested). On a screen where nothing behind the
+/// control is tappable that is invisible; put this inside a row, tile or card that carries its own
+/// `onTap` and the user presses a control announced as unavailable and gets that row's action
+/// instead. Measured twice on this codebase: the storage tree's withheld ⋮ collapsed the group it
+/// sat on, and the addon task list's greyed ▶ opened the task's edit dialog.
+///
+/// [AbsorbPointer] does not cure it either, and not only because it stops hover along with the
+/// press (which silences the tooltip explaining the refusal — the one thing the user needs most at
+/// that moment). It does not even stop the fall-through. `RenderAbsorbPointer.hitTest` returns
+/// `size.contains(position)` while absorbing and adds **nothing** to the result: it reports a hit to
+/// its parent without putting itself or its child on the hit-test path. The path is then completed
+/// as the recursion unwinds — every ancestor adds itself — so the row's recognizer is still in the
+/// arena, and the absorber has registered none of its own to contest it. Measured: swapping
+/// [TapSink] for an `AbsorbPointer` in the addon task row reopened the edit dialog *and* killed the
+/// tooltip.
+///
+/// Only a tappable **ancestor** can steal the press this way. A tappable sibling painted *below* in
+/// a [Stack] cannot, because the stack stops probing lower siblings once an upper one hit-tests true.
+///
+/// **So this widget answers the press itself**, through a [TapSink] it builds around its own
+/// subtree — see [wrappedChild]. Callers wrap nothing extra; [TapSink] stays public for the controls
+/// that go dead through a null callback alone, without passing through here.
 class Disabled extends StatelessWidget {
   final bool disabled;
   final String? tooltip;
@@ -387,11 +416,22 @@ class Disabled extends StatelessWidget {
     // widget in and out would change the element tree's shape and discard the child's [State] every
     // time the control changed availability (the capture toggle's in-flight marker, an
     // [AnimatedSwitcher]'s running transition).
-    return ExcludeFocus(
-      excluding: disabled,
-      child: IgnorePointer(
-        ignoring: disabled,
-        child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
+    //
+    // WITHDRAWN FROM THE ANCESTOR AS WELL. The [IgnorePointer] above takes the child out of hit
+    // testing but leaves the press to fall to whatever ancestor wants one, which is the defect this
+    // class's doc opens with. The [TapSink] collects it here rather than at each call site, for the
+    // reason the paragraph above gives about [ExcludeFocus]: a caller that forgets is the failure
+    // mode this primitive exists to prevent, and it has now been measured twice (the storage tree's
+    // ⋮, the addon task list's ▶). `active:` is toggled and the widget itself is unconditional, for
+    // the same [State]-preserving reason.
+    return TapSink(
+      active: disabled,
+      child: ExcludeFocus(
+        excluding: disabled,
+        child: IgnorePointer(
+          ignoring: disabled,
+          child: Opacity(opacity: disabled ? 0.5 : 1, child: child),
+        ),
       ),
     );
   }
@@ -403,6 +443,72 @@ class Disabled extends StatelessWidget {
     } else {
       return wrappedChild();
     }
+  }
+}
+
+/// Terminates a tap at [child] instead of letting it reach a tappable ancestor.
+///
+/// Put this around a control that lives inside a row, tile or card with its own `onTap` and that can
+/// become unavailable. An unavailable control — one handed a null callback, or wrapped in
+/// [Disabled], or both — registers no tap recognizer of its own, so the ancestor's recognizer is
+/// alone in the gesture arena and the press it wins is one the user aimed somewhere else. That is
+/// not "nothing happened"; it is a different action, chosen by geometry the user could not see.
+///
+/// **An available control keeps its press.** Gestures are dispatched from the hit-test target
+/// outwards, so the child's own recognizer enters the arena before this one, and the arena's sweep
+/// hands the win to its first member. This only ever collects a press the child itself declined.
+///
+/// **Deliberately narrow, and it is the arena — not hit testing — that makes it so.** Nothing here
+/// is taken off the hit-test path: an opaque box adds itself when the child misses and every
+/// ancestor still adds itself as the recursion unwinds, so the ancestor's recogniser does enter the
+/// arena. This one merely enters it first, being nearer the target, and `GestureArenaManager.sweep`
+/// hands the win to the first member and rejects every other. That settles only a gesture that waits
+/// for the sweep, which is to say a tap. A recogniser that declares victory on its own resolves the
+/// arena before the sweep runs and takes the pointer over this widget's head — a long press when its
+/// deadline expires, a drag when the pointer passes the touch slop — and a secondary tap is never
+/// contested at all, since the detector below claims the primary button only. **An ancestor's long
+/// press, drag or right-click is therefore not stopped here.** Refuse those where they are declared,
+/// as the storage tree's row menu does at its own `onLongPressStart` and `onPointerDown`; the addon
+/// task row needs nothing because its tile carries only `onTap`.
+///
+/// **It does not absorb, on purpose.** An [AbsorbPointer] around the child would not stop the
+/// fall-through anyway (see [Disabled]'s doc: it registers no recogniser of its own), but it would
+/// keep the child off the hit-test path, and with it the hover that raises the disabled control's
+/// tooltip — the only thing carrying *why* the control is refusing. The workaround the framework
+/// settled on, `GestureDetector(onTap: () {}, child: AbsorbPointer(...))` in flutter/flutter#10593,
+/// is exactly this widget plus that inner half; the inner half is dropped because the greying here
+/// is already done by a null callback or by [Disabled], and paying for it with the tooltip would
+/// leave the user a dead button and no reason for it. The issue is closed — as no longer
+/// reproducible in its own reduction, not as fixed in general — so nothing is pending upstream.
+///
+/// Semantics are excluded on purpose. This is a hole-filler, not a control: announcing it would lay
+/// a tappable node over a button that has just announced itself as disabled, so a screen reader and
+/// the screen would disagree about what is pressable.
+///
+/// [active] exists for [Disabled], which builds one of these around every child it greys and has to
+/// stop collecting the moment the child is available again. Toggled rather than inserted and
+/// removed, so the subtree's [State] survives the change. While inactive this is a plain proxy:
+/// `deferToChild` puts hit testing back in the child's hands and the null callback registers no
+/// recognizer, so a press reaches exactly what it reached before.
+class TapSink extends StatelessWidget {
+  const TapSink({super.key, this.active = true, required this.child});
+
+  /// Whether presses are collected here. Defaults to true: a call site that wraps a control
+  /// explicitly is wrapping one it has already decided can go dead.
+  final bool active;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      // Opaque while collecting, because the point is to answer a press the child refused: with
+      // `deferToChild` the refusal would propagate and this widget would never be hit at all.
+      behavior: active ? HitTestBehavior.opaque : HitTestBehavior.deferToChild,
+      excludeFromSemantics: true,
+      onTap: active ? () {} : null,
+      child: child,
+    );
   }
 }
 
@@ -669,19 +775,24 @@ class _WheelZoomViewerState extends State<WheelZoomViewer> {
 }
 
 class CardDialog extends ConsumerStatefulWidget {
-  /// Shows [builder] as the single dialog and returns its token.
+  /// Shows [builder] as the dialog and returns its token.
   ///
   /// Pass the token to [dismiss] when the close happens later than the dialog's
   /// own lifetime — see [DialogController.dismiss].
+  ///
+  /// [over] opens on top of the dialog already up instead of replacing it, for
+  /// a dialog opened *from* another one; [DialogController] says which view
+  /// needs that and why nothing else does.
   static int show(
     RefBase ref,
     WidgetBuilder builder, {
     bool barrierDismissible = true,
     AlignmentGeometry alignment = Alignment.center,
+    bool over = false,
   }) {
     return ref
         .read(dialogBuilderProvider.notifier)
-        .show(builder, barrierDismissible: barrierDismissible, alignment: alignment);
+        .show(builder, barrierDismissible: barrierDismissible, alignment: alignment, over: over);
   }
 
   /// Closes the current dialog, or only the dialog [token] identifies.
@@ -701,6 +812,17 @@ class CardDialog extends ConsumerStatefulWidget {
   /// Ignored when [dialogTitle] is null: that case renders no title bar at all,
   /// so there is no close button to label.
   final String? closeButtonTooltip;
+
+  /// Whether the title bar's × accepts a press.
+  ///
+  /// True for every dialog the user may leave whenever they like, which is all
+  /// of them until one starts work it cannot take back. Set it false for as long
+  /// as that work runs: the × is the one exit a dialog cannot guard from the
+  /// outside, since it is drawn by this widget and not by the content, and a
+  /// press on it unmounts the dialog just as the barrier does. Greyed rather than
+  /// hidden, so the button does not move about and the tooltip still names it.
+  final bool closeButtonEnabled;
+
   final Widget content;
   final Widget? bottom;
   final bool usePageView;
@@ -715,6 +837,7 @@ class CardDialog extends ConsumerStatefulWidget {
     super.key,
     this.dialogTitle,
     this.closeButtonTooltip,
+    this.closeButtonEnabled = true,
     required this.content,
     this.bottom,
     this.usePageView = true,
@@ -760,11 +883,26 @@ class _CardDialogState extends ConsumerState<CardDialog> {
                   : Tooltip(
                       message: widget.closeButtonTooltip,
                       child: IconButton(
-                        icon: Icon(Symbols.close_rounded, color: theme.colorScheme.onTertiary),
+                        // The tile is `tertiary`, so the button's `onSurface` default would not read
+                        // against it and the colour has to be named here. Named through the button's
+                        // style rather than on the `Icon`, because an `Icon.color` is one colour for
+                        // every state: it overrode the disabled resolution, and a shut × went on
+                        // painting at full strength while the Cancel button beside it greyed out.
+                        // Handing the pair to `styleFrom` lets the framework pick per state, so a
+                        // state this code never enumerated still gets a colour that suits the tile.
+                        // 38% is the same strength the framework greys that Cancel button to
+                        // (`onSurface(0.38)`); only the role differs, because the surfaces do.
+                        style: IconButton.styleFrom(
+                          foregroundColor: theme.colorScheme.onTertiary,
+                          disabledForegroundColor: theme.colorScheme.onTertiary.withValues(alpha: 0.38),
+                        ),
+                        icon: const Icon(Symbols.close_rounded),
                         splashRadius: 24,
-                        onPressed: () {
-                          CardDialog.dismiss(ref.base);
-                        },
+                        onPressed: !widget.closeButtonEnabled
+                            ? null
+                            : () {
+                                CardDialog.dismiss(ref.base);
+                              },
                       ),
                     ),
             ),
@@ -1098,24 +1236,54 @@ class FeedbackLayer extends StatelessWidget {
 /// never migrates at all) leaves the session untouched. The scrim cannot tell
 /// those outcomes apart, so it stays off for the whole flow and each step offers
 /// its own close button or withholds it.
-typedef DialogEntry = ({WidgetBuilder builder, bool barrierDismissible, AlignmentGeometry alignment});
+typedef DialogEntry = ({int token, WidgetBuilder builder, bool barrierDismissible, AlignmentGeometry alignment});
 
-/// Holds the one dialog the [DialogLayer] renders.
+/// Holds the dialogs the [DialogLayer] renders, innermost last.
 ///
-/// Only a single dialog exists at a time, so an unconditional [dismiss] closes
-/// whatever is on screen — including a dialog someone else opened in the
-/// meantime. That matters for callers that dismiss from a delayed callback: the
-/// web capture tutorial banner, for instance, closes when `startCapture()`
-/// settles, which can be long after the user moved on to another dialog.
-/// [show] therefore hands out a token identifying that particular dialog, and
-/// `dismiss(token)` closes it only while it is still the one on screen.
+/// **One at a time is still the rule, and [show] still enforces it.** A dialog
+/// opened the ordinary way *replaces* whatever was up, so for every caller but
+/// one this is the single slot it always was: the state exposed by
+/// [dialogBuilderProvider] is the dialog on top, `null` when none is open, and
+/// an unconditional [dismiss] closes what the user is looking at — including a
+/// dialog someone else opened in the meantime. That matters for callers that
+/// dismiss from a delayed callback: the web capture tutorial banner, for
+/// instance, closes when `startCapture()` settles, which can be long after the
+/// user moved on. [show] therefore hands out a token identifying that
+/// particular dialog, and `dismiss(token)` closes it only while it is still
+/// open.
+///
+/// **`over: true` is the exception, and it exists because one view is itself a
+/// dialog.** The storage-management view is entered from the settings page as a
+/// dialog, and it is a file browser: it opens previews, delete confirmations and
+/// delete result panels of its own. Replacing would unmount the tree the user
+/// opened them from, so looking at two files — or deleting two — meant
+/// re-entering the view and re-walking the whole store each time. Those dialogs
+/// therefore stack on top of it instead, and closing one uncovers the tree
+/// exactly as it was. Nothing else stacks: `over` defaults to false, so every
+/// other call site keeps the replacement it was written against.
+///
+/// The stack is the controller's own list rather than the exposed state so that
+/// "is a dialog open" and "which one is the user in" stay the single value they
+/// have always been. Every mutation changes the top — [dismiss] with a token
+/// drops that entry *and everything above it* — so a listener watching the state
+/// sees every change, and the token in each entry keeps two otherwise identical
+/// records distinct.
 class DialogController extends Notifier<DialogEntry?> {
   /// Monotonic id of the most recently shown dialog. Never reset, so a token
   /// from a closed dialog can never match a later one.
   int _token = 0;
 
+  /// The open dialogs, bottom first. [state] is the last of these, or null.
+  final List<DialogEntry> _entries = [];
+
   @override
-  DialogEntry? build() => null;
+  DialogEntry? build() {
+    _entries.clear();
+    return null;
+  }
+
+  /// The open dialogs, bottom first, for [DialogLayer] to render.
+  List<DialogEntry> get entries => List.unmodifiable(_entries);
 
   /// Token of the dialog currently on screen (0 before the first [show]).
   ///
@@ -1126,23 +1294,75 @@ class DialogController extends Notifier<DialogEntry?> {
   /// caller off `WidgetRef`, which throws once the dialog is unmounted.
   int get currentToken => _token;
 
-  /// Replaces the current dialog with [builder] and returns its token.
-  int show(WidgetBuilder builder, {bool barrierDismissible = true, AlignmentGeometry alignment = Alignment.center}) {
+  /// Shows [builder] and returns its token.
+  ///
+  /// Replaces every open dialog unless [over] is set, in which case [builder]
+  /// opens on top of them and closing it uncovers the one underneath.
+  int show(
+    WidgetBuilder builder, {
+    bool barrierDismissible = true,
+    AlignmentGeometry alignment = Alignment.center,
+    bool over = false,
+  }) {
     _token += 1;
-    state = (builder: builder, barrierDismissible: barrierDismissible, alignment: alignment);
+    if (!over) {
+      _entries.clear();
+    }
+    _entries.add((token: _token, builder: builder, barrierDismissible: barrierDismissible, alignment: alignment));
+    state = _entries.last;
     return _token;
   }
 
-  /// Closes the current dialog.
+  /// Freezes or releases the barrier of the dialog [token] identifies.
   ///
-  /// With a [token] from [show], closes it only if that dialog is still the
-  /// current one; otherwise does nothing. Without a token, closes whatever is
-  /// currently shown.
-  void dismiss([int? token]) {
-    if (token != null && token != _token) {
+  /// **For a dialog that becomes un-leavable partway through its own life.** A
+  /// confirmation is dismissible while it is asking the question and must not be
+  /// once it has been answered and the work is running: the operation goes on
+  /// either way, so a scrim tap there does not cancel anything — it only takes
+  /// away the surface that has to report what happened. [show]'s flag cannot say
+  /// that, because it is read once, before the dialog knows.
+  ///
+  /// Does nothing for a token that is no longer open, so a caller releasing the
+  /// barrier in a `finally` need not first ask whether it is still there.
+  ///
+  /// Only the entry on top can be interacted with — [DialogLayer] stacks the
+  /// barriers in the same order, so a lower one is covered by every barrier above
+  /// it — which is why re-publishing [state] is enough to make this visible: a
+  /// change to the top entry changes [state], and a change to a covered one
+  /// cannot be reached until whatever covers it has gone.
+  void setBarrierDismissible(int token, {required bool barrierDismissible}) {
+    final index = _entries.indexWhere((entry) => entry.token == token);
+    if (index < 0) {
       return;
     }
-    state = null;
+    final entry = _entries[index];
+    _entries[index] = (
+      token: entry.token,
+      builder: entry.builder,
+      barrierDismissible: barrierDismissible,
+      alignment: entry.alignment,
+    );
+    state = _entries.last;
+  }
+
+  /// Closes the dialog on top, or the one [token] identifies.
+  ///
+  /// With a [token] from [show], closes that dialog only if it is still open —
+  /// together with anything opened over it, which was opened against a dialog
+  /// that is going away. Without a token, closes whatever is on top.
+  void dismiss([int? token]) {
+    if (token == null) {
+      if (_entries.isNotEmpty) {
+        _entries.removeLast();
+      }
+    } else {
+      final index = _entries.indexWhere((entry) => entry.token == token);
+      if (index < 0) {
+        return;
+      }
+      _entries.removeRange(index, _entries.length);
+    }
+    state = _entries.isEmpty ? null : _entries.last;
   }
 }
 
@@ -1160,7 +1380,10 @@ class DialogLayer extends ConsumerStatefulWidget {
 class _DialogLayerState extends ConsumerState<DialogLayer> {
   @override
   Widget build(BuildContext context) {
+    // Watched for the top, read for the rest: every mutation changes the top
+    // (see [DialogController]), so this rebuilds whenever the stack does.
     final entry = ref.watch(dialogBuilderProvider);
+    final entries = ref.read(dialogBuilderProvider.notifier).entries;
     final theme = Theme.of(context);
     return Stack(
       alignment: Alignment.center,
@@ -1186,16 +1409,30 @@ class _DialogLayerState extends ConsumerState<DialogLayer> {
         // change the element tree's shape and discard the [State] of the entire
         // page every time a dialog opened or closed.
         ExcludeFocus(excluding: entry != null, child: widget.child),
-        if (entry != null) ...[
+        // Bottom dialog first, each behind its own barrier. A dialog opened
+        // `over` another is withdrawn from neither device by accident: its
+        // barrier covers the dialog below just as the first one covers the app,
+        // and everything but the top is excluded from focus traversal, so Tab
+        // cannot walk down into a tree the user cannot see or click.
+        //
+        // ONLY THE BOTTOM BARRIER IS TINTED. The scrim says "the app behind is
+        // withdrawn", and stacking a second one would say it twice — the view
+        // under a preview would darken a step further for no reason the user
+        // could name. The upper barriers are transparent and still swallow every
+        // tap, which is the half that has to hold on all of them.
+        for (final (index, item) in entries.indexed) ...[
           GestureDetector(
             // A non-dismissible barrier still swallows the tap (empty callback)
-            // so it never falls through to the app behind the dialog.
-            onTap: entry.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss() : () {},
-            child: Container(color: theme.colorScheme.scrim.withValues(alpha: 0.5)),
+            // so it never falls through to whatever is behind the dialog.
+            onTap: item.barrierDismissible ? () => ref.read(dialogBuilderProvider.notifier).dismiss(item.token) : () {},
+            child: Container(color: index == 0 ? theme.colorScheme.scrim.withValues(alpha: 0.5) : Colors.transparent),
           ),
-          Padding(
-            padding: const EdgeInsets.all(32),
-            child: Align(alignment: entry.alignment, child: entry.builder(context)),
+          ExcludeFocus(
+            excluding: item.token != entry?.token,
+            child: Padding(
+              padding: const EdgeInsets.all(32),
+              child: Align(alignment: item.alignment, child: item.builder(context)),
+            ),
           ),
         ],
       ],

@@ -158,6 +158,91 @@ Future<({ProviderContainer container, _FakeRecordStorage storage})> _pump(Widget
   return (container: container, storage: storage);
 }
 
+/// Opens the bulk confirmation without answering it.
+///
+/// The part of [_pump] that precedes the long press, so the positive control can
+/// tap the same barrier coordinate with no delete under way.
+Future<ProviderContainer> _pumpUnconfirmed(WidgetTester tester) async {
+  final storage = _FakeRecordStorage();
+  final container = ProviderContainer(overrides: [charaDetailRecordStorageLoaderProvider.overrideWith(() => storage)]);
+  addTearDown(container.dispose);
+  container.read(selectionModeProvider.notifier).set(SelectionPurpose.delete);
+  container.read(selectedRecordIdsProvider.notifier).set({'a', 'b'});
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        home: DialogLayer(child: const Scaffold(body: _ShowButton())),
+      ),
+    ),
+  );
+  await tester.tap(find.text('show delete dialog'));
+  await tester.pump();
+  expect(find.byType(BulkDeleteRecordDialog), findsOneWidget);
+  return container;
+}
+
+/// Opens the single-record confirmation and answers it, leaving the delete held.
+Future<({ProviderContainer container, _FakeRecordStorage storage})> _pumpSingle(WidgetTester tester) async {
+  final storage = _FakeRecordStorage();
+  final temp = DirectoryPath(Directory.systemTemp.path);
+  final container = ProviderContainer(
+    overrides: [
+      charaDetailRecordStorageLoaderProvider.overrideWith(() => storage),
+      pathInfoProvider.overrideWithValue(
+        PathInfo(documentDir: temp, supportDir: temp, executableDir: temp, downloadDir: temp),
+      ),
+    ],
+  );
+  addTearDown(container.dispose);
+  await tester.pumpWidget(
+    UncontrolledProviderScope(
+      container: container,
+      child: MaterialApp(
+        home: DialogLayer(child: const Scaffold(body: _ShowSingleButton())),
+      ),
+    ),
+  );
+  await tester.tap(find.text('show single delete dialog'));
+  await tester.pump();
+  expect(find.byType(DeleteRecordDialog), findsOneWidget);
+  await tester.longPress(find.widgetWithIcon(FilledButton, Symbols.delete_rounded));
+  await tester.pump();
+  expect(storage.deleteAllCalls, [
+    {'a'},
+  ]);
+  return (container: container, storage: storage);
+}
+
+/// The confirmation's cancel button, scoped to [dialog].
+///
+/// `find.byType(OutlinedButton)` would match nothing: `OutlinedButton.icon`
+/// returns a private subclass and `byType` compares `runtimeType` exactly, so a
+/// "cancel is disabled" assertion written that way would pass with the button
+/// live on screen.
+Finder _cancelButton(Finder dialog) {
+  return find.descendant(of: dialog, matching: find.byWidgetPredicate((widget) => widget is OutlinedButton));
+}
+
+/// The title bar's × for [dialog]. Scoped by dialog rather than by tooltip
+/// because the bulk dialog gives its × and its cancel the same tooltip, and this
+/// is the only [IconButton] either confirmation builds.
+Finder _closeButton(Finder dialog) => find.descendant(of: dialog, matching: find.byType(IconButton));
+
+/// Lets the held delete finish and asserts it did, without reporting a failure.
+///
+/// The second half of every exit test: shutting a door must not also stop the
+/// delete behind it, and a dialog that survived the exit while silently dropping
+/// its delete would satisfy the first assertion alone.
+Future<void> _expectHeldDeleteFinished(WidgetTester tester, _FakeRecordStorage storage, Finder dialog) async {
+  storage.settle();
+  await tester.pump();
+  await _settlePendingDeletes(tester, storage);
+  expect(storage.reported.where((e) => !e.isSuccess), isEmpty, reason: 'a delete that ran was reported as a failure');
+  expect(dialog, findsNothing, reason: 'the confirmation outlived its delete');
+  expect(tester.takeException(), isNull);
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUpAll(loadAppTranslations);
@@ -284,8 +369,9 @@ void main() {
   testWidgets('leaves a dialog opened meanwhile alone', (tester) async {
     final h = await _pump(tester);
 
-    // Only one dialog exists at a time, so this replaces the delete confirmation. The pending delete must
-    // not take the unrelated dialog down with it when it finally settles.
+    // An ordinary `show` replaces whatever is up, so this replaces the delete confirmation (only the
+    // storage view asks to stack, with `over: true`). The pending delete must not take the unrelated
+    // dialog down with it when it finally settles.
     h.container
         .read(dialogBuilderProvider.notifier)
         .show(
@@ -303,5 +389,130 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('other-dialog')), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  // **A confirmation has three exits, and the withdrawn confirm is not one of
+  // them.** The group above pins that a second press cannot be made through the
+  // confirm button. It says nothing about the barrier, the title bar's x and
+  // cancel, each of which unmounts the dialog outright -- and `_deleting` goes
+  // with the widget, so the rows are listed again with their delete entries live
+  // and the same records can be sent to the store a second time. The store's
+  // cross-tab lock makes that second call *wait* rather than refusing it, so it
+  // arrives after the first delete erased the records, finds every id missing and
+  // reports the whole batch as failed: an error toast for a delete that worked.
+  //
+  // One test per exit and per dialog, so a guard put back for one door and not
+  // the others cannot hide behind a neighbour.
+  //
+  // **The positive control for the barrier tests.** Those tap a bare coordinate
+  // and assert nothing happened, which is what a tap that *missed* the barrier
+  // looks like too. This states that the same coordinate does reach a live
+  // barrier, so "nothing happened" there is a refusal and not a miss.
+  testWidgets('the same barrier tap does close the confirmation before the delete starts', (tester) async {
+    await _pumpUnconfirmed(tester);
+
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump();
+
+    expect(
+      find.byType(BulkDeleteRecordDialog),
+      findsNothing,
+      reason: 'the tap the barrier tests rely on does not reach the barrier at all',
+    );
+  });
+
+  testWidgets('the barrier does not close the bulk confirmation mid-delete', (tester) async {
+    final h = await _pump(tester);
+
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump();
+
+    expect(
+      find.byType(BulkDeleteRecordDialog),
+      findsOneWidget,
+      reason: 'a tap on the barrier closed the confirmation while its delete was running',
+    );
+    await _expectHeldDeleteFinished(tester, h.storage, find.byType(BulkDeleteRecordDialog));
+  });
+
+  testWidgets('the close button does not close the bulk confirmation mid-delete', (tester) async {
+    final h = await _pump(tester);
+    final close = _closeButton(find.byType(BulkDeleteRecordDialog));
+
+    expect(tester.widget<IconButton>(close).onPressed, isNull, reason: 'the title bar x is live while the delete runs');
+    await tester.tap(close, warnIfMissed: false);
+    await tester.pump();
+
+    expect(
+      find.byType(BulkDeleteRecordDialog),
+      findsOneWidget,
+      reason: 'the title bar x closed the confirmation while its delete was running',
+    );
+    await _expectHeldDeleteFinished(tester, h.storage, find.byType(BulkDeleteRecordDialog));
+  });
+
+  testWidgets('the cancel button does not close the bulk confirmation mid-delete', (tester) async {
+    final h = await _pump(tester);
+    final cancel = _cancelButton(find.byType(BulkDeleteRecordDialog));
+
+    expect(tester.widget<ButtonStyleButton>(cancel).enabled, isFalse, reason: 'cancel is live while the delete runs');
+    await tester.tap(cancel, warnIfMissed: false);
+    await tester.pump();
+
+    expect(
+      find.byType(BulkDeleteRecordDialog),
+      findsOneWidget,
+      reason: 'cancel closed the confirmation while its delete was running',
+    );
+    await _expectHeldDeleteFinished(tester, h.storage, find.byType(BulkDeleteRecordDialog));
+  });
+
+  // The same three claims on the single-record dialog, which reaches the same
+  // store through `deleteAsync` and carries its own copy of every exit: neither
+  // class can be fixed by the other one being fixed.
+  testWidgets('the barrier does not close the single confirmation mid-delete', (tester) async {
+    final h = await _pumpSingle(tester);
+
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pump();
+
+    expect(
+      find.byType(DeleteRecordDialog),
+      findsOneWidget,
+      reason: 'a tap on the barrier closed the confirmation while its delete was running',
+    );
+    await _expectHeldDeleteFinished(tester, h.storage, find.byType(DeleteRecordDialog));
+  });
+
+  testWidgets('the close button does not close the single confirmation mid-delete', (tester) async {
+    final h = await _pumpSingle(tester);
+    final close = _closeButton(find.byType(DeleteRecordDialog));
+
+    expect(tester.widget<IconButton>(close).onPressed, isNull, reason: 'the title bar x is live while the delete runs');
+    await tester.tap(close, warnIfMissed: false);
+    await tester.pump();
+
+    expect(
+      find.byType(DeleteRecordDialog),
+      findsOneWidget,
+      reason: 'the title bar x closed the confirmation while its delete was running',
+    );
+    await _expectHeldDeleteFinished(tester, h.storage, find.byType(DeleteRecordDialog));
+  });
+
+  testWidgets('the cancel button does not close the single confirmation mid-delete', (tester) async {
+    final h = await _pumpSingle(tester);
+    final cancel = _cancelButton(find.byType(DeleteRecordDialog));
+
+    expect(tester.widget<ButtonStyleButton>(cancel).enabled, isFalse, reason: 'cancel is live while the delete runs');
+    await tester.tap(cancel, warnIfMissed: false);
+    await tester.pump();
+
+    expect(
+      find.byType(DeleteRecordDialog),
+      findsOneWidget,
+      reason: 'cancel closed the confirmation while its delete was running',
+    );
+    await _expectHeldDeleteFinished(tester, h.storage, find.byType(DeleteRecordDialog));
   });
 }

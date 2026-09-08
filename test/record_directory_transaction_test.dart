@@ -528,18 +528,23 @@ void main() {
       // *name*. Ours (the first two cases): it is a receipt of ours for a move
       // this version cannot act on, and the interrupt was before anything was
       // staged, so clearing it carries nothing away. Not ours (`slot-mismatch`,
-      // renamed out of the derivation): carried whole into `retired/` rather
-      // than left where no later sweep would ever look at it again.
+      // renamed out of the derivation): carried whole into `quarantine/` rather
+      // than left where no later sweep would ever look at it again — and to
+      // `quarantine/` rather than `retired/` because the name is the only thing
+      // this build read of it, and it settles who minted the directory and
+      // nothing about what is inside.
       expect(transactionRoot.listSync(), isEmpty, reason: id);
       final retired = Directory('${root.path}/retired');
+      final quarantine = Directory('${root.path}/quarantine');
       if (entry.key == 'slot-mismatch') {
-        expect(File('${retired.path}/unexpected-slot/manifest.json').readAsStringSync(), before);
-        retired.deleteSync(recursive: true);
+        expect(File('${quarantine.path}/unexpected-slot/manifest.json').readAsStringSync(), before);
+        expect(retired.existsSync(), isFalse, reason: id);
+        quarantine.deleteSync(recursive: true);
       } else {
         expect(invalidManifest.existsSync(), isFalse, reason: id);
         expect(retired.existsSync(), isFalse, reason: id);
+        expect(quarantine.existsSync(), isFalse, reason: id);
       }
-      expect(Directory('${root.path}/quarantine').existsSync(), isFalse, reason: id);
       transactionRoot.parent.deleteSync(recursive: true);
     }
   });
@@ -631,22 +636,29 @@ void main() {
     expect(await RecordDirectoryTransaction().recoverRecord(DirectoryPath(root.path), 'future'), isEmpty);
   });
 
-  test('a slot name no writer of ours produced goes to retired/, not quarantine/', () async {
+  test('a slot name no writer of ours produced goes to quarantine/, not retired/', () async {
     // The one distinction the scans still draw, and the reason the test above
-    // is not "quarantine everything": ownership is read off the *name*, and it
+    // is not "retire everything": ownership is read off the *name*, and it
     // decides where a directory another writer put in the transaction root is
     // carried -- never whether it may be destroyed. It is moved byte-for-byte,
-    // and into `retired/` rather than `quarantine/`, because the banner counts
-    // `quarantine/`'s children at the user as records the app could not read
-    // and this is not a record of theirs.
+    // and into `quarantine/` rather than `retired/`.
+    //
+    // `retired/`'s delete is offered at one confirmation on the stated basis
+    // that nothing on that shelf is the only copy of anything. That is a claim
+    // about the bytes, and the name -- all this build read of this directory --
+    // does not support it: another version's interrupted transaction can hold
+    // the only copy of a record it saved for the user, and its manifest is
+    // exactly what could not be read. So it is filed by the worst thing the
+    // name allows, on the shelf whose delete tells the user the app cannot put
+    // it back.
     final foreign = Directory('${root.path}/.umacapture-transactions/v1/not-one-of-ours')..createSync(recursive: true);
     File('${foreign.path}/manifest.json').writeAsStringSync('{ this is not json');
 
     final recovered = await RecordDirectoryTransaction().recoverAll(DirectoryPath(root.path));
     expect(recovered.single.result, RecordTransactionResult.incomplete);
     expect(foreign.existsSync(), isFalse, reason: 'left in place, no later sweep would ever derive its name again');
-    expect(File('${root.path}/retired/not-one-of-ours/manifest.json').readAsStringSync(), '{ this is not json');
-    expect(Directory('${root.path}/quarantine').existsSync(), isFalse);
+    expect(File('${root.path}/quarantine/not-one-of-ours/manifest.json').readAsStringSync(), '{ this is not json');
+    expect(Directory('${root.path}/retired').existsSync(), isFalse);
   });
 
   test('a file where the source directory belongs is never mistaken for an equal empty tree', () async {
@@ -677,9 +689,14 @@ final class _FileTolerantListBackend extends WebLikeFsBackend {
   _FileTolerantListBackend(super.inner);
 
   @override
-  Future<List<FsEntry>> list(String path, {bool recursive = false, bool followLinks = false}) async {
+  Future<List<FsEntry>> list(
+    String path, {
+    bool recursive = false,
+    bool followLinks = false,
+    bool withMetadata = false,
+  }) async {
     if (!await inner.exists(path) || await inner.isFile(path)) return const [];
-    return inner.list(path, recursive: recursive, followLinks: followLinks);
+    return super.list(path, recursive: recursive, followLinks: followLinks, withMetadata: withMetadata);
   }
 }
 

@@ -9,7 +9,11 @@
 /// `recordMutationLockUnavailabilityProvider` in `storage.dart`.
 library;
 
-export 'record_recovery_gate_shared.dart' show RecordRecoveryEnsurer, RootRecoveryEnsurer, RecordRecoveryGate;
+export 'record_recovery_gate_shared.dart'
+    show BeforeRootMaintenance, RecordRecoveryEnsurer, RootRecoveryEnsurer, RecordRecoveryGate;
+// Part of `runForRoot`'s signature, so every caller of the gate needs them and
+// none of them needs the rest of the maintenance library to say so.
+export 'root_storage_maintenance.dart' show RootMaintenanceOutcome, RootMaintenanceReason, UndrainedSlot;
 export 'record_recovery_gate_io.dart'
     if (dart.library.js_interop) 'record_recovery_gate_web.dart'
     show createPlatformRecordRecoveryGate, platformRecordRecoveryGate;

@@ -46,11 +46,23 @@ final sidebarExtendedStateProvider = BooleanNotifierProvider(() {
 final applicationWidgetRebuildEvent = EventStreamProvider<void>();
 final _applicationWidgetRebuildEventProvider = applicationWidgetRebuildEvent.provider;
 
-class _Sidebar extends ConsumerWidget {
+/// The wide-layout navigation surface: one destination per [Pages.labels] entry.
+///
+/// The active index and the selection callback are parameters rather than a
+/// `AutoTabsRouter.of(context)` read inside this widget, so that what it *draws*
+/// can be asserted without standing the router up. That matters because this and
+/// [AppNavigationDrawer] are two independent renderings of the same list — a tab
+/// added to one of them by hand would be invisible to a test of the other — and
+/// `app_navigation_surfaces_test.dart` pumps each on its own for that reason.
+class AppNavigationRail extends ConsumerWidget {
+  const AppNavigationRail({super.key, required this.selectedIndex, required this.onSelected});
+
+  final int selectedIndex;
+  final ValueChanged<int> onSelected;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final tabsRouter = AutoTabsRouter.of(context);
     final isExtended = ref.watch(sidebarExtendedStateProvider);
     return Stack(
       children: [
@@ -59,7 +71,7 @@ class _Sidebar extends ConsumerWidget {
           // Slightly narrower than the M3 default (256) when expanded; the
           // labels do not need the full width and it leaves more room for content.
           minExtendedWidth: 220,
-          selectedIndex: tabsRouter.activeIndex,
+          selectedIndex: selectedIndex,
           useIndicator: true,
           destinations: [
             for (final pageLabel in Pages.labels)
@@ -78,7 +90,7 @@ class _Sidebar extends ConsumerWidget {
                 padding: EdgeInsets.zero,
               ),
           ],
-          onDestinationSelected: (index) => tabsRouter.setActiveIndex(index),
+          onDestinationSelected: onSelected,
         ),
         Positioned(
           bottom: 0,
@@ -95,12 +107,19 @@ class _Sidebar extends ConsumerWidget {
   }
 }
 
-class _Drawer extends StatelessWidget {
-  const _Drawer();
+/// The narrow-layout navigation surface, drawing the same [Pages.labels] the
+/// rail does. Parameterised for the reason [AppNavigationRail] states.
+///
+/// [onSelected] carries the whole gesture — switch tab *and* close the drawer —
+/// because closing it is a router pop, and the router is what this widget is
+/// kept clear of.
+class AppNavigationDrawer extends StatelessWidget {
+  const AppNavigationDrawer({super.key, required this.onSelected});
+
+  final ValueChanged<int> onSelected;
 
   @override
   Widget build(BuildContext context) {
-    final tabsRouter = AutoTabsRouter.of(context);
     return Drawer(
       child: ListView(
         children: [
@@ -108,10 +127,7 @@ class _Drawer extends StatelessWidget {
             ListTile(
               leading: entry.value.unselectedIcon,
               title: Text(entry.value.label),
-              onTap: () {
-                tabsRouter.setActiveIndex(entry.key);
-                context.router.pop();
-              },
+              onTap: () => onSelected(entry.key),
             ),
         ],
       ),
@@ -145,14 +161,21 @@ class _ResponsiveScaffold extends StatelessWidget {
                     style: theme.textTheme.titleLarge?.copyWith(color: theme.colorScheme.onSurface),
                   ),
                 ),
-          drawer: wide ? null : const _Drawer(),
+          drawer: wide
+              ? null
+              : AppNavigationDrawer(
+                  onSelected: (index) {
+                    router.setActiveIndex(index);
+                    context.router.pop();
+                  },
+                ),
           body: Stack(
             fit: StackFit.expand,
             children: [
               NotificationLayer.asSibling(
                 child: Row(
                   children: [
-                    if (wide) _Sidebar(),
+                    if (wide) AppNavigationRail(selectedIndex: router.activeIndex, onSelected: router.setActiveIndex),
                     Expanded(
                       child: Column(
                         children: [

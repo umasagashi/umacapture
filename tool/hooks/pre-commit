@@ -83,7 +83,17 @@ fi
 # through a checked command substitution instead, so "git could not answer" and
 # "the answer is nothing" stay distinguishable.
 staged_status=0
-staged="$(git diff --cached --name-only --diff-filter=ACM -- '*.dart')" || staged_status=$?
+# ACMR, not ACM: git reports a moved-and-edited file as a single `R` entry (its
+# similarity index over the default ~50% threshold), never split into an `A` +
+# `D` pair -- a low-similarity rewrite lands as `A`+`D` and `A` alone already
+# satisfies this filter, so `R` is the only status this list was missing. With
+# `ACM` a `git mv` plus an edit (e.g. a colour literal added at the new path)
+# made `staged` empty, which read as "no Dart staged" and skipped the format
+# and colour gates for the entire commit -- see the rename case in
+# test_pre_commit.sh. `--name-only` on an `R` entry prints only the
+# destination path, which is exactly the path `dart format` and the diff below
+# need to read.
+staged="$(git diff --cached --name-only --diff-filter=ACMR -- '*.dart')" || staged_status=$?
 if [ "$staged_status" -ne 0 ]; then
   echo "" >&2
   echo "✖ Could not list the staged Dart files (git exit $staged_status)." >&2
@@ -123,21 +133,30 @@ color_allowlist=(
 # (e.g. `colorScheme.scrim.withValues(alpha: .3)`) is allowed, while literal
 # alpha (`Colors.black.withValues(...)`) is still caught by the `Colors.` rule.
 # `Colors.transparent` is structural ("no color", no theme role exists) and is
-# stripped before matching so it is not flagged.
+# stripped before matching so it is not flagged. The strip stops at a following
+# `.`, because the exemption is for the *value*, not for the name as a prefix:
+# `Colors.transparent.withValues(alpha: 1)` is opaque black, i.e. a literal
+# colour wearing the exempt spelling, and stripping it unconditionally handed the
+# whole `Colors.` rule an escape hatch spelled in eighteen characters.
 #
 # THE THREE ALTERNATIVES ARE SHAPES, NOT A LIST OF SPELLINGS, because a list of
 # spellings is what let `Color.fromARGB` -- the form Flutter's own docs reach for
 # first -- through a hook written to stop exactly that:
 #   1. `Colors.<anything>`: the Material palette, whatever the swatch is called.
-#   2. `Color(0…`: the default constructor over a numeric literal. `0` rather than
-#      `0x`, so the uppercase `0X` prefix Dart also accepts, and a plain decimal
-#      ARGB, are covered too; no identifier can begin with a digit, so nothing
-#      that is not a literal matches.
+#   2. `Color(<digit>`: the default constructor over a numeric literal. The class
+#      is `[0-9]`, not the character `0`: writing `0` was meant to cover "0x, 0X
+#      and plain decimal alike", but a decimal ARGB does not begin with a zero --
+#      `Color(4278190080)` walked straight through the gate that comment claimed
+#      covered it. Let the machine enumerate the digits instead of hand-picking
+#      one; no identifier can begin with a digit, so nothing that is not a
+#      literal matches. `[[:space:]]*` because `Color( 0xFF…)` is the same
+#      literal (`dart format` would close the gap, but the gate must not depend
+#      on a gate that runs beside it).
 #   3. `Color.from…` (and the HSL/HSV builders): every named constructor that
 #      builds a colour out of component numbers is spelled `from<something>`.
 #      `Color.lerp` and the rest are deliberately NOT matched -- they take colours
 #      rather than digits, so their inputs are caught wherever those came from.
-color_pattern='\bColors\.|\bColor\(0|\b(Color|HSLColor|HSVColor)\.from'
+color_pattern='\bColors\.|\bColor\([[:space:]]*[0-9]|\b(Color|HSLColor|HSVColor)\.from'
 
 violations=""
 for f in "${files[@]}"; do
@@ -163,7 +182,7 @@ for f in "${files[@]}"; do
     exit 1
   fi
   added="$(printf '%s\n' "$diff_out" | sed -nE '/^[+][+][+]/d; s/^[+]//p')"
-  scrubbed="$(printf '%s\n' "$added" | sed -E 's/Colors\.transparent//g')"
+  scrubbed="$(printf '%s\n' "$added" | sed -E 's/\bColors\.transparent($|[^.])/\1/g')"
 
   # `grep` answers 0 = matched, 1 = matched nothing, 2 = the run itself failed --
   # most plausibly because `color_pattern` above stopped being a valid POSIX ERE.

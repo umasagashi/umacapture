@@ -13,7 +13,7 @@ PlatformDirs createPlatformDirs() => const WebPlatformDirs();
 /// still appends `appName` to the documents dir (yielding `umacapture/storage`,
 /// `umacapture/chara_detail/...`) and leaves the support dir unprefixed
 /// (yielding `modules`), and the OPFS adapter maps each virtual segment onto a
-/// nested OPFS directory (design §3).
+/// nested OPFS directory.
 ///
 /// Returning a non-empty `['umacapture']` root would double-nest the application
 /// namespace because `pathInfoLoader` already appends `appName`. The empty root

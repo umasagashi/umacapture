@@ -12,11 +12,12 @@ import 'package:umacapture/src/core/fs/record_mutation_lock.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate_shared.dart';
 import 'package:umacapture/src/core/fs/record_recovery_gate_web.dart';
 import 'package:umacapture/src/core/fs/root_storage_maintenance.dart';
-import 'package:umacapture/src/core/fs/root_storage_maintenance_web.dart';
+import 'package:umacapture/src/core/fs/root_storage_maintenance_shared.dart';
 import 'package:umacapture/src/core/fs/web_record_persistence.dart';
 import 'package:umacapture/src/core/fs/web_record_write_transaction.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 
+import 'support/long_read_declarations.dart';
 import 'support/records.dart';
 import 'support/web_like_fs_backend.dart';
 
@@ -36,7 +37,7 @@ void main() {
     originalBackend = fsBackend;
     fsBackend = WebLikeFsBackend(originalBackend);
     final mutationLock = RecordMutationLock((_, _, action) => action());
-    final rootMaintenance = WebRootStorageMaintenance(mutationLock: mutationLock);
+    final rootMaintenance = JournalRootStorageMaintenance.bothJournals(mutationLock: mutationLock);
     // The per-record half is production's, taken off the real platform gate
     // rather than re-written here: a hand-written predicate can only ever pin
     // itself, and this file is about the composition around it.
@@ -48,8 +49,9 @@ void main() {
       // resolves to the *io* implementation on the VM, and this suite is about the
       // web store. Its memoisation is per instance, so a fresh one per test also
       // keeps the sweep from being skipped.
-      ensureRootReady: (storage) =>
-          rootMaintenance.runUnlocked(RootStorageMaintenanceRequest(recordDataRoot: storage / 'chara_detail')),
+      ensureRootReady: (storage, reason) => rootMaintenance.runUnlocked(
+        RootStorageMaintenanceRequest(recordDataRoot: storage / 'chara_detail', reason: reason),
+      ),
     );
   });
 
@@ -80,6 +82,7 @@ void main() {
 
     final (:results, :unavailable) = await loadRecordsUnder(
       activeRoot,
+      declaration: undeclaredInTest,
       recoveryGate: gate,
       snapshotDirectories: (_) async {
         events.add('list');
@@ -119,7 +122,13 @@ void main() {
     //    with the repair that resolved this behind exactly the door that had
     //    just closed. Then it stopped throwing but still left the slot standing
     //    until a person pressed a button. Now the sweep sets it aside itself.
-    await gate.runForRoot(storageRoot, () async {});
+    await gate.runForRoot(
+      storageRoot,
+      (_) async {},
+      declaration: undeclaredInTest,
+      reason: RootMaintenanceReason.readyToUse,
+      beforeMaintenance: const BeforeRootMaintenance.none(reason: 'this case surveys nothing'),
+    );
     expect(await slot.exists(), isFalse);
 
     // 2. The scan lists the record. It used to refuse it: the gate turned the
@@ -129,6 +138,7 @@ void main() {
     //    cannot finish is the slot's own problem.
     Future<RecordScanResult> scan() => loadRecordsUnder(
       activeRoot,
+      declaration: undeclaredInTest,
       recoveryGate: gate,
       loadAction: (directory) async => RecordLoaded(makeRecord(id: directory.name, card: 1)),
     );
@@ -177,7 +187,13 @@ void main() {
 
     // 1. Startup completes *and* resolves the slot. It used to throw here for
     //    every later session, with no repair defined for an archive slot at all.
-    await gate.runForRoot(storageRoot, () async {});
+    await gate.runForRoot(
+      storageRoot,
+      (_) async {},
+      declaration: undeclaredInTest,
+      reason: RootMaintenanceReason.readyToUse,
+      beforeMaintenance: const BeforeRootMaintenance.none(reason: 'this case surveys nothing'),
+    );
     expect(await slot.exists(), isFalse);
 
     // 2. The scan lists the record, which never moved: the move is what tore.
@@ -186,6 +202,7 @@ void main() {
     //    failed to move.
     Future<RecordScanResult> scan() => loadRecordsUnder(
       activeRoot,
+      declaration: undeclaredInTest,
       recoveryGate: gate,
       loadAction: (directory) async => RecordLoaded(makeRecord(id: directory.name, card: 1)),
     );
@@ -206,12 +223,18 @@ void main() {
     await leaveReadyWrite(id);
     var deletes = 0;
 
-    await gate.runForRecord(storageRoot, id, () async {
+    await gate.runForRecord(storageRoot, id, declaration: undeclaredInTest, () async {
       expect(await (activeRoot / id).exists(), isTrue);
       deletes++;
       await (activeRoot / id).delete(recursive: true);
     });
-    await gate.runForRoot(storageRoot, () async {});
+    await gate.runForRoot(
+      storageRoot,
+      (_) async {},
+      declaration: undeclaredInTest,
+      reason: RootMaintenanceReason.readyToUse,
+      beforeMaintenance: const BeforeRootMaintenance.none(reason: 'this case surveys nothing'),
+    );
 
     expect(deletes, 1);
     expect(await (activeRoot / id).exists(), isFalse);
@@ -282,7 +305,7 @@ void main() {
     // record be acted on rather than stranding it behind a failing cleanup. The
     // partial cleanup is already visible to the action, which is what proves
     // recovery ran first.
-    await gate.runForRecord(storageRoot, id, () async {
+    await gate.runForRecord(storageRoot, id, declaration: undeclaredInTest, () async {
       actions++;
       expect(await spec.destination.filePath('prediction.json').exists(), isFalse);
       expect(await spec.destination.filePath('skill.png').exists(), isFalse);
@@ -299,7 +322,7 @@ void main() {
     expect(manifest['state'], RecordTransactionState.cleaning.name);
 
     fsBackend = WebLikeFsBackend(originalBackend);
-    await gate.runForRecord(storageRoot, id, () async {
+    await gate.runForRecord(storageRoot, id, declaration: undeclaredInTest, () async {
       actions++;
       expect(await spec.destination.filePath('prediction.json').exists(), isFalse);
       expect(await spec.destination.filePath('skill.png').exists(), isFalse);

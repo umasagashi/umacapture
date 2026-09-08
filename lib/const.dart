@@ -7,6 +7,30 @@ import 'package:version/version.dart';
 /// location Hive opens stay in lock-step.
 const String settingsBoxDirName = "settings";
 
+/// Name of the crash-reporting SDK's own database directory, created directly
+/// under the application support directory.
+///
+/// Spelled once, here, because two unrelated parts of the app have to agree on
+/// it: `runWithSentry` creates it (`sentry_util.dart`), and the storage feature
+/// has to recognise it by name to leave it alone. It was written out twice
+/// before, and a rename of either would have dropped it into the storage view's
+/// "unclassified" bucket — offered for deletion, under a warning that tells the
+/// user to check whether they put it there themselves.
+const String sentryNativeDirName = "sentry-native";
+
+/// Directory names this app creates under its own roots that the storage
+/// feature deliberately does not manage.
+///
+/// These are neither the app's data nor the user's. The storage view can say
+/// nothing useful about one — not what it holds, not what deleting it would
+/// cost — so it neither gives it a group nor reports it as unclassified
+/// residue. Being *named* here is what makes that an accounted-for decision
+/// rather than an omission: `unclassified_scan.dart` subtracts this set, and
+/// the guard over the group table (`storage_group_test.dart`) counts it among
+/// the names the app is accountable for, so a directory that is in neither a
+/// group nor this set still fails there.
+const Set<String> unmanagedDirectoryNames = <String>{sentryNativeDirName};
+
 class Const {
   static String get moduleUrlRoot => "https://data.umacapture.com/umacapture";
 

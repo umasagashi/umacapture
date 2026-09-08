@@ -55,7 +55,14 @@ Future<ClipboardWriteOutcome> copyImageToClipboard(RefBase ref, ClipboardImageRe
 
 /// Copies [path] to the clipboard as a file reference.
 ///
+/// Takes a [PathEntity] and not a [FilePath] because a native file clipboard
+/// carries a *list of paths* (`CF_HDROP` on Windows), which does not distinguish
+/// a file from a directory — the file manager resolves whatever the path names.
+/// A sibling entry point for directories would therefore be a second name for
+/// one operation, and would have to be kept in step with this one on both halves
+/// of the seam.
+///
 /// Only meaningful where [clipboardSupportsFileReferences] holds; elsewhere it
 /// reports [ClipboardWriteOutcome.unavailable].
-Future<ClipboardWriteOutcome> copyFileReferenceToClipboard(FilePath path) =>
+Future<ClipboardWriteOutcome> copyFileReferenceToClipboard(PathEntity path) =>
     implementation.copyFileReferenceToClipboard(path);

@@ -39,25 +39,71 @@ class JsonAdapter<T> extends TypeAdapter<T?> {
   }
 }
 
+/// Something to do with every adapter the app registers, once each, **with its
+/// type argument intact**.
+typedef AdapterVisitor = void Function<T>(JsonAdapter<T> adapter);
+
+/// The one declaration of what this app persists through `dart_mappable`.
+///
+/// A visitor and not a `List<JsonAdapter>`, because a list erases `T` to
+/// `dynamic` and `Hive.registerAdapter` resolves an adapter by `value is T` — a
+/// `dynamic` T matches *every* value, so the first entry would claim every write
+/// in the app. The generic callback keeps each `T` reified, which is also what
+/// lets [encodeRegisteredHiveValue] below test a runtime value against it.
+///
+/// typeId is the on-disk identity of each adapter, so these literals must stay
+/// stable: never reorder, reuse, or repurpose an existing id. Add new types at
+/// the end with the next unused id — and note that adding one here is what
+/// extends the second tier of the storage view's settings-value rendering
+/// (`settings_value_render.dart`), which is why
+/// `hive_adapter_roster_test.dart` turns red until the addition has been looked
+/// at.
+void visitHiveAdapters(AdapterVisitor visit) {
+  visit(const JsonAdapter<Size>(0));
+  visit(const JsonAdapter<Offset>(1));
+  visit(const JsonAdapter<ThemeMode>(2));
+  visit(const JsonAdapter<CharaDetailRecordImageMode>(3));
+  visit(const JsonAdapter<ClipboardPasteImageMode>(4));
+  visit(const JsonAdapter<RowHeightMode>(5));
+}
+
 void registerHiveAdapters() {
-  // typeId is the on-disk identity of each adapter, so these literals must stay
-  // stable: never reorder, reuse, or repurpose an existing id. Add new types at
-  // the end with the next unused id.
-  //
   // Guard each registration so registerHiveAdapters is idempotent: Hive keeps
   // adapters registered across Hive.close(), so a second StorageBox.ensureOpened
   // in the same process (e.g. reopening with reset) would otherwise throw
   // HiveError on the already-registered typeId before it could reset any box.
-  void register<T>(JsonAdapter<T> adapter) {
+  visitHiveAdapters(<T>(JsonAdapter<T> adapter) {
     if (!Hive.isAdapterRegistered(adapter.typeId)) {
       Hive.registerAdapter(adapter);
     }
-  }
+  });
+}
 
-  register(JsonAdapter<Size>(0));
-  register(JsonAdapter<Offset>(1));
-  register(JsonAdapter<ThemeMode>(2));
-  register(JsonAdapter<CharaDetailRecordImageMode>(3));
-  register(JsonAdapter<ClipboardPasteImageMode>(4));
-  register(JsonAdapter<RowHeightMode>(5));
+/// [value]'s `dart_mappable` JSON when its type is one of the persisted ones,
+/// `null` otherwise — the second tier of the storage view's settings-value
+/// rendering.
+///
+/// Derived from [visitHiveAdapters] rather than from a table of its own. A
+/// hand-written second list would be a copy of the first that nothing holds to
+/// it, so a type added to the registrations would keep persisting correctly while
+/// silently dropping to `toString()` on the storage view — the one failure those
+/// tiers are ordered to prevent, and an invisible one, because a value rendered
+/// by the wrong tier still renders.
+String? encodeRegisteredHiveValue(Object value) {
+  String? encoded;
+  visitHiveAdapters(<T>(JsonAdapter<T> adapter) {
+    // `is T` and not a `runtimeType` comparison: a subtype of a registered type
+    // is written by that adapter too (this is the same test
+    // `Hive.registerAdapter` resolves writes with), so the rendering has to
+    // follow the same rule the persistence does.
+    if (encoded == null && value is T) {
+      // Cast rather than relying on promotion: `value` is captured from the
+      // enclosing function, and flow analysis does not promote a capture to the
+      // closure's own type parameter. The `is` test above is what makes the cast
+      // safe, and it is the same test `Hive.registerAdapter` resolves writes
+      // with.
+      encoded = MapperContainer.globals.toJson<T>(value as T);
+    }
+  });
+  return encoded;
 }

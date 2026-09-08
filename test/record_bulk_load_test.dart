@@ -8,11 +8,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
 import 'package:umacapture/src/chara_detail/storage.dart';
 import 'package:umacapture/src/core/mapper_init.dart';
 import 'package:umacapture/src/core/path_entity.dart';
+
+import 'support/riverpod.dart';
 
 Character _chara(int card) => Character(0, 0, card, 0);
 
@@ -84,7 +87,10 @@ void main() {
       seedValidRecord(id);
     }
 
-    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(
+      ProviderContainer.test().read(refBaseProvider),
+      activeDir,
+    );
 
     final loadedIds = results.whereType<RecordLoaded>().map((e) => e.record.id).toSet();
     expect(loadedIds, ids.toSet());
@@ -97,7 +103,10 @@ void main() {
     seedValidRecord('id-001');
     File('${activeDir.path}/desktop.ini').writeAsStringSync('[.ShellClassInfo]');
 
-    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(
+      ProviderContainer.test().read(refBaseProvider),
+      activeDir,
+    );
 
     expect(results, hasLength(1));
     expect(results.single, isA<RecordLoaded>());
@@ -110,7 +119,10 @@ void main() {
   test('returns empty when the root holds no directories', () async {
     File('${activeDir.path}/desktop.ini').writeAsStringSync('[.ShellClassInfo]');
 
-    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(
+      ProviderContainer.test().read(refBaseProvider),
+      activeDir,
+    );
     expect(results, isEmpty);
     expect(unavailable, isEmpty);
   });
@@ -120,7 +132,10 @@ void main() {
     seedValidRecord('id-002');
     seedRecordJson('id-corrupt', 'not valid json');
 
-    final (:results, :unavailable) = await loadAllCharaDetailRecord(activeDir);
+    final (:results, :unavailable) = await loadAllCharaDetailRecord(
+      ProviderContainer.test().read(refBaseProvider),
+      activeDir,
+    );
 
     expect(results, hasLength(3));
     expect(results.whereType<RecordLoaded>().map((e) => e.record.id).toSet(), {'id-001', 'id-002'});
