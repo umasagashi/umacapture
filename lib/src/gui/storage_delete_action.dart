@@ -15,7 +15,7 @@
 /// **What is here from the stage after, and what is still not.**
 /// [runStorageDelete] is the single point at which a storage-view delete finishes,
 /// so the provider-invalidate table is applied there and no second entry point can
-/// bypass it: the tree's buttons open [StorageDeleteConfirmDialog], and that
+/// bypass it: the tree's row menus open [StorageDeleteConfirmDialog], and that
 /// dialog is the only caller of the runner. The table itself lives in
 /// `storage_delete_invalidation.dart` — this file decides *when*, that one decides
 /// *what*. The image-cache eviction is applied at the same point and for
@@ -55,7 +55,7 @@ import '/src/gui/toast.dart';
 /// Whether the view offers a delete for [group] at all.
 ///
 /// **Two fields answer this, and they have to agree.** [StorageGroup.operations]
-/// is the set of things the view may do to a group — the same gate the zip button
+/// is the set of things the view may do to a group — the same gate the zip entry
 /// reads, and what that set is for — while
 /// [StorageDeleteFriction.notOffered] is the answer the friction classification gives for a
 /// group whose delete would not do what the user expects. `data_root.json` sets
@@ -68,7 +68,7 @@ bool storageGroupOffersDelete(StorageGroup group) {
   return group.operations.contains(StorageOperation.delete) && group.deleteFriction != StorageDeleteFriction.notOffered;
 }
 
-/// What an entry row's delete button removes, or null when it offers none.
+/// What an entry row's delete removes, or null when it offers none.
 ///
 /// A synthetic group answers null even though it offers a delete. Its level is
 /// not a directory listing, so the view builds store rows for it and never
@@ -83,10 +83,10 @@ StorageDeleteRequest? storageRowDeleteRequest(StorageGroup group, PathEntity ent
   return StorageDeletePathsRequest([entity]);
 }
 
-/// What a **group row's** delete button removes, or null when the group has no
-/// such button.
+/// What a **group row's** delete removes, or null when the group has no
+/// such action.
 ///
-/// A group row carries the action for the reason its zip button does — a group
+/// A group row carries the action for the reason its zip does — a group
 /// *is* a folder to the user, and clearing one out an entry at a time is not an
 /// answer for a store holding hundreds of records. What it removes is the
 /// group's own roots, not their contents one by one: `resolveStorageLockPlan`
@@ -272,9 +272,10 @@ class _StorageDeleteConfirmDialogState extends ConsumerState<StorageDeleteConfir
   /// [storageDeleteRefusalOf], so the pair cannot come apart again here and the
   /// order between them is not this dialog's to choose.
   ///
-  /// The gap it closes was never the zip's: both sites that start one
-  /// (`storage_tree.dart`'s row button and row menu) sit under this dialog's own
-  /// modal barrier, so a zip cannot begin while this confirmation is up. It is
+  /// The gap it closes was never the zip's: the one entry that starts one
+  /// (`storage_tree.dart`'s `_zipMenuEntry`, on both row menus) sits under this
+  /// dialog's own modal barrier, so a zip cannot begin while this confirmation is
+  /// up. It is
   /// every long reader that begins *outside* the storage view — an archive move,
   /// a startup sweep, a repair, a regeneration — for which the barrier says
   /// nothing at all, and which can therefore claim a path between the press that

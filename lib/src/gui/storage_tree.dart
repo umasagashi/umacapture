@@ -7,25 +7,29 @@
 ///
 /// Tapping a file opens its preview (`storage_file_preview.dart`), which shows
 /// the file and nothing more: it hosts no action of its own. Beside the row body
-/// sit three fixed-width
-/// slots — the copy button (stage 5a, [_CopyEntitySlot]), the zip button (stage
-/// 5c, [_ZipEntitySlot]) and the delete button (stage 6b, [_DeleteSlot]) — which
-/// are a folder's actions, because a folder has no preview to hang them on.
+/// sits **one** fixed-width slot — [_RowMenuSlot], the button that opens the
+/// row's menu — and every action this view offers is an entry on that menu.
 ///
-/// A secondary press on an entry row opens the same actions as a context menu,
-/// and that menu is *not* limited to the three slots: it is the one
-/// surface both kinds of row have, so a file row lists there the two ways a file
-/// leaves the app (copy, save) plus the one action no slot can host — opening the
-/// containing folder in the OS file manager, where the platform has one. Counting
-/// the row's actions as "the three slots" stopped being true when that menu
-/// arrived.
+/// It replaced three always-visible buttons (copy, zip, delete). A row is read
+/// far more often than it is acted on, so three glyphs on every row advertised at
+/// all times what is asked for rarely; and they were never the whole of the row's
+/// actions anyway — a file row could not host its own two (copy, save) in a slot
+/// and reached them through the menu alone, as did the one action no slot can
+/// host, opening the containing folder in the OS file manager. One control that
+/// says "there is more here" is what both row kinds can carry.
+///
+/// **Three entrances, one menu.** The button, a secondary press and a long press
+/// all reach one builder, so a pointer with no secondary button and a touch
+/// screen get what a mouse gets. While the row is withheld — a capture writing
+/// into the group, a long reader holding its paths — none of the three opens it,
+/// and the button carries the reason as its tooltip ([_RowMenuSlot]).
 ///
 /// **The menu is the only host of a file's two actions.** They stood on the
 /// preview dialog as well until that surface was cut back to previewing alone, so
 /// this menu is now the sole route to them — including for a file the preview
 /// declines to render, which never had one of its own.
 ///
-/// The delete button is the only thing here that writes into the app's own
+/// The delete entry is the only thing here that writes into the app's own
 /// storage, and it writes nothing itself: it opens the two-stage confirmation —
 /// a warning plus, for the irrecoverable groups, an explicit acknowledgement
 /// checkbox — in `storage_delete_action.dart`, which is where the friction, the exclusion
@@ -357,7 +361,7 @@ final storageSettingsBoxesProvider = FutureProvider<List<SettingsBoxListing>>((r
 /// `storage_file_preview.dart`, they are `autoDispose`, and they are only alive
 /// while the preview dialog is up — and a delete cannot be asked for while one
 /// is. The preview opens over the tree and covers it, barrier and all, so the
-/// row's delete button is out of reach until the preview is closed, which
+/// row's delete is out of reach until the preview is closed, which
 /// disposes both providers. So no preview can survive a delete to show stale
 /// contents. `storage_tab_refresh_test.dart` pins this list against every
 /// `FutureProvider` declared anywhere in the view's *own* sources — the files
@@ -475,7 +479,7 @@ bool storageRowOffersZip(StorageGroupId group, PathEntity entity) {
 /// A group row carries the action at all because a group *is* a folder to the
 /// user —「育成記録」 is the thing they want out, not the twenty record folders
 /// inside it — and because several groups show their contents directly, so the
-/// folder itself has no row of its own to host the button.
+/// folder itself has no row of its own to host the entry.
 DirectoryPath? storageGroupZipTarget(PathInfo info, StorageGroup group) {
   if (!group.operations.contains(StorageOperation.zip)) {
     return null;
@@ -494,13 +498,13 @@ DirectoryPath? storageGroupZipTarget(PathInfo info, StorageGroup group) {
 /// root legitimately can be absent: nothing quarantined yet, no temp session
 /// (`directory_totals.dart` states the identical fact for the group's byte
 /// total, which is `_empty()` rather than an error for the same directory).
-/// Offering the zip button for a root that is not there sends
-/// [exportDirectoryAsZip] into a listing that throws, and the button had no
+/// Offering the zip entry for a root that is not there sends
+/// [exportDirectoryAsZip] into a listing that throws, and the entry had no
 /// way to know that in advance.
 ///
 /// Asked through [storageTargetIsPresent] and not a second `exists()` call
 /// written out here: that is the same fact [StorageDeletePlan.absent] records
-/// when a delete surveys this same root, so the button's "may I be pressed"
+/// when a delete surveys this same root, so the entry's "may I be pressed"
 /// and the delete's "was this here" cannot drift into two different answers
 /// for the one question of whether the directory exists.
 ///
@@ -524,7 +528,7 @@ DirectoryPath? storageGroupZipTarget(PathInfo info, StorageGroup group) {
 /// `quarantine` can take the directory with it, and a group that had nothing in
 /// it acquires a root the moment anything is quarantined or a temp session
 /// starts. Held outside the list, the first answer would be the only one, and
-/// the button would stay live over a root that is gone or dead over one that
+/// the entry would stay live over a root that is gone or dead over one that
 /// has since appeared, until the app was restarted.
 final storageGroupZipTargetExistsProvider = FutureProvider.family<bool, String>(
   (ref, path) => storageTargetIsPresent(DirectoryPath(path)),
@@ -554,7 +558,7 @@ final storageGroupZipTargetExistsProvider = FutureProvider.family<bool, String>(
 /// target contains the bundled folder. A zip of `active/<id>` therefore withholds
 /// the delete of that record, of anything inside it, and of the group root above
 /// it, and withholds nothing in `active/<other>` — which is why a sibling record
-/// keeps its button. Asked through [placeStorageTarget] rather than by comparing
+/// keeps its delete. Asked through [placeStorageTarget] rather than by comparing
 /// strings here, for the reason that function's doc gives: it is the one place a
 /// storage path is matched against another, and a second derivation beside it is
 /// how the two come to disagree silently about what "inside" means.
@@ -569,7 +573,7 @@ final storageGroupZipTargetExistsProvider = FutureProvider.family<bool, String>(
 ///    therefore makes every delete in `active`, `archive`, `quarantine` and
 ///    `retired` wait on it, because those take that same name — shared for a
 ///    record, exclusive for a root. Containment sees none of that and leaves the
-///    buttons live, deliberately: such a delete only *waits*, and waiting is the
+///    entries live, deliberately: such a delete only *waits*, and waiting is the
 ///    half that was never broken.
 ///  * *The lock is not there at all.* The seven [StorageLockScope.unlocked] groups
 ///    take no lock (`runUnderStorageExclusion` is `return action();`), and
@@ -607,7 +611,7 @@ bool storageDeleteAwaitsExtraction(StorageDeleteRequest? request, StorageZipStat
 /// Which long reader, if any, is holding a path [request] would delete.
 ///
 /// The whole of the storage view's answer to "may this delete be offered?", and
-/// the only thing its buttons ask. The per-path decision is
+/// the only thing its menu entries ask. The per-path decision is
 /// [storageDeleteAwaitsExtraction] — unchanged, still the single place a storage
 /// path is matched against another — and all this adds is the two quantifiers
 /// around it: any hold of any claim.
@@ -644,10 +648,10 @@ LongReadKind? storageDeleteBlockedBy(StorageDeleteRequest? request, Iterable<Lon
 ///
 /// **Not narrowed by [LongReadKind], and there is no read/mutate flag left to
 /// narrow by either.** A claim that only reads is still holding the handles, and
-/// a claim that mutates is rewriting the very bytes this button would hand over,
+/// a claim that mutates is rewriting the very bytes this extraction would hand over,
 /// so neither answer would change what this fold does; the claim stopped
 /// carrying the distinction for exactly that reason. Filtering by kind here
-/// would be a third classification of a long reader, decided at a button rather
+/// would be a third classification of a long reader, decided at a menu entry rather
 /// than where the claim is made.
 ///
 /// `null` for a `null` [target]: a row that offers no extraction has nothing to
@@ -725,6 +729,29 @@ final class StorageLongReadRefusal extends StorageRefusal {
 /// a row with nothing to hand over — the activity blocker is still weighed,
 /// because a group being written into is a fact about the group and not about
 /// the row.
+///
+/// **The activity sentence composed here — `pages.storage.blocked.verb.extract`
+/// — reaches no screen at all, and since the row's buttons became one ⋮ that is a
+/// fact about the app rather than about which groups happen to exist.** The one
+/// surface that renders a [StorageRefusal.message] is the row's menu button
+/// tooltip; that control covers a delete and the extractions together, so
+/// [storageRowMenuRefusalOf] re-composes the activity sentence with
+/// [StorageAction.any] whichever side it took, and no row can carry this verb any
+/// more — not even the row-with-no-delete shape that used to be the one way to
+/// reach it. The long-read half below is unaffected: it carries
+/// [longReadBusyMessage], which is the delete side's sentence too.
+///
+/// The verb is kept rather than retired, for two reasons that are about the code
+/// and not about a screen. The composition in `storageActionBlockedMessage` is
+/// exhaustive over (blocker, action), so retiring the member would be retiring
+/// the *distinction* — this helper would then have nothing but [StorageAction.any]
+/// to ask with, and an extraction control that names its own action (which is
+/// what every one of them did until the fold, and what a control outside a row
+/// would do again) could not be written without reinstating it. And the delete
+/// side's counterpart is not in the same position: `storage_delete_action.dart`
+/// renders `…verb.delete` on the confirmation, so the pair is not dead symmetry.
+/// `storage_row_menu_gate_test.dart` asserts the choice directly, since no widget
+/// can.
 StorageRefusal? storageExtractRefusalOf(WidgetRef ref, {required StorageGroup group, required PathEntity? target}) {
   final claims = ref.watch(longReadRegistryProvider).values;
   final blocker = storageActionBlockerOf(ref, group, StorageAction.extract);
@@ -759,6 +786,77 @@ StorageRefusal? storageDeleteRefusalOf(
   }
   final kind = storageDeleteBlockedBy(request, claims);
   return kind == null ? null : StorageLongReadRefusal(kind: kind, message: longReadBusyMessage());
+}
+
+/// The refusal that closes a row's **whole menu**, or null when it may be
+/// opened. One answer for the three entrances a row's menu has.
+///
+/// **Why a row needs an answer of its own rather than one of the two above.** A
+/// menu is not one operation: an entry row's carries extractions (copy, save,
+/// zip) and a delete side by side, and each entry still asks for itself, on
+/// every frame it paints ([_StorageMenuItem]). What this decides is the
+/// question the *entrances* have — may the menu open at all — and the row is
+/// withheld when either kind of action on it is.
+///
+/// Both are asked, and neither may be skipped on the strength of the other
+/// answering first:
+///
+///  * They are **not** the same reading. [storageActionBlockerOf] does return
+///    the same blocker for both — `storageActionBlocker` deliberately does not
+///    look at the action, and says why — but the long-read halves ask about
+///    different paths, and the two sentences differ in their verb.
+///  * A row can offer an extraction and **no delete at all**: `data_root.json`
+///    sits in the one group whose [StorageDeleteFriction] is `notOffered`, so
+///    [storageRowDeleteRequest] answers null for it, and a delete refusal is
+///    then null whatever is holding the file. Asking only the delete would
+///    leave that row's entrances open while a long reader held it — the sort of
+///    gap that holds because of which groups exist today rather than because
+///    anything decided it.
+///
+/// **The activity sentence is re-composed with [StorageAction.any], and that is
+/// the whole reason this surface may not take either helper's wording as it
+/// comes.** The row used to carry three buttons — copy, zip, delete — and each
+/// named the one action it was; the ⋮ that replaced them withholds all three at
+/// once. Handing it 「削除できません」 would report the delete and say nothing about
+/// the copy and the zip that were withheld in the same breath, which is the
+/// defect that folding the buttons introduced: the extraction refusal stopped
+/// having a surface at the moment its buttons stopped existing. So the sentence
+/// this control carries is neutral about the verb, exactly as the control is.
+///
+/// Only the activity half is re-composed. The long-read half already carries
+/// [longReadBusyMessage], which is verb-neutral by construction and is the same
+/// sentence on both sides.
+///
+/// **Which side speaks still follows from what the row offers, not from which
+/// helper answered first.** [storageDeleteRefusalOf] answers the activity
+/// blocker for a null [request] too, deliberately — a group being written into is
+/// a fact about the group — so a bare `delete ?? extract` would hand a row that
+/// offers no delete a *refusal* about deleting something it never offers to
+/// delete. Since the neutral verb, the two sides no longer differ in the words
+/// the user reads; they still differ in the [StorageRefusal] the row carries,
+/// which is what a surface that wants to say more than the shipped sentence
+/// would read. Keeping the condition on what the row offers rather than on which
+/// call came back non-null is what stops that from being decided by the order of
+/// two lines.
+///
+/// Neither call is short-circuited, for [storageExtractRefusalOf]'s reason: the
+/// widget's subscription must not depend on which refusal happens to win.
+StorageRefusal? storageRowMenuRefusalOf(
+  WidgetRef ref, {
+  required StorageGroup group,
+  required StorageDeleteRequest? request,
+  required PathEntity? extractTarget,
+}) {
+  final delete = storageDeleteRefusalOf(ref, group: group, request: request);
+  final extract = storageExtractRefusalOf(ref, group: group, target: extractTarget);
+  final refusal = request == null ? extract : (delete ?? extract);
+  if (refusal is! StorageActivityRefusal) {
+    return refusal;
+  }
+  return StorageActivityRefusal(
+    blocker: refusal.blocker,
+    message: storageActionBlockedMessage(refusal.blocker, StorageAction.any),
+  );
 }
 
 /// Directories before files, then by name, case-insensitively.
@@ -866,7 +964,7 @@ Future<List<FsListing>> _childrenOfGroup(PathInfo info, StorageGroup group) asyn
 /// drawing it empty.
 ///
 /// A row for something that is not there is worse than redundant. It carries
-/// this view's own delete, zip and copy buttons — the metadata group offers all
+/// this view's own delete, zip and copy entries — the metadata group offers all
 /// three — for a path on which none of them can do anything, while the group
 /// total on the row above it says `0 B`: one screen stating two things about the
 /// same storage. The group's own row stays either way, with its label, its
@@ -946,12 +1044,12 @@ class _GroupRow extends _TreeRow {
   final StorageGroup group;
   final StorageNodeId id;
 
-  /// The directory this group's zip button would bundle, or `null` when the
+  /// The directory this group's zip entry would bundle, or `null` when the
   /// group offers no zip. Resolved once while the rows are built, so the tile
   /// does not have to hold a [PathInfo] to ask.
   final DirectoryPath? zipTarget;
 
-  /// What this group's delete button would remove, null when it offers none.
+  /// What this group's delete entry would remove, null when it offers none.
   /// Resolved here for the same reason [zipTarget] is.
   final StorageDeleteRequest? deleteRequest;
 }
@@ -1369,22 +1467,117 @@ class _GroupTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final open = ref.watch(storageTreeExpansionProvider).contains(id);
     final totals = ref.watch(storageGroupTotalsProvider(group.id)).unwrapPrevious();
-    return InkWell(
-      onTap: () => ref.read(storageTreeExpansionProvider.notifier).toggle(id),
-      child: Padding(
-        padding: _indent(0).copyWith(top: 8, bottom: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _nameLine(theme, open: open, totals: totals),
-            _descriptionLine(theme),
-          ],
+    // A capability, not a platform, and resolved once here rather than at each
+    // of the three places that need it — the menu's entry list, the ⋮'s
+    // presence and the refusal's extract target — so they cannot disagree about
+    // whether this row has a zip.
+    final zip = ref.watch(storageZipAvailableProvider) ? zipTarget : null;
+    // Asked from the row, whose menu entry is the one that reads the answer.
+    //
+    // **Where a subscription starts decides what the user's first press meets.**
+    // `storageGroupZipTargetExistsProvider` is a `FutureProvider`, so the frame
+    // it is first watched in is its loading one; watched only from inside the
+    // zip entry, that frame is the frame the menu opens in, and the entry the
+    // user is reaching for paints dead until the answer lands — a press in that
+    // window is dropped, over a root that is there. The row is on screen before
+    // any of its three entrances can be used, so asking here is what makes the
+    // answer already there when the menu paints. Whether the zip may be started
+    // is still the entry's own question, re-asked on every frame it paints; this
+    // is the start of the subscription and not a second reading of it.
+    //
+    // `unwrapPrevious()` for the reason `storage_view_reload_test.dart` enforces
+    // over every watch of these providers: a refresh hands the previous answer
+    // back with `isLoading` set. Nothing is read off it here — the line's whole
+    // work is the subscription — but a watch whose value would be wrong to read
+    // is not a shape to leave in the file for the next reader to copy.
+    if (zip != null) {
+      ref.watch(storageGroupZipTargetExistsProvider(zip.path)).unwrapPrevious();
+    }
+    final refusal = storageRowMenuRefusalOf(ref, group: group, request: deleteRequest, extractTarget: zip);
+    // The two entries a group row's menu can hold. A group with neither has no
+    // menu, and gets the empty cell every row keeps for its slot rather than a
+    // button that opens nothing — the same distinction the slots drew between
+    // "this row has no such action" and "the action is withheld right now".
+    final hasMenu = zip != null || deleteRequest != null;
+    return Listener(
+      // The same two entrances an entry row has, added with the menu itself:
+      // one builder behind all three, so a touch screen reaches what a mouse
+      // reaches. Withheld at the entrance while [refusal] stands, which is what
+      // makes the disabled button a statement about the row and not about one
+      // control on it.
+      onPointerDown: (event) {
+        if (event.buttons != kSecondaryButton || refusal != null) {
+          return;
+        }
+        _showGroupMenu(context, ref, event.position, zip);
+      },
+      child: GestureDetector(
+        onLongPressStart: (details) {
+          if (refusal != null) {
+            return;
+          }
+          _showGroupMenu(context, ref, details.globalPosition, zip);
+        },
+        child: InkWell(
+          onTap: () => ref.read(storageTreeExpansionProvider.notifier).toggle(id),
+          child: Padding(
+            padding: _indent(0).copyWith(top: 8, bottom: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _nameLine(
+                  theme,
+                  open: open,
+                  totals: totals,
+                  menu: hasMenu
+                      ? _RowMenuSlot(
+                          buttonKey: storageRowMenuGroupKey(group.id),
+                          refusal: refusal,
+                          zipTarget: zip,
+                          onOpen: (position) => _showGroupMenu(context, ref, position, zip),
+                        )
+                      : const SizedBox(width: _actionSlotWidth),
+                ),
+                _descriptionLine(theme),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _nameLine(ThemeData theme, {required bool open, required AsyncValue<StorageAggregate> totals}) {
+  /// A group row's menu: the bundle and the removal, and nothing else.
+  ///
+  /// **Two entries where an entry row has up to six, and the missing four are
+  /// missing for one reason.** A group can resolve to more than one root — the
+  /// metadata group is `rating/` and `memo/` — so "copy this" and "open this
+  /// folder" have no single path to name, and picking one of the roots silently
+  /// is the alternative. The zip and the delete are not in that position: the
+  /// zip exists only where the group *is* one directory
+  /// ([storageGroupZipTarget]), and the delete names every root at once, which
+  /// is what a group's delete means.
+  void _showGroupMenu(BuildContext context, WidgetRef ref, Offset offset, DirectoryPath? zip) {
+    final request = deleteRequest;
+    final entries = <ContextMenuEntry>[
+      // `verifyExists`, unlike an entry row's zip: a group's root is a
+      // declaration and may not be on disk at all. See
+      // [storageGroupZipTargetExistsProvider].
+      if (zip != null) _zipMenuEntry(ref, group: group, target: zip, verifyExists: true),
+      if (request != null) _deleteMenuEntry(ref, group: group, request: request, subject: group.labelKey.tr()),
+    ];
+    if (entries.isEmpty) {
+      return;
+    }
+    _showStorageMenu(context, offset, entries);
+  }
+
+  Widget _nameLine(
+    ThemeData theme, {
+    required bool open,
+    required AsyncValue<StorageAggregate> totals,
+    required Widget menu,
+  }) {
     return Row(
       children: [
         Icon(open ? Symbols.expand_more_rounded : Symbols.chevron_right_rounded, size: 20),
@@ -1416,18 +1609,12 @@ class _GroupTile extends ConsumerWidget {
           },
         ),
         // Keeps the group row's size column over the entry rows' one, which is
-        // followed by a 128-wide timestamp a group has no counterpart for, the
-        // 8-wide gap before the action cells, and the copy cell a group row does
-        // not have (a group is not one clipboard-copyable path: two of them are
-        // not one directory at all).
-        const SizedBox(width: _valueColumnGap + _modifiedColumnWidth + 8 + _actionSlotWidth),
-        _ZipEntitySlot(target: zipTarget, group: group, verifyExists: true),
-        _DeleteSlot(
-          buttonKey: storageDeleteGroupKey(group.id),
-          group: group,
-          request: deleteRequest,
-          subject: group.labelKey.tr(),
-        ),
+        // followed by a 128-wide timestamp a group has no counterpart for and
+        // the 8-wide gap before the trailing slot. Both row kinds carry exactly
+        // one slot now, so the difference between them is only the columns a
+        // group has no value for.
+        const SizedBox(width: _valueColumnGap + _modifiedColumnWidth + 8),
+        menu,
       ],
     );
   }
@@ -1609,10 +1796,23 @@ final class _StorageMenuItem extends ContextMenuItem<void> {
     required this.label,
     required this.available,
     required ValueChanged<void> onSelected,
+    this.destructive = false,
   }) : super(onSelected: onSelected);
 
   final IconData icon;
   final String label;
+
+  /// Whether this entry destroys data, and so must not read like the entries
+  /// around it.
+  ///
+  /// The buttons these entries replaced carried `colorScheme.error` on the row
+  /// itself; folding three controls into one menu is not a reason for delete to
+  /// become indistinguishable from copy in a list the user scans in a hurry.
+  ///
+  /// A flag and not a colour: the role is resolved from the theme inside
+  /// [builder], so no call site can name one, and a second destructive entry
+  /// cannot arrive in a different red.
+  final bool destructive;
 
   /// Whether the entry may act, asked afresh for every frame the menu paints.
   ///
@@ -1643,10 +1843,21 @@ final class _StorageMenuItem extends ContextMenuItem<void> {
         final focused = menuState.focusedEntry == this;
         // The foreground `MenuItem` gives a menu entry, kept so a disabled entry
         // is the only thing that changes colour here.
-        final iconColor = Color.alphaBlend(
+        final plainIconColor = Color.alphaBlend(
           theme.colorScheme.onSurface.withValues(alpha: 0.7),
           theme.colorScheme.surface,
         );
+        // Withheld beats destructive, and deliberately: a greyed entry has to
+        // read as greyed, and an error-coloured one that cannot act would say
+        // "danger" about a press that does nothing. So the disabled colour is
+        // still the only thing that changes when `live` is false, exactly as the
+        // comment above claims -- [destructive] only ever repaints the *live*
+        // state.
+        final foreground = !live
+            ? theme.disabledColor
+            : destructive
+            ? theme.colorScheme.error
+            : null;
         return ConstrainedBox(
           constraints: const BoxConstraints.expand(height: 40),
           child: Material(
@@ -1671,7 +1882,7 @@ final class _StorageMenuItem extends ContextMenuItem<void> {
                     // Material Symbols are a variable font; bump the wght axis so
                     // the thin default strokes read clearly at the 16px menu icon
                     // size.
-                    child: Icon(icon, size: 16.0, weight: 700.0, color: live ? iconColor : theme.disabledColor),
+                    child: Icon(icon, size: 16.0, weight: 700.0, color: foreground ?? plainIconColor),
                   ),
                   const SizedBox(width: 8.0),
                   Expanded(
@@ -1679,7 +1890,7 @@ final class _StorageMenuItem extends ContextMenuItem<void> {
                       label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: live ? style : style?.copyWith(color: theme.disabledColor),
+                      style: foreground == null ? style : style?.copyWith(color: foreground),
                     ),
                   ),
                   const SizedBox(width: 8.0),
@@ -1937,13 +2148,25 @@ class _EntryTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final nodeId = id;
     final open = nodeId != null && ref.watch(storageTreeExpansionProvider).contains(nodeId);
+    final entity = listing.entity;
+    final storageGroup = storageGroupOf(group);
+    // Read once, for all three entrances. The button, the secondary press and
+    // the long press then weigh one answer instead of three readings that could
+    // come apart, and this build is what re-runs when a capture or a claim
+    // starts, so the closures below are never holding a stale one.
+    final refusal = storageRowMenuRefusalOf(
+      ref,
+      group: storageGroup,
+      request: storageRowDeleteRequest(storageGroup, entity),
+      extractTarget: entity,
+    );
     return Listener(
       // The row's right-click menu. Same shape as the record table's
       // (`data_table_widget.dart`): a `Listener` rather than a gesture detector,
       // because the row body already owns the primary tap and the two must not
       // contend for it.
       onPointerDown: (event) {
-        if (event.buttons != kSecondaryButton) {
+        if (event.buttons != kSecondaryButton || refusal != null) {
           return;
         }
         _showRowMenu(context, ref, event.position);
@@ -1961,13 +2184,24 @@ class _EntryTile extends ConsumerWidget {
         // The row's own tap is unaffected: the tap and long-press recognisers
         // settle it in the gesture arena, so a quick press still opens the
         // folder or the preview and a held one does not.
-        onLongPressStart: (details) => _showRowMenu(context, ref, details.globalPosition),
-        child: _body(context, ref, open: open, nodeId: nodeId),
+        onLongPressStart: (details) {
+          if (refusal != null) {
+            return;
+          }
+          _showRowMenu(context, ref, details.globalPosition);
+        },
+        child: _body(context, ref, open: open, nodeId: nodeId, refusal: refusal),
       ),
     );
   }
 
-  Widget _body(BuildContext context, WidgetRef ref, {required bool open, required StorageNodeId? nodeId}) {
+  Widget _body(
+    BuildContext context,
+    WidgetRef ref, {
+    required bool open,
+    required StorageNodeId? nodeId,
+    required StorageRefusal? refusal,
+  }) {
     final theme = Theme.of(context);
     final entity = listing.entity;
     return InkWell(
@@ -2029,13 +2263,17 @@ class _EntryTile extends ConsumerWidget {
               ),
             ],
             const SizedBox(width: 8),
-            _CopyEntitySlot(entity: entity, group: storageGroupOf(group)),
-            _ZipEntitySlot(target: _zipTarget(nodeId, entity), group: storageGroupOf(group)),
-            _DeleteSlot(
-              buttonKey: storageDeleteEntityKey(entity),
-              group: storageGroupOf(group),
-              request: storageRowDeleteRequest(storageGroupOf(group), entity),
-              subject: entity.name,
+            // Unconditional, unlike a group row's: every entry row has a menu.
+            // A file row always carries its save, and a directory row always
+            // carries its group's delete — the one group that offers none
+            // (`data_root_config`) resolves to a single *file*, so it has no
+            // directory row for the exception to reach. `_showRowMenu` still
+            // refuses to open an empty menu, which is where that would show.
+            _RowMenuSlot(
+              buttonKey: storageRowMenuEntityKey(entity),
+              refusal: refusal,
+              zipTarget: _zipTarget(nodeId, entity),
+              onOpen: (position) => _showRowMenu(context, ref, position),
             ),
           ],
         ),
@@ -2043,7 +2281,7 @@ class _EntryTile extends ConsumerWidget {
     );
   }
 
-  /// The folder this row's zip button would bundle, or `null` for a row that
+  /// The folder this row's zip entry would bundle, or `null` for a row that
   /// offers none.
   DirectoryPath? _zipTarget(StorageNodeId? nodeId, PathEntity entity) {
     if (nodeId == null || entity is! DirectoryPath) {
@@ -2054,16 +2292,13 @@ class _EntryTile extends ConsumerWidget {
 
   /// The row's actions as a context menu.
   ///
-  /// **Only entry rows have one.** A group row and a delegated row do not, for
-  /// the reason the group row has no copy button: a group can hold more than one
-  /// root, so there is no single path for "copy this" or "open this folder" to
-  /// name. Adding a menu there would have to pick one of the roots silently.
+  /// **Wider than a group row's, which carries the zip and the delete alone**
+  /// ([_GroupTile._showGroupMenu] says why). An entry row names exactly one
+  /// path, so "copy this" and "open this folder" have a subject here that a
+  /// group has not.
   ///
-  /// **A file row's menu is wider than its slots.** The slots are a folder's
-  /// (see the library doc), so a file row would otherwise offer delete alone,
-  /// while the two ways a file leaves the app sit on its preview. Both are
-  /// listed here as well: the menu is the surface a user reaches without first
-  /// deciding to open anything.
+  /// **A delegated row has no menu at all**, having no path and no operation of
+  /// its own: it is a link across to the screen that owns one.
   ///
   /// **"Open the folder" is the row's, not the file's.** For a directory row it
   /// opens that directory; for a file row it opens the *containing* folder and
@@ -2113,44 +2348,11 @@ class _EntryTile extends ConsumerWidget {
           available: (ref) => extractable(ref, entity),
           onSelected: (_) => ClipboardAlt.pasteEntity(ref.base, entity),
         ),
-      if (zipTarget != null)
-        _StorageMenuItem(
-          icon: Symbols.folder_zip_rounded,
-          label: 'pages.storage.actions.zip_directory'.tr(),
-          // "One archive at a time", the same rule the slot's button obeys — and
-          // beside it the registry reading that rule is not, for the reason
-          // [_ZipEntitySlot] gives: a repair or a relocation is no zip and shows
-          // up in no zip state.
-          //
-          // `holdsKind`, not the progress projection. The projection answers
-          // "where has *this one* zip got to", which needs a single hold to make
-          // sense of; what this entry needs is "is there a zip claim at all", and
-          // asking it that way carries no assumption about how many paths that
-          // claim holds. **Not the same question [StorageZipProgress.begin]
-          // asks**, which is about that notifier's own run: this reading goes
-          // `false` for the length of a leg's save dialog, when the claim is
-          // released but the run is not. That makes it a live view of what is
-          // *held* — which is what a menu entry offering to read the folder
-          // wants — and leaves refusing the press itself to `begin`, which
-          // answers `alreadyRunning`. Read and not watched, because the call beside it
-          // already subscribes to the whole registry: any claim arriving or
-          // released rebuilds this entry, and this line is re-evaluated with it.
-          available: (ref) =>
-              extractable(ref, zipTarget) && !ref.read(longReadRegistryProvider.notifier).holdsKind(LongReadKind.zip),
-          onSelected: (_) => exportDirectoryAsZip(ref.base, zipTarget, group: storageGroup),
-        ),
+      // No `verifyExists`: an entry row's target came out of an actual listing
+      // moments earlier, so its existence was already observed.
+      if (zipTarget != null) _zipMenuEntry(ref, group: storageGroup, target: zipTarget, verifyExists: false),
       if (deleteRequest != null)
-        _StorageMenuItem(
-          icon: Symbols.delete_rounded,
-          label: 'pages.storage.actions.delete'.tr(),
-          // The same refusal the row's own delete button makes. Both entrances
-          // or neither: the menu is the *only* route to a file row's delete on a
-          // touch screen, so a gate on the slot alone would be a gate a tablet
-          // walks straight past.
-          available: (ref) => storageDeleteRefusalOf(ref, group: storageGroup, request: deleteRequest) == null,
-          onSelected: (_) =>
-              showStorageDeleteConfirmation(ref, group: storageGroup, request: deleteRequest, subject: entity.name),
-        ),
+        _deleteMenuEntry(ref, group: storageGroup, request: deleteRequest, subject: entity.name),
       if (entity is FilePath && clipboardOffered)
         _StorageMenuItem(
           icon: Symbols.content_copy_rounded,
@@ -2203,160 +2405,166 @@ class _EntryTile extends ConsumerWidget {
     if (actions.isEmpty) {
       return;
     }
-    showContextMenu(
-      context,
-      contextMenu: ContextMenu(position: offset, entries: actions),
-      routeOptions: const MenuRouteOptions(
-        transitionDuration: Duration(milliseconds: 120),
-        reverseTransitionDuration: Duration(milliseconds: 120),
-      ),
-    );
+    _showStorageMenu(context, offset, actions);
   }
 }
 
-/// Addresses one directory row's copy button.
-Key storageCopyEntityKey(PathEntity entity) => ValueKey('storage-tree-copy:${entity.path}');
-
-/// The trailing action cell of an entry row: copy this directory (stage 5a).
+/// The zip entry, shared by the two row menus that offer one.
 ///
-/// **Why only directories.** A file's actions live on the row's context menu
-/// ([_EntryTile._showRowMenu]), which is now their only host: the preview
-/// dialog carried them until it was cut back to previewing alone, and a file row
-/// has no copy *slot* because the menu already reaches it without costing every
-/// row a second fixed-width cell. A directory is on the menu too, and has a slot
-/// besides, because a folder is what the slot columns were laid out for and a
-/// discoverable one-click copy is worth a column there.
-/// The row's "one row, one thing" rule (see [_EntryTile._body]) is
-/// about the row *body's* tap, which is untouched: this is a button beside it,
-/// not a second meaning for the same target.
+/// One builder rather than a copy per menu: the rule below is three readings
+/// deep, and a second hand-written copy of it is where the group row and the
+/// entry row would come to disagree about when a bundle may be started.
 ///
-/// **Why the cell exists even when it holds nothing.** The size and timestamp
-/// columns are fixed-width and right-aligned, so a slot that appeared only on
-/// some rows would shift them from row to row.
-class _CopyEntitySlot extends ConsumerWidget {
-  const _CopyEntitySlot({required this.entity, required this.group});
-
-  final PathEntity entity;
-
-  /// The group [entity] belongs to, carried for the reason [_ZipEntitySlot]
-  /// carries it: it is what says whether anything has to be out of the way while
-  /// this folder is read.
-  final StorageGroup group;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    // A capability, not a platform: a browser has no filesystem-reference
-    // clipboard at all, so no button is offered rather than one that always
-    // fails. Nothing stands in its place here and nothing does on the row's
-    // context menu either, where the file form of this action lives: an absence
-    // is the whole statement, and repeating an explanation on every directory row
-    // would be noise, not information.
-    // Read through the provider so a VM test can build the browser arrangement —
-    // `clipboardSupportsFileReferences` is a `const` and would fold this away.
-    final offered = entity is DirectoryPath && ref.watch(clipboardFileReferenceSupportProvider);
-    // Reading a folder — zipping it, copying it — needs the same exclusion its
-    // writers take; this is that rule applied to the group whose lock plan is
-    // `unlocked`. What the clipboard takes is a reference and not the
-    // bytes, so nothing is torn at this instant — but the paste that follows is
-    // the read, it happens outside this app where no gate of ours reaches it, and
-    // handing the user a folder that the scrape is still filling is the same
-    // half-written copy by a slower route.
-    // …and the other half of that sentence asked of the registry, in the same
-    // call: the paste happens outside this app, and a folder a long reader is
-    // still rewriting is the same half-written copy by the same slower route.
-    // Watched, not read, for [_DeleteSlot]'s reason — a capture or a long read
-    // starts and ends while this row is on screen, so the button has to go dead
-    // and come back on its own — and both are weighed in
-    // [storageExtractRefusalOf], which is also where their order is decided.
-    final refusal = storageExtractRefusalOf(ref, group: group, target: entity);
-    return SizedBox(
-      width: _actionSlotWidth,
-      child: offered
-          ? IconButton(
-              key: storageCopyEntityKey(entity),
-              icon: const Icon(Symbols.content_copy_rounded, size: 18),
-              tooltip: refusal?.message ?? 'pages.storage.actions.copy_directory'.tr(),
-              visualDensity: VisualDensity.compact,
-              onPressed: refusal != null ? null : () => ClipboardAlt.pasteEntity(ref.base, entity),
-            )
-          : null,
-    );
-  }
+/// "One archive at a time", the same rule the whole view obeys — and beside it
+/// the registry reading, which that rule is not: a repair or a relocation is no
+/// zip and shows up in no zip state.
+///
+/// `holdsKind`, not the progress projection. The projection answers "where has
+/// *this one* zip got to", which needs a single hold to make sense of; what this
+/// entry needs is "is there a zip claim at all", and asking it that way carries
+/// no assumption about how many paths that claim holds. **Not the same question
+/// [StorageZipProgress.begin] asks**, which is about that notifier's own run:
+/// this reading goes `false` for the length of a leg's save dialog, when the
+/// claim is released but the run is not. That makes it a live view of what is
+/// *held* — which is what a menu entry offering to read the folder wants — and
+/// leaves refusing the press itself to `begin`, which answers `alreadyRunning`.
+/// Read and not watched, because the call beside it already subscribes to the
+/// whole registry: any claim arriving or released rebuilds this entry, and this
+/// line is re-evaluated with it.
+///
+/// [verifyExists] is a **group** row's extra question and only its: a group's
+/// root is a declaration that may name nothing on disk, where an entry row's
+/// target came out of a listing. `unwrapPrevious()` for [reloadStorageTab]'s
+/// reason — after a delete the provider is dropped and riverpod hands back the
+/// previous answer, which is the root the delete just removed.
+///
+/// The answer is watched here, so it is re-read for every frame this entry
+/// paints; the *subscription* starts in the group row, which says why. An entry
+/// that were the only watcher would paint its first frame on a loading value and
+/// drop the press that opened the menu.
+_StorageMenuItem _zipMenuEntry(
+  WidgetRef ref, {
+  required StorageGroup group,
+  required DirectoryPath target,
+  required bool verifyExists,
+}) {
+  return _StorageMenuItem(
+    icon: Symbols.folder_zip_rounded,
+    label: 'pages.storage.actions.zip_directory'.tr(),
+    available: (ref) =>
+        storageExtractRefusalOf(ref, group: group, target: target) == null &&
+        !ref.read(longReadRegistryProvider.notifier).holdsKind(LongReadKind.zip) &&
+        (!verifyExists || ref.watch(storageGroupZipTargetExistsProvider(target.path)).unwrapPrevious().value == true),
+    onSelected: (_) => exportDirectoryAsZip(ref.base, target, group: group),
+  );
 }
 
-/// Width of one trailing action cell. Named because three places have to agree
-/// on it — the copy cell, the zip cell, and the group row's spacer that keeps
-/// its own zip cell over theirs.
-const double _actionSlotWidth = 40;
-
-/// Addresses one folder's zip button, group row or entry row.
-Key storageZipEntityKey(PathEntity entity) => ValueKey('storage-tree-zip:${entity.path}');
-
-/// Addresses the progress indicator that replaces that button while *this*
-/// folder is being bundled.
-Key storageZipProgressKey(PathEntity entity) => ValueKey('storage-tree-zip-progress:${entity.path}');
-
-/// The zip action of a folder row (stage 5c).
+/// The delete entry, shared by the two row menus, for [_zipMenuEntry]'s reason.
 ///
-/// **Three states, and each is a different sentence.** The folder being bundled
-/// shows a determinate indicator — progress is owed on the platform that can
-/// produce it, and a spinner that only spins would not distinguish "started" from
-/// "stuck" on a multi-gigabyte folder. Every *other* folder's button is disabled
-/// while that runs, which is the other half of the rule: one archive at a time, decided by
-/// [StorageZipProgress.begin] rather than by the buttons, so a press that beats a
-/// rebuild is refused by the same rule the disabling expresses.
+/// **The entry opens a dialog and nothing else.** Which dialog, and whether the
+/// user has to tick a box in it, is decided from [StorageGroup.deleteFriction]
+/// inside `storage_delete_action.dart`; nothing about the friction is decided
+/// here, so a row cannot offer a weaker confirmation than its group calls for.
 ///
-/// A folder that offers no zip renders an empty cell of the same width rather
-/// than nothing, for the reason [_CopyEntitySlot] states: the size and timestamp
-/// columns are fixed-width, and a cell that appeared only on some rows would
-/// shift them from row to row.
-class _ZipEntitySlot extends ConsumerWidget {
-  const _ZipEntitySlot({required this.target, required this.group, this.verifyExists = false});
+/// Only *whether* something withholds it, not which kind: the sentence
+/// [StorageRefusal] carries names no operation, so a second registered kind
+/// needs no second sentence and no switch here.
+_StorageMenuItem _deleteMenuEntry(
+  WidgetRef ref, {
+  required StorageGroup group,
+  required StorageDeleteRequest request,
+  required String subject,
+}) {
+  return _StorageMenuItem(
+    icon: Symbols.delete_rounded,
+    label: 'pages.storage.actions.delete'.tr(),
+    // The one destructive entry either menu offers, and the one the removed
+    // delete button painted in `colorScheme.error`. Declared on the shared
+    // helper, so the entry row's menu and the group row's cannot disagree about
+    // it.
+    destructive: true,
+    available: (ref) => storageDeleteRefusalOf(ref, group: group, request: request) == null,
+    onSelected: (_) => showStorageDeleteConfirmation(ref, group: group, request: request, subject: subject),
+  );
+}
 
-  /// The folder to bundle, or `null` when this row offers no zip.
-  final DirectoryPath? target;
+/// Puts one of this view's menus on screen. The timings are the view's, not each
+/// caller's, so the three menus over it open and close alike.
+void _showStorageMenu(BuildContext context, Offset offset, List<ContextMenuEntry> entries) {
+  showContextMenu(
+    context,
+    contextMenu: ContextMenu(position: offset, entries: entries),
+    routeOptions: const MenuRouteOptions(
+      transitionDuration: Duration(milliseconds: 120),
+      reverseTransitionDuration: Duration(milliseconds: 120),
+    ),
+  );
+}
 
-  /// The group [target] belongs to, which is what says who has to be out of the
-  /// way while it is read. Carried rather than re-derived from the path:
-  /// the row already knows its group, and matching a path back to a group is the
-  /// step that would have to guess for the residue bucket.
-  final StorageGroup group;
+/// Addresses one row's menu button — the ⋮ that is now every row's only
+/// trailing control.
+///
+/// Keyed by the row's path, as the buttons it replaced were, so a test names the
+/// row it means rather than the nth button on screen.
+Key storageRowMenuEntityKey(PathEntity entity) => ValueKey('storage-tree-menu:${entity.path}');
 
-  /// Whether [target] must be confirmed present before the button is offered.
-  ///
-  /// True only for a **group row**'s target, [storageGroupZipTarget] — see
-  /// [storageGroupZipTargetExistsProvider] for why that one, and only that
-  /// one, cannot be trusted to exist just because it was returned. An entry
-  /// row's target came out of an actual listing and needs no second check.
-  final bool verifyExists;
+/// Addresses one group row's menu button.
+///
+/// Keyed by the group and not by a path, as the group's delete button was
+/// before it: a group's actions can cover more than one root — the metadata
+/// group is `rating/` and `memo/` — so there is no single path that names it.
+Key storageRowMenuGroupKey(StorageGroupId id) => ValueKey('storage-tree-menu-group:${id.name}');
+
+/// The one trailing control of a row: the button that opens its menu.
+///
+/// **Disabled rather than hidden while the row is withheld, and the tooltip
+/// carries the reason.** This is the delete button's contract, inherited whole
+/// from the slot this replaced: a
+/// button that vanishes while a capture runs looks like a missing feature, one
+/// that is merely grey says nothing a general user can act on, and the row keeps
+/// its width either way. It matters more here than it did there, because this is
+/// now the row's only control — with the delete button gone, the tooltip is the
+/// one place the view still says why nothing can be done to this row, and the
+/// delete confirmation's warning no longer says it either. That is also why the
+/// sentence names no action: this one control stands for the copy, the zip, the
+/// download and the delete alike, and [storageRowMenuRefusalOf] composes it with
+/// [StorageAction.any] so that the withheld extractions are not left unmentioned
+/// by a sentence that reports only the delete.
+///
+/// **The refusal is resolved by the row, not here.** The button is one of three
+/// entrances and the other two are gestures on the row body, so the answer has
+/// to be one reading shared between them; a second reading taken in this widget
+/// would be a second place for the gate to be got wrong.
+///
+/// **The zip's progress ring lives here**, where the zip button used to draw
+/// it. Progress is owed on the platform that can produce it, and a determinate
+/// ring is what distinguishes "started" from "stuck" on a multi-gigabyte folder;
+/// with the zip button gone the ring would otherwise have had nowhere to be. It
+/// takes the slot rather than sitting beside it because the two never want the
+/// space at once: a zip of this folder claims its path, so the row is withheld
+/// for the length of the run and the button it replaces would be dead anyway.
+class _RowMenuSlot extends ConsumerWidget {
+  const _RowMenuSlot({required this.buttonKey, required this.refusal, required this.zipTarget, required this.onOpen});
+
+  final Key buttonKey;
+
+  /// Why this row's menu may not be opened right now, or null when it may.
+  /// Resolved by the row through [storageRowMenuRefusalOf].
+  final StorageRefusal? refusal;
+
+  /// The folder this row would bundle, or null. Read for the progress ring
+  /// alone — whether the zip may be *started* is the menu entry's question.
+  final DirectoryPath? zipTarget;
+
+  /// Opens the row's menu at the given global position.
+  final void Function(Offset position) onOpen;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final directory = target;
-    // A capability, not a platform: both builds can zip today, and a build that
-    // could not is not shown an action that cannot run. Read through the provider
-    // so a VM test can build both arrangements — `kIsWeb` would fold one away.
-    if (directory == null || !ref.watch(storageZipAvailableProvider)) {
-      return const SizedBox(width: _actionSlotWidth);
-    }
-    // Asked before anything else so a group row whose root does not exist yet
-    // renders a disabled button on the very first build rather than flashing
-    // enabled while [storageGroupZipTargetExistsProvider] resolves. `.value`'s
-    // `null` (still loading, or the check itself failed) is treated as "not
-    // confirmed", not as "confirmed absent": either answer withholds the
-    // button, and only a resolved `true` offers it.
-    //
-    // `unwrapPrevious()` for [reloadStorageTab]'s reason, which applies here in
-    // its sharpest form: after a delete this provider is dropped and riverpod
-    // hands the recomputation back carrying the *previous* answer, so without it
-    // the button would go on offering itself over the root the delete just
-    // removed for the whole length of the re-check.
-    final present =
-        !verifyExists || ref.watch(storageGroupZipTargetExistsProvider(directory.path)).unwrapPrevious().value == true;
+    final directory = zipTarget;
     final running = ref.watch(storageZipProgressProvider);
-    if (running != null && running.directoryPath == directory.path) {
-      return SizedBox(
-        width: _actionSlotWidth,
+    if (directory != null && running != null && running.directoryPath == directory.path) {
+      return _cell(
         child: Center(
           child: SizedBox(
             width: 18,
@@ -2370,121 +2578,71 @@ class _ZipEntitySlot extends ConsumerWidget {
         ),
       );
     }
-    // The rule that reading needs the same lock a write does names zipping
-    // explicitly. For every group with a lock it is honoured inside
-    // `runUnderStorageExclusion`; for the one a capture stages into there is no
-    // lock to take, and a bundle built while the scrape writes is an archive that
-    // looks whole until it is opened.
-    // …and the same question of the registry, in the same call, which [running]
-    // above is not a substitute for: that is the zip's own projection — "one
-    // archive at a time", and which folder this one is on — while this asks
-    // whether *any* long reader is holding the folder about to be bundled. An
-    // archive move, a repair or a relocation rewrites the very bytes the archive
-    // would capture, and none of them is a zip, so none of them shows up in
-    // [storageZipProgressProvider].
-    final refusal = storageExtractRefusalOf(ref, group: group, target: directory);
-    return SizedBox(
-      width: _actionSlotWidth,
-      child: IconButton(
-        key: storageZipEntityKey(directory),
-        icon: const Icon(Symbols.folder_zip_rounded, size: 18),
-        // A zip running elsewhere is deliberately *not* a third refusal: it
-        // disables the button below without a sentence of its own, because the
-        // folder it is bundling wears the progress ring that says so. That is
-        // why [running] stays out of [StorageRefusal] and is weighed here.
-        tooltip: refusal?.message ?? 'pages.storage.actions.zip_directory'.tr(),
-        visualDensity: VisualDensity.compact,
-        onPressed: running != null || refusal != null || !present
-            ? null
-            : () => exportDirectoryAsZip(ref.base, directory, group: group),
-      ),
-    );
-  }
-}
-
-/// Addresses one entry row's delete button.
-Key storageDeleteEntityKey(PathEntity entity) => ValueKey('storage-tree-delete:${entity.path}');
-
-/// Addresses one group row's delete button.
-///
-/// Keyed by the group and not by a path because a group's delete can cover more
-/// than one root — metadata is `rating/` and `memo/` — so there is no single path
-/// that names the button.
-Key storageDeleteGroupKey(StorageGroupId id) => ValueKey('storage-tree-delete-group:${id.name}');
-
-/// The delete action of a row, group or entry (stage 6b).
-///
-/// **The button opens a dialog and nothing else.** Which dialog, and whether the
-/// user has to tick a box in it, is decided from
-/// [StorageGroup.deleteFriction] inside `storage_delete_action.dart`; nothing
-/// about the friction is decided here, so a row cannot offer a weaker
-/// confirmation than its group calls for.
-///
-/// A row that offers no delete renders an empty cell of the same width, for the
-/// reason [_CopyEntitySlot] states: the size and timestamp columns are
-/// fixed-width, and a cell that appeared only on some rows would shift them from
-/// row to row.
-///
-/// The error colour is what a delete control is required to carry, and it is a
-/// theme role rather than a red: the
-/// same role `WarningCard` and the confirm button use, so the whole path from the
-/// button to the confirmation reads as one thing.
-class _DeleteSlot extends ConsumerWidget {
-  const _DeleteSlot({required this.buttonKey, required this.group, required this.request, required this.subject});
-
-  final Key buttonKey;
-  final StorageGroup group;
-
-  /// What the button would remove, or null when this row offers no delete.
-  ///
-  /// Nullable rather than an empty list: the settings group removes stores and
-  /// names no path at all, so "there is nothing to delete" and "what
-  /// this deletes is not a path" were the same value while the slot took a list —
-  /// and the settings row lost its button to that collision.
-  final StorageDeleteRequest? request;
-  final String subject;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final request = this.request;
-    if (request == null) {
-      return const SizedBox(width: _actionSlotWidth);
-    }
-    // A running capture withholds the delete. Disabled rather than hidden, and
-    // the tooltip carries the reason:
-    // a button that vanishes while a capture runs looks like a missing feature,
-    // and one that is merely grey says nothing a general user can act on. The
-    // row keeps its width either way, as the doc above requires.
-    // …and the registry in the same call, watched for the same reason: a long
-    // read starts and ends while this row is on screen, so the button has to go
-    // dead and come back on its own.
-    //
-    // The registry and not `storageZipProgressProvider`: this asks "is *some*
-    // long reader holding what I would delete", and reading the zip's own state
-    // to answer it is a copy of the claim that the long readers are the zips.
-    // The zip slot beside it does read that state, because its question really
-    // is about the zip — its own ring and its own "one archive at a time".
-    //
-    // Only *whether* something holds it, not which kind: the sentence
-    // [StorageRefusal] carries names no operation, so a second registered kind
-    // needs no second sentence and no switch here. The kind is still on the
-    // refusal for a surface that wants to say more than this one does.
-    final refusal = storageDeleteRefusalOf(ref, group: group, request: request);
-    return SizedBox(
-      width: _actionSlotWidth,
+    final blocked = refusal;
+    return _cell(
       child: IconButton(
         key: buttonKey,
-        icon: const Icon(Symbols.delete_rounded, size: 18),
-        color: Theme.of(context).colorScheme.error,
-        tooltip: refusal?.message ?? 'pages.storage.actions.delete'.tr(),
+        icon: const Icon(Symbols.more_vert_rounded, size: 18),
+        // No sentence when the row is free: the menu names its own entries the
+        // moment it opens, and a label repeating "actions" over every row would
+        // say nothing this one does not. The refusal is the only thing the
+        // button has to say for itself, and it is the thing nothing else says.
+        tooltip: blocked?.message,
         visualDensity: VisualDensity.compact,
-        onPressed: refusal != null
-            ? null
-            : () => showStorageDeleteConfirmation(ref, group: group, request: request, subject: subject),
+        onPressed: blocked != null ? null : () => _open(context),
       ),
     );
   }
+
+  /// The row's trailing cell, of a fixed width and taking every press that lands
+  /// inside it.
+  ///
+  /// **A press here is an interaction with the slot and never with the row under
+  /// it,** which is [TapSink]'s job and is documented there. Neither of the two
+  /// states above manages it alone: an `IconButton` given a null `onPressed`
+  /// enters no tap recogniser at all, and a progress ring is not a control, so in
+  /// both of them the press would fall through to the row's own `InkWell` — a
+  /// withheld ⋮ would collapse the group it sits on, or open a file's preview,
+  /// which is the opposite of what a control the view has deliberately deadened
+  /// is saying. When the button *is* live its own recogniser wins, and the
+  /// enabled press is unchanged.
+  ///
+  /// The long press is untouched by design: [TapSink] takes taps only, and a
+  /// long press accepts on its own timer rather than by arena order, so a row
+  /// whose menu is free still opens it from a press held over the slot, exactly
+  /// as from anywhere else on the row.
+  Widget _cell({required Widget child}) {
+    return SizedBox(
+      width: _actionSlotWidth,
+      child: TapSink(child: child),
+    );
+  }
+
+  /// Opens the menu under the button, in global coordinates.
+  ///
+  /// The two gesture entrances carry a pointer position; this one has none, so
+  /// it takes the slot's own bottom-left corner — the menu then hangs off the
+  /// control the user pressed instead of wherever the pointer last was.
+  void _open(BuildContext context) {
+    final render = context.findRenderObject();
+    if (render is! RenderBox) {
+      return;
+    }
+    onOpen(render.localToGlobal(Offset(0, render.size.height)));
+  }
 }
+
+/// Width of the one trailing cell every row carries. Named because two places
+/// have to agree on it — [_RowMenuSlot] and the group row's spacer that keeps
+/// its own slot over the entry rows'.
+const double _actionSlotWidth = 40;
+
+/// Addresses the progress indicator shown while *this* folder is being bundled.
+///
+/// Still live, and still the only thing in the trailing slot while a zip runs —
+/// it took the row's menu button's place when it used to take the zip button's.
+/// See [_RowMenuSlot].
+Key storageZipProgressKey(PathEntity entity) => ValueKey('storage-tree-zip-progress:${entity.path}');
 
 /// Addresses one entry row's size cell, file or directory.
 ///
@@ -2573,7 +2731,7 @@ const double _modifiedColumnWidth = 128;
 /// *file*'s mtime — a value inferred from the contents, not one the OS holds.
 /// The branch is written on the
 /// value rather than on the platform (`ownModified == null`) for the reason
-/// `_CopyEntitySlot` states about the clipboard: it is a capability, the two
+/// [_EntryTile._showRowMenu] states about the clipboard: it is a capability, the two
 /// platforms differ in it only because one lacks it, and a Windows listing that
 /// loses the stat to a race is better served by the derived value than by a dash.
 /// An empty directory has no descendant to take a timestamp from, so

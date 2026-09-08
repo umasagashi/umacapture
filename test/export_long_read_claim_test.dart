@@ -60,6 +60,7 @@ import 'package:umacapture/src/gui/toast.dart';
 import 'support/localization.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 import 'support/web_like_fs_backend.dart';
 
 late Directory _tempRoot;
@@ -211,8 +212,6 @@ bool _confirmLive(WidgetTester tester) {
   final button = tester.widget<FilledButton>(_confirm);
   return button.onLongPress != null && button.onPressed != null;
 }
-
-bool _buttonEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
 
 /// Collects every toast raised while [container] is alive.
 ///
@@ -470,7 +469,12 @@ void main() {
       expect(_confirmLive(tester), isTrue, reason: 'withheld for the length of the export, not of the session');
     });
 
-    testWidgets('ストレージ管理: the row delete goes dead while the export holds the folder', (tester) async {
+    // The row's delete is now one entry of the row's menu rather than a button of
+    // its own, so the claim moved up one level — the export's hold closes the
+    // menu's ⋮, and with it all three entrances. That the control still leads to
+    // a delete is asserted at the end, once the claim is released: with it in
+    // force no entrance opens, so there is no menu to read.
+    testWidgets('ストレージ管理: the row s menu goes dead while the export holds the folder', (tester) async {
       final records = [_seedRecord('a'), _seedRecord('b')];
       final pinned = _PinnedGate();
       final container = _container(pinned, records);
@@ -481,16 +485,19 @@ void main() {
       await pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
       await _settle(tester);
 
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(_activeDir / 'a')), isTrue);
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(_activeDir / 'b')), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'a')), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'b')), isTrue);
 
       final exporting = _exporter(container, const {'a'}).export();
       await pinned.reached.future;
       await tester.pump();
 
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(_activeDir / 'a')), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'a')), isFalse);
+      // The reason reaches the user, which with the delete button gone is the
+      // whole of what the view says about a row it will not act on.
+      expect(storageRowMenuTooltip(tester, storageRowMenuEntityKey(_activeDir / 'a')), longReadBusyMessage());
       expect(
-        _buttonEnabled(tester, storageDeleteEntityKey(_activeDir / 'b')),
+        storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'b')),
         isTrue,
         reason: 'a record the export is not reading takes a different lock; refusing it would refuse nothing',
       );
@@ -498,7 +505,11 @@ void main() {
       pinned.release.complete();
       await exporting;
       await tester.pump();
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(_activeDir / 'a')), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(_activeDir / 'a')), isTrue);
+
+      // What the returned control leads to is still the delete.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(_activeDir / 'a'));
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('delete')), isTrue);
     });
   });
 

@@ -52,6 +52,7 @@ import 'package:material_symbols_icons/symbols.dart';
 import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/byte_size_format.dart';
+import 'package:umacapture/src/core/storage/long_read_registry.dart';
 import 'package:umacapture/src/core/storage/settings_store_delete.dart';
 import 'package:umacapture/src/core/storage/storage_delete_report.dart';
 import 'package:umacapture/src/core/storage/storage_group.dart';
@@ -65,6 +66,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'support/hive.dart';
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _root;
 late PathInfo _info;
@@ -379,11 +381,46 @@ void main() {
       expect(find.text('a.bin'), findsOneWidget);
     });
 
+    // The same tap, on the row's *withheld* ⋮, which must reach nothing.
+    //
+    // A disabled `IconButton` enters no tap recogniser, so unless the slot around
+    // it takes the press itself the press lands on the row's own `InkWell` — and
+    // the user, told the row is withheld, is handed the preview instead of
+    // nothing. Asserted here and not in `storage_row_menu_gate_test.dart` because
+    // this is the arrangement in which a preview can be *seen* to open: it is
+    // `CardDialog`'s, and the case above is its positive control, one tap away in
+    // the same file.
+    testWidgets('pressing the withheld ⋮ on a file row opens no preview', (tester) async {
+      final container = _container();
+      final file = await openWithAFile(tester, container);
+      container.read(longReadRegistryProvider.notifier).claimUntilReleased(kind: LongReadKind.scan, paths: [file]);
+      await _settle(tester);
+      expect(
+        storageRowMenuEnabled(tester, storageRowMenuEntityKey(file)),
+        isFalse,
+        reason: 'the claim is what makes this a press on a dead control',
+      );
+
+      await tester.tap(find.byKey(storageRowMenuEntityKey(file)), warnIfMissed: false);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.byType(StorageFilePreviewDialog),
+        findsNothing,
+        reason: 'the press fell through the withheld button to the row and opened the preview',
+      );
+    });
+
     testWidgets('a delete confirmation is opened over the tree, and cancelling leaves the tree up', (tester) async {
       final container = _container();
       final file = await openWithAFile(tester, container);
 
-      await tester.tap(find.byKey(storageDeleteEntityKey(file)));
+      // Through the row's menu, which is where the delete lives now that the row
+      // carries one ⋮ instead of three buttons. What is under test is unchanged:
+      // where the confirmation lands, not how it was reached.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(file));
+      await tester.tap(find.text(storageActionLabel('delete')));
       await tester.pump();
       await tester.pump();
 
@@ -463,7 +500,8 @@ void main() {
       await _open(tester, container);
       await _settle(tester);
 
-      await tester.tap(find.byKey(storageDeleteGroupKey(StorageGroupId.settings)));
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.settings));
+      await tester.tap(find.text(storageActionLabel('delete')));
       await tester.pump();
       await tester.pump();
       expect(find.byType(StorageDeleteConfirmDialog), findsOneWidget);

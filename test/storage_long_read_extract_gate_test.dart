@@ -41,7 +41,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_context_menu/flutter_context_menu.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:umacapture/src/core/clipboard_alt.dart';
@@ -60,6 +59,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -132,26 +132,12 @@ Future<void> _settle(WidgetTester tester) async {
   }
 }
 
-bool _iconEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
+/// The menu entry's own `enabled`, read through the shared helper: the package's
+/// wrapper is not exported, so it is matched by the name its runtime type
+/// reports, while `ContextMenuItem` — which declares `enabled` — is.
+bool _entryEnabled(WidgetTester tester, String label) => storageMenuEntryEnabled(tester, label);
 
-/// The menu entry labelled [label], read the way `storage_tree_context_menu_test`
-/// reads one: the package's wrapper is not exported, so it is matched by the name
-/// its runtime type reports, while `ContextMenuItem` — which declares `enabled` —
-/// is, so nothing about `enabled` comes back through `dynamic`.
-ContextMenuItem _menuEntry(WidgetTester tester, String label) {
-  final matches = tester.allWidgets
-      .where((widget) => widget.runtimeType.toString().startsWith('MenuEntryWidget'))
-      .map((widget) => (widget as dynamic).entry)
-      .whereType<ContextMenuItem>()
-      .where((item) => (item as dynamic).label == label)
-      .toList();
-  expect(matches, hasLength(1), reason: 'expected exactly one menu entry labelled "$label"');
-  return matches.single;
-}
-
-bool _entryEnabled(WidgetTester tester, String label) => _menuEntry(tester, label).enabled;
-
-String _label(String action) => appSentenceAt('pages.storage.actions.$action');
+String _label(String action) => storageActionLabel(action);
 
 Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) async {
   tester.view.physicalSize = const Size(1000, 2400);
@@ -225,20 +211,27 @@ void main() {
     }
   });
 
-  group('the row s copy and zip buttons', () {
-    testWidgets('a long reader holding a folder withholds both of that row s buttons', (tester) async {
+  // The copy and the zip were buttons standing on the row; they are now entries
+  // of the row's menu, and a long reader holding the row's paths closes the ⋮
+  // that opens it. So a held row is read one level up — no entrance opens, so
+  // neither action is reachable — and *which* actions the row offers is read on
+  // the menu of a row nothing is holding.
+  group('the row s copy and zip', () {
+    testWidgets('a long reader holding a folder withholds that row s whole menu', (tester) async {
       final held = _seedRecord('recA');
       final free = _seedRecord('recB');
       final container = _container();
       _claim(container, [held]);
       await _pumpTree(tester, container);
 
-      expect(_iconEnabled(tester, storageCopyEntityKey(held)), isFalse);
-      expect(_iconEnabled(tester, storageZipEntityKey(held)), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(held)), isFalse);
       // The control that separates "held" from "always dead", in the same frame
-      // and with the same claim live.
-      expect(_iconEnabled(tester, storageCopyEntityKey(free)), isTrue);
-      expect(_iconEnabled(tester, storageZipEntityKey(free)), isTrue);
+      // and with the same claim live — and the two actions this case names are
+      // read on it, so "withheld" above names things the row really has.
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(free)), isTrue);
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(free));
+      expect(storageMenuEntryEnabled(tester, _label('copy_directory')), isTrue);
+      expect(storageMenuEntryEnabled(tester, _label('zip_directory')), isTrue);
     });
 
     testWidgets('the containment is asked both ways round, so the group above is withheld too', (tester) async {
@@ -249,18 +242,18 @@ void main() {
 
       // The group row's own zip bundles `active/` whole, which contains the held
       // record: a gate that compared paths for equality would leave it live.
-      expect(_iconEnabled(tester, storageZipEntityKey(_activeDir)), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords)), isFalse);
     });
 
-    testWidgets('the withheld buttons say why, in the app s one long-read sentence', (tester) async {
+    testWidgets('the withheld row says why, in the app s one long-read sentence', (tester) async {
       final held = _seedRecord('recA');
       final container = _container();
       _claim(container, [held]);
       await _pumpTree(tester, container);
 
       final sentence = longReadBusyMessage();
-      await _hover(tester, storageCopyEntityKey(held));
-      expect(find.text(sentence), findsOneWidget, reason: 'a dead copy button explained itself to nobody');
+      await _hover(tester, storageRowMenuEntityKey(held));
+      expect(find.text(sentence), findsOneWidget, reason: 'a dead control explained itself to nobody');
       // It resolved, so what was found is a sentence and not a raw key rendered as
       // itself. This case used to assert that the sentence carried
       // `pages.storage.blocked.verb.extract`'s 「取り出せません」 as well; the merge
@@ -269,39 +262,55 @@ void main() {
       expect(sentence, appSentenceAt(longReadBusyKey));
     });
 
-    testWidgets('the buttons come back on when the claim is released', (tester) async {
+    testWidgets('the row comes back on when the claim is released', (tester) async {
       final held = _seedRecord('recA');
       final container = _container();
       final token = _claim(container, [held]);
       await _pumpTree(tester, container);
-      expect(_iconEnabled(tester, storageZipEntityKey(held)), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(held)), isFalse);
 
       container.read(longReadRegistryProvider.notifier).release(token);
       await _settle(tester);
 
-      expect(_iconEnabled(tester, storageCopyEntityKey(held)), isTrue);
-      expect(_iconEnabled(tester, storageZipEntityKey(held)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(held)), isTrue);
+      // Both of the two actions come back, not merely the entrance to them.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(held));
+      expect(storageMenuEntryEnabled(tester, _label('copy_directory')), isTrue);
+      expect(storageMenuEntryEnabled(tester, _label('zip_directory')), isTrue);
     });
 
-    testWidgets('with no long reader at all the same buttons are live', (tester) async {
+    testWidgets('with no long reader at all the same entries are live', (tester) async {
       final free = _seedRecord('recA');
       final container = _container();
       await _pumpTree(tester, container);
 
-      expect(_iconEnabled(tester, storageCopyEntityKey(free)), isTrue);
-      expect(_iconEnabled(tester, storageZipEntityKey(free)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(free)), isTrue);
+      expect(storageRowMenuTooltip(tester, storageRowMenuEntityKey(free)), isNull);
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(free));
+      expect(storageMenuEntryEnabled(tester, _label('copy_directory')), isTrue);
+      expect(storageMenuEntryEnabled(tester, _label('zip_directory')), isTrue);
       expect(find.text(longReadBusyMessage()), findsNothing);
     });
   });
 
   group('the row menu, which on a touch screen is the only entrance', () {
-    testWidgets('a held folder s copy and zip entries are withheld', (tester) async {
+    // **The claim now arrives after the menu is open, where this case used to
+    // register it first.** A row already held opens no menu at all — the group
+    // above asserts exactly that — so the entries' own `enabled` is only
+    // observable from this ordering. It is also the ordering these entries exist
+    // for: none of the claims in this file is started by the user, so one
+    // beginning under an open menu is the ordinary case and not the exotic one.
+    testWidgets('a folder s copy and zip entries are withheld by a claim that arrives', (tester) async {
       final held = _seedRecord('recA');
       final container = _container();
-      _claim(container, [held]);
       await _pumpTree(tester, container);
 
       await _secondaryPress(tester, find.text('recA'));
+      expect(_entryEnabled(tester, _label('copy_directory')), isTrue, reason: 'the entries have to start live');
+      expect(_entryEnabled(tester, _label('zip_directory')), isTrue);
+
+      _claim(container, [held]);
+      await _settle(tester);
 
       expect(_entryEnabled(tester, _label('copy_directory')), isFalse);
       expect(_entryEnabled(tester, _label('zip_directory')), isFalse);
@@ -324,14 +333,20 @@ void main() {
       expect(free.path, isNot(held.path));
     });
 
-    testWidgets('a file inside a held folder can be neither copied nor saved out', (tester) async {
+    // The same reordering as the case above, for the same reason, on the file
+    // row: the containment question is the one under test here, and it is asked
+    // afresh on every frame the entry paints.
+    testWidgets('a file inside a folder can be neither copied nor saved out once it is held', (tester) async {
       final held = _seedRecord('recA');
       final container = _container();
-      _claim(container, [held]);
       await _pumpTree(tester, container);
       await _expand(tester, container, held);
 
       await _secondaryPress(tester, find.text('record.json'));
+      expect(_entryEnabled(tester, _label('download_file')), isTrue, reason: 'the entry has to start live');
+
+      _claim(container, [held]);
+      await _settle(tester);
 
       expect(_entryEnabled(tester, _label('copy_file')), isFalse);
       expect(_entryEnabled(tester, _label('download_file')), isFalse);
@@ -492,9 +507,17 @@ void main() {
       // The half that did *not* merge, asserted here so that "the extract verb is
       // no longer in the long-read sentence" reads as a decision rather than as a
       // key nobody noticed had died. `pages.storage.blocked.verb.extract` is still
-      // shipped, still composed by `storageActionBlockedMessage`, and still what a
-      // capture tells the user — a capture is something they started and can stop,
-      // so its sentence names the action and the remedy.
+      // shipped and still composed by `storageActionBlockedMessage` — a capture is
+      // something the user started and can stop, so its sentence names the action
+      // and the remedy.
+      //
+      // **Which surface carries it is asked elsewhere, and the answer is now
+      // none.** A row's ⋮ covers extractions and a delete together, so
+      // `storageRowMenuRefusalOf` composes its sentence with `StorageAction.any`
+      // and no row carries this verb whatever it offers. The key is kept for the
+      // composition's sake, and `storageExtractRefusalOf`'s doc says why;
+      // `storage_row_menu_gate_test.dart` holds the contract that the row says
+      // something neutral instead. This case holds only the composition.
       final capture = storageActionBlockedMessage(StorageActionBlocker.capturing, StorageAction.extract);
       expect(capture, contains(appSentenceAt('pages.storage.blocked.verb.extract')));
       expect(capture, isNot(longReadBusyMessage()));
@@ -517,18 +540,22 @@ void main() {
   // naming that one first would answer "why is this dead?" with an instruction
   // nobody can follow while a followable one was available.
   group('when a capture and a long reader are both in force', () {
-    testWidgets('an extract control names the capture, which is the one that can be stopped', (tester) async {
+    // **The verb this reads changed with the row's control.** The row carried a
+    // zip button and a delete button, each naming its own action; it carries one
+    // ⋮ now, which withholds both at once, so `storageRowMenuRefusalOf` composes
+    // the sentence with `StorageAction.any` and it ends in
+    // `pages.storage.blocked.verb.any` where this case used to read
+    // `…verb.extract`. What is under test is unchanged: which of the two
+    // refusals in force the user is told about, and it is still the capture.
+    testWidgets('a withheld row names the capture, which is the one that can be stopped', (tester) async {
       final held = _seedRecord('recA');
       final container = _container(capturing: true);
       _claim(container, [held]);
       await _pumpTree(tester, container);
 
-      expect(_iconEnabled(tester, storageZipEntityKey(held)), isFalse);
-      await _hover(tester, storageZipEntityKey(held));
-      expect(
-        find.text(storageActionBlockedMessage(StorageActionBlocker.capturing, StorageAction.extract)),
-        findsOneWidget,
-      );
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(held)), isFalse);
+      await _hover(tester, storageRowMenuEntityKey(held));
+      expect(find.text(storageActionBlockedMessage(StorageActionBlocker.capturing, StorageAction.any)), findsOneWidget);
       expect(
         find.text(longReadBusyMessage()),
         findsNothing,

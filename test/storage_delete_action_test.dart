@@ -63,6 +63,7 @@ import 'package:umacapture/src/preference/storage_box.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 import 'support/web_like_fs_backend.dart';
 
 /// Delegates to the io backend but refuses to delete the paths [refuse] selects.
@@ -907,7 +908,13 @@ void main() {
       expect(storageGroups.where((group) => !storageGroupOffersDelete(group)), isNotEmpty);
     });
 
-    testWidgets('the row buttons are on the tree, and absent where the group refuses', (tester) async {
+    // The delete used to be a button of its own on each row; it is now an entry
+    // of the row's menu. So "the row has a delete" is read in two steps — the row
+    // carries a ⋮ at all, and that menu lists the delete — and "the group refuses
+    // one" is read as a row with no ⋮, which is the empty cell a row keeps when
+    // it has no menu to open. The menus are opened one at a time: two open at
+    // once would make every label ambiguous.
+    testWidgets('the row deletes are on the tree, and absent where the group refuses', (tester) async {
       final file = _seed('documents/temp/scratch.bin');
       _seed('support/data_root.json');
       tester.view.physicalSize = const Size(1000, 2400);
@@ -922,18 +929,32 @@ void main() {
       await pumpWithContainer(tester, container, const MaterialApp(home: Scaffold(body: StorageTreeView())));
       await _settle(tester);
 
+      // Absent: `data_root.json` offers no delete of its own -- it delegates to
+      // the settings page's reset -- and no zip either, so its group row has
+      // nothing to put in a menu and carries no ⋮ at all. Asserted beside the
+      // three below, so a key scheme that matched nothing would fail those.
+      expect(find.byKey(storageRowMenuGroupKey(StorageGroupId.dataRootConfig)), findsNothing);
+
       // Present: the temp group's own row, and the file row inside it.
-      expect(find.byKey(storageDeleteGroupKey(StorageGroupId.temp)), findsOneWidget);
-      expect(find.byKey(storageDeleteEntityKey(file)), findsOneWidget);
-      // Present: the settings group, whose button removes stores and no path at
+      expect(find.byKey(storageRowMenuGroupKey(StorageGroupId.temp)), findsOneWidget);
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.temp));
+      expect(find.text(storageActionLabel('delete')), findsOneWidget, reason: 'the temp group row');
+      await dismissStorageMenu(tester);
+
+      expect(find.byKey(storageRowMenuEntityKey(file)), findsOneWidget);
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(file));
+      expect(find.text(storageActionLabel('delete')), findsOneWidget, reason: 'the file row inside temp');
+      await dismissStorageMenu(tester);
+
+      // Present: the settings group, whose delete removes stores and no path at
       // all. It is the whole of stage 6e's wiring seen end to end -- the
-      // resolver, the slot and the key -- and it was absent before, because the
-      // slot could not tell "deletes no path" from "deletes nothing".
-      expect(find.byKey(storageDeleteGroupKey(StorageGroupId.settings)), findsOneWidget);
-      // Absent: `data_root.json` offers no delete of its own -- it delegates to the
-      // settings page's reset. Asserted beside the two
-      // above so a key scheme that matched nothing at all would fail those.
-      expect(find.byKey(storageDeleteGroupKey(StorageGroupId.dataRootConfig)), findsNothing);
+      // resolver, the entry and the key -- and it was absent before, because the
+      // control could not tell "deletes no path" from "deletes nothing". The
+      // settings group offers no zip, so its ⋮ exists *because* of the delete.
+      expect(find.byKey(storageRowMenuGroupKey(StorageGroupId.settings)), findsOneWidget);
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.settings));
+      expect(find.text(storageActionLabel('delete')), findsOneWidget, reason: 'the settings group row');
+      expect(find.text(storageActionLabel('zip_directory')), findsNothing);
     });
   });
 

@@ -48,6 +48,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -76,7 +77,16 @@ FilePath _seedIn(DirectoryPath directory, String name) {
   return path;
 }
 
+/// The notifier the last [_container] handed to `videoImportListenableProvider`.
+///
+/// Exposed so a test can start an import **while the view is already up**, which
+/// is the only activity blocker this suite can turn on mid-test: the capture half
+/// is a value override and is fixed for the life of the container. It is also
+/// how the app itself drives one, so nothing about the arrangement is invented.
+late ValueNotifier<VideoImportState> _importNotifier;
+
 ProviderContainer _container({bool capturing = false, VideoImportState importing = VideoImportState.idle}) {
+  _importNotifier = ValueNotifier(importing);
   final container = ProviderContainer(
     overrides: [
       pathInfoProvider.overrideWithValue(_layout),
@@ -84,7 +94,7 @@ ProviderContainer _container({bool capturing = false, VideoImportState importing
       // The two halves are overridden below `captureActivityProvider`, so the
       // resolution under test is the shipped one.
       capturingStateProvider.overrideWithValue(capturing),
-      videoImportListenableProvider.overrideWithValue(ValueNotifier(importing)),
+      videoImportListenableProvider.overrideWithValue(_importNotifier),
       // The copy button is absent on a build with no file clipboard, and "absent"
       // and "disabled" are the two answers this suite has to tell apart.
       clipboardFileReferenceSupportProvider.overrideWithValue(true),
@@ -109,8 +119,6 @@ Future<void> _settle(WidgetTester tester) async {
     await tester.pump();
   }
 }
-
-bool _iconEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
 
 Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) async {
   tester.view.physicalSize = const Size(1000, 2400);
@@ -150,6 +158,10 @@ void main() {
     }
   });
 
+  // The zip and the copy were buttons standing on the row; they are now entries
+  // of the row's menu, and the gate closes the ⋮ that opens it. So a withheld row
+  // is read one level up — no entrance opens — and what the row *offers* is read
+  // on the menu of a row nothing is blocking.
   group('the tree row', () {
     for (final entry in _busy.entries) {
       testWidgets('temp cannot be zipped or copied while ${entry.key} runs', (tester) async {
@@ -164,50 +176,71 @@ void main() {
         final container = _container(capturing: entry.value.capturing, importing: entry.value.importing);
         await _pumpTree(tester, container);
 
-        expect(_iconEnabled(tester, storageZipEntityKey(temp)), isFalse);
-        expect(_iconEnabled(tester, storageZipEntityKey(session)), isFalse);
-        expect(_iconEnabled(tester, storageCopyEntityKey(session)), isFalse);
+        expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.temp)), isFalse);
+        expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(session)), isFalse);
         // The control that separates "blocked because something is running" from
-        // "blocked always": a group nothing stages into keeps its zip in the very
-        // same frame.
-        expect(_iconEnabled(tester, storageZipEntityKey(modules)), isTrue);
+        // "blocked always": a group nothing stages into keeps its control in the
+        // very same frame, and the zip is still on the menu behind it.
+        expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.modules)), isTrue);
+        expect(modules.path, isNot(temp.path));
 
-        // The tooltip is the only surface the reason has while the button is dead,
-        // so it is read as painted text after a real hover rather than as a string
-        // this test also supplied to the widget.
-        final reason = storageActionBlockedMessage(entry.value.blocker, StorageAction.extract);
-        final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-        await gesture.addPointer(location: Offset.zero);
-        addTearDown(gesture.removePointer);
-        await gesture.moveTo(tester.getCenter(find.byKey(storageZipEntityKey(temp))));
-        await tester.pump();
-        await tester.pump(const Duration(seconds: 2));
-        expect(find.text(reason), findsOneWidget, reason: 'a dead zip button explained itself to nobody');
-        await gesture.moveTo(Offset.zero);
-        await tester.pump(const Duration(seconds: 2));
+        // The tooltip is the only surface the reason has while the control is
+        // dead, so it is read as painted text after a real hover rather than as a
+        // string this test also supplied to the widget.
+        //
+        // **`StorageAction.any`, where this case used to read
+        // `StorageAction.extract`.** The ⋮ is one control for the whole row —
+        // this case's zip and copy among the things it withholds — so
+        // `storageRowMenuRefusalOf` composes a sentence that names no action at
+        // all. Naming the delete instead, which is what the fold first produced,
+        // would have reported the delete and left this suite's own two actions
+        // withheld with nothing said about them. What is asserted here is
+        // unchanged in substance: a running activity is named as the reason and
+        // can be stopped.
+        final reason = storageActionBlockedMessage(entry.value.blocker, StorageAction.any);
+        final gesture = await hoverStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.temp));
+        expect(find.text(reason), findsOneWidget, reason: 'a dead control explained itself to nobody');
+        await unhover(tester, gesture);
 
-        // The assertion a finder cannot fake.
-        await tester.tap(find.byKey(storageZipEntityKey(temp)), warnIfMissed: false);
+        // The assertion a finder cannot fake — and the entrance is what closed,
+        // so there is not even a menu of inert entries to press through.
+        await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.temp));
+        expect(find.text(appSentenceAt('pages.storage.actions.zip_directory')), findsNothing);
         await _settle(tester);
         expect(_saved, isEmpty, reason: 'a zip of the staging area reached the save dialog');
       });
     }
 
-    testWidgets('with nothing running the same buttons work and the zip starts', (tester) async {
+    testWidgets('with nothing running the same rows work and the zip starts', (tester) async {
       final temp = _groupRoot(StorageGroupId.temp);
       final session = temp / 'session';
       _seedIn(session, 'scratch.bin');
       final container = _container();
       await _pumpTree(tester, container);
 
-      expect(_iconEnabled(tester, storageZipEntityKey(temp)), isTrue);
-      expect(_iconEnabled(tester, storageZipEntityKey(session)), isTrue);
-      expect(_iconEnabled(tester, storageCopyEntityKey(session)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.temp)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(session)), isTrue);
+
+      // The two actions the blocked cases above deny, seen where they live: the
+      // folder row offers both, so "cannot be zipped or copied" names things the
+      // row really has.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(session));
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('copy_directory')), isTrue);
+      await dismissStorageMenu(tester);
 
       // The control for the "reached nothing" assertions above: the same recorder
       // does see this press, so an empty list is a fact about the gate and not
       // about a test that never reaches the seam.
-      await tester.tap(find.byKey(storageZipEntityKey(temp)));
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.temp));
+      // Read on the frame the menu opened in, exactly as the entry row's
+      // assertions above are. A group row's zip entry asks one thing an entry
+      // row's does not — `storageGroupZipTargetExistsProvider`, because a group's
+      // root is a declaration and may name nothing on disk — but the *row*
+      // subscribes to it, not the entry, so the answer is already there when the
+      // menu paints.
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
+      await tester.tap(find.text(storageActionLabel('zip_directory')));
       await _settle(tester);
       expect(_saved, ['${temp.name}.zip']);
     });
@@ -228,22 +261,64 @@ void main() {
   // needed its own case would be a copy that stopped sharing that reading.
   group('the row context menu on a file', () {
     for (final entry in _busy.entries) {
+      // **The shape of this case changed with the row's control.** It used to
+      // open the menu with the activity already running and then assert that the
+      // save entry was listed but inert. A running activity now closes every
+      // entrance to the menu, so there is no menu to open and the "listed but
+      // inert" state is unreachable from this ordering. What replaces it is the
+      // claim the change actually makes: neither entrance opens, so no press can
+      // reach the save at all.
       testWidgets('a temp file cannot be saved out of the view while ${entry.key} runs', (tester) async {
         _seedIn(_groupRoot(StorageGroupId.temp), 'scratch.bin');
         final container = _container(capturing: entry.value.capturing, importing: entry.value.importing);
         await _pumpTree(tester, container);
+        final file = _groupRoot(StorageGroupId.temp).filePath('scratch.bin');
 
+        expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(file)), isFalse);
         await _secondaryPress(tester, find.text('scratch.bin'));
-        await tester.tap(find.text(appSentenceAt('pages.storage.actions.download_file')));
-        await _settle(tester);
+        expect(find.text(appSentenceAt('pages.storage.actions.download_file')), findsNothing);
+        await longPressStorageRow(tester, find.text('scratch.bin'));
+        expect(find.text(appSentenceAt('pages.storage.actions.download_file')), findsNothing);
+        await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(file));
+        expect(find.text(appSentenceAt('pages.storage.actions.download_file')), findsNothing);
 
-        // Withheld while a capture writes, not withdrawn — the entry is still listed, so this
-        // is not the "the menu never opened" state, which would make the empty
-        // list below meaningless.
-        expect(find.text(appSentenceAt('pages.storage.actions.download_file')), findsOneWidget);
+        await _settle(tester);
         expect(_saved, isEmpty, reason: 'a half-written scratch file reached the save dialog');
       });
     }
+
+    // The other ordering, which is the one the entries' own gate is for: the menu
+    // is already open when the activity starts. This is what the two cases above
+    // used to assert and can no longer reach — the entry is still listed and goes
+    // inert under it — and it is the arrangement the app really produces, since a
+    // video import can begin from a picker the user left running.
+    //
+    // Driven through the import notifier because it is the only half of the
+    // activity this suite can turn on mid-test: the capture half is a value
+    // override, fixed for the life of the container. Both halves resolve to one
+    // `CaptureActivity`, which `the rule itself` above asserts.
+    testWidgets('an import that begins while the menu is open takes the save with it', (tester) async {
+      _seedIn(_groupRoot(StorageGroupId.temp), 'scratch.bin');
+      final container = _container();
+      await _pumpTree(tester, container);
+
+      await _secondaryPress(tester, find.text('scratch.bin'));
+      final label = appSentenceAt('pages.storage.actions.download_file');
+      expect(storageMenuEntryEnabled(tester, label), isTrue, reason: 'the entry has to start live');
+
+      _importNotifier.value = _importing;
+      await _settle(tester);
+
+      expect(storageMenuEntryEnabled(tester, label), isFalse);
+      expect(storageMenuEntryLooksDisabled(tester, label), isTrue);
+      // Withheld, not withdrawn — the entry is still listed, so this is not the
+      // "the menu never opened" state, which would make the empty list below
+      // meaningless.
+      expect(find.text(label), findsOneWidget);
+      await tester.tap(find.text(label));
+      await _settle(tester);
+      expect(_saved, isEmpty, reason: 'a half-written scratch file reached the save dialog');
+    });
 
     testWidgets('with nothing running the same entry works and the download starts', (tester) async {
       _seedIn(_groupRoot(StorageGroupId.temp), 'scratch.bin');

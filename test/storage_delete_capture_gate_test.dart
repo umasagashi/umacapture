@@ -38,7 +38,6 @@
 // `capturingStateProvider` (the platform channel that drives it) is exercised.
 import 'dart:io';
 
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -55,6 +54,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -157,8 +157,6 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 bool _exists(FilePath path) => File(path.path).existsSync();
-
-bool _buttonEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
 
 Future<void> _pumpTree(WidgetTester tester, ProviderContainer container) async {
   tester.view.physicalSize = const Size(1000, 2400);
@@ -293,55 +291,62 @@ void main() {
 
   group('the tree row', () {
     for (final entry in _busy.entries) {
-      testWidgets('the temp buttons are dead while ${entry.key} runs, and the settings one is not', (tester) async {
+      // The delete was a button on the row and is now one entry of the row's
+      // menu, so what the gate closes is the ⋮ that opens it — and with it all
+      // three entrances, which is why the press below reaches no menu at all
+      // rather than a menu of dead entries.
+      testWidgets('the temp rows are dead while ${entry.key} runs, and the settings one is not', (tester) async {
         final file = _seed('documents/temp/scratch.bin');
         final container = _container(capturing: entry.value.capturing, importing: entry.value.importing);
         await _pumpTree(tester, container);
 
-        expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.temp)), isFalse);
-        expect(_buttonEnabled(tester, storageDeleteEntityKey(file)), isFalse);
+        expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.temp)), isFalse);
+        expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(file)), isFalse);
         // The control that separates "blocked because a capture is running" from
-        // "blocked always": a group a capture does not write into keeps its button
+        // "blocked always": a group a capture does not write into keeps its control
         // in the very same frame.
-        expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.settings)), isTrue);
+        expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.settings)), isTrue);
 
-        // The tooltip is the *only* surface the reason has while the button is
-        // dead — the dialog that also carries it cannot be opened from here — so
-        // it is asserted as rendered text after a real hover, not merely as a
-        // string on the widget. A sentence read out of the shipped file, because
-        // `.tr()` renders a missing key as the key.
-        final reason = storageActionBlockedMessage(entry.value.blocker, StorageAction.delete);
-        final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-        await gesture.addPointer(location: Offset.zero);
-        addTearDown(gesture.removePointer);
-        await gesture.moveTo(tester.getCenter(find.byKey(storageDeleteGroupKey(StorageGroupId.temp))));
-        await tester.pump();
-        await tester.pump(const Duration(seconds: 2));
-        expect(find.text(reason), findsOneWidget, reason: 'a dead button explained itself to nobody');
-        await gesture.moveTo(Offset.zero);
-        await tester.pump(const Duration(seconds: 2));
+        // The tooltip is the *only* surface the reason has while the control is
+        // dead — the dialog that also carries it cannot be opened from here, and
+        // neither can the menu — so it is asserted as rendered text after a real
+        // hover, not merely as a string on the widget. A sentence read out of the
+        // shipped file, because `.tr()` renders a missing key as the key.
+        //
+        // **`StorageAction.any`.** The ⋮ withholds the copy, the zip and the
+        // delete in one control, so its sentence names none of them; the
+        // confirmation further down is the surface that still names deleting, and
+        // it reads `StorageAction.delete` in the very same run.
+        final reason = storageActionBlockedMessage(entry.value.blocker, StorageAction.any);
+        final gesture = await hoverStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.temp));
+        expect(find.text(reason), findsOneWidget, reason: 'a dead control explained itself to nobody');
+        await unhover(tester, gesture);
 
         // The assertion a finder cannot fake: press it and read the app's dialog
         // slot, which is where a confirmation is announced whether or not this
-        // test renders one.
-        await tester.tap(find.byKey(storageDeleteGroupKey(StorageGroupId.temp)), warnIfMissed: false);
-        await tester.pump();
+        // test renders one. The menu is not there either — the entrance is what
+        // closed, so there is no list of inert entries to press through.
+        await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.temp));
+        expect(find.text(storageActionLabel('delete')), findsNothing, reason: 'the menu opened during ${entry.key}');
         expect(container.read(dialogBuilderProvider), isNull, reason: 'a confirmation opened during ${entry.key}');
       });
     }
 
-    testWidgets('with nothing running the same buttons work', (tester) async {
+    testWidgets('with nothing running the same rows work', (tester) async {
       final file = _seed('documents/temp/scratch.bin');
       final container = _container();
       await _pumpTree(tester, container);
 
-      expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.temp)), isTrue);
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(file)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.temp)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(file)), isTrue);
 
-      // The control for the assertion above: the same read answers non-null
-      // here, so "no confirmation opened" is a fact about the gate and not about
-      // a test that renders no dialogs.
-      await tester.tap(find.byKey(storageDeleteEntityKey(file)));
+      // The control for the assertions above: the same entrance does open, the
+      // delete is on the menu behind it, and the same read answers non-null — so
+      // "no menu, no confirmation" is a fact about the gate and not about a test
+      // that renders no dialogs.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(file));
+      expect(find.text(storageActionLabel('delete')), findsOneWidget);
+      await tester.tap(find.text(storageActionLabel('delete')));
       await tester.pump();
       expect(container.read(dialogBuilderProvider), isNotNull);
     });

@@ -618,12 +618,14 @@ void main() {
     expect(find.text('memo'), findsNothing);
     expect(find.text('data_root.json'), findsNothing);
 
-    // The row is what carried the buttons, and the buttons are what made an
-    // absent row worse than merely redundant: the metadata group offers delete,
-    // zip and copy, and none of the three can do anything to a directory that is
-    // not there.
-    expect(find.byKey(storageDeleteEntityKey(_info.charaDetailMemoDir)), findsNothing);
-    expect(find.byKey(storageZipEntityKey(_info.charaDetailMemoDir)), findsNothing);
+    // The row is what carries the actions, and they are what made an absent row
+    // worse than merely redundant: the metadata group offers delete, zip and
+    // copy, and none of the three can do anything to a directory that is not
+    // there. Named on the row's one control, which is the entrance to all three.
+    // The sibling that *is* there carries one, so this is an absent row and not a
+    // key nobody produces.
+    expect(find.byKey(storageRowMenuEntityKey(_info.charaDetailMemoDir)), findsNothing);
+    expect(find.byKey(storageRowMenuEntityKey(_info.charaDetailRatingDir)), findsOneWidget);
 
     // ...while the groups keep their own rows, so an empty level is not read as
     // a group that vanished. That is the other half of the position: absent

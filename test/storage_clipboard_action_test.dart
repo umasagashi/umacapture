@@ -50,6 +50,7 @@ import 'package:umacapture/src/gui/theme_extensions.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 /// The channel `pasteboard` talks to on the native host.
 const _pasteboardChannel = MethodChannel('pasteboard');
@@ -247,7 +248,10 @@ void main() {
   });
 
   group('the copy action is reachable from the view', () {
-    testWidgets('a directory row copies that directory', (tester) async {
+    // The copy used to be a button standing on the directory row; it is now an
+    // entry of that row's menu, so the press is two steps and the claim is the
+    // same one: what reaches the clipboard is *that* directory.
+    testWidgets("a directory row's menu copies that directory", (tester) async {
       final container = _container(fileReferences: true);
       await _pumpTree(tester, container);
       await _settle(tester);
@@ -255,7 +259,8 @@ void main() {
       await _settle(tester);
 
       final directory = DirectoryPath(_abs('documents/umacapture/storage/chara_detail/active/rec1'));
-      await tester.tap(find.byKey(storageCopyEntityKey(directory)));
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(directory));
+      await tester.tap(find.text(storageActionLabel('copy_directory')));
       await _awaitWrite(tester);
 
       expect(_written, [
@@ -263,7 +268,13 @@ void main() {
       ]);
     });
 
-    testWidgets('a file row carries no copy button, because the preview holds its actions', (tester) async {
+    // What this used to claim — "the file row carries no copy *button*" — is now
+    // true of every row and of every action: the three buttons are gone and one
+    // ⋮ stands where they did. So the claim it can still make is the one that
+    // distinguishes the row from the preview beside it: the row has exactly one
+    // trailing control, and the file's actions are behind it (the case below) and
+    // not on the preview (`the preview surface itself offers no action at all`).
+    testWidgets('a file row carries one trailing control, and it is the menu', (tester) async {
       final container = _container(fileReferences: true);
       await _pumpTree(tester, container);
       await _settle(tester);
@@ -277,12 +288,9 @@ void main() {
       await _settle(tester);
 
       expect(find.text('record.json'), findsOneWidget, reason: 'the file row has to be on screen to be judged');
-      expect(
-        find.byKey(
-          storageCopyEntityKey(FilePath(_abs('documents/umacapture/storage/chara_detail/active/rec1/record.json'))),
-        ),
-        findsNothing,
-      );
+      final file = FilePath(_abs('documents/umacapture/storage/chara_detail/active/rec1/record.json'));
+      expect(find.byKey(storageRowMenuEntityKey(file)), findsOneWidget);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(file)), isTrue);
     });
 
     testWidgets("a file row's menu copies that file", (tester) async {
@@ -363,7 +371,13 @@ void main() {
       expect(find.text(appSentenceAt('pages.storage.actions.copy_directory')), findsNothing);
     });
 
-    testWidgets('no directory row offers a copy button', (tester) async {
+    // The same claim the case above makes for a file, for a directory: with no
+    // file clipboard the copy is *absent*, not present and dead, and nothing
+    // stands in its place. Asserted on the menu now that the row's copy button is
+    // gone — and the row's menu is proven to have opened by an entry that does
+    // not depend on the clipboard, so an absent copy here is an absent entry and
+    // not a menu that failed to open.
+    testWidgets('no directory row offers a copy entry', (tester) async {
       final container = _container(fileReferences: false);
       await _pumpTree(tester, container);
       await _settle(tester);
@@ -371,10 +385,11 @@ void main() {
       await _settle(tester);
 
       expect(find.text('rec1'), findsOneWidget, reason: 'the directory row has to be on screen to be judged');
-      expect(
-        find.byKey(storageCopyEntityKey(DirectoryPath(_abs('documents/umacapture/storage/chara_detail/active/rec1')))),
-        findsNothing,
-      );
+      final directory = DirectoryPath(_abs('documents/umacapture/storage/chara_detail/active/rec1'));
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(directory));
+
+      expect(find.text(storageActionLabel('delete')), findsOneWidget, reason: 'the menu did open');
+      expect(find.text(storageActionLabel('copy_directory')), findsNothing);
       expect(_written, isEmpty);
     });
 

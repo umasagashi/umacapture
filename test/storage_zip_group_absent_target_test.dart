@@ -32,11 +32,13 @@ import 'package:umacapture/src/core/path_entity.dart';
 import 'package:umacapture/src/core/providers.dart';
 import 'package:umacapture/src/core/storage/file_download.dart';
 import 'package:umacapture/src/core/storage/storage_delete.dart';
+import 'package:umacapture/src/core/storage/storage_group.dart';
 import 'package:umacapture/src/core/storage/zip_export.dart';
 import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -67,8 +69,6 @@ ProviderContainer _container() {
   addTearDown(container.dispose);
   return container;
 }
-
-bool _iconEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
 
 /// Lets the real `dart:io` futures behind `PathEntity.exists()` resolve, which
 /// a `testWidgets` body's fake clock does not advance on its own.
@@ -120,29 +120,45 @@ void main() {
     expect(await storageTargetIsPresent(_quarantineDir), isTrue);
   });
 
-  testWidgets('a group whose root does not exist yet offers a zip button, but disabled', (tester) async {
+  // The zip was a button standing on the group row; it is now an entry of that
+  // row's menu, so "offered but disabled" is read on the entry. The row itself
+  // stays open — nothing is refusing the *row*, only this one action on it —
+  // which is what lets the menu be opened to look at all.
+  //
+  // Every reading below is made on the frame the menu opened in, with no settle
+  // between: `storageGroupZipTargetExistsProvider` is subscribed by the *row*,
+  // which is on screen long before any entrance to its menu can be used, so the
+  // entry paints its first frame on a resolved answer. A settle here would hide
+  // the state this suite exists to pin — an entry that is inert while the user is
+  // already reaching for it.
+  testWidgets('a group whose root does not exist yet offers a zip entry, but disabled', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
 
-    final key = storageZipEntityKey(_quarantineDir);
-    // The positive control first: the button is *offered* (the group declares
-    // the operation), which is what tells this apart from the settings group's
-    // `findsNothing`.
-    expect(find.byKey(key), findsOneWidget);
-    expect(_iconEnabled(tester, key), isFalse);
+    final key = storageRowMenuGroupKey(StorageGroupId.quarantine);
+    expect(storageRowMenuEnabled(tester, key), isTrue, reason: 'the row itself is not what is refused');
+    await pressStorageRowMenuButton(tester, key);
 
-    // The assertion a finder cannot fake: a press on a disabled button never
+    // The positive control first: the entry is *offered* (the group declares
+    // the operation), which is what tells this apart from the settings group's
+    // absence.
+    expect(find.text(storageActionLabel('zip_directory')), findsOneWidget);
+    expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isFalse);
+
+    // The assertion a finder cannot fake: a press on a disabled entry never
     // reaches the save-dialog seam, so the zip runner never opened the folder
     // that is not there.
-    await tester.tap(find.byKey(key), warnIfMissed: false);
+    await tester.tap(find.text(storageActionLabel('zip_directory')));
     await _settle(tester);
     expect(_requestedNames, isEmpty, reason: 'a zip of an absent group directory reached the save dialog');
   });
 
-  testWidgets('once something lands in the group, the same button turns live', (tester) async {
+  testWidgets('once something lands in the group, the same entry turns live', (tester) async {
     final container = _container();
     await _pumpTree(tester, container);
-    expect(_iconEnabled(tester, storageZipEntityKey(_quarantineDir)), isFalse);
+    await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.quarantine));
+    expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isFalse);
+    await dismissStorageMenu(tester);
 
     File(_quarantineDir.filePath('leftover.bin').path)
       ..parent.createSync(recursive: true)
@@ -157,20 +173,22 @@ void main() {
     reloadStorageTab(container.read(refBaseProvider));
     await _settle(tester);
 
-    expect(_iconEnabled(tester, storageZipEntityKey(_quarantineDir)), isTrue);
+    await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.quarantine));
+    expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
 
-    await tester.tap(find.byKey(storageZipEntityKey(_quarantineDir)));
+    await tester.tap(find.text(storageActionLabel('zip_directory')));
     await _settle(tester);
     expect(_requestedNames, ['${_quarantineDir.name}.zip']);
   });
 
-  testWidgets('a group whose root does exist keeps a live button, as before', (tester) async {
+  testWidgets('a group whose root does exist keeps a live entry, as before', (tester) async {
     File(_quarantineDir.filePath('leftover.bin').path)
       ..parent.createSync(recursive: true)
       ..writeAsBytesSync([1]);
     final container = _container();
     await _pumpTree(tester, container);
 
-    expect(_iconEnabled(tester, storageZipEntityKey(_quarantineDir)), isTrue);
+    await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.quarantine));
+    expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
   });
 }

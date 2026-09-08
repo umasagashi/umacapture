@@ -51,7 +51,7 @@ import '/src/core/video_import_ops.dart';
 
 /// What the view was about to do, in the words the refusal has to use.
 ///
-/// Two members and not one string per call site: the sentence differs only in its
+/// Members and not one string per call site: the sentence differs only in its
 /// verb, and a verb supplied by the caller is a verb that can be supplied wrongly
 /// — or forgotten, and rendered as an empty clause — without anything noticing.
 enum StorageAction {
@@ -60,6 +60,20 @@ enum StorageAction {
 
   /// Reading the target out of the app: a zip, a download, a clipboard copy.
   extract,
+
+  /// Every action a control covers at once, named by none of them.
+  ///
+  /// **For a surface that withholds more than one kind of action with a single
+  /// control**, which today is the row's ⋮ ([storageRowMenuRefusalOf]): it opens
+  /// onto a copy, a zip, a download and a delete together, so a sentence ending
+  /// in [delete]'s 「削除できません」 tells the user only that deleting is off and
+  /// leaves the extractions it withheld unaccounted for on the screen. Folding
+  /// the row's three buttons into one control is what created this case — each
+  /// button used to carry the verb of the one action it was.
+  ///
+  /// Not a default and not a fallback: a surface that offers exactly one kind of
+  /// action still names it, because the neutral verb says strictly less.
+  any,
 }
 
 /// Why an action on a group is being withheld at this moment.
@@ -78,8 +92,8 @@ enum StorageActionBlocker {
 /// The blocker in force for [action] on [group], or null when it may proceed.
 ///
 /// Takes the activity as a value rather than reading it, so the rule is testable
-/// without a widget and so every surface that shows it — the row's buttons, the
-/// preview's buttons, the confirmation's confirm button — decides it once and the
+/// without a widget and so every surface that shows it — the row's menu button,
+/// its entries, the confirmation's confirm button — decides it once and the
 /// same way.
 StorageActionBlocker? storageActionBlocker(
   StorageGroup group,
@@ -112,11 +126,12 @@ StorageActionBlocker? storageActionBlocker(
 
 /// [storageActionBlocker] against the app's live state.
 ///
-/// **The one place the storage view asks what is running.** Both the tree and the
-/// preview dialog go through here, so a capture or an import that starts while a
-/// dialog is open withdraws its buttons by the same evaluation that withdrew the
-/// row's — and `ref.watch` is what makes them react to it rather than answering
-/// with whatever was true when they were built.
+/// **The one place the storage view asks what is running.** The tree and the
+/// delete confirmation both reach it through the two refusal helpers in
+/// `storage_tree.dart`, so a capture or an import that starts while the
+/// confirmation is open withdraws its confirm by the same evaluation that
+/// withdrew the row's menu button — and `ref.watch` is what makes them react to
+/// it rather than answering with whatever was true when they were built.
 StorageActionBlocker? storageActionBlockerOf(WidgetRef ref, StorageGroup group, StorageAction action) {
   return storageActionBlocker(group, action, activity: ref.watch(captureActivityProvider));
 }
@@ -137,14 +152,16 @@ String storageActionBlockedVerbKey(StorageAction action) {
   return switch (action) {
     StorageAction.delete => 'pages.storage.blocked.verb.delete',
     StorageAction.extract => 'pages.storage.blocked.verb.extract',
+    StorageAction.any => 'pages.storage.blocked.verb.any',
   };
 }
 
 /// What a withheld [action] says for itself: what is happening, then what to do.
 ///
 /// Composed from three keys rather than written out once per pair, because the
-/// pairs multiply — two activities times two actions today — and four hand-written
-/// sentences are four places for the fifth to be missed. The two `switch`es above
+/// pairs multiply — two activities times three actions today — and six
+/// hand-written sentences are six places for the seventh to be missed. The two
+/// `switch`es above
 /// are exhaustive, so a third activity or a third action is named by the compiler
 /// instead.
 String storageActionBlockedMessage(StorageActionBlocker blocker, StorageAction action) {

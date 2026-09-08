@@ -68,6 +68,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -120,8 +121,6 @@ Future<void> _settle(WidgetTester tester) async {
     await tester.pump();
   }
 }
-
-bool _buttonEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
 
 /// The colour the icon of the button under [key] actually paints with.
 ///
@@ -263,40 +262,58 @@ void main() {
     });
   });
 
-  group('the row button', () {
-    testWidgets('the bundling record loses its delete while a sibling keeps one', (tester) async {
+  // The delete was a button of its own on each row; it is now one entry of the
+  // row's menu, so what this gate closes is the ⋮ that opens the menu. Two
+  // consequences shape every case below.
+  //
+  //  * The **bundled** row has no ⋮ at all while its zip runs: the progress ring
+  //    takes that one slot (`_RowMenuSlot`). So "this row lost its delete" is
+  //    read there as "the row offers nothing and shows progress instead", and the
+  //    dead-control readings are made on a row that is withheld *by* the zip
+  //    without being the folder being bundled — the group row above it.
+  //  * A withheld row's menu cannot be opened at all, so the delete entry's own
+  //    `enabled` is only reachable when the zip starts *after* the menu is up.
+  //    That ordering is `the row menu` group at the bottom of this file.
+  group('the row control', () {
+    testWidgets('the bundling record loses its whole menu while a sibling keeps one', (tester) async {
       final recordA = _seedRecord('recA');
       final recordB = _seedRecord('recB');
       final container = _container();
       await _pumpTree(tester, container);
 
       // The control that separates this gate from "the tree is broken": with the
-      // slot free every button on screen is live.
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isTrue);
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordB)), isTrue);
-      expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.activeRecords)), isTrue);
+      // slot free every row on screen is live.
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordB)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords)), isTrue);
 
       _beginExtraction(container, recordA);
       await tester.pump();
 
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isFalse);
+      // The bundled row's one slot is the ring now, so there is no control on it
+      // to press at all — the strongest form of "it lost its delete".
+      expect(find.byKey(storageRowMenuEntityKey(recordA)), findsNothing);
+      expect(find.byKey(storageZipProgressKey(recordA)), findsOneWidget);
       // Not "the whole group goes quiet": a different record takes a different
       // record lock, and refusing it would be a refusal with nothing behind it.
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordB)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordB)), isTrue);
       // The group row does go, because its delete takes the root exclusively and
       // the zip is holding a shared acquisition under it.
-      expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.activeRecords)), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords)), isFalse);
 
       container.read(storageZipProgressProvider.notifier).finish();
       await tester.pump();
 
-      // It comes back by itself. The button is withheld for the length of the
-      // extraction and not for the length of the session.
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isTrue);
-      expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.activeRecords)), isTrue);
+      // It comes back by itself. The row is withheld for the length of the
+      // extraction and not for the length of the session — and what comes back is
+      // a menu with the delete on it.
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords)), isTrue);
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(recordA));
+      expect(storageMenuEntryEnabled(tester, _label('delete')), isTrue);
     });
 
-    testWidgets('bundling the group withholds the delete of a record inside it', (tester) async {
+    testWidgets('bundling the group withholds the row inside it', (tester) async {
       final recordA = _seedRecord('recA');
       final container = _container();
       await _pumpTree(tester, container);
@@ -304,15 +321,17 @@ void main() {
       _beginExtraction(container, _activeDir);
       await tester.pump();
 
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isFalse);
-      expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.activeRecords)), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isFalse);
+      // The group row is the folder being bundled, so its slot carries the ring.
+      expect(find.byKey(storageRowMenuGroupKey(StorageGroupId.activeRecords)), findsNothing);
+      expect(find.byKey(storageZipProgressKey(_activeDir)), findsOneWidget);
       // The control from another group: a zip of the record store says nothing
       // about the settings stores, and a gate that disabled everything would
       // satisfy the two assertions above.
-      expect(_buttonEnabled(tester, storageDeleteGroupKey(StorageGroupId.settings)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.settings)), isTrue);
     });
 
-    testWidgets('the dead button explains itself, and pressing it opens nothing', (tester) async {
+    testWidgets('the dead control explains itself, and pressing it opens nothing', (tester) async {
       final recordA = _seedRecord('recA');
       final recordB = _seedRecord('recB');
       final container = _container();
@@ -321,49 +340,69 @@ void main() {
       _beginExtraction(container, recordA);
       await tester.pump();
 
+      // Read on the group row: `recA` is the folder being bundled, so its slot is
+      // the ring and there is no control there to explain anything. The group row
+      // is withheld by the same claim and keeps its ⋮.
+      //
       // The tooltip is the only surface the reason has: the confirmation that
-      // would otherwise carry it cannot be opened from here. Asserted as rendered
-      // text after a real hover rather than as a string on the widget.
-      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
-      await gesture.addPointer(location: Offset.zero);
-      addTearDown(gesture.removePointer);
-      await gesture.moveTo(tester.getCenter(find.byKey(storageDeleteEntityKey(recordA))));
-      await tester.pump();
-      await tester.pump(const Duration(seconds: 2));
+      // would otherwise carry it cannot be opened from here, and neither can the
+      // menu. Asserted as rendered text after a real hover rather than as a
+      // string on the widget.
+      final gesture = await hoverStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
       expect(find.text(longReadBusyMessage()), findsOneWidget);
-      await gesture.moveTo(Offset.zero);
-      await tester.pump(const Duration(seconds: 2));
+      await unhover(tester, gesture);
 
       // The assertion a finder cannot fake: press it and read the app's dialog
       // slot, which is where a confirmation is announced whether or not this
-      // test renders one.
-      await tester.tap(find.byKey(storageDeleteEntityKey(recordA)), warnIfMissed: false);
-      await tester.pump();
+      // test renders one. No menu opens either, so there is no inert entry to
+      // press through.
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
+      expect(find.text(_label('delete')), findsNothing, reason: 'the menu opened over a running zip');
       expect(container.read(dialogBuilderProvider), isNull, reason: 'a confirmation opened over a running zip');
+      // The other entrance, which does not run through the button at all.
+      await _secondaryPress(tester, find.text(appSentenceAt('pages.storage.group.active_records.label')));
+      expect(find.text(_label('delete')), findsNothing, reason: 'a secondary press opened it over a running zip');
+      expect(container.read(dialogBuilderProvider), isNull);
 
-      // The control for that read: the same press on the sibling does announce
-      // one, so the null above is about the gate and not about a test that
-      // renders no dialogs.
-      await tester.tap(find.byKey(storageDeleteEntityKey(recordB)), warnIfMissed: false);
+      // The group is still open, so the sibling below is still on screen. That is
+      // the slot's doing and not the button's: a disabled `IconButton` enters no
+      // tap recogniser, and the trailing cell takes the press so it cannot reach
+      // the row (`_RowMenuSlot._cell`). Pinned as its own case in
+      // `storage_row_menu_gate_test.dart`; here it is simply relied on.
+      expect(find.text('recB'), findsOneWidget);
+
+      // The control for that read: the same two presses on the sibling do
+      // announce one, so the null above is about the gate and not about a test
+      // that renders no dialogs.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(recordB));
+      await tester.tap(find.text(_label('delete')));
       await tester.pump();
       expect(container.read(dialogBuilderProvider), isNotNull);
     });
   });
 
-  group('the withheld button looks withheld', () {
-    // The refusal is invisible unless the button also *reads* as refused, and
-    // nothing in `_DeleteSlot` says it does: the slot names `color:` only, so the
-    // disabled foreground resolves to null on the widget's own style and the
-    // framework falls through to the default `IconButton` one at the value level.
-    // Left that way on purpose — the row sits on a plain surface, so the
-    // framework's own grey is the right answer there and naming a strength here
-    // would be this file's copy of a number the framework owns. What is pinned is
-    // therefore the outcome, so that a `disabledColor`, a `style`, or an
-    // `Icon(color:)` added later cannot quietly flatten it. That is not a
-    // hypothetical: `common.dart`'s dialog × shipped with exactly this defect —
-    // an `Icon.color` overrode the disabled resolution and a shut × went on
-    // painting at full strength while the button refused every press.
-    testWidgets('the gated delete paints differently from the live one beside it', (tester) async {
+  group('the withheld control looks withheld', () {
+    // The refusal is invisible unless the control also *reads* as refused, and
+    // nothing in `_RowMenuSlot` says it does: the slot names no foreground at
+    // all, so the disabled colour resolves through the framework's default
+    // `IconButton` style at the value level. Left that way on purpose — the row
+    // sits on a plain surface, so the framework's own grey is the right answer
+    // there and naming a strength here would be this file's copy of a number the
+    // framework owns. What is pinned is therefore the outcome, so that a
+    // `disabledColor`, a `style`, or an `Icon(color:)` added later cannot quietly
+    // flatten it. That is not a hypothetical: `common.dart`'s dialog × shipped
+    // with exactly this defect — an `Icon.color` overrode the disabled resolution
+    // and a shut × went on painting at full strength while the button refused
+    // every press.
+    //
+    // **One claim this case used to make is gone with the button.** It also
+    // asserted that the *live* delete wore `colorScheme.error`, which is what a
+    // delete button is required to look like. There is no delete button now; the
+    // row's one control is a neutral ⋮ that opens a menu, and the delete is an
+    // entry on it. What replaces that control is a second live ⋮ from another
+    // group read out of the same frame: the two live ones agree, so "different"
+    // below is a fact about the withheld state and not about which row was read.
+    testWidgets('the gated menu button paints differently from the live one beside it', (tester) async {
       final recordA = _seedRecord('recA');
       final recordB = _seedRecord('recB');
       final container = _container();
@@ -384,16 +423,21 @@ void main() {
       // Two rows read out of one frame rather than one row read before and after
       // a rebuild: the pair cannot then differ through a stale element instead of
       // through the state under test.
-      final gated = storageDeleteEntityKey(recordA);
-      final live = storageDeleteEntityKey(recordB);
-      expect(_buttonEnabled(tester, gated), isFalse);
-      expect(_buttonEnabled(tester, live), isTrue);
+      //
+      // `recA` itself is not the pair's gated half: the folder being bundled has
+      // no button at all while its ring is up. The group row above it is withheld
+      // by the same claim and keeps its ⋮, which is what makes it readable.
+      final gated = storageRowMenuGroupKey(StorageGroupId.activeRecords);
+      final live = storageRowMenuEntityKey(recordB);
+      final alsoLive = storageRowMenuGroupKey(StorageGroupId.settings);
+      expect(storageRowMenuEnabled(tester, gated), isFalse);
+      expect(storageRowMenuEnabled(tester, live), isTrue);
+      expect(storageRowMenuEnabled(tester, alsoLive), isTrue);
 
-      // The control for the comparison: the live one still wears the role a
-      // delete is required to carry, so a difference below is about the withheld
-      // button and not about a row that lost its colour altogether.
-      final scheme = Theme.of(tester.element(find.byKey(live))).colorScheme;
-      expect(_paintedIconColour(tester, live).toARGB32(), scheme.error.toARGB32());
+      // The control for the comparison: two live controls read out of the same
+      // frame paint alike, so a difference below is about the withheld one and
+      // not about a row that lost its colour altogether.
+      expect(_paintedIconColour(tester, live).toARGB32(), _paintedIconColour(tester, alsoLive).toARGB32());
 
       // Compared at the 8 bits per channel the surface actually has, and that is
       // the strict direction for an inequality: at full precision two colours
@@ -406,7 +450,7 @@ void main() {
       expect(
         _paintedIconColour(tester, gated).toARGB32(),
         isNot(_paintedIconColour(tester, live).toARGB32()),
-        reason: 'the withheld delete paints exactly as the live one, so nothing on screen says it is refused',
+        reason: 'the withheld control paints exactly as the live one, so nothing on screen says it is refused',
       );
     });
   });
@@ -420,17 +464,26 @@ void main() {
     // states: a menu entry is a model and not a widget, so `enabled` is not
     // readable from the tree and a greyed style would keep passing if `enabled`
     // were hard-wired true.
-    testWidgets('the delete entry is inert while the row is being bundled', (tester) async {
+    // **The zip starts after the menu is open, where this case used to start it
+    // first.** A row withheld before the menu is asked for now opens no menu at
+    // all — the group above asserts that — so the entry's own `enabled` is only
+    // observable from this ordering. It is also the ordering the entry's gate
+    // exists for: `_StorageMenuItem` re-reads its refusal on every frame it
+    // paints, and the whole point of that is a claim arriving under an open menu.
+    testWidgets('the delete entry goes inert when the row starts being bundled', (tester) async {
       final recordA = _seedRecord('recA');
       final container = _container();
       await _pumpTree(tester, container);
 
-      _beginExtraction(container, recordA);
-      await tester.pump();
-
       await _secondaryPress(tester, find.text('recA'));
+      expect(storageMenuEntryEnabled(tester, _label('delete')), isTrue, reason: 'the entry has to start live');
+
+      _beginExtraction(container, recordA);
+      await _settle(tester);
+
       // Withheld, not withdrawn: the entry is still listed, so this is not the
       // "there is no delete here" state.
+      expect(storageMenuEntryEnabled(tester, _label('delete')), isFalse);
       expect(find.text(_label('delete')), findsOneWidget);
       await tester.tap(find.text(_label('delete')));
       await _settle(tester);

@@ -57,6 +57,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 
 import 'support/localization.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 /// A group whose [StorageLockScope] is `unlocked`, for the cases that are not
 /// about the per-group exclusion. Named rather than inlined so a case that *is* about
@@ -210,6 +211,15 @@ Widget _tree() => const MaterialApp(home: Scaffold(body: StorageTreeView()));
 /// suite deliberately puts a `CircularProgressIndicator` on screen -- the zip
 /// progress -- and a settle written that way would wait for the thing under test
 /// to go away.
+/// Lets the real event loop run without re-pumping the widget, which would take
+/// an open menu route with it.
+Future<void> _settle(WidgetTester tester, {int rounds = 10}) async {
+  for (var round = 0; round < rounds; round++) {
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+    await tester.pump();
+  }
+}
+
 Future<void> _pumpTree(WidgetTester tester, ProviderContainer container, {int rounds = 30}) async {
   tester.view.physicalSize = const Size(1200, 1800);
   tester.view.devicePixelRatio = 1.0;
@@ -728,27 +738,41 @@ void main() {
       _writeFile('documents/umacapture/temp/placeholder.bin', _incompressible(4, 9));
     });
 
-    testWidgets('the folder rows that offer a zip have a button, and the settings group has none', (tester) async {
+    // The zip was a button standing on the row; it is now an entry of the row's
+    // menu, so "this row offers a zip" is read by opening the menu and "that one
+    // does not" by the entry being absent from it. The settings group still has a
+    // ⋮ — it offers a delete — which is what makes the absence below an absent
+    // entry rather than an absent row.
+    testWidgets('the folder rows that offer a zip have the entry, and the settings group has none', (tester) async {
       final container = _container();
       await _pumpTree(tester, container);
 
       // The positive control comes first on purpose: it is what says the finder
       // below is capable of finding anything at all. A `findsNothing` written
-      // against a key nobody produces passes forever.
-      expect(find.byKey(storageZipEntityKey(_info.charaDetailActiveDir)), findsOneWidget);
-      expect(find.byKey(storageZipEntityKey(_info.settingsDir)), findsNothing);
+      // against a label nobody produces passes forever.
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
+      expect(find.text(storageActionLabel('zip_directory')), findsOneWidget);
+      await dismissStorageMenu(tester);
+
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.settings));
+      expect(find.text(storageActionLabel('delete')), findsOneWidget, reason: 'the settings menu did open');
+      expect(find.text(storageActionLabel('zip_directory')), findsNothing);
     });
 
-    testWidgets('a build that cannot zip shows no button at all', (tester) async {
+    testWidgets('a build that cannot zip offers no zip entry at all', (tester) async {
       final container = _container(available: false);
       await _pumpTree(tester, container);
 
       // The browser arrangement, reachable only because the capability is a
       // provider: `kIsWeb` is a compile-time false here and would fold it away.
-      expect(find.byKey(storageZipEntityKey(_info.charaDetailActiveDir)), findsNothing);
+      // The row keeps its ⋮ because it still offers a delete, so what is asserted
+      // is the entry's absence and not the row's.
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
+      expect(find.text(storageActionLabel('delete')), findsOneWidget, reason: 'the menu did open');
+      expect(find.text(storageActionLabel('zip_directory')), findsNothing);
     });
 
-    testWidgets('while one folder is being bundled it shows progress and every other button is dead', (tester) async {
+    testWidgets('while one folder is being bundled it shows progress in place of that row s control', (tester) async {
       final gate = Completer<StorageZipDelivery>();
       late StorageZipProgressSink sink;
       // The runner is the production seam; what is replaced here is the platform
@@ -763,27 +787,62 @@ void main() {
       );
       await _pumpTree(tester, container);
 
-      await tester.tap(find.byKey(storageZipEntityKey(_info.charaDetailActiveDir)));
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
+      await tester.tap(find.text(storageActionLabel('zip_directory')));
       await tester.pump();
       sink(0.4);
       await tester.pump();
 
+      // The ring takes the row's one trailing slot, which is where the zip button
+      // used to draw it: the bundled row has no ⋮ while its zip runs, so that row
+      // offers nothing at all rather than a menu of dead entries.
       final running = find.byKey(storageZipProgressKey(_info.charaDetailActiveDir));
       expect(running, findsOneWidget);
       expect(tester.widget<CircularProgressIndicator>(running).value, 0.4);
-      // The bundled folder's own button is gone, and every other one is
-      // disabled: the controls are blocked while the zip builds.
-      expect(find.byKey(storageZipEntityKey(_info.charaDetailActiveDir)), findsNothing);
-      final other = find.byKey(storageZipEntityKey(_info.tempDir));
-      expect(other, findsOneWidget);
-      expect(tester.widget<IconButton>(other).onPressed, isNull);
+      expect(find.byKey(storageRowMenuGroupKey(StorageGroupId.activeRecords)), findsNothing);
 
       gate.complete(StorageZipDelivery.written);
       await tester.pump();
       await tester.pump();
 
+      // The ring goes and the row's control comes back — withheld for the length
+      // of the run and not of the session.
       expect(find.byKey(storageZipProgressKey(_info.charaDetailActiveDir)), findsNothing);
-      expect(tester.widget<IconButton>(find.byKey(storageZipEntityKey(_info.tempDir))).onPressed, isNotNull);
+      expect(storageRowMenuEnabled(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords)), isTrue);
+    });
+
+    // The other half of what the case above used to claim in one body: while a
+    // zip runs, no *other* row may start a second one. That is a different rule
+    // from the progress ring — "one archive at a time", read by the zip entry as
+    // `holdsKind(LongReadKind.zip)` — and it lands on the entry rather than on
+    // the row: a folder nothing is holding keeps its ⋮ and its menu, and only the
+    // zip entry on it goes inert.
+    testWidgets('while one folder is being bundled no other row may start a second zip', (tester) async {
+      final gate = Completer<StorageZipDelivery>();
+      final container = _container(runner: (ref, directory, onProgress, guard) => gate.future);
+      await _pumpTree(tester, container);
+
+      final other = storageRowMenuGroupKey(StorageGroupId.temp);
+
+      // The negative control, in the same arrangement before anything runs.
+      await pressStorageRowMenuButton(tester, other);
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
+      await dismissStorageMenu(tester);
+
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
+      await tester.tap(find.text(storageActionLabel('zip_directory')));
+      await tester.pump();
+
+      expect(storageRowMenuEnabled(tester, other), isTrue, reason: 'nothing holds temp, so its row stays open');
+      await pressStorageRowMenuButton(tester, other);
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isFalse);
+      await dismissStorageMenu(tester);
+
+      gate.complete(StorageZipDelivery.written);
+      await _settle(tester);
+
+      await pressStorageRowMenuButton(tester, other);
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('zip_directory')), isTrue);
     });
   });
 
@@ -819,29 +878,38 @@ void main() {
       // whose users have no other way to reach their files, so "the zip is still
       // there" and "the copy is gone" are halves of one sentence. Splitting them
       // would let a build that offers neither satisfy the half that is checked.
+      //
+      // Read off the rows' menus, which is where both actions live now that the
+      // row carries one ⋮ instead of three buttons.
       final container = _container(onWeb: true, copySupported: false);
       await pumpExpanded(tester, container);
 
       final record = _info.charaDetailActiveDir / 'rec1';
-      expect(find.byKey(storageZipEntityKey(_info.charaDetailActiveDir)), findsOneWidget, reason: 'the group row');
-      expect(find.byKey(storageZipEntityKey(record)), findsOneWidget, reason: 'the folder row');
-      // Not `findsNothing` alone: the folder row is proven to be on screen by the
-      // zip assertion immediately above, so an absent copy button here is an
-      // absent button and not an absent row. The suite's own control for the
-      // finder is the next case, which builds the same rows off web.
-      expect(find.byKey(storageCopyEntityKey(record)), findsNothing);
+      await pressStorageRowMenuButton(tester, storageRowMenuGroupKey(StorageGroupId.activeRecords));
+      expect(find.text(storageActionLabel('zip_directory')), findsOneWidget, reason: 'the group row');
+      await dismissStorageMenu(tester);
+
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(record));
+      // Not `findsNothing` alone: the folder row's menu is proven to be open by
+      // the zip entry immediately above it, so an absent copy here is an absent
+      // entry and not an absent row. The suite's own control for the finder is
+      // the next case, which builds the same rows off web.
+      expect(find.text(storageActionLabel('zip_directory')), findsOneWidget, reason: 'the folder row');
+      expect(find.text(storageActionLabel('copy_directory')), findsNothing);
     });
 
-    testWidgets('off web the same folder row does carry a copy button', (tester) async {
+    testWidgets('off web the same folder row does carry a copy entry', (tester) async {
       // The positive control for the `findsNothing` above. Without it that
-      // assertion is satisfied by a key nobody ever produces, by a renamed key,
-      // and by a row that failed to build -- three ways to stay green forever.
+      // assertion is satisfied by a label nobody ever produces, by a reworded
+      // one, and by a row that failed to build -- three ways to stay green
+      // forever.
       final container = _container(onWeb: false, copySupported: true);
       await pumpExpanded(tester, container);
 
       final record = _info.charaDetailActiveDir / 'rec1';
-      expect(find.byKey(storageCopyEntityKey(record)), findsOneWidget);
-      expect(find.byKey(storageZipEntityKey(record)), findsOneWidget);
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(record));
+      expect(find.text(storageActionLabel('copy_directory')), findsOneWidget);
+      expect(find.text(storageActionLabel('zip_directory')), findsOneWidget);
     });
   });
 }

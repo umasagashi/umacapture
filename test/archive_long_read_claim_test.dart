@@ -56,6 +56,7 @@ import 'package:umacapture/src/gui/storage_tree.dart';
 import 'support/localization.dart';
 import 'support/records.dart';
 import 'support/riverpod.dart';
+import 'support/storage_row_menu.dart';
 
 late Directory _tempRoot;
 late PathInfo _layout;
@@ -185,8 +186,6 @@ bool _confirmLive(WidgetTester tester) {
   final button = tester.widget<FilledButton>(_confirm);
   return button.onLongPress != null && button.onPressed != null;
 }
-
-bool _buttonEnabled(WidgetTester tester, Key key) => tester.widget<IconButton>(find.byKey(key)).onPressed != null;
 
 /// Lets the real event loop run, which a `testWidgets` body's fake clock does not.
 Future<void> _settle(WidgetTester tester) async {
@@ -492,22 +491,30 @@ void main() {
       expect(_confirmLive(tester), isTrue, reason: 'withheld for the length of the archive, not of the session');
     });
 
-    testWidgets('ストレージ管理: the row delete goes dead while the archive holds the folder', (tester) async {
+    // The row's delete used to be a button of its own; it is now one entry of the
+    // row's menu, and the menu's ⋮ is what the claim closes. So the reading moved
+    // up one level — from "that button is dead" to "the row will not open at all"
+    // — and the delete itself is asserted at the end, on the row the claim has
+    // let go of, which is the only state in which the menu can be opened to look.
+    testWidgets('ストレージ管理: the row s menu goes dead while the archive holds the folder', (tester) async {
       final recordA = _seedRecord('a');
       final recordB = _seedRecord('b');
       final container = _container();
       await _pumpTree(tester, container);
 
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isTrue);
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordB)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordB)), isTrue);
 
       final archive = _startPinnedArchive(container, ['a']);
       await archive.reached;
       await tester.pump();
 
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isFalse);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isFalse);
+      // The reason reaches the user, which with the delete button gone is the
+      // whole of what the view says about a row it will not act on.
+      expect(storageRowMenuTooltip(tester, storageRowMenuEntityKey(recordA)), longReadBusyMessage());
       expect(
-        _buttonEnabled(tester, storageDeleteEntityKey(recordB)),
+        storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordB)),
         isTrue,
         reason: 'a record the batch is not moving takes a different lock; refusing it would refuse nothing',
       );
@@ -515,7 +522,12 @@ void main() {
       archive.release.complete();
       await archive.archiving;
       await tester.pump();
-      expect(_buttonEnabled(tester, storageDeleteEntityKey(recordA)), isTrue);
+      expect(storageRowMenuEnabled(tester, storageRowMenuEntityKey(recordA)), isTrue);
+
+      // What the returned control leads to is still the delete: the claim above
+      // is about the row's delete and not merely about some button on the row.
+      await pressStorageRowMenuButton(tester, storageRowMenuEntityKey(recordA));
+      expect(storageMenuEntryEnabled(tester, storageActionLabel('delete')), isTrue);
     });
   });
 }

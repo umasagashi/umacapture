@@ -22,15 +22,20 @@
 //  * **failure** — a shell that refuses says so, as an error toast;
 //  * **exclusion** — the withholding that applies while a capture or a video
 //    import is writing into the group, claimed once per gated entry rather
-//    than once for the menu, since the entries read it independently;
+//    than once for the menu, since the entries read it independently. Asserted
+//    with the activity beginning *under an open menu*: a row it is already in
+//    force on opens no menu at all, and that half is claimed here too and in
+//    `storage_row_menu_gate_test.dart`;
 //  * **liveness** — an entry's refusal is re-read while the menu is up, so a long
 //    reader that begins after it opened withholds the entry and releasing gives
 //    it back, without the menu being reopened;
 //  * **independence from the preview** — a file the preview declines to render is
 //    still one the menu can save.
 //
-// Negative controls: a group row has no menu, and the entries a row does not
-// offer are absent rather than present-and-dead.
+// Negative controls: a group row's menu is narrower than an entry row's — no
+// copy and no "open the folder", because a group can resolve to more than one
+// root — and the entries a row does not offer are absent rather than
+// present-and-dead.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/storage_tree_context_menu_test.dart
 import 'dart:io';
@@ -94,7 +99,18 @@ void _write(String relative, int bytes) {
 /// what "the export ran" means without writing an archive: the runner is the last
 /// thing `exportDirectoryAsZip` reaches, so a press that gets that far got past
 /// every gate.
+/// The notifier the last [_container] handed to `videoImportListenableProvider`.
+///
+/// Exposed so a test can start an activity blocker **while the menu is already
+/// open**, which is the only ordering that reaches an entry's own gate now that a
+/// blocked row opens no menu at all. An import is a `CaptureActivity` exactly as
+/// a capture is (`storage_delete_capture_gate_test` asserts the two resolve
+/// alike), and it is the half this suite can turn on mid-test: the capture half
+/// is a value override, fixed for the life of the container.
+late ValueNotifier<VideoImportState> _importNotifier;
+
 ProviderContainer _container({bool clipboard = true, bool capturing = false, List<String>? zipped}) {
+  _importNotifier = ValueNotifier(VideoImportState.idle);
   return ProviderContainer(
     overrides: [
       if (zipped != null) ...[
@@ -112,7 +128,7 @@ ProviderContainer _container({bool clipboard = true, bool capturing = false, Lis
       // Overridden *below* `captureActivityProvider`, so the resolution under
       // test is the shipped one.
       capturingStateProvider.overrideWithValue(capturing),
-      videoImportListenableProvider.overrideWithValue(ValueNotifier(VideoImportState.idle)),
+      videoImportListenableProvider.overrideWithValue(_importNotifier),
       // Stands in for the OS save dialog, which no VM test may open.
       storageSaveFileProvider.overrideWithValue(({
         required String dialogTitle,
@@ -230,18 +246,29 @@ void main() {
     expect(find.text(_label('zip_directory')), findsNothing);
   }, variant: _desktop);
 
-  testWidgets('a group row has no menu', (tester) async {
+  // **A group row has a menu now, and it is narrower than an entry row's.** This
+  // case used to claim the opposite — that a group row had none at all — and the
+  // reason it gave has survived the change: a group can resolve to more than one
+  // root, so "copy this" and "open this folder" still have no single path to
+  // name. The zip and the delete were never in that position, so they are what
+  // the row's menu carries.
+  //
+  // Paired with the two tests above, which show the missing labels *do* appear
+  // for an entry row, so the absences below cannot pass by the labels being
+  // unfindable in principle.
+  testWidgets('a group row s menu carries the bundle and the removal alone', (tester) async {
     final container = _container();
     await openToTheFile(tester, container);
 
     await _secondaryPress(tester, find.text(appSentenceAt('pages.storage.group.active_records.label')));
 
-    // Nothing a menu would have put on screen is there. Paired with the two
-    // tests above, which show these same labels *do* appear for an entry row, so
-    // this cannot pass by the labels being unfindable in principle.
+    expect(find.text(_label('zip_directory')), findsOneWidget);
+    expect(find.text(_label('delete')), findsOneWidget);
     expect(find.text(_label('open_in_explorer')), findsNothing);
-    expect(find.text(_label('delete')), findsNothing);
     expect(find.text(_label('copy_directory')), findsNothing);
+    // The two file actions are not on it either: a group is not a file.
+    expect(find.text(_label('copy_file')), findsNothing);
+    expect(find.text(_label('download_file')), findsNothing);
   }, variant: _desktop);
 
   testWidgets('the open-the-folder entry is absent where the platform has no file manager', (tester) async {
@@ -321,31 +348,70 @@ void main() {
     expect(_saved, ['record.json']);
   }, variant: _desktop);
 
-  testWidgets('a capture in progress withholds the save entry', (tester) async {
-    final container = _container(capturing: true);
+  // **These three used to run with the activity already in force when the menu
+  // was opened.** A row a capture or an import is writing into now opens no menu
+  // at all — the row's ⋮ and both of its gestures are shut, which
+  // `storage_row_menu_gate_test.dart` claims — so the state they were written
+  // against, a listed entry that refuses the press, is only reachable when the
+  // activity begins *after* the menu is up. That ordering is what the entries'
+  // per-frame reading is for, and it is the one the app really produces: an
+  // import can begin from a picker the user left standing.
+  testWidgets('an activity that begins while the menu is open withholds the save entry', (tester) async {
+    final container = _container();
     await openToTheFile(tester, container);
 
     await _secondaryPress(tester, find.text('record.json'));
+    expect(_entryEnabled(tester, _label('download_file')), isTrue, reason: 'the entry has to start live');
+
+    _importNotifier.value = const VideoImportState(phase: VideoImportPhase.importing);
+    await _settle(tester);
+
+    expect(_entryEnabled(tester, _label('download_file')), isFalse);
     await tester.tap(find.text(_label('download_file')));
     await _settle(tester);
 
-    // Withheld while a capture writes, not withdrawn. The entry is still listed — the press
+    // Withheld while the import writes, not withdrawn. The entry is still listed — the press
     // simply does nothing — so this is not the "entry is missing" state.
     expect(find.text(_label('download_file')), findsOneWidget);
     expect(_saved, isEmpty);
   }, variant: _desktop);
 
-  testWidgets('a capture in progress does not withhold the folder entry', (tester) async {
+  testWidgets('an activity that begins while the menu is open does not withhold the folder entry', (tester) async {
+    final container = _container();
+    await openToTheFile(tester, container);
+
+    await _secondaryPress(tester, find.text('record.json'));
+    _importNotifier.value = const VideoImportState(phase: VideoImportPhase.importing);
+    await _settle(tester);
+
+    // Reading a path out to the file manager writes nothing and copies nothing,
+    // so it is not one of the actions the per-group exclusion covers. The save
+    // entry beside it *is* withheld in this very frame, so this is not a test in
+    // which the blocker failed to arrive.
+    expect(_entryEnabled(tester, _label('download_file')), isFalse);
+    expect(_entryEnabled(tester, _label('open_in_explorer')), isTrue);
+    await tester.tap(find.text(_label('open_in_explorer')));
+    await _settle(tester);
+
+    expect(shellCalls, hasLength(1));
+  }, variant: _desktop);
+
+  // The other side of the same change: with the activity already running there
+  // is no menu to grey, because the entrance is what closed. Asserted here as
+  // well as in the gate suite, because this file is where the reader looks for
+  // "what does a capture do to this menu" and the answer moved.
+  testWidgets('a capture already running opens no menu at all, rather than a menu of dead entries', (tester) async {
     final container = _container(capturing: true);
     await openToTheFile(tester, container);
 
     await _secondaryPress(tester, find.text('record.json'));
-    await tester.tap(find.text(_label('open_in_explorer')));
-    await _settle(tester);
 
-    // Reading a path out to the file manager writes nothing and copies nothing,
-    // so it is not one of the actions the per-group exclusion covers.
-    expect(shellCalls, hasLength(1));
+    expect(find.text(_label('download_file')), findsNothing);
+    // `open_in_explorer` is the entry nothing ever withholds, so it is the one
+    // that tells "the menu did not open" from "the menu opened with everything
+    // greyed".
+    expect(find.text(_label('open_in_explorer')), findsNothing);
+    expect(_saved, isEmpty);
   }, variant: _desktop);
 
   // The claim `storage_file_preview_view_test` used to carry on the preview's own
@@ -462,7 +528,12 @@ void main() {
     expect(_saved, isEmpty, reason: 'the press reached the save with a long reader holding the folder');
   }, variant: _desktop);
 
-  testWidgets('a claim registered before the menu opened withholds the save entry', (tester) async {
+  // The claim-first ordering, whose answer changed. It used to open the menu and
+  // find the save entry listed and inert; the entrance is now shut before the
+  // menu can be asked for, so what it asserts is that no menu appears — the
+  // difference between "listed and refused" and "not offered", which is exactly
+  // what the case above it is the other half of.
+  testWidgets('a claim registered before the menu is asked for opens no menu', (tester) async {
     final container = _container();
     await openToTheFile(tester, container);
 
@@ -470,9 +541,8 @@ void main() {
     await _settle(tester);
     await _secondaryPress(tester, find.text('record.json'));
 
-    expect(_entryEnabled(tester, _label('download_file')), isFalse);
-    await tester.tap(find.text(_label('download_file')));
-    await _settle(tester);
+    expect(find.text(_label('download_file')), findsNothing);
+    expect(find.text(_label('open_in_explorer')), findsNothing);
     expect(_saved, isEmpty);
   }, variant: _desktop);
 
@@ -544,16 +614,25 @@ void main() {
     expect(_saved, ['record.json']);
   }, variant: _desktop);
 
-  testWidgets('a capture in progress withholds the copy entry', (tester) async {
-    final container = _container(capturing: true);
+  // The copy entry's own activity gate, asserted apart from the save entry's for
+  // the reason the two long-read cases above are: they read the same expression
+  // today and sit in the same list, so one case covering both would stop covering
+  // either the moment they diverged. Reordered like its neighbours — the activity
+  // begins under an open menu, since a row it is already in force on opens none.
+  testWidgets('an activity that begins while the menu is open withholds the copy entry', (tester) async {
+    final container = _container();
     await openToTheFile(tester, container);
 
     await _secondaryPress(tester, find.text('record.json'));
+    expect(_entryEnabled(tester, _label('copy_file')), isTrue, reason: 'the entry has to start live');
+
+    _importNotifier.value = const VideoImportState(phase: VideoImportPhase.importing);
+    await _settle(tester);
 
     expect(_entryEnabled(tester, _label('copy_file')), isFalse);
     expect(_entryLooksDisabled(tester, _label('copy_file')), isTrue);
-    // Still listed, not withdrawn — the same shape the save entry keeps while a
-    // capture is writing.
+    // Still listed, not withdrawn — the same shape the save entry keeps while an
+    // import is writing.
     expect(find.text(_label('copy_file')), findsOneWidget);
   }, variant: _desktop);
 
@@ -591,15 +670,22 @@ void main() {
     expect(container.read(storageTreeExpansionProvider), opened);
   }, variant: _desktop);
 
-  testWidgets('a long press on a group row opens nothing', (tester) async {
+  // The group row's second entrance, claimed apart from its secondary press for
+  // the reason an entry row's two are. This case used to claim that a long press
+  // on a group row opened nothing, which was the other half of "a group row has
+  // no menu"; a group row has one now, and it is reached the same three ways an
+  // entry row's is.
+  testWidgets('a long press on a group row opens the same menu', (tester) async {
     final container = _container();
     await openToTheFile(tester, container);
 
     await tester.longPress(find.text(appSentenceAt('pages.storage.group.active_records.label')));
     await tester.pump(const Duration(milliseconds: 200));
 
+    expect(find.text(_label('delete')), findsOneWidget);
+    expect(find.text(_label('zip_directory')), findsOneWidget);
+    // Still narrower than an entry row's, from this entrance as from the other.
     expect(find.text(_label('open_in_explorer')), findsNothing);
-    expect(find.text(_label('delete')), findsNothing);
   }, variant: _desktop);
 }
 
