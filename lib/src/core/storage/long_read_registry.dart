@@ -360,7 +360,13 @@ enum LongReadKind {
 ///     the control it was shown on; the extract pair deliberately reused
 ///     `pages.storage.blocked.verb.extract`, so that one control's two refusals
 ///     (a capture, and a long reader) answered with the same word. That pairing
-///     is gone: a capture still says 取り出せません and this says 実行できません.
+///     is gone, and the storage row has since gone further in the same
+///     direction: its three buttons became one ⋮ that covers them all, so the
+///     capture refusal it carries is now `pages.storage.blocked.verb.any`'s
+///     verb-neutral 操作できません rather than any one action's word, and this says
+///     実行できません. `…verb.extract` is still composed by
+///     `storageActionBlockedMessage` but reaches no surface — see
+///     `storageExtractRefusalOf` for why it is kept.
 ///  2. **Folder or file.** The extract tooltip chose its subject from the
 ///     target's type. The row still shows which it is — an icon and a name — but
 ///     the sentence alone no longer says.

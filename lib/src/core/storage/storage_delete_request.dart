@@ -26,7 +26,7 @@ class StorageDeletePathsRequest extends StorageDeleteRequest {
   const StorageDeletePathsRequest(this.targets);
 
   /// Never empty. A group with nothing to delete has no request at all, so that
-  /// "no button" and "a button that removes nothing" cannot be spelled the same
+  /// "no delete" and "a delete that removes nothing" cannot be spelled the same
   /// way.
   final List<PathEntity> targets;
 }

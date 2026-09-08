@@ -79,7 +79,7 @@ Future<StorageDeleteReport> deleteStorageEntry(
       intent: StorageExclusionIntent.mutate,
       // The destructive side of the whole arrangement: this is the operation the
       // registry withholds while somebody else holds the paths, and it is the
-      // one caller that must never announce a claim of its own — the button it
+      // one caller that must never announce a claim of its own — the menu entry it
       // was pressed from reads the same registry.
       declaration: const LongReadDeclaration.none(
         reason: 'a delete is the destructive side the registry withholds, not a long read that withholds anything',

@@ -133,7 +133,7 @@ enum StorageExclusionIntent {
 /// **[beforeMaintenance] and the outcome [action] is handed are the two halves of
 /// one fact: whole-store recovery writes into directories this view deletes.**
 /// The drain empties a slot into `active/`, `quarantine/` or `retired/`, and the
-/// last two are groups with a delete button, so a set of entries taken *after*
+/// last two are groups this view offers a delete for, so a set of entries taken *after*
 /// the drain contains bytes the gesture never asked for and the drain has
 /// nowhere else to put. Only the root scope drains, but both arguments are
 /// required of every caller whatever scope its group resolves to: which scope a

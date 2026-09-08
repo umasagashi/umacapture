@@ -84,7 +84,7 @@ enum StorageZipOutcome {
   refused,
 
   /// A zip was already being built. Nothing was started; the UI disables its
-  /// buttons for the same reason, and this is the answer if one is pressed
+  /// controls for the same reason, and this is the answer if one is pressed
   /// anyway.
   alreadyRunning,
 
@@ -335,7 +335,7 @@ class StorageZipProgress extends Notifier<StorageZipState?> {
   /// which stands until the user answers and can stand indefinitely — a dialog
   /// left open over lunch is an ordinary thing to do. A claim held across it is
   /// held over a stretch in which not one byte of the folder is read, and it is
-  /// no longer only a greyed button that costs: `runModuleInstall` now *waits*
+  /// no longer only a greyed control that costs: `runModuleInstall` now *waits*
   /// for the holders of `modules/`, so a save dialog nobody closes would park
   /// the automatic module update behind it for as long as it stands. This is the
   /// same reason `zip_export_io.dart` gives for starting the group's exclusion
@@ -345,7 +345,7 @@ class StorageZipProgress extends Notifier<StorageZipState?> {
   /// of them needs a user to do anything.
   ///
   /// *The view stops refusing.* The row wears no progress ring and `holdsKind`
-  /// answers `false`, so every zip button in the tree comes back and every
+  /// answers `false`, so every zip entry in the tree comes back and every
   /// delete and extraction the claim was withholding does too. A press that gets
   /// through is answered by [begin] — the slot is [_run] and not the registry
   /// precisely so that this window has an answer — and the second request ends
@@ -574,7 +574,7 @@ Future<StorageZipOutcome> exportDirectoryAsZip(
   } finally {
     // Always, and after the messages above: the slot has to be released whether
     // the run succeeded, was declined, threw, or was cancelled, or the view's zip
-    // buttons stay disabled for the rest of the session.
+    // entries stay disabled for the rest of the session.
     progress.finish();
   }
 }

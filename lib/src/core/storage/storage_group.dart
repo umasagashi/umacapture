@@ -265,7 +265,7 @@ class StorageGroup {
   /// the journals exist only while a move is in flight, and on Windows never at
   /// all. Without this, the view had to read a group with more than one root as
   /// "several folders, pick one", which put `retired/` behind an extra click on
-  /// every platform and took the group's own zip button away — a permanent cost
+  /// every platform and took the group's own zip away — a permanent cost
   /// paid for two directories that are usually not there.
   ///
   /// **Data, not a count taken at runtime.** The obvious alternative is to ask the
@@ -340,7 +340,7 @@ class StorageGroup {
   /// Whether a **running capture writes into this group**, in which case the view
   /// withholds its delete *and its extraction* while one is running.
   ///
-  /// Declared here rather than tested for by id at the button, because "which
+  /// Declared here rather than tested for by id at the row, because "which
   /// groups does a capture write into?" is a property of the group and the
   /// alternative is a hand-written list of ids in the widget that a thirteenth
   /// group would not appear in.
@@ -371,7 +371,7 @@ class StorageGroup {
   /// the native writer does have — it writes a record id Dart has not been told
   /// about yet — is the one bound this view breaks on purpose, because this view
   /// enumerates the filesystem rather than the store, so the half-written
-  /// directory is on screen with a delete button on it.
+  /// directory is on screen with a delete on its menu.
   ///
   /// **One answer per group, not per platform.** The two writers above are the
   /// desktop ones; web's incremental merge ([CharaDetailRecordStorage.addFromFileAsync])
