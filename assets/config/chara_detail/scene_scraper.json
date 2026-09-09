@@ -157,6 +157,18 @@
         "b": 255
       }
     },
+    "scroll_bar_track_color": {
+      "min": {
+        "r": 180,
+        "g": 180,
+        "b": 180
+      },
+      "max": {
+        "r": 234,
+        "g": 234,
+        "b": 234
+      }
+    },
     "scroll_bar_thumb_probe": {
       "centroid_half_width": 0.010869565217391304,
       "white_reference_gap": 0.012228260869565218,
@@ -325,6 +337,18 @@
         "r": 255,
         "g": 255,
         "b": 255
+      }
+    },
+    "scroll_bar_track_color": {
+      "min": {
+        "r": 180,
+        "g": 180,
+        "b": 180
+      },
+      "max": {
+        "r": 234,
+        "g": 234,
+        "b": 234
       }
     },
     "scroll_bar_thumb_probe": {

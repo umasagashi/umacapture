@@ -26,15 +26,24 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <limits>
 #include <optional>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include "chara_detail/chara_detail_config.h"
 #include "chara_detail/chara_detail_scene_scraper.h"
 #include "cv/frame.h"
 #include "util/cv_test_helpers.h"
+#include "util/json_util.h"
+
+// Same narrow exception as test_config.cpp: the committed scene_scraper.json is small versioned config, and
+// the scroll-bar colour boxes in it are part of the contract these tests assert (see shippedScrollBar()).
+#ifndef TEST_ASSET_CONFIG_DIR
+#error "TEST_ASSET_CONFIG_DIR must be defined by the build (see native/CMakeLists.txt)."
+#endif
 
 namespace uma::chara_detail {
 namespace {
@@ -48,11 +57,79 @@ using scraper_impl::ScrollAreaOffsetEstimator;
 using scraper_impl::ScrollBarOffsetEstimator;
 using scraper_impl::StationaryFrameCatcher;
 
-const Color kMargin{245, 245, 245};  // near-white band flanking the placeholder track
+const Color kMargin{241, 241, 241};  // near-white page margin flanking the placeholder track
 const Color kTrack{210, 210, 210};  // the placeholder track (background to the thumb scan, but not "white")
 const Color kThumb{60, 60, 60};  // the scroll thumb
-const Range<Color> kTrackRange{Color(200, 200, 200), Color(255, 255, 255)};  // thumb vs. background
-const Range<Color> kMarginRange{Color(228, 228, 228), Color(255, 255, 255)};  // near-white margin vs. track
+// The two anti-aliased cap rows that decide every at-top reading, and the page margin above them. Each cap is
+// the blend of the row above with the row below, and what matters is which colour boxes each one lands in.
+// The ranges below were measured over 18 clips of this project's corpus (13,599 whole-pixel reads, 3,896 of
+// them at a genuine top), separately per layout because the two layouts do NOT agree:
+//
+//   role                       real          in margin box   in background box   in track box
+//   page margin              241-248         yes             yes                 no  (above 234)
+//   track's own top cap      229-230         YES             yes                 YES  <-- uncovered by 1 px
+//   track interior           201-224         no              yes                 yes
+//   thumb's own cap (at top) 196-201 common  no              yes                 yes
+//                            148-226 friend  no              yes down to ~170    yes
+//   thumb                     dark           no              no                  no
+//
+// The track's own cap is inside BOTH the margin box and the track box; that dual membership is the whole
+// mechanism, because it is what lets the near-white margin run swallow the row a one-pixel scroll uncovers.
+//
+// WHICH EDGE EACH CONSTANT GUARDS. A single painted level cannot be the extreme against every box edge at
+// once, so each one below is the extreme of its measured range against ONE NAMED edge -- the edge whose
+// crossing this file can actually observe -- and the edges it does not guard are listed after it. Where the
+// synthetic and the corpus break at different settings, the synthetic breaks FIRST or at the same setting;
+// it is never the later of the two.
+//
+//  * kMargin 241 is the DARKEST page-margin sample in the corpus (common layout, over 3,669 at-top reads;
+//    friendCommon's darkest is 242). It guards the track box's CEILING (234) from above, with 7 levels to
+//    spare: raise that ceiling to 241 and the at-top cases here read non-zero. On the corpus the same
+//    8-level move is likewise the first that changes any verdict, and it changes them the same way -- a
+//    FALSE ALARM at a genuine top. Painting 245, as this file used to, hid the four levels in between.
+//  * kThumbCap 226 is the BRIGHTEST at-top thumb cap in the corpus (friendCommon; the common layout's
+//    brightest is 201, i.e. 27 levels of slack, so pooling the two layouts would have hidden this). It
+//    guards the margin box's FLOOR (228) from below, with 2 levels to spare: lower that floor to 226 and the
+//    margin run swallows the cap, m_up meets the upper bound, and the one-tip-pixel cases here collapse to 0
+//    -- a MISS. On the corpus the first floor that changes any verdict is lower still (190, the brightest
+//    thumb cap measured directly against the margin run on an already-scrolled frame), so this file goes red
+//    36 levels before the material does. Conservative in the safe direction, not representative of 190.
+//  * kTrackCap 230 is the BRIGHTEST track cap in the corpus (measured 229-230). It guards the track box's
+//    CEILING (234) from below -- lower that ceiling under 230 and the row a one-tip-pixel scroll uncovers
+//    stops counting as track, so the head-start cases collapse to 0. Its margin-box membership is not
+//    guarded by anything here: raising the margin floor past it only makes upper_gap larger, which no
+//    assertion in this file can see.
+//
+// NOT GUARDED, and stated so no reader takes the table above for a bound it is not:
+//  * The background box's FLOOR (153,151,170). The material's extreme there is the DARK end of the thumb
+//    cap -- 148 on friendCommon, already below that floor -- while kThumbCap is the bright end. A floor
+//    raised anywhere in (170, 226] breaks head starts on real footage with every case here green.
+//  * Anything about hardware this corpus does not contain. One device, and friendCommon appears in exactly
+//    one clip of the 18 (227 at-top reads against common's 3,669).
+const Color kTrackCap{230, 230, 230};  // track fading into the page margin: inside the margin AND track boxes
+const Color kThumbCap{226, 226, 226};  // thumb fading into whatever is above it: below the margin box floor
+
+// The three colour boxes are the SHIPPED ones, read from the committed config -- not restated here. They are
+// the only part of the estimator's configuration these tests take from shipping; the scan line, viewport, cap
+// offset and thumb probe stay synthetic, because the frames are hand-built 100 px mats and those four are
+// geometry, not colour.
+//
+// Restating them here is what this file used to do, and it hid a real break. The background box was written
+// as [200,255]^3, whose floor sits 47 levels above the shipped one, and kThumbCap then had to be pushed up to
+// 205 just to stay inside that invented floor -- a level picked to satisfy the synthetic's own box rather
+// than measured anywhere, and above the whole at-top cap range of the layout it was supposed to stand for
+// (196-201 on common). A synthetic running its own floor of 200 against its own cap of 205 stays green
+// through every edit to the SHIPPED background floor, including one that lifts it past a real cap and makes
+// `upper` stop a sample early. Reading the boxes from the config is what puts such an edit in front of these
+// assertions. It does not by itself make the painted levels representative -- that is what the extremes
+// above are for, and the two failures are independent.
+const scraper_config::SceneScraperConfig &shippedScrollBar() {
+    static const scraper_config::SceneScraperConfig config =
+        json_util::read(std::filesystem::path(TEST_ASSET_CONFIG_DIR) / "chara_detail" / "scene_scraper.json")
+            .get<scraper_config::CharaDetailSceneScraperConfig>()
+            .common;
+    return config;
+}
 
 // Estimator physics for the tests: a unit viewport keeps scrollGuess in frame-width pixels, and a zero cap
 // offset makes the logical thumb length exactly the measured tip-to-tip span, so the geometric expectations
@@ -108,12 +185,45 @@ Frame scrollbarFrameAA(int size, double thumb_top, double thumb_bottom) {
     return Frame::fixed(mat);
 }
 
+// The geometry a genuine "content at the very top" produces, which scrollbarFrame() cannot express: BOTH
+// ends of the exposed track carry an anti-aliased cap row, and the two caps land in different colour boxes
+// (the table by kTrackCap above). The track's own cap is bright enough to stay inside the near-white margin
+// box, so the margin run walks straight over it; the thumb's cap is dragged well below that floor, so the
+// margin run stops there instead. That is why the margin run's end is NOT the track top on a frame where
+// the thumb is parked near it.
+//
+// `exposed_rows` is how many rows of placeholder track (its own cap row counting as the first) are left
+// visible above the thumb's cap: 0 is the genuine top -- the thumb's cap occludes the track's cap, exactly as
+// on real footage -- and 1 is the smallest scroll the widget can show, which uncovers the track's cap row and
+// nothing else. Painting that row inside the margin box is the point of this helper: it reproduces the real
+// reading, where the margin run swallows the newly uncovered row and the two positions become
+// indistinguishable to any window whose lower bound is that run's end.
+Frame scrollbarFrameCappedTop(int size, int exposed_rows, int thumb_rows) {
+    const int track_inset = size * 8 / 100;
+    cv::Mat mat = testutil::solid(size, kMargin);
+    mat(cv::Rect(0, track_inset, size, size - 2 * track_inset)).setTo(cv::Scalar(kTrack.b(), kTrack.g(), kTrack.r()));
+    mat.row(track_inset).setTo(cv::Scalar(kTrackCap.b(), kTrackCap.g(), kTrackCap.r()));
+    const int thumb_cap = track_inset + exposed_rows;  // occludes the track's cap row when exposed_rows == 0
+    mat.row(thumb_cap).setTo(cv::Scalar(kThumbCap.b(), kThumbCap.g(), kThumbCap.r()));
+    mat(cv::Rect(0, thumb_cap + 1, size, thumb_rows)).setTo(cv::Scalar(kThumb.b(), kThumb.g(), kThumb.r()));
+    return Frame::fixed(mat);
+}
+
 // Endpoints stay strictly inside the frame: on a 100px-tall fixed frame, normalized y maps to pixel
 // y*width, so y=1.0 would map to row 100 (one past the last valid row 99). 0.99 keeps the scan in bounds.
 const Line<double> kScanLine{Point<double>(0.5, 0.0), Point<double>(0.5, 0.99)};
 
+// Shipped colour boxes, synthetic geometry. One factory so the shipped/synthetic split is stated once and
+// cannot drift between cases.
+ScrollBarOffsetEstimator makeScrollBarEstimator() {
+    const scraper_config::SceneScraperConfig &shipped = shippedScrollBar();
+    return ScrollBarOffsetEstimator(
+        shipped.scroll_bar_bg_color, kScanLine, shipped.scroll_bar_margin_color, shipped.scroll_bar_track_color,
+        kViewport, kCapOffset, kThumbProbe);
+}
+
 TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered track") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     const Frame frame = scrollbarFrame(100, 40, 60);
 
     CHECK(estimator.hasScrollbar(frame));
@@ -130,8 +240,69 @@ TEST_CASE("ScrollBarOffsetEstimator reads the thumb margins from a rendered trac
     CHECK(*position == doctest::Approx(0.50).epsilon(0.05));  // scrolled fraction of the movable range
 }
 
+TEST_CASE("ScrollBarOffsetEstimator reads a thumb parked on the track's cap as a genuine top") {
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
+    // Track [8, 92), thumb parked on the track's top cap: row 8 is the thumb's own anti-aliased cap row
+    // (it occludes the track's cap), rows [9, 29) are the thumb. No track is visible above the thumb, so the
+    // content is at the very top and both readings must be exactly 0 -- not "small".
+    const Frame frame = scrollbarFrameCappedTop(100, /*exposed_rows=*/0, /*thumb_rows=*/20);
+
+    REQUIRE(estimator.hasScrollbar(frame));
+    const auto top_margin = estimator.topMargin(frame);
+    REQUIRE(top_margin.has_value());
+    CHECK(*top_margin == 0.0);
+
+    const auto position = estimator.position(frame);
+    REQUIRE(position.has_value());
+    CHECK(*position == 0.0);
+}
+
+TEST_CASE("ScrollBarOffsetEstimator still measures a single exposed row of track") {
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
+    // The positive control for the case above, and the smallest movement the widget can show: the track's own
+    // cap row (row 8) is now uncovered above the thumb's cap row (row 9). The reading must leave zero, or
+    // "at the top" would be indistinguishable from "scrolled" and the case above would pass vacuously.
+    //
+    // The uncovered row is INSIDE the near-white margin box (kTrackCap, as on real footage), so the margin run
+    // walks over it and its end advances in lockstep with the thumb. A window whose lower bound is that run's
+    // end therefore never contains the row that just appeared, and this reading collapses back to 0. Only a
+    // window anchored at the START of the scan column sees it.
+    const Frame frame = scrollbarFrameCappedTop(100, /*exposed_rows=*/1, /*thumb_rows=*/20);
+
+    const auto top_margin = estimator.topMargin(frame);
+    REQUIRE(top_margin.has_value());
+    CHECK(*top_margin > 0.0);
+
+    const auto position = estimator.position(frame);
+    REQUIRE(position.has_value());
+    CHECK(*position > 0.0);
+}
+
+TEST_CASE("ScrollBarOffsetEstimator separates a one-tip-pixel head start from a genuine top") {
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
+    // The contract premature-scroll detection rests on, stated as a RELATION rather than as two separate
+    // magnitudes: a user who began scrolling before the ready notification has moved the thumb by at least one
+    // tip pixel, and the two frames must not read alike. Asserting each frame's magnitude on its own (the two
+    // cases above) leaves "both read 0" satisfying one of them vacuously, which is exactly the state this
+    // reading was in while the window's lower bound tracked the near-white margin run.
+    const Frame at_top = scrollbarFrameCappedTop(100, /*exposed_rows=*/0, /*thumb_rows=*/20);
+    const Frame head_start = scrollbarFrameCappedTop(100, /*exposed_rows=*/1, /*thumb_rows=*/20);
+
+    const auto top_margin_at_top = estimator.topMargin(at_top);
+    const auto top_margin_head_start = estimator.topMargin(head_start);
+    REQUIRE(top_margin_at_top.has_value());
+    REQUIRE(top_margin_head_start.has_value());
+    CHECK(*top_margin_head_start > *top_margin_at_top);
+
+    const auto position_at_top = estimator.position(at_top);
+    const auto position_head_start = estimator.position(head_start);
+    REQUIRE(position_at_top.has_value());
+    REQUIRE(position_head_start.has_value());
+    CHECK(*position_head_start > *position_at_top);
+}
+
 TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     const Frame frame = Frame::fixed(testutil::solid(100, kTrack));
 
     CHECK_FALSE(estimator.hasScrollbar(frame));
@@ -140,7 +311,7 @@ TEST_CASE("ScrollBarOffsetEstimator reports no scrollbar on a uniform frame") {
 }
 
 TEST_CASE("ScrollBarOffsetEstimator::scrollGuess turns a thumb move into a content-pixel guess") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     // from: thumb [40, 60) (length 20, upper_gap 40-8 = 32). to: thumb [50, 70) (upper_gap 42), same length.
     // guess = viewport_px * (ug_to - ug_from) / tl_from = 100 * (42 - 32) / 20 = 50 (unit viewport => px = width).
     const Frame from = scrollbarFrame(100, 40, 60);
@@ -160,7 +331,7 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollGuess turns a thumb move into a conte
 }
 
 TEST_CASE("ScrollBarOffsetEstimator::scrollGuess returns nullopt without a usable scrollbar pair") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     const Frame bar = scrollbarFrame(100, 40, 60);
     const Frame uniform = Frame::fixed(testutil::solid(100, kTrack));
 
@@ -174,7 +345,7 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollGuess returns nullopt without a usabl
 }
 
 TEST_CASE("ScrollBarOffsetEstimator::scrollGuess divides by each frame's own length across a genuine re-scale") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     // from: thumb [40, 70) (length 30, upper_gap 32). to: thumb [50, 70) (length 20, upper_gap 42): the thumb
     // length changed by 10 px (>> the re-scale cut) and stays clear of the track bottom, so this is read as a
     // genuine mid-scroll re-scale and each upper_gap is divided by its OWN frame's length:
@@ -189,7 +360,7 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollGuess divides by each frame's own len
 }
 
 TEST_CASE("ScrollBarOffsetEstimator::scrollGuess keeps the reference length while the thumb is bottom-clipped") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     // to's thumb bottom is pinned to the track bottom (row 92 here), the overscroll signature under which to's
     // own measured length is unreliable -- so even though the length changed by 10 px (which alone would select
     // the own-length form, see the re-scale case above) the guess must keep dividing by from's length:
@@ -203,7 +374,7 @@ TEST_CASE("ScrollBarOffsetEstimator::scrollGuess keeps the reference length whil
 }
 
 TEST_CASE("scrollGuess sub-pixel refinement matches the integer guess on hard-edged frames") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     const Frame from = scrollbarFrame(100, 40, 60);
     const Frame to = scrollbarFrame(100, 50, 70);  // same length, moved 10 px
 
@@ -219,7 +390,7 @@ TEST_CASE("scrollGuess sub-pixel refinement matches the integer guess on hard-ed
 }
 
 TEST_CASE("scrollGuess sub-pixel refinement resolves a move the integer tips round away") {
-    const ScrollBarOffsetEstimator estimator(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator estimator = makeScrollBarEstimator();
     // Both tips slide 0.6 px -- below one pixel, so the colour-run rounds both frames to the same integer tips
     // and the integer guess reads ~0. The anti-aliased tip blend encodes the fraction, so the refined guess
     // recovers the forward move (amplified by viewport / thumb_length ~= 5x here). This is the quantization the
@@ -236,7 +407,7 @@ TEST_CASE("scrollGuess sub-pixel refinement resolves a move the integer tips rou
 }
 
 TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless frames") {
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar = makeScrollBarEstimator();
     const ImageOffsetEstimator image;  // default config
     const ScrollAreaOffsetEstimator estimator(scroll_bar, image, kGuessMargin);
 
@@ -257,7 +428,7 @@ TEST_CASE("ScrollAreaOffsetEstimator delegates position and rejects featureless 
 TEST_CASE("ScrollAreaOffsetEstimator reads scrollbar geometry from scroll_bar_frame, not frame") {
     // Guards the scroll-area / scroll-bar decoupling: geometry must come from the dedicated band, so that the
     // content crop (frame) can change without disturbing detection.
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar = makeScrollBarEstimator();
     const ImageOffsetEstimator image;  // default config
     const ScrollAreaOffsetEstimator estimator(scroll_bar, image, kGuessMargin);
 
@@ -645,7 +816,7 @@ cv::Mat blockMosaic(int height, int width) {
 }
 
 TEST_CASE("ScrollAreaOffsetEstimator admits an image offset near the scroll-bar guess and vetoes a far one") {
-    const ScrollBarOffsetEstimator scroll_bar(kTrackRange, kScanLine, kMarginRange, kViewport, kCapOffset, kThumbProbe);
+    const ScrollBarOffsetEstimator scroll_bar = makeScrollBarEstimator();
     const ScrollAreaOffsetEstimator estimator(scroll_bar, ImageOffsetEstimator(), kGuessMargin);
 
     // Content: two 300-row windows of one tall texture, 90 rows apart -> the image estimator reads +90 px.

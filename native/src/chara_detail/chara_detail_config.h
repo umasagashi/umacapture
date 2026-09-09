@@ -114,11 +114,39 @@ struct SceneScraperConfig {
     // thumb_length); it is NOT the crop height. `cap_offset` is the thumb's rounded-cap depth c: the tip-to-tip
     // length over-reads the logical thumb length by 2c, so the logical length is `tip - 2 * cap_offset`.
     // `scroll_bar_margin_color` is the near-white band flanking the placeholder track; isolating it locates the
-    // fixed track ends so the position is measured against the true track, not the (slightly longer) config
+    // track ends so the position is measured against the true track, not the (slightly longer) config
     // scan line.
     double viewport;
     double cap_offset;
     Range<Color> scroll_bar_margin_color;
+    // The placeholder track's own fill. Third of three colour boxes on the same scan column, and deliberately
+    // the one BETWEEN the other two: `scroll_bar_margin_color` starts at the near-white floor 228 and
+    // `scroll_bar_bg_color` starts at the thumb's own tone, so the track's mid-grey fell in the gap they leave
+    // and no box named it. It is not a subset of either; it is the missing middle.
+    //
+    // WHY THE MARGIN RUN'S END CANNOT ANSWER "IS THE TRACK EXPOSED". `scroll_bar_margin_color`'s end locates
+    // the track top only while the thumb is elsewhere. The thumb is drawn far darker than the track, so the
+    // single anti-aliased row where the thumb's cap meets the margin is pulled below the near-white
+    // floor (a common-layout blend runs 243 -> 199 against a floor of 228; that row's measured at-top range
+    // is 196-201 on common and 148-226 on friendCommon), whereas the same row carrying only the track's own
+    // cap stays above it (243 -> 229..230). At a genuine top the thumb sits ON the track's top cap, so that row is
+    // the thumb's: the margin run terminates one sample early and `thumb_top - track_top` reads a gap of one
+    // sample where the true gap is zero. The bias is a property of WHICH feature is occluding the cap, so it
+    // cannot be cancelled by a constant, and moving the 228 floor only trades which frame reads wrong.
+    // Testing for the track's own colour below the thumb's cap asks the question directly -- "is there any
+    // track above the thumb" -- and reads no absolute position, so it survives the ~1 px whole-widget
+    // translation that differs between capture geometries.
+    //
+    // AND THE MARGIN RUN'S END CANNOT BOUND THAT TEST EITHER. The row a one-tip-pixel scroll uncovers is the
+    // track's OWN top cap, whose blend (229..230) is above the 228 floor and therefore inside
+    // `scroll_bar_margin_color`. So the margin run advances over precisely the row that is the evidence, in
+    // lockstep with the thumb; a window starting at that run's end never contains it and the reading collapses
+    // to 0 for the first tip pixel of travel. geometryAt starts the window at the scan column instead, which
+    // is a fixed landmark. The cost is that this box's ceiling now faces the page margin directly: 234 against
+    // a measured margin minimum of 241 is 7 levels, and nothing but colour separates them. That headroom
+    // fails toward a FALSE ALARM -- a genuine top reported as scrolled, i.e. a refused tab -- and not toward
+    // a miss; the two hazards on this scan column fail in opposite directions and geometryAt sets out both.
+    Range<Color> scroll_bar_track_color;
     // Sub-pixel thumb-centre probe geometry (self-centres the vertical scan on the thumb; see trackCenterX).
     ScrollBarThumbProbeConfig scroll_bar_thumb_probe;
     // Half-width (width-normalized) of the scroll-guess safeguard window: the image estimator's chosen offset
@@ -145,6 +173,7 @@ struct SceneScraperConfig {
         viewport,
         cap_offset,
         scroll_bar_margin_color,
+        scroll_bar_track_color,
         scroll_bar_thumb_probe,
         guess_window_margin);
 };

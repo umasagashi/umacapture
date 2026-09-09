@@ -223,8 +223,37 @@ private:
             0.00126,
             // Placeholder track is faintly coloured (satisfies R < 228 or G < 228); the near-white scroll-area
             // margin flanking it is all channels >= 228. This box catches that margin and excludes the track,
-            // so the top/bottom margin runs locate the fixed track ends.
+            // so the top/bottom margin runs locate the track ends -- but only on a frame where the thumb is
+            // not sitting on the end being located; see scroll_bar_track_color below and geometryAt.
             Range<Color>{{228, 228, 228}, {255, 255, 255}},
+            // The placeholder track's own fill, used to ask whether any track is visible above the thumb tip
+            // (geometryAt scans from the start of the column down to that tip). Measured over 31 clips / 17,022
+            // forwarded frames: the track interior (451,275 samples, both anti-aliased rows excluded) spans
+            // R 201-223, G 201-224, B 200-232 with p1/p99 of 207/213, 206/211, 209/217; the thumb body
+            // (27,164 samples) tops out at 168/167/175; the near-white margin (86,348 samples) starts at 228.
+            // The box below therefore clears the thumb's brightest tone by 5 levels and sits 20 below the
+            // track's darkest, and it contained 451,266 / 451,275 = 99.998 % of the track interior against
+            // 0 / 86,348 margin and 0 / 27,164 thumb-body samples.
+            //
+            // The upper bound is 234 and not 227, i.e. ABOVE the 228 margin floor, and the two boxes therefore
+            // overlap on 228-234. That used to be free: the caller bracketed the samples by index between the
+            // margin run's end and the thumb run's end, so no margin sample was ever offered to this box. It
+            // is not free any more. The window's lower bound had to move to the start of the scan column --
+            // the margin run's end advances over the very row a one-tip-pixel scroll uncovers, so a window
+            // hung off it cannot see that scroll at all (geometryAt derives it) -- and the page margin is now
+            // separated from this box by colour alone. Measured headroom: 7 levels (the darkest margin sample
+            // over 3,506 at-top frames is 241, this ceiling is 234; a later 18-clip remeasure reproduces the
+            // 241 over 3,669 at-top reads). Spending it fails toward a FALSE ALARM -- a genuine top reported
+            // as scrolled -- and not toward a miss: with this ceiling lifted to 244, the first verdict change
+            // was a false alarm in 47 of 47 diverging tab-runs and a miss in 0. The margin FLOOR below fails
+            // the other way (toward a miss); see geometryAt, which sets both directions out. The 227 variant
+            // was measured too and
+            // reported nine false "no track" frames on the x1.335 rung, where the single exposed row is a
+            // white/track blend at 232,227,228 and 227,221,228 -- but that rung is upscaled from 404 px,
+            // below the shipped 540 px minimum, so what 234 buys over 227 is coverage outside the supported
+            // range, and what it costs is half of the margin headroom above. Revisiting the bound is a
+            // judgement about that trade, not a defect.
+            Range<Color>{{180, 180, 180}, {234, 234, 234}},
             thumbProbe(),
             // Guess-window half-width for the scroll-guess veto (see ScrollAreaOffsetEstimator::estimate). ~0.10
             // of the width (~74 px at 736): safely above the worst measured V2 true-offset guess error (~41 px on
@@ -268,7 +297,8 @@ private:
         config.scroll_bar_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
         // The shorter friend scroll area has a smaller viewport: fit across friend_standard /
         // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. cap_offset,
-        // the margin colour and the guess-window margin are shared, unchanged from common().
+        // the margin and track colours and the guess-window margin are shared, unchanged from common()
+        // (the two layouts draw the same widget; only where it sits and how much content it scrolls differ).
         config.viewport = 0.553;
         return config;
     }

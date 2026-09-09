@@ -79,12 +79,14 @@ ScrollBarOffsetEstimator::ScrollBarOffsetEstimator(
     const Range<Color> &scroll_bar_bg_color_range,
     const Line<double> &scroll_bar_scan_line,
     const Range<Color> &scroll_bar_margin_color_range,
+    const Range<Color> &scroll_bar_track_color_range,
     double viewport,
     double cap_offset,
     const scraper_config::ScrollBarThumbProbeConfig &thumb_probe)
     : scroll_bar_bg_color_range(scroll_bar_bg_color_range)
     , scroll_bar_scan_line(scroll_bar_scan_line)
     , scroll_bar_margin_color_range(scroll_bar_margin_color_range)
+    , scroll_bar_track_color_range(scroll_bar_track_color_range)
     , viewport(viewport)
     , cap_offset(cap_offset)
     , thumb_probe(thumb_probe) {}
@@ -103,7 +105,7 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
         return std::nullopt;  // Bar not found.
     }
 
-    // Margin run from each end reaches the (non-white) placeholder track, locating its fixed top/bottom.
+    // Margin run from each end reaches the (non-white) placeholder track, locating its top/bottom.
     // Fail open: if the near-white margin is absent (== 1. is the whole line, so ignore it too), fall back to
     // the scan endpoints, i.e. the old scan-line-relative behaviour, rather than dropping the whole frame.
     const auto margin_upper = frame.lengthIn(scroll_bar_margin_color_range, scan_line);
@@ -129,9 +131,58 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     if (thumb_logical <= 0. || track_span <= 0.) {
         return std::nullopt;
     }
+    // Is any placeholder track actually visible above the thumb? The margin run's end locates the track top
+    // only on a frame where the thumb is NOT sitting on that end. The thumb is drawn far darker than the
+    // track, so the one anti-aliased row where its cap meets the near-white margin is dragged well under the
+    // margin floor (measured 243 -> 199 against a floor of 228), while the same row carrying only the
+    // track's own cap stays inside it (243 -> 231). At a genuine top the thumb IS on the track's top cap, so
+    // that row is the thumb's, the margin run stops one sample early, and track_top is read one sample high
+    // -- an offset that depends on what is occluding the cap and therefore cannot be cancelled by a
+    // constant. Asking for the track's own colour BELOW the thumb's own cap (that boundary sample is an
+    // anti-aliased edge belonging to the thumb, not to the track) answers the question the gap is really
+    // about and reads no absolute position, so it also survives the ~1 px whole-widget translation that
+    // differs between capture geometries. When no track is exposed the true gap is below one sample: report 0.
+    //
+    // The window's LOWER bound is the start of the scan column and not the margin run's end (m_up), because
+    // m_up is not a landmark: it moves with the thumb, in the same direction and by the same step as the
+    // upper bound. The row a one-tip-pixel scroll uncovers is the track's own top cap, and that row's blend
+    // sits INSIDE the near-white margin box (231 against a 228 floor, the second value measured above). So
+    // the margin run swallows exactly the row that constitutes the evidence, m_up advances by one sample, the
+    // upper bound advances by one sample with it, and the interval stays empty -- the window closes on the
+    // only thing it was opened to find. Measured over 16 clips: with m_up as the lower bound the reading is 0
+    // on 190 frames displaced a full tip pixel, indistinguishable from the 3,506 genuine tops; anchored at
+    // the column start it is non-zero on all 190 and still exactly 0 on all 3,506. The column start cannot
+    // move with the thumb -- it is the top edge of the scroll-bar crop -- which is the whole property being
+    // bought here.
+    //
+    // What that costs: the page margin is no longer excluded by the index window, only by colour. The track
+    // box's ceiling (234) sits 7 levels below the darkest page-margin sample in the corpus (241, over 3,506
+    // at-top frames), and on the friendCommon layout the thumb's own cap reaches 227 against the 228 margin
+    // floor, i.e. one level -- a capture whose cap brightened past that floor would have m_up swallow the cap
+    // too, and the cap would then be counted as track. Both are colour headroom on unfamiliar hardware, which
+    // this corpus (one device) cannot bound, and both fail toward a false "scrolled". The opposite failure is
+    // unchanged by the lower bound and predates it: if the track's tone leaves the box entirely, no sample
+    // matches, the reading is a definite 0, and every caller reads "at the very top".
+    // The column's very first sample is outside the open interval (isInBetween skips index 0) and is never
+    // examined. For that exclusion to change an answer, sample 0 would have to be the ONLY track-coloured
+    // sample above the thumb tip; the track is drawn contiguously, so that needs the near-white run above the
+    // track to be zero samples deep -- the scan column would have to start exactly on the track's own top
+    // cap. At depth 1 the row a one-tip-pixel scroll uncovers already falls on sample 1, inside the window,
+    // and is read normally. Measured depth of that run (one sample ~= one pixel at anchor unit 736), over the
+    // same 16 clips: 3 and 4 samples on the player/factor layouts, 4 and 5 on landscape 2-pane, 7 on friend,
+    // and the page margin (241-248) fills it on all 4,063 corpus frames carrying a scroll bar. So the slack
+    // is three samples at its thinnest, not merely "sample 0 happens to be white". If a future crop or widget
+    // shift ever spends those three, the failure is the silent one: a one-tip-pixel head start reads exactly
+    // 0 and is indistinguishable from a genuine top, which is the defect this window exists to remove.
+    //
+    // Below the shipped 540 px minimum this path reports 1 sample at a genuine top rather than 0: an upscale
+    // widens the thumb's cap ramp to two rows, and the middle row's white/thumb blend is the placeholder
+    // track's colour to within noise, so no colour test can separate "one row of track" from "the top of a
+    // wide ramp". Sub-540 px input is best-effort by project policy; native-resolution correctness wins.
+    const bool track_exposed = frame.isInBetween(scroll_bar_track_color_range, scan_line, 0., upper.value());
     // Clamp on overscroll: the thumb shortens and its top pins to the track top, so a tiny negative gap from
     // sub-pixel noise should read as "at the top" (0), not a small backward offset.
-    const double upper_gap = std::max(0., thumb_top - track_top);
+    const double upper_gap = track_exposed ? std::max(0., thumb_top - track_top) : 0.;
     const double lower_gap = std::max(0., track_bottom - thumb_bottom);
     return TrackGeometry{upper_gap, lower_gap, track_span, thumb_logical};
 }
@@ -1356,6 +1407,7 @@ void SceneScraper::build(const Frame &frame) {
         config.scroll_bar_bg_color,
         config.scroll_bar_scan_line,
         config.scroll_bar_margin_color,
+        config.scroll_bar_track_color,
         config.viewport,
         config.cap_offset,
         config.scroll_bar_thumb_probe);

@@ -351,6 +351,42 @@ public:
         return static_cast<double>(inside) / samples;
     }
 
+    // Whether any sampled point STRICTLY BETWEEN the ratios `after` and `before` falls in `color_range`.
+    // The sample grid is the same one lengthIn walks (same >= 2 clamp, same linspace over the same mapped
+    // line), so the two ratios lengthIn returns for this very `line` address exactly the samples this call
+    // brackets -- passing them selects the open interval between two colour runs, excluding each run's own
+    // last sample. That exclusion is the point: the boundary sample of a run is the anti-aliased edge that
+    // ended it, and it belongs to neither side. Both bounds are compared against grid ratios that came out
+    // of the identical linspace call, so the exact float comparison is safe by construction.
+    //
+    // A bound may also be a literal 0. / 1. rather than a run's end, which selects "from the start of the
+    // line" / "to its end" -- the caller then wants a fixed landmark on one side, not a second run (see
+    // geometryAt, where the run that would have bounded it moves with the feature being measured). The
+    // comparison stays exact: linspace writes its first element as `start + delta * 0`, i.e. exactly 0., and
+    // its last as `end` verbatim, so those two samples are excluded deterministically and not by luck. On
+    // this line's grid they are the frame crop's own first and last row, which are edge samples of the crop
+    // in the same sense a run's boundary sample is an edge of its run.
+    [[nodiscard]] bool isInBetween(
+        const Range<Color> &color_range, const Line<double> &line, double after, double before) const {
+        const Range<BGR> &bgr_range = asBGRRange(color_range);
+        const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();
+
+        const int samples = std::max(2, (int) mapped_line.length());
+        for (const auto &ratio : linspace(0., 1., samples)) {
+            if (ratio <= after) {
+                continue;
+            }
+            if (ratio >= before) {
+                break;
+            }
+            const auto &p = mapped_line.pointAt(ratio).round();
+            if (bgr_range.contains(bgrAt(p.x(), p.y()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     [[nodiscard]] std::optional<double> lengthIn(const Range<Color> &color_range, const Line<double> &line) const {
         const Range<BGR> &bgr_range = asBGRRange(color_range);
         const Line<double> &mapped_line = anchor_.mapToFrame(line).cast<double>();

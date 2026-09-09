@@ -57,6 +57,7 @@ public:
         const Range<Color> &scroll_bar_bg_color_range,
         const Line<double> &scroll_bar_scan_line,
         const Range<Color> &scroll_bar_margin_color_range,
+        const Range<Color> &scroll_bar_track_color_range,
         double viewport,
         double cap_offset,
         const scraper_config::ScrollBarThumbProbeConfig &thumb_probe);
@@ -96,8 +97,15 @@ private:
     // the (near-white) edge of the track. Measuring against the track, not the scan line, removes the
     // scan-line overshoot; only the thumb length carries the -2c cap correction (the caps cancel in
     // upper_gap since the thumb top and track top share the same cap geometry).
+    //
+    // `upper_gap` additionally answers "is any track visible above the thumb at all" before it answers "how
+    // much": with the thumb parked on the track's top cap there is no track above it, and the margin run's
+    // end is then a reading of the THUMB's cap, one sample high. That exposure test scans from the START of
+    // the scan column down to the thumb's cap -- deliberately NOT from the margin run's end, which moves with
+    // the thumb and would swallow the one row a one-tip-pixel scroll uncovers. See geometryAt and the
+    // derivation on SceneScraperConfig::scroll_bar_track_color.
     struct TrackGeometry {
-        double upper_gap;      // thumb_top - track_top, clamped >= 0 (overscroll pins the thumb to the top)
+        double upper_gap;      // thumb_top - track_top, clamped >= 0, and exactly 0 when no track is exposed
         double lower_gap;      // track_bottom - thumb_bottom, clamped >= 0 (~0 when the thumb bottom is pinned)
         double track_span;     // track_bottom - track_top (the placeholder length)
         double thumb_logical;  // thumb tip-to-tip length - 2 * cap_offset, guaranteed > 0
@@ -131,6 +139,7 @@ private:
     const Range<Color> scroll_bar_bg_color_range;
     const Line<double> scroll_bar_scan_line;
     const Range<Color> scroll_bar_margin_color_range;
+    const Range<Color> scroll_bar_track_color_range;
     const double viewport;
     const double cap_offset;
     const scraper_config::ScrollBarThumbProbeConfig thumb_probe;
@@ -862,7 +871,26 @@ private:
     // On the factor tab that spuriously fired maybeResetOnFactorChange when the inheritance history lazily
     // loaded: the reload re-scales the thumb to ~0.027 while the list content changes, and 0.03 gated it as a
     // character switch (friend_inheritance golden regression). A genuine switch is instead visible at the very
-    // top (~0.002, before any reload) so it still fires; 0.02 sits in the gap between the two.
+    // top so it still fires; 0.02 sits in the gap between the two.
+    //
+    // The lower edge of that gap used to be ~0.002 rather than 0: geometryAt read the track top off the
+    // near-white margin run, which the thumb's own anti-aliased cap terminated one sample early whenever the
+    // thumb was parked on it. Folding the track-colour exposure test into upper_gap removed that bias, so a
+    // genuine top now reads EXACTLY 0 at native resolution. Measured over 31 clips / 24,258 topMargin-path
+    // reads: every reading the fold moved was in [0.00195, 0.00267] and moved to 0 -- always toward this
+    // threshold's "at top" side and never across it, and the upper edge (the ~0.027 reload re-scale) is on a
+    // frame with exposed track and does not move at all. So the gap this constant sits in got wider, not
+    // narrower, and the value is unchanged.
+    //
+    // Anchoring that exposure test at the scan column's start instead of the margin run's end (see geometryAt)
+    // moves readings the other way, and by the same one sample: measured over 16 clips / 12,262 reads on this
+    // path, 201 readings go from exactly 0 to somewhere in [0.00196, 0.00267] and none moves down. Those 201
+    // are the frames displaced one tip pixel, which the previous form could not tell from a genuine top; the
+    // genuine tops still read exactly 0. Both edges of the gap are therefore unchanged -- the new values sit
+    // an order of magnitude below this threshold (0 at_top transitions flipped over those 12,262 reads) and
+    // the ~0.027 upper edge is untouched -- so the value is again unchanged. A caller that wants to see a
+    // one-tip-pixel head start must compare against 0, not against this constant: this one is calibrated to
+    // ignore a thin idle band and, by construction, ignores that displacement too.
     static constexpr double kTopMarginThreshold = 0.02;
     // How long an inferred-switch signal (record-type change, completed tab at top, factor content change) must
     // persist before it commits a reset, so a transient misread during the switch animation cannot trigger one.
