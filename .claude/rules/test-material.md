@@ -19,7 +19,16 @@ remove. Unlike `.notes/`, its contents are addressed **by name** from committed 
   file here is the expected state, not missing material.
 - `testdata/clips/source/` — primary recordings that nothing re-derives; the rest was cut from
   these.
-- `testdata/clips/calibration/` — clips a shipped constant was calibrated against.
+- `testdata/clips/calibration/` — clips a shipped constant was calibrated against. **It is empty
+  today, and that is the expected state, not missing material.** Its one clip,
+  `friend_standard_many_rental.mp4`, was moved into `testdata/clips/golden/` on the user's
+  instruction and registered in `native/test/integration/cases.json`, so the two constants it
+  derived — the scroll-guess veto half-width and `friend_common.viewport`, both in
+  `native/tool/builder/chara_detail_scene_scraper_builder.h` — now cite material the golden suite
+  re-runs. A clip being a derivation source and a golden input is not a conflict: the second only
+  adds the requirement that its records stay reproducible. Keep this entry: the next clip a
+  constant is calibrated on lands here, and a clip only graduates to `golden/` once a case asserts
+  something about it.
 - `testdata/models/` — recognizer module sets kept for comparison against the current one.
 - `testdata/harness/` — the live-capture harness's scratch data root (`appdrive_root/`) and its
   per-run artefacts (`runs/`), plus `firefox-live-capture/` — the web live-capture playtest

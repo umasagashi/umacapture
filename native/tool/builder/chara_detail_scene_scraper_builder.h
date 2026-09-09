@@ -258,7 +258,9 @@ private:
             // of the width (~74 px at 736): safely above the worst measured V2 true-offset guess error (~41 px on
             // the tiny-thumb friend_standard_many_rental clip) yet far below the periodicity alias distance
             // (hundreds of px), so it rejects the far aliases without ever rejecting a genuine offset. Shared by
-            // both layouts.
+            // both layouts. That clip is a registered integration case (native/test/integration/cases.json,
+            // input testdata/clips/golden/friend_standard_many_rental.mp4), so the material this bound was
+            // derived from is also material the golden suite re-runs.
             0.10,
         };
     }
@@ -295,7 +297,9 @@ private:
         config.scroll_area_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
         config.scroll_bar_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
         // The shorter friend scroll area has a smaller viewport: fit across friend_standard /
-        // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. cap_offset,
+        // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. Both fit points
+        // are registered integration cases (native/test/integration/cases.json), so the two clips this
+        // number was solved from are re-run by the golden suite. cap_offset,
         // the margin and track colours and the guess-window margin are shared, unchanged from common()
         // (the two layouts draw the same widget; only where it sits and how much content it scrolls differ).
         config.viewport = 0.553;
