@@ -101,6 +101,25 @@ Use the `MSYS2_ARG_CONV_EXCL='*'` form with an **absolute Windows path** to the
 script. After any `cmd`-driven build, confirm it actually built — look for
 compiler/link output, or check the exe's mtime — rather than trusting rc=0.
 
+### Trap: `MSYS2_ARG_CONV_EXCL='*'` only fixes the `cmd` hop — it is not a general "make any Git Bash launch reliable" prefix
+
+The env var above solves one specific problem: MSYS mangling `cmd`'s own `/c`
+switch (and, the same way, mangling a path argument to a Windows executable
+launched directly from Git Bash, e.g. `umacapture_cli.exe` — that use is fine).
+It is not safe to carry onto a **plain bash script** just because the script
+also does something Windows-flavored: setting it disables MSYS path conversion
+for that script's whole process tree, including tools the script shells out to
+that do their own path resolution.
+
+Measured 2026-09-09: launching `native/wasm/build.sh` (a bash script with no
+`cmd` hop at all) as `MSYS2_ARG_CONV_EXCL='*' bash native/wasm/build.sh` made
+the script's internal `uv run` call fail with `Failed to spawn (os error 3)` —
+`uv` could no longer resolve its own executable/interpreter path. Plain
+`bash native/wasm/build.sh`, with normal MSYS path conversion left on, ran fine.
+So scope the flag to the literal `cmd /c '<abs.cmd>'` (or direct `.exe`) launch
+it targets; don't prefix a bash script with it on the assumption that it makes
+Git Bash launches more reliable in general.
+
 ### Trap: a bare exe name inside a `.cmd` is not resolved from the cwd
 
 This machine sets `NoDefaultCurrentDirectoryInExePath=1`, so cmd does **not**
