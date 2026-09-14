@@ -9,9 +9,17 @@
 // This reads the repo-committed config JSON under assets/config/chara_detail via TEST_ASSET_CONFIG_DIR, which
 // CMake injects. That is a deliberate, narrow exception to the "no game assets" rule in test/README.md: those
 // files are small, versioned config (not screenshots or ONNX models) and are themselves the contract here.
+//
+// The last case is not about serialization. The shipped JSON is a BUILD OUTPUT of
+// native/tool/builder/chara_detail_scene_scraper_builder.h, and nothing else in the suite looks at the value
+// of a shipped rect: the scraper tests read whatever the file says and assert relationships against it, so a
+// builder edit that regenerates the file wrongly -- or a builder edit that is never regenerated at all -- is
+// invisible to them. That case states the one geometric relation between the two layouts' scroll areas that
+// the game screen forces, so it is the file, not a copy of it, that has to satisfy it.
 
 #include <doctest/doctest.h>
 
+#include <cmath>
 #include <filesystem>
 #include <string>
 
@@ -67,6 +75,73 @@ TEST_CASE("scene_context condition tree round-trips") {
 TEST_CASE("missing required keys are rejected") {
     const Json incomplete = {{"stretch_range", nullptr}};
     CHECK_THROWS(incomplete.get<stitcher_config::CharaDetailSceneStitcherConfig>());
+}
+
+// The width the scraper's normalized geometry was calibrated at, used only to report a mismatch in the unit
+// the calibration notes are written in. Every quantity compared below is width-normalized, so this scales the
+// verdict; it does not decide it.
+constexpr double kCalibrationWidthPx = 736.0;
+
+TEST_CASE("the two shipped layouts' scroll areas differ only by their viewports") {
+    // WHAT FORCES THIS. On the Friend full-record layout a green "register practice partner" button is
+    // inserted above the tab bar, pushing the tab bar and the scroll area down the screen. The scroll area's
+    // BOTTOM is not pushed anywhere: it stays anchored to the bottom of the screen, which is why both layouts
+    // declare the same bottom_right. A shorter box with an unmoved bottom is a box whose top moved down by
+    // exactly the height it lost -- and the height it lost is the difference of the two visible content
+    // heights, which is what `viewport` carries. The surrounding white inset is the same widget on both
+    // layouts and cancels out of the difference, so this holds even though `viewport` is deliberately NOT the
+    // crop height (see chara_detail_config.h).
+    //
+    // The tab bar's own drop is a SEPARATE measurement and is deliberately not reused here; the last section
+    // pins that the two really are different numbers.
+    const auto config =
+        json_util::read(configPath("scene_scraper.json")).get<scraper_config::CharaDetailSceneScraperConfig>();
+    const auto &common = config.common;
+    const auto &friend_common = config.friend_common;
+
+    SUBCASE("both scroll areas end at the same bottom edge") {
+        // The premise of the relation below. If this ever stops holding, the top is no longer derivable from
+        // the viewports and the next subcase is asserting something meaningless rather than something false.
+        CHECK(common.scroll_area_rect.bottomRight() == friend_common.scroll_area_rect.bottomRight());
+        // Tops are compared as plain numbers below, which is only meaningful while both are anchored the same
+        // way.
+        CHECK(common.scroll_area_rect.topLeft().anchor() == friend_common.scroll_area_rect.topLeft().anchor());
+    }
+
+    SUBCASE("the friend scroll area's top is its viewport difference below common's") {
+        const double drop = friend_common.scroll_area_rect.topLeft().y() - common.scroll_area_rect.topLeft().y();
+        const double lost_viewport = common.viewport - friend_common.viewport;
+        const double mismatch_px = (drop - lost_viewport) * kCalibrationWidthPx;
+        // A tenth of a capture pixel at the calibration width: far below anything the crop rounding could
+        // express, and far above double-rounding noise.
+        CHECK(std::abs(mismatch_px) < 0.1);
+    }
+
+    SUBCASE("the scroll-bar band is the same region as the scroll area on both layouts") {
+        // Not decoration: the band and the area are declared as one region per layout, and the scraper tests
+        // paint a single rectangle to serve both sensors on that basis. Moving one layout's area without its
+        // band would leave the band's position derived from nothing that was ever measured.
+        CHECK(common.scroll_bar_rect == common.scroll_area_rect);
+        CHECK(friend_common.scroll_bar_rect == friend_common.scroll_area_rect);
+    }
+
+    SUBCASE("the tab bar and the scroll area do not drop by the same amount") {
+        // The Friend layout is not a rigid translation of the Standard one: the tab bar's drop is pinned from
+        // the tab bar's own measured row, the scroll area's comes from the viewports, and the two land 3.4 px
+        // apart at the calibration width. What is asserted is only that they are DIFFERENT NUMBERS, not how
+        // far apart -- the distance is whatever two independent measurements happen to give, and pinning it
+        // would turn an honest re-fit of the viewport into a failure here. Zero is the one value that cannot
+        // be a measurement: it means a builder went back to driving both rects off one shared shift, which is
+        // how the scroll area came to sit above the content it crops.
+        const double tab_bar_drop =
+            friend_common.tab_button_rect.topLeft().y() - common.tab_button_rect.topLeft().y();
+        const double scroll_area_drop =
+            friend_common.scroll_area_rect.topLeft().y() - common.scroll_area_rect.topLeft().y();
+        const double disagreement_px = std::abs(scroll_area_drop - tab_bar_drop) * kCalibrationWidthPx;
+        // A hundredth of a capture pixel: eleven orders of magnitude above double-rounding noise on these
+        // values, and far below any difference two real measurements could report.
+        CHECK(disagreement_px > 0.01);
+    }
 }
 
 }  // namespace

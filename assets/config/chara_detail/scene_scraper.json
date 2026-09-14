@@ -239,7 +239,7 @@
     "scroll_area_rect": {
       "top_left": {
         "x": 0.0,
-        "y": 0.9896304347826087,
+        "y": 0.9942999999999999,
         "anchor": {
           "h": "IntersectStart",
           "v": "IntersectStart"
@@ -257,7 +257,7 @@
     "scroll_bar_rect": {
       "top_left": {
         "x": 0.0,
-        "y": 0.9896304347826087,
+        "y": 0.9942999999999999,
         "anchor": {
           "h": "IntersectStart",
           "v": "IntersectStart"

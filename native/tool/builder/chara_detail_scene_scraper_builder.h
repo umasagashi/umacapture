@@ -29,10 +29,14 @@ public:
     }
 
 private:
-    // Vertical drop of the tab bar / scroll area in the Friend layout, where a green
-    // "練習パートナー登録" button sits above the tab bar. Pinned from the Friend tab bar at
-    // row 682 of the 736 px wide intersection vs. the Standard tab bar at 0.7463.
-    static constexpr double friend_layout_shift = 682.0 / 736.0 - 0.7463;
+    // Vertical drop of the TAB BAR ALONE in the Friend layout, where a green "練習パートナー登録" button sits
+    // above the tab bar. Pinned from the Friend tab bar at row 682 of the 736 px wide intersection vs. the
+    // Standard tab bar at 0.7463, i.e. 132.7 px at that width.
+    //
+    // It applies to tab_button_rect and to nothing else. The scroll area below the tab bar drops by a
+    // DIFFERENT amount (136.2 px; friendCommon derives it, and says from what), so the Friend layout is not a
+    // rigid translation of the Standard one and no single shift can place both rects.
+    static constexpr double friend_tab_bar_shift = 682.0 / 736.0 - 0.7463;
 
     [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig common() const {
         return {
@@ -285,24 +289,52 @@ private:
         };
     }
 
-    // The Friend layout differs from Standard only by shifting the tab bar and the scroll
-    // area down. The scroll-bar scan line, scroll-area stationary rect and scan parameters
-    // are all relative to the cropped scroll area, so only the absolute, top-anchored rects
-    // move (tab button, scroll area and scroll-bar band); the scroll area bottom stays
-    // anchored to the screen bottom (ILE).
+    // The Friend layout inserts a green "register practice partner" button above the tab bar, so the tab bar
+    // and the scroll area both sit lower than on Standard. They do NOT move by the same amount, and the two
+    // drops are measured from different things:
+    //
+    //   tab bar     -- friend_tab_bar_shift, pinned from the tab bar's own measured row (132.7 px at 736 px).
+    //   scroll area -- the difference of the two viewports, below (136.2 px at 736 px).
+    //
+    // WHY THE SCROLL AREA'S DROP IS NOT A FREE MEASUREMENT. Its bottom edge does not move: it stays anchored
+    // to the bottom of the screen (ILE), which is why the rect below keeps common()'s bottom_right verbatim
+    // rather than restating it. A box that keeps its bottom and loses height has moved its top down by exactly
+    // the height it lost, and the height it lost is the difference of the two visible content heights --
+    // `viewport`. The white inset between the crop edge and the content is the same widget on both layouts and
+    // cancels out of a difference, so this holds even though `viewport` is deliberately not the crop height
+    // (chara_detail_config.h says so at its declaration).
+    //
+    // Deriving the scroll area from friend_tab_bar_shift instead is what once left this rect 3.4 px above the
+    // content it crops, with the config asserting two different bottoms for the same box -- one via this top
+    // plus its viewport, one via the shared bottom_right. Reading the drop off `viewport` removes that second
+    // answer rather than correcting it: there is now one place the friend scroll area's height is stated, and
+    // re-fitting the viewport moves the top with it. test_config.cpp asserts the relation against the SHIPPED
+    // JSON, so regenerating this file wrongly -- or editing the builder and not regenerating -- is caught.
+    //
+    // The scroll-bar scan line, the scroll-area stationary rect and the scan parameters are all relative to
+    // the cropped scroll area, so only the absolute, top-anchored rects move.
     [[nodiscard]] chara_detail::scraper_config::SceneScraperConfig friendCommon() const {
         auto config = common();
-        const double shift = friend_layout_shift;
-        config.tab_button_rect = {{0.0222, 0.7259 + shift, IS}, {0.9759, 0.8037 + shift, IS}};
-        config.scroll_area_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
-        config.scroll_bar_rect = {{0.0000, 0.8093 + shift, IS}, {0.0000, -0.2426, {IPE, ILE}}};
+        config.tab_button_rect = {
+            {0.0222, 0.7259 + friend_tab_bar_shift, IS}, {0.9759, 0.8037 + friend_tab_bar_shift, IS}};
         // The shorter friend scroll area has a smaller viewport: fit across friend_standard /
         // friend_standard_many_rental gives V = 407 px (0.553 width-normalized), R^2 = 1.0. Both fit points
         // are registered integration cases (native/test/integration/cases.json), so the two clips this
-        // number was solved from are re-run by the golden suite. cap_offset,
+        // number was solved from are re-run by the golden suite. That fit is now also what places the scroll
+        // area's top edge, and the 136 px it gives agrees with the drop measured straight off the pixels of
+        // those same clips (135.9 px), which is an independent check on the value. cap_offset,
         // the margin and track colours and the guess-window margin are shared, unchanged from common()
         // (the two layouts draw the same widget; only where it sits and how much content it scrolls differ).
-        config.viewport = 0.553;
+        const double friend_viewport = 0.553;
+        const Rect<double> common_scroll_area = config.scroll_area_rect;
+        const Point<double> common_top = common_scroll_area.topLeft();
+        config.scroll_area_rect = {
+            common_top.withY(common_top.y() + config.viewport - friend_viewport),
+            common_scroll_area.bottomRight()};
+        // Both layouts declare the band and the area as one region; friend is no exception. A band left where
+        // the tab bar's shift put it would be a position derived from nothing that was ever measured.
+        config.scroll_bar_rect = config.scroll_area_rect;
+        config.viewport = friend_viewport;
         return config;
     }
 

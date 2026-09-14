@@ -103,6 +103,8 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   reports and continues when they are absent. A second case states `band_start` /
   `band_end` / `green_fraction_threshold` as data with their derivation, because the
   band's width also buys occlusion tolerance that no corpus statistic can observe.
+  A third compares the header's crop row across the two layouts, which is what notices
+  `friend_common.viewport` moving without the scroll-area rect that is now derived from it.
 - `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical` (split
   out of the ONNX-linked recognizer TU into `chara_detail_search_helpers.{h,cpp}`):
   downward/upward run scanning, the `max_length` cap, the all-background nullopt, and

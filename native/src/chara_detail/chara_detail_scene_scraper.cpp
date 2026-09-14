@@ -170,10 +170,35 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // cap. At depth 1 the row a one-tip-pixel scroll uncovers already falls on sample 1, inside the window,
     // and is read normally. Measured depth of that run (one sample ~= one pixel at anchor unit 736), over the
     // same 16 clips: 3 and 4 samples on the player/factor layouts, 4 and 5 on landscape 2-pane, 7 on friend,
-    // and the page margin (241-248) fills it on all 4,063 corpus frames carrying a scroll bar. So the slack
-    // is three samples at its thinnest, not merely "sample 0 happens to be white". If a future crop or widget
-    // shift ever spends those three, the failure is the silent one: a one-tip-pixel head start reads exactly
-    // 0 and is indistinguishable from a genuine top, which is the defect this window exists to remove.
+    // and the page margin (241-248) fills it on all 4,063 corpus frames carrying a scroll bar.
+    //
+    // THE FRIEND FIGURE ABOVE IS HISTORICAL, and its size was an artefact. friend_common's scroll-bar band
+    // used to be placed by the TAB BAR's drop, which left it about four rows above the scroll area's own top;
+    // the extra near-white margin those four rows swept up is the whole reason friend was the roomiest layout
+    // here. The band is now derived from the viewport difference and starts at the true top, so friend reads
+    // 3 to 4 samples at a genuine head of content -- measured on friend_standard_many_rental's 74
+    // head-of-content frames, against 4 to 5 on player_standard_factor_tiny_scroll_switch. It is the same
+    // depth as the other layouts because it is now the same geometry, and the number to compare against a
+    // future change is 3, not 7.
+    //
+    // So the slack is three samples at its thinnest, not merely "sample 0 happens to be white" -- and friend
+    // no longer sits above that floor, it sits on it.
+    //
+    // IF A FUTURE CROP OR WIDGET SHIFT SPENDS THOSE THREE, THE FAILURE IS ONE OF TWO, AND THEY ARE OPPOSITES.
+    // Which one you get depends on where the crop's top edge stops relative to the placeholder track's own top:
+    //  * PAST IT, i.e. the crop starts BELOW the track top. The near-white run is then zero samples deep,
+    //    `track_top` collapses onto the scan column's own start, and `upper_gap` is positive on every frame --
+    //    so that layout never answers AtTop again, its fragment #0 is never accepted and its factor tab never
+    //    completes. LOUD, in the sense that the capture visibly does not finish; the cause is not on screen.
+    //    Measured: forcing both layouts' crops 7.4 px down puts friend at m_up == 0 on 471 of 471 frames and
+    //    at upper_gap == 0 on 0 of them.
+    //  * EXACTLY ON IT, i.e. depth 0 but not past. The only track-coloured sample above the thumb is index 0,
+    //    which isInBetween's open interval skips, so `track_exposed` is false and `upper_gap` is pinned to 0 --
+    //    a one-tip-pixel head start reads exactly 0 and is indistinguishable from a genuine top. SILENT, and
+    //    the defect this window exists to remove. NOT measured: no variant that lands the crop exactly there
+    //    has been built, so this arm rests on reading the three lines above and not on a run.
+    // The two are a hair apart in geometry and a world apart in consequence, which is the reason both are
+    // written down rather than only the one this window was designed against.
     //
     // Below the shipped 540 px minimum this path reports 1 sample at a genuine top rather than 0: an upscale
     // widens the thumb's cap ramp to two rows, and the middle row's white/thumb blend is the placeholder
