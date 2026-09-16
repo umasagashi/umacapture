@@ -21,6 +21,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <stdexcept>
 #include <string>
 
 #include "chara_detail/chara_detail_config.h"
@@ -72,9 +73,59 @@ TEST_CASE("scene_context condition tree round-trips") {
     CHECK(first == second);
 }
 
+// A layout's factor limit below 1 is refused while the config is deserialized. The limit ends every
+// single-frame read of the factor tab, so 0 would read nothing on any frame -- the character-switch rule would
+// go blind without a word -- and a negative value has no meaning (recognizer_impl::SelfFactorWindow holds it
+// unsigned, so it would silently become a limit no list reaches).
+TEST_CASE("a layout factor limit below 1 is rejected while the scraper config is deserialized") {
+    const Json shipped = json_util::read(configPath("scene_scraper.json"));
+    CHECK_NOTHROW(shipped.get<scraper_config::CharaDetailSceneScraperConfig>());
+
+    for (const std::string layout : {"common", "friend_common"}) {
+        for (const int value : {0, -1}) {
+            CAPTURE(layout);
+            CAPTURE(value);
+            Json edited = shipped;
+            edited[layout]["self_factor_prefix_length"] = value;
+            CHECK_THROWS_AS(edited.get<scraper_config::CharaDetailSceneScraperConfig>(), std::invalid_argument);
+        }
+        // The boundary: 1 is a limit.
+        Json one = shipped;
+        one[layout]["self_factor_prefix_length"] = 1;
+        CHECK_NOTHROW(one.get<scraper_config::CharaDetailSceneScraperConfig>());
+    }
+}
+
 TEST_CASE("missing required keys are rejected") {
     const Json incomplete = {{"stretch_range", nullptr}};
     CHECK_THROWS(incomplete.get<stitcher_config::CharaDetailSceneStitcherConfig>());
+}
+
+// An empty scan sequence is the one malformed shape that used to pass deserialization: a missing key, a wrong
+// type or broken JSON is already refused above, but `"skill_scans": []` parsed cleanly and only surfaced much
+// later, inside the scraper runner thread, where nothing reports it to the user.
+//
+// This asserts the refusal AT THE DESERIALIZATION BOUNDARY, which is what makes it reportable: `.get<>()` is
+// what startPipeline calls (core/native_api.cpp), so a throw here is caught by startEventLoopReportingError
+// and handed to notifyError -- Dart's onError on Windows and web, a non-zero exit on the CLI. PageScrapingBox's
+// own constructor rejects the same thing, but it runs too late and on the wrong thread to be seen; asserting
+// that one instead would assert a throw nobody catches usefully.
+TEST_CASE("an empty scan sequence is rejected while the scraper config is deserialized") {
+    const Json shipped = json_util::read(configPath("scene_scraper.json"));
+
+    // Positive control. Without it, a green below could equally mean this file stopped parsing at all, and the
+    // premise: emptying a key is only a change if the key is a non-empty array to begin with.
+    CHECK_NOTHROW(shipped.get<scraper_config::CharaDetailSceneScraperConfig>());
+
+    for (const std::string key : {"skill_scans", "factor_scans", "campaign_scans"}) {
+        CAPTURE(key);
+        CHECK(shipped.at(key).is_array());
+        CHECK_FALSE(shipped.at(key).empty());
+
+        Json emptied = shipped;
+        emptied[key] = Json::array();
+        CHECK_THROWS_AS(emptied.get<scraper_config::CharaDetailSceneScraperConfig>(), std::invalid_argument);
+    }
 }
 
 // The width the scraper's normalized geometry was calibrated at, used only to report a mismatch in the unit

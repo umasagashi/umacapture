@@ -225,6 +225,9 @@ private:
 // The value is sized so that its rows lie inside the layout's scroll area with room left below them (the derivation
 // is in native/tool/builder/chara_detail_scene_scraper_builder.h); nothing is promised about the rows further
 // down, so they are not read at all rather than read and then compared.
+//
+// Unsigned so that no window can hold a negative limit. The conversion in fromLayout is safe because
+// CharaDetailSceneScraperConfig refuses a layout whose threshold is below 1 while it is deserialized.
 struct SelfFactorWindow {
     Rect<double> scroll_area;
     std::size_t factor_limit;

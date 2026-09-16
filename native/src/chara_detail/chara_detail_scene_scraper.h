@@ -509,6 +509,14 @@ private:
 
 class PageScrapingBox {
 public:
+    // Throws std::invalid_argument on an empty `scan_parameters`. A page that scans nothing can never terminate
+    // its own scroll sequence, so an empty sequence is a malformed configuration rather than a page that simply
+    // captures nothing; it is refused at construction, in Release too.
+    //
+    // This is a class invariant, NOT a user-facing diagnostic: the box is built on the scraper runner thread,
+    // where the throw is only logged and the next frame then trips over the rolled-back session. The refusal
+    // that reaches the user is CharaDetailSceneScraperConfig's constructor in chara_detail_config.h, on the
+    // startPipeline path. See the definition.
     PageScrapingBox(
         const std::vector<scraper_config::ScanParameter> &scan_parameters,
         const std::filesystem::path &image_dir,

@@ -1269,6 +1269,13 @@ Frame contentAndScrollBar(int content_shift, int exposed_rows, uint64 timestamp)
 const Rect<double> kContentRect{Point<double>(0.0, 0.0), Point<double>(1.0, 1.0)};
 const Rect<double> kBarRect{Point<double>(0.0, 1.0), Point<double>(1.0, 2.0)};
 
+// A scan the fixtures above can never satisfy: a saturated-blue box (G and R pinned at 0), while every pixel
+// contentAndScrollBar paints -- content texture and scroll-bar band alike -- is gray, i.e. B == G == R. A gray
+// whose blue reaches 200 has G == R == 200 too, so Range<Color>'s per-channel test can never contain it. The
+// box therefore keeps current_scan parked at begin() for the whole case: the scan sequence never completes, so
+// the page stays mid-scroll, which is the state every interpreter decision below is about.
+const scraper_config::ScanParameter kUnmatchedScan{0.5, 0.2, {Color(0, 0, 200), Color(0, 0, 255)}};
+
 struct InterpreterHarness {
     DirectoryHookRecorder recorder;
     std::shared_ptr<PageScrapingBox> box;
@@ -1303,7 +1310,7 @@ struct InterpreterHarness {
         // No scan parameters: this exercises the interpreter's decision, and an empty scan set makes
         // addScrollArea a no-op, so a latch cannot reach the filesystem.
         : box(std::make_shared<PageScrapingBox>(
-              std::vector<scraper_config::ScanParameter>{}, "unit_test_premature_scroll", recorder.hooks())) {
+              std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, "unit_test_premature_scroll", recorder.hooks())) {
         scroll_ready->listen([this]() { ready_count++; });
         head_latched->listen([this](const Frame &frame, bool cue_owed) {
             latched_frames.push_back(frame);
@@ -1488,7 +1495,7 @@ TEST_CASE("a page with no scroll bar is never refused") {
     // "scrolled" on every frame and refuse that tab every single time.
     DirectoryHookRecorder recorder;
     const auto box = std::make_shared<PageScrapingBox>(
-        std::vector<scraper_config::ScanParameter>{}, "unit_test_no_scroll_bar", recorder.hooks());
+        std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, "unit_test_no_scroll_bar", recorder.hooks());
     // A stationary time no frame here reaches, so the page never latches and nothing is written to disk; this
     // case is about the refusal level, which is answered from the first update onwards.
     const auto head_latched = event_util::makeDirectConnection<Frame, bool>();
@@ -1512,7 +1519,7 @@ TEST_CASE("each interpreter says whether its page can scroll, and no frame chang
     // off a frame would put a scrolled frame of a scrollable page at the head whenever its bar went undetected.
     DirectoryHookRecorder recorder;
     const auto box = std::make_shared<PageScrapingBox>(
-        std::vector<scraper_config::ScanParameter>{}, "unit_test_no_scroll_bar", recorder.hooks());
+        std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, "unit_test_no_scroll_bar", recorder.hooks());
     const auto head_latched = event_util::makeDirectConnection<Frame, bool>();
     NonScrollableScrapingInterpreter without_bar(
         box,
@@ -1535,8 +1542,8 @@ TEST_CASE("a page with no scroll bar publishes its latch: the whole frame, once,
     // claims, each of which a consumer depends on: it is sent at the latch and not before; it carries the FULL
     // frame, which Rule 3 compares by size and crops itself, not the catcher's content crop; and it says no cue is
     // owed, because a page with nothing to scroll must not announce "you may scroll now".
-    // Unlike addScrollArea, setScrollArea writes the page's one strip even with no scan parameters, so the
-    // directory the recorder only pretends to create has to exist, and goes away with the case.
+    // setScrollArea writes the page's one strip unconditionally -- it does not consult the scan sequence at all
+    // -- so the directory the recorder only pretends to create has to exist, and goes away with the case.
     const std::filesystem::path tab_dir = "unit_test_no_scroll_bar_latch";
     std::filesystem::create_directories(tab_dir);
     struct RemoveOnExit {
@@ -1548,7 +1555,7 @@ TEST_CASE("a page with no scroll bar publishes its latch: the whole frame, once,
     } const cleanup{tab_dir};
     DirectoryHookRecorder recorder;
     const auto box = std::make_shared<PageScrapingBox>(
-        std::vector<scraper_config::ScanParameter>{}, tab_dir, recorder.hooks());
+        std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, tab_dir, recorder.hooks());
     const auto head_latched = event_util::makeDirectConnection<Frame, bool>();
     std::vector<Frame> latched_frames;
     std::vector<bool> latched_cues;

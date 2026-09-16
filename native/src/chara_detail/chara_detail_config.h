@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include "types/color.h"
@@ -158,7 +159,8 @@ struct SceneScraperConfig {
     // character-switch rule compares (recognizer_impl::SelfFactorWindow). A property of THIS LAYOUT, not of the
     // record type: it is sized so that its rows fit inside the layout's scroll area on that frame, and the layout
     // choice has one owner (CharaDetailSceneScraper::buildSession). The derivation lives beside the values in
-    // native/tool/builder/chara_detail_scene_scraper_builder.h. A count of factors; not width-normalized.
+    // native/tool/builder/chara_detail_scene_scraper_builder.h. A count of factors; not width-normalized. At least
+    // 1, enforced by CharaDetailSceneScraperConfig: a limit of 0 would read nothing on every frame.
     int self_factor_prefix_length;
 
     EXTENDED_JSON_TYPE_NDC(
@@ -235,6 +237,65 @@ struct CharaDetailSceneScraperConfig {
     Range<Color> header_color_range;
     uint64 header_visible_time_threshold;
     FactorHeaderConfig factor_header;
+
+    // Refuses a config in which any of the three scan sequences is empty. A page with no scans is not a
+    // supported "page that scans nothing": PageScrapingBox parks current_scan at end() from the very first
+    // strip, so every latch drops its rows and the page can never reach its own completion. An empty sequence
+    // therefore disables a whole tab silently rather than configuring it.
+    //
+    // The check is on THIS type's constructor rather than on a call site because this is where the value
+    // enters the program: EXTENDED_JSON_TYPE_NDC deserializes via Type{...}, so every reader passes through
+    // here -- the pipeline start (core/native_api.cpp, inside startPipeline), the CLI `build` subcommand's
+    // round-trip (core/cli.cpp) and the generator in tool/builder -- and Windows, web and the CLI get the
+    // same answer from the same shared-core line. Landing inside startPipeline is what makes the refusal
+    // reportable: startEventLoopReportingError catches it, tears the partial pipeline down and hands the
+    // message to notifyError, i.e. Dart's onError on Windows and web and a non-zero exit plus a stderr
+    // summary on the CLI. That is exactly where Range's inverted-box check (types/range.h) and Model's
+    // output-head check (cv/model.h) already land.
+    //
+    // PageScrapingBox's own constructor keeps an equivalent throw, but it runs on the scraper runner thread,
+    // where event_util's per-event catch only logs it; it is a class invariant, not a diagnostic.
+    CharaDetailSceneScraperConfig(
+        const SceneScraperConfig &common,
+        const SceneScraperConfig &friend_common,
+        const std::vector<ScanParameter> &skill_scans,
+        const std::vector<ScanParameter> &factor_scans,
+        const std::vector<ScanParameter> &campaign_scans,
+        const ScanParameter &factor_end_green,
+        const Line<double> &header_scan_line,
+        const Range<Color> &header_color_range,
+        uint64 header_visible_time_threshold,
+        const FactorHeaderConfig &factor_header)
+        : common(common)
+        , friend_common(friend_common)
+        , skill_scans(skill_scans)
+        , factor_scans(factor_scans)
+        , campaign_scans(campaign_scans)
+        , factor_end_green(factor_end_green)
+        , header_scan_line(header_scan_line)
+        , header_color_range(header_color_range)
+        , header_visible_time_threshold(header_visible_time_threshold)
+        , factor_header(factor_header) {
+        const auto require = [](const char *name, const std::vector<ScanParameter> &scans) {
+            if (scans.empty()) {
+                throw std::invalid_argument(
+                    std::string("CharaDetailSceneScraperConfig: ") + name + " must not be empty");
+            }
+        };
+        require("skill_scans", this->skill_scans);
+        require("factor_scans", this->factor_scans);
+        require("campaign_scans", this->campaign_scans);
+        const auto require_factor_limit = [](const char *name, const SceneScraperConfig &layout) {
+            if (layout.self_factor_prefix_length < 1) {
+                throw std::invalid_argument(
+                    std::string("CharaDetailSceneScraperConfig: ") + name
+                    + ".self_factor_prefix_length must be at least 1, got "
+                    + std::to_string(layout.self_factor_prefix_length));
+            }
+        };
+        require_factor_limit("common", this->common);
+        require_factor_limit("friend_common", this->friend_common);
+    }
 
     EXTENDED_JSON_TYPE_NDC(
         CharaDetailSceneScraperConfig,

@@ -9,6 +9,7 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <stdexcept>
 #include <vector>
 
 #pragma clang diagnostic push
@@ -30,6 +31,12 @@ namespace {
 // constructor, so it cannot be brace-value-initialized with {}.
 const scraper_config::ScanParameter kNoFactorEndGreen{0.0, 0.0, {Color(0, 0, 0), Color(0, 0, 0)}};
 
+// A placeholder scan sequence for the directory-lifecycle cases, which never run a scan at all. They still
+// have to build their boxes the way product does: PageScrapingBox refuses an empty sequence, because a page
+// that scans nothing can never terminate its scroll sequence.
+const std::vector<scraper_config::ScanParameter> kPlaceholderScans{
+    {0.5, 0.2, {Color(0, 0, 200), Color(0, 0, 255)}}};
+
 // Records the paths passed to the injected directory hooks, without touching the filesystem.
 struct HookRecorder {
     std::vector<std::filesystem::path> made;
@@ -47,11 +54,25 @@ TEST_CASE("PageScrapingBox creates its image directory via the injected hook") {
     HookRecorder recorder;
     const std::filesystem::path dir = "unit_test_page_box";
 
-    scraper_impl::PageScrapingBox box({}, dir, recorder.hooks());
+    scraper_impl::PageScrapingBox box(kPlaceholderScans, dir, recorder.hooks());
 
     CHECK(recorder.made.size() == 1);
     CHECK(recorder.made.front() == dir);
     CHECK(recorder.removed.empty());
+}
+
+TEST_CASE("PageScrapingBox refuses a page configured with no scans") {
+    HookRecorder recorder;
+
+    // A page that scans nothing can never terminate its scroll sequence: current_scan is end() from the first
+    // strip on, so every latch drops its rows and the page never completes. That is a malformed configuration,
+    // and it has to be refused in RELEASE too -- the assert_ in addScrollArea compiles away there, so without
+    // this the shipped build would quietly capture an empty tab instead of reporting a bad config.
+    CHECK_THROWS_AS(
+        scraper_impl::PageScrapingBox({}, "unit_test_empty_scans", recorder.hooks()), std::invalid_argument);
+
+    // Refused before it takes any effect: no directory is created for a box that was never valid.
+    CHECK(recorder.made.empty());
 }
 
 TEST_CASE("SceneScrapingBox creates one directory per tab") {
@@ -59,7 +80,8 @@ TEST_CASE("SceneScrapingBox creates one directory per tab") {
     const std::filesystem::path root = "unit_test_scene_box";
 
     scraper_impl::SceneScrapingBox box(
-        {}, {}, {}, kNoFactorEndGreen, record::RecordType::Standard, root, recorder.hooks());
+        kPlaceholderScans, kPlaceholderScans, kPlaceholderScans, kNoFactorEndGreen, record::RecordType::Standard,
+        root, recorder.hooks());
 
     CHECK(recorder.made.size() == 3);
     CHECK(recorder.made[0] == root / path_config.skill.stem());
@@ -74,7 +96,8 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
     const std::filesystem::path factor_dir = root / path_config.factor.stem();
 
     scraper_impl::SceneScrapingBox box(
-        {}, {}, {}, kNoFactorEndGreen, record::RecordType::Standard, root, recorder.hooks());
+        kPlaceholderScans, kPlaceholderScans, kPlaceholderScans, kNoFactorEndGreen, record::RecordType::Standard,
+        root, recorder.hooks());
     recorder.made.clear();
 
     box.resetFactorBox();

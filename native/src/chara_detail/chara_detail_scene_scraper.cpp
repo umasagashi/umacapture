@@ -784,6 +784,25 @@ PageScrapingBox::PageScrapingBox(
     : image_dir(image_dir)
     , scan_parameters(scan_parameters)
     , end_green(end_green) {
+    // A page with no scans is a malformed configuration, not a supported "page that scans nothing": current_scan
+    // would be end() from the very first strip, so every latch drops its rows and the page could never reach its
+    // own completion. Rejected here rather than by the assert_ in addScrollArea, which compiles away in Release
+    // and would leave a shipped build quietly capturing an empty tab forever.
+    //
+    // THIS THROW DOES NOT REACH THE USER, and nothing downstream turns it into one. The box is constructed from
+    // buildSession() on the scraper runner thread, where event_util's per-event catch only log_error()s what a
+    // listener threw; the half-built session is then rolled back and the next frame runs tabScraper() over null
+    // scrapers. Treat it as a class invariant -- the last thing that still holds if some future caller builds a
+    // box from something other than the shipped config.
+    //
+    // The check that IS reported is CharaDetailSceneScraperConfig's constructor (chara_detail_config.h): it
+    // refuses an empty skill/factor/campaign scan sequence while startPipeline deserializes the config, which
+    // is the path Range and Model already throw from, so it reaches notifyError (Dart's onError on Windows and
+    // web) and a non-zero exit on the CLI. Both exist on purpose; only that one is a diagnostic.
+    if (this->scan_parameters.empty()) {
+        throw std::invalid_argument(
+            "PageScrapingBox(" + image_dir.generic_string() + "): scan_parameters must not be empty");
+    }
     current_scan = this->scan_parameters.begin();
     directory_hooks.mkdir(image_dir);
 }
@@ -795,6 +814,10 @@ void PageScrapingBox::addTabButton(const Frame &frame) {
 }
 
 void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
+    // The scan sequence still has a scan left to match. An empty sequence cannot reach this line -- the
+    // constructor rejects one -- so end() here means the sequence already COMPLETED and a caller latched
+    // another strip afterwards, instead of stopping once scrollAreaReady() turned true. That caller bug is
+    // the only thing this assert can still catch, and it is why it is kept.
     assert_(current_scan != scan_parameters.end());
     assert_(1 <= offset_pixels && offset_pixels <= frame.height());
     // assert_ is a no-op in Release; clamp for real so an out-of-range offset (estimator returning
@@ -802,9 +825,9 @@ void PageScrapingBox::addScrollArea(const Frame &frame, int offset_pixels) {
     // bounds. A degenerate 1px / full-height slice is safe; an out-of-bounds read is not.
     offset_pixels = std::clamp(offset_pixels, 1, frame.height());
 
-    // assert_ above is a no-op in Release; guard for real. The loop below dereferences current_scan before it
-    // checks current_scan != end(), so an empty scan_parameters (a page configured with no scans) would read a
-    // past-the-end iterator. Nothing to accumulate in that case.
+    // assert_ above is a no-op in Release; guard the same exhausted case for real. The loop below dereferences
+    // current_scan before it checks current_scan != end(), so a latch arriving after the sequence completed
+    // would read a past-the-end iterator. The sequence is finished, so there is nothing left to accumulate.
     if (current_scan == scan_parameters.end()) {
         return;
     }
