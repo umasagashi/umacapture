@@ -42,6 +42,7 @@
 #include "types/shape.h"
 #include "util/event_util.h"
 #include "util/json_util.h"
+#include "util/video_backend_guard.h"
 
 #ifndef TEST_ASSET_CONFIG_DIR
 #error "TEST_ASSET_CONFIG_DIR must be defined by the build (see native/CMakeLists.txt)."
@@ -151,6 +152,7 @@ BandStats measureClip(
     const std::filesystem::path &clip,
     const Rect<double> &scroll_area_rect,
     const scraper_config::FactorHeaderConfig &header) {
+    testutil::requireFfmpegDecodes(clip);
     BandStats stats;
     const auto frames = event_util::makeDirectConnection<Frame, Size<int>>();
     frames->listen([&](const Frame &frame, const Size<int> &) {
@@ -274,6 +276,7 @@ HeaderRowStats measureHeaderRow(
     const std::filesystem::path &clip,
     const scraper_config::SceneScraperConfig &layout,
     const scraper_config::FactorHeaderConfig &header) {
+    testutil::requireFfmpegDecodes(clip);
     // The production estimator, built from this layout's own shipped values -- so "at the head of the list"
     // here is the same reading the scraper acts on, not a restatement of it.
     const scraper_impl::ScrollBarOffsetEstimator estimator(

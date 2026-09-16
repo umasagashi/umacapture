@@ -14,6 +14,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -30,6 +31,7 @@
 #include "cv/video_loader.h"
 #include "types/shape.h"
 #include "util/event_util.h"
+#include "util/video_backend_guard.h"
 
 namespace uma::video {
 namespace {
@@ -40,8 +42,16 @@ const Size<int> kSize{64, 64};
 
 // Written with Motion JPEG in an AVI container: the one encoding OpenCV can always produce, so the clip
 // exists on any machine that can build this target and the case never degrades into a skip.
+//
+// The written path carries a per-PROCESS random token: more than one umacapture_tests process can run at
+// a time in the same working directory (Debug and Release side by side, an independent verification run
+// alongside a regression run), and a fixed name under the shared system temp directory would let one
+// process's write/remove race another's still-open clip. There is no pid helper in this tree, so a
+// random token stands in (test_scraper_estimators.cpp's uniqueHarnessDir() uses the same device for the
+// same reason). One token per process is enough here -- every call site already passes a distinct `name`.
 std::filesystem::path writeClip(const std::string &name) {
-    const auto path = std::filesystem::temp_directory_path() / name;
+    static const std::string token = std::to_string(std::random_device{}());
+    const auto path = std::filesystem::temp_directory_path() / (token + "_" + name);
     std::filesystem::remove(path);
     cv::VideoWriter writer(path.generic_string(), cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), kFps,
                            cv::Size(kSize.width(), kSize.height()));
@@ -53,6 +63,8 @@ std::filesystem::path writeClip(const std::string &name) {
     }
     writer.release();
     REQUIRE(std::filesystem::exists(path));
+    // Written to be decoded by the backend the product decodes with; see util/video_backend_guard.h.
+    testutil::requireFfmpegDecodes(path);
     return path;
 }
 

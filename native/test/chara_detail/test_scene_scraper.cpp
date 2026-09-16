@@ -23,6 +23,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -187,6 +188,20 @@ struct HookRecorder {
         return h;
     }
 };
+
+// A scratch directory unique to this PROCESS. Previously a literal relative to the test binary's working
+// directory (the build directory), which two umacapture_tests processes running in the same directory
+// share: ScraperHarness below writes real fragment files under it through injected mkdir hooks, so two
+// concurrent processes race the same relative path and one fails with "failed to open image for write"
+// (see .notes/debug-scan-assert/T-test-tempdirs.md). The random token separates processes the same way
+// test_scraper_estimators.cpp's uniqueHarnessDir() does -- there is no pid helper in this tree, and this
+// needs no platform header. A single token is enough here (no per-call counter): every case in this file
+// shares the one root, and doctest runs them one at a time within a process.
+std::filesystem::path uniqueScrapingRoot() {
+    static const std::string token = std::to_string(std::random_device{}());
+    return std::filesystem::temp_directory_path() / ("unit_test_scraping_root_" + token);
+}
+const std::filesystem::path kScrapingRoot = uniqueScrapingRoot();
 
 // <scraping root>/<record id>/<tab>: the session a created directory belongs to.
 std::string sessionIdOf(const std::filesystem::path &made) {
@@ -365,7 +380,7 @@ struct ScraperHarness {
               factor_switch_judged,
               restarted,
               shippedScraperConfig(),
-              "unit_test_scraping_root",
+              kScrapingRoot,
               recorder.hooks()) {
         restarted->listen([this](const DiscardedSession &discarded) { discards.push_back(discarded); });
         factor_switch_judged->listen(

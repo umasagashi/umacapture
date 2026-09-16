@@ -371,6 +371,13 @@ The hand-built mat builders shared across the pixel-level tests (`solid`,
 (`uma::testutil`), included via the `test/` include root, so a new test reuses the
 same conventions instead of copying them.
 
+Every case that decodes a video file (the footage cases in `chara_detail/test_factor_header_band.cpp`, and the
+generated-clip fixtures of `cv/test_video_loader.cpp` and `cv/test_video_frame_grabber.cpp`) first calls
+`requireFfmpegDecodes` from [`util/video_backend_guard.h`](util/video_backend_guard.h): it fails, naming the
+missing `opencv_videoio_ffmpeg*` plugin, when OpenCV would open the file through any backend other than FFmpeg.
+The `umacapture_tests` POST_BUILD step places that plugin next to the exe (under its shipped name, which the
+Debug `opencv_world` also loads), so a tests-only build needs no other target built beside it.
+
 Since this binary is built Debug, `assert_` aborts rather than being a no-op, so
 the assert-guarded negative paths (e.g. `linspace(num < 2)`, mismatched-anchor
 point arithmetic, the event-runner's after-start `makeConnection`/`add` guards)

@@ -24,12 +24,15 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <random>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -1276,7 +1279,23 @@ const Rect<double> kBarRect{Point<double>(0.0, 1.0), Point<double>(1.0, 2.0)};
 // the page stays mid-scroll, which is the state every interpreter decision below is about.
 const scraper_config::ScanParameter kUnmatchedScan{0.5, 0.2, {Color(0, 0, 200), Color(0, 0, 255)}};
 
+// A scratch directory unique to this PROCESS and to this harness instance. More than one umacapture_tests runs
+// at a time in practice -- Debug and Release side by side, an independent verification stage alongside a
+// regression run -- and a fixed name would let one process's destructor remove the fragments another is still
+// writing. The random token separates processes (there is no pid helper in this tree, and this needs no
+// platform header); the counter separates harnesses within one process.
+std::filesystem::path uniqueHarnessDir() {
+    static const std::string token = std::to_string(std::random_device{}());
+    static std::atomic<unsigned> counter{0};
+    return std::filesystem::temp_directory_path()
+           / ("uma_premature_scroll_harness_" + token + "_" + std::to_string(counter++));
+}
+
 struct InterpreterHarness {
+    // A real directory, because the box now runs addScrollArea's body: an accepted latch writes a fragment
+    // file. It lives in the system temp area and is removed with the harness, so a test run leaves no trace in
+    // the repository working tree.
+    std::filesystem::path tab_dir;
     DirectoryHookRecorder recorder;
     std::shared_ptr<PageScrapingBox> box;
     event_util::Connection<> scroll_ready = event_util::makeDirectConnection<>();
@@ -1307,10 +1326,15 @@ struct InterpreterHarness {
     // identical frame (the stationary path, which also sends the ready cue), while a time no test frame
     // reaches keeps the catcher open so the motion path runs instead.
     explicit InterpreterHarness(uint64 stationary_time)
-        // No scan parameters: this exercises the interpreter's decision, and an empty scan set makes
-        // addScrollArea a no-op, so a latch cannot reach the filesystem.
-        : box(std::make_shared<PageScrapingBox>(
-              std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, "unit_test_premature_scroll", recorder.hooks())) {
+        // Built on the same precondition product guarantees: a non-empty scan sequence (PageScrapingBox refuses
+        // an empty one) and a directory that exists. The previous empty sequence relied on addScrollArea
+        // returning early, which is only true in Release -- in Debug the assert fired and aborted the process.
+        : tab_dir(uniqueHarnessDir())
+        , box(std::make_shared<PageScrapingBox>(
+              std::vector<scraper_config::ScanParameter>{kUnmatchedScan}, tab_dir, recorder.hooks())) {
+        std::error_code ignored;
+        std::filesystem::remove_all(tab_dir, ignored);
+        std::filesystem::create_directories(tab_dir);
         scroll_ready->listen([this]() { ready_count++; });
         head_latched->listen([this](const Frame &frame, bool cue_owed) {
             latched_frames.push_back(frame);
@@ -1329,6 +1353,11 @@ struct InterpreterHarness {
             scroll_ready,
             head_latched,
             scroll_updated);
+    }
+
+    ~InterpreterHarness() {
+        std::error_code ignored;
+        std::filesystem::remove_all(tab_dir, ignored);
     }
 };
 

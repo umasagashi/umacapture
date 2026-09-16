@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <random>
 #include <string>
 
 #include "tool/stop_file_guard.h"
@@ -24,11 +25,28 @@
 namespace uma::tool {
 namespace {
 
+// A token unique to this PROCESS; see its use in OwnedTempDir below.
+std::string processToken() {
+    static const std::string token = std::to_string(std::random_device{}());
+    return token;
+}
+
 // A directory this test created and therefore owns. `create_directory` returning false means the
 // name was already taken, which is the one case where cleaning up afterwards would not be ours to do.
+//
+// The path carries a per-PROCESS random token: more than one umacapture_tests process can run at a
+// time in the same working directory (Debug and Release side by side, an independent verification run
+// alongside a regression run). A fixed name under the shared system temp directory is worse than
+// merely racy here -- REQUIRE(create_directory(path_)) is written to FAIL loudly if the name is already
+// taken, so two concurrent processes would turn this into a spurious red case even before either
+// touches the sentinel file, and the remove_all above could delete the other process's directory out
+// from under it first. There is no pid helper in this tree, so a random token stands in
+// (test_scraper_estimators.cpp's uniqueHarnessDir() uses the same device for the same reason). One
+// token per process is enough here -- every call site already passes a distinct `name`.
 class OwnedTempDir {
 public:
-    explicit OwnedTempDir(const std::string &name): path_(std::filesystem::temp_directory_path() / name) {
+    explicit OwnedTempDir(const std::string &name)
+        : path_(std::filesystem::temp_directory_path() / (processToken() + "_" + name)) {
         std::error_code ec;
         std::filesystem::remove_all(path_, ec);  // a leftover from an aborted earlier run of this test
         REQUIRE(std::filesystem::create_directory(path_));

@@ -9,6 +9,7 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
@@ -120,8 +121,17 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
 // resolves to a 5 px required run and K (the absent scan's length, 0.2) resolves to 20 px.
 
 // A fresh, empty temp directory for boxes whose addScrollArea writes real fragment files. Reused, cleared.
+//
+// The directory name carries a per-PROCESS random token: more than one umacapture_tests process can run
+// at a time in the same working directory (Debug and Release side by side, an independent verification
+// run alongside a regression run), and a fixed name under the shared system temp directory would let one
+// process's remove_all/create_directories race another's still-open files. There is no pid helper in this
+// tree, so a random token stands in (test_scraper_estimators.cpp's uniqueHarnessDir() uses the same
+// device for the same reason). One token per process is enough here -- unlike uniqueHarnessDir(), this
+// function already takes a distinguishing `name` per call, so no additional counter is needed.
 std::filesystem::path freshTempDir(const std::string &name) {
-    const auto dir = std::filesystem::temp_directory_path() / name;
+    static const std::string token = std::to_string(std::random_device{}());
+    const auto dir = std::filesystem::temp_directory_path() / (name + "_" + token);
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     return dir;

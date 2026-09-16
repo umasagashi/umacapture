@@ -26,7 +26,8 @@ set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
 set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
 # OpenCV decodes video through this FFmpeg plugin DLL; the `video` subcommand fails to open a clip
 # without it next to the exe. Copied by the POST_BUILD step below so `video` works from the build dir.
-set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/opencv_videoio_ffmpeg${OpenCV_VERSION}_64.dll")
+set(OpenCV_FFMPEG_DLL_NAME "opencv_videoio_ffmpeg${OpenCV_VERSION}_64")
+set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_FFMPEG_DLL_NAME}.dll")
 
 set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/onnxruntime")
 
@@ -275,6 +276,10 @@ target_compile_definitions(
         # MATERIAL and not part of the repository, so the case that reads it must -- like every golden case --
         # report and continue when a clip is absent rather than fail.
         TEST_GOLDEN_CLIP_DIR="${CMAKE_CURRENT_LIST_DIR}/../testdata/clips/golden"
+        # The FFmpeg plugin file name this configuration's opencv_world loads, so a case that decodes video can
+        # name the missing file when the backend is absent (test/util/video_backend_guard.h). The same value the
+        # POST_BUILD copy below writes, so the message cannot name a file the build does not place.
+        TEST_OPENCV_FFMPEG_PLUGIN="${OpenCV_FFMPEG_DLL_NAME}.dll"
 )
 
 target_include_directories(
@@ -602,5 +607,19 @@ add_custom_command(
         copy
         $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
         $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
+        $<TARGET_FILE_DIR:umacapture_tests>
+)
+
+# The tests that decode video (the footage cases in test/chara_detail/test_factor_header_band.cpp, and the
+# generated-clip cases in test/cv/test_video_loader.cpp and test_video_frame_grabber.cpp) need OpenCV's FFmpeg
+# plugin next to THIS exe. It used to arrive only as a side effect of building umacapture_cli into the same
+# directory; a tests-only build then fell back to MSMF without a word -- an FFV1 clip decoded to nothing, and an
+# .mp4 decoded to different pixels that still passed. Copied under its shipped name in every configuration: a
+# Debug opencv_world4130d.dll asks for `..._64d.dll` first and then loads `..._64.dll` from beside the exe
+# (measured on this target, OpenCV 4.13). This target links no onnxruntime and no libav, so nothing else is needed.
+add_custom_command(
+        TARGET umacapture_tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        ${OpenCV_FFMPEG_DLL}
         $<TARGET_FILE_DIR:umacapture_tests>
 )

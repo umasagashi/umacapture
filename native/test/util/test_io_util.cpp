@@ -26,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -35,13 +36,26 @@
 namespace uma::io_util {
 namespace {
 
+// A token unique to this PROCESS; see its use in ScopedTempFile below.
+std::string processToken() {
+    static const std::string token = std::to_string(std::random_device{}());
+    return token;
+}
+
 // Removes its file on destruction, so the temp file is cleaned up on every exit path -- including a
 // failed REQUIRE (doctest throws) and a throw out of io_util itself. The noexcept error_code
 // overload is required: this destructor can run during stack unwinding.
+//
+// The path carries a per-PROCESS random token: more than one umacapture_tests process can run at a
+// time in the same working directory (Debug and Release side by side, an independent verification run
+// alongside a regression run), and a fixed name under the shared system temp directory would let one
+// process's write/remove race another's still-open file. There is no pid helper in this tree, so a
+// random token stands in (test_scraper_estimators.cpp's uniqueHarnessDir() uses the same device for the
+// same reason). One token per process is enough here -- every call site already passes a distinct `name`.
 class ScopedTempFile {
 public:
     explicit ScopedTempFile(const char *name)
-        : path_(std::filesystem::temp_directory_path() / name) {
+        : path_(std::filesystem::temp_directory_path() / (processToken() + "_" + name)) {
         remove();  // A leftover from a previously crashed run must not be mistaken for our output.
     }
 
