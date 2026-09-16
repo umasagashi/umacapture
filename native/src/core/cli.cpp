@@ -660,6 +660,13 @@ int main(int argc, char **argv) {
         run->forwarded_frames = geometry.frames;
         run->anchor_unit_min = geometry.min_unit;
         run->anchor_unit_max = geometry.max_unit;
+        // The factor switch rule's verdicts, at the same point and for the same reason: a frame still queued for
+        // the scraper has not been judged. Every verdict is listed, so one that never happened is reported as 0.
+        const auto verdicts = uma::app::NativeApi::instance().factorSwitchVerdicts();
+        for (const auto verdict : uma::chara_detail::scraper_impl::kFactorSwitchVerdicts) {
+            run->factor_switch_verdicts.emplace_back(
+                uma::chara_detail::scraper_impl::factorSwitchVerdictTag(verdict), verdicts.of(verdict));
+        }
         rc = uma::cli::g_run_report.exitCode(threw);
         run->exit_code = rc;
         std::cerr << uma::cli::g_run_report.summaryLine(run.value()) << std::endl;

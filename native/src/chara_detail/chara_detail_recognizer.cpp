@@ -10,6 +10,7 @@
 #error "chara_detail_recognizer.cpp must stay ONNX-free; the onnxruntime header leaked in (see the TU-split note)."
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <map>
@@ -124,17 +125,26 @@ std::optional<double> SkillTabRecognizer::findNext(const Frame &frame, const Poi
     return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_gap);
 }
 
+// FactorRowReader: production ctor lives in chara_detail_recognizer_models.cpp.
+
+FactorRowReader::FactorRowReader(
+    const recognizer_config::FactorTabConfig &config,
+    std::unique_ptr<const recognizer::Predictor<int>> factor_model,
+    std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model)
+    : config(config)
+    , factor_model(std::move(factor_model))
+    , factor_rank_model(std::move(factor_rank_model)) {
+}
+
 // FactorTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
 
 FactorTabRecognizer::FactorTabRecognizer(
     const recognizer_config::FactorTabConfig &config,
-    std::unique_ptr<const recognizer::Predictor<int>> factor_model,
-    std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model,
+    std::shared_ptr<const FactorRowReader> rows,
     std::unique_ptr<const recognizer::Predictor<Chara>> character_model,
     std::unique_ptr<const recognizer::Predictor<int>> character_rank_model)
     : config(config)
-    , factor_model(std::move(factor_model))
-    , factor_rank_model(std::move(factor_rank_model))
+    , rows(requireFactorRows(std::move(rows)))
     , character_model(std::move(character_model))
     , character_rank_model(std::move(character_rank_model)) {
 }
@@ -164,14 +174,41 @@ void FactorTabRecognizer::recognize(
     // Move to the space between the banner and the first factor.
     const double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
 
+    // The stitched image's scroll area is config.area, the same rect the banner search above starts from.
     double current_y = scan_top;
-    const auto self = recognizeOne(frame, current_y, history);
-    const auto parent1 = recognizeOne(frame, current_y, history);
-    const auto parent2 = recognizeOne(frame, current_y, history);
+    // Every list is read in full: the limit belongs to the single-frame read only (SelfFactorWindow), and each
+    // list here starts where the one before it ended, which a limited read would not reach.
+    const auto self = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
+    const auto parent1 = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
+    const auto parent2 = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
 
     record.factors = {self, parent1, parent2};
 
     record.trainee = recognizeTrainee(frame, record_info, scan_top, crop_info, history);
+}
+
+std::vector<record::Factor>
+FactorRowReader::visibleSelfPrefix(const Frame &frame, const SelfFactorWindow &window) const {
+    const auto anchor = frame.anchor();
+
+    // Scan from the caller's scroll area, NOT from config.area: this frame is a live one, whose scroll
+    // area moves with the record layout (see the header for the full reason).
+    const auto top_banner_y = searchVertical(
+        frame,
+        config.bg_color,
+        {
+            anchor.absolute(config.left_rect).left(),
+            anchor.absolute(window.scroll_area).top(),
+        },
+        config.vertical_banner_upper_gap);
+    if (!top_banner_y) {
+        log_warning("Failed to find top banner of factor tab.");
+        return {};
+    }
+
+    double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+    PredictionHistory history;
+    return recognizeOne(frame, window.scroll_area, scan_top, history, window.factor_limit);
 }
 
 std::vector<record::Factor>
@@ -195,6 +232,48 @@ FactorTabRecognizer::recognizeVisibleSelf(const Frame &frame, PredictionHistory 
     return recognizeOne(frame, scan_top, history, /*bounded=*/true);
 }
 
+std::vector<record::Factor> FactorTabRecognizer::recognizeOne(
+    const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded) const {
+    const auto anchor = frame.anchor();
+    const auto left_rect = anchor.absolute(config.left_rect);
+    const auto right_rect = anchor.absolute(config.right_rect);
+
+    const auto fits_frame = [&](const Rect<double> &cell, double top) {
+        const auto mapped = anchor.mapToFrame(cell + Point<double>{0, top});
+        return mapped.top() >= 0 && mapped.left() >= 0  //
+            && mapped.bottom() <= frame.height() && mapped.right() <= frame.width();
+    };
+
+    std::vector<record::Factor> factors;
+    for (;;) {
+        const auto current_scan_top = scan_top;
+
+        // Find next row of LEFT column.
+        const auto left_column_y = rows->findNext(frame, left_rect.topLeft().withY(current_scan_top));
+        if (!left_column_y) {
+            break;
+        }
+        if (bounded && !fits_frame(left_rect, left_column_y.value())) {
+            break;
+        }
+        factors.push_back(rows->predictFactor(frame, rows->cellsAt(left_rect, left_column_y.value()), history));
+        scan_top = left_column_y.value() + config.vertical_delta;
+
+        // Find next row of RIGHT column.
+        const auto right_column_y = rows->findNext(frame, right_rect.topLeft().withY(current_scan_top));
+        if (!right_column_y) {
+            break;
+        }
+        if (bounded && !fits_frame(right_rect, right_column_y.value())) {
+            break;
+        }
+        factors.push_back(rows->predictFactor(frame, rows->cellsAt(right_rect, right_column_y.value()), history));
+    }
+
+    scan_top += config.vertical_chara_gap;
+    return factors;
+}
+
 record::Character FactorTabRecognizer::recognizeTrainee(
     const Frame &frame,
     const RecordInfo &record_info,
@@ -202,7 +281,7 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     CropInfo &crop_info,
     PredictionHistory &history) const {
     const auto &anchor = frame.anchor();
-    const auto reference_top = findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
+    const auto reference_top = rows->findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
     if (!reference_top.has_value()) {
         log_warning("Failed to find reference point for trainee icon.");
         return {};
@@ -231,67 +310,98 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     return character;
 }
 
-std::vector<record::Factor> FactorTabRecognizer::recognizeOne(
-    const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded) const {
+std::vector<record::Factor> FactorRowReader::recognizeOne(
+    const Frame &frame,
+    const Rect<double> &scroll_area,
+    double &scan_top,
+    PredictionHistory &history,
+    const std::optional<std::size_t> factor_limit) const {
     const auto anchor = frame.anchor();
     const auto left_rect = anchor.absolute(config.left_rect);
     const auto right_rect = anchor.absolute(config.right_rect);
 
-    const auto fits_frame = [&](const Rect<double> &cell, double top) {
-        const auto mapped = anchor.mapToFrame(cell + Point<double>{0, top});
-        return mapped.top() >= 0 && mapped.left() >= 0  //
-            && mapped.bottom() <= frame.height() && mapped.right() <= frame.width();
+    // The region a cell has to lie in, in the pixels Frame::view crops by: the scroll area, clipped to the frame.
+    const auto area = anchor.mapToFrame(scroll_area);
+    const Rect<int> visible{
+        {std::max(area.left(), 0), std::max(area.top(), 0)},
+        Point<int>{std::min(area.right(), frame.width()), std::min(area.bottom(), frame.height())},
+    };
+    const auto inside_visible = [&](const Rect<double> &cell) {
+        const auto mapped = anchor.mapToFrame(cell);
+        return mapped.left() >= visible.left() && mapped.top() >= visible.top()  //
+            && mapped.right() <= visible.right() && mapped.bottom() <= visible.bottom();
+    };
+    const auto fits = [&](const FactorCells &cells) {
+        return inside_visible(cells.name) && inside_visible(cells.star);
+    };
+
+    // Checked before each cell is looked for, so a limited read hands the models nothing past the limit.
+    const auto full = [&](const std::vector<record::Factor> &read) {
+        return factor_limit.has_value() && read.size() >= factor_limit.value();
     };
 
     std::vector<record::Factor> factors;
     for (;;) {
         const auto current_scan_top = scan_top;
+        if (full(factors)) {
+            break;
+        }
 
         // Find next row of LEFT column.
         const auto left_column_y = findNext(frame, left_rect.topLeft().withY(current_scan_top));
         if (!left_column_y) {
             break;
         }
-        if (bounded && !fits_frame(left_rect, left_column_y.value())) {
+        const auto left_cells = cellsAt(left_rect, left_column_y.value());
+        if (!fits(left_cells)) {
             break;
         }
-        factors.push_back(predictFactor(frame, left_rect, left_column_y.value(), history));
+        factors.push_back(predictFactor(frame, left_cells, history));
         scan_top = left_column_y.value() + config.vertical_delta;
+        if (full(factors)) {
+            break;
+        }
 
         // Find next row of RIGHT column.
         const auto right_column_y = findNext(frame, right_rect.topLeft().withY(current_scan_top));
         if (!right_column_y) {
             break;
         }
-        if (bounded && !fits_frame(right_rect, right_column_y.value())) {
+        const auto right_cells = cellsAt(right_rect, right_column_y.value());
+        if (!fits(right_cells)) {
             break;
         }
-        factors.push_back(predictFactor(frame, right_rect, right_column_y.value(), history));
+        factors.push_back(predictFactor(frame, right_cells, history));
     }
 
     scan_top += config.vertical_chara_gap;
     return factors;
 }
 
-std::optional<double> FactorTabRecognizer::findNext(const Frame &frame, const Point<double> &scan_top_left) const {
+std::optional<double> FactorRowReader::findNext(const Frame &frame, const Point<double> &scan_top_left) const {
     return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_factor_gap);
 }
 
-record::Factor FactorTabRecognizer::predictFactor(
-    const Frame &frame, const Rect<double> &rect, double top, PredictionHistory &history) const {
+FactorRowReader::FactorCells FactorRowReader::cellsAt(const Rect<double> &column_rect, double top) const {
     // The offset math below only holds for ScreenStart-anchored rects. This is a structural invariant of the
     // parsed config, so a violation is a real check (not a Debug-only assert): it is caught by the recognizer's
     // per-record try/catch and degrades to a dropped record plus a log entry.
     if (!(config.factor_rank.rect.topLeft().anchor() == ScreenStart)
-        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart) || !(rect.topLeft().anchor() == ScreenStart)
-        || !(rect.bottomRight().anchor() == ScreenStart)) {
-        throw std::logic_error("predictFactor requires ScreenStart-anchored rects");
+        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart)
+        || !(column_rect.topLeft().anchor() == ScreenStart) || !(column_rect.bottomRight().anchor() == ScreenStart)) {
+        throw std::logic_error("FactorRowReader::cellsAt requires ScreenStart-anchored rects");
     }
+    return {
+        column_rect + Point<double>{0, top},
+        config.factor_rank.rect + Point<double>{column_rect.left(), top},
+    };
+}
 
-    const auto factor_id = predict(*factor_model, frame, rect + Point<double>{0, top}, history);
+record::Factor
+FactorRowReader::predictFactor(const Frame &frame, const FactorCells &cells, PredictionHistory &history) const {
+    const auto factor_id = predict(factor_model, frame, cells.name, history);
 
-    const auto factor_rank =
-        predict(*factor_rank_model, frame, config.factor_rank.rect + Point<double>{rect.left(), top}, history);
+    const auto factor_rank = predict(factor_rank_model, frame, cells.star, history);
 
     return {
         factor_id,

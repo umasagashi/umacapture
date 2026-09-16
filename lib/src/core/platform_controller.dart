@@ -610,6 +610,15 @@ class CharaDetailCaptureState {
   /// Returns null when there is no meaningful guidance (no detail session, or a hard error surfaced
   /// separately).
   ///
+  /// **"Detectable" is not "every pair of records is told apart".** At the factor top Rule 3's pixel diff only
+  /// nominates a switch; the core then reads the self factors both frames show (the visible prefix: the rows whose
+  /// cells lie inside the scroll area) and KEEPS the session when the two readings are non-empty and equal in every
+  /// (id, star). So a switch to a record whose visible prefix is identical to the current one's is not reset:
+  /// the new character's tabs are captured into the current record, with nothing on screen to say so. A true
+  /// here promises that Rule 3 is armed, not that it separates such a pair, and nothing on this side can see
+  /// the difference. The prefix is only as long as the rows the frame shows (11 to 17 on the golden corpus's
+  /// layouts, shortest on FriendStandard); no clip of such a collision exists, so the harm is unmeasured.
+  ///
   /// **The scroll position is deliberately not part of the answer, and that rests on a game fact, not on
   /// data.** Rule 3 judges only frames at the head of the factor list ([factorAtTop]'s gate). Switching
   /// to another record returns the game to the head of the list, so the first frame of the new record is

@@ -176,6 +176,26 @@ TEST_CASE("a run that forwarded no frame reports the count, not a geometry of ze
     CHECK(json["anchor_unit_max"].get<int>() == 0);
 }
 
+TEST_CASE("the line states every factor switch verdict the caller counted, under its own word") {
+    // The only place a switch reader that always finds nothing -- or always fails -- differs from a working one:
+    // all three reset alike, so the records and the discard counts are identical. native/test/integration/run.py
+    // compares this object with what a case declares. Distinct counts, so a key written under another's word
+    // cannot pass.
+    RunReport report;
+    RunInvocation run{"video", 1, 1, kExitOk};
+    run.factor_switch_verdicts = {{"same", 1}, {"different", 2}, {"empty", 3}, {"unreadable", 0}};
+    const auto json = summaryJsonOf(report, run);
+    REQUIRE(json.contains("factor_switch_verdicts"));
+    const auto &verdicts = json["factor_switch_verdicts"];
+    REQUIRE(verdicts.is_object());
+    CHECK(verdicts.size() == 4);
+    CHECK(verdicts["same"].get<int64_t>() == 1);
+    CHECK(verdicts["different"].get<int64_t>() == 2);
+    CHECK(verdicts["empty"].get<int64_t>() == 3);
+    // A zero is stated, not left out: "no Unreadable verdict" and "this line does not count Unreadable" differ.
+    CHECK(verdicts["unreadable"].get<int64_t>() == 0);
+}
+
 TEST_CASE("a notification that cannot be read is counted, never dropped") {
     // The mechanism that exists to end silent failures must not have a silent failure of its own.
     RunReport report;

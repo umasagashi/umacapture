@@ -37,13 +37,21 @@ SkillTabRecognizer::SkillTabRecognizer(
               module_root_dir / config.skill_level.module_path, "skill_level")) {
 }
 
-FactorTabRecognizer::FactorTabRecognizer(
+FactorRowReader::FactorRowReader(
     const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
-    : config(config)
-    , factor_model(std::make_unique<recognizer::Model<IndexPrediction>>(module_root_dir / config.module_path, "factor"))
-    , factor_rank_model(
+    : FactorRowReader(
+          config,
+          std::make_unique<recognizer::Model<IndexPrediction>>(module_root_dir / config.module_path, "factor"),
           std::make_unique<recognizer::Model<IndexPrediction>>(
-              module_root_dir / config.factor_rank.module_path, "factor_rank"))
+              module_root_dir / config.factor_rank.module_path, "factor_rank")) {
+}
+
+FactorTabRecognizer::FactorTabRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::FactorTabConfig &config,
+    std::shared_ptr<const FactorRowReader> rows)
+    : config(config)
+    , rows(requireFactorRows(std::move(rows)))
     , character_model(
           std::make_unique<recognizer::Model<CharaPrediction>>(
               module_root_dir / config.trainee_icon.icon.module_path, "character"))
@@ -146,6 +154,7 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     const std::string &trainer_id,
     const std::filesystem::path &record_root_dir,
     const std::filesystem::path &module_root_dir,
+    const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_rows,
     const event_util::Listener<RecordInfo> &on_recognize_ready,
     const event_util::Sender<RecordInfo> &on_recognize_completed,
     const event_util::Listener<RecordInfo> &on_update_requested,
@@ -158,9 +167,10 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     , record_root_dir(record_root_dir)
     , module_root_dir(module_root_dir)
     , config(config)
+    , factor_rows(factor_rows)
     , status_header_recognizer(module_root_dir, config.status_header)
     , skill_tab_recognizer(module_root_dir, config.skill_tab)
-    , factor_tab_recognizer(module_root_dir, config.factor_tab)
+    , factor_tab_recognizer(module_root_dir, config.factor_tab, factor_rows)
     , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
     , on_recognize_ready(on_recognize_ready)
     , on_recognize_completed(on_recognize_completed)

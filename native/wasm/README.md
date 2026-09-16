@@ -22,9 +22,10 @@ dependencies. See the Stage-6 design at
   constructors with the same signatures.
 - `wasm_inference_bridge.h` — the abort protocol `stop()` uses to cancel an
   in-flight bridged inference. Required, not optional: `stop()` runs on the JS
-  thread and joins the recognizer pthread, but that pthread's inference is served
-  by a pump on the very thread `stop()` is blocking, so without the abort a stop
-  during recognition hangs the worker permanently.
+  thread and joins the pipeline pthreads, but their inference (the recognizer's,
+  and the scene scraper's factor-row reads) is served by a pump on the very thread
+  `stop()` is blocking, so without the abort a stop during inference hangs the
+  worker permanently.
 - `check_sources.py` — the mechanical drift check for the two hand-maintained
   copies below. `build.sh` runs it before compiling; see "Drift checks".
 

@@ -181,7 +181,7 @@ let setupComplete = false;
 // dangling), a second set of ORT sessions, and -- the part that corrupts RESULTS and not merely memory -- a
 // second `pump()`. The inference bridge has no compare-and-swap: `pump` tests for ST_REQUEST and only then
 // awaits the session, so two pumps service the SAME request, and the late one's `Atomics.store(ST_DONE)` can
-// land after C++ has published the NEXT request -- handing the waiting recognizer thread the previous request's
+// land after C++ has published the NEXT request -- handing the waiting pipeline thread the previous request's
 // output. A silent misrecognition: no log line, no `pumpError`, nothing for a playtest to see.
 //
 // It needs no debug console to reach. The Dart client's init timeout expires after two minutes and drops its
@@ -870,7 +870,7 @@ function inputShapeOf(session, inputName, key) {
 
 // --- inference pump ---------------------------------------------------------------------------------------
 // Services one bridged request: read the NHWC uint8 input + model id from the shared control block, run the
-// matching ORT session, write the scalar outputs back, and wake the futex-waiting recognizer pthread. Fresh
+// matching ORT session, write the scalar outputs back, and wake the futex-waiting pipeline pthread. Fresh
 // HEAP views every access: ORT session.run may grow the heap and detach stale views.
 async function serviceOneRequest() {
   const ctrl = Module.HEAP32;

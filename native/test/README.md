@@ -203,9 +203,9 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   aptitudes, and what an inheritance-only record skips),
   `chara_detail/test_skill_tab_recognizer.cpp` (no skills for inheritance-only; a
   level read only for the first skill of a left+right row),
-  `chara_detail/test_factor_recognizer.cpp` (`recognizeVisibleSelf`: the missing
+  `chara_detail/test_factor_recognizer.cpp` (`visibleSelfPrefix`: the missing
   top banner, a fully visible left+right row with a 1-based star, and stopping
-  before a row that would fall off the frame),
+  before a row whose name or star cell would leave the scroll area),
   `chara_detail/test_support_card_recognizer.cpp` (no card top leaves the cards
   and `scan_top` untouched; six cards with 1-based ranks),
   `chara_detail/test_family_tree_recognizer.cpp` (the default family when no tree
@@ -261,6 +261,16 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
 - `core/test_record_production_counter.cpp` — the per-run record count: each record
   counted once, zero at the start of a run however the previous one ended, surviving
   until the next run begins, and safe across the threads that use it.
+- `core/test_factor_switch_verdict_tally.cpp` — `app::FactorSwitchVerdictTally`, the
+  per-run count of what the factor tab's character-switch rule concluded (`Same` /
+  `Different` / `Empty` / `Unreadable`): a fresh tally reports zero for every verdict,
+  four unequal counts stay apart under their own slots (so a conflation -- `Empty`
+  folded into `Unreadable`, say -- cannot reproduce all four numbers), a new run
+  resets every verdict however the previous one ended, each verdict's tag word is
+  distinct and non-empty and matches the four words (`same`/`different`/`empty`/
+  `unreadable`) the CLI's run summary keys its line by, and concurrent `note()` calls
+  from separate threads (mirroring the scraper runner vs. the CLI's post-drain read)
+  lose no count.
 - `core/test_frame_flow_counters.cpp` — the two in-flight counters whose difference
   is the resident frame count: the lead-in, a frame counted on each hop it crosses,
   a full drain returning to zero rather than to a residue, reset in both directions,
@@ -493,8 +503,25 @@ That decision table is itself a ctest, `integration_coverage_selftest`
 (`integration/test_run_coverage.py`). `--coverage` decides everything from file
 existence, so the self-test drives it against a synthetic manifest inside a
 `TemporaryDirectory` — no clips, no models, no cli, and no contact with the real
-baseline. It is therefore the only integration test here that is unconditional and
-that actually runs in CI.
+baseline. It is therefore one of the two integration tests here that are
+unconditional and actually run in CI — the other is `integration_check_selftest`
+below.
+
+`run.py`'s per-case judge (`check_run`) gets the same treatment for the same reason:
+a golden case only exercises a claim against the numbers its own clip happens to
+produce, so a claim the judge quietly stopped comparing stays green on every case
+whose declaration is right. This is sharpest for `expect_factor_switch_verdicts` (the
+four counts `core/test_factor_switch_verdict_tally.cpp` pins the source of): a
+declaration that matches the run passes whether or not the judge is still reading it.
+[`integration/test_run_check.py`](integration/test_run_check.py) — `integration_check_selftest`
+— drives `check_run` against hand-built `CompletedProcess` summaries, no cli or clip
+needed: a matching declaration passes; each of the four verdict words disagreeing on
+its own is caught by name (so a judge that compared only some of them, summed them, or
+folded `empty` into `unreadable`, fails); a summary predating the key, or whose verdict
+vocabulary is short or has an extra word, is refused rather than partly read; an
+undeclared case asserts nothing about its verdicts either way; and a malformed
+declaration (a missing or unknown verdict, a negative/boolean/float count, a list, or
+`null`) is refused before any pipeline would run.
 
 Regenerated goldens are tied to the `sandbox/modules` models — to what they
 *predict*, that is, not to the version string, which is stripped (above). When the

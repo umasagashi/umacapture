@@ -15,9 +15,15 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
+#include <limits>
+#include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -28,7 +34,9 @@
 #include "types/range.h"
 #include "types/shape.h"
 #include "util/cv_test_helpers.h"
+#include "util/error_util.h"
 #include "util/event_util.h"
+#include "util/fake_predictor.h"
 #include "util/json_util.h"
 
 #ifndef TEST_ASSET_CONFIG_DIR
@@ -199,6 +207,32 @@ Frame solidFrameAt(uint64 timestamp, const Color &color) {
     return Frame(pixels, timestamp);
 }
 
+// The scan config of the harness's FactorRowReader. NOT production geometry, on purpose: its background range is
+// one colour none of this file's frames contain, so the banner search and every row search stop at their first
+// sample and the scan reads rows on any frame. What the cases here pin is WHETHER and WHEN the switch rule reads,
+// not what the rows say; the scan itself is test_factor_recognizer.cpp's subject. The rank cell sits inside the
+// factor cell, so no crop the scan makes can leave a frame the factor cell fits in.
+recognizer_config::FactorTabConfig readerScanConfig() {
+    const auto rect = [](double left, double top, double right, double bottom) {
+        return Rect<double>{Point<double>{left, top}, Point<double>{right, bottom}};
+    };
+    const recognizer_config::BasicModuleConfig unused_module{"unused", rect(0.0, 0.0, 0.05, 0.05)};
+    return {
+        "factor",  // module_path
+        Range<Color>{Color(1, 2, 3), Color(1, 2, 3)},  // bg_color
+        rect(0.0, 0.0, 1.0, 1.0),  // area
+        rect(0.10, 0.0, 0.40, 0.08),  // left_rect
+        rect(0.50, 0.0, 0.80, 0.08),  // right_rect
+        0.06,  // vertical_delta
+        0.30,  // vertical_banner_upper_gap
+        0.02,  // vertical_banner_bottom_delta
+        0.10,  // vertical_factor_gap
+        0.03,  // vertical_chara_gap
+        {"factor_rank", rect(0.0, 0.0, 0.05, 0.05)},  // factor_rank
+        {unused_module, unused_module},  // trainee_icon
+    };
+}
+
 // Every connection CharaDetailSceneScraper's constructor takes, plus the discard stream these tests read.
 struct ScraperHarness {
     HookRecorder recorder;
@@ -216,9 +250,15 @@ struct ScraperHarness {
     event_util::Connection<int> page_ready = event_util::makeDirectConnection<int>();
     event_util::Connection<RecordInfo> completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<Frame, RecordInfo> factor_probe = event_util::makeDirectConnection<Frame, RecordInfo>();
+    event_util::Connection<scraper_impl::FactorSwitchVerdict> factor_switch_judged =
+        event_util::makeDirectConnection<scraper_impl::FactorSwitchVerdict>();
     event_util::Connection<DiscardedSession> restarted = event_util::makeDirectConnection<DiscardedSession>();
 
     std::vector<DiscardedSession> discards;
+    // Every verdict the character-switch rule stated, in order, each with how many sessions had been discarded when
+    // it was stated. The stream NativeApi counts for the CLI's run summary; the second field is what lets a case
+    // state that a resetting verdict is announced BEFORE the discard it causes.
+    std::vector<std::pair<scraper_impl::FactorSwitchVerdict, std::size_t>> verdicts;
     // Every on_tab_refused message, in order, as {index, refused, reason}.
     std::vector<std::tuple<int, bool, std::string>> refusals;
     // Every on_scroll_position message, in order, as {index, word}. A SEQUENCE, and of the WORD the core put
@@ -228,6 +268,78 @@ struct ScraperHarness {
     // "the core has said nothing about this tab" are three different claims, and a front end that resolves
     // fail-closed acts differently on each.
     std::vector<std::pair<int, std::string>> positions;
+    // Every frame the factor duplicate probe was sent with, in order.
+    std::vector<Frame> probe_frames;
+    // Every call the factor model of the scraper's FactorRowReader received, in order: the timestamp of the frame
+    // the cell was cropped from, how many sessions had been discarded at that instant, and where the cell sits in
+    // that frame, in pixels. The second field is what lets a case state that a reading happened BEFORE the reset
+    // rather than merely during the update. The third is what lets a case state WHICH REGION the reading scanned:
+    // the reader hands the model a view into the frame it was given, and a view knows its own offset.
+    struct FactorModelCall {
+        uint64 timestamp;
+        std::size_t discards_so_far;
+        cv::Point cell_origin;
+    };
+    std::vector<FactorModelCall> factor_model_calls;
+    // What the factor model does on each call after recording it; a case replaces it to make the reader fail.
+    std::function<void()> factor_model_fault;
+    // The id the factor model answers for a cell. Unset, every cell of every frame reads 101, so any two readings
+    // of equal length are the same record; a case that needs two frames to read differently answers by the
+    // cell's timestamp.
+    std::function<int(const Frame &cell)> factor_model_answer;
+
+    // The verdicts stated so far, in order, without the discard counts beside them.
+    [[nodiscard]] std::vector<scraper_impl::FactorSwitchVerdict> verdictsStated() const {
+        std::vector<scraper_impl::FactorSwitchVerdict> stated;
+        for (const auto &[verdict, discards_so_far] : verdicts) {
+            stated.push_back(verdict);
+        }
+        return stated;
+    }
+
+    // How many cells the factor model was handed from the frame stamped `timestamp`. One reading of one frame is
+    // one fixed number of cells here (readerScanConfig finds the same rows on every frame of one size), so this
+    // is how a case tells "read once" from "read twice".
+    [[nodiscard]] std::size_t factorCallsOn(uint64 timestamp) const {
+        std::size_t calls = 0;
+        for (const auto &call : factor_model_calls) {
+            calls += call.timestamp == timestamp ? 1 : 0;
+        }
+        return calls;
+    }
+
+    // The frames the factor model read, in order, with consecutive calls on one frame folded into one entry.
+    [[nodiscard]] std::vector<uint64> framesRead() const {
+        std::vector<uint64> frames;
+        for (const auto &call : factor_model_calls) {
+            if (frames.empty() || frames.back() != call.timestamp) {
+                frames.push_back(call.timestamp);
+            }
+        }
+        return frames;
+    }
+
+    // THE READER the scraper's character-switch rule reads with, built through the injection ctor exactly as
+    // production builds it (both models behind their admissions). Its scan config is readerScanConfig(), under
+    // which the scan finds rows on any of this file's frames, so a reading always reaches the factor model and
+    // is observable in factor_model_calls.
+    std::shared_ptr<const recognizer_impl::FactorRowReader> factor_reader =
+        std::make_shared<const recognizer_impl::FactorRowReader>(
+            readerScanConfig(),
+            testutil::functionPredictor<int>(
+                "factor",
+                [this](const Frame &cell) {
+                    cv::Size whole;
+                    cv::Point origin;
+                    cell.data().locateROI(whole, origin);
+                    factor_model_calls.push_back(FactorModelCall{cell.timestamp(), discards.size(), origin});
+                    if (factor_model_fault) {
+                        factor_model_fault();
+                    }
+                    return recognizer::Predicted<int>{factor_model_answer ? factor_model_answer(cell) : 101, 1.0f, {}};
+                }),
+            testutil::constantPredictor<int>("factor_rank", 2));
+
     CharaDetailSceneScraper scraper;
 
     ScraperHarness()
@@ -244,15 +356,20 @@ struct ScraperHarness {
               page_ready,
               completed,
               factor_probe,
+              factor_reader,
+              factor_switch_judged,
               restarted,
               shippedScraperConfig(),
               "unit_test_scraping_root",
               recorder.hooks()) {
         restarted->listen([this](const DiscardedSession &discarded) { discards.push_back(discarded); });
+        factor_switch_judged->listen(
+            [this](const scraper_impl::FactorSwitchVerdict verdict) { verdicts.emplace_back(verdict, discards.size()); });
         tab_refused->listen([this](int index, bool refused, const std::string &reason) {
             refusals.emplace_back(index, refused, reason);
         });
         scroll_position->listen([this](int index, const std::string &word) { positions.emplace_back(index, word); });
+        factor_probe->listen([this](const Frame &frame, const RecordInfo &) { probe_frames.push_back(frame); });
     }
 
     // Every word stated for `tab`, in order. Not the last one: what the wire promises is that a tab which
@@ -374,7 +491,12 @@ void fill(cv::Mat mat, const Color &color) {
 // device solidFrameAt uses, and the reason these tests need no filesystem). It cannot disturb the scroll area,
 // which is the band itself. The header banner is absent on every frame, so the base-frame catcher likewise
 // never latches.
-Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
+// [layout] is the shipped coordinate set the session under test resolved -- `common` for every record type
+// but one, `friend_common` for a friend's full record, whose scroll area sits ~136 px lower (and whose tab
+// bar sits ~133 px lower -- the two are separate measurements, see friendCommon in the builder). The
+// bar has to be painted where THAT layout looks for it, or the frame is simply a bar-less one.
+Frame scrollBarFrameIn(
+    const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int exposed_rows, int nonce) {
     cv::Mat pixels(960, 540, CV_8UC3, cv::Scalar(kNoBanner.b(), kNoBanner.g(), kNoBanner.r()));
     // Ask the frame itself where the config rect lands, rather than restating pixel coordinates that would
     // silently stop matching the shipped config.
@@ -392,6 +514,57 @@ Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
     const int thumb_cap = kTrackInset + exposed_rows;
     fill(band.row(thumb_cap), kBarThumbCap);
     fill(band(cv::Rect(0, thumb_cap + 1, band.cols, kThumbRows)), kBarThumb);
+    return Frame(pixels, timestamp);
+}
+
+Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
+    return scrollBarFrameIn(shippedScraperConfig().common, timestamp, exposed_rows, nonce);
+}
+
+// The same frame with a TRANSLATING CONTENT TEXTURE painted over the scroll area, left of the scroll-bar scan
+// line. This is what makes the OFFSET exit reachable at this level: that exit needs the scroll-area content to
+// translate past initial_scroll_threshold while the stationary catcher never latches, and a band painted only
+// with bar levels can express neither (it is uniform along every row it does not move, so the image estimator
+// has nothing to match, and two such frames are pixel-identical and latch immediately).
+//
+// The shipped scroll_area_rect and scroll_bar_rect are the same region, so the two sensors would otherwise
+// fight over the same pixels; the texture stops at 90% of the width and the scan line sits at 0.9693, so the
+// bar reading is untouched and `exposed_rows` still decides the head-of-list verdict independently.
+//
+// `content_shift` moves the texture UP by that many rows -- i.e. it is the scroll offset in pixels, the same
+// sense test_scraper_estimators.cpp's contentAndScrollBar uses. The per-row grey comes from a multiplicative
+// hash rather than a short modular ramp: the band is ~392 rows tall here, so a period-200 ramp would give the
+// image estimator two identical copies to lock onto and the offset would be decided by an alias.
+// [layout] as in scrollBarFrameIn: the texture goes where THAT layout's scroll area is.
+Frame scrollingBandFrameIn(
+    const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
+    const Frame bar = scrollBarFrameIn(layout, timestamp, exposed_rows, nonce);
+    cv::Mat pixels = bar.data().clone();
+    const Rect<int> band_rect = bar.anchor().mapToFrame(layout.scroll_area_rect);
+    const int texture_width = band_rect.width() * 9 / 10;
+    for (int r = 0; r < band_rect.height(); r++) {
+        const unsigned hashed = static_cast<unsigned>(r + content_shift) * 2654435761u;
+        const auto value = static_cast<uchar>((hashed >> 24) % 200 + 28);
+        pixels(cv::Rect(band_rect.left(), band_rect.top() + r, texture_width, 1))
+            .setTo(cv::Scalar(value, value, value));
+    }
+    return Frame(pixels, timestamp);
+}
+
+Frame scrollingBandFrameAt(uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
+    return scrollingBandFrameIn(shippedScraperConfig().common, timestamp, content_shift, exposed_rows, nonce);
+}
+
+// A head-of-list frame ON WHICH THE HARNESS'S READER FINDS NO ROWS: the same texture region as
+// scrollingBandFrameAt, filled instead with readerScanConfig's background colour, so the banner search runs out
+// of span without leaving the background and the reading comes back empty. The scroll bar is untouched, so the
+// frame is still flush at the top, and against a scroll-bar reference it is still a large pixel change.
+Frame emptyReadingFrameAt(uint64 timestamp, int nonce) {
+    const Frame bar = scrollBarFrameAt(timestamp, /*exposed_rows=*/0, nonce);
+    cv::Mat pixels = bar.data().clone();
+    const Rect<int> band_rect = bar.anchor().mapToFrame(shippedScraperConfig().common.scroll_area_rect);
+    fill(pixels(cv::Rect(band_rect.left(), band_rect.top(), band_rect.width() * 9 / 10, band_rect.height())),
+         readerScanConfig().bg_color.min());
     return Frame(pixels, timestamp);
 }
 
@@ -506,6 +679,348 @@ TEST_CASE("a tab a sensor CAN read says which way it measured") {
     scrolled.scraper.update(
         scrollBarFrameAt(kPastStationary, /*exposed_rows=*/1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
     CHECK(scrolled.positionWords(FactorPage) == std::vector<std::string>{"unknown", "scrolled"});
+}
+
+// --- the reading Rule 3 takes once its pixel diff has said "a different character" -------------------------
+//
+// WHAT THIS PROTECTS is not a verdict. Rule 3 decides from pixels alone and, when it is wrong, throws away a
+// capture the user has already paid for; the reading pinned here is what will let it look at what the two
+// frames actually show before paying that price. It is taken with the pipeline's shared FactorRowReader,
+// SYNCHRONOUSLY, inside the update() that judges the frame -- so these cases need no runner, no answer to
+// deliver and no count to wait on: when update() returns, the reading has happened or it has not.
+//
+// The pixel diff only nominates a frame. What decides is scraper_impl::factorSwitchVerdict over the two readings:
+// Same keeps the session and makes the judged frame the reference; Different, Empty and Unreadable reset. Each of
+// those four is its own case below, because a case that covered two of them could stay green with the two
+// swapped.
+//
+// The harness's reader answers 101 for every cell unless a case says otherwise, so by default every pair of
+// readings is Same. A case that wants a reset has to make it happen, which keeps "it reset" from being the
+// harness's default rather than the rule's decision.
+
+// The factor tab's head latch on `layout`: two identical frames settled at the head of the list, which latch
+// fragment #0 and so arm the rule with its reference (nothing before that latch can reach the diff at all).
+// Returns the timestamp of the latched frame, which is the reference's.
+uint64 latchFactorHead(
+    ScraperHarness &h,
+    uint64 base,
+    int nonce,
+    const scraper_config::SceneScraperConfig &layout,
+    record::RecordType record_type) {
+    h.scraper.update(scrollBarFrameIn(layout, base, /*exposed_rows=*/0, nonce), SceneState{FactorPage, record_type});
+    h.scraper.update(
+        scrollBarFrameIn(layout, base + kPastStationary, /*exposed_rows=*/0, nonce + 1),
+        SceneState{FactorPage, record_type});
+    return base + kPastStationary;
+}
+
+using FrameAt = std::function<Frame(uint64 timestamp, int nonce)>;
+
+// Holds the frames `frame_at` builds for a dwell, starting at `at`: the first opens the window and the second,
+// a dwell later, is the one the rule judges. Returns the judged frame's timestamp. Every frame here must stay
+// flush at the top (exposed_rows 0), because the rule is gated on that and would never look at the pixels
+// otherwise.
+uint64 holdFactorDivergence(
+    ScraperHarness &h, uint64 at, int nonce, const FrameAt &frame_at, record::RecordType record_type) {
+    h.scraper.update(frame_at(at, nonce), SceneState{FactorPage, record_type});
+    h.scraper.update(frame_at(at + kPastDwell, nonce + 1), SceneState{FactorPage, record_type});
+    return at + kPastDwell;
+}
+
+// The two Standard-layout frames the round-trip cases alternate between: the scroll bar's flat levels (what the
+// head latch holds) and a content texture over the scroll area. Either one diffs against the other far past
+// kFactorChangeRatioThreshold; two of the same kind diff by nothing, because the nonce only repaints above the
+// scroll area.
+Frame latchedLook(uint64 timestamp, int nonce) {
+    return scrollBarFrameAt(timestamp, /*exposed_rows=*/0, nonce);
+}
+Frame texturedLook(uint64 timestamp, int nonce) {
+    return scrollingBandFrameAt(timestamp, /*content_shift=*/0, /*exposed_rows=*/0, nonce);
+}
+
+// Drives one Standard factor-tab session from a fresh latch to the judged frame of a divergence into the
+// textured look, and returns that frame's timestamp. Whether it resets is the reader's answer, not this helper's.
+uint64 driveFactorDivergence(ScraperHarness &h, uint64 base, int nonce) {
+    const uint64 latched = latchFactorHead(h, base, nonce, shippedScraperConfig().common, record::Standard);
+    return holdFactorDivergence(h, latched + 100, nonce + 2, texturedLook, record::Standard);
+}
+
+TEST_CASE("the switch verdict is Same only for two non-empty readings that agree in length and every element") {
+    using scraper_impl::FactorSwitchReading;
+    const auto verdict = [](const std::optional<FactorSwitchReading> &reading) {
+        return std::string(scraper_impl::factorSwitchVerdictTag(scraper_impl::factorSwitchVerdict(reading)));
+    };
+    const record::Factor a{101, 3};
+    const record::Factor b{202, 1};
+
+    CHECK(verdict(FactorSwitchReading{{a, b}, {a, b}}) == "same");
+    // A reader failure is not a reading, and says so rather than passing for an empty one.
+    CHECK(verdict(std::nullopt) == "unreadable");
+    // An empty side is never Same -- not even against another empty side -- and is not Different either: a count
+    // of real mismatches must not absorb "nothing was found".
+    CHECK(verdict(FactorSwitchReading{{}, {}}) == "empty");
+    CHECK(verdict(FactorSwitchReading{{a}, {}}) == "empty");
+    CHECK(verdict(FactorSwitchReading{{}, {a}}) == "empty");
+    // Length: one reading a prefix of the other is not the same list.
+    CHECK(verdict(FactorSwitchReading{{a}, {a, b}}) == "different");
+    CHECK(verdict(FactorSwitchReading{{a, b}, {a}}) == "different");
+    // Every element, both fields, in order.
+    CHECK(verdict(FactorSwitchReading{{a, b}, {a, record::Factor{203, 1}}}) == "different");
+    CHECK(verdict(FactorSwitchReading{{a, b}, {a, record::Factor{202, 2}}}) == "different");
+    CHECK(verdict(FactorSwitchReading{{a, b}, {b, a}}) == "different");
+}
+
+TEST_CASE("a candidate switch whose two readings differ discards the session, having read both frames first") {
+    ScraperHarness h;
+    // The latched frame reads 101s and every later frame reads 102s.
+    h.factor_model_answer = [](const Frame &cell) { return cell.timestamp() > kPastStationary ? 102 : 101; };
+    h.scraper.buildSession(record::Standard);
+    REQUIRE_FALSE(h.recorder.made.empty());
+    const std::string first_session = h.sessionIdAt(0);
+
+    const uint64 judged_at = driveFactorDivergence(h, 0, /*nonce=*/0);
+
+    REQUIRE(h.discards.size() == 1);
+    CHECK(h.discards.front().info.record_id == first_session);
+
+    // The reference is the frame the head latch armed the rule with, which is the frame the probe was handed.
+    REQUIRE(h.probe_frames.size() == 1);
+    const uint64 reference_at = h.probe_frames.front().timestamp();
+    REQUIRE(reference_at == kPastStationary);
+    // Exactly two readings: the reference, then the judged frame. Not on the frames that only latched the head or
+    // opened the dwell, and not after the reset on the fresh session's behalf.
+    CHECK(h.framesRead() == std::vector<uint64>{reference_at, judged_at});
+    // ...and all of it before the session was discarded: the reading is part of judging the frame, not an
+    // afterthought of the reset.
+    std::size_t calls_after_a_discard = 0;
+    for (const auto &call : h.factor_model_calls) {
+        calls_after_a_discard += call.discards_so_far != 0 ? 1 : 0;
+    }
+    CHECK(calls_after_a_discard == 0);
+    // Stated as Different, once, and before the discard it caused.
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Different});
+    CHECK(h.verdicts.front().second == 0);
+}
+
+TEST_CASE("a candidate switch read as the same record keeps the session and asks nothing more of the frames that follow") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+    const std::string first_session = h.sessionIdAt(0);
+
+    const uint64 judged_at = driveFactorDivergence(h, 0, /*nonce=*/0);
+
+    // The rule did read -- the verdict is the reader's, not a pixel diff that never fired...
+    REQUIRE(h.framesRead() == std::vector<uint64>{kPastStationary, judged_at});
+    // ...and kept the session: no discard, no fresh session, no second probe.
+    CHECK(h.discards.empty());
+    CHECK(h.sessionIdAt(h.recorder.made.size() - 1) == first_session);
+    CHECK(h.probe_frames.size() == 1);
+    // ...and said so: a Same is the one verdict no other channel shows, so the stream is its only trace.
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Same});
+
+    // THE JUDGED FRAME IS NOW THE REFERENCE, observed from both sides. The textured look is held for two more
+    // dwells: against the latched frame that would reopen the window and be read again, against the judged frame
+    // it is no change at all.
+    const std::size_t calls_after_verdict = h.factor_model_calls.size();
+    for (int i = 0; i < 3; i++) {
+        h.scraper.update(
+            texturedLook(judged_at + 100 + static_cast<uint64>(i) * kPastDwell, /*nonce=*/10 + i),
+            SceneState{FactorPage, record::Standard});
+    }
+    CHECK(h.factor_model_calls.size() == calls_after_verdict);
+    // And the latched look, which the rule had been treating as "no change" until now, is a divergence again.
+    const uint64 back_at =
+        holdFactorDivergence(h, judged_at + 100 + 3 * kPastDwell, /*nonce=*/20, latchedLook, record::Standard);
+    CHECK(h.framesRead().back() == back_at);
+    CHECK(h.discards.empty());
+}
+
+TEST_CASE("a candidate switch on which the reader finds no rows discards the session") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    const uint64 latched = latchFactorHead(h, 0, /*nonce=*/0, shippedScraperConfig().common, record::Standard);
+    const uint64 judged_at = holdFactorDivergence(h, latched + 100, /*nonce=*/2, emptyReadingFrameAt, record::Standard);
+
+    CHECK(h.discards.size() == 1);
+    // Empty, and not Different or Unreadable: the reference WAS read and found rows, the judged frame yielded not
+    // one cell, and the reader did not fail (a failure would have left nothing read at all).
+    CHECK(h.factorCallsOn(latched) > 0);
+    CHECK(h.factorCallsOn(judged_at) == 0);
+    // And stated as Empty -- not folded into Different or Unreadable, although it resets like both.
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Empty});
+    CHECK(h.verdicts.front().second == 0);
+}
+
+TEST_CASE("the reference is read once, and a reference installed by a Same verdict is not read at all") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    const uint64 latched = latchFactorHead(h, 0, /*nonce=*/0, shippedScraperConfig().common, record::Standard);
+    // Not at the latch: a latch that never diverges must not pay for a reading.
+    CHECK(h.factor_model_calls.empty());
+
+    const uint64 first_judged = holdFactorDivergence(h, latched + 100, /*nonce=*/2, texturedLook, record::Standard);
+    const std::size_t one_reading = h.factorCallsOn(latched);
+    REQUIRE(one_reading > 0);
+    REQUIRE(h.factorCallsOn(first_judged) == one_reading);
+
+    // The second candidate switch compares against first_judged, whose reading was taken as the judged frame.
+    const uint64 second_judged =
+        holdFactorDivergence(h, first_judged + 100, /*nonce=*/4, latchedLook, record::Standard);
+    REQUIRE(h.discards.empty());
+    CHECK(h.factorCallsOn(second_judged) == one_reading);
+    CHECK(h.factorCallsOn(first_judged) == one_reading);  // not read a second time as the reference
+    CHECK(h.factorCallsOn(latched) == one_reading);
+    CHECK(h.factor_model_calls.size() == 3 * one_reading);
+}
+
+TEST_CASE("going back and forth between two looks of one record costs one reading per transition") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    const uint64 latched = latchFactorHead(h, 0, /*nonce=*/0, shippedScraperConfig().common, record::Standard);
+    std::vector<uint64> expected{latched};
+    uint64 at = latched + 100;
+    const std::array<FrameAt, 4> transitions{texturedLook, latchedLook, texturedLook, latchedLook};
+    for (std::size_t i = 0; i < transitions.size(); i++) {
+        const uint64 judged = holdFactorDivergence(h, at, static_cast<int>(2 + 2 * i), transitions[i], record::Standard);
+        expected.push_back(judged);
+        at = judged + 100;
+    }
+
+    CHECK(h.discards.empty());
+    // One reference reading and one judged reading per transition; the frames that only opened each dwell are
+    // never read.
+    CHECK(h.framesRead() == expected);
+    // One verdict per transition, every one Same: the count is of judgements, not of frames read.
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>(4, scraper_impl::FactorSwitchVerdict::Same));
+}
+
+// --- which region the switch reading scans, per layout ----------------------------------------------------------
+//
+// The reader scans a live frame from the rect it is handed, and only the scraper knows where this session's
+// layout puts the scroll area. Scanning from anywhere else -- the recognizer's own config.area, which names the
+// stitched image's Standard position, or common's rect on a friend's full record -- reads rows that are not the
+// self factors, or none, and nothing downstream of the reader can tell. That is the failure stage 1 fixed for the
+// probe; these pin it for the switch reading.
+//
+// Under readerScanConfig the banner search stops at its first sample, so a reading's first cell starts exactly
+// vertical_banner_bottom_delta below the top of the rect the reader was handed. What is asserted is that window,
+// measured from the top of THIS LAYOUT's scroll area on the frame -- one capture pixel of rounding on each side.
+void checkSwitchReadingArea(const scraper_config::SceneScraperConfig &layout, record::RecordType record_type) {
+    ScraperHarness h;
+    h.factor_model_answer = [](const Frame &cell) { return cell.timestamp() > kPastStationary ? 102 : 101; };
+    h.scraper.buildSession(record_type);
+
+    const uint64 latched = latchFactorHead(h, 0, /*nonce=*/0, layout, record_type);
+    const FrameAt textured_in_layout = [&layout](uint64 timestamp, int nonce) {
+        return scrollingBandFrameIn(layout, timestamp, /*content_shift=*/0, /*exposed_rows=*/0, nonce);
+    };
+    const uint64 judged_at = holdFactorDivergence(h, latched + 100, /*nonce=*/2, textured_in_layout, record_type);
+    REQUIRE(h.framesRead() == std::vector<uint64>{latched, judged_at});
+
+    const Frame probe = scrollBarFrameIn(layout, 0, 0, 0);
+    const int unit = probe.anchor().intersection().width();
+    const int area_top = probe.anchor().mapToFrame(layout.scroll_area_rect).top();
+    const int first_row_offset =
+        static_cast<int>(std::lround(readerScanConfig().vertical_banner_bottom_delta * static_cast<double>(unit)));
+    for (const uint64 frame_at : {latched, judged_at}) {
+        int first_cell_top = std::numeric_limits<int>::max();
+        for (const auto &call : h.factor_model_calls) {
+            if (call.timestamp == frame_at) {
+                first_cell_top = std::min(first_cell_top, call.cell_origin.y);
+            }
+        }
+        CAPTURE(frame_at);
+        CAPTURE(area_top);
+        CHECK(first_cell_top >= area_top + first_row_offset - 1);
+        CHECK(first_cell_top <= area_top + first_row_offset + 1);
+    }
+}
+
+TEST_CASE("the switch reading scans the scroll area of a Standard session's layout") {
+    checkSwitchReadingArea(shippedScraperConfig().common, record::Standard);
+}
+
+TEST_CASE("the switch reading scans the scroll area of a friend's full record, not Standard's") {
+    const auto config = shippedScraperConfig();
+    // The control that makes this case able to fail: at this frame size the two layouts' scroll areas are far
+    // enough apart that no one window contains both. Without it, a friend session scanning common's rect could
+    // land inside the friend window by coincidence.
+    const Frame probe = scrollBarFrameIn(config.common, 0, 0, 0);
+    REQUIRE(
+        probe.anchor().mapToFrame(config.friend_common.scroll_area_rect).top()
+            - probe.anchor().mapToFrame(config.common.scroll_area_rect).top()
+        > 2);
+    checkSwitchReadingArea(config.friend_common, record::FriendStandard);
+}
+
+TEST_CASE("the switch reading stops at the scroll area, so frames that differ only below it are one record") {
+    // THE BOUND RULE 3 SHARES WITH THE PROBE. Under readerScanConfig the row search finds a row at every sample, so
+    // a reading that were not bounded by the scroll area would run on towards the frame's bottom edge. The factor
+    // model here answers the same on both frames for every cell inside the scroll area, and differently on the
+    // judged frame for any cell reaching below it -- two frames whose only difference is where a live frame shows
+    // the bottom UI. Read by the rule, they are Same. A reading bounded by anything but this session's scroll area
+    // hands the model those cells, and the verdict becomes Different: a reset of the session being captured.
+    ScraperHarness h;
+    const Frame probe = scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0);
+    const int area_bottom = probe.anchor().mapToFrame(shippedScraperConfig().common.scroll_area_rect).bottom();
+    h.factor_model_answer = [area_bottom](const Frame &cell) {
+        cv::Size whole;
+        cv::Point origin;
+        cell.data().locateROI(whole, origin);
+        const bool reaches_below = origin.y + cell.height() > area_bottom;
+        return cell.timestamp() > kPastStationary && reaches_below ? 102 : 101;
+    };
+    h.scraper.buildSession(record::Standard);
+
+    const uint64 judged_at = driveFactorDivergence(h, 0, /*nonce=*/0);
+
+    // The pixel diff did fire and both frames were read: the verdict is the reader's.
+    REQUIRE(h.framesRead() == std::vector<uint64>{kPastStationary, judged_at});
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Same});
+    CHECK(h.discards.empty());
+}
+
+TEST_CASE("a candidate switch the reader cannot read discards the session") {
+    // THE FAILURE THE READING MUST NOT INTRODUCE. If an exception left update(), the runner's per-event
+    // containment would stop it -- after it had skipped the reset -- and factor_change_pending_since would still be
+    // set, so every following frame would read, throw and skip the reset again: the session would keep scraping a
+    // different character. Driven directly, as here, an escaping exception reaches the case instead, which is
+    // what CHECK_NOTHROW pins.
+    //
+    // The fault is the ONLY thing that makes these frames reset: the harness's reader otherwise answers the same
+    // ids on both frames, which is a Same verdict and keeps the session (the case above). So a discard here is the
+    // Unreadable arm deciding, not a Different verdict the fault happened to accompany.
+    struct NotAStdException {};
+    ScraperHarness h;
+    SUBCASE("a failure that is not a std::exception, as WinRT and ONNX failures are not") {
+        h.factor_model_fault = [] { throw NotAStdException{}; };
+    }
+    SUBCASE("a stop cancelling the inference") {
+        h.factor_model_fault = [] { throw error_util::OperationAborted("test stop"); };
+    }
+    h.scraper.buildSession(record::Standard);
+
+    uint64 reset_at = 0;
+    CHECK_NOTHROW(reset_at = driveFactorDivergence(h, 0, /*nonce=*/0));
+    // The fault was actually reached: a case whose reader was never called would pass the line above for nothing.
+    REQUIRE_FALSE(h.factor_model_calls.empty());
+    CHECK(h.discards.size() == 1);
+
+    // Nothing is left armed by the failure: the session the reset built latches afresh and discards again.
+    CHECK_NOTHROW(driveFactorDivergence(h, reset_at + 100, /*nonce=*/4));
+    CHECK(h.discards.size() == 2);
+    // Stated as Unreadable both times, each before its discard: a reader that always fails resets exactly as often
+    // as a working one that always reads Different, and this stream is where the two differ.
+    CHECK(
+        h.verdictsStated()
+        == std::vector<scraper_impl::FactorSwitchVerdict>{
+            scraper_impl::FactorSwitchVerdict::Unreadable, scraper_impl::FactorSwitchVerdict::Unreadable});
+    REQUIRE(h.verdicts.size() == 2);
+    CHECK(h.verdicts[0].second == 0);
+    CHECK(h.verdicts[1].second == 1);
 }
 
 }  // namespace

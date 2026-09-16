@@ -154,6 +154,12 @@ struct SceneScraperConfig {
     // estimate). Sized well above the worst measured true-offset guess error yet far below the periodicity
     // alias distance, so it rejects far aliases without ever rejecting a genuine offset.
     double guess_window_margin;
+    // How many of the trainee's own factors are read off a single factor-tab frame at most -- the two frames the
+    // character-switch rule compares (recognizer_impl::SelfFactorWindow). A property of THIS LAYOUT, not of the
+    // record type: it is sized so that its rows fit inside the layout's scroll area on that frame, and the layout
+    // choice has one owner (CharaDetailSceneScraper::buildSession). The derivation lives beside the values in
+    // native/tool/builder/chara_detail_scene_scraper_builder.h. A count of factors; not width-normalized.
+    int self_factor_prefix_length;
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
@@ -175,7 +181,8 @@ struct SceneScraperConfig {
         scroll_bar_margin_color,
         scroll_bar_track_color,
         scroll_bar_thumb_probe,
-        guess_window_margin);
+        guess_window_margin,
+        self_factor_prefix_length);
 };
 
 struct ScanParameter {

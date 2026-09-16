@@ -211,6 +211,10 @@ struct Factor {
     int id;
     int star;
 
+    // A factor is its id and its star rank, and nothing else -- the same identity Dart's Factor compares by. C++17,
+    // so there is no generated `!=`; write `!(a == b)`.
+    [[nodiscard]] bool operator==(const Factor &other) const { return id == other.id && star == other.star; }
+
     EXTENDED_JSON_TYPE_NDC(Factor, id, star);
 };
 

@@ -143,6 +143,7 @@ CaptureSessionStart NativeApi::startCaptureSession(const CaptureSessionKind kind
         // Same unit, same two hooks, same reason: the geometry belongs to the run being measured, and a range
         // carried over from the previous session would describe frames this one never forwarded.
         forwarded_frame_geometry.beginRun();
+        factor_switch_verdicts.beginRun();
         // A loop left running by a record regeneration is ADOPTED when it was built for the same pipeline
         // identity and REBUILT when it was not (CapturePipelineIdentity says which config keys that covers and
         // why): riding a mismatched loop would silently give this session the other one's frame handling, record
@@ -182,6 +183,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // one a session start reaching this far gets a second time, harmlessly.
     record_production.beginRun();
     forwarded_frame_geometry.beginRun();
+    factor_switch_verdicts.beginRun();
 
     const auto config_json = json_util::Json::parse(native_config);
     // What this loop is being built for, resolved by the SAME function that produced the identity the caller
@@ -406,6 +408,13 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto restarted_connection = event_util::makeDirectConnection<chara_detail::DiscardedSession>();
     restarted_connection->listen([this](const auto &discarded) { notifyCharaDetailRestarted(discarded); });
 
+    // Every verdict the factor character-switch rule reaches, counted for the run (FactorSwitchVerdictTally) and
+    // relayed to no front end. Direct: the note is taken inside the scraper's processing of the judged frame.
+    const auto factor_switch_judged_connection =
+        event_util::makeDirectConnection<chara_detail::scraper_impl::FactorSwitchVerdict>();
+    factor_switch_judged_connection->listen(
+        [this](const chara_detail::scraper_impl::FactorSwitchVerdict verdict) { factor_switch_verdicts.note(verdict); });
+
     const auto stitch_ready_connection = stitcher_runner->makeConnection<chara_detail::RecordInfo>("stitch_ready");
     on_stitch_ready = stitch_ready_connection;
 
@@ -456,6 +465,19 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     factor_probe_completed_connection->listen(
         [this](const auto &factors, int record_type) { notifyFactorProbe(factors, record_type); });
 
+    const auto recognizer_config =
+        config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>();
+    const auto modules_dir = json_util::decodePath(config_json["directory"]["modules_dir"]);
+
+    // THE FACTOR TAB'S ROW READER, built ONCE here and handed to BOTH stages that read factor rows: the recognizer
+    // (the stitched record and the early duplicate probe) and the scene scraper (the frames its character-switch
+    // rule judges, read synchronously inside that frame's processing). One pair of factor models per pipeline,
+    // serialized in arrival order inside the reader, so neither stage waits on the other's queue -- only on the
+    // inference calls queued ahead of its own. Both stages hold the same shared_ptr, so the reader lives exactly
+    // as long as the longer-lived of the two, and a stage built without it does not compile.
+    const auto factor_rows =
+        std::make_shared<const chara_detail::recognizer_impl::FactorRowReader>(modules_dir, recognizer_config.factor_tab);
+
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
     // Route directory create/remove through the (possibly Dart-provided) callbacks so the pipeline
@@ -476,6 +498,8 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,
+        factor_rows,
+        factor_switch_judged_connection,
         restarted_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir,
@@ -529,7 +553,8 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
         stitcher_dir,
-        json_util::decodePath(config_json["directory"]["modules_dir"]),
+        modules_dir,
+        factor_rows,
         recognize_ready_connection,
         recognize_completed_connection,
         update_ready_connection,
@@ -537,7 +562,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         factor_probe_ready_connection,
         factor_probe_completed_connection,
         recognize_failed_connection,
-        config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
+        recognizer_config);
 
     event_runners->start();
 

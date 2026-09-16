@@ -2,6 +2,9 @@
 
 #include <cstdint>
 
+#include "util/error_util.h"
+#include "util/json_util.h"
+
 namespace uma::chara_detail {
 
 namespace scraper_impl {
@@ -1244,6 +1247,17 @@ const char *topOfContentSensorTag(TopOfContentSensor sensor) {
     return "";  // out-of-range fallback; also silences C4715 (not all paths return a value)
 }
 
+FactorSwitchVerdict factorSwitchVerdict(const std::optional<FactorSwitchReading> &reading) {
+    if (!reading.has_value()) {
+        return FactorSwitchVerdict::Unreadable;
+    }
+    if (reading->reference.empty() || reading->judged.empty()) {
+        return FactorSwitchVerdict::Empty;
+    }
+    // std::vector's == compares the lengths first, then every element with Factor's own ==.
+    return reading->reference == reading->judged ? FactorSwitchVerdict::Same : FactorSwitchVerdict::Different;
+}
+
 void NonScrollableScrapingInterpreter::update(const Frame &frame) {
     assert_(state == Updatable);
     // Crop the content region from the full frame; the catcher and capture see the same pixels as before.
@@ -1625,6 +1639,8 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const event_util::Sender<int> &on_page_ready,
     const event_util::Sender<RecordInfo> &on_completed,
     const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
+    const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_reader,
+    const event_util::Sender<scraper_impl::FactorSwitchVerdict> &on_factor_switch_judged,
     const event_util::Sender<DiscardedSession> &on_restarted,
     const scraper_config::CharaDetailSceneScraperConfig &config,
     const std::filesystem::path &scraping_dir,
@@ -1641,10 +1657,15 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     , on_page_ready(on_page_ready)
     , on_completed(on_completed)
     , on_factor_probe(on_factor_probe)
+    , factor_reader(factor_reader)
+    , on_factor_switch_judged(on_factor_switch_judged)
     , on_restarted(on_restarted)
     , config(config)
     , scraping_root_dir(scraping_dir)
     , directory_hooks(directory_hooks) {
+    if (this->factor_reader == nullptr) {
+        throw std::invalid_argument("CharaDetailSceneScraper requires the pipeline's FactorRowReader");
+    }
     this->on_opened->listen([this](const auto &info) { build(info); });
     this->on_updated->listen([this](const auto &frame, const auto &state) { update(frame, state); });
     this->on_closed->listen([this]() {
@@ -1728,9 +1749,11 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         // StationaryFrameCatcher::update retains its previous frame WITHOUT cloning. The deep copy is kept here
         // as a deliberate, unmeasured choice, not as a correctness requirement; it runs once per latch rather
         // than per frame, so dropping it is an open candidate with a small and unquantified gain.
-        factor_probe_reference = frame.clone();
-        // Capture the flush header position alongside the reference; both are taken on this at-top frame, so
-        // maybeResetOnFactorChange can later reject a tiny scroll by comparing the header against it.
+        //
+        // Unread: the reading is taken only if a divergence ever asks for it (FactorSwitchReference::reading).
+        factor_switch_reference = scraper_impl::FactorSwitchReference{frame.clone(), std::nullopt};
+        // Capture the flush header position alongside Rule 3's reference; both are taken on this at-top frame,
+        // so topOfContent can later reject a tiny scroll by comparing the header against it.
         reference_header_y = factorHeaderTopY(frame);
         // If the header green is not found here, the flush gate is unavailable and maybeResetOnFactorChange falls
         // back to the top-margin gate. A capture source whose green differs from the configured range (e.g. live
@@ -1838,11 +1861,12 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     }
 
     // Rule 3: on the factor tab, keep watching for a character switch before the tab is captured. The probe
-    // fires once per latch, so a switch made without scrolling would otherwise go unnoticed; a content change
-    // at the top means a new character and triggers a full reset (whose fresh session re-probes the new
-    // character). It is a no-op until the factor tab has latched its fragment #0 -- until then
-    // factor_probe_reference is empty and maybeResetOnFactorChange returns at once -- and a tab REFUSED at
-    // that latch never arms it at all, which is the one path this rule still cannot cover.
+    // fires once per latch, so a switch made without scrolling would otherwise go unnoticed. A content change
+    // at the top is a candidate switch: the rule reads both frames, keeps the session when they show the same
+    // record, and otherwise triggers a full reset (whose fresh session re-probes the new character). It is a
+    // no-op until the factor tab has latched its fragment #0 -- until then factor_switch_reference is unset and
+    // maybeResetOnFactorChange returns at once -- and a tab REFUSED at that latch never arms it at all, which is
+    // the one path this rule still cannot cover.
     if (tab_page == TabPage::FactorPage && !tab_completed[TabPage::FactorPage]) {
         maybeResetOnFactorChange(frame, scene_state.record_type, top_of_content);
     }
@@ -1985,7 +2009,7 @@ void CharaDetailSceneScraper::notifyTabRefusalIfChanged() {
 }
 
 bool CharaDetailSceneScraper::factorSwitchArmed() const {
-    return !factor_probe_reference.empty();
+    return factor_switch_reference.has_value();
 }
 
 void CharaDetailSceneScraper::notifyFactorSwitchArmedIfChanged() {
@@ -2033,7 +2057,7 @@ void CharaDetailSceneScraper::rebuildTab(TabPage tab_page) {
             skill_scraper = makeTabScraper(TabPage::SkillPage, scraping_box->resetSkillBox());
             break;
         case TabPage::FactorPage:
-            factor_probe_reference = {};
+            factor_switch_reference = std::nullopt;
             reference_header_y = std::nullopt;
             factor_change_pending_since = std::nullopt;
             factor_scraper = makeTabScraper(TabPage::FactorPage, scraping_box->resetFactorBox());
@@ -2090,7 +2114,7 @@ bool CharaDetailSceneScraper::isFactorChanged(double ratio) {
 
 void CharaDetailSceneScraper::maybeResetOnFactorChange(
     const Frame &frame, record::RecordType record_type, const scraper_impl::TopOfContentReading &reading) {
-    if (factor_probe_reference.empty() || active_common == nullptr) {
+    if (!factor_switch_reference.has_value() || active_common == nullptr) {
         factor_change_pending_since = std::nullopt;
         return;
     }
@@ -2114,11 +2138,11 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
         flush = kMissingReadingIsScrolled.resolve(reading.verdict) == scraper_impl::TopOfContent::AtTop;
         used_header_gate = false;
     }
-    if (!flush || factor_probe_reference.size() != frame.size()) {
+    if (!flush || factor_switch_reference->frame.size() != frame.size()) {
         factor_change_pending_since = std::nullopt;
         return;
     }
-    // Fraction of the factor-list scroll area whose pixels changed vs the probed reference. Crop both
+    // Fraction of the factor-list scroll area whose pixels changed vs the reference. Crop both
     // frames to the scroll area first: the stationary rect is defined relative to that crop, so applying
     // it to the full frame would instead diff nearly the whole screen -- including the header (portrait,
     // name, tabs), which is identical when the switch is between two records of the same character. That
@@ -2128,7 +2152,7 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
     // switch changes a broad, contiguous area of the list, so its ratio is high; video codec noise is
     // sparse and stays low even when a few artifacts spike in magnitude. The per-pixel X gate drops
     // sub-threshold render/encode noise, so the same character reads ~0. Resolution-independent.
-    const auto reference_area = factor_probe_reference.copy(active_common->scroll_area_rect);
+    const auto reference_area = factor_switch_reference->frame.copy(active_common->scroll_area_rect);
     const auto current_area = frame.copy(active_common->scroll_area_rect);
     const auto &diff_rect = active_common->scroll_area_stationary_rect;
     const double ratio = factorChangeRatio(current_area, reference_area, diff_rect);
@@ -2144,6 +2168,50 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
     if (chrono_util::monotonicElapsed(timestamp, factor_change_pending_since.value()) < kMonitorDwellMs) {
         return;
     }
+    // READ WHAT BOTH FRAMES SHOW before acting on the pixels, and BEFORE any reset -- which replaces the layout the
+    // read needs and drops the reference it reads. Synchronous: the reading is part of judging this frame, so the
+    // decision is complete before update() returns, no other stage is involved, and what an offline import
+    // decides is a function of the clip.
+    //
+    // THE PIXEL DIFF IS NO LONGER THE VERDICT, only the reason to ask. Rule 3 used to reset on the diff alone, so
+    // anything that moved the pixels without changing the record -- a displaced render, an overlay -- threw away a
+    // capture the user had paid for. A reading that shows the SAME record reduces that to one unnecessary read.
+    const auto switch_reading = readFactorSwitch(frame);
+    const auto verdict = scraper_impl::factorSwitchVerdict(switch_reading);
+    // Stated for every verdict, before it is acted on -- so a verdict that resets is stated before the discard it
+    // causes, and one that keeps the session is stated although nothing else on any channel changes.
+    on_factor_switch_judged->send(verdict);
+    if (switch_reading.has_value()) {
+        log_info(
+            "factor switch verdict={} reference={} judged={}",
+            scraper_impl::factorSwitchVerdictTag(verdict),
+            json_util::Json(switch_reading->reference).dump(),
+            json_util::Json(switch_reading->judged).dump());
+    } else {
+        log_info("factor switch verdict={}", scraper_impl::factorSwitchVerdictTag(verdict));
+    }
+    if (verdict == scraper_impl::FactorSwitchVerdict::Same) {
+        // KEEP THE SESSION AND COMPARE AGAINST THIS FRAME FROM NOW ON. Both halves are required, and neither is a
+        // tolerance: the rectangle, the threshold and the dwell are exactly what they were.
+        //   * Replacing the reference is what makes the check cost ONE read per displacement. Left on the old
+        //     frame, the diff would stay above the threshold, the next frame would reopen the dwell and the one
+        //     after it would read again -- a read every dwell for as long as the displacement lasts. What it
+        //     costs: a later return to the old pixels is itself a divergence and is read once more, and the
+        //     switches this rule cannot see move from "looks like the latched frame" to "looks like this one".
+        //   * Clearing the pending timestamp is what stops THIS divergence from being judged again on the next
+        //     frame, before the replaced reference has been compared with anything.
+        // The judged reading becomes the reference's reading: this frame has just been read, and reading it again
+        // on the next divergence would pay for an answer already in hand. Held like the latch holds its frame.
+        factor_switch_reference = scraper_impl::FactorSwitchReference{frame.clone(), switch_reading->judged};
+        factor_change_pending_since = std::nullopt;
+        log_info(
+            "factor switch kept the session (ratio={:.4f}, gate={}): this frame is now the reference",
+            ratio,
+            used_header_gate ? "header" : "topmargin");
+        return;
+    }
+    // Different, Empty and Unreadable all reset: fail-CLOSED. A wrong reset costs a re-capture the user can see
+    // happening; a wrong keep scrapes two characters into one record and saves it without a word.
     log_info(
         "factor reset (ratio={:.4f}, gate={}, header_y={}, ref_header_y={})",
         ratio,
@@ -2151,6 +2219,41 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
         header_y.value_or(-1),
         reference_header_y.value_or(-1));
     resetSession(record_type);
+}
+
+std::optional<scraper_impl::FactorSwitchReading> CharaDetailSceneScraper::readFactorSwitch(const Frame &frame) {
+    assert_(active_common != nullptr && factor_switch_reference.has_value());
+    // CAUGHT HERE, IN THE RULE, AND NOT LEFT TO THE RUNNER. The runner's per-event containment would stop the
+    // exception, but only after it had skipped the rest of update() -- the reset below the reading -- and left
+    // factor_change_pending_since set, so the next frame would read, throw and skip the reset again for as long
+    // as the divergence lasts: the session would keep scraping a different character. One arm on purpose, as in
+    // CharaDetailRecognizer::probe: WinRT/ONNX exceptions do not derive from std::exception.
+    try {
+        // The reference first, and only if this reference has never been read. Stored as soon as it succeeds: if
+        // the judged read then throws, the verdict is Unreadable and the reset drops the reference anyway, so
+        // nothing depends on whether a half-finished reading was kept.
+        // Both lists under this layout's one window (SelfFactorWindow::fromLayout), so they are read with the same
+        // bound and the same limit.
+        const auto window = recognizer_impl::SelfFactorWindow::fromLayout(*active_common);
+        auto &reference = factor_switch_reference.value();
+        if (!reference.reading.has_value()) {
+            reference.reading = factor_reader->visibleSelfPrefix(reference.frame, window);
+        }
+        return scraper_impl::FactorSwitchReading{
+            reference.reading.value(),
+            factor_reader->visibleSelfPrefix(frame, window),
+        };
+    } catch (...) {
+        const auto failure = error_util::describeCurrentFailure();
+        if (failure.aborted) {
+            // A stop cancelling an in-flight inference is the design working (native/wasm/wasm_inference_bridge.h).
+            log_info("factor switch reading aborted for record_id={}: {}", current_record_info.record_id, failure.message);
+        } else {
+            log_error(
+                "factor switch reading failed for record_id={}: {}", current_record_info.record_id, failure.message);
+        }
+        return std::nullopt;
+    }
 }
 
 void CharaDetailSceneScraper::resetMonitors() {
@@ -2161,7 +2264,7 @@ void CharaDetailSceneScraper::resetMonitors() {
     type_pending_since = std::nullopt;
     type_pending_value = std::nullopt;
     factor_change_pending_since = std::nullopt;
-    factor_probe_reference = {};
+    factor_switch_reference = std::nullopt;
     reference_header_y = std::nullopt;
     last_scroll_position_emitted = std::nullopt;
     // Back to the true initial level (no tab refused), matching the scrapers a fresh session builds. The UI is

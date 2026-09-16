@@ -5,6 +5,19 @@
 // compares it with the reference while the tab is being captured, and where the completed-tab rule sees a
 // captured tab back at its head afterwards, so the position before the switch is not a condition (the
 // premise is stated at switchSafety's doc comment).
+//
+// "Detect" is not "tell every pair of records apart": Rule 3's diff only nominates a switch, and native
+// keeps the session when both frames' visible self-factor prefixes read the same. A switch between two
+// records with identical visible prefixes is therefore not reset, and nothing this state sees can tell.
+// switchSafety's doc comment states that limit; these tests pin where Rule 3 is armed, not that case.
+//
+// The scroll position (at top vs scrolled) is a single fact reported by native via the scroll-position
+// event (scrollPosition), kept separate from capture progress (the ring value set by progress()). Both
+// "capturing" and "safe to switch" derive from that one fact, so they can never disagree.
+//
+// Run: .fvm/flutter_sdk/bin/flutter test test/switch_safety_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/core/platform_controller.dart';
 
 void main() {
   group('CharaDetailCaptureState.switchSafety', () {

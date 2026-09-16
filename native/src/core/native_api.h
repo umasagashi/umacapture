@@ -21,6 +21,7 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic pop
 
+#include "chara_detail/factor_switch_verdict.h"
 #include "chara_detail/record_info.h"
 #include "core/detail_crop_report_throttle.h"
 #include "core/native_api_messages.h"
@@ -447,6 +448,61 @@ private:
     ForwardedFrameGeometry observed;
 };
 
+// How many times the current run's factor character-switch rule reached each verdict, indexed by the verdict
+// (chara_detail/factor_switch_verdict.h pins that each verdict is its own index).
+struct FactorSwitchVerdictCounts {
+    std::array<int64_t, chara_detail::scraper_impl::kFactorSwitchVerdicts.size()> by_verdict{};
+
+    [[nodiscard]] int64_t of(const chara_detail::scraper_impl::FactorSwitchVerdict verdict) const {
+        return by_verdict[static_cast<std::size_t>(verdict)];
+    }
+};
+
+// WHAT THE FACTOR TAB'S CHARACTER-SWITCH RULE CONCLUDED OVER A RUN, as a fact the core states.
+//
+// WHY IT EXISTS AT ALL. The rule resets on Different, Empty and Unreadable alike -- fail-CLOSED -- and keeps the
+// session only on Same. So a build whose reader always comes back empty, or always throws, resets exactly as
+// often as a working build: the records, `discarded` and `discarded_incomplete` are all identical, every golden
+// stays green, and the rule has silently gone back to discarding on the pixel diff alone. The verdicts are the
+// only thing that differs, and nothing outside the core could see them. The CLI reports these counts on its run
+// summary and native/test/integration/run.py compares them with what a case declares.
+//
+// A COUNT PER VERDICT, and Empty never folded into Unreadable: they are different defects ("nothing rendered" vs
+// "the reader failed"), and a single "unread" count would let one hide inside the other.
+//
+// OBSERVED OUTSIDE THE STAGE, like the two counters above: the scraper states each verdict on a direct
+// connection (CharaDetailSceneScraper::on_factor_switch_judged) and NativeApi's listener notes it here. The
+// scraper states facts on its connections and knows nothing of runs; what a run is -- and when one begins --
+// belongs to NativeApi, which is where the other two run-scoped counts already reset. Direct, so the note is
+// taken on the scraper thread inside the processing of the judged frame, and every verdict of a run has been
+// noted once the drain barrier has joined the loop.
+class FactorSwitchVerdictTally {
+public:
+    // A new run starts here. Hooked at the same two sites as RecordProductionCounter::beginRun, for the same
+    // reason: verdicts carried over from the previous run would describe switches this one never judged.
+    void beginRun() {
+        std::lock_guard<std::mutex> lock(mutex);
+        counts = {};
+    }
+
+    // The rule reached `verdict` once.
+    void note(const chara_detail::scraper_impl::FactorSwitchVerdict verdict) {
+        std::lock_guard<std::mutex> lock(mutex);
+        counts.by_verdict[static_cast<std::size_t>(verdict)] += 1;
+    }
+
+    // One observation of all four counts, so no reader sees a Same from after a note next to a Different from
+    // before it.
+    [[nodiscard]] FactorSwitchVerdictCounts snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        return counts;
+    }
+
+private:
+    mutable std::mutex mutex;
+    FactorSwitchVerdictCounts counts;
+};
+
 // What a start request has to do to the event loop before it can proceed.
 enum class CaptureLoopDisposition {
     // Nothing was running, so this request built the pipeline. It says the build was ATTEMPTED, not that it
@@ -702,6 +758,13 @@ public:
     [[nodiscard]] ForwardedFrameGeometry forwardedFrameGeometry() const {
         return forwarded_frame_geometry.snapshot();
     }
+
+    // What the CURRENT run's factor character-switch rule concluded, per verdict (FactorSwitchVerdictTally says
+    // why this is the one observable that tells a working switch reader from a broken one).
+    //
+    // READ IT AFTER THE DRAIN, for the reason recordsProduced() states: a frame still queued for the scraper has
+    // not been judged yet.
+    [[nodiscard]] FactorSwitchVerdictCounts factorSwitchVerdicts() const { return factor_switch_verdicts.snapshot(); }
 
     // Whether the session open right now (if any) is a video import. This is what makes a record's origin a FACT
     // the core states rather than something a receiver infers from timing -- see notifyCharaDetailFinished.
@@ -1131,6 +1194,7 @@ private:
     // after their drain. See RecordProductionCounter.
     RecordProductionCounter record_production;
     ForwardedFrameGeometryObserver forwarded_frame_geometry;
+    FactorSwitchVerdictTally factor_switch_verdicts;
 
     // Producer-visible pane-mode handoff and auto-calibrated detail crop. Both are owned HERE rather than by
     // the pipeline so they survive teardownLocked():

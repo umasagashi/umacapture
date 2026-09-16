@@ -7,14 +7,15 @@
 //   * Predictor construction runs on the module main thread (inside Module.init -> startPipeline), where JS
 //     calls via emscripten::val ARE allowed. Each WasmPredictor resolves its model id + input H/W there by
 //     calling the JS-side umaOrtResolve(key).
-//   * predict() runs on the recognizer pthread, where arbitrary JS calls are NOT allowed. So inference is a
+//   * predict() runs on a pipeline pthread -- the recognizer's runner, or the scene scraper's for the factor rows
+//     its character-switch rule reads -- where arbitrary JS calls are NOT allowed. So inference is a
 //     shared-memory request/response over the (SharedArrayBuffer-backed) Wasm heap: the pthread writes the
 //     resized NHWC uint8 input + model id into a control block, futex-waits, and the JS main-thread pump
 //     (see harness worker.js) runs ORT and writes the scalar outputs back, then Atomics.notify wakes us.
 //
-// This is a PoC bridge: one in-flight request at a time (the recognizer drives all inference from a single
-// runner thread), scalar-only outputs (every head here is a 1-element int64 label or float confidence), and a
-// fixed-size request buffer. Product code would batch and avoid the per-call round trip.
+// This is a PoC bridge: one in-flight request at a time, whichever pthread issues it (the channel admits callers
+// in arrival order, see InferenceChannel), scalar-only outputs (every head here is a 1-element int64 label or
+// float confidence), and a fixed-size request buffer. Product code would batch and avoid the per-call round trip.
 //
 // The one thing that is NOT PoC-grade, because getting it wrong hangs the whole worker: the wait. This thread
 // waits on a pump that runs on the JS thread, so anything that occupies the JS thread stalls it -- and stop()
@@ -32,7 +33,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -50,6 +50,7 @@
 #include "util/error_util.h"
 #include "util/json_util.h"
 #include "util/logger_util.h"
+#include "util/thread_util.h"
 
 #include "wasm_inference_bridge.h"
 
@@ -144,14 +145,19 @@ constexpr double kInferenceDeadlineMs = 30000.0;
 // pays this once (rather than the full inference budget) before failing.
 constexpr double kReclaimDeadlineMs = 2000.0;
 
-// A single global inference channel. The recognizer runs all inference from one runner thread, so one
-// in-flight slot suffices; the mutex only guards against the (unused here) possibility of two recognizer
-// threads and makes the single-flight contract explicit.
+// A single global inference channel with one in-flight slot, used by EVERY pipeline pthread that runs a
+// prediction. Two do today: the recognizer's runner, and the scene scraper's runner, which reads the factor rows
+// of the frame its character-switch rule judges (chara_detail::recognizer_impl::FactorRowReader).
+//
+// `admission` is what makes the slot single-flight: it covers reclaim -> publish -> wait -> kIdle for one request.
+// A FIFO rather than a std::mutex, because the recognizer issues predictions back to back for a whole record and
+// a std::mutex promises no order -- a waiting scraper could lose every re-acquisition race for the length of that
+// record. Admitted in arrival order, a caller waits for the requests queued ahead of it and no longer.
 struct InferenceChannel {
     volatile int32_t *control = nullptr;
     std::uint8_t *request = nullptr;
     double *response = nullptr;
-    std::mutex mutex;
+    uma::thread_util::FifoAdmission admission;
 };
 
 InferenceChannel &channel() {
@@ -171,8 +177,8 @@ std::atomic<bool> g_inference_aborting{false};
 std::atomic<bool> g_abandoned_response_pending{false};
 
 // Allocates the shared buffers on the Wasm heap and hands their pointers to JS. Called once from the module
-// main thread (harness worker.js) before Module.init(). The buffers live on the pthread-shared heap, so the
-// recognizer pthread and the JS main thread address the same bytes.
+// main thread (harness worker.js) before Module.init(). The buffers live on the pthread-shared heap, so every
+// pipeline pthread and the JS main thread address the same bytes.
 emscripten::val setupInferenceBridge() {
     auto &ch = channel();
     if (ch.control == nullptr) {
@@ -224,8 +230,8 @@ ModelHandle resolveModel(const std::string &key) {
 // Waits for the JS pump to move the protocol word off kRequest, and returns the terminal state it published.
 // Throws instead of returning when the abort flag is raised or `deadline_ms` elapses; in both cases the
 // request stays published and is marked abandoned, because the pump may still be holding it (see
-// g_abandoned_response_pending). Runs on the recognizer pthread only -- futex_wait is not allowed on the JS
-// thread, and blocking that thread is precisely what this whole mechanism exists to survive.
+// g_abandoned_response_pending). Runs on a pipeline pthread only, never on the JS thread -- futex_wait is not
+// allowed there, and blocking that thread is precisely what this whole mechanism exists to survive.
 int32_t awaitBridgeResponse(InferenceChannel &ch, double deadline_ms, const char *what) {
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<long long>(deadline_ms));
@@ -252,7 +258,8 @@ int32_t awaitBridgeResponse(InferenceChannel &ch, double deadline_ms, const char
 }
 
 // Collects the completion of a request that was abandoned earlier, and returns the channel to kIdle. Called
-// with ch.mutex held, before a new request is published, so a stray kDone can never be mistaken for the answer
+// with the channel's admission pass held, before a new request is published, so a stray kDone can never be
+// mistaken for the answer
 // to the request that follows it. Throws (leaving the channel still marked abandoned) when the stray
 // completion does not arrive within kReclaimDeadlineMs.
 void reclaimAbandonedResponse(InferenceChannel &ch) {
@@ -265,7 +272,7 @@ void reclaimAbandonedResponse(InferenceChannel &ch) {
     log_debug("inference bridge: reclaimed an abandoned response, channel is idle again");
 }
 
-// Runs one inference on the recognizer pthread by handing the request to the JS pump and futex-waiting.
+// Runs one inference on the calling pipeline pthread by handing the request to the JS pump and futex-waiting.
 void runInferenceOnBridge(
     int model_id, const std::uint8_t *input, int height, int width, int channels, int output_count, double *output) {
     auto &ch = channel();
@@ -288,7 +295,13 @@ void runInferenceOnBridge(
         throw std::runtime_error("inference output count exceeds the shared response buffer");
     }
 
-    std::lock_guard<std::mutex> lock(ch.mutex);
+    const auto pass = ch.admission.admit();
+    // Re-checked with the pass held: the abort may have been raised while this caller was queued behind another
+    // request, and publishing now would only cost a wait slice before throwing (FifoAdmission leaves abort to
+    // the caller by contract).
+    if (g_inference_aborting.load(std::memory_order_acquire)) {
+        throw uma::error_util::OperationAborted("inference bridge is stopping");
+    }
     reclaimAbandonedResponse(ch);
     std::memcpy(ch.request, input, byte_count);
     ch.control[kModelId] = model_id;
@@ -434,7 +447,7 @@ makePredictor(const std::string &key, const std::string &name) {
 namespace uma::wasm {
 
 // See wasm_inference_bridge.h for why this exists. Runs on the JS thread, from stop(), just before it joins
-// the recognizer pthread.
+// the pipeline pthreads.
 void beginInferenceAbort() {
     g_inference_aborting.store(true, std::memory_order_release);
     auto &ch = channel();
@@ -483,11 +496,21 @@ SkillTabRecognizer::SkillTabRecognizer(
     (void) module_root_dir;
 }
 
-FactorTabRecognizer::FactorTabRecognizer(
+FactorRowReader::FactorRowReader(
     const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
+    : FactorRowReader(
+          config,
+          makePredictor<IndexDecoder>(config.module_path, "factor"),
+          makePredictor<IndexDecoder>(config.factor_rank.module_path, "factor_rank")) {
+    (void) module_root_dir;
+}
+
+FactorTabRecognizer::FactorTabRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::FactorTabConfig &config,
+    std::shared_ptr<const FactorRowReader> rows)
     : config(config)
-    , factor_model(makePredictor<IndexDecoder>(config.module_path, "factor"))
-    , factor_rank_model(makePredictor<IndexDecoder>(config.factor_rank.module_path, "factor_rank"))
+    , rows(requireFactorRows(std::move(rows)))
     , character_model(makePredictor<CharaDecoder>(config.trainee_icon.icon.module_path, "character"))
     , character_rank_model(makePredictor<IndexDecoder>(config.trainee_icon.rank.module_path, "character_rank")) {
     (void) module_root_dir;
@@ -564,6 +587,7 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     const std::string &trainer_id,
     const std::filesystem::path &record_root_dir,
     const std::filesystem::path &module_root_dir,
+    const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_rows,
     const event_util::Listener<RecordInfo> &on_recognize_ready,
     const event_util::Sender<RecordInfo> &on_recognize_completed,
     const event_util::Listener<RecordInfo> &on_update_requested,
@@ -576,9 +600,10 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     , record_root_dir(record_root_dir)
     , module_root_dir(module_root_dir)
     , config(config)
+    , factor_rows(factor_rows)
     , status_header_recognizer(module_root_dir, config.status_header)
     , skill_tab_recognizer(module_root_dir, config.skill_tab)
-    , factor_tab_recognizer(module_root_dir, config.factor_tab)
+    , factor_tab_recognizer(module_root_dir, config.factor_tab, factor_rows)
     , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
     , on_recognize_ready(on_recognize_ready)
     , on_recognize_completed(on_recognize_completed)

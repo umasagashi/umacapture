@@ -179,7 +179,8 @@
       "minimum_contrast": 20.0,
       "minimum_coverage": 3.0
     },
-    "guess_window_margin": 0.1
+    "guess_window_margin": 0.1,
+    "self_factor_prefix_length": 14
   },
   "friend_common": {
     "base_image_stationary_rect": {
@@ -361,7 +362,8 @@
       "minimum_contrast": 20.0,
       "minimum_coverage": 3.0
     },
-    "guess_window_margin": 0.1
+    "guess_window_margin": 0.1,
+    "self_factor_prefix_length": 10
   },
   "skill_scans": [
     {

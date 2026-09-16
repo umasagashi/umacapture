@@ -121,9 +121,11 @@ public:
     }
 
     // `const` reflects logical constness (the model configuration is unchanged), but this runs ONNX
-    // inference which mutates hidden session state and is NOT thread-safe. Call it from a single thread
-    // only (the recognizer drives all inference from its own event-runner thread). Decodes the raw
-    // Prediction into a Predicted<Result> here so callers (the recognizer) never touch Ort::Value.
+    // inference which mutates hidden session state and is NOT thread-safe: calls on ONE instance must never
+    // overlap. An instance used by a single stage is called from that stage's runner thread only. An instance
+    // two stages share -- the factor tab's two row models, used by the recognizer and the scene scraper -- is
+    // wrapped in chara_detail::recognizer_impl::AdmittedPredictor, which admits one call at a time in arrival
+    // order. Decodes the raw Prediction into a Predicted<Result> here so callers never touch Ort::Value.
     [[nodiscard]] Predicted<Result> predict(const Frame &frame) const override {
         const auto raw = runInference(frame);
         return {raw.result(), raw.confidence(), raw.toJson()};

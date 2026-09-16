@@ -187,6 +187,7 @@ set(
         test/core/test_native_api_messages.cpp
         test/core/test_record_production_counter.cpp
         test/core/test_forwarded_frame_geometry.cpp
+        test/core/test_factor_switch_verdict_tally.cpp
         test/core/test_native_api_preview.cpp
         test/core/test_pipeline_config.cpp
         test/core/test_pipeline_drain.cpp
@@ -535,6 +536,15 @@ if(UV_EXECUTABLE)
     add_test(NAME integration_coverage_selftest
              COMMAND ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/test_run_coverage.py")
     set_tests_properties(integration_coverage_selftest PROPERTIES LABELS "integration;golden")
+
+    # The run judge's own test: check_run's per-case claims that are decided from the summary line alone, driven
+    # against synthetic summaries in-process. Like the coverage selftest it spawns no cli and needs no clip, so
+    # it runs in CI. It exists because the golden cases can only exercise a claim against the numbers the real
+    # corpus happens to produce: a claim that stopped comparing -- a declared factor-switch verdict count the
+    # judge no longer checks -- stays green on every golden case whose declaration is right.
+    add_test(NAME integration_check_selftest
+             COMMAND ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/test_run_check.py")
+    set_tests_properties(integration_check_selftest PROPERTIES LABELS "integration;golden")
 
     # Dual-decode equivalence: the same clip run through `video --color_matrix bt601` and
     # `--color_matrix bt709`, requiring one identical record set. See test/integration/run_dual_decode.py

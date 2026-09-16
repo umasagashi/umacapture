@@ -120,6 +120,12 @@ CLI_EXIT_REPORTED_ERROR = 2
 RUN_SUMMARY_MARKER = "UMACAPTURE_RUN_SUMMARY"
 RUN_SUMMARY_SCHEMA = 1
 
+# The factor character-switch rule's verdict words, mirrored from native/src/chara_detail/factor_switch_verdict.h
+# (kFactorSwitchVerdicts / factorSwitchVerdictTag) -- the keys of the summary's `factor_switch_verdicts` object.
+# A mirror for the same reason the exit codes above are one; what turns its staleness into a loud failure is that
+# factor_switch_verdict_failure refuses a summary whose key set is not exactly this one.
+FACTOR_SWITCH_VERDICTS = ("same", "different", "empty", "unreadable")
+
 # The config key whose name this suite guards. Every appearance of it in the CLI's output is the core warning
 # that it could not use the `frame_resize` block as written -- see check_run step (5) for why the numbers
 # being pinned in C++ leaves the key NAMES unguarded, and native/src/core/pipeline_config.h for the warnings.
@@ -352,6 +358,63 @@ def expected_discarded_incomplete(case: dict) -> int:
     )
 
 
+def expected_factor_switch_verdicts(case: dict) -> dict[str, int] | None:
+    """The verdicts the factor character-switch rule must reach over this run, per verdict, or None when unstated.
+
+    WHY A CASE WOULD STATE IT. The rule resets on `different`, `empty` and `unreadable` alike (fail-CLOSED) and
+    keeps the session only on `same`. A build whose switch reader always finds nothing, or always throws, therefore
+    resets exactly as often as a working build: `discarded`, `discarded_incomplete` and every record are unchanged,
+    and every other claim in check_run stays green. The verdict counts are the one number that differs.
+
+    ALL FOUR OR NONE. A declaration names every verdict, zeros included, so a case cannot assert `different` and
+    say nothing -- by omission -- about `unreadable`, which is exactly the count a broken reader moves.
+
+    UNSTATED MEANS NOTHING IS ASSERTED, not "all zero". Whether an undeclared case should be held to a default is
+    not decided here; until it is, only a case that states the key is judged on it.
+    """
+    if "expect_factor_switch_verdicts" not in case:
+        return None
+    value = case["expect_factor_switch_verdicts"]
+    if (
+        isinstance(value, dict)
+        and set(value) == set(FACTOR_SWITCH_VERDICTS)
+        and all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in value.values())
+    ):
+        return dict(value)
+    raise ValueError(
+        f"case {case.get('name')!r} has expect_factor_switch_verdicts {value!r}; state an object with exactly the "
+        f"keys {list(FACTOR_SWITCH_VERDICTS)}, each a non-negative integer, or omit the key."
+    )
+
+
+def factor_switch_verdict_failure(case: dict, summary: dict) -> str | None:
+    """Judge the factor switch rule's verdicts against what the case declares. Returns a detail, or None."""
+    wanted = expected_factor_switch_verdicts(case)
+    if wanted is None:
+        return None
+    actual = summary.get("factor_switch_verdicts")
+    if actual is None:
+        return (
+            "this cli reports no factor_switch_verdicts on its run summary; it predates the key this case "
+            "asserts -- rebuild it from this tree rather than reading the absence as a result"
+        )
+    if not isinstance(actual, dict) or set(actual) != set(FACTOR_SWITCH_VERDICTS):
+        return (
+            "cli reports factor_switch_verdicts {!r}, whose verdict words are not {}. The vocabulary moved in "
+            "native/src/chara_detail/factor_switch_verdict.h without FACTOR_SWITCH_VERDICTS here, or the cli "
+            "stopped listing every verdict; either way the counts cannot be read at the meaning declared."
+        ).format(actual, list(FACTOR_SWITCH_VERDICTS))
+    if actual != wanted:
+        return (
+            "the factor switch rule reached verdicts {}, expected {}. The resets can look right while this is "
+            "wrong: `empty` and `unreadable` reset exactly like `different`, so a switch reader that stopped "
+            "reading is visible here and nowhere else."
+        ).format(
+            {word: actual[word] for word in FACTOR_SWITCH_VERDICTS}, {word: wanted[word] for word in FACTOR_SWITCH_VERDICTS}
+        )
+    return None
+
+
 def _tail(label: str, text: str) -> str:
     lines = text.strip().splitlines()[-DIAGNOSTIC_TAIL_LINES:]
     return f"--- {label} (last {len(lines)}) ---\n" + "\n".join(lines)
@@ -400,6 +463,8 @@ def check_run(case: dict, completed: subprocess.CompletedProcess) -> str | None:
     3. it announced exactly the terminal errors the manifest names -- no more, and no fewer;
     4. it discarded the number of sessions the manifest states, when it states one, and it LOST the number
        the manifest states -- which every case states, since omitting the key claims zero;
+       and the factor switch rule reached the verdicts the manifest states, when it states them -- which is
+       what tells a reset caused by a reading from a reset caused by a reader that cannot read;
     5. the core understood the frame_resize block the cli wrote (the config was ACCEPTED);
     6. the frames reached recognition at the geometry the manifest states (the config had EFFECT).
 
@@ -470,6 +535,14 @@ def check_run(case: dict, completed: subprocess.CompletedProcess) -> str | None:
             "disagreement is either a reset rule that moved or a `completed` bit that stopped being set."
         ).format(incomplete, wanted_incomplete)
 
+    # (4c) WHY those discards happened, as far as the factor switch rule is concerned -- when the case declares it.
+    # (4) and (4b) cannot tell a reset the rule decided on a reading from one it fell into because the reader
+    # returned nothing or failed: both reset, and both leave the same records behind. See
+    # expected_factor_switch_verdicts.
+    verdict_failure = factor_switch_verdict_failure(case, summary)
+    if verdict_failure is not None:
+        return verdict_failure
+
     # (5) The core UNDERSTOOD the frame_resize block the CLI wrote. This is the only place in either suite
     # where what a writer emits is read back, and it exists because the constants are pinned and the KEY NAMES
     # are not: `readFrameResizeBand` (native/src/core/pipeline_config.h) falls back to the shipped default
@@ -533,6 +606,7 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
     case_frame_resize(case)
     case_anchor_unit(case)
     expected_discarded_incomplete(case)
+    expected_factor_switch_verdicts(case)
 
     video = (data_dir / case["video"]).resolve()
 

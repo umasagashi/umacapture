@@ -94,6 +94,19 @@ struct RunInvocation {
     int64_t forwarded_frames = 0;
     int anchor_unit_min = 0;
     int anchor_unit_max = 0;
+    // WHAT THE FACTOR TAB'S CHARACTER-SWITCH RULE CONCLUDED (app::NativeApi::factorSwitchVerdicts), as
+    // {verdict word, count} for EVERY verdict, zeros included, READ AFTER THE DRAIN BARRIER like the fields above.
+    //
+    // The rule resets on three of its four verdicts, so a build whose reader always finds nothing or always fails
+    // resets exactly as often as a working one and leaves every record and every discard count unchanged. These
+    // counts are the only place that difference shows (app::FactorSwitchVerdictTally says so at length).
+    //
+    // The words are chara_detail::scraper_impl::factorSwitchVerdictTag's, supplied by the caller rather than
+    // spelled here: this header deliberately includes nothing from the pipeline, and a second spelling of the
+    // vocabulary here would be a second chance to disagree with the log line the rule writes.
+    //
+    // Last, for the positional-initialisation reason stated on forwarded_frames.
+    std::vector<std::pair<std::string, int64_t>> factor_switch_verdicts;
 };
 
 // Accumulates the notify stream of one invocation.
@@ -195,6 +208,10 @@ public:
     // this run cannot give it, and split the invocation instead.
     [[nodiscard]] std::string summaryLine(const RunInvocation &run) const {
         std::lock_guard<std::mutex> lock(mutex);
+        auto factor_switch_verdicts = json_util::Json::object();
+        for (const auto &[verdict, count] : run.factor_switch_verdicts) {
+            factor_switch_verdicts[verdict] = count;
+        }
         const json_util::Json json{
             {"schema", kRunSummarySchema},
             {"subcommand", run.subcommand},
@@ -219,6 +236,11 @@ public:
             {"forwarded_frames", run.forwarded_frames},
             {"anchor_unit_min", run.anchor_unit_min},
             {"anchor_unit_max", run.anchor_unit_max},
+            // THE FACTOR SWITCH RULE'S VERDICTS, one key per verdict word. Also ADDED, and for the same reason not
+            // a schema bump: a harness that asserts them against an older CLI finds the key absent and fails on
+            // that. An object rather than four top-level keys so a consumer can tell "this CLI counts verdicts"
+            // from "this CLI counts the verdicts I know about" by the key set alone.
+            {"factor_switch_verdicts", factor_switch_verdicts},
             {"exit", run.exit_code}};
         // Same `replace` error handler messages::error uses, and for the same measured reason: a reported
         // what() can carry CP932 bytes on a Japanese Windows, and a strict dump() would throw here -- inside the

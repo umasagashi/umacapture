@@ -266,6 +266,28 @@ private:
             // input testdata/clips/golden/friend_standard_many_rental.mp4), so the material this bound was
             // derived from is also material the golden suite re-runs.
             0.10,
+            // self_factor_prefix_length: how many of the trainee's own factors are read, from the top, off one
+            // factor-tab frame. The character-switch rule reads both frames it compares under this one value
+            // (recognizer_impl::SelfFactorWindow): the read stops at it, and the rows past it are never read.
+            // This is the one home of its derivation; other comments point here instead of restating it.
+            //
+            // Why this many can be read: the rows that hold this many factors (two per row, so 7 rows here) lie
+            // inside the scroll area on the frame, and content still remains below them. The margin is that
+            // remainder as a share of the scroll area's height -- measured from the star-cell bottom of the
+            // last row the value requires down to the area's bottom edge. Measured on the golden corpus
+            // (player_standard; unit 736, a Release CLI run with the arguments run.py builds): 63 px of a 533 px
+            // area, 11.8%. friendCommon's shorter area gets the same 11.8% from its own, smaller value (see
+            // there). The margin is a share of pixels, not a count of factors: the number of factors that
+            // happen to be readable beyond this value is not a margin, because nothing past the value is
+            // compared. Rows further down are not promised to be readable at all, which is why the read is
+            // cut here rather than read and then discarded. It is a property of the layout because the
+            // scroll area is; the detail screen's layout is the same on portrait and landscape panes, so these
+            // rows fit on both.
+            //
+            // The larger the value, the more collision-resistant the comparison -- two characters whose first
+            // factors happen to coincide -- and the lower the row the read has to reach. It is 14 here and 10
+            // in friendCommon() because this layout's scroll area shows more rows.
+            14,
         };
     }
 
@@ -335,6 +357,12 @@ private:
         // the tab bar's shift put it would be a position derived from nothing that was ever measured.
         config.scroll_bar_rect = config.scroll_area_rect;
         config.viewport = friend_viewport;
+        // How many self-factors one frame is read for (common() says what the value means and how its margin
+        // is measured). This scroll area is the shorter one, so it holds fewer rows than Standard's, and the
+        // value is 10, i.e. 5 rows. Measured on the golden corpus the same way
+        // (friend_standard and friend_standard_many_rental; unit 736): 47 px remain below those rows in a 397 px
+        // area, 11.8% -- the same share as common()'s.
+        config.self_factor_prefix_length = 10;
         return config;
     }
 

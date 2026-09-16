@@ -20,7 +20,9 @@
 #include <minimal_uuid4/minimal_uuid4.h>
 
 #include "chara_detail/chara_detail_config.h"
+#include "chara_detail/chara_detail_recognizer.h"
 #include "chara_detail/chara_detail_scene_context.h"
+#include "chara_detail/factor_switch_verdict.h"
 #include "chara_detail/record_info.h"
 #include "util/event_util.h"
 #include "util/logger_util.h"
@@ -29,6 +31,43 @@
 namespace uma::chara_detail {
 
 namespace scraper_impl {
+
+// What the factor tab's character-switch rule reads once its pixel diff has said "a different character": the
+// self-factor prefix of the reference the diff was taken against, and of the frame it judged. Both are read by
+// the pipeline's one FactorRowReader with visibleSelfPrefix -- the rule the early duplicate probe reads by -- from
+// the same scroll area. An empty list is a reading that found no rows; a reader that failed is not a
+// FactorSwitchReading at all.
+struct FactorSwitchReading {
+    std::vector<record::Factor> reference;
+    std::vector<record::Factor> judged;
+};
+
+// What the rule concludes from a FactorSwitchReading is a FactorSwitchVerdict (chara_detail/factor_switch_verdict.h,
+// which also says why the vocabulary lives in a header of its own).
+
+// THE COMPARISON, with no constant in it: non-empty, equal length, every element equal. It asks whether two
+// frames read by ONE rule show the same thing, which is not the question Dart's duplicate check asks (a stored
+// record against one live frame, with a leading-match threshold that tolerates misreads). Both lists here come
+// from the same reader under the same scroll-area bound, so a tolerance would have nothing to absorb -- and it
+// would stop the relation being transitive, which the reference replacement below relies on: every reference a
+// session has held reads the same as the one before it.
+//
+// An empty reading is never Same, even against another empty one. Two frames on which the reader found nothing
+// have not been shown to be one record, and keeping a session on that basis is the fail-OPEN direction: a
+// character switch whose new list has not rendered yet would be scraped into the old character's record.
+[[nodiscard]] FactorSwitchVerdict factorSwitchVerdict(const std::optional<FactorSwitchReading> &reading);
+
+// The factor tab's character-switch reference: the pixels Rule 3 diffs every flush frame against, and what the
+// shared reader read off them. Held TOGETHER so that whatever replaces the pixels also replaces (or drops) the
+// reading -- a reading that outlived its frame would be compared as if it described a frame it was never read
+// from.
+struct FactorSwitchReference {
+    Frame frame;
+    // nullopt until a divergence first needs it. The latch does not read: most latches never diverge, and reading
+    // there would pay the reader once per latch for a comparison that never happens. A reference installed by a
+    // Same verdict arrives with its reading already taken, because that frame was just read as the judged one.
+    std::optional<std::vector<record::Factor>> reading;
+};
 
 template<typename T>
 inline bool updateUntilReady(T &subject, const Frame &frame) {
@@ -902,6 +941,8 @@ public:
         const event_util::Sender<int> &on_page_ready,
         const event_util::Sender<RecordInfo> &on_completed,
         const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
+        const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_reader,
+        const event_util::Sender<scraper_impl::FactorSwitchVerdict> &on_factor_switch_judged,
         const event_util::Sender<DiscardedSession> &on_restarted,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir,
@@ -995,11 +1036,21 @@ private:
 
     void rebuildTab(TabPage tab_page);
 
-    // On the factor tab, diff the current stable top-of-page against the last probed reference. A large,
-    // sustained change while at the top means the displayed character switched, so reset (the fresh session
-    // re-probes). Reuses the stationary rect and its calibrated color thresholds as the change metric.
+    // On the factor tab, diff the current top-of-page against factor_switch_reference. A large change that
+    // outlasts the dwell while at the top is a CANDIDATE switch, and the rule then reads what both frames show:
+    // the same record keeps the session and makes this frame the reference; anything else -- a different record,
+    // an empty reading, a reader failure -- resets (the fresh session re-probes). Reuses the stationary rect and
+    // its calibrated color thresholds as the change metric.
     void maybeResetOnFactorChange(
         const Frame &frame, record::RecordType record_type, const scraper_impl::TopOfContentReading &reading);
+
+    // Read what the reference and the judged `frame` show, with factor_reader, for the session that is current
+    // RIGHT NOW (its layout decides the scroll area both are read from). Synchronous. The reference is read at
+    // most once per reference: the first call stores its reading on factor_switch_reference and later calls reuse
+    // it. NEVER THROWS: a reader failure is caught here and comes back as nullopt ("unreadable"), because an
+    // exception leaving update() would skip the rest of the rule -- the reset -- on every frame the divergence
+    // lasts.
+    [[nodiscard]] std::optional<scraper_impl::FactorSwitchReading> readFactorSwitch(const Frame &frame);
 
     // Top-edge pixel row of the green "因子" section header, relative to the scroll-area crop (so it tracks the
     // content, not the scroll thumb). Scans the config band top-down for the first row that is mostly header
@@ -1062,6 +1113,24 @@ private:
     // the condition on one message: "this latch owed a cue" and "this character is not a duplicate". Without
     // it the front end can only see the second half, and a capture that began mid-scroll chimes anyway.
     const event_util::Sender<Frame, RecordInfo> on_factor_probe;
+    // THE READER RULE 3 READS WITH once its pixel diff has already said "a different character": the pipeline's
+    // one FactorRowReader, shared with the recognizer (which reads the probe frame and the stitched record with
+    // it), so both frames of the switch are read by the same rule the probe uses (visibleSelfPrefix).
+    //
+    // Called SYNCHRONOUSLY, on this scraper's runner, inside the processing of the frame being judged -- not by
+    // asking another stage and waiting for an answer. What an offline import decides therefore depends on the
+    // clip and not on when another thread gets round to answering, and nothing about the reading is outstanding
+    // anywhere once update() returns, so the drain barrier needs no account of it. Nothing about the reading
+    // reaches a front end either: the CLI has no adjudicator, the golden suite scores every onFactorProbe line
+    // the run emits, and a record id is deliberately not on the wire (see DiscardedSession::info).
+    const std::shared_ptr<const recognizer_impl::FactorRowReader> factor_reader;
+    // EVERY VERDICT the character-switch rule reaches, once per candidate switch it read, Same included. The
+    // reset it may cause already travels on on_restarted, but a reset cannot say WHY it happened, and a Same
+    // leaves no trace on any other channel at all -- so a reader that always comes back empty, or always throws,
+    // would reset exactly as often as a working one and be indistinguishable from it everywhere else. This is the
+    // fact that tells them apart. NOT a wire message: NativeApi counts it (app::FactorSwitchVerdictTally) for the
+    // CLI's run summary, and no front end is told.
+    const event_util::Sender<scraper_impl::FactorSwitchVerdict> on_factor_switch_judged;
     // Mid-scene reset (inferred character switch), carrying the session it threw away. NOT an error channel:
     // all three reset rules fire legitimately on a real switch, so what travels here is the FACT of a discard
     // and its contents -- see DiscardedSession for why the contents are what makes a partial failure
@@ -1267,9 +1336,14 @@ private:
     std::optional<uint64> type_pending_since;
     std::optional<record::RecordType> type_pending_value;
     std::optional<uint64> factor_change_pending_since;
-    Frame factor_probe_reference = {};
-    // Header top-edge pixel row (see factorHeaderTopY) captured with factor_probe_reference; the flush gate
-    // compares the current header row against it in pixels.
+    // Rule 3's reference; nullopt while the rule is unarmed. Installed by the factor tab's head latch (the frame
+    // the duplicate probe is also handed), and REPLACED by the judged frame whenever a divergence is read as the
+    // same record -- so after the first such replacement it is no longer the probe's frame, and nothing may treat
+    // it as one. Dropped by the rebuild of the factor tab and by a session reset.
+    std::optional<scraper_impl::FactorSwitchReference> factor_switch_reference;
+    // Header top-edge pixel row (see factorHeaderTopY) captured at the same latch as factor_switch_reference;
+    // topOfContent compares the current header row against it in pixels. Not replaced when the reference is:
+    // a divergence read as the same record does not move the list, so the head row is still the head row.
     std::optional<int> reference_header_y;
     // Last top-of-content verdict put on the wire, with the tab it described. Held as the three-valued verdict
     // rather than as the emitted word, because the word is a rendering of it and comparing renderings would
