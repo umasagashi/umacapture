@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 17)
 # it reaches every target that pulls in spdlog.
 add_compile_options(/utf-8)
 
+# Every target, every configuration. Debug's /Zi (a .debug$S section per function) and /RTC1 (extra
+# .xdata/.pdata) nearly double the object sections per function, which pushes the largest TUs (cli.cpp and
+# native_api.cpp) past the plain COFF section limit (C1128) in Debug only. The Windows runner, which
+# compiles native_api.cpp as well, gets /bigobj from APPLY_STANDARD_SETTINGS in windows/CMakeLists.txt.
+# /bigobj only widens the object file's section-count field; it does not change the generated code.
+add_compile_options(/bigobj)
+
 set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/opencv/build")
 set(OpenCV_VERSION "4130")
 set(OpenCV_ARCH "x64")
@@ -61,13 +68,6 @@ target_compile_options(
                    # default-less switch over an enum must stay exhaustive (e.g. recordTypeTag,
                    # tabPageTag). Not /we4061, which also fires when a default IS present.
 )
-
-# cli.cpp is the only TU that still needs /bigobj: it includes the tool/builder/* headers, which
-# instantiate the full condition/builder template set in a single translation unit and overflow the
-# COFF section limit. The recognition-pipeline sources no longer need it now that their
-# implementations live in their own .cpp files (previously they were compiled inline into
-# native_api.cpp's TU), so scope the flag to this one file instead of the whole target.
-set_source_files_properties(src/core/cli.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
 
 target_compile_definitions(
         ${PROJECT_NAME} PRIVATE
