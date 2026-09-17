@@ -253,9 +253,12 @@ enum CharaDetailCaptureStatus {
   ///
   /// The user began scrolling before the ready cue, so the rows above the first captured fragment
   /// were never seen. **Not terminal and not session-scoped**: only that tab is unusable, the other
-  /// tabs keep their progress, and leaving the tab and coming back rebuilds it and withdraws the
-  /// refusal (the core sends the withdrawal on the same message). Ranked above [capturing],
-  /// [detailReady] *and* [duplicateHint] because it needs an action the ordinary phases do not and
+  /// tabs keep their progress, and leaving the tab rebuilds it and withdraws the refusal (the core
+  /// sends the withdrawal on the same message). The retry succeeds only if the tab was scrolled back
+  /// to its head before leaving, because the game keeps a tab's scroll position across a tab switch;
+  /// closing and reopening the detail screen also works (see [CharaDetailCaptureState.tabRefusals]).
+  /// Ranked above [capturing], [detailReady] *and* [duplicateHint] because it needs an action the
+  /// ordinary phases do not and
   /// contradicts the hint's instruction, and below every terminal status. Winning the tie against
   /// the hint has a cost — the hint's [CaptureEvent] is lost for that character — which
   /// [CharaDetailCaptureState.status] states in full.
@@ -371,8 +374,13 @@ class CharaDetailCaptureState {
   /// withdraws it on the same message type with `refused: false` (there is deliberately no paired
   /// "cleared" type), so this holds the last value per index rather than counting events. An entry
   /// means "this tab's first captured fragment was not the head of its list, so the rows above it
-  /// were never seen"; the remedy is to leave the tab and come back, which rebuilds it in the core
-  /// and arrives here as the withdrawal.
+  /// were never seen". Leaving the tab rebuilds it in the core and arrives here as the withdrawal,
+  /// but the withdrawal is not the remedy by itself: the core ignores every frame of a refused tab,
+  /// so scrolling back up on that tab changes nothing, and the game keeps a tab's scroll position
+  /// across a tab switch, so coming back to a tab that is still scrolled is refused again. The
+  /// routes that recover are to scroll back to the head and THEN switch tabs and return, or to close
+  /// and reopen the detail screen (which the game opens at the head, and which resets the session).
+  /// Switching records alone is not one: it rebuilds nothing unless the core detects the switch.
   ///
   /// The reason is the core's own stable word (`scrolled` / `unknown`), kept as data rather than
   /// mapped to a status here: it is not user-facing, and an unrecognised word must still read as a
@@ -538,7 +546,7 @@ class CharaDetailCaptureState {
     // it. A refusal that keeps the status off `duplicateHint` therefore records nothing when the
     // probe fires. The fact is not discarded — the probe error is held until the session resets, so
     // the hint is recorded late if the state reaches it again — but on the path the refusal's own
-    // remedy puts the user on (leave the tab, come back, the core withdraws it there) the withdrawal
+    // remedy puts the user on (scroll back up, leave the tab, the core withdraws it there) the withdrawal
     // lands while the factor top is not displayed, and the notice is then lost for that character.
     //
     // Accepted deliberately. Ranked the other way, the card answered the probe while a tab stood
@@ -659,7 +667,7 @@ class CharaDetailCaptureState {
   /// terminal `null` branch below -- the user is being told to move around the tabs, and blanking the
   /// indicator there would be wrong. But the answer is a policy, not the witness: whichever tab was
   /// refused, letting the user switch abandons that tab's refusal without the path that withdraws it
-  /// (leaving the tab and coming back), so a refused session is a "finish this first" state.
+  /// (leaving the tab, after scrolling it back to its head -- see [tabRefusals]), so a refused session is a "finish this first" state.
   ///
   /// The statuses are listed rather than defaulted so that a status added later has to state its
   /// own answer here: the wildcard means "no guidance", which is the wrong answer for every phase

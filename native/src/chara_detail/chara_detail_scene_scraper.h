@@ -893,6 +893,18 @@ public:
     // cue -- so the rows above it were never captured and the tab can only be retried, not completed. It is a
     // LEVEL, not an occurrence: it holds until the tab is rebuilt (a tab switch), which is what lets the
     // notification be edge-sent off the level and withdrawn by the same mechanism that clears it.
+    //
+    // WITHDRAWING THE REFUSAL IS NOT THE SAME AS RECOVERING THE TAB. A refused interpreter ignores every frame, so
+    // scrolling back to the head on the same tab changes nothing. The level is cleared only by replacing the
+    // interpreter: leaving the tab (CharaDetailSceneScraper::handleTabSwitchInProgress -> rebuildTab), or
+    // discarding the whole session (the detail screen closing, or a Rule 0 / Rule 3 reset). But the game keeps a
+    // tab's scroll position across a tab switch, so a user who leaves the tab while it is still scrolled comes
+    // back to the same position, and the fresh interpreter latches there and refuses again. The routes that
+    // actually recover are therefore: scroll back to the head, THEN switch to another tab and back; or close
+    // and reopen the detail screen, which the game opens at the head. Switching to another record does not by
+    // itself rebuild anything here -- the game returns the list to its head, but the core discards the session
+    // only when Rule 0 (record type) or Rule 3 (factor tab witness) sees the switch, and a refused factor tab
+    // holds no witness.
     [[nodiscard]] virtual std::optional<TopOfContent> refusal() const = 0;
 
     // WHETHER THIS PAGE CAN SCROLL AT ALL. A structural answer like the two above: it is decided once, when
@@ -1282,6 +1294,19 @@ private:
     // exists, so after the tab is captured and after the session completes too (see watchesFactorContent).
     // Returns true when it reset the session, so update() stops processing a frame that belonged to the
     // session it discarded.
+    //
+    // A DISPLAY THAT DIMS THE WHOLE SCREEN IS NOT THIS RULE'S CASE -- it is covered by how the detail screen is
+    // detected, not left open. Tapping a factor opens a dialog and darkens everything behind it, and the game
+    // treats the detail screen as left. The scene condition (CharaDetailSceneContextBuilder, evaluated by
+    // CharaDetailSceneContext::update) agrees: every branch checks fixed colours -- the green title bar, the white
+    // close button, and all three tab buttons (the selected one green, the other two within 30 of pure white
+    // per channel) -- so a scrim that darkens the screen fails the condition, the frame is not forwarded
+    // (on_scene_updated is sent only while the condition is met), and this rule never diffs it. If the scrim
+    // stays for scene_end_timeout (1 s, native_api.cpp), the scene ends and the session is released as on a
+    // close; if it is gone sooner, the next forwarded frame is the undimmed list again. The displays the game
+    // draws over this list dim the whole screen (a property of the game, confirmed by the user), so this is the
+    // whole case: a display that covers the list alone and leaves the title bar and tab bar unchanged is not
+    // something the game shows, and it is deliberately not designed for.
     [[nodiscard]] bool maybeResetOnFactorChange(
         const Frame &frame, record::RecordType record_type, const scraper_impl::TopOfContentReading &reading);
 
@@ -1324,8 +1349,10 @@ private:
     // THE STRUCTURE GOES FIRST, AHEAD OF THE BANNER, because on a page that cannot scroll every sensor answer
     // other than AtTop is wrong by definition: a banner partly covered or cut by an animation reads Scrolled,
     // and there is no thumb to consult -- and Rule 3, which acts only on AtTop, would stop judging a page the
-    // user can switch on. Asked of the class and not of this frame, for the reason ScrapingInterpreter::
-    // scrollable states. A tab not built yet has no structure to ask and goes to the sensors, where its thumb
+    // user can switch on. Rule 3's flush gate is therefore open on every frame of such a page that reaches it;
+    // a display the game draws over the list dims the whole screen, and the scene condition drops that frame
+    // before it gets here (see maybeResetOnFactorChange). Asked of the class and not of this frame, for the reason
+    // ScrapingInterpreter::scrollable states. A tab not built yet has no structure to ask and goes to the sensors, where its thumb
     // reads Unknown -- on the factor tab too, so the answer is Unknown and the header is not read.
     //
     // UNDER A THUMB AT THE HEAD, A MISSING HEADER IS A REFUSAL, NOT AN ABSENCE OF EVIDENCE. The window it
@@ -1382,7 +1409,8 @@ private:
     // began scrolling before the ready cue, so the rows above it were never seen. Per tab, edge-triggered off
     // the level, and WITHDRAWABLE: the same message carries refused=false once a tab switch rebuilds the tab.
     // Deliberately not routed through the error channel, which is session-scoped and terminal: only this tab
-    // is unusable, the session keeps waiting for it, and a tab switch retries it.
+    // is unusable, the session keeps waiting for it, and a tab switch retries it -- successfully only if the
+    // tab was scrolled back to its head first (see ScrapingInterpreter::refusal).
     const event_util::Sender<int, bool, std::string> on_tab_refused;
     // Whether Rule 3 can see a switch (factorSwitchArmed). Edge-triggered, restated per session.
     const event_util::Sender<bool> on_factor_switch_armed;

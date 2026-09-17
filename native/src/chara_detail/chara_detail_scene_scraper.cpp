@@ -1356,7 +1356,9 @@ void ScrollableScrapingInterpreter::update(const Frame &frame) {
         // Terminal until this interpreter is replaced. Continuing would keep hunting for a stationary frame
         // and eventually latch a fragment #0 further down the list -- capturing the very truncated list the
         // refusal exists to reject. The retry route is a tab switch, which rebuilds the tab
-        // (CharaDetailSceneScraper::handleTabSwitchInProgress).
+        // (CharaDetailSceneScraper::handleTabSwitchInProgress). The game keeps the tab's scroll position across
+        // that switch, so the retry succeeds only if the user scrolled back to the head before leaving; closing
+        // and reopening the detail screen is the other route (see ScrapingInterpreter::refusal).
         return;
     }
 
@@ -1896,7 +1898,9 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     // tabScraper(). The witness exists from the tab's head latch on, from either interpreter -- before that latch
     // (the settle wait, and a tab REFUSED at its latch) there is none, and those are the stretches this rule still
     // cannot cover; the front end is told which stretch it is in (on_factor_switch_armed), so it does not offer a
-    // switch there.
+    // switch there. A display the game draws over the list (the dialog a factor tap opens) is not among them: it
+    // dims the whole screen, the scene condition rejects such a frame, and it never arrives here (see the
+    // declaration of maybeResetOnFactorChange).
     //
     // ITS DWELL COUNTS ONLY THE FRAMES IT JUDGED, so a frame it does not watch clears the dwell here. A captured
     // factor tab is never rebuilt, so nothing else would: left standing, a dwell opened before a visit to another
