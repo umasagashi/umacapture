@@ -99,6 +99,18 @@ TEST_CASE("scroll messages") {
     checkMessage(scrollPosition(4, false), R"({"type":"onScrollPosition","index":4,"at_top":false})");
 }
 
+TEST_CASE("a tab refusal states the tab, the level and the machine reason") {
+    // The withdrawal travels on the SAME type with refused=false, so a front end holding one value per index
+    // needs no second message type; pinning both directions here is what keeps that contract from drifting
+    // into a paired "cleared" message later.
+    checkMessage(
+        tabRefused(1, true, "scrolled"), R"({"type":"onTabRefused","index":1,"refused":true,"reason":"scrolled"})");
+    checkMessage(
+        tabRefused(1, false, ""), R"({"type":"onTabRefused","index":1,"refused":false,"reason":""})");
+    checkMessage(
+        tabRefused(0, true, "unknown"), R"({"type":"onTabRefused","index":0,"refused":true,"reason":"unknown"})");
+}
+
 TEST_CASE("chara-detail record messages use the id/success keys") {
     checkMessage(charaDetailFinished("rec-1", true), R"({"type":"onCharaDetailFinished","id":"rec-1","success":true})");
     checkMessage(charaDetailFinished("rec-2", false), R"({"type":"onCharaDetailFinished","id":"rec-2","success":false})");

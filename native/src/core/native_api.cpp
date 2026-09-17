@@ -372,6 +372,16 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto scroll_position_connection = event_util::makeDirectConnection<int, bool>();
     scroll_position_connection->listen([this](int index, bool at_top) { notifyScrollPosition(index, at_top); });
 
+    // A tab's capture was refused (its first fragment was not the head of the list), or that refusal was
+    // withdrawn by a rebuild. Level-driven and per tab -- see messages::tabRefused for why this is not routed
+    // through notifyError. Relayed, not judged: the core states which tab is unusable, each front end decides
+    // what to say. Info-level so a refusal is observable in the CLI's log the way a factor reset is.
+    const auto tab_refused_connection = event_util::makeDirectConnection<int, bool, std::string>();
+    tab_refused_connection->listen([this](int index, bool refused, const std::string &reason) {
+        log_info("tab {} refused={} ({})", index, refused, reason);
+        notifyTabRefused(index, refused, reason);
+    });
+
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
 
@@ -448,6 +458,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         scroll_ready_connection,
         scroll_updated_connection,
         scroll_position_connection,
+        tab_refused_connection,
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,

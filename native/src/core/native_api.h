@@ -908,6 +908,10 @@ public:
 
     void notifyScrollPosition(int index, bool at_top) { notify(messages::scrollPosition(index, at_top)); }
 
+    void notifyTabRefused(int index, bool refused, const std::string &reason) {
+        notify(messages::tabRefused(index, refused, reason));
+    }
+
     void notifyPageReady(int index) { notify(messages::pageReady(index)); }
 
     void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {

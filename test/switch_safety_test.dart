@@ -180,6 +180,59 @@ void main() {
       expect(state.duplicateRecordId, 'rec-123');
     });
 
+    test('is tabRefused while any tab holds a refusal, and returns when it is withdrawn', () {
+      final refused = CharaDetailCaptureState()
+          .started()
+          .scrollPosition(1, true)
+          .tabRefused(0, true, 'scrolled');
+      expect(refused.status, CharaDetailCaptureStatus.tabRefused);
+      // Ranked above the three phase statuses: at the factor top, settled, this state would
+      // otherwise read `detailReady`, which says the screen is fine.
+      expect(refused.tabRefused(0, false, '').status, CharaDetailCaptureStatus.detailReady);
+    });
+
+    test('a refusal outranks a scrolled tab but not a terminal outcome', () {
+      final scrolled = CharaDetailCaptureState().started().scrollPosition(1, false).tabRefused(1, true, 'scrolled');
+      expect(scrolled.status, CharaDetailCaptureStatus.tabRefused, reason: 'above capturing');
+      expect(scrolled.fail(message: 'closed_before_completed').status, CharaDetailCaptureStatus.failed);
+      expect(scrolled.success(id: 'x').status, CharaDetailCaptureStatus.succeeded);
+      expect(
+        CharaDetailCaptureState().tabRefused(0, true, 'scrolled').status,
+        CharaDetailCaptureStatus.waitingForDetail,
+        reason: 'a refusal cannot outlive the detail screen it was about',
+      );
+    });
+
+    test('a refusal outranks the duplicate hint, whose instruction would contradict it', () {
+      // LOAD-BEARING ORDER, and a RULING WITH A COST — the order was the other way round until the
+      // cost of each direction had been measured against the other.
+      //
+      // The hint's line is 「詳細画面を検出しました／スクロールしてキャプチャを開始してください」 with the
+      // green "safe to switch" arrows beside it. Shown while a tab stands refused, that is a wrong
+      // instruction delivered at the moment the user is deciding whether to move on, seconds after
+      // an error chime whose only on-screen explanation it has just displaced. The refusal wins for
+      // that reason and no other.
+      //
+      // WHAT IT COSTS, asserted next door in `capture_event_test.dart` rather than only written
+      // here: `duplicateHint` is recorded as a `CaptureEvent` on the transition INTO it, so a probe
+      // that fires while a tab is refused records nothing then, and on the path the refusal's own
+      // remedy puts the user on it is never recorded at all. Accepted: the duplicate is caught again
+      // at the end of the capture, the unseen rows are not.
+      final state = CharaDetailCaptureState(
+        detailOpened: true,
+        currentTab: 1,
+        atTop: true,
+      ).tabRefused(0, true, 'scrolled').fail(message: 'duplicated_character_probe');
+      expect(state.status, CharaDetailCaptureStatus.tabRefused);
+      // The probe error is still held, and still means what it meant: withdraw the refusal and the
+      // hint is the status, so the ranking SUPPRESSES the hint rather than discarding the fact.
+      expect(state.tabRefused(0, false, '').status, CharaDetailCaptureStatus.duplicateHint);
+      // Which is what makes the loss above a real one and not a bookkeeping detail: by the time the
+      // hint could be the status, the user has left the factor top to do what the refusal asked, and
+      // then it is not a hint any more either.
+      expect(state.tabRefused(0, false, '').scrollPosition(1, false).status, CharaDetailCaptureStatus.capturing);
+    });
+
     test('is failed for any other error', () {
       final state = CharaDetailCaptureState(detailOpened: true)..error = 'closed_before_completed';
       expect(state.status, CharaDetailCaptureStatus.failed);

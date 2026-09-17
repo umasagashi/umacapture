@@ -128,4 +128,31 @@ void main() {
       expectSentence('pages.capture.capture_control.message.load_error.action', 'キャプチャ機能は利用できません。');
     });
   });
+
+  group('the sentences approved on 2026-09-09, verbatim', () {
+    // WHY THE ACTION LINE NOW NAMES ONLY ONE CAUSE. This card used to spell out two possible
+    // causes ("スクロールされていたか、早すぎた可能性があります"): the detection point behind it fires
+    // both when the user starts scrolling before the ready chime, and on the tab-switch path (a
+    // tab reopened while already mid-scroll). Those two causes are still indistinguishable from
+    // where this message is shown -- the tab-switch path still raises this very same card today,
+    // that fact has not changed. On 2026-09-10 the user rewrote the wording to name only the
+    // early-scroll cause ("スクロールを開始するのが早すぎた可能性があります"). That is the user's own,
+    // current call, not a claim that the tab-switch path stopped applying: naming a cause the card
+    // cannot single out is now accepted, in exchange for a shorter, more actionable line. Do not
+    // restore the two-cause wording on the theory that it is "more correct" -- that tradeoff was
+    // made deliberately and should not be second-guessed here. Recovering also requires scrolling
+    // back up first, which does not fit in one line, so the action line asks for a retry instead of
+    // walking the user through that.
+    //
+    // Pinned as a pair, like `load_error` above: both lines render on the same card for
+    // the same event, so a reword of one alone risks a status and a remedy that no longer
+    // agree with each other.
+    test('the tab-refused card now blames early scrolling, though a tab-switch mid-scroll trips the same detector', () {
+      expectSentence('pages.capture.capture_control.message.tab_refused.status', '先頭をキャプチャできませんでした');
+      expectSentence(
+        'pages.capture.capture_control.message.tab_refused.action',
+        'スクロールを開始するのが早すぎた可能性があります。\nキャプチャをやり直してください。',
+      );
+    });
+  });
 }

@@ -46,6 +46,25 @@ inline std::string scrollPosition(int index, bool at_top) {
     return json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"at_top", at_top}}.dump();
 }
 
+// A TAB'S CAPTURE WAS REFUSED, or that refusal was withdrawn. `refused` is the level, not an occurrence: the
+// scraper re-states it whenever it changes, so a front end holds the last value per `index` rather than
+// counting events, and a tab switch (which rebuilds the tab) arrives here as `refused: false` on the same
+// message type. There is deliberately no separate "cleared" type to fall out of step with this one.
+//
+// NOT onError. That channel is session-scoped and terminal: it would mark the whole capture failed while the
+// other two tabs are still fine and while this one is about to be retried. What happened is that this tab's
+// first captured fragment was not the head of its list -- the user began scrolling before the ready cue -- so
+// the rows above it were never seen and only this tab is unusable.
+//
+// `reason` is a stable machine word (scraper_impl::topOfContentTag): "scrolled" when the scroll bar was
+// measured away from the top, "unknown" when the tab has a scroll bar but this frame yielded no reading and
+// the shipped policy refuses rather than risk capturing a truncated list. It is not a user-facing string; the
+// front end maps it to its own wording, and must have a fallback for a word it does not recognise.
+inline std::string tabRefused(int index, bool refused, const std::string &reason) {
+    return json_util::Json{{"type", "onTabRefused"}, {"index", index}, {"refused", refused}, {"reason", reason}}
+        .dump();
+}
+
 inline std::string pageReady(int index) {
     return json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump();
 }

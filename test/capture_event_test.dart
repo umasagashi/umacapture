@@ -189,6 +189,54 @@ void main() {
       expect(event.recordId, 'rec-old', reason: 'the duplicate this hint points at must survive with it');
     });
 
+    test('a hint that fires while a tab is refused is not recorded then — the cost of the ranking', () {
+      // THE PRICE OF `tabRefused` OUTRANKING `duplicateHint`, written down as an assertion so it is
+      // a decision this suite states rather than a surprise the next reader discovers.
+      //
+      // Events are recorded on the TRANSITION into an eventful status, and a refusal standing on any
+      // tab keeps the status at `tabRefused`. So the probe firing produces no transition and no
+      // event, at the moment it fires.
+      //
+      // It was ranked the other way for exactly this reason and was changed anyway: the hint's
+      // wording tells the user the screen is fine and that switching away is safe, which is a wrong
+      // instruction at the moment they are deciding whether to move on. A duplicate is caught again
+      // at the end of the capture (`duplicated_character`, terminal); the rows above a refused tab's
+      // first fragment are never seen at all.
+      final container = _container();
+      container.read(charaDetailCaptureStateProvider.notifier)
+        ..started()
+        ..scrollPosition(1, true)
+        ..tabRefused(0, true, 'scrolled')
+        ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
+
+      expect(
+        container.read(charaDetailCaptureStateProvider).status,
+        CharaDetailCaptureStatus.tabRefused,
+        reason: 'the ranking under test: without this the case below is about nothing',
+      );
+      expect(container.read(captureEventProvider), isNull);
+    });
+
+    test('the suppressed hint is recorded late if the state reaches it again', () {
+      // The other half, and the reason the case above says "not recorded then" rather than "lost".
+      // The probe error is held on the state until the session resets, so the withdrawal arriving
+      // while the factor tab is still at its top makes `duplicateHint` the status after all — and
+      // this notifier records whatever becomes eventful, whenever it does.
+      final container = _container();
+      container.read(charaDetailCaptureStateProvider.notifier)
+        ..started()
+        ..scrollPosition(1, true)
+        ..tabRefused(0, true, 'scrolled')
+        ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
+      expect(container.read(captureEventProvider), isNull);
+
+      container.read(charaDetailCaptureStateProvider.notifier).tabRefused(0, false, '');
+
+      final event = container.read(captureEventProvider) as CharaCaptureEvent;
+      expect(event.status, CharaDetailCaptureStatus.duplicateHint);
+      expect(event.recordId, 'rec-old');
+    });
+
     test('a success outlives the next character being opened', () {
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)

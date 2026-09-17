@@ -68,11 +68,10 @@ private:
             //    step -- and there are three tabs (kAllTabPages), so +50 ms here is about +150 ms of holding
             //    the screen still per character.
             //  * The cost that bites harder is not the latency but the widened "please do not scroll yet"
-            //    window, once per tab. Arming scroll-ready is what captures `factor_probe_reference` (the
+            //    window, once per tab. Scroll-ready is what runs the factor tab's duplicate probe (the
             //    factor_scroll_ready listener in chara_detail_scene_scraper.cpp), so a user who scrolls before
-            //    the dwell elapses never arms it, and the factor tab's character-switch reset (Rule 3) then
-            //    has no reference and never fires. That loss is SILENT, and every millisecond added here makes
-            //    it likelier. Nothing in this repo can measure it: the clips are recordings of scrolling that
+            //    the dwell elapses never gets the early duplicate check. That loss is SILENT, and every
+            //    millisecond added here makes it likelier. Nothing in this repo can measure it: the clips are recordings of scrolling that
             //    already happened, which is the closest proxy there is and is not the same thing.
             //
             // The measured ceiling is kept because it BOUNDS a future proposal, not because it licenses one:

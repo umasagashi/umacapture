@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "chara_detail/chara_detail_scene_scraper.h"
@@ -209,12 +210,16 @@ struct ScraperHarness {
     event_util::Connection<int> scroll_ready = event_util::makeDirectConnection<int>();
     event_util::Connection<int, double> scroll_updated = event_util::makeDirectConnection<int, double>();
     event_util::Connection<int, bool> scroll_position = event_util::makeDirectConnection<int, bool>();
+    event_util::Connection<int, bool, std::string> tab_refused =
+        event_util::makeDirectConnection<int, bool, std::string>();
     event_util::Connection<int> page_ready = event_util::makeDirectConnection<int>();
     event_util::Connection<RecordInfo> completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<Frame, RecordInfo> factor_probe = event_util::makeDirectConnection<Frame, RecordInfo>();
     event_util::Connection<DiscardedSession> restarted = event_util::makeDirectConnection<DiscardedSession>();
 
     std::vector<DiscardedSession> discards;
+    // Every on_tab_refused message, in order, as {index, refused, reason}.
+    std::vector<std::tuple<int, bool, std::string>> refusals;
     CharaDetailSceneScraper scraper;
 
     ScraperHarness()
@@ -226,6 +231,7 @@ struct ScraperHarness {
               scroll_ready,
               scroll_updated,
               scroll_position,
+              tab_refused,
               page_ready,
               completed,
               factor_probe,
@@ -234,6 +240,9 @@ struct ScraperHarness {
               "unit_test_scraping_root",
               recorder.hooks()) {
         restarted->listen([this](const DiscardedSession &discarded) { discards.push_back(discarded); });
+        tab_refused->listen([this](int index, bool refused, const std::string &reason) {
+            refusals.emplace_back(index, refused, reason);
+        });
     }
 
     [[nodiscard]] std::string sessionIdAt(std::size_t made_index) const {
@@ -307,6 +316,122 @@ TEST_CASE("release reports the session it destroys, and announces nothing by its
     // A release is not by itself a discard event. The scene-closed path releases too, and its loss already
     // travels as closed_before_completed -- announcing it here as well would report one lost session twice.
     CHECK(h.discards.empty());
+}
+
+// --- A tab refused because its capture did not start at the head of the list -----------------------------
+//
+// These drive the whole scraper -- not the interpreter -- because the two facts they pin live at this level
+// only: that the refusal reaches the wire as a withdrawable per-tab level, and that leaving a refused tab
+// rebuilds it. The second is the trap in "a tab switch retries the tab": a refused tab has NOT started
+// scrolling, so the switch handler's original `started()` test would skip it, and the tab would stay refused
+// forever with nothing on screen ever saying why.
+
+// The scroll-bar colours, and the two anti-aliased cap rows that decide an at-top reading. Values measured on
+// real 736 px footage; see the table on kTrackCap in test_scraper_estimators.cpp for which shipped colour box
+// each one lands in, which is the whole mechanism. The boxes themselves come from the shipped config.
+const Color kBarMargin{245, 245, 245};
+const Color kBarTrack{210, 210, 210};
+const Color kBarTrackCap{231, 231, 231};
+const Color kBarThumbCap{199, 199, 199};
+const Color kBarThumb{60, 60, 60};
+
+void fill(cv::Mat mat, const Color &color) {
+    mat.setTo(cv::Scalar(color.b(), color.g(), color.r()));
+}
+
+// A 540x960 frame carrying a RENDERED SCROLL BAR inside the shipped scroll-bar rect, so the estimator has
+// something real to measure. `exposed_rows` is how many rows of placeholder track are visible above the
+// thumb's own cap: 0 is a genuine head-of-list (the thumb's cap occludes the track's cap, as on real
+// footage) and 1 is the smallest head start the widget can show -- one tip pixel, the thing this detector
+// exists to catch. The scroll-area rect and the scroll-bar rect are the same region in the shipped config, so
+// painting once serves both, and two frames built with the same arguments are pixel-identical and therefore
+// latch as stationary.
+//
+// `nonce` must differ between consecutive frames. It repaints everything ABOVE the band, which is where the
+// tab-button rect lives, so that catcher never latches and no scraped image is ever written to disk (the same
+// device solidFrameAt uses, and the reason these tests need no filesystem). It cannot disturb the scroll area,
+// which is the band itself. The header banner is absent on every frame, so the base-frame catcher likewise
+// never latches.
+Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
+    cv::Mat pixels(960, 540, CV_8UC3, cv::Scalar(kNoBanner.b(), kNoBanner.g(), kNoBanner.r()));
+    // Ask the frame itself where the config rect lands, rather than restating pixel coordinates that would
+    // silently stop matching the shipped config.
+    const Rect<int> band_rect =
+        Frame(pixels, timestamp).anchor().mapToFrame(shippedScraperConfig().common.scroll_bar_rect);
+    fill(pixels(cv::Rect(0, 0, pixels.cols, band_rect.top())),
+         Color(static_cast<int>(nonce % 2) * 120 + 10, 0, 0));
+    cv::Mat band = pixels(cv::Rect(band_rect.left(), band_rect.top(), band_rect.width(), band_rect.height()));
+
+    constexpr int kTrackInset = 30;  // comfortably inside the scan line's own small vertical inset
+    constexpr int kThumbRows = 100;
+    fill(band, kBarMargin);
+    fill(band(cv::Rect(0, kTrackInset, band.cols, band.rows - 2 * kTrackInset)), kBarTrack);
+    fill(band.row(kTrackInset), kBarTrackCap);
+    const int thumb_cap = kTrackInset + exposed_rows;
+    fill(band.row(thumb_cap), kBarThumbCap);
+    fill(band(cv::Rect(0, thumb_cap + 1, band.cols, kThumbRows)), kBarThumb);
+    return Frame(pixels, timestamp);
+}
+
+// Past the shipped stationary_time_threshold, so two frames this far apart latch. Read from the config rather
+// than restated, for the same reason the rect above is.
+const uint64 kPastStationary = shippedScraperConfig().common.stationary_time_threshold + 100;
+
+TEST_CASE("a tab whose capture would not start at the head of the list is refused, on the wire") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    // A settled screen that is ALREADY scrolled by one tip pixel. Nothing moves, so the pre-existing
+    // premature-scroll branch cannot see it: the catcher latches, and without this mechanism the cue would
+    // sound over a capture whose head is missing.
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    CHECK(h.refusals.empty());
+    h.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+
+    REQUIRE(h.refusals.size() == 1);
+    CHECK(std::get<0>(h.refusals.front()) == static_cast<int>(FactorPage));
+    CHECK(std::get<1>(h.refusals.front()) == true);
+    CHECK(std::get<2>(h.refusals.front()) == "scrolled");
+    // The session is NOT failed: the other tabs are still capturable and this one is retryable.
+    CHECK(h.discards.empty());
+}
+
+TEST_CASE("a tab at the head of the list is not refused") {
+    // The negative control. Without it, "refused" would be indistinguishable from "this synthetic bar refuses
+    // everything", which is exactly how a threshold that is too tight would look.
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    h.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/0, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+
+    CHECK(h.refusals.empty());
+}
+
+TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refusal") {
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/1, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    h.scraper.update(
+        scrollBarFrameAt(kPastStationary, /*exposed_rows=*/1, /*nonce=*/1), SceneState{FactorPage, record::Standard});
+    REQUIRE(h.refusals.size() == 1);
+
+    // Leaving the refused tab must discard it. A refused tab has never set is_scrolling, so the switch
+    // handler's `started()` test alone would leave it in place: the user would come back to the same refused
+    // scraper, the tab would never complete, and the notice would never be withdrawn.
+    h.scraper.update(
+        scrollBarFrameAt(2 * kPastStationary, /*exposed_rows=*/1, /*nonce=*/2),
+        SceneState{CampaignPage, record::Standard});
+
+    REQUIRE(h.refusals.size() == 2);
+    CHECK(std::get<0>(h.refusals.back()) == static_cast<int>(FactorPage));
+    CHECK(std::get<1>(h.refusals.back()) == false);
+    // The withdrawal travels on the same message, so a front end holding one value per tab needs no second
+    // type; an empty reason is what "not refused" carries.
+    CHECK(std::get<2>(h.refusals.back()).empty());
 }
 
 }  // namespace

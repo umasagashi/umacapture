@@ -132,6 +132,20 @@ final scrollReadyEventProvider = _scrollReadyEvent.provider;
 final _pageReadyEvent = EventStreamProvider<int>();
 final pageReadyEventProvider = _pageReadyEvent.provider;
 
+/// One tab's capture was refused because it did not start at the head of its list.
+///
+/// **Its own stream rather than a second use of [errorEventProvider]**, even though it maps to the
+/// same chime. That provider is read by more than the notification layer — `capture.dart` clears the
+/// pending capture-toggle spinner on it, because every `onError` it carries is a session-level
+/// failure — and a refusal is neither session-level nor a reason to drop a control's pending state.
+/// One event stream per fact, with the sound chosen in `notification_controller.dart`, is also the
+/// shape [duplicatedCharaEventProvider] already has: two providers, one `SoundType.error`.
+///
+/// Emitted only on the transition INTO a refusal. The wire fact is a level, so re-stating it (or
+/// withdrawing it) must not chime again; the state map is what holds it.
+final _tabRefusedEvent = EventStreamProvider<int>();
+final tabRefusedEventProvider = _tabRefusedEvent.provider;
+
 /// One record the core has finished, and **which kind of session produced it**.
 ///
 /// The origin travels on the event, as data, rather than being inferred at the far end from
@@ -233,6 +247,18 @@ enum CharaDetailCaptureStatus {
   /// The early duplicate probe suggests this character is likely already captured (a hint, not an error).
   duplicateHint,
 
+  /// At least one tab refused its capture because it did not start at the head of its list.
+  ///
+  /// The user began scrolling before the ready cue, so the rows above the first captured fragment
+  /// were never seen. **Not terminal and not session-scoped**: only that tab is unusable, the other
+  /// tabs keep their progress, and leaving the tab and coming back rebuilds it and withdraws the
+  /// refusal (the core sends the withdrawal on the same message). Ranked above [capturing],
+  /// [detailReady] *and* [duplicateHint] because it needs an action the ordinary phases do not and
+  /// contradicts the hint's instruction, and below every terminal status. Winning the tie against
+  /// the hint has a cost — the hint's [CaptureEvent] is lost for that character — which
+  /// [CharaDetailCaptureState.status] states in full.
+  tabRefused,
+
   /// A completed capture was rejected because the character is already stored.
   alreadyCaptured,
 
@@ -270,6 +296,24 @@ class CharaDetailCaptureState {
   /// tab at top) are both derived from it and can never disagree. A non-scrollable tab counts as at top.
   bool atTop;
 
+  /// The tabs whose capture the core refused, by native tab index, to the machine reason it gave.
+  ///
+  /// **A level, not a tally.** The core states `onTabRefused` whenever the fact changes and
+  /// withdraws it on the same message type with `refused: false` (there is deliberately no paired
+  /// "cleared" type), so this holds the last value per index rather than counting events. An entry
+  /// means "this tab's first captured fragment was not the head of its list, so the rows above it
+  /// were never seen"; the remedy is to leave the tab and come back, which rebuilds it in the core
+  /// and arrives here as the withdrawal.
+  ///
+  /// The reason is the core's own stable word (`scrolled` / `unknown`), kept as data rather than
+  /// mapped to a status here: it is not user-facing, and an unrecognised word must still read as a
+  /// refusal, so nothing branches exhaustively on it.
+  ///
+  /// Session-scoped: [reset] drops it, which is what `onCharaDetailStarted`,
+  /// `onCharaDetailRestarted` and `onCharaDetailClosed` all reach. The core resets its own emitted
+  /// level at those points too and will not re-state it, so the two sides clear together.
+  Map<int, String> tabRefusals;
+
   CharaDetailCaptureState({
     this.skillTabProgress = 0,
     this.factorTabProgress = 0,
@@ -280,7 +324,8 @@ class CharaDetailCaptureState {
     this.duplicateRecordId,
     this.currentTab = 0,
     this.atTop = true,
-  });
+    Map<int, String>? tabRefusals,
+  }) : tabRefusals = Map<int, String>.from(tabRefusals ?? const <int, String>{});
 
   CharaDetailCaptureState clone() {
     return CharaDetailCaptureState(
@@ -293,6 +338,9 @@ class CharaDetailCaptureState {
       duplicateRecordId: duplicateRecordId,
       currentTab: currentTab,
       atTop: atTop,
+      // Copied, not shared: every mutator here returns a new state built from a clone, and a shared
+      // map would let a later refusal edit the state a listener already captured.
+      tabRefusals: tabRefusals,
     );
   }
 
@@ -333,6 +381,21 @@ class CharaDetailCaptureState {
     return state;
   }
 
+  /// Records, or withdraws, the core's refusal of one tab's capture.
+  ///
+  /// Idempotent by construction: [refused] is the level the core is stating for [index], so
+  /// re-stating the same level twice leaves the same map. Withdrawal removes the entry rather than
+  /// storing a false, so "is any tab refused" is `isNotEmpty` and cannot drift from the entries.
+  CharaDetailCaptureState tabRefused(int index, bool refused, String reason) {
+    final state = clone();
+    if (refused) {
+      state.tabRefusals[index] = reason;
+    } else {
+      state.tabRefusals.remove(index);
+    }
+    return state;
+  }
+
   CharaDetailCaptureState success({required String id}) {
     final state = reset();
     // Keep every tab pinned at 100% instead of clearing it, so the completed progress rings (and the
@@ -370,6 +433,29 @@ class CharaDetailCaptureState {
     }
     if (!detailOpened) {
       return CharaDetailCaptureStatus.waitingForDetail;
+    }
+    // A refused tab outranks BOTH the two ordinary phases below and the duplicate hint. Against the
+    // phases the case is plain: those say where the recognizer is, this says the user has to do
+    // something or one tab's rows are lost.
+    //
+    // **Against the hint it is a ruling with a stated cost, not a free win.** `duplicateHint` is one
+    // of the `_eventfulCaptureStatuses`, so it is recorded as a `CaptureEvent` on the TRANSITION into
+    // it. A refusal that keeps the status off `duplicateHint` therefore records nothing when the
+    // probe fires. The fact is not discarded — the probe error is held until the session resets, so
+    // the hint is recorded late if the state reaches it again — but on the path the refusal's own
+    // remedy puts the user on (leave the tab, come back, the core withdraws it there) the withdrawal
+    // lands while the factor top is not displayed, and the notice is then lost for that character.
+    //
+    // Accepted deliberately. Ranked the other way, the card answered the probe while a tab stood
+    // refused and told the user 「スクロールしてキャプチャを開始してください」 with the green switch arrows
+    // beside it -- at the one moment they are deciding whether to move on, and seconds after an error
+    // chime whose only on-screen explanation had just been displaced. A wrong instruction while a
+    // decision is being made outranks a notice that is a convenience: the duplicate is caught again
+    // at the end of the capture (`duplicated_character`, which is terminal), whereas the rows above a
+    // refused tab's first fragment are simply never seen. Both halves of the cost are asserted in
+    // `test/capture_event_test.dart`.
+    if (tabRefusals.isNotEmpty) {
+      return CharaDetailCaptureStatus.tabRefused;
     }
     // The probe hint only stands while the factor tab is still at its top (where the hint fired). Once the
     // user scrolls or navigates to another tab, factorAtTop is false and the stale hint degrades to the
@@ -417,6 +503,8 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
   void progress(int index, double progress) => state = state.progress(index, progress);
 
   void scrollPosition(int index, bool atTop) => state = state.scrollPosition(index, atTop);
+
+  void tabRefused(int index, bool refused, String reason) => state = state.tabRefused(index, refused, reason);
 
   void success(String id) => state = state.success(id: id);
 
@@ -480,6 +568,18 @@ final class VideoImportCaptureEvent extends CaptureEvent {
 /// frame by frame. Recording them would replace the last outcome with a restatement of the
 /// rings, which is the one thing an event must never do: it is the only surface that still
 /// remembers what happened.
+///
+/// `tabRefused` is the one of those five that is arguably news, and it is still left out: it is a
+/// LEVEL the user is being asked to act on, withdrawn the moment they do, so as an event it would
+/// outlive the condition it names — and it would spend the card's single slot, displacing the last
+/// character's outcome and the record link that opens it. The banner carries it instead.
+///
+/// **Membership is not a guarantee that the event is recorded.** These are recorded on the
+/// TRANSITION into the status, so a status that never becomes current is never recorded. That bites
+/// `duplicateHint`: `tabRefused` outranks it (see [CharaDetailCaptureState.status]), so a probe
+/// firing while a tab stands refused records nothing at the time, and on the path the refusal's
+/// remedy puts the user on it is never recorded at all. Accepted deliberately — the reasoning, and
+/// exactly what is lost, is written out at the ranking itself.
 const _eventfulCaptureStatuses = {
   CharaDetailCaptureStatus.succeeded,
   CharaDetailCaptureStatus.duplicateHint,
@@ -1313,6 +1413,37 @@ class PlatformController {
             final atTop = data['at_top'] as bool?;
             if (index != null && atTop != null) {
               captureState.scrollPosition(index, atTop);
+            }
+          }
+          break;
+        case 'onTabRefused':
+          {
+            // THE TAB'S CAPTURE DID NOT START AT THE HEAD OF ITS LIST -- the user began scrolling
+            // before the ready cue, so the rows above the first captured fragment were never seen.
+            //
+            // Deliberately NOT routed to `captureState.fail`. That marks the whole session failed,
+            // which is terminal and would blank `switchSafety` at the one moment the remedy is to
+            // move between tabs; only this tab is unusable and the session goes on waiting for it.
+            //
+            // `refused` is a LEVEL the core re-states when it changes, and the withdrawal arrives on
+            // this same type with `refused: false` (a tab switch rebuilds the tab in the core). So
+            // the map holds the last value per index and nothing counts events.
+            final index = data['index'] as int?;
+            final refused = data['refused'] as bool?;
+            if (index == null || refused == null) {
+              break;
+            }
+            // A machine word (`scrolled` / `unknown`), coerced rather than type-checked: an
+            // unrecognised or missing reason must still read as a refusal, so nothing here may
+            // reject the message over it.
+            final reason = data['reason']?.toString() ?? '';
+            final wasRefused = _ref.read(charaDetailCaptureStateProvider).tabRefusals.containsKey(index);
+            captureState.tabRefused(index, refused, reason);
+            // The chime fires on the transition into a refusal only. The user is watching the game,
+            // not the app -- which is why this is audible at all -- but a level re-stated by the
+            // core, or withdrawn on a tab switch, is not news and must not chime again.
+            if (refused && !wasRefused) {
+              _tabRefusedEvent.add(_soundEventSequence++);
             }
           }
           break;

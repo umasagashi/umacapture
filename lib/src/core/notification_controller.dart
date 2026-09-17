@@ -128,6 +128,12 @@ class _NotificationLayerState extends ConsumerState<NotificationLayer> {
     _listenForPlaySound(pageReadyEventProvider, SoundType.success);
     _listenForPlaySound(errorEventProvider, SoundType.error);
     _listenForPlaySound(duplicatedCharaEventProvider, SoundType.error);
+    // A tab refused because scrolling started before the standby cue. The existing error chime, and
+    // not a new sound: the user is looking at the game while scrolling, so the banner alone would go
+    // unseen -- but what they need to hear is "stop, something is wrong", which this already says.
+    // Gated by the import mute above like every other cue, which is right: an import scrolls nothing
+    // and nobody is watching it.
+    _listenForPlaySound(tabRefusedEventProvider, SoundType.error);
 
     _listenForToastData(plainToastEventProvider);
     _listenForToast<ExportResult>(

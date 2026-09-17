@@ -339,8 +339,9 @@ class CharaDetailStateWidget extends ConsumerWidget {
   // and the clip scrolls the tabs exactly as a live session would.
   Widget _buildProgress(BuildContext context, WidgetRef ref, {required bool switchHints}) {
     final state = ref.watch(charaDetailCaptureStateProvider);
-    // Within the states that show progress (detailReady / capturing / duplicateHint) switchSafety is
-    // always non-null; default defensively so an unexpected null reads as "not safe to switch".
+    // Every status that shows progress answers switchSafety non-null -- the list is `detailActive`
+    // in `build`, and it is the list, not a copy of it kept here, that decides which ones reach this
+    // row. Default defensively so an unexpected null reads as "not safe to switch".
     final safe = state.switchSafety ?? false;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -464,6 +465,15 @@ class CharaDetailStateWidget extends ConsumerWidget {
         );
       case CharaDetailCaptureStatus.capturing:
         return _StatusMessage(CaptureStatusTone.info, Symbols.downloading_rounded, "$base.capturing");
+      case CharaDetailCaptureStatus.tabRefused:
+        // Present tense, and it belongs here rather than in the event tile: the refusal is a level
+        // that stands until the user acts on it, and it is withdrawn the moment they do. An event
+        // is the past tense and would outlive the condition it describes -- and would spend the
+        // card's single event slot, displacing the last character's outcome and its record link.
+        //
+        // Error tone, not hint: a refused tab produces no record for that tab, and the capture will
+        // sit waiting until it is retried or the screen is closed.
+        return _StatusMessage(CaptureStatusTone.error, Symbols.block_rounded, "$base.tab_refused");
       case CharaDetailCaptureStatus.succeeded:
       case CharaDetailCaptureStatus.alreadyCaptured:
         // Both mean the same thing about the screen in front of the user: every tab of this
@@ -564,6 +574,11 @@ class CharaDetailStateWidget extends ConsumerWidget {
         (status == CharaDetailCaptureStatus.detailReady ||
             status == CharaDetailCaptureStatus.capturing ||
             status == CharaDetailCaptureStatus.duplicateHint ||
+            // A refused tab is still an open detail screen with a session in progress: the other
+            // tabs keep whatever they captured, and the remedy is to move between the tabs the rings
+            // describe. Dropping the rings (and with them the switch indicators) here would hide the
+            // very display the user is being told to act on.
+            status == CharaDetailCaptureStatus.tabRefused ||
             status == CharaDetailCaptureStatus.succeeded ||
             status == CharaDetailCaptureStatus.alreadyCaptured);
 
@@ -1432,7 +1447,7 @@ class CaptureEventView extends ConsumerWidget {
       CharaDetailCaptureStatus.succeeded => (CaptureStatusTone.success, Symbols.check_circle_rounded, "succeeded"),
       CharaDetailCaptureStatus.duplicateHint => (CaptureStatusTone.hint, Symbols.lightbulb_rounded, "duplicate_hint"),
       CharaDetailCaptureStatus.alreadyCaptured => (CaptureStatusTone.neutral, Symbols.info_rounded, "already_captured"),
-      // Only `failed` is left; the other three statuses are positions inside a character and are
+      // Only `failed` is left; the other five statuses are positions inside a character and are
       // never recorded as events (see `_eventfulCaptureStatuses`).
       _ => (CaptureStatusTone.error, Symbols.error_rounded, "failed"),
     };

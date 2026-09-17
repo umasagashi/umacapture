@@ -28,6 +28,7 @@
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -37,6 +38,7 @@
 #include "chara_detail/chara_detail_scene_scraper.h"
 #include "cv/frame.h"
 #include "util/cv_test_helpers.h"
+#include "util/event_util.h"
 #include "util/json_util.h"
 
 // Same narrow exception as test_config.cpp: the committed scene_scraper.json is small versioned config, and
@@ -1158,6 +1160,347 @@ TEST_CASE("StationaryFrameCatcher measures a fraction of its region, not an abso
     large.update(Frame::fixed(testutil::solid(200, kTrack), 0));
     large.update(changedBy(200, 100));
     CHECK(large.ready());
+}
+
+// --------------------------------------------------------------------------------------------------------
+// Premature-scroll detection: the head-of-list policy, and the interpreter that applies it to fragment #0.
+// --------------------------------------------------------------------------------------------------------
+
+// Directory hooks that record instead of touching the filesystem (the same shape test_scraping_box.cpp uses;
+// its recorder has internal linkage, so it cannot be shared across translation units).
+struct DirectoryHookRecorder {
+    std::vector<std::filesystem::path> made;
+    std::vector<std::filesystem::path> removed;
+
+    [[nodiscard]] io_util::DirectoryHooks hooks() {
+        io_util::DirectoryHooks h;
+        h.mkdir = [this](const std::filesystem::path &path) { made.push_back(path); };
+        h.rmdir = [this](const std::filesystem::path &path) { removed.push_back(path); };
+        return h;
+    }
+};
+
+using scraper_impl::NonScrollableScrapingInterpreter;
+using scraper_impl::PageScrapingBox;
+using scraper_impl::ScrollableScrapingInterpreter;
+using scraper_impl::TopOfContent;
+using scraper_impl::TopOfContentPolicy;
+
+TEST_CASE("TopOfContentPolicy names the unmeasurable case instead of folding it into a bool") {
+    // An unreadable thumb is a third state, not a bool: a caller that re-typed the comparison itself would pick
+    // a direction silently, and callers do not all want the same one. Only the fail-closed direction is shipped
+    // as a constant (kMissingReadingIsScrolled), so the fail-open arm is a policy built right here: what is
+    // pinned is the CLASS's contract in both directions.
+    const auto fail_closed = CharaDetailSceneScraper::kMissingReadingIsScrolled;
+    constexpr TopOfContentPolicy fail_open{TopOfContent::AtTop};
+
+    // The reading reaches a policy UNRESOLVED: the thumb's derivation names the absent reading rather than
+    // answering for it...
+    CHECK(CharaDetailSceneScraper::thumbTopOfContent(std::nullopt) == TopOfContent::Unknown);
+
+    // ...and each policy states its own answer for it, as data rather than as which `||` someone typed.
+    CHECK(fail_closed.resolve(TopOfContent::Unknown) == TopOfContent::Scrolled);
+    CHECK(fail_open.resolve(TopOfContent::Unknown) == TopOfContent::AtTop);
+
+    // A present reading is passed through by both; only the missing one differs.
+    for (const auto present : {TopOfContent::AtTop, TopOfContent::Scrolled}) {
+        CHECK(fail_closed.resolve(present) == present);
+        CHECK(fail_open.resolve(present) == present);
+    }
+}
+
+TEST_CASE("the one shipped threshold refuses the smallest head start the widget can show") {
+    using Scraper = CharaDetailSceneScraper;
+    const auto accepted = [](const std::optional<double> &top_margin) {
+        return Scraper::kMissingReadingIsScrolled.resolve(Scraper::thumbTopOfContent(top_margin))
+               == TopOfContent::AtTop;
+    };
+
+    // A genuine top reads exactly 0 (see the case above on scrollbarFrameCappedTop), and it is accepted.
+    CHECK(Scraper::thumbTopOfContent(0.0) == TopOfContent::AtTop);
+    CHECK(accepted(0.0));
+
+    // One tip pixel of travel -- the smallest movement the widget can show -- was measured across this
+    // project's clip corpus at 0.00196..0.00267, and it must read as Scrolled. Those readings sit an order of
+    // magnitude below kTopMarginThreshold (0.02), which is why fragment #0 is not judged against that one.
+    for (const double head_start : {0.00196, 0.00267}) {
+        CHECK(Scraper::thumbTopOfContent(head_start) == TopOfContent::Scrolled);
+    }
+
+    // The bound the ruling actually made -- "not one missed row" -- is that this threshold is EXACTLY zero,
+    // and no literal taken from the corpus can state that: every one of them leaves room underneath. The
+    // smallest positive double does state it. Together with thumbTopOfContent(0.0) == AtTop above (which forbids
+    // a threshold below 0) this brackets the constant to 0 from both sides, which is the whole of what
+    // kExposedTrackTopMargin is required to be. Any strictly positive threshold turns this red, including one
+    // too small to matter on the corpus -- deliberately, because "too small to matter" is a claim about a
+    // corpus of one device and the ruling is not.
+    CHECK(Scraper::thumbTopOfContent(std::nextafter(0.0, 1.0)) == TopOfContent::Scrolled);
+    // ...and the same through the resolution the call site actually applies, so a resolve() that rounded or
+    // clamped on its way to a verdict could not hide behind the derivation.
+    CHECK_FALSE(accepted(std::nextafter(0.0, 1.0)));
+
+    // Unmeasurable on a page that HAS a scroll bar: refuse rather than capture a possibly truncated list.
+    CHECK_FALSE(accepted(std::nullopt));
+}
+
+// A 100x200 frame whose TOP 100 rows are scrollable content and whose BOTTOM 100 rows are the scroll-bar
+// band, mirroring the production split: the interpreter is configured with two rects addressing genuinely
+// different pixels, so a test cannot accidentally judge the content crop's geometry as if it were the bar's.
+//
+// `content_shift` moves the content texture (what the image estimator measures); `exposed_rows` moves the
+// thumb (what the head-of-list policy measures). They are independent on purpose -- premature scroll is
+// exactly the case where the bar has already moved before the content the interpreter latches.
+Frame contentAndScrollBar(int content_shift, int exposed_rows, uint64 timestamp) {
+    constexpr int kSize = 100;
+    cv::Mat mat(2 * kSize, kSize, CV_8UC3);
+    // Aperiodic over the 100 visible rows (period 200, stride coprime with it), so the shift proposal has a
+    // unique answer and the overlap verification confirms it rather than an alias.
+    for (int r = 0; r < kSize; r++) {
+        const auto value = static_cast<uchar>((r + content_shift) * 53 % 200 + 28);
+        mat.row(r).setTo(cv::Scalar(value, value, value));
+    }
+    const Frame bar = scrollbarFrameCappedTop(kSize, exposed_rows, /*thumb_rows=*/20);
+    bar.data().copyTo(mat(cv::Rect(0, kSize, kSize, kSize)));
+    return Frame::fixed(mat, timestamp);
+}
+
+// The two rects above, in the frame's own width-normalized units (Frame::fixed normalizes both axes by the
+// width, so the 200-row frame spans y in [0, 2)).
+const Rect<double> kContentRect{Point<double>(0.0, 0.0), Point<double>(1.0, 1.0)};
+const Rect<double> kBarRect{Point<double>(0.0, 1.0), Point<double>(1.0, 2.0)};
+
+struct InterpreterHarness {
+    DirectoryHookRecorder recorder;
+    std::shared_ptr<PageScrapingBox> box;
+    event_util::Connection<> scroll_ready = event_util::makeDirectConnection<>();
+    event_util::Connection<Frame, bool> head_latched = event_util::makeDirectConnection<Frame, bool>();
+    event_util::Connection<double> scroll_updated = event_util::makeDirectConnection<double>();
+    int ready_count = 0;
+    // Every frame published as fragment #0, in order. A count alone could not tell "published the right
+    // pixels" from "published whatever was current", which is the distinction the motion exit turns on.
+    std::vector<Frame> latched_frames;
+    // The `cue_owed` each of those latches carried, in the same order. Recorded separately from ready_count
+    // because the two are different claims: ready_count says the cue reached the wire, this says the latch
+    // event stated whether it was owed -- which is what a consumer that synthesizes the cue downstream reads.
+    std::vector<bool> latched_cues;
+    std::unique_ptr<ScrollableScrapingInterpreter> interpreter;
+
+    // THE JUDGMENT THIS HARNESS HANDS IN: the thumb's, as CharaDetailSceneScraper::topOfContent takes it -- the
+    // scroll-bar band of the frame it is given, against the shipped threshold. The interpreter owns no judgment
+    // of its own; what these cases pin is WHICH frame it asks about and how it acts on the answer.
+    [[nodiscard]] static scraper_impl::TopOfContentJudge thumbJudge() {
+        return [thumb = makeScrollBarEstimator()](const Frame &frame) {
+            return scraper_impl::TopOfContentReading{
+                CharaDetailSceneScraper::thumbTopOfContent(thumb.topMargin(frame.copy(kBarRect))),
+                scraper_impl::TopOfContentSensor::ScrollThumb};
+        };
+    }
+
+    // `stationary_time` selects which startScrolling path the caller exercises: 0 latches on the second
+    // identical frame (the stationary path, which also sends the ready cue), while a time no test frame
+    // reaches keeps the catcher open so the motion path runs instead.
+    explicit InterpreterHarness(uint64 stationary_time)
+        // No scan parameters: this exercises the interpreter's decision, and an empty scan set makes
+        // addScrollArea a no-op, so a latch cannot reach the filesystem.
+        : box(std::make_shared<PageScrapingBox>(
+              std::vector<scraper_config::ScanParameter>{}, "unit_test_premature_scroll", recorder.hooks())) {
+        scroll_ready->listen([this]() { ready_count++; });
+        head_latched->listen([this](const Frame &frame, bool cue_owed) {
+            latched_frames.push_back(frame);
+            latched_cues.push_back(cue_owed);
+        });
+        interpreter = std::make_unique<ScrollableScrapingInterpreter>(
+            box,
+            ScrollAreaOffsetEstimator(makeScrollBarEstimator(), ImageOffsetEstimator(), kGuessMargin),
+            StationaryFrameCatcher(stationary_time, /*minimum_color=*/10, kAnyPixel, Rect<double>{}),
+            kContentRect,
+            kBarRect,
+            /*initial_scroll_threshold=*/3.0,
+            /*minimum_scroll_threshold=*/1.0,
+            thumbJudge(),
+            CharaDetailSceneScraper::kMissingReadingIsScrolled,
+            scroll_ready,
+            head_latched,
+            scroll_updated);
+    }
+};
+
+TEST_CASE("the stationary path latches fragment #0 when the list is at its head") {
+    // Positive control for the case below. Without it, "refused" would be indistinguishable from "this
+    // synthetic never latches anything at all".
+    InterpreterHarness h(/*stationary_time=*/0);
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, 0));
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, 50));
+
+    CHECK(h.latched_frames.size() == 1);
+    CHECK_FALSE(h.interpreter->refusal().has_value());
+    CHECK(h.ready_count == 1);
+}
+
+TEST_CASE("the stationary path refuses a settled screen that was already scrolled") {
+    // The case the request is about, and the one the pre-existing detector cannot see: the user scrolled
+    // before (or while) opening the tab, the screen then settles perfectly, so the stationary catcher latches
+    // and the cue fires over a capture whose head is missing. One tip pixel is enough.
+    InterpreterHarness h(/*stationary_time=*/0);
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 0));
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 50));
+
+    CHECK(h.latched_frames.empty());
+    REQUIRE(h.interpreter->refusal().has_value());
+    CHECK(h.interpreter->refusal().value() == TopOfContent::Scrolled);
+    // The cue must NOT sound: it tells the user to start scrolling a capture that will not be kept.
+    CHECK(h.ready_count == 0);
+}
+
+TEST_CASE("the motion path judges the descriptor it latches, not the frame that triggered it") {
+    // The second route into startScrolling. The interpreter's FIRST frame becomes initial_descriptor; a later
+    // frame that has moved past initial_scroll makes it latch that older descriptor. So the verdict must come
+    // from the older frame's scroll bar -- here at the head -- even though the current frame is far from it.
+    // The thumb moves 2 rows while the content moves 10 px, which is what the scroll-bar guess predicts for
+    // this synthetic geometry (unit viewport, 20 px thumb over a 100 px frame): a wildly inconsistent pair
+    // would be vetoed by ScrollAreaOffsetEstimator and never reach startScrolling at all.
+    InterpreterHarness h(/*stationary_time=*/1'000'000);
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, 0));
+    CHECK(h.latched_frames.empty());
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/10, /*exposed_rows=*/2, 50));
+
+    CHECK(h.latched_frames.size() == 1);
+    CHECK_FALSE(h.interpreter->refusal().has_value());
+    CHECK(h.ready_count == 0);  // this path deliberately never sends the cue
+}
+
+TEST_CASE("the motion path refuses when the descriptor it latches was already scrolled") {
+    // Same route, with the head start present on the FIRST frame. A check placed anywhere but inside
+    // startScrolling would be reading the second frame here, which is scrolled either way and would therefore
+    // agree with this expectation for the wrong reason; the case above is what separates the two.
+    InterpreterHarness h(/*stationary_time=*/1'000'000);
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 0));
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/10, /*exposed_rows=*/3, 50));
+
+    CHECK(h.latched_frames.empty());
+    REQUIRE(h.interpreter->refusal().has_value());
+    CHECK(h.interpreter->refusal().value() == TopOfContent::Scrolled);
+}
+
+// The grey level contentAndScrollBar paints into the content's first row for a given shift. Row 0 of a shift-0
+// frame is 28; of a shift-10 frame, 158. Used to tell WHICH frame was published apart from "a frame was".
+int firstContentRow(const Frame &frame) {
+    return frame.data().at<cv::Vec3b>(0, 0)[0];
+}
+
+TEST_CASE("startScrolling publishes fragment #0's own full frame from both of its exits") {
+    // The fact this pins: "the frame that became fragment #0" is available to a consumer on EVERY exit, and it
+    // is fragment #0's own frame rather than whichever frame was current when something else fired. Before this
+    // publication existed the only signal carrying those pixels was the ready cue, which the motion exit
+    // deliberately never sends (see "the motion path judges the descriptor it latches" above) -- so a consumer
+    // hanging off the cue got nothing at all on that exit, and the frame it took on the other exit was fragment
+    // #0's only by coincidence of the two being the same frame there.
+    //
+    // Both exits are driven in one case so the pair cannot drift apart, and each published frame is checked for
+    // (a) full resolution -- 200 rows, i.e. content AND bar, not the 100-row content crop the interpreter keeps
+    // -- and (b) identity, by its timestamp and its first content row.
+    // The two negative controls run FIRST, deliberately. A failing REQUIRE aborts the whole test case, not just
+    // its subcase, so a control declared after a broken expectation is not merely unreported -- it is unrun, and
+    // "refused publishes nothing" would then be indistinguishable from "nothing publishes anything" in exactly
+    // the run where that distinction is being asked for.
+    SUBCASE("a refused stationary exit publishes nothing") {
+        // Nothing became fragment #0, so there are no pixels to name. Publishing here would hand a consumer a
+        // frame that is at the wrong position by definition -- the case the whole refusal exists to reject.
+        InterpreterHarness h(/*stationary_time=*/0);
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 0));
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 50));
+
+        REQUIRE(h.interpreter->refusal().has_value());
+        CHECK(h.latched_frames.empty());
+        CHECK(h.latched_cues.empty());
+    }
+
+    SUBCASE("a refused motion exit publishes nothing") {
+        InterpreterHarness h(/*stationary_time=*/1'000'000);
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 0));
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/10, /*exposed_rows=*/3, 50));
+
+        REQUIRE(h.interpreter->refusal().has_value());
+        CHECK(h.latched_frames.empty());
+        CHECK(h.latched_cues.empty());
+    }
+
+    SUBCASE("the stationary exit") {
+        InterpreterHarness h(/*stationary_time=*/0);
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, 0));
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, 50));
+
+        REQUIRE(h.latched_frames.size() == 1);
+        CHECK(h.latched_frames[0].height() == 200);  // the crop alone would be 100
+        CHECK(h.latched_frames[0].width() == 100);
+        // The catcher latches on the frame it was just handed, so fragment #0 here is the SECOND frame.
+        CHECK(h.latched_frames[0].timestamp() == 50);
+        CHECK(h.ready_count == 1);  // this exit still announces itself; the two signals coexist
+        // ...and it SAYS so on the latch, which is not the same claim. The cue above reached the wire; this is
+        // the fact travelling to a consumer that must synthesize the announcement further downstream, and the
+        // factor tab -- whose cue never reaches the wire at all -- has only this one.
+        CHECK(h.latched_cues == std::vector<bool>{true});
+    }
+
+    SUBCASE("the motion exit") {
+        InterpreterHarness h(/*stationary_time=*/1'000'000);
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, 0));
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/10, /*exposed_rows=*/2, 50));
+
+        REQUIRE(h.latched_frames.size() == 1);
+        CHECK(h.latched_frames[0].height() == 200);
+        CHECK(h.latched_frames[0].width() == 100);
+        // The published frame must be initial_descriptor's own -- the FIRST frame -- and not the frame that
+        // triggered the exit. Both assertions below separate them: the trigger frame is timestamp 50 and its
+        // first content row reads 158.
+        CHECK(h.latched_frames[0].timestamp() == 0);
+        CHECK(firstContentRow(h.latched_frames[0]) == 28);
+        CHECK(h.ready_count == 0);  // and it still announces nothing, which is why the cue could not carry this
+        // The latch says the announcement is not owed. Without this the silence above is only observable by a
+        // consumer sitting on on_scroll_ready -- which the factor tab is not, so its chime would sound anyway.
+        CHECK(h.latched_cues == std::vector<bool>{false});
+    }
+
+}
+
+TEST_CASE("a refused interpreter stays refused instead of latching a later stationary frame") {
+    // Refusal is terminal per interpreter. Were it not, the tab would go on hunting for a stationary frame and
+    // latch a fragment #0 further down the list -- capturing exactly the truncated list this rejects. The way
+    // out is a rebuild, which CharaDetailSceneScraper::handleTabSwitchInProgress performs on a tab switch.
+    InterpreterHarness h(/*stationary_time=*/0);
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 0));
+    h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/1, 50));
+    REQUIRE(h.interpreter->refusal().has_value());
+
+    // Now hold a perfectly settled, genuinely-at-top screen in front of it for a long time.
+    for (uint64 t = 100; t <= 1000; t += 100) {
+        h.interpreter->update(contentAndScrollBar(/*content_shift=*/0, /*exposed_rows=*/0, t));
+    }
+    CHECK(h.latched_frames.empty());
+    CHECK_FALSE(h.interpreter->ready());
+    CHECK(h.interpreter->refusal().value() == TopOfContent::Scrolled);
+    CHECK(h.ready_count == 0);
+}
+
+TEST_CASE("a page with no scroll bar is never refused") {
+    // The structural exemption, asserted rather than assumed: the skill tab of an inheritance-only record has
+    // no scroll bar at all, and its interpreter is given no policy. Handing one in would resolve Unknown to
+    // "scrolled" on every frame and refuse that tab every single time.
+    DirectoryHookRecorder recorder;
+    const auto box = std::make_shared<PageScrapingBox>(
+        std::vector<scraper_config::ScanParameter>{}, "unit_test_no_scroll_bar", recorder.hooks());
+    // A stationary time no frame here reaches, so the page never latches and nothing is written to disk; this
+    // case is about the refusal level, which is answered from the first update onwards.
+    NonScrollableScrapingInterpreter interpreter(
+        box,
+        StationaryFrameCatcher(/*stationary_time=*/1'000'000, /*minimum_color=*/10, kAnyPixel, Rect<double>{}),
+        kContentRect);
+
+    interpreter.update(contentAndScrollBar(0, 1, 0));
+    interpreter.update(contentAndScrollBar(0, 1, 50));
+
+    CHECK_FALSE(interpreter.ready());
+    CHECK_FALSE(interpreter.refusal().has_value());
 }
 
 }  // namespace
