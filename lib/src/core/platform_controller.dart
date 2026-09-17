@@ -286,8 +286,9 @@ enum TopOfContent {
   atTop('at_top'),
   scrolled('scrolled'),
 
-  /// No sensor could read this frame — the tab's scroll bar was unmeasurable for a moment, the tab
-  /// has not been built yet, or the page has no scroll bar at all.
+  /// No sensor could read this frame — the tab's scroll bar was unmeasurable for a moment, or the
+  /// tab has not been built yet. A page with no scroll bar at all never reaches this: the core
+  /// answers `at_top` for it from the tab's structure, before either sensor is asked.
   unknown('unknown');
 
   const TopOfContent(this.wireWord);
@@ -354,13 +355,14 @@ class CharaDetailCaptureState {
   /// diffs against, as the core states it on `onFactorSwitchArmed`.
   ///
   /// **A level the core states on edges**, restated on the first frame of every session. The
-  /// reference is installed by the factor tab's head latch and cleared when an unfinished factor tab
-  /// is rebuilt or the session is reset.
+  /// reference is installed by the factor tab's head latch (on a page with no scroll bar, by its one
+  /// stationary frame) and cleared when an unfinished factor tab is rebuilt or the session is reset.
   /// Until then a switch cannot be detected, however the screen looks; [switchSafety] reads this for
   /// exactly that reason.
   ///
   /// Session-scoped: [reset] drops it. [success] **keeps** it, as it keeps [currentTab]: the core
-  /// states it on edges only and does not restate it when a session completes.
+  /// states it on edges only and does not restate it when a session completes, and a completed session
+  /// always holds the reference.
   bool factorSwitchArmed;
 
   /// The tabs whose capture the core refused, by native tab index, to the machine reason it gave.
@@ -561,11 +563,13 @@ class CharaDetailCaptureState {
     // from two independent heuristics.
     //
     // **FAIL-OPEN, and this is the one place the phase resolves it**: only a MEASURED "scrolled"
-    // moves the card into its capturing phase. A tab nobody could read — a page with no scroll bar
-    // at all, or a frame whose bar was unmeasurable — has nothing to have scrolled away from, and
-    // announcing "capturing" there would tell the user a capture is under way on a tab that cannot
-    // start one. The opposite direction belongs to [factorAtTop], and the two differ deliberately:
-    // a wrong phase costs a wrong sentence, a wrong switch arrow costs the capture.
+    // moves the card into its capturing phase. A tab nobody could read — a frame whose bar was
+    // unmeasurable, or a tab not yet built — has nothing to have scrolled away from, and announcing
+    // "capturing" there would tell the user a capture is under way on a tab that cannot start one.
+    // (A page with no scroll bar at all is not this case: the core states its structural `at_top`
+    // before either sensor is asked, so it never reads `unknown`.) The opposite direction belongs to
+    // [factorAtTop], the duplicate-hint gate above, which resolves it the way the core's
+    // switch-detection gate does.
     if (topOfContent == TopOfContent.scrolled) {
       return CharaDetailCaptureStatus.capturing;
     }
@@ -594,21 +598,22 @@ class CharaDetailCaptureState {
 
   /// Whether the 継承タブ (the factor tab) is the tab on screen, at any scroll position.
   ///
-  /// The one tab whose content the core compares for a character switch (Rule 3). Half of the switch
-  /// arrows' condition; the other half is whether Rule 3 is armed ([factorSwitchArmed]). See
-  /// [switchSafety].
+  /// The one tab the core watches for a character switch (Rule 3), during capture and after the session
+  /// completes alike. Half of the switch arrows' condition; the other half is whether Rule 3 is armed
+  /// ([factorSwitchArmed]). See [switchSafety].
   bool get factorTabShown => currentTab == factorTabIndex;
 
   /// Whether it is safe to navigate to an adjacent character without closing the detail screen.
   ///
-  /// A switch is offered where the 継承タブ (the factor tab) will judge it: that tab is shown
-  /// ([factorTabShown]) **and** Rule 3 holds its reference ([factorSwitchArmed]), before and after the
-  /// session completes alike. A record switch opens the new record's 継承タブ at its head; while the tab is
-  /// being captured Rule 3 compares it with the reference, and once it is captured the completed-tab rule
-  /// sees a captured tab back at its head. The skill and 育成情報 tabs are not offered: an inherited
-  /// character's skill list can be empty and it carries no status block, so nothing there is compared.
-  /// Returns null when there is no meaningful guidance (no detail session, or a hard error surfaced
-  /// separately).
+  /// The core detects a character switch on one tab only: the 継承タブ (the factor tab), by Rule 3's
+  /// content diff, which keeps watching that tab after it is captured and after the session completes.
+  /// No rule watches the skill or 育成情報 tabs, during capture or after it — an inherited character's
+  /// skill list can be empty and it carries no status block, so those tabs need not change on a switch.
+  /// A switch made there is seen only if the record type changes with it, and is otherwise captured
+  /// into the current record, or not noticed after completion. So a switch is safe only while the
+  /// 継承タブ is shown ([factorTabShown]) **and** Rule 3 holds its reference ([factorSwitchArmed]),
+  /// before and after the session completes alike. Returns null when there is no meaningful guidance
+  /// (no detail session, or a hard error surfaced separately).
   ///
   /// **"Detectable" is not "every pair of records is told apart".** At the factor top Rule 3's pixel diff only
   /// nominates a switch; the core then reads the self factors both frames show (the visible prefix: the rows whose
@@ -628,8 +633,8 @@ class CharaDetailCaptureState {
   /// record switch, a switch from there would go unseen with the arrows shown.
   ///
   /// **Whether Rule 3 is armed is data, stated by the core.** The diff it nominates a switch by is taken
-  /// against a reference the factor tab's head latch installs, and until that latch there is no
-  /// reference at all: at the factor top, before the
+  /// against a reference the factor tab's head latch installs (on a page with no scroll bar, by its one
+  /// stationary frame), and until that latch there is no reference at all: at the factor top, before the
   /// latch, the screen looks exactly like the safe moment and is not one. The core states the reference's
   /// presence as its own level ([factorSwitchArmed]), and this reads that level.
   ///
@@ -644,9 +649,10 @@ class CharaDetailCaptureState {
   /// own answer here: the wildcard means "no guidance", which is the wrong answer for every phase
   /// status and is silent about being wrong.
   bool? get switchSafety => switch (status) {
-    // One answer for the phases and the completed states alike: the 継承タブ shown and Rule 3 holding its
-    // reference. `duplicateHint` is gated on [factorAtTop], so it is always on the factor tab; it reads the
-    // same facts rather than a second `true` that would agree only by that gate.
+    // One answer for the phases and the completed states alike: Rule 3 on the factor tab is the only switch
+    // detector, it watches that tab before and after the session completes, and it can nominate a switch only
+    // once it holds its reference. `duplicateHint` is gated on [factorAtTop], so it is always on the factor
+    // tab; it reads the same facts rather than a second `true` that would agree only by that gate.
     CharaDetailCaptureStatus.detailReady ||
     CharaDetailCaptureStatus.capturing ||
     CharaDetailCaptureStatus.duplicateHint ||
@@ -1641,8 +1647,8 @@ class PlatformController {
           // open, and the probe key is cleared so the new character's early duplicate check runs — which
           // is why this shared the `onCharaDetailStarted` case until the message gained a payload.
           //
-          // WHAT IT DOES *NOT* DO IS REPORT A FAILURE, and that is a decision rather than an omission: all
-          // three of the scraper's reset rules fire legitimately when the player switches character, so a
+          // WHAT IT DOES *NOT* DO IS REPORT A FAILURE, and that is a decision rather than an omission: both
+          // of the scraper's reset rules fire legitimately when the player switches character, so a
           // live capture must stay silent here (the switch is the feature working). Only an import counts
           // it, and only through the tally below, which is closed while no import is running.
           //

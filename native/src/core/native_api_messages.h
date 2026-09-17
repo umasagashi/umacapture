@@ -46,7 +46,10 @@ inline std::string scrollUpdated(int index, double progress) {
 //
 // `top_of_content` is the same stable machine word `onTabRefused`'s `reason` carries
 // (scraper_impl::topOfContentTag): "at_top", "scrolled", or "unknown" when no sensor could read this frame --
-// the factor tab's scroll bar unmeasurable for a moment, or a factor page that has no scroll bar at all.
+// a tab not built yet, or a scroll bar unmeasurable for a moment on a page that has one. A page with NO scroll
+// bar at all reads "at_top" from the frame after its tab is built, on every tab and whatever its frames show:
+// it cannot be anywhere but the head of its content, and the core takes that from the structure the tab was
+// built with, before any sensor (CharaDetailSceneScraper::topOfContent).
 //
 // NOT A BOOL, and that is the contract rather than a richer payload for its own sake. The core cannot answer
 // "unknown" for the front end because the front end has two consumers whose costs for a wrong answer are
@@ -90,13 +93,12 @@ inline std::string tabRefused(int index, bool refused, const std::string &reason
         .dump();
 }
 
-// WHETHER THE FACTOR TAB'S CHARACTER-SWITCH RULE (Rule 3) HOLDS ITS REFERENCE: the core has a frame to compare
-// the factor tab against (CharaDetailSceneScraper::factorSwitchArmed). Not per tab, because the reference is not:
-// it is installed by the factor tab's head latch, kept through that tab's capture and the session's completion,
-// and dropped only when the factor tab is rebuilt or the session is discarded. A front end offers a switch exactly
-// when the factor tab is shown (onScrollPosition's `index`) AND this level is true: a record switch opens the new
-// record's factor tab at its head, where Rule 3 compares it with the reference while the tab is being captured,
-// and where the completed-tab rule sees a captured tab back at its head once it is.
+// WHETHER THE CHARACTER-SWITCH RULE CAN SEE A SWITCH RIGHT NOW: the core holds a reference to compare the factor
+// tab against (CharaDetailSceneScraper::factorSwitchArmed). Not per tab, because the reference is not: it is
+// installed by the factor tab's head latch, kept through that tab's capture and the session's completion, and
+// dropped only when the factor tab is rebuilt or the session is discarded. The rule watches only the factor tab,
+// and that half is already on the wire (onScrollPosition's `index`), so a front end offers a switch exactly when
+// the factor tab is shown AND this level is true -- which is the rule's own condition, read from the rule.
 //
 // A level, edge-triggered, restated on the first frame of every session. A reader must treat an absent or
 // malformed `armed` as false.
@@ -123,7 +125,7 @@ inline std::string charaDetailStarted() { return json_util::Json{{"type", "onCha
 // are now different messages, and an import can report "3 registered, 1 lost" instead of reporting the 3 as an
 // unqualified success.
 //
-// NOT AN ERROR, and deliberately not routed like one. Every one of the scraper's three reset rules fires
+// NOT AN ERROR, and deliberately not routed like one. Each of the scraper's two reset rules fires
 // legitimately when the player switches character, so reporting a discard as a failure would be wrong more
 // often than right (it would fire on every switch in an ordinary two-character clip). What the wire states is
 // the FACT and its contents; which of them deserves a sentence is the front end's call, and it differs by front

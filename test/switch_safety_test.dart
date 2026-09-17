@@ -1,23 +1,11 @@
 // Verifies CharaDetailCaptureState.status and .switchSafety, which drive the capture-tab guidance and
-// Native offers a character switch where the factor tab (the 継承タブ) will judge it: the factor tab is shown
-// (factorTabShown) and Rule 3 holds its reference (factorSwitchArmed), during capture and after completion
-// alike, at any scroll position. A record switch returns the game to the head of the list, where Rule 3
-// compares it with the reference while the tab is being captured, and where the completed-tab rule sees a
-// captured tab back at its head afterwards, so the position before the switch is not a condition (the
-// premise is stated at switchSafety's doc comment).
-//
-// "Detect" is not "tell every pair of records apart": Rule 3's diff only nominates a switch, and native
-// keeps the session when both frames' visible self-factor prefixes read the same. A switch between two
-// records with identical visible prefixes is therefore not reset, and nothing this state sees can tell.
-// switchSafety's doc comment states that limit; these tests pin where Rule 3 is armed, not that case.
-//
-// The scroll position (at top vs scrolled) is a single fact reported by native via the scroll-position
-// event (scrollPosition), kept separate from capture progress (the ring value set by progress()). Both
-// "capturing" and "safe to switch" derive from that one fact, so they can never disagree.
-//
-// Run: .fvm/flutter_sdk/bin/flutter test test/switch_safety_test.dart
-import 'package:flutter_test/flutter_test.dart';
-import 'package:umacapture/src/core/platform_controller.dart';
+// Native detects a character switch on the factor tab (the 継承タブ) only: Rule 3's content diff, which
+// keeps watching that tab after it is captured and after the session completes. No rule watches the skill
+// or 育成情報 tabs, during capture or after it. A switch made there is seen only if the record type changes
+// with it. So a switch is safe only while the factor tab is shown (factorTabShown) and Rule 3 holds its
+// reference (factorSwitchArmed), during capture and after completion alike, at any scroll position: a record
+// switch returns the game to the head of the list, which is where Rule 3 judges, so the position before the
+// switch is not a condition (the premise is stated at switchSafety's doc comment).
 
 void main() {
   group('CharaDetailCaptureState.switchSafety', () {

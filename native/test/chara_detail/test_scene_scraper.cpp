@@ -167,10 +167,11 @@ TEST_CASE("frame() crops the latched base image to the base rect") {
 // a discard that lost nothing -- silently, and only for real clips.
 //
 // So these drive the real class through the real shipped config and pin the reported identity against the
-// session's own scraping directory. Only ONE of the three reset rules is reachable without game pixels: the
-// record-type change, which the scene context resolves from its condition tree and hands over as SceneState, so
-// a test can state it directly. It is also the one rule that runs before any scraping on the frame that trips
-// it, which is what keeps these frames free of image work.
+// session's own scraping directory. They use the record-type change, the one reset rule that reads no image: the
+// scene context resolves it from its condition tree and hands it over as SceneState, so a test can state it
+// directly. It is also the one rule that runs before any scraping on the frame that trips it, which is what keeps
+// these frames free of image work. (The two rules that do read the image are driven by synthetic frames further
+// down.)
 
 // Records the paths passed to the injected directory hooks instead of touching the filesystem (the same fake
 // as test_scraping_box.cpp). The scraping directory is per-session and named after the record id, so this is
@@ -261,6 +262,10 @@ struct ScraperHarness {
     std::vector<std::pair<scraper_impl::FactorSwitchVerdict, std::size_t>> verdicts;
     // Every on_tab_refused message, in order, as {index, refused, reason}.
     std::vector<std::tuple<int, bool, std::string>> refusals;
+    // Every on_page_ready index, in order, and how many times on_completed fired. What lets a case state that a
+    // tab -- or the whole session -- really was captured before it asserts what a switch rule did with it.
+    std::vector<int> pages_ready;
+    std::size_t completions = 0;
     // Every on_scroll_position message, in order, as {index, word}. A SEQUENCE, and of the WORD the core put
     // on the wire rather than of a bool derived from it: this channel is the one place the composite verdict
     // leaves the core, it is edge-triggered, and its whole contract is that the third state survives the trip
@@ -368,6 +373,8 @@ struct ScraperHarness {
         tab_refused->listen([this](int index, bool refused, const std::string &reason) {
             refusals.emplace_back(index, refused, reason);
         });
+        page_ready->listen([this](int index) { pages_ready.push_back(index); });
+        completed->listen([this](const RecordInfo &) { completions++; });
         scroll_position->listen([this](int index, const std::string &word) { positions.emplace_back(index, word); });
         factor_probe->listen([this](const Frame &frame, const RecordInfo &) { probe_frames.push_back(frame); });
     }
@@ -429,16 +436,13 @@ TEST_CASE("a session discarded before it completed says so") {
     // be the one that is actually produced here rather than merely the field's default.
     CHECK(h.discards[0].completed == false);
 
-    // THE `true` DIRECTION IS NOT REACHABLE FROM THIS TARGET, and that is a property of the bit rather than
-    // an omission here. `completed` is `ready()`, which is `scraping_state == Ready`, which only
-    // checkForCompleted sets and only when the whole SceneScrapingBox is ready -- i.e. all three tabs
-    // captured plus the base image, which needs game pixels running through the real scrapers. So no
-    // unit-level frame sequence can produce a discard that lost nothing, and nothing below this layer can
-    // either: test_native_api_messages.cpp is handed the bit rather than producing it.
-    // Where the `true` direction IS asserted is the integration manifest: `expect_discarded_incomplete`
-    // (native/test/integration/cases.json) states zero on every ordinary clip, so a build that stopped
-    // setting the bit turns those cases red -- which is the same regression this case guards from the other
-    // side. If that key ever goes, this direction loses its only cover.
+    // THE `true` DIRECTION is asserted further down, by the Rule 3 cases that discard a completed session.
+    // `completed` is `ready()`, which is `scraping_state == Ready`, which only checkForCompleted sets and only
+    // when the whole SceneScrapingBox is ready -- all three tabs captured plus the base image. Synthetic frames
+    // reach that: a tab with no scroll bar is captured from one stationary frame, and the base image latches on
+    // frames carrying the title-bar banner. On real footage the same bit is asserted by the integration
+    // manifest: `expect_discarded_incomplete` (native/test/integration/cases.json) states zero on every
+    // ordinary clip, so a build that stopped setting the bit turns those cases red.
 }
 
 TEST_CASE("release reports the session it destroys, and announces nothing by itself") {
@@ -536,11 +540,11 @@ Frame scrollBarFrameAt(uint64 timestamp, int exposed_rows, int nonce) {
 // hash rather than a short modular ramp: the band is ~392 rows tall here, so a period-200 ramp would give the
 // image estimator two identical copies to lock onto and the offset would be decided by an alias.
 // [layout] as in scrollBarFrameIn: the texture goes where THAT layout's scroll area is.
-Frame scrollingBandFrameIn(
-    const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
-    const Frame bar = scrollBarFrameIn(layout, timestamp, exposed_rows, nonce);
-    cv::Mat pixels = bar.data().clone();
-    const Rect<int> band_rect = bar.anchor().mapToFrame(layout.scroll_area_rect);
+// `frame` with that texture painted over `layout`'s scroll area, shifted by `content_shift`. Whatever the frame
+// carries in the scroll bar's scan column is left as it was, so a frame with no scroll bar keeps having none.
+Frame withContentTexture(const Frame &frame, const scraper_config::SceneScraperConfig &layout, int content_shift) {
+    cv::Mat pixels = frame.data().clone();
+    const Rect<int> band_rect = frame.anchor().mapToFrame(layout.scroll_area_rect);
     const int texture_width = band_rect.width() * 9 / 10;
     for (int r = 0; r < band_rect.height(); r++) {
         const unsigned hashed = static_cast<unsigned>(r + content_shift) * 2654435761u;
@@ -548,7 +552,12 @@ Frame scrollingBandFrameIn(
         pixels(cv::Rect(band_rect.left(), band_rect.top() + r, texture_width, 1))
             .setTo(cv::Scalar(value, value, value));
     }
-    return Frame(pixels, timestamp);
+    return Frame(pixels, frame.timestamp());
+}
+
+Frame scrollingBandFrameIn(
+    const scraper_config::SceneScraperConfig &layout, uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
+    return withContentTexture(scrollBarFrameIn(layout, timestamp, exposed_rows, nonce), layout, content_shift);
 }
 
 Frame scrollingBandFrameAt(uint64 timestamp, int content_shift, int exposed_rows, int nonce) {
@@ -580,6 +589,32 @@ Frame noScrollBarFrameAt(uint64 timestamp, int nonce) {
          Color(static_cast<int>(nonce % 2) * 120 + 10, 0, 0));
     fill(pixels(cv::Rect(band_rect.left(), band_rect.top(), band_rect.width(), band_rect.height())), kBarMargin);
     return Frame(pixels, timestamp);
+}
+
+// The crop row the tests paint the green "因子" header on. Which row does not matter to the header sensor, which
+// compares the row it finds against the row the factor probe read on the same page; it only has to be one row
+// for every frame of a page that has not moved, and inside the crop.
+constexpr int kHeaderCropRow = 12;
+
+// `frame` with the green "因子" SECTION HEADER painted into the scroll-area crop at `crop_row`, across the
+// configured probe band. This is what makes the fine sensor reachable at this level: a frame painted only with
+// bar levels carries no header at all, so topOfContent's factor arm answers Unknown on it and every one of these
+// tests would be reading the coarse sensor no matter what the fine one did.
+//
+// The band stops at band_end (0.93 of the crop width) and the bar's scan line sits at 0.9693, so the coarse
+// reading is untouched and `exposed_rows` still decides it independently.
+Frame withFactorHeaderAt(const Frame &frame, int crop_row) {
+    const auto &config = shippedScraperConfig();
+    cv::Mat pixels = frame.data().clone();
+    const Rect<int> band = frame.anchor().mapToFrame(config.common.scroll_area_rect);
+    // Solidly inside the configured range ({70,150,0}..{190,255,85}), so the row's green FRACTION is 1.0 over
+    // the probe band and the threshold is not what is being tested here.
+    const Color green{130, 200, 40};
+    const int left = band.left() + static_cast<int>(std::lround(config.factor_header.band_start * band.width()));
+    const int right = band.left() + static_cast<int>(std::lround(config.factor_header.band_end * band.width()));
+    constexpr int kHeaderRows = 24;  // the header's measured height at these capture widths
+    fill(pixels(cv::Rect(left, band.top() + crop_row, right - left, kHeaderRows)), green);
+    return Frame(pixels, frame.timestamp());
 }
 
 // Past the shipped stationary_time_threshold, so two frames this far apart latch. Read from the config rather
@@ -643,23 +678,72 @@ TEST_CASE("switching away from a refused tab rebuilds it and withdraws the refus
     CHECK(std::get<2>(h.refusals.back()).empty());
 }
 
-TEST_CASE("a tab no sensor can read says so on the wire, rather than being resolved here") {
+TEST_CASE("a tab not built yet says so on the wire, rather than being resolved here") {
     ScraperHarness h;
     h.scraper.buildSession(record::Standard);
 
-    // The factor tab of a record whose list does not scroll: the coarse sensor has no thumb to measure and
-    // the fine one has no reference row (the header reference is taken at the factor probe, which only a
-    // latch arms -- and a non-scrollable page never latches one). Both silent, on every frame.
-    h.scraper.update(noScrollBarFrameAt(0, /*nonce=*/0), SceneState{FactorPage, record::Standard});
-    h.scraper.update(noScrollBarFrameAt(kPastStationary, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    // The first frame of a tab is judged BEFORE the tab is built from it (SceneScraper::build runs later in the
+    // same update), so there is no thumb to measure and no structure to ask. On a campaign frame there is no
+    // header either, so nothing has anything to say. (A frame of a BUILT, scrollable tab that neither sensor can
+    // read says "unknown" too; see "a frame of a scrollable factor page that shows neither ..." below, which also
+    // pins what Rule 3 does with it.)
+    h.scraper.update(scrollBarFrameAt(0, /*exposed_rows=*/0, /*nonce=*/0), SceneState{CampaignPage, record::Standard});
 
     // The word, not a bool. "unknown" is the whole point: resolved to either answer here, this reads as one
     // of the other two and the consumer that needed the distinction never sees it.
-    CHECK(h.positionWords(FactorPage) == std::vector<std::string>{"unknown"});
+    CHECK(h.positionWords(CampaignPage) == std::vector<std::string>{"unknown"});
+}
+
+TEST_CASE("a tab whose page cannot scroll is at the head of its content on the wire, whatever its frames show") {
+    // A PAGE WITH NO SCROLL BAR CANNOT BE ANYWHERE BUT THE HEAD OF ITS CONTENT, and the core says so from the
+    // structure the tab was built with, not from a sensor. Before, a skill or campaign page with no scroll bar
+    // says "unknown" on every frame (no thumb), and a factor page says whatever its header says -- "unknown" when
+    // the header is covered, its green missed, or no reference row has been read yet, "scrolled" when it sits off
+    // the row its factor probe read. Rule 3 resolves both as "scrolled" and then never judges the page the user
+    // can switch on.
+    //
+    // Four pages, and two of them are not the factor tab, so an answer keyed on the tab's name stays red.
+    TabPage tab = SkillPage;
+    std::function<Frame(uint64, int)> page;
+    std::string sensors_word;  // the first frame's word, taken before the tab is built (see the case above)
+    SUBCASE("a skill page") {
+        tab = SkillPage;
+        page = noScrollBarFrameAt;
+        sensors_word = "unknown";
+    }
+    SUBCASE("a campaign page") {
+        tab = CampaignPage;
+        page = noScrollBarFrameAt;
+        sensors_word = "unknown";
+    }
+    SUBCASE("a factor page whose header is not drawn") {
+        tab = FactorPage;
+        page = noScrollBarFrameAt;
+        sensors_word = "unknown";
+    }
+    SUBCASE("a factor page whose header is drawn") {
+        // Before the latch no reference row exists, so the header sensor has nothing to compare and the first
+        // word is the thumb's -- and there is no thumb.
+        tab = FactorPage;
+        page = [](uint64 timestamp, int nonce) {
+            return withFactorHeaderAt(noScrollBarFrameAt(timestamp, nonce), kHeaderCropRow);
+        };
+        sensors_word = "unknown";
+    }
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+
+    // The page latches on the second frame; the third shows the answer holds after that too.
+    h.scraper.update(page(0, /*nonce=*/0), SceneState{tab, record::Standard});
+    h.scraper.update(page(kPastStationary, /*nonce=*/0), SceneState{tab, record::Standard});
+    h.scraper.update(page(kPastStationary + kPastDwell, /*nonce=*/0), SceneState{tab, record::Standard});
+
+    CHECK(h.positionWords(tab) == std::vector<std::string>{sensors_word, "at_top"});
+    CHECK(h.discards.empty());
 }
 
 TEST_CASE("a tab a sensor CAN read says which way it measured") {
-    // The positive control for the case above: without it, "unknown" would be indistinguishable from a wire
+    // The positive control for the "unknown" cases: without it, "unknown" would be indistinguishable from a wire
     // that says "unknown" no matter what the sensors found. Both measured words are reachable from the same
     // frames the refusal cases use, so the two claims are pinned against the same synthetic bar.
     ScraperHarness h;
@@ -1021,6 +1105,552 @@ TEST_CASE("a candidate switch the reader cannot read discards the session") {
     REQUIRE(h.verdicts.size() == 2);
     CHECK(h.verdicts[0].second == 0);
     CHECK(h.verdicts[1].second == 1);
+}
+
+// --- which rule watches a captured tab for a character switch --------------------------------------------------
+//
+// WHAT THIS GROUP CLAIMS: a captured tab is watched by Rule 3 whenever it holds a switch witness (the factor tab,
+// from its head latch on, whether its page scrolls or has no scroll bar), before the session completes and after,
+// and no other tab is watched in any state -- so a captured tab back at the head of its list is never, by itself, a
+// reason to throw the capture away, and a switch made on another tab after completion is judged when the factor tab
+// is next shown. CharaDetailSceneScraper::watchesFactorContent states why; these pin what it decides.
+//
+// A COMPLETED SESSION IS REACHABLE WITHOUT GAME PIXELS, which is what the cases that watch Rule 3 after completion
+// need:
+//   * A skill or campaign tab with no scroll bar is captured WITHOUT SCROLLING: that builds the non-scrollable
+//     interpreter, which latches one stationary frame and is done. From then on the tab reads at the head of its
+//     content from that structure (CharaDetailSceneScraper::topOfContent), whatever a later frame draws -- so
+//     the scroll bar some cases below render on later frames does not change the word.
+//   * The factor tab is captured either way, and EITHER WAY ITS LATCH INSTALLS THE WITNESS: by scrolling (a head
+//     latch, then one more frame of the same list carrying the green end bar, which ends the tab on a frame whose
+//     offset is known -- even a zero one, PageScrapingBox::detectGreenTerminator), or on a factor page with no scroll
+//     bar (its one settled frame). So no completed session has a factor tab without a witness.
+//   * The base image latches on those same frames, because they carry the title-bar banner.
+
+// Green inside both the shipped header_color_range and factor_end_green's range.
+const Color kTitleGreen{130, 200, 40};
+
+// `frame` with the green title-bar banner across the shipped header scan line, so the base catcher's banner gate
+// opens. Painted where the frame itself maps that line, a few rows wider on each side, and above the scroll
+// area, so no tab's reading changes.
+Frame withBanner(const Frame &frame) {
+    const Line<int> line = frame.anchor().mapToFrame(shippedScraperConfig().header_scan_line);
+    const int top = std::min(line.p1().y(), line.p2().y()) - 2;
+    const int bottom = std::max(line.p1().y(), line.p2().y()) + 3;
+    cv::Mat pixels = frame.data().clone();
+    fill(pixels(cv::Rect(0, top, pixels.cols, bottom - top)), kTitleGreen);
+    return Frame(pixels, frame.timestamp());
+}
+
+// `frame` with the factor list's green end bar near the bottom of the scroll area, at the shipped end-bar scan
+// column. On a frame that did not scroll the frontier is the bottom of the area, and the terminator looks within
+// the terminating scan's length above it. Twenty by ten pixels: still the same list to the offset estimator,
+// and below kFactorChangeRatioThreshold against the latched frame, so Rule 3 does not see it as a change.
+Frame withFactorEndBar(const Frame &frame) {
+    const auto config = shippedScraperConfig();
+    const Rect<int> area = frame.anchor().mapToFrame(config.common.scroll_area_rect);
+    const int x = area.left() + static_cast<int>(std::lround(config.factor_end_green.x * area.width()));
+    cv::Mat pixels = frame.data().clone();
+    fill(pixels(cv::Rect(x - 10, area.top() + area.height() - 30, 20, 10)), kTitleGreen);
+    return Frame(pixels, frame.timestamp());
+}
+
+// `page` as a factor page draws it at the head of its content: the green 因子 header on kHeaderCropRow, and the
+// title-bar banner. On a page with no scroll bar the header is NOT what opens Rule 3's flush gate -- the page's
+// structure is -- so the kinds below that draw no header, or draw it off its row, are judged all the same.
+Frame asFactorPageAtHead(const Frame &page) {
+    return withBanner(withFactorHeaderAt(page, kHeaderCropRow));
+}
+
+// `page` with the header two rows BELOW kHeaderCropRow, and the banner: past factor_header.flush_tolerance_px from
+// the row a latch on asFactorPageAtHead reads, so the sensor reads it as scrolled on a page that cannot scroll --
+// what a header partly covered, or drawn off its row, reads as.
+Frame withFactorHeaderBelowHead(const Frame &page) {
+    return withBanner(withFactorHeaderAt(page, kHeaderCropRow + 2));
+}
+
+// A factor page whose list fits on one screen: no scroll bar, the header at the head of its content, the banner.
+Frame factorPageWithoutScrollBar(uint64 timestamp, int nonce) {
+    return asFactorPageAtHead(noScrollBarFrameAt(timestamp, nonce));
+}
+
+// The same kind of page showing a different list: a content texture over the scroll area, left of the scroll bar's
+// scan column, so the page still has no scroll bar. Diffs against factorPageWithoutScrollBar far past
+// kFactorChangeRatioThreshold.
+Frame texturedFactorPageWithoutScrollBar(uint64 timestamp, int nonce) {
+    return asFactorPageAtHead(
+        withContentTexture(noScrollBarFrameAt(timestamp, nonce), shippedScraperConfig().common, /*content_shift=*/0));
+}
+
+// Captures `tab` of a Standard session without scrolling, on a page with no scroll bar and no factor header -- the
+// look of a skill or campaign page. Returns the timestamp of its last frame.
+uint64 captureWithoutScrolling(ScraperHarness &h, TabPage tab, uint64 at) {
+    h.scraper.update(withBanner(noScrollBarFrameAt(at, /*nonce=*/0)), SceneState{tab, record::Standard});
+    h.scraper.update(
+        withBanner(noScrollBarFrameAt(at + kPastStationary, /*nonce=*/0)), SceneState{tab, record::Standard});
+    return at + kPastStationary;
+}
+
+// The timestamp of the witness either factor capture below installs when it starts at 0: the latched frame.
+const uint64 kWitnessAt = kPastStationary;
+
+// Captures the factor tab of a Standard session by scrolling, so it holds Rule 3's witness. The nonce stays fixed
+// because the tab button has to latch too for the tab to count as captured. Returns the timestamp of the last
+// frame; the witness is the latched frame, kPastStationary after `at`.
+uint64 captureFactorByScrolling(ScraperHarness &h, uint64 at) {
+    const auto look = [](uint64 timestamp) {
+        return withBanner(scrollBarFrameAt(timestamp, /*exposed_rows=*/0, /*nonce=*/0));
+    };
+    h.scraper.update(look(at), SceneState{FactorPage, record::Standard});
+    h.scraper.update(look(at + kPastStationary), SceneState{FactorPage, record::Standard});
+    h.scraper.update(withFactorEndBar(look(at + kPastStationary + 100)), SceneState{FactorPage, record::Standard});
+    return at + kPastStationary + 100;
+}
+
+// Captures the factor tab of a Standard session on a factor page with no scroll bar that looks like `look`. Its one
+// settled frame is the tab's whole capture and its head latch, so it holds Rule 3's witness from that frame on,
+// exactly as a scrolled capture does. Returns the timestamp of that frame, kPastStationary after `at`.
+uint64 captureFactorPageLooking(ScraperHarness &h, uint64 at, const FrameAt &look) {
+    h.scraper.update(look(at, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    h.scraper.update(look(at + kPastStationary, /*nonce=*/0), SceneState{FactorPage, record::Standard});
+    return at + kPastStationary;
+}
+
+uint64 captureFactorWithoutScrollBar(ScraperHarness &h, uint64 at) {
+    return captureFactorPageLooking(h, at, factorPageWithoutScrollBar);
+}
+
+// A factor page with no scroll bar on which the header is not drawn (covered by a tap effect, or a green this
+// source never matches), with the banner; and the same page showing a different list.
+Frame factorPageWithoutScrollBarOrHeader(uint64 timestamp, int nonce) {
+    return withBanner(noScrollBarFrameAt(timestamp, nonce));
+}
+Frame texturedFactorPageWithoutScrollBarOrHeader(uint64 timestamp, int nonce) {
+    return withBanner(
+        withContentTexture(noScrollBarFrameAt(timestamp, nonce), shippedScraperConfig().common, /*content_shift=*/0));
+}
+uint64 captureFactorWithoutScrollBarOrHeader(ScraperHarness &h, uint64 at) {
+    return captureFactorPageLooking(h, at, factorPageWithoutScrollBarOrHeader);
+}
+
+// A factor page with no scroll bar whose header the sensor reads as scrolled (withFactorHeaderBelowHead); and the
+// same page showing a different list.
+Frame factorPageWithHeaderBelowHead(uint64 timestamp, int nonce) {
+    return withFactorHeaderBelowHead(noScrollBarFrameAt(timestamp, nonce));
+}
+Frame texturedFactorPageWithHeaderBelowHead(uint64 timestamp, int nonce) {
+    return withFactorHeaderBelowHead(
+        withContentTexture(noScrollBarFrameAt(timestamp, nonce), shippedScraperConfig().common, /*content_shift=*/0));
+}
+uint64 captureFactorWithHeaderBelowHead(ScraperHarness &h, uint64 at) {
+    return captureFactorPageLooking(h, at, factorPageWithHeaderBelowHead);
+}
+
+using CaptureFactorTab = uint64 (*)(ScraperHarness &, uint64);
+
+// Completes a Standard session: the factor tab first, by `capture_factor`, then the other two without scrolling.
+uint64 completeSession(ScraperHarness &h, CaptureFactorTab capture_factor) {
+    uint64 at = capture_factor(h, 0);
+    at = captureWithoutScrolling(h, SkillPage, at + 100);
+    return captureWithoutScrolling(h, CampaignPage, at + 100);
+}
+
+TEST_CASE("the capture helpers really capture: a tab, the witness, and a whole session") {
+    // The control every case below rests on. A helper that silently failed to capture would turn "no discard"
+    // into "nothing was ever captured", and "Rule 3 discarded a completed session" into "it was never complete".
+    SUBCASE("a skill or campaign page with no scroll bar latches, arms no probe and owes no cue") {
+        TabPage tab = SkillPage;
+        SUBCASE("the skill tab") {
+            tab = SkillPage;
+        }
+        SUBCASE("the campaign tab") {
+            tab = CampaignPage;
+        }
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        captureWithoutScrolling(h, tab, 0);
+        CHECK(h.pages_ready == std::vector<int>{static_cast<int>(tab)});
+        CHECK(h.probe_frames.empty());
+        CHECK(h.completions == 0);
+    }
+    SUBCASE("the factor tab by scrolling, which latches the witness owing the cue") {
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        captureFactorByScrolling(h, 0);
+        CHECK(h.pages_ready == std::vector<int>{static_cast<int>(FactorPage)});
+        REQUIRE(h.probe_frames.size() == 1);
+        CHECK(h.probe_frames.front().timestamp() == kWitnessAt);
+        CHECK(h.completions == 0);
+    }
+    SUBCASE("a factor page with no scroll bar, which latches the witness on its one frame owing no cue") {
+        // THE LATCH THAT USED TO INSTALL NOTHING. The page is captured and its head latched on the same frame, so
+        // the probe is armed exactly as on a scrolled capture -- with the whole frame, this session's scroll area,
+        // and no cue: there is nothing to scroll, so "you may scroll now" would be false, and it would arrive after
+        // the tab's own completion.
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        captureFactorWithoutScrollBar(h, 0);
+        CHECK(h.pages_ready == std::vector<int>{static_cast<int>(FactorPage)});
+        REQUIRE(h.probe_frames.size() == 1);
+        CHECK(h.probe_frames.front().timestamp() == kWitnessAt);
+        // The whole frame, not the content crop: Rule 3 compares its witness with later frames by size.
+        CHECK(h.probe_frames.front().size() == factorPageWithoutScrollBar(0, 0).size());
+        // A page that cannot scroll reads at the head of its content -- which is what lets Rule 3's flush gate open
+        // on it at all.
+        CHECK(h.positionWords(FactorPage).back() == "at_top");
+        CHECK(h.completions == 0);
+    }
+    SUBCASE("a whole session, whichever way its factor tab was captured, with the witness") {
+        CaptureFactorTab capture_factor = captureFactorByScrolling;
+        SUBCASE("by scrolling") {
+            capture_factor = captureFactorByScrolling;
+        }
+        SUBCASE("on a page with no scroll bar") {
+            capture_factor = captureFactorWithoutScrollBar;
+        }
+        ScraperHarness h;
+        h.scraper.buildSession(record::Standard);
+        completeSession(h, capture_factor);
+        CHECK(h.completions == 1);
+        CHECK(h.probe_frames.size() == 1);
+        CHECK(h.discards.empty());
+    }
+}
+
+TEST_CASE("a captured skill or campaign tab at the head of its list is never a switch, whether or not the session is complete") {
+    // THE DEFECT THIS GROUP EXISTS FOR. The tab was captured and reads at the head of its list for four dwells. The
+    // user either scrolled back up or switched on a tab where nothing can compare the two records; neither is a
+    // reason to throw captured tabs away, and after completion a real switch here is judged at the factor tab
+    // instead ("after completion, a switch made on another tab ..." below). (The factor tab is Rule 3's from its
+    // latch on; its version of this is "a captured factor page with no scroll bar that stays at its head ..." below.)
+    TabPage tab = SkillPage;
+    bool complete = false;
+    SUBCASE("the skill tab") {
+        tab = SkillPage;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("the campaign tab") {
+        tab = CampaignPage;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+    const uint64 captured =
+        complete ? completeSession(h, captureFactorWithoutScrollBar) : captureWithoutScrolling(h, tab, 0);
+    REQUIRE(std::find(h.pages_ready.begin(), h.pages_ready.end(), static_cast<int>(tab)) != h.pages_ready.end());
+    REQUIRE(h.completions == (complete ? 1 : 0));
+
+    const uint64 first_top = captured + 100;
+    for (int i = 0; i < 4; i++) {
+        h.scraper.update(
+            scrollBarFrameAt(first_top + static_cast<uint64>(i) * kPastDwell, /*exposed_rows=*/0, /*nonce=*/2 + i),
+            SceneState{tab, record::Standard});
+    }
+    CHECK(h.discards.empty());
+    CHECK(h.verdicts.empty());
+    // No second record either: a completed session stays the one that completed.
+    CHECK(h.completions == (complete ? 1 : 0));
+    // The frames were read at the head, so "no discard" is no rule watching, not a sensor that saw nothing.
+    CHECK(h.positionWords(tab).back() == "at_top");
+}
+
+// One kind of factor page: how its tab is captured, and the look that shows a different list on the same kind of
+// page (a scroll bar stays a scroll bar, and a page without one stays without one).
+struct FactorPageKind {
+    CaptureFactorTab capture;
+    FrameAt diverged;
+};
+
+const FactorPageKind kScrollableFactorPage{captureFactorByScrolling, texturedLook};
+const FactorPageKind kFactorPageWithoutScrollBar{captureFactorWithoutScrollBar, texturedFactorPageWithoutScrollBar};
+// The two looks of a page with no scroll bar on which the header sensor cannot say "at the head". Rule 3 judges them
+// all the same, because the page's structure, and not its header, answers where it is.
+const FactorPageKind kFactorPageWithoutScrollBarOrHeader{
+    captureFactorWithoutScrollBarOrHeader, texturedFactorPageWithoutScrollBarOrHeader};
+const FactorPageKind kFactorPageWithHeaderBelowHead{
+    captureFactorWithHeaderBelowHead, texturedFactorPageWithHeaderBelowHead};
+
+// Captures the factor tab of `page`'s kind and, when `complete`, the other two tabs without scrolling, then holds
+// that kind's different look at the head of the factor list for a dwell. Returns the judged frame's timestamp.
+uint64 divergeOnCapturedFactorTab(ScraperHarness &h, const FactorPageKind &page, bool complete) {
+    h.scraper.buildSession(record::Standard);
+    uint64 at = page.capture(h, 0);
+    if (complete) {
+        at = captureWithoutScrolling(h, SkillPage, at + 100);
+        at = captureWithoutScrolling(h, CampaignPage, at + 100);
+    }
+    REQUIRE(h.pages_ready.front() == static_cast<int>(FactorPage));
+    REQUIRE(h.completions == (complete ? 1 : 0));
+    return holdFactorDivergence(h, at + 100, /*nonce=*/2, page.diverged, record::Standard);
+}
+
+TEST_CASE("a captured factor tab whose frames show the same record keeps its session, complete or not") {
+    // The tab is captured and reads at the head for the dwell, and its list changed from the witness's look. Rule 3
+    // holds the witness, reads both frames, and keeps the session -- on a page with no scroll bar too, whose one
+    // settled frame is its witness.
+    const FactorPageKind *page = &kScrollableFactorPage;
+    bool complete = false;
+    SUBCASE("a scrollable factor page") {
+        page = &kScrollableFactorPage;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("a factor page with no scroll bar") {
+        page = &kFactorPageWithoutScrollBar;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("a factor page with no scroll bar whose header is not drawn") {
+        page = &kFactorPageWithoutScrollBarOrHeader;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("a factor page with no scroll bar whose header reads as scrolled") {
+        page = &kFactorPageWithHeaderBelowHead;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    ScraperHarness h;
+    const uint64 judged_at = divergeOnCapturedFactorTab(h, *page, complete);
+
+    CHECK(h.framesRead() == std::vector<uint64>{kWitnessAt, judged_at});
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Same});
+    CHECK(h.discards.empty());
+    // Judged at the head, on every kind: the word the front end holds agrees with what Rule 3 acted on.
+    CHECK(h.positionWords(FactorPage).back() == "at_top");
+}
+
+TEST_CASE("a captured factor tab whose frames show a different record is discarded by Rule 3, complete or not") {
+    const FactorPageKind *page = &kScrollableFactorPage;
+    bool complete = false;
+    SUBCASE("a scrollable factor page") {
+        page = &kScrollableFactorPage;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("a factor page with no scroll bar") {
+        page = &kFactorPageWithoutScrollBar;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("a factor page with no scroll bar whose header is not drawn") {
+        page = &kFactorPageWithoutScrollBarOrHeader;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    SUBCASE("a factor page with no scroll bar whose header reads as scrolled") {
+        page = &kFactorPageWithHeaderBelowHead;
+        SUBCASE("while the other tabs are still to be captured") {
+            complete = false;
+        }
+        SUBCASE("after the whole session is captured") {
+            complete = true;
+        }
+    }
+    ScraperHarness h;
+    h.factor_model_answer = [](const Frame &cell) { return cell.timestamp() > kWitnessAt ? 102 : 101; };
+    const uint64 judged_at = divergeOnCapturedFactorTab(h, *page, complete);
+
+    CHECK(h.framesRead() == std::vector<uint64>{kWitnessAt, judged_at});
+    CHECK(
+        h.verdictsStated()
+        == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Different});
+    REQUIRE(h.discards.size() == 1);
+    CHECK(h.discards.front().completed == complete);
+    // Stated before the discard it caused, as on a tab still being captured.
+    REQUIRE(h.verdicts.size() == 1);
+    CHECK(h.verdicts.front().second == 0);
+}
+
+TEST_CASE("a captured factor page with no scroll bar that stays at its head is not discarded, however long it stays") {
+    // THE RESET THIS CLOSES. Such a page is captured on the frame it settles on, and the user has nowhere to scroll
+    // it, so it stays at the head of its content for as long as it is displayed. While its latch installed no
+    // witness, a rule that took "a captured tab at the head for the dwell" for a switch discarded it with nobody
+    // having switched. Rule 3 watches it now, and an unchanged page nominates nothing, however many dwells pass.
+    bool complete = false;
+    SUBCASE("while the other tabs are still to be captured") {
+        complete = false;
+    }
+    SUBCASE("after the whole session is captured") {
+        complete = true;
+    }
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+    uint64 at = captureFactorWithoutScrollBar(h, 0);
+    if (complete) {
+        at = captureWithoutScrolling(h, SkillPage, at + 100);
+        at = captureWithoutScrolling(h, CampaignPage, at + 100);
+    }
+    REQUIRE(h.completions == (complete ? 1 : 0));
+
+    for (int i = 0; i < 4; i++) {
+        h.scraper.update(
+            factorPageWithoutScrollBar(at + 100 + static_cast<uint64>(i) * kPastDwell, /*nonce=*/2 + i),
+            SceneState{FactorPage, record::Standard});
+    }
+    CHECK(h.discards.empty());
+    CHECK(h.verdicts.empty());
+    // The frames were read at the head, so "no discard" is the rules declining, not a sensor that saw nothing.
+    CHECK(h.positionWords(FactorPage).back() == "at_top");
+}
+
+TEST_CASE("a frame of a scrollable factor page that shows neither its header nor its scroll bar is not taken for the head") {
+    // THE OTHER SIDE OF "a page with no scroll bar is at its head": that is a fact about the TAB, decided when it was
+    // built, and never about one frame. A page that does scroll can show a frame on which neither sensor finds
+    // anything -- something drawn over the bar and the header, a transition -- and that frame may well be scrolled.
+    // Taken for the head because this frame shows no scroll bar, it would be diffed against the witness, and a
+    // captured session discarded on a frame nobody could place.
+    ScraperHarness h;
+    h.factor_model_answer = [](const Frame &cell) { return cell.timestamp() > kWitnessAt ? 102 : 101; };
+    h.scraper.buildSession(record::Standard);
+    const uint64 captured = captureFactorByScrolling(h, 0);
+    REQUIRE(h.pages_ready == std::vector<int>{static_cast<int>(FactorPage)});
+
+    // A different list, on frames that draw neither the scroll bar nor the header.
+    const FrameAt unplaceable = [](uint64 timestamp, int nonce) {
+        return withContentTexture(noScrollBarFrameAt(timestamp, nonce), shippedScraperConfig().common, 0);
+    };
+    holdFactorDivergence(h, captured + 100, /*nonce=*/2, unplaceable, record::Standard);
+    // Unresolved on the wire, and resolved "scrolled" by Rule 3's gate.
+    CHECK(h.positionWords(FactorPage).back() == "unknown");
+    CHECK(h.framesRead().empty());
+    CHECK(h.verdicts.empty());
+    CHECK(h.discards.empty());
+
+    // The control: the same list with its scroll bar back, at the head, is read and discarded -- so the silence
+    // above is the flush gate, and not frames Rule 3 would have let pass anyway.
+    const uint64 judged_at =
+        holdFactorDivergence(h, captured + 100 + 2 * kPastDwell, /*nonce=*/4, texturedLook, record::Standard);
+    CHECK(h.framesRead() == std::vector<uint64>{kWitnessAt, judged_at});
+    CHECK(
+        h.verdictsStated()
+        == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Different});
+    CHECK(h.discards.size() == 1);
+}
+
+TEST_CASE("a factor page that has not settled holds no witness, and nothing reads or discards it") {
+    // WHAT IS LEFT WITHOUT A WITNESS once every latch installs one: the factor tab before its head latch. On a page
+    // with no scroll bar that is the stationary wait, during which the page already reads at the head of its
+    // content. This pins the core's side of that window as it is: no probe, no reading, no verdict, no discard. It is
+    // not a claim that the window is safe -- a switch made inside it goes undetected, and the witness installed when
+    // the page settles is then the new record's.
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+    uint64 at = captureWithoutScrolling(h, SkillPage, 0);
+    at = captureWithoutScrolling(h, CampaignPage, at + 100);
+
+    // Alternating between two lists, so no two consecutive frames match and the page never settles.
+    for (int i = 0; i < 4; i++) {
+        const uint64 timestamp = at + 100 + static_cast<uint64>(i) * kPastDwell;
+        h.scraper.update(
+            i % 2 == 0 ? factorPageWithoutScrollBar(timestamp, /*nonce=*/2 + i)
+                       : texturedFactorPageWithoutScrollBar(timestamp, /*nonce=*/2 + i),
+            SceneState{FactorPage, record::Standard});
+    }
+    CHECK(h.pages_ready == std::vector<int>{static_cast<int>(SkillPage), static_cast<int>(CampaignPage)});
+    CHECK(h.probe_frames.empty());
+    CHECK(h.framesRead().empty());
+    CHECK(h.verdicts.empty());
+    CHECK(h.discards.empty());
+    // At the head the whole time, so the silence above is not a closed flush gate.
+    CHECK(h.positionWords(FactorPage).back() == "at_top");
+}
+
+TEST_CASE("after completion, a switch made on another tab is judged by Rule 3 once the factor tab is shown") {
+    // THE ONE SWITCH DETECTION LEFT AFTER COMPLETION, in miniature (golden player_standard_sequential switches this way
+    // on real footage). The
+    // session completes; the user switches on the campaign tab, which the game shows at its head, and stays there.
+    // Nothing watches that tab, so nothing is discarded while it is shown. The new record's factor tab then opens at
+    // its head over a different list, and Rule 3 -- whose witness still holds the old record's list -- reads both
+    // frames and discards a session whose record had already gone out.
+    ScraperHarness h;
+    h.factor_model_answer = [](const Frame &cell) { return cell.timestamp() > kWitnessAt ? 102 : 101; };
+    h.scraper.buildSession(record::Standard);
+    const uint64 completed_at = completeSession(h, captureFactorByScrolling);
+    REQUIRE(h.completions == 1);
+
+    const uint64 first_top = completed_at + 100;
+    for (int i = 0; i < 4; i++) {
+        h.scraper.update(
+            scrollBarFrameAt(first_top + static_cast<uint64>(i) * kPastDwell, /*exposed_rows=*/0, /*nonce=*/2 + i),
+            SceneState{CampaignPage, record::Standard});
+    }
+    // The line that a rule taking "a captured tab at the head" for a switch turns red: without it this case would
+    // pass whether or not such a rule existed, because Rule 3 then discards anyway.
+    CHECK(h.discards.empty());
+    CHECK(h.verdicts.empty());
+    CHECK(h.positionWords(CampaignPage).back() == "at_top");
+
+    const uint64 judged_at = holdFactorDivergence(h, first_top + 4 * kPastDwell, /*nonce=*/6, texturedLook, record::Standard);
+    CHECK(h.framesRead() == std::vector<uint64>{kWitnessAt, judged_at});
+    CHECK(
+        h.verdictsStated()
+        == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Different});
+    REQUIRE(h.discards.size() == 1);
+    CHECK(h.discards.front().completed == true);
+    // Stated before the discard it caused.
+    REQUIRE(h.verdicts.size() == 1);
+    CHECK(h.verdicts.front().second == 0);
+}
+
+TEST_CASE("Rule 3's dwell does not resume across a frame of another tab") {
+    // The same property from Rule 3's side, which a captured factor tab now needs: before, its dwell could be
+    // left standing only on a tab still being captured, where leaving the tab rebuilt it and dropped the dwell.
+    ScraperHarness h;
+    h.scraper.buildSession(record::Standard);
+    const uint64 completed_at = completeSession(h, captureFactorByScrolling);
+    REQUIRE(h.completions == 1);
+
+    const uint64 opened = completed_at + 100;
+    h.scraper.update(texturedLook(opened, /*nonce=*/2), SceneState{FactorPage, record::Standard});
+    // A campaign frame: a tab no rule watches, so the visit is nothing but a frame Rule 3 did not judge.
+    h.scraper.update(noScrollBarFrameAt(opened + 10, /*nonce=*/3), SceneState{CampaignPage, record::Standard});
+    h.scraper.update(texturedLook(opened + kPastDwell, /*nonce=*/4), SceneState{FactorPage, record::Standard});
+    CHECK(h.framesRead().empty());
+    CHECK(h.verdicts.empty());
+
+    // The control: the dwell restarted on that frame, and a dwell later the frames are read.
+    h.scraper.update(texturedLook(opened + 2 * kPastDwell, /*nonce=*/5), SceneState{FactorPage, record::Standard});
+    CHECK(h.verdictsStated() == std::vector<scraper_impl::FactorSwitchVerdict>{scraper_impl::FactorSwitchVerdict::Same});
+    CHECK(h.discards.empty());
 }
 
 }  // namespace

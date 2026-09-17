@@ -51,7 +51,12 @@ String _cancellingStatus() => appSentenceAt("$_tr_message.import_cancelling.stat
 
 String _status(String key) => appSentenceAt("$_tr_message.$key.status");
 
-String _action(String key) => appSentenceAt("$_tr_message.$key.action");
+/// One variant of a status whose action line depends on whether a character switch is safe.
+String _actionVariant(String key, String variant) => appSentenceAt("$_tr_message.$key.action.$variant");
+
+/// The switch indicator's tooltip for the same answer the [_actionVariant] of that name gives.
+String _switchTooltip(String variant) =>
+    appSentenceAt("pages.capture.capture_control.switch_indicator.${variant == 'switchable' ? 'safe' : 'unsafe'}");
 
 const _importing = VideoImportState(phase: VideoImportPhase.importing, fileName: 'clip.mkv');
 const _cancelling = VideoImportState(phase: VideoImportPhase.cancelling, fileName: 'clip.mkv');
@@ -486,18 +491,64 @@ void main() {
     // now; what the banner still owes the user is the SITUATION each leaves behind, and there are
     // only two of those.
     testWidgets('a success and an already-captured duplicate both read as completed', (tester) async {
-      for (final drive in <void Function(CharaDetailCaptureStateNotifier)>[
-        (n) => n
-          ..started()
-          ..success('rec-1'),
-        (n) => n
-          ..started()
-          ..fail('duplicated_character'),
-      ]) {
-        await _pumpThenDrive(tester, import: VideoImportState.idle, capturing: true, drive: drive);
+      // The action line follows `switchSafety`: on the 継承タブ (at any position) the user may switch; on
+      // another tab they are pointed at the 継承タブ. The tab is stated BEFORE the outcome and not after,
+      // because the core does not restate it on completion.
+      for (final outcome in <String, void Function(CharaDetailCaptureStateNotifier)>{
+        'success': (n) => n.success('rec-1'),
+        'duplicate': (n) => n.fail('duplicated_character'),
+      }.entries) {
+        for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable'), (2, 'not_switchable')]) {
+          await _pumpThenDrive(
+            tester,
+            import: VideoImportState.idle,
+            capturing: true,
+            drive: (n) {
+              n
+                ..started()
+                ..scrollPosition(tab, TopOfContent.scrolled);
+              outcome.value(n);
+            },
+          );
 
-        expect(find.text(_status('capture_completed')), findsOneWidget);
-        expect(find.text(_action('capture_completed')), findsOneWidget);
+          final label = '${outcome.key} on tab $tab';
+          expect(find.text(_status('capture_completed')), findsOneWidget, reason: label);
+          expect(find.text(_actionVariant('capture_completed', variant)), findsOneWidget, reason: label);
+          expect(find.byTooltip(_switchTooltip(variant)), findsNWidgets(2), reason: '$label: the arrows agree');
+        }
+      }
+    });
+
+    testWidgets('while capturing, the action line follows the tab shown', (tester) async {
+      for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable'), (2, 'not_switchable')]) {
+        await _pumpThenDrive(
+          tester,
+          import: VideoImportState.idle,
+          capturing: true,
+          drive: (n) => n
+            ..started()
+            ..scrollPosition(tab, TopOfContent.scrolled),
+        );
+
+        expect(find.text(_status('capturing')), findsOneWidget, reason: 'tab $tab');
+        expect(find.text(_actionVariant('capturing', variant)), findsOneWidget, reason: 'tab $tab');
+        expect(find.byTooltip(_switchTooltip(variant)), findsNWidgets(2), reason: 'tab $tab: the arrows agree');
+      }
+    });
+
+    testWidgets('at the head of a tab, the action line follows the tab shown', (tester) async {
+      for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable')]) {
+        await _pumpThenDrive(
+          tester,
+          import: VideoImportState.idle,
+          capturing: true,
+          drive: (n) => n
+            ..started()
+            ..scrollPosition(tab, TopOfContent.atTop),
+        );
+
+        expect(find.text(_status('detail_ready')), findsOneWidget, reason: 'tab $tab');
+        expect(find.text(_actionVariant('detail_ready', variant)), findsOneWidget, reason: 'tab $tab');
       }
     });
 

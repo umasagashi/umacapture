@@ -1223,11 +1223,19 @@ Frame StationaryFrameCatcher::croppedFrame() const {
     return target_rect.empty() ? previous_frame : previous_frame.view(target_rect);
 }
 
+// The `cue_owed` a head latch carries on on_head_latched, spelled at the three call sites below so the exit each
+// one is says itself instead of being read off a bare literal. Not an enum: the fact is a yes/no that travels
+// with the latch as a yes/no, in the same idiom as on_tab_refused's `refused` level.
+constexpr bool kCueOwed = true;
+constexpr bool kCueWithheld = false;
+
 NonScrollableScrapingInterpreter::NonScrollableScrapingInterpreter(
     const std::shared_ptr<PageScrapingBox> &scraping_box,
     const StationaryFrameCatcher &stationary_catcher,
-    const Rect<double> &scroll_area_rect)
-    : stationary_catcher(stationary_catcher)
+    const Rect<double> &scroll_area_rect,
+    const event_util::Sender<Frame, bool> &on_head_latched)
+    : on_head_latched(on_head_latched)
+    , stationary_catcher(stationary_catcher)
     , scroll_area_rect(scroll_area_rect)
     , scraping_box(scraping_box) {}
 
@@ -1242,6 +1250,7 @@ const char *topOfContentTag(TopOfContent verdict) {
 
 const char *topOfContentSensorTag(TopOfContentSensor sensor) {
     switch (sensor) {
+        case TopOfContentSensor::NoScrollBar: return "no_scroll_bar";
         case TopOfContentSensor::ScrollThumb: return "topmargin";
     }
     return "";  // out-of-range fallback; also silences C4715 (not all paths return a value)
@@ -1264,6 +1273,12 @@ void NonScrollableScrapingInterpreter::update(const Frame &frame) {
     if (readyAfterUpdate(stationary_catcher, frame.copy(scroll_area_rect))) {
         scraping_box->setScrollArea(stationary_catcher.fullSizeFrame());
         state = Ready;
+        // Publish the latch the way the scrollable interpreter's startScrolling does: the full frame this page's
+        // one fragment was cut from (readyAfterUpdate just handed this frame's crop to the catcher, so `frame` IS
+        // the latched frame), and what the latch owes the user. It owes no cue -- there is nothing to scroll, and
+        // the tab is complete on this very frame -- so a consumer that synthesizes the chime (the factor tab's
+        // front end) stays silent, as the skill and campaign tabs of such a page already are.
+        on_head_latched->send(frame, kCueWithheld);
     }
 }
 
@@ -1273,6 +1288,10 @@ bool NonScrollableScrapingInterpreter::ready() const {
 
 std::optional<TopOfContent> NonScrollableScrapingInterpreter::refusal() const {
     return std::nullopt;  // structurally unscrollable, so it cannot have been scrolled -- see the declaration
+}
+
+bool NonScrollableScrapingInterpreter::scrollable() const {
+    return false;  // built exactly when SceneScraper::build found no scroll bar -- see the base declaration
 }
 
 ScrollableScrapingInterpreter::ScrollableScrapingInterpreter(
@@ -1327,11 +1346,10 @@ std::optional<TopOfContent> ScrollableScrapingInterpreter::refusal() const {
     return refusal_reason;
 }
 
-// The `cue_owed` argument startScrolling takes, spelled at the two call sites below so the exit each one is
-// says itself instead of being read off a bare literal. Not an enum: the fact is a yes/no that travels with the
-// latch as a yes/no, in the same idiom as on_tab_refused's `refused` level.
-constexpr bool kCueOwed = true;
-constexpr bool kCueWithheld = false;
+bool ScrollableScrapingInterpreter::scrollable() const {
+    return true;  // built exactly when SceneScraper::build found a scroll bar -- see the base declaration
+}
+
 
 void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
     // `frame` is the full frame: the catcher/capture use the content crop, the estimator the scroll-bar band.
@@ -1511,6 +1529,15 @@ std::optional<TopOfContent> SceneScraper::refusal() const {
     return scroll_area_scraper == nullptr ? std::nullopt : scroll_area_scraper->refusal();
 }
 
+std::optional<bool> SceneScraper::scrollable() const {
+    // No interpreter yet means nothing has looked at this tab, so neither answer is established -- see the
+    // declaration for why that is not collapsed into either one.
+    if (scroll_area_scraper == nullptr) {
+        return std::nullopt;
+    }
+    return scroll_area_scraper->scrollable();
+}
+
 void SceneScraper::build(const Frame &frame) {
     assert_(state == Null);
 
@@ -1552,7 +1579,7 @@ void SceneScraper::build(const Frame &frame) {
             on_scroll_updated);
     } else {
         scroll_area_scraper = std::make_unique<NonScrollableScrapingInterpreter>(
-            scraping_box, stationary_catcher, config.scroll_area_rect);
+            scraping_box, stationary_catcher, config.scroll_area_rect, on_head_latched);
     }
 
     tab_button_catcher = std::make_unique<StationaryFrameCatcher>(
@@ -1724,12 +1751,15 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         if (tab_index != static_cast<int>(TabPage::FactorPage)) {
             return;
         }
-        // `frame` is the frame startScrolling ACCEPTED as fragment #0, not whichever frame is current -- on the
-        // motion exit those differ by several updates, and the current one is by definition already scrolled.
+        // `frame` is the frame the tab ACCEPTED as fragment #0, not whichever frame is current -- on the motion
+        // exit those differ by several updates, and the current one is by definition already scrolled. A page
+        // with no scroll bar sends its one settled frame from NonScrollableScrapingInterpreter::update, and is
+        // handled here exactly like either scrollable exit: this listener asks the tab, not the sender.
         // What that buys, and what it costs:
         //   * at-top-ness is now by construction. startScrolling proved this very frame at the head of the list
-        //     on the zero-tolerance policy, so reference_header_y is read off the top on EVERY exit rather than
-        //     only on the one that happens to announce itself.
+        //     on the zero-tolerance policy -- and a page with no scroll bar has no other position to be in -- so
+        //     reference_header_y is read off the top on EVERY exit rather than only on the one that happens to
+        //     announce itself.
         //   * settledness is no longer guaranteed. The motion exit latches without asking the stationary
         //     catcher, so this may be a transitional render. A DELIBERATE TRADE, not an oversight: a smeared
         //     reference can make maybeResetOnFactorChange's diff exceed kFactorChangeRatioThreshold and fire a
@@ -1807,13 +1837,21 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     // -- the consumers differ in which way they answer an unreadable frame.
     const auto top_of_content = topOfContent(tab_page, frame);
 
-    // Rule 2: a completed tab scrolled back to the top is the observable proxy for a character switch
-    // (the switch snaps the visible tab to the top). Discarding a captured tab cascades into a full
-    // reset. Checked before the ready() short-circuit and via a const accessor so it never trips the
-    // Updatable assert on tabScraper().
-    if (tab_completed[tab_page] && detectCompletedTabAtTop(tab_page, frame)) {
-        log_debug("completed tab {} scrolled to top -> reset session", static_cast<int>(tab_page));
-        resetSession(scene_state.record_type);
+    // Rule 3: a content change at the head of the factor list is a candidate switch, and the rule reads both frames
+    // before it acts. Whether it watches this tab is decided from what the session holds (see watchesFactorContent
+    // for the choice and why). Asked before the ready() short-circuit, because a completed session still has to
+    // notice the next character, and through const accessors so it never trips the Updatable assert on
+    // tabScraper(). The witness exists from the tab's head latch on, from either interpreter -- before that latch
+    // (the settle wait, and a tab REFUSED at its latch) there is none, and those are the stretches this rule still
+    // cannot cover; the front end is told which stretch it is in (on_factor_switch_armed), so it does not offer a
+    // switch there.
+    //
+    // ITS DWELL COUNTS ONLY THE FRAMES IT JUDGED, so a frame it does not watch clears the dwell here. A captured
+    // factor tab is never rebuilt, so nothing else would: left standing, a dwell opened before a visit to another
+    // tab would resume on the first frame back and fire without the debounce it exists for.
+    if (!watchesFactorContent(tab_page)) {
+        factor_change_pending_since = std::nullopt;
+    } else if (maybeResetOnFactorChange(frame, scene_state.record_type, top_of_content)) {
         return;
     }
 
@@ -1827,7 +1865,7 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     // factor tab being shown while the switch witness is armed (notifyFactorSwitchArmedIfChanged).
     notifyScrollPositionIfChanged(tab_page, top_of_content.verdict);
 
-    if (ready()) {  // Session complete; only a Rule 2 reset (handled above) can restart it.
+    if (ready()) {  // Session complete; only the switch detection above (Rule 0 or Rule 3) can restart it.
         return;
     }
 
@@ -1850,25 +1888,15 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     // this one had not already reported one frame earlier: it fired zero times over 583 doctest cases and 27
     // clip runs, and deleting it left every case green.
     notifyTabRefusalIfChanged();
-    // Rule 3's reference, stated after every mutator of it in this frame: the head latch (installs, via the tab's
-    // update above) and rebuildTab (clears, via handleTabSwitchInProgress). A reset returns before this line and
-    // is restated on the next frame (resetMonitors).
+    // Rule 3's witness, stated after every mutator of it in this frame: the head latch (installs, via
+    // updateUntilReady), rebuildTab (clears, via handleTabSwitchInProgress) and Rule 3's Same reading (replaces,
+    // so the level stays true). A reset returns before this line and is restated on the next frame
+    // (resetMonitors).
     notifyFactorSwitchArmedIfChanged();
 
     if (updateUntilReady(base_frame_catcher, frame)) {
         scraping_box->addBase(base_frame_catcher->frame());
         checkForCompleted();
-    }
-
-    // Rule 3: on the factor tab, keep watching for a character switch before the tab is captured. The probe
-    // fires once per latch, so a switch made without scrolling would otherwise go unnoticed. A content change
-    // at the top is a candidate switch: the rule reads both frames, keeps the session when they show the same
-    // record, and otherwise triggers a full reset (whose fresh session re-probes the new character). It is a
-    // no-op until the factor tab has latched its fragment #0 -- until then factor_switch_reference is unset and
-    // maybeResetOnFactorChange returns at once -- and a tab REFUSED at that latch never arms it at all, which is
-    // the one path this rule still cannot cover.
-    if (tab_page == TabPage::FactorPage && !tab_completed[TabPage::FactorPage]) {
-        maybeResetOnFactorChange(frame, scene_state.record_type, top_of_content);
     }
 
     log_trace("delay={}", chrono_util::to_timestamp(chrono_util::local_now()) - frame.timestamp());
@@ -1963,21 +1991,13 @@ bool CharaDetailSceneScraper::handleRecordTypeChange(record::RecordType record_t
     return true;
 }
 
-bool CharaDetailSceneScraper::detectCompletedTabAtTop(TabPage tab_page, const Frame &frame) {
-    const auto *scraper = scraperOf(tab_page);
-    const auto top_margin = scraper == nullptr ? std::nullopt : scraper->topMargin(frame);
-    const bool at_top = top_margin.has_value() && top_margin.value() <= kTopMarginThreshold;
-    if (!at_top) {
-        top_pending_since = std::nullopt;
-        return false;
-    }
-    const uint64 timestamp = frame.timestamp();
-    if (!top_pending_since || top_pending_tab != tab_page) {
-        top_pending_since = timestamp;
-        top_pending_tab = tab_page;
-        return false;
-    }
-    return chrono_util::monotonicElapsed(timestamp, top_pending_since.value()) >= kMonitorDwellMs;
+bool CharaDetailSceneScraper::watchesFactorContent(TabPage tab_page) const {
+    // The witness, and nothing about capture or completion. See the declaration.
+    return tab_page == TabPage::FactorPage && factorSwitchArmed();
+}
+
+bool CharaDetailSceneScraper::factorSwitchArmed() const {
+    return factor_switch_reference.has_value();
 }
 
 void CharaDetailSceneScraper::notifyScrollPositionIfChanged(TabPage tab_page, scraper_impl::TopOfContent reading) {
@@ -2006,10 +2026,6 @@ void CharaDetailSceneScraper::notifyTabRefusalIfChanged() {
             refusal.has_value(),
             refusal.has_value() ? std::string(scraper_impl::topOfContentTag(refusal.value())) : std::string{});
     }
-}
-
-bool CharaDetailSceneScraper::factorSwitchArmed() const {
-    return factor_switch_reference.has_value();
 }
 
 void CharaDetailSceneScraper::notifyFactorSwitchArmedIfChanged() {
@@ -2095,7 +2111,14 @@ std::optional<int> CharaDetailSceneScraper::factorHeaderTopY(const Frame &frame)
 }
 
 scraper_impl::TopOfContentReading CharaDetailSceneScraper::topOfContent(TabPage tab_page, const Frame &frame) const {
+    // AHEAD OF THE THUMB: a tab built for a page with no scroll bar is at the head of its content by definition,
+    // so nothing on this frame is read for it -- there is no thumb to read. Asked of the tab's structure, never of
+    // this frame; see the declaration.
     const auto *scraper = scraperOf(tab_page);
+    const auto scrollable = scraper == nullptr ? std::nullopt : scraper->scrollable();
+    if (scrollable.has_value() && !scrollable.value()) {
+        return {scraper_impl::TopOfContent::AtTop, scraper_impl::TopOfContentSensor::NoScrollBar};
+    }
     // A tab with no scraper has no thumb to read, which is the thumb's own Unknown -- the same value the
     // derivation gives a frame whose scroll bar is unmeasurable. The caller's resolve() answers both.
     return {
@@ -2112,11 +2135,11 @@ bool CharaDetailSceneScraper::isFactorChanged(double ratio) {
     return ratio >= kFactorChangeRatioThreshold;
 }
 
-void CharaDetailSceneScraper::maybeResetOnFactorChange(
+bool CharaDetailSceneScraper::maybeResetOnFactorChange(
     const Frame &frame, record::RecordType record_type, const scraper_impl::TopOfContentReading &reading) {
     if (!factor_switch_reference.has_value() || active_common == nullptr) {
         factor_change_pending_since = std::nullopt;
-        return;
+        return false;
     }
     // Gate the diff on being flush at the very top. Prefer the green "因子" header, which moves 1:1 with the
     // content, over the scroll thumb (whose travel is compressed by viewport/content, so a tiny content scroll
@@ -2140,7 +2163,7 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
     }
     if (!flush || factor_switch_reference->frame.size() != frame.size()) {
         factor_change_pending_since = std::nullopt;
-        return;
+        return false;
     }
     // Fraction of the factor-list scroll area whose pixels changed vs the reference. Crop both
     // frames to the scroll area first: the stationary rect is defined relative to that crop, so applying
@@ -2158,15 +2181,15 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
     const double ratio = factorChangeRatio(current_area, reference_area, diff_rect);
     if (!isFactorChanged(ratio)) {
         factor_change_pending_since = std::nullopt;  // Same character still shown (only render noise).
-        return;
+        return false;
     }
     const uint64 timestamp = frame.timestamp();
     if (!factor_change_pending_since) {
         factor_change_pending_since = timestamp;
-        return;
+        return false;
     }
     if (chrono_util::monotonicElapsed(timestamp, factor_change_pending_since.value()) < kMonitorDwellMs) {
-        return;
+        return false;
     }
     // READ WHAT BOTH FRAMES SHOW before acting on the pixels, and BEFORE any reset -- which replaces the layout the
     // read needs and drops the reference it reads. Synchronous: the reading is part of judging this frame, so the
@@ -2208,7 +2231,7 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
             "factor switch kept the session (ratio={:.4f}, gate={}): this frame is now the reference",
             ratio,
             used_header_gate ? "header" : "topmargin");
-        return;
+        return false;
     }
     // Different, Empty and Unreadable all reset: fail-CLOSED. A wrong reset costs a re-capture the user can see
     // happening; a wrong keep scrapes two characters into one record and saves it without a word.
@@ -2219,6 +2242,7 @@ void CharaDetailSceneScraper::maybeResetOnFactorChange(
         header_y.value_or(-1),
         reference_header_y.value_or(-1));
     resetSession(record_type);
+    return true;
 }
 
 std::optional<scraper_impl::FactorSwitchReading> CharaDetailSceneScraper::readFactorSwitch(const Frame &frame) {
@@ -2259,8 +2283,6 @@ std::optional<scraper_impl::FactorSwitchReading> CharaDetailSceneScraper::readFa
 void CharaDetailSceneScraper::resetMonitors() {
     tab_completed.fill(false);
     last_active_tab = std::nullopt;
-    top_pending_since = std::nullopt;
-    top_pending_tab = std::nullopt;
     type_pending_since = std::nullopt;
     type_pending_value = std::nullopt;
     factor_change_pending_since = std::nullopt;

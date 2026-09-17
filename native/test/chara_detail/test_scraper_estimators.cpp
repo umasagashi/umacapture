@@ -1491,16 +1491,87 @@ TEST_CASE("a page with no scroll bar is never refused") {
         std::vector<scraper_config::ScanParameter>{}, "unit_test_no_scroll_bar", recorder.hooks());
     // A stationary time no frame here reaches, so the page never latches and nothing is written to disk; this
     // case is about the refusal level, which is answered from the first update onwards.
+    const auto head_latched = event_util::makeDirectConnection<Frame, bool>();
     NonScrollableScrapingInterpreter interpreter(
         box,
         StationaryFrameCatcher(/*stationary_time=*/1'000'000, /*minimum_color=*/10, kAnyPixel, Rect<double>{}),
-        kContentRect);
+        kContentRect,
+        head_latched);
 
     interpreter.update(contentAndScrollBar(0, 1, 0));
     interpreter.update(contentAndScrollBar(0, 1, 50));
 
     CHECK_FALSE(interpreter.ready());
     CHECK_FALSE(interpreter.refusal().has_value());
+}
+
+TEST_CASE("each interpreter says whether its page can scroll, and no frame changes the answer") {
+    // The structural fact the scraper's top-of-content reading asks first: a page with no scroll bar is at the head
+    // of its content by definition. It is a property of WHICH interpreter was built, so a frame that draws the
+    // other kind of page -- a bar on the page built without one, and the reverse -- must not move it; reading it
+    // off a frame would put a scrolled frame of a scrollable page at the head whenever its bar went undetected.
+    DirectoryHookRecorder recorder;
+    const auto box = std::make_shared<PageScrapingBox>(
+        std::vector<scraper_config::ScanParameter>{}, "unit_test_no_scroll_bar", recorder.hooks());
+    const auto head_latched = event_util::makeDirectConnection<Frame, bool>();
+    NonScrollableScrapingInterpreter without_bar(
+        box,
+        StationaryFrameCatcher(/*stationary_time=*/1'000'000, /*minimum_color=*/10, kAnyPixel, Rect<double>{}),
+        kContentRect,
+        head_latched);
+    CHECK_FALSE(without_bar.scrollable());
+    without_bar.update(contentAndScrollBar(0, /*exposed_rows=*/0, 0));
+    CHECK_FALSE(without_bar.scrollable());
+
+    InterpreterHarness with_bar(/*stationary_time=*/1'000'000);
+    CHECK(with_bar.interpreter->scrollable());
+    with_bar.interpreter->update(contentAndScrollBar(0, /*exposed_rows=*/1, 0));
+    CHECK(with_bar.interpreter->scrollable());
+}
+
+TEST_CASE("a page with no scroll bar publishes its latch: the whole frame, once, owing no cue") {
+    // THE SAME EVENT THE SCROLLABLE INTERPRETER PUBLISHES, so the one consumer that arms the factor tab's switch
+    // witness and duplicate probe from it cannot tell the two interpreters apart and does not need to. Three
+    // claims, each of which a consumer depends on: it is sent at the latch and not before; it carries the FULL
+    // frame, which Rule 3 compares by size and crops itself, not the catcher's content crop; and it says no cue is
+    // owed, because a page with nothing to scroll must not announce "you may scroll now".
+    // Unlike addScrollArea, setScrollArea writes the page's one strip even with no scan parameters, so the
+    // directory the recorder only pretends to create has to exist, and goes away with the case.
+    const std::filesystem::path tab_dir = "unit_test_no_scroll_bar_latch";
+    std::filesystem::create_directories(tab_dir);
+    struct RemoveOnExit {
+        std::filesystem::path path;
+        ~RemoveOnExit() {
+            std::error_code ignored;
+            std::filesystem::remove_all(path, ignored);
+        }
+    } const cleanup{tab_dir};
+    DirectoryHookRecorder recorder;
+    const auto box = std::make_shared<PageScrapingBox>(
+        std::vector<scraper_config::ScanParameter>{}, tab_dir, recorder.hooks());
+    const auto head_latched = event_util::makeDirectConnection<Frame, bool>();
+    std::vector<Frame> latched_frames;
+    std::vector<bool> latched_cues;
+    head_latched->listen([&](const Frame &frame, bool cue_owed) {
+        latched_frames.push_back(frame);
+        latched_cues.push_back(cue_owed);
+    });
+    // Stationary time 0: the second identical frame latches, as InterpreterHarness's stationary path does.
+    NonScrollableScrapingInterpreter interpreter(
+        box, StationaryFrameCatcher(/*stationary_time=*/0, /*minimum_color=*/10, kAnyPixel, Rect<double>{}),
+        kContentRect,
+        head_latched);
+
+    interpreter.update(contentAndScrollBar(0, 1, 0));
+    CHECK(latched_frames.empty());  // one frame settles nothing
+    const Frame latched = contentAndScrollBar(0, 1, 50);
+    interpreter.update(latched);
+
+    REQUIRE(interpreter.ready());
+    REQUIRE(latched_frames.size() == 1);
+    CHECK(latched_frames.front().timestamp() == 50);
+    CHECK(latched_frames.front().size() == latched.size());
+    CHECK(latched_cues == std::vector<bool>{false});
 }
 
 }  // namespace

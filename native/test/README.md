@@ -79,17 +79,30 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   built from the *shipped* `scene_scraper.json`, driven past the switch dwell so the
   record-type reset rule fires, asserting that the reported session is the one thrown
   away and not the one rebuilt on the same call, that it says it did not complete, and
-  that `release()` reports its session without announcing a discard of its own. Only
-  that one of the three reset rules is reachable without game pixels — the other two
-  read the image — and a discard reporting `completed == true` is not reachable at all
-  from this target (it needs a fully captured session); the integration manifest's
-  `expect_discarded_incomplete` is what covers that direction. Also the **top-of-content
+  that `release()` reports its session without announcing a discard of its own. The
+  record-type rule is the one reset rule that needs no image at all; a discard reporting
+  `completed == true` is produced by the Rule 3 cases below that complete a whole
+  session from synthetic frames and then show a different factor list, and the integration manifest's
+  `expect_discarded_incomplete` covers the same bit on real footage. Also the **top-of-content
   wire**: that `on_scroll_position` carries the composite verdict's own word
   (`at_top` / `scrolled` / `unknown`) *unresolved*, because the two front-end consumers
   answer an unreadable frame in opposite directions — a resolve on this side is invisible
-  to the records a golden compares. And **Rule 2** (a completed tab back at the head of
-  its list): it commits only after the dwell, one frame away from the top restarts the
-  dwell, and a frame no sensor can read supplies no switch at all.
+  to the records a golden compares. A tab built for a page with **no scroll bar** says
+  `at_top` from the structure it was built with, before any sensor and whatever its frames
+  show (on the skill, campaign and factor tabs alike, with the factor header missing or
+  read as scrolled), while a frame of a *scrollable* page that shows neither its header nor
+  its scroll bar still says `unknown` and is not judged by Rule 3. And **which rule watches a captured tab for a
+  character switch**: Rule 3, and only Rule 3, whenever the factor tab holds its witness
+  (after the tab is captured and after the session completes, keeping the session on a
+  same-record reading). No rule watches any other tab, so a captured skill or campaign tab
+  at the head of its list is never discarded, in an incomplete session or a completed one,
+  and a switch made there after completion is judged by Rule 3 when the factor tab is next
+  shown. The factor tab's
+  witness is installed by its head latch whether its page scrolls or has no scroll bar
+  (the latter arming the probe with `cue_owed == false`), so a factor page with no scroll
+  bar that stays at its head is never discarded and a switch on it is judged by Rule 3;
+  before its latch the tab holds no witness and nothing reads it. Rule 3's dwell does not
+  resume across a frame of another tab.
 - `chara_detail/test_factor_header_band.cpp` — the invariant the fine (green "因子"
   header) sensor rests on, measured against real footage: inside the configured probe
   band, the header row is the *only* row of the scroll-area crop that clears

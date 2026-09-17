@@ -451,20 +451,9 @@ class CharaDetailStateWidget extends ConsumerWidget {
         // A duplicate HINT is not a state of its own here: the screen is at the factor-tab top with
         // nothing captured yet, exactly as `detailReady`, and the user may scroll on and capture it
         // anyway. That the probe fired is the event's business.
-        //
-        // The action line depends on whether the user can switch characters right now: switching is only
-        // detectable at the factor-tab top (switchSafety), so guide toward it when it is not yet reached.
-        final actionKey = (state.switchSafety ?? false)
-            ? "$base.detail_ready.action.switchable"
-            : "$base.detail_ready.action.not_switchable";
-        return _StatusMessage.explicit(
-          CaptureStatusTone.info,
-          Symbols.swipe_down_rounded,
-          "$base.detail_ready.status".tr(),
-          actionKey.tr(),
-        );
+        return _switchAwareMessage(CaptureStatusTone.info, Symbols.swipe_down_rounded, "$base.detail_ready", state);
       case CharaDetailCaptureStatus.capturing:
-        return _StatusMessage(CaptureStatusTone.info, Symbols.downloading_rounded, "$base.capturing");
+        return _switchAwareMessage(CaptureStatusTone.info, Symbols.downloading_rounded, "$base.capturing", state);
       case CharaDetailCaptureStatus.tabRefused:
         // Present tense, and it belongs here rather than in the event tile: the refusal is a level
         // that stands until the user acts on it, and it is withdrawn the moment they do. An event
@@ -480,8 +469,29 @@ class CharaDetailStateWidget extends ConsumerWidget {
         // character is done, so they can switch away or keep going. WHICH of the two it was -- a new
         // record or one already in the table -- is the event's subject, and the only place that
         // distinction survives the next character being opened.
-        return _StatusMessage(CaptureStatusTone.success, Symbols.check_circle_rounded, "$base.capture_completed");
+        return _switchAwareMessage(
+          CaptureStatusTone.success,
+          Symbols.check_circle_rounded,
+          "$base.capture_completed",
+          state,
+        );
     }
+  }
+
+  // A status line with an action line that depends on whether the user can switch characters right
+  // now. [base] carries `action.switchable` and `action.not_switchable`; [switchSafety] picks one, so
+  // the line that says switching is possible and the green arrows beside it read the same answer.
+  // While it is not safe the line points at the 継承タブ, the one tab the core watches for a switch,
+  // during capture and after it alike. A null answer (no guidance) reads as "not safe", as the
+  // indicator does.
+  _StatusMessage _switchAwareMessage(
+    CaptureStatusTone tone,
+    IconData icon,
+    String base,
+    CharaDetailCaptureState state,
+  ) {
+    final variant = (state.switchSafety ?? false) ? "switchable" : "not_switchable";
+    return _StatusMessage.explicit(tone, icon, "$base.status".tr(), "$base.action.$variant".tr());
   }
 
   Widget _buildStatusBanner(
@@ -567,7 +577,7 @@ class CharaDetailStateWidget extends ConsumerWidget {
     final sessionActive = outerCapturing || importState.isRunning;
     // The progress rings stay visible for every in-detail state and only disappear once the detail
     // screen is closed (waitingForDetail) or lost mid-capture (failed). That keeps the completed rings
-    // and the "safe to switch" indicator on screen after success or an already-captured duplicate.
+    // and the switch indicator on screen after success or an already-captured duplicate.
     final detailActive =
         controllerAvailable &&
         sessionActive &&

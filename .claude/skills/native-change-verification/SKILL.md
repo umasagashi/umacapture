@@ -74,11 +74,12 @@ moves no record on this material, so the goldens were identical with and without
 `integration_dual_decode.landscape_2pane_ps5`, each quoting the geometry that actually reached
 recognition.
 
-**Since 8457a45 that particular cover is gone, and nothing has replaced it.** Every case now states
-735, 736 or 737 — recount them off `cases.json`, do not take it from here — and all three sit inside
-the untouched arm, so the band performs **no step on any golden clip** and band-on and band-off yield
-the same `anchor_unit`. The assertion still does what it says: it pins the geometry that reached
-recognition, which is the thing every normalized coordinate is multiplied by. It no longer detects a
+**Since 8457a45 that particular cover is gone, and nothing has replaced it.** Every case states one of
+`713`, `720`, `735`, `736` or `737` (`grep -o '"anchor_unit": [0-9]*' native/test/integration/cases.json |
+sort | uniq -c` — recount them off `cases.json`, do not take the list from here), and every one of those
+sits inside the untouched arm, so the band performs **no step on any golden clip** and band-on and
+band-off yield the same `anchor_unit`. The assertion still does what it says: it pins the geometry that
+reached recognition, which is the thing every normalized coordinate is multiplied by. It no longer detects a
 band that never ran. **So do not read a green `anchor_unit` as evidence that the band is armed.** On
 this material the shrink arm is reached only by the §3 grid's 1080-wide rungs and by the doctest
 edge cases named in §0; a change to it has no golden cover at all.
@@ -355,21 +356,25 @@ The number that moves is the verdict count, carried twice:
 
 For each must-fire clip report the four counts next to the reset count, and say whether its case
 declares them. The counts also narrow the "which rule fired" question below: every verdict other than
-`same` is one Rule 3 reset, whereas `discarded` counts all three reset rules.
+`same` is one Rule 3 reset, whereas `discarded` counts every reset, the record-type one included.
 
 Two things the ctests do **not** cover, and which still have to be measured by hand:
 
 * **The reset count of the two clips that produce a record.** Neither states `expect_discarded`;
   their goldens assert the record, not the number of discards that preceded it. Their Rule 3 resets
-  are covered by the verdict counts where the case declares them; the other two rules' resets are not.
-* **Which rule fired.** `expect_discarded` counts every `onCharaDetailRestarted`, i.e. all three
-  reset sites in `chara_detail_scene_scraper.cpp` (record-type change, completed-tab-at-top,
-  factor-change). Only the factor one logs at INFO (`factor reset (…)`, present in Release); the
-  other two log at DEBUG. **So the two numbers legitimately disagree** — measured:
-  `player_standard_sequential` prints **zero** `factor reset` lines and reports `discarded: 1`. Do
-  not read a `discarded` count as a factor-reset count, in either direction. If the change under
-  review is about *which* rule fires, the count alone cannot tell you; the log line and the verdict
-  counts can.
+  are covered by the verdict counts where the case declares them; a record-type reset is not.
+* **Which rule fired.** `expect_discarded` counts every `onCharaDetailRestarted`, i.e. both
+  `resetSession` call sites in `chara_detail_scene_scraper.cpp`: the record-type change and the
+  factor change (Rule 3). The factor one logs at INFO (`factor reset (…)`, present in Release); the
+  record-type one logs at DEBUG (`record type changed -> reset session`). **So the two numbers can
+  legitimately disagree**, by exactly the number of record-type resets. There used to be a third
+  site — a completed tab held at its head — and the example of disagreement quoted here was that
+  rule firing on `player_standard_sequential`. That rule is gone, and so is the example: the clip's
+  post-completion switch is now caught by Rule 3 when the factor tab is next shown, and it prints
+  **one** `factor reset` line beside `discarded: 1` (measured 2026-09-15 with `grep -c 'factor reset'`
+  over the stdout of a `video` run given `run.py`'s arguments). Do not read a `discarded` count as a
+  factor-reset count, in either direction. If the change under review is about *which* rule fires,
+  the count alone cannot tell you; the log line and the verdict counts can.
 
 **A legitimate switch and a lost half-captured character ARE distinguishable in the data**, so do not
 report a discard count on its own. The discriminator is the payload
