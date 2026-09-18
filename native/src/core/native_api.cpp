@@ -546,10 +546,11 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto recognize_failed_connection = event_util::makeDirectConnection<std::string>();
     recognize_failed_connection->listen([this](const std::string &message) { notifyError(message); });
 
-    // The recognizer stage runs ONNX inference. On Windows it links onnxruntime in-process (recognizer_models.cpp
-    // names recognizer::Model); the Emscripten Wasm PoC links a JS bridge instead (wasm/wasm_recognizer_models.cpp
-    // provides the same ctors, backed by onnxruntime-web). Either way the recognizer subscribes to the stitcher's
-    // recognize_ready output and emits recognize_completed on success, so the pipeline runs end to end.
+    // The recognizer stage runs ONNX inference. The constructor is the same on every platform; only the predictors
+    // it builds through makePredictor differ (in-process onnxruntime on Windows, a JS bridge to onnxruntime-web in
+    // the Emscripten Wasm PoC; see chara_detail/recognizer_prediction.h). Either way the recognizer subscribes to
+    // the stitcher's recognize_ready output and emits recognize_completed on success, so the pipeline runs end to
+    // end.
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
         stitcher_dir,

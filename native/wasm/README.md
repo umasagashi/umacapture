@@ -16,10 +16,13 @@ dependencies. See the Stage-6 design at
   `stop`, the shared-memory counters, `setupInferenceBridge`, ...).
 - `wasm_recognizer_models.cpp` — two things: the shared-memory inference channel
   that hands recognizer inference off to the JS-side onnxruntime-web pump, and
-  the Wasm replacement for **every production recognizer constructor**. It stands
-  in for `native/src/chara_detail/chara_detail_recognizer_models.cpp` (which is
-  excluded from this build because it links onnxruntime) and must define the same
-  constructors with the same signatures.
+  the Wasm definition of `makePredictor` (declared in
+  `native/src/chara_detail/recognizer_prediction.h`), which builds each
+  recognizer model as a predictor on that channel. It stands in for
+  `native/src/chara_detail/chara_detail_recognizer_models.cpp` (the desktop
+  definition, excluded from this build because it links onnxruntime) and must
+  instantiate `makePredictor` for the same decoders. The recognizer constructors
+  and decoders themselves are shared code in `chara_detail_recognizer.cpp`.
 - `wasm_inference_bridge.h` — the abort protocol `stop()` uses to cancel an
   in-flight bridged inference. Required, not optional: `stop()` runs on the JS
   thread and joins the pipeline pthreads, but their inference (the recognizer's,
@@ -82,11 +85,12 @@ cross-checks, so they are checked mechanically instead:
   files it deliberately leaves out (`EXCLUDED_SOURCES`, each with its reason),
   and the check requires the two lists together to cover `native/src` exactly —
   a new source lands in neither and fails.
-- **The recognizer twin.** `wasm_recognizer_models.cpp` must define the same
-  constructors, with the same signatures, as
-  `chara_detail_recognizer_models.cpp`. Adding or re-signing a recognizer on the
-  desktop side otherwise compiles fine on Windows and breaks the Wasm build with
-  no signal until someone runs `build.sh` by hand.
+- **The predictor factory.** `wasm_recognizer_models.cpp` and
+  `chara_detail_recognizer_models.cpp` must each instantiate `makePredictor` for
+  exactly the decoders `recognizer_prediction.h` declares, and neither may define
+  a recognizer constructor. A decoder added on the desktop side only otherwise
+  compiles fine on Windows and breaks the Wasm link with no signal until someone
+  runs `build.sh` by hand.
 
 `build.sh` runs the check before compiling anything (`SKIP_SOURCE_CHECK=1`
 bypasses it). It needs no Emscripten toolchain and no OpenCV, so it also stands
@@ -224,8 +228,8 @@ of the following change:
   `SOURCES` (or to `EXCLUDED_SOURCES` with a reason) or it is not in the module
   at all. This is the step most easily forgotten, which is why the drift check
   above exists.
-- A recognizer constructor in `chara_detail_recognizer_models.cpp`: its twin in
-  `wasm_recognizer_models.cpp` must be updated to match.
+- A new decoder in `recognizer_prediction.h`: `wasm_recognizer_models.cpp` must
+  instantiate `makePredictor` for it, as the desktop definition does.
 - The Wasm-target OpenCV build (version or flags) or the emsdk version.
 - The build flags in `build.sh`.
 

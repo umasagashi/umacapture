@@ -68,7 +68,8 @@ jobs:
       # Drift gate for the two hand-maintained copies the Wasm build depends on and
       # that no compiler cross-checks: native/wasm/build.sh's SOURCES/EXCLUDED_SOURCES
       # must together cover native/src exactly, and wasm_recognizer_models.cpp must
-      # define the same constructors as its desktop twin. A new native/src/**.cpp is
+      # instantiate makePredictor for the same decoders as the desktop definition
+      # (recognizer_prediction.h declares them). A new native/src/**.cpp is
       # otherwise simply absent from the Wasm module, with no signal until someone
       # runs build.sh by hand -- which is why it lives in the job that owns those
       # sources, right next to where they are compiled for Windows.

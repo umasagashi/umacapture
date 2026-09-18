@@ -875,6 +875,10 @@ test('a release with no core instance clears the local claim instead of dangling
 
 const SETUP_ST_REQUEST = 1, SETUP_ST_DONE = 2;
 const SETUP_W_MODEL = 1, SETUP_W_H = 2, SETUP_W_W = 3, SETUP_W_C = 4, SETUP_W_OUTCOUNT = 5;
+// Byte offsets of the stub bridge's blocks. The kind values are deliberately NOT the ones the core uses, so a pump
+// that wrote its own constants instead of the ones the bridge handed it is caught.
+const SETUP_RESPONSE_PTR = 1024, SETUP_COUNTS_PTR = 1536, SETUP_KINDS_PTR = 1792;
+const SETUP_KINDS_BY_TENSOR_TYPE = { int64: 7, float32: 9 }, SETUP_OTHER_KIND = 5;
 
 const dataModule = (source) => 'data:text/javascript,' + encodeURIComponent(source);
 const setupCoreUrl = dataModule('export default async () => globalThis.__testCoreFactory();');
@@ -904,7 +908,16 @@ function installSetupStubs(tally) {
         tally.bridges++;
         // controlPtr 0 / stateIndex 0 puts the state cell at HEAP32[0]; the request and response blocks sit far
         // enough past the control words that nothing overlaps.
-        return { controlPtr: 0, requestPtr: 256, responsePtr: 1024, stateIndex: 0 };
+        return {
+          controlPtr: 0,
+          requestPtr: 256,
+          responsePtr: SETUP_RESPONSE_PTR,
+          responseElementCountsPtr: SETUP_COUNTS_PTR,
+          responseKindsPtr: SETUP_KINDS_PTR,
+          kindsByTensorType: SETUP_KINDS_BY_TENSOR_TYPE,
+          otherKind: SETUP_OTHER_KIND,
+          stateIndex: 0,
+        };
       },
       isRunning: () => false,
       drainMessages: () => [],
@@ -920,14 +933,20 @@ function installSetupStubs(tally) {
       create: async () => {
         tally.sessions++;
         await new Promise((resolve) => setTimeout(resolve, 0));
+        // One output of each kind the pump has to tell apart: an int64 label, a float confidence, and a type no
+        // decoder reads, as a vector so its element count differs too.
         return {
           inputNames: ['in'],
-          outputNames: ['out'],
+          outputNames: ['label', 'confidence', 'mask'],
           inputMetadata: [{ name: 'in', shape: [1, 1, 1, 1] }],
           run: async () => {
             tally.inferences++;
             await runGate;
-            return { out: { data: [0.5] } };
+            return {
+              label: { type: 'int64', size: 1, data: BigInt64Array.of(3n) },
+              confidence: { type: 'float32', size: 1, data: Float32Array.of(0.5) },
+              mask: { type: 'bool', size: 4, data: Uint8Array.of(1, 0, 1, 1) },
+            };
           },
         };
       },
@@ -1017,6 +1036,50 @@ test('one published inference request is serviced ONCE after two overlapping ini
       releaseRun();
       await settle();
       assert.equal(Atomics.load(HEAP32, 0), SETUP_ST_DONE, 'the single pump still answers the request');
+    } finally {
+      await teardownSetupStubs(releaseRun);
+    }
+  });
+
+// -------------------------------------------------------------------------------------------------------------
+// WHAT THE PUMP REPORTS OF A MODEL'S OUTPUTS, for the check C++ runs on them (cv/prediction_check.h).
+//
+// The check itself is C++ and unit-tested there; what only this seam can reach is the JS half of the contract:
+// the output count umaOrtResolve answers at load, and, per inference, each output's element count and element
+// type written next to its value. A pump that dropped either would leave C++ judging zeros -- every record
+// refused -- and one that wrote its own kind constants would disagree with the core the first time they moved.
+
+test('umaOrtResolve reports the session output count the core checks at load', { timeout: 10000 }, async () => {
+  const tally = { cores: 0, sessions: 0, bridges: 0, moduleFiles: 0, inferences: 0 };
+  const { releaseRun } = await driveOverlappingInits(tally);
+  try {
+    assert.equal(self.umaOrtResolve('skill/prediction.onnx').outputs, 3);
+  } finally {
+    await teardownSetupStubs(releaseRun);
+  }
+});
+
+test('the pump writes each output\'s element count and bridge-supplied kind next to its value', { timeout: 10000 },
+  async () => {
+    const tally = { cores: 0, sessions: 0, bridges: 0, moduleFiles: 0, inferences: 0 };
+    const { HEAP32, releaseRun } = await driveOverlappingInits(tally);
+    try {
+      HEAP32[SETUP_W_MODEL] = 0;
+      HEAP32[SETUP_W_H] = 1; HEAP32[SETUP_W_W] = 1; HEAP32[SETUP_W_C] = 1;
+      HEAP32[SETUP_W_OUTCOUNT] = 3;
+      Atomics.store(HEAP32, 0, SETUP_ST_REQUEST);
+      releaseRun();
+      await settle();
+      assert.equal(Atomics.load(HEAP32, 0), SETUP_ST_DONE);
+
+      const values = new Float64Array(HEAP32.buffer, SETUP_RESPONSE_PTR, 3);
+      const counts = new Int32Array(HEAP32.buffer, SETUP_COUNTS_PTR, 3);
+      const kinds = new Int32Array(HEAP32.buffer, SETUP_KINDS_PTR, 3);
+      assert.deepEqual(Array.from(values), [3, 0.5, 1]);
+      assert.deepEqual(Array.from(counts), [1, 1, 4]);
+      assert.deepEqual(
+        Array.from(kinds),
+        [SETUP_KINDS_BY_TENSOR_TYPE.int64, SETUP_KINDS_BY_TENSOR_TYPE.float32, SETUP_OTHER_KIND]);
     } finally {
       await teardownSetupStubs(releaseRun);
     }

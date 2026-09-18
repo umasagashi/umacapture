@@ -14,9 +14,9 @@ namespace uma::chara_detail::recognizer_impl {
 //
 // This is the geometric primitive the factor/skill/campaign recognizers use to find the top edge of a
 // row: they walk down (or up, with `reversed`) from a known anchor until the background gives way to
-// content. It depends only on Frame and the geometry/color primitives -- not on any ONNX Model -- so it
-// lives in this pure helper TU, kept out of chara_detail_recognizer.h (which pulls in cv/model.h and
-// thus onnxruntime) so it can be unit-tested against hand-built frames without the recognition stack.
+// content. It depends only on Frame and the geometry/color primitives, so it is a free function in its own
+// small TU and is unit-tested against hand-built frames (test_search_helpers.cpp) without constructing a
+// recognizer.
 //
 // Both scan axes are clamped to the frame bounds before sampling: the start point can map at or past an
 // edge (a scan_top near the bottom, or an X near the right on a narrower-than-expected frame), and an

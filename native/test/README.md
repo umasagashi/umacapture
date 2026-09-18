@@ -171,8 +171,8 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   recognizer still finds the banner there, and that the window is
   `lround(vertical_banner_upper_gap * unit)`. The footage cases report and continue when
   their clips are absent.
-- `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical` (split
-  out of the ONNX-linked recognizer TU into `chara_detail_search_helpers.{h,cpp}`):
+- `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical`
+  (`chara_detail_search_helpers.{h,cpp}`):
   downward/upward run scanning, the `max_length` cap, the all-background nullopt, and
   the out-of-bounds start clamp, against hand-built mats; `scanVertical`, the pixel
   form of the same scan (start, unclamped length, hit row), and
@@ -194,6 +194,14 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   debounce (fire once on the transition into a stall, rearm only after frames
   resume), driven with synthetic elapsed durations so the timing logic is
   deterministic without spinning up the poll thread or the real clock.
+- `cv/test_prediction_check.cpp` — the inference-output check desktop (`cv/model.h`)
+  and web (`native/wasm/wasm_recognizer_models.cpp`) both run before a decoder reads
+  a model's outputs: a session one output short refused at load, a wrong element
+  type, a vector and an empty output refused per read with the exception type each
+  raises, and an out-of-range index refused before the platform is asked to describe
+  it. Neither adapter compiles here; the JS half of the web contract (output count at
+  load, element count and type per output) is covered by
+  `tool/test_web_capture_session.mjs`.
 - `util/test_event_util.cpp` — the event plumbing: `bindLeft`/`bindRight` argument
   binding, the queued-connection limit modes (`Discard` drops, `NoLimit` keeps,
   `Block` back-pressures without dropping), and the runner thread's containment of a
@@ -264,10 +272,23 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   per-pixel cut, an identical frame never is, a whole-frame brightness drift below
   the cut is not, and a small high-contrast change is rejected by the area bar
   rather than by the cut.
-- The ONNX-linked recognizers, driven through the `util/fake_predictor.h` stub
-  (their production constructors live in the deliberately unlinked
-  `chara_detail_recognizer_models.cpp`, so the scan logic is testable with no
-  onnxruntime). Each covers its landmark-not-found path, its layout selection and
+- `chara_detail/fake_predictor_factory.cpp` — not a test: the test target's
+  definition of `makePredictor`, which the recognizers' production constructors
+  call. The desktop definition (`chara_detail_recognizer_models.cpp`) loads ONNX
+  models and is deliberately unlinked; this one loads nothing and returns
+  `util/fake_predictor.h` constants (the value-initialized result, confidence 1),
+  so the production constructors link and can be built in a test.
+- `chara_detail/test_recognizer_wiring.cpp` — the three subscriptions of
+  `CharaDetailRecognizer`'s production constructor, built with the fake above and
+  the shipped `recognizer.json` over direct connections: a factor probe answers
+  once on the completion channel with the limit and cue it was sent; an update
+  request for a missing record answers once with `updateRecord failed for
+  record_id=…`; the capture input is registered exactly once and its failure
+  reports no update error. A capture subscription that calls nothing still passes
+  (the capture path reports failure only to the log); the golden suite covers that.
+- The recognizers, driven through their injection constructors and the
+  `util/fake_predictor.h` stub, so the scan logic is testable with no
+  onnxruntime. Each covers its landmark-not-found path, its layout selection and
   the 0-based-to-1-based conversions the record contract requires:
   `chara_detail/test_status_header_recognizer.cpp` (evaluation / status /
   aptitudes, and what an inheritance-only record skips),
@@ -605,6 +626,18 @@ Regenerated goldens are tied to the `sandbox/modules` models — to what they
 models change, rerun `--update-golden`, eyeball the diff, and commit the updated
 goldens alongside the model change; a refresh that moves no prediction produces an
 empty diff rather than 12 changed version lines.
+
+`native/wasm/check_sources.py`'s own comment/string stripping has its own self-test,
+`wasm_check_sources_selftest` ([`../wasm/test_check_sources.py`](../wasm/test_check_sources.py)),
+registered next to the two above because it also needs only `uv` and no clip, model or
+cli — not because it is part of the golden suite. It drives `strip_comments` and the
+constructor/duplicate-instantiation probes that read its output against hand-built
+text: a `/*` inside a line comment or a string literal, and a duplicated
+`makePredictor<Decoder>` instantiation hidden behind one, are each caught; a
+constructor or a duplicate instantiation entirely inside a real comment, an apostrophe
+in a line comment, and a string literal containing `//` all stay quiet; and the real
+`chara_detail_recognizer_models.cpp` / `wasm_recognizer_models.cpp`
+/ `recognizer_prediction.h` still report no drift.
 
 ### Dual-decode equivalence (`integration_dual_decode.<name>`)
 

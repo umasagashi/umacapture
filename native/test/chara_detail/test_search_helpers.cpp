@@ -2,8 +2,8 @@
 //
 // searchVertical walks a vertical run from a start point until the pixel leaves the background color,
 // returning the normalized Y of that first content pixel. It is the geometric primitive the recognizers
-// use to locate a row's top edge, split out of the ONNX-linked recognizer TU so it can be driven by
-// hand-built CV_8UC3 mats here. Frame::fixed normalizes BOTH axes by the frame width (unit_size ==
+// use to locate a row's top edge, and lives in its own TU (chara_detail_search_helpers) so it can be driven
+// by hand-built CV_8UC3 mats here. Frame::fixed normalizes BOTH axes by the frame width (unit_size ==
 // width), so on a square frame a pixel (px, py) is addressed at normalized (px/w, py/w).
 
 #include <doctest/doctest.h>

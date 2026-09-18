@@ -1,97 +1,76 @@
 #pragma once
 
-// ONNX-backed Prediction decoders. These derive from recognizer::Prediction (cv/model.h) and read Ort tensor
-// outputs, so they are kept OUT of chara_detail_recognizer.h to keep that header (and the scan logic in
-// chara_detail_recognizer.cpp) free of the onnxruntime include. Only recognizer_models.cpp, which
-// instantiates Model<PredictionType>, includes this header.
+// How the recognizers obtain their predictors, and how a prediction's scalar outputs are read.
 //
-// Each type's result()/confidence()/toJson() is what Model<PredictionType>::predict() calls to produce a
-// Predicted<Result>; the Result structs (Chara, RacePlace) and the pure formatTrainedDate() helper live in
-// chara_detail_recognizer.h so they stay testable without ONNX.
+// The decoders are platform-free: they read through recognizer::PredictionOutputs and are defined once, in
+// chara_detail_recognizer.cpp. makePredictor is the one thing each platform supplies, because running a model
+// is the one thing the platforms cannot share (see the definitions for the constraint on each side). The
+// production constructors in chara_detail_recognizer.cpp call it; each build links exactly one definition:
+//   - desktop (CLI and Windows runner): chara_detail_recognizer_models.cpp, in-process onnxruntime;
+//   - Wasm: native/wasm/wasm_recognizer_models.cpp, onnxruntime-web behind a JS bridge;
+//   - umacapture_tests: native/test/chara_detail/fake_predictor_factory.cpp, which loads nothing.
+// This header stays ONNX-free, so every one of those translation units may include it.
 
-#include <algorithm>
+#include <cstddef>
+#include <filesystem>
+#include <memory>
 #include <string>
 
 #include "chara_detail/chara_detail_recognizer.h"
-#include "cv/model.h"
-#include "util/json_util.h"
+#include "cv/predictor.h"
 
 namespace uma::chara_detail::recognizer_impl {
 
-struct IndexPrediction : public recognizer::Prediction {
-    // Highest output index this type reads, plus one; validated against the loaded model in Model's ctor.
-    static constexpr size_t kOutputCount = 2;
+// Each decoder names its Result, the number of outputs it reads (its highest output index plus one), and how
+// those outputs become a Predicted<Result>. Even output indices are int64 labels, odd ones float confidences.
+struct IndexDecoder {
+    using Result = int;
+    static constexpr std::size_t kOutputCount = 2;
 
-    [[nodiscard]] int result() const { return static_cast<int>(at<int64_t>(0)); }
-
-    [[nodiscard]] auto confidence() const { return at<float>(1); }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
+    [[nodiscard]] static recognizer::Predicted<Result> decode(const recognizer::PredictionOutputs &out);
 };
 
-struct CharaPrediction : public recognizer::Prediction {
-    // Reads outputs 0..9 (record-type head at 8, its confidence at 9); validated in Model's ctor so a model
-    // with fewer heads fails loudly at load instead of dropping every record via a per-call out_of_range.
-    static constexpr size_t kOutputCount = 10;
+struct CharaDecoder {
+    using Result = Chara;
+    // Reads outputs 0..9 (record-type head at 8, its confidence at 9).
+    static constexpr std::size_t kOutputCount = 10;
 
-    [[nodiscard]] int icon() const { return static_cast<int>(at<int64_t>(0)); }
-
-    [[nodiscard]] int chara() const { return static_cast<int>(at<int64_t>(2)); }
-
-    [[nodiscard]] int card() const { return static_cast<int>(at<int64_t>(4)); }
-
-    [[nodiscard]] bool rental() const { return at<int64_t>(6); }
-
-    // record_type_index (output 8), not rental_index (output 6): the model has a dedicated record-type
-    // head with values 0-3 (see record::RecordType). Read it as int, not bool, so a FriendStandard/
-    // FriendInheritance value (>= 2) is not truncated to 1.
-    [[nodiscard]] int recordType() const { return static_cast<int>(at<int64_t>(8)); }
-
-    [[nodiscard]] Chara result() const {
-        return {
-            icon(),
-            chara(),
-            card(),
-            rental(),
-            recordType(),
-        };
-    }
-
-    [[nodiscard]] auto confidence() const {
-        return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7), at<float>(9)});
-    }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
+    [[nodiscard]] static recognizer::Predicted<Result> decode(const recognizer::PredictionOutputs &out);
 };
 
-struct RacePlacePrediction : public recognizer::Prediction {
-    // Reads outputs 0..7; validated against the loaded model in Model's ctor.
-    static constexpr size_t kOutputCount = 8;
+struct RacePlaceDecoder {
+    using Result = RacePlace;
+    static constexpr std::size_t kOutputCount = 8;
 
-    [[nodiscard]] int place() const { return static_cast<int>(at<int64_t>(0)); }
-
-    [[nodiscard]] int ground() const { return static_cast<int>(at<int64_t>(2)); }
-
-    [[nodiscard]] int distance() const { return static_cast<int>(at<int64_t>(4)); }
-
-    [[nodiscard]] int variation() const { return static_cast<int>(at<int64_t>(6)); }
-
-    [[nodiscard]] RacePlace result() const { return {place(), ground(), distance(), variation()}; }
-
-    [[nodiscard]] auto confidence() const { return std::min({at<float>(1), at<float>(3), at<float>(5), at<float>(7)}); }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
+    [[nodiscard]] static recognizer::Predicted<Result> decode(const recognizer::PredictionOutputs &out);
 };
 
-struct DateTimePrediction : public recognizer::Prediction {
-    // Reads outputs 0 and 1; validated against the loaded model in Model's ctor.
-    static constexpr size_t kOutputCount = 2;
+struct DateTimeDecoder {
+    using Result = std::string;
+    static constexpr std::size_t kOutputCount = 2;
 
-    [[nodiscard]] std::string result() const { return formatTrainedDate(at<int64_t>(0)); }
-
-    [[nodiscard]] auto confidence() const { return at<float>(1); }
-
-    [[nodiscard]] json_util::Json toJson() const { return {{"confidence", confidence()}, {"label", result()}}; }
+    [[nodiscard]] static recognizer::Predicted<Result> decode(const recognizer::PredictionOutputs &out);
 };
+
+template<typename Decoder>
+using PredictorFor = std::unique_ptr<const recognizer::Predictor<typename Decoder::Result>>;
+
+// Builds the predictor for one model. `module_root_dir` is the directory the module set was installed into and
+// `module_path` the model's path inside it, as recognizer.json names it; a platform uses whichever of the two
+// identifies a model there. `name` is the model name recorded with every prediction.
+template<typename Decoder>
+[[nodiscard]] PredictorFor<Decoder> makePredictor(
+    const std::filesystem::path &module_root_dir, const std::string &module_path, const std::string &name);
+
+// The decoders makePredictor is defined for. Every platform definition explicitly instantiates exactly these
+// (native/wasm/check_sources.py compares the lists), so a decoder missing on one platform fails that link.
+extern template PredictorFor<IndexDecoder> makePredictor<IndexDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
+extern template PredictorFor<CharaDecoder> makePredictor<CharaDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
+extern template PredictorFor<RacePlaceDecoder> makePredictor<RacePlaceDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
+extern template PredictorFor<DateTimeDecoder> makePredictor<DateTimeDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
 
 }  // namespace uma::chara_detail::recognizer_impl

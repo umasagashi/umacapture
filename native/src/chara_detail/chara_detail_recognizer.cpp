@@ -1,13 +1,16 @@
 #include "chara_detail/chara_detail_recognizer.h"
 
-// INVARIANT (see native/CMakeLists.txt and the TU-split note in chara_detail_recognizer_models.cpp): this
-// translation unit must stay ONNX-free so it links into BOTH the app target and the onnxruntime-less
-// umacapture_tests target. It must NEVER name recognizer::Model or include cv/model.h -- every ONNX model
-// construction lives in chara_detail_recognizer_models.cpp. Only the injection ctors (which take pre-built
-// Predictors) and the recognize()/scan methods live here. The tripwire below fails the build loudly if the
-// onnxruntime header leaks in transitively.
+// Every constructor of the recognizers and the decoders that read a prediction's outputs live here, once for
+// every platform. A production constructor obtains its predictors from makePredictor
+// (chara_detail/recognizer_prediction.h), the one piece each build defines for itself; an injection constructor
+// takes pre-built predictors, so the scan logic can be tested against fakes.
+//
+// INVARIANT: this translation unit must stay ONNX-free. It is compiled into the desktop app, the Wasm module
+// (which links no onnxruntime) and the onnxruntime-less umacapture_tests target, so it must NEVER name
+// recognizer::Model or include cv/model.h. The tripwire below fails the build loudly if the onnxruntime header
+// leaks in transitively.
 #ifdef ORT_API_VERSION
-#error "chara_detail_recognizer.cpp must stay ONNX-free; the onnxruntime header leaked in (see the TU-split note)."
+#error "chara_detail_recognizer.cpp must stay ONNX-free; the onnxruntime header leaked in (see the note above)."
 #endif
 
 #include <algorithm>
@@ -17,6 +20,7 @@
 #include <utility>
 
 #include "chara_detail/chara_detail_search_helpers.h"
+#include "chara_detail/recognizer_prediction.h"
 #include "util/error_util.h"
 #include "util/logger_util.h"
 
@@ -24,12 +28,68 @@ namespace uma::chara_detail {
 
 namespace recognizer_impl {
 
+// Decoders (chara_detail/recognizer_prediction.h). Each platform's predictor hands its outputs to these.
+
+namespace {
+
+template<typename Result>
+recognizer::Predicted<Result> predicted(Result result, float confidence) {
+    json_util::Json json = {{"confidence", confidence}, {"label", result}};
+    return {std::move(result), confidence, std::move(json)};
+}
+
+}  // namespace
+
+recognizer::Predicted<int> IndexDecoder::decode(const recognizer::PredictionOutputs &out) {
+    const auto result = static_cast<int>(out.int64At(0));
+    return predicted(result, out.floatAt(1));
+}
+
+recognizer::Predicted<Chara> CharaDecoder::decode(const recognizer::PredictionOutputs &out) {
+    Chara result{
+        static_cast<int>(out.int64At(0)),  // icon
+        static_cast<int>(out.int64At(2)),  // chara
+        static_cast<int>(out.int64At(4)),  // card
+        static_cast<bool>(out.int64At(6)),  // rental
+        // record_type_index (output 8), not rental_index (output 6): the model has a dedicated record-type head
+        // with values 0-3 (see record::RecordType). Read it as int, not bool, so a FriendStandard/
+        // FriendInheritance value (>= 2) is not truncated to 1.
+        static_cast<int>(out.int64At(8)),
+    };
+    const auto confidence =
+        std::min({out.floatAt(1), out.floatAt(3), out.floatAt(5), out.floatAt(7), out.floatAt(9)});
+    return predicted(std::move(result), confidence);
+}
+
+recognizer::Predicted<RacePlace> RacePlaceDecoder::decode(const recognizer::PredictionOutputs &out) {
+    RacePlace result{
+        static_cast<int>(out.int64At(0)),  // place
+        static_cast<int>(out.int64At(2)),  // ground
+        static_cast<int>(out.int64At(4)),  // distance
+        static_cast<int>(out.int64At(6)),  // variation
+    };
+    const auto confidence = std::min({out.floatAt(1), out.floatAt(3), out.floatAt(5), out.floatAt(7)});
+    return predicted(std::move(result), confidence);
+}
+
+recognizer::Predicted<std::string> DateTimeDecoder::decode(const recognizer::PredictionOutputs &out) {
+    auto result = formatTrainedDate(out.int64At(0));
+    return predicted(std::move(result), out.floatAt(1));
+}
+
 json_util::Json PredictionHistory::toJson() const {
     vlog_debug(records.size());
     return records;
 }
 
-// StatusHeaderRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+StatusHeaderRecognizer::StatusHeaderRecognizer(
+    const std::filesystem::path &module_root_dir, const recognizer_config::StatusHeaderConfig &config)
+    : config(config)
+    , evaluation_value_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.evaluation.module_path, "evaluation_value"))
+    , status_value_model(makePredictor<IndexDecoder>(module_root_dir, config.status.module_path, "status_value"))
+    , aptitude_model(makePredictor<IndexDecoder>(module_root_dir, config.aptitude.module_path, "aptitude")) {
+}
 
 StatusHeaderRecognizer::StatusHeaderRecognizer(
     const recognizer_config::StatusHeaderConfig &config,
@@ -54,7 +114,12 @@ void StatusHeaderRecognizer::recognize(
     record.aptitudes = predict(*aptitude_model, frame, config.aptitude.rects, history);
 }
 
-// SkillTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+SkillTabRecognizer::SkillTabRecognizer(
+    const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config)
+    : config(config)
+    , skill_model(makePredictor<IndexDecoder>(module_root_dir, config.module_path, "skill"))
+    , skill_level_model(makePredictor<IndexDecoder>(module_root_dir, config.skill_level.module_path, "skill_level")) {
+}
 
 SkillTabRecognizer::SkillTabRecognizer(
     const recognizer_config::SkillTabConfig &config,
@@ -125,7 +190,13 @@ std::optional<double> SkillTabRecognizer::findNext(const Frame &frame, const Poi
     return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_gap);
 }
 
-// FactorRowReader: production ctor lives in chara_detail_recognizer_models.cpp.
+FactorRowReader::FactorRowReader(
+    const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
+    : FactorRowReader(
+          config,
+          makePredictor<IndexDecoder>(module_root_dir, config.module_path, "factor"),
+          makePredictor<IndexDecoder>(module_root_dir, config.factor_rank.module_path, "factor_rank")) {
+}
 
 FactorRowReader::FactorRowReader(
     const recognizer_config::FactorTabConfig &config,
@@ -136,7 +207,16 @@ FactorRowReader::FactorRowReader(
     , factor_rank_model(std::move(factor_rank_model)) {
 }
 
-// FactorTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+FactorTabRecognizer::FactorTabRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::FactorTabConfig &config,
+    std::shared_ptr<const FactorRowReader> rows)
+    : config(config)
+    , rows(requireFactorRows(std::move(rows)))
+    , character_model(makePredictor<CharaDecoder>(module_root_dir, config.trainee_icon.icon.module_path, "character"))
+    , character_rank_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.trainee_icon.rank.module_path, "character_rank")) {
+}
 
 FactorTabRecognizer::FactorTabRecognizer(
     const recognizer_config::FactorTabConfig &config,
@@ -417,7 +497,16 @@ FactorRowReader::predictFactor(const Frame &frame, const FactorCells &cells, Pre
     };
 }
 
-// SupportCardRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+SupportCardRecognizer::SupportCardRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::SupportCardConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , support_card_model(makePredictor<IndexDecoder>(module_root_dir, config.module_path, "support_card"))
+    , support_card_rank_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.rank.module_path, "support_card_rank")) {
+}
 
 SupportCardRecognizer::SupportCardRecognizer(
     const recognizer_config::SupportCardConfig &config,
@@ -472,7 +561,15 @@ void SupportCardRecognizer::recognize(
     scan_top = card_top.value() + config.vertical_delta;
 }
 
-// FamilyTreeRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+FamilyTreeRecognizer::FamilyTreeRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::FamilyTreeConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , character_model(makePredictor<CharaDecoder>(module_root_dir, config.module.chara, "character"))
+    , character_rank_model(makePredictor<IndexDecoder>(module_root_dir, config.module.rank, "character_rank")) {
+}
 
 FamilyTreeRecognizer::FamilyTreeRecognizer(
     const recognizer_config::FamilyTreeConfig &config,
@@ -572,7 +669,19 @@ record::Character FamilyTreeRecognizer::makeCharacter(const Chara &chara, int ra
     return character;
 }
 
-// CampaignRecordRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+CampaignRecordRecognizer::CampaignRecordRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::CampaignRecordConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , campaign_field_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.campaign_field.module_path, "campaign_field"))
+    , fans_value_model(makePredictor<IndexDecoder>(module_root_dir, config.fans_value.module_path, "fans_value"))
+    , scenario_model(makePredictor<IndexDecoder>(module_root_dir, config.scenario.module_path, "scenario"))
+    , trained_date_model(
+          makePredictor<DateTimeDecoder>(module_root_dir, config.trained_date.module_path, "trained_date")) {
+}
 
 CampaignRecordRecognizer::CampaignRecordRecognizer(
     const recognizer_config::CampaignRecordConfig &config,
@@ -701,8 +810,26 @@ std::optional<double> CampaignRecordRecognizer::findNext(
     return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
 }
 
-// RaceRecordRecognizer: production ctors (for the recognizer and its RaceBlockModelSet) live in
-// chara_detail_recognizer_models.cpp.
+RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(
+    const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config)
+    : title(makePredictor<IndexDecoder>(module_root_dir, block_config.title.module_path, "race_title"))
+    // race_place has 1line and 2line variations, but since there's no need to distinguish the output, name can be the same.
+    , place(makePredictor<RacePlaceDecoder>(module_root_dir, block_config.place.module_path, "race_place"))
+    , weather(makePredictor<IndexDecoder>(module_root_dir, block_config.weather.module_path, "race_weather"))
+    , strategy(makePredictor<IndexDecoder>(module_root_dir, block_config.strategy.module_path, "race_strategy"))
+    , turn(makePredictor<IndexDecoder>(module_root_dir, block_config.turn.module_path, "race_turn"))
+    , position(makePredictor<IndexDecoder>(module_root_dir, block_config.position.module_path, "race_position")) {
+}
+
+RaceRecordRecognizer::RaceRecordRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::RaceConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , models_1line(module_root_dir, config.block_1line_config)
+    , models_2line(module_root_dir, config.block_2line_config) {
+}
 
 RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(RaceBlockPredictors predictors)
     : title(std::move(predictors.title))
@@ -832,7 +959,14 @@ record::Race RaceRecordRecognizer::recognizeRace(
     return race;
 }
 
-// CampaignTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+CampaignTabRecognizer::CampaignTabRecognizer(
+    const std::filesystem::path &module_root_dir, const recognizer_config::CampaignTabConfig &config)
+    : config(config)
+    , support_card_recognizer(module_root_dir, config.support_card, config.common)
+    , family_tree_recognizer(module_root_dir, config.family_tree, config.common)
+    , campaign_record_recognizer(module_root_dir, config.campaign_record, config.common)
+    , race_record_recognizer(module_root_dir, config.race, config.common) {
+}
 
 void CampaignTabRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
@@ -845,7 +979,39 @@ void CampaignTabRecognizer::recognize(
 
 }  // namespace recognizer_impl
 
-// CharaDetailRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+CharaDetailRecognizer::CharaDetailRecognizer(
+    const std::string &trainer_id,
+    const std::filesystem::path &record_root_dir,
+    const std::filesystem::path &module_root_dir,
+    const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_rows,
+    const event_util::Listener<RecordInfo> &on_recognize_ready,
+    const event_util::Sender<RecordInfo> &on_recognize_completed,
+    const event_util::Listener<RecordInfo> &on_update_requested,
+    const event_util::Sender<RecordInfo> &on_update_completed,
+    const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
+    const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
+    const event_util::Sender<std::string> &on_error,
+    const recognizer_config::CharaDetailRecognizerConfig &config)
+    : trainer_id(trainer_id)
+    , record_root_dir(record_root_dir)
+    , module_root_dir(module_root_dir)
+    , config(config)
+    , factor_rows(factor_rows)
+    , status_header_recognizer(module_root_dir, config.status_header)
+    , skill_tab_recognizer(module_root_dir, config.skill_tab)
+    , factor_tab_recognizer(module_root_dir, config.factor_tab, factor_rows)
+    , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
+    , on_recognize_ready(on_recognize_ready)
+    , on_recognize_completed(on_recognize_completed)
+    , on_update_requested(on_update_requested)
+    , on_update_completed(on_update_completed)
+    , on_factor_probe_ready(on_factor_probe_ready)
+    , on_factor_probe_completed(on_factor_probe_completed)
+    , on_error(on_error) {
+    this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
+    this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
+    this->on_factor_probe_ready->listen([this](const auto &frame, const auto &info) { this->probe(frame, info); });
+}
 
 void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info) const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value());

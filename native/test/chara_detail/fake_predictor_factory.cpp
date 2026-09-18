@@ -1,23 +1,25 @@
-// Desktop definition of recognizer_impl::makePredictor (declared in chara_detail/recognizer_prediction.h).
+// Test-target definition of recognizer_impl::makePredictor (declared in chara_detail/recognizer_prediction.h).
 //
-// Why this is per platform: on desktop a model runs in process through onnxruntime (recognizer::Model, which
-// includes cv/model.h), and it is found as a file under the installed module directory. The Wasm build links no
-// onnxruntime and defines the same function in native/wasm/wasm_recognizer_models.cpp; the onnxruntime-less
-// umacapture_tests target links a fake. So this is the only translation unit that names recognizer::Model, and
-// it holds nothing else: the constructors that call makePredictor and the decoders live, once for every
-// platform, in chara_detail_recognizer.cpp.
+// umacapture_tests links chara_detail_recognizer.cpp, whose production constructors call makePredictor, but
+// links no onnxruntime and ships no model files, so neither platform definition can be used here. This one loads
+// nothing: every predictor it builds ignores the frame and returns the value-initialized Result (0, an all-zero
+// Chara / RacePlace, an empty string) with confidence 1, under the name it was given. That is enough to
+// construct the production recognizers in a test and drive what they do around their predictions.
 
-#include <memory>
+#include <filesystem>
+#include <string>
 
 #include "chara_detail/recognizer_prediction.h"
-#include "cv/model.h"
+#include "util/fake_predictor.h"
 
 namespace uma::chara_detail::recognizer_impl {
 
 template<typename Decoder>
 PredictorFor<Decoder> makePredictor(
     const std::filesystem::path &module_root_dir, const std::string &module_path, const std::string &name) {
-    return std::make_unique<recognizer::Model<Decoder>>(module_root_dir / module_path, name);
+    (void) module_root_dir;
+    (void) module_path;
+    return testutil::constantPredictor<typename Decoder::Result>(name, typename Decoder::Result{});
 }
 
 template PredictorFor<IndexDecoder> makePredictor<IndexDecoder>(

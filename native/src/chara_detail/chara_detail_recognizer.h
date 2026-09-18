@@ -36,8 +36,8 @@ struct VersionInfo {
     EXTENDED_JSON_TYPE_NDC(VersionInfo, format_version, region, recognizer_version);
 };
 
-// The recognized value of a Chara/CharaRank prediction. Kept here (ONNX-free) because it is the Result type
-// of Predictor<Chara>; the ONNX-backed CharaPrediction that produces it lives in recognizer_prediction.h.
+// The recognized value of a Chara/CharaRank prediction: the Result type of Predictor<Chara>, produced by
+// CharaDecoder (recognizer_prediction.h).
 struct Chara {
     int icon;
     int chara;
@@ -48,8 +48,8 @@ struct Chara {
     EXTENDED_JSON_TYPE_NDC(Chara, icon, chara, card, rental, record_type);
 };
 
-// The recognized value of a RacePlace prediction. Kept here (ONNX-free) as the Result type of
-// Predictor<RacePlace>; the ONNX-backed RacePlacePrediction lives in recognizer_prediction.h.
+// The recognized value of a RacePlace prediction: the Result type of Predictor<RacePlace>, produced by
+// RacePlaceDecoder (recognizer_prediction.h).
 struct RacePlace {
     int place;
     int ground;
@@ -60,9 +60,8 @@ struct RacePlace {
 };
 
 // Formats a raw YYYYMMDD integer as "YYYY/MM/DD", degrading to the raw stringified value on any malformed
-// input. Extracted from DateTimePrediction::result() (recognizer_prediction.h) so this pure string logic
-// (which carries the edge-case fixes below) can be unit-tested without the ONNX-backed Prediction that
-// supplies the integer.
+// input. DateTimeDecoder (recognizer_prediction.h) calls it on the label it reads; it stands alone so this
+// pure string logic (which carries the edge-case fixes below) can be unit-tested without a prediction.
 //
 // Expect exactly YYYYMMDD (8 digits). A misrecognition that stringifies to fewer digits would make substr(6)
 // throw std::out_of_range, which the recognizer's per-record try/catch turns into a dropped record. A
@@ -74,7 +73,7 @@ struct RacePlace {
     const bool all_digits =
         std::all_of(short_str.begin(), short_str.end(), [](unsigned char c) { return std::isdigit(c) != 0; });
     if (short_str.size() != 8 || !all_digits) {
-        log_warning("DateTimePrediction: unexpected date value '{}'", short_str);
+        log_warning("DateTimeDecoder: unexpected date value '{}'", short_str);
         return short_str;
     }
     return short_str.substr(0, 4) + "/" + short_str.substr(4, 2) + "/" + short_str.substr(6);
@@ -267,8 +266,8 @@ struct BannerHit {
 // Both models are AdmittedPredictors, so the two stages may call concurrently and each call waits only for the
 // calls queued before it.
 //
-// The production ctor lives in the ONNX-linked recognizer_models.cpp (and its Wasm twin); the injection ctor
-// and every scan method live in the ONNX-free recognizer.cpp, so the scan can be unit-tested against fakes.
+// The production ctor builds both models through makePredictor (recognizer_prediction.h); the injection ctor
+// takes them pre-built, so the scan can be unit-tested against fakes.
 class FactorRowReader {
 public:
     [[maybe_unused]] FactorRowReader(
@@ -381,9 +380,9 @@ public:
         const recognizer_config::FactorTabConfig &config,
         std::shared_ptr<const FactorRowReader> rows);
 
-    // Injection ctor: takes pre-built predictors instead of loading ONNX models from disk, so the scan
-    // logic can be unit-tested against fakes. The production ctor above lives in the ONNX-linked
-    // recognizer_models.cpp; this one and all recognize()/scan methods live in the ONNX-free recognizer.cpp.
+    // Injection ctor: takes pre-built predictors instead of building them through makePredictor
+    // (recognizer_prediction.h), which loads the platform's models, so the scan logic can be unit-tested
+    // against fakes.
     FactorTabRecognizer(
         const recognizer_config::FactorTabConfig &config,
         std::shared_ptr<const FactorRowReader> rows,
@@ -426,8 +425,8 @@ private:
     std::unique_ptr<const recognizer::Predictor<int>> character_rank_model;
 };
 
-// A FactorRowReader that must be there. Shared by both production ctors of FactorTabRecognizer, so a null reader
-// is refused by one rule on both platforms rather than surfacing later as a dereference on a runner thread.
+// A FactorRowReader that must be there. Shared by the production and injection ctors of FactorTabRecognizer, so
+// a null reader is refused by one rule rather than surfacing later as a dereference on a runner thread.
 inline std::shared_ptr<const FactorRowReader> requireFactorRows(std::shared_ptr<const FactorRowReader> rows) {
     if (rows == nullptr) {
         throw std::invalid_argument("FactorTabRecognizer requires the pipeline's FactorRowReader");

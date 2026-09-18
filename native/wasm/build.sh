@@ -30,10 +30,11 @@ mkdir -p "${OBJ_DIR}"
 
 # --- Drift checks ------------------------------------------------------------
 # Two things here are hand-maintained copies that no compiler cross-checks: the SOURCES/EXCLUDED_SOURCES lists
-# below (a third copy after native/CMakeLists.txt and windows/runner/CMakeLists.txt), and
-# wasm_recognizer_models.cpp, which must define the same constructors as its desktop twin. Both are checked
-# before anything is compiled, so drift fails loudly here instead of producing a module that is quietly missing
-# a stage. The check needs no toolchain, so CI can run it on its own (see check_sources.py).
+# below (a third copy after native/CMakeLists.txt and windows/runner/CMakeLists.txt), and the decoders
+# wasm_recognizer_models.cpp instantiates makePredictor for, which must match the desktop definition's and the
+# declaration's. Both are checked before anything is compiled, so drift fails loudly here instead of producing a
+# module that is quietly missing a stage. The check needs no toolchain, so CI can run it on its own (see
+# check_sources.py).
 if [[ "${SKIP_SOURCE_CHECK:-0}" != "1" ]]; then
   if ! command -v uv >/dev/null 2>&1; then
     echo "uv not found; it runs the source-drift check (see native/wasm/check_sources.py)." >&2
@@ -96,8 +97,9 @@ EXCLUDED_SOURCES=(
   # FFV1 record/replay, CLI-only: both are built on FFmpeg, which is not part of the Wasm dependency set.
   "${NATIVE_DIR}/src/cv/ffv1_reader.cpp"
   "${NATIVE_DIR}/src/cv/ffv1_recorder.cpp"
-  # Replaced, not dropped: wasm_recognizer_models.cpp defines the same constructors against the JS bridge
-  # instead of an in-process onnxruntime. check_sources.py compares the two files' signatures.
+  # Replaced, not dropped: this is the desktop definition of makePredictor (in-process onnxruntime);
+  # wasm_recognizer_models.cpp defines it against the JS bridge instead. check_sources.py compares the decoders
+  # the two instantiate it for.
   "${NATIVE_DIR}/src/chara_detail/chara_detail_recognizer_models.cpp"
 )
 

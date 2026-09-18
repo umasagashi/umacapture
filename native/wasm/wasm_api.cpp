@@ -5,8 +5,9 @@
 // This is a PoC driver: it wires the existing NativeApi pipeline (SingleThreadMultiEventRunner + eventpp +
 // std::thread, unchanged) to a minimal JS-facing surface. The recognizer stage runs end to end here too:
 // native_api.cpp builds the same CharaDetailRecognizer under Emscripten, but its ONNX inference is served by a
-// JS bridge (wasm/wasm_recognizer_models.cpp, backed by onnxruntime-web) instead of an in-process runtime, so a
-// run stitches the canvas and then recognizes it, emitting the recognized record through drainMessages().
+// JS bridge (the predictors wasm/wasm_recognizer_models.cpp builds, backed by onnxruntime-web) instead of an
+// in-process runtime, so a run stitches the canvas and then recognizes it, emitting the recognized record
+// through drainMessages().
 //
 // Threading note: pipeline notifications fire on worker threads (the event runners). Calling into JS from a
 // pthread is not allowed for arbitrary emscripten::val work, so notifications are copied into a mutex-guarded

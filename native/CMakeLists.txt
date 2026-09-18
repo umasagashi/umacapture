@@ -177,6 +177,7 @@ set(
         test/chara_detail/test_race_recognizer.cpp
         test/chara_detail/test_campaign_recognizer.cpp
         test/chara_detail/test_factor_recognizer.cpp
+        test/chara_detail/test_recognizer_wiring.cpp
         test/chara_detail/test_status_header_recognizer.cpp
         test/chara_detail/test_skill_tab_recognizer.cpp
         test/chara_detail/test_support_card_recognizer.cpp
@@ -223,6 +224,7 @@ set(
         test/cv/test_detail_crop_tracker.cpp
         test/cv/test_frame_distributor.cpp
         test/cv/test_frame_stall_watchdog.cpp
+        test/cv/test_prediction_check.cpp
         # The Wasm module itself needs Emscripten and is compiled by no suite; its Emscripten-free wire-contract
         # headers (native/wasm/*.h) are testable here, which is why they are kept free of emscripten includes.
         test/wasm/test_pane_snapshot_token.cpp
@@ -237,10 +239,13 @@ set(
         src/chara_detail/chara_detail_scene_context.cpp
         src/chara_detail/chara_detail_scene_stitcher.cpp
         src/chara_detail/chara_detail_search_helpers.cpp
-        # ONNX-free half of the recognizer TU split (its production ctors, which name recognizer::Model, live
-        # in chara_detail_recognizer_models.cpp and are deliberately NOT linked here). This lets the scan logic
-        # be tested against fake predictors without onnxruntime; the ONNX include dir/lib below are omitted.
+        # The recognizers' constructors, decoders and scan logic, which are ONNX-free. Their production ctors
+        # build predictors through makePredictor, whose desktop definition (chara_detail_recognizer_models.cpp)
+        # names recognizer::Model and is deliberately NOT linked here; the fake below defines it instead, loading
+        # no model. So the scan logic is tested against fake predictors without onnxruntime, and the ONNX include
+        # dir/lib below are omitted.
         src/chara_detail/chara_detail_recognizer.cpp
+        test/chara_detail/fake_predictor_factory.cpp
 )
 
 add_executable(umacapture_tests ${TEST_SOURCE_FILES})
@@ -550,6 +555,13 @@ if(UV_EXECUTABLE)
     add_test(NAME integration_check_selftest
              COMMAND ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/test_run_check.py")
     set_tests_properties(integration_check_selftest PROPERTIES LABELS "integration;golden")
+
+    # check_sources.py's own comment/string stripping, driven against hand-built text: no clip, model or cli
+    # is needed, so it runs in CI. Not part of the golden suite (it has nothing to do with the recognition
+    # pipeline or its clips), so it carries no "integration;golden" label and no SKIP_RETURN_CODE -- there is
+    # no machine on which it is allowed to skip.
+    add_test(NAME wasm_check_sources_selftest
+             COMMAND ${UV_EXECUTABLE} run "${CMAKE_CURRENT_LIST_DIR}/wasm/test_check_sources.py")
 
     # Dual-decode equivalence: the same clip run through `video --color_matrix bt601` and
     # `--color_matrix bt709`, requiring one identical record set. See test/integration/run_dual_decode.py

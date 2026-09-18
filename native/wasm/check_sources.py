@@ -15,11 +15,15 @@ happens to run build.sh:
     that fails. Both roots are partitioned, not just ``native/src``: the module's own bridge sources are named
     by hand in the same array, and one left out of it takes its ``EMSCRIPTEN_BINDINGS`` block with it.
 
-2.  *The recognizer twin.* ``native/wasm/wasm_recognizer_models.cpp`` replaces
-    ``native/src/chara_detail/chara_detail_recognizer_models.cpp`` -- same constructors, JS-bridged predictors
-    instead of in-process onnxruntime. Adding, removing, or re-signing a recognizer constructor on the desktop
-    side compiles fine on Windows and breaks (or silently under-implements) the Wasm build. This script
-    compares the out-of-line constructor definitions of the two files and requires them to be identical.
+2.  *The predictor factory.* The recognizers' constructors and decoders are shared code
+    (``native/src/chara_detail/chara_detail_recognizer.cpp``); what each platform supplies is
+    ``makePredictor``, declared in ``native/src/chara_detail/recognizer_prediction.h`` and defined, with one
+    explicit instantiation per decoder, in ``native/src/chara_detail/chara_detail_recognizer_models.cpp``
+    (desktop, in-process onnxruntime) and ``native/wasm/wasm_recognizer_models.cpp`` (Wasm, JS bridge). A
+    decoder instantiated on the desktop side only compiles and links on Windows and breaks the Wasm link, which
+    CI never runs. This script requires both definitions to instantiate exactly the decoders the header
+    declares, with the declaration's parameter list, and requires neither file to define a constructor: a
+    constructor copied back into one of them would be a second, unchecked copy of the shared one.
 
 3.  *The manifest's view of the same exclusions.* ``tool/web_deps.json`` pins the built module against a
     digest of the sources it came from (``build.sources``), and that digest deliberately skips the same
@@ -33,11 +37,11 @@ Run it standalone (no toolchain needed, so it is CI-callable on any runner that 
 
 ``build.sh`` runs it before compiling, so a hand build fails on drift too.
 
-Scope, stated plainly: check 2 compares constructor signatures *verbatim* after whitespace normalisation --
-parameter names included -- because the two files are meant to be literal mirrors. A parameter renamed on one
-side is reported, and the fix is to rename it on the other. It does not compare the enclosing namespaces
-(both files nest the definitions identically) and it does not look inside the constructor bodies, which are
-the part that is meant to differ.
+Scope, stated plainly: check 2 compares the explicit instantiations as text, after whitespace normalisation,
+with the header's ``extern template`` declarations. It does not compare the enclosing namespaces (all three
+files nest them identically), and it does not look inside the two ``makePredictor`` bodies, which are the part
+that is meant to differ. The test target's fake definition (under ``native/test/``) is not compared here: CI
+links it, so a decoder it lacks fails there.
 """
 
 from __future__ import annotations
@@ -52,6 +56,7 @@ WASM_DIR = REPO_ROOT / "native" / "wasm"
 BUILD_SH = WASM_DIR / "build.sh"
 WEB_DEPS = REPO_ROOT / "tool" / "web_deps.json"
 NATIVE_SRC = REPO_ROOT / "native" / "src"
+PREDICTOR_HEADER = NATIVE_SRC / "chara_detail" / "recognizer_prediction.h"
 DESKTOP_MODELS = NATIVE_SRC / "chara_detail" / "chara_detail_recognizer_models.cpp"
 WASM_MODELS = WASM_DIR / "wasm_recognizer_models.cpp"
 
@@ -143,88 +148,120 @@ def rel(path: Path) -> str:
         return path.as_posix()
 
 
+# One left-to-right scan: whichever of these starts first wins, so a "/*" inside a line comment or a string
+# literal is text, and a "//" inside a string literal is text. A two-pass strip (block comments first) reads
+# such a "/*" as the start of a comment and deletes every line up to the next "*/", hiding whatever stands
+# between them from both probes below. Comments become empty; literals are kept, because the probes read the
+# code around them. Raw string literals (R"(...)") are not handled: these sources contain none.
+_COMMENT_OR_LITERAL_RE = re.compile(r"""//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'""", re.DOTALL)
+
+
+def _strip_comments_replace(match: re.Match[str]) -> str:
+    token = match.group(0)
+    if token.startswith("//"):
+        return ""
+    if token.startswith("/*"):
+        return " " + "\n" * token.count("\n")
+    return token
+
+
 def strip_comments(text: str) -> str:
-    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
-    return re.sub(r"//[^\n]*", "", text)
+    return _COMMENT_OR_LITERAL_RE.sub(_strip_comments_replace, text)
 
 
 # An out-of-line constructor definition: a qualifier chain whose last two identifiers are equal, e.g.
 # `StatusHeaderRecognizer::StatusHeaderRecognizer(` or
-# `RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(`.
-#
-# THE INDENTATION IS TOLERATED, AND WHAT IT MISSES IS REPORTED. This used to anchor at column 0. Both files
-# happen to define everything there today, so nothing was wrong -- but the failure mode was the wrong way
-# round: a definition wrapped in an indented `namespace { ... }` block became invisible on BOTH sides at once,
-# the two sets stayed equal, and check 2 announced "in sync" for a pair it had stopped comparing. A check that
-# guards against a silently under-implemented Wasm build must not fail open, so the anchor now allows leading
-# whitespace, and the unanchored probe below re-reads the file to prove the anchored pass missed nothing --
-# whatever the next formatting change looks like, rather than only the one variant that was anticipated.
-CTOR_RE = re.compile(r"^[ \t]*((?:[A-Za-z_]\w*::)*)([A-Za-z_]\w*)::\2\s*\(", re.MULTILINE)
+# `RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(`. Unanchored, so neither indentation nor a
+# wrapping namespace block can hide one: check 2 requires it to find nothing in either platform file.
 CTOR_PROBE_RE = re.compile(r"((?:[A-Za-z_]\w*::)*)([A-Za-z_]\w*)::\2\s*\(")
+
+# An explicit instantiation of makePredictor, up to its terminating semicolon. The header holds explicit
+# instantiation *declarations* (`extern template ...`); the platform files hold the definitions.
+#
+# FAIL CLOSED ON WHAT THE PATTERN CANNOT READ. The probe finds every `makePredictor<` that follows a `template`
+# keyword within one statement; one the anchored pattern did not capture stops the run, so a new spelling makes
+# the check refuse to answer instead of comparing a subset.
+INSTANTIATION_RE = re.compile(
+    r"^[ \t]*(extern[ \t]+)?template[ \t]+PredictorFor<(\w+)>[ \t]+makePredictor<(\w+)>\s*(\([^;]*\))\s*;",
+    re.MULTILINE,
+)
+INSTANTIATION_PROBE_RE = re.compile(r"\btemplate\b[^;{}]*?\bmakePredictor\s*<")
 
 
 def _ctor_name(match: re.Match[str]) -> str:
     return f"{match.group(1)}{match.group(2)}::{match.group(2)}"
 
 
-def constructor_signatures(path: Path) -> dict[str, str]:
+def instantiations(path: Path, *, extern: bool) -> dict[str, str]:
+    """Maps each decoder ``makePredictor`` is explicitly instantiated for to its normalised parameter list."""
     text = strip_comments(path.read_text(encoding="utf-8"))
-    signatures: dict[str, str] = {}
-    for match in CTOR_RE.finditer(text):
-        name = _ctor_name(match)
-        params = read_balanced(text, match.end() - 1)
-        if params is None:
-            raise SystemExit(f"check_sources: unbalanced parameter list for {name} in {rel(path)}")
-        signatures[name] = normalise(params)
+    found: dict[str, str] = {}
+    spans: list[tuple[int, int]] = []
+    for match in INSTANTIATION_RE.finditer(text):
+        spans.append(match.span())
+        decoder = match.group(3)
+        if bool(match.group(1)) != extern:
+            wrong = "an explicit instantiation definition" if extern else "an extern template declaration"
+            raise SystemExit(f"check_sources: {rel(path)} holds {wrong} of makePredictor<{decoder}>")
+        if match.group(2) != decoder:
+            raise SystemExit(
+                f"check_sources: {rel(path)} instantiates makePredictor<{decoder}> returning"
+                f" PredictorFor<{match.group(2)}>"
+            )
+        if decoder in found:
+            raise SystemExit(f"check_sources: {rel(path)} instantiates makePredictor<{decoder}> twice")
+        found[decoder] = normalise(match.group(4))
 
-    # Fail closed on anything the anchored pattern could not see. Reaching this is not "the file is wrong": it
-    # is "this script can no longer read the file", which has to stop the run rather than quietly compare a
-    # subset. Widen CTOR_RE to cover the new spelling.
-    unreachable = sorted({_ctor_name(m) for m in CTOR_PROBE_RE.finditer(text)} - set(signatures))
-    if unreachable:
+    unread = [m.start() for m in INSTANTIATION_PROBE_RE.finditer(text) if not any(a <= m.start() < b for a, b in spans)]
+    if unread:
+        line = text.count("\n", 0, unread[0]) + 1
         raise SystemExit(
-            f"check_sources: {rel(path)} defines constructors this script cannot parse, so the twin comparison"
-            f" would silently skip them: {', '.join(unreachable)}"
+            f"check_sources: {rel(path)} instantiates makePredictor in a form this script cannot parse (first at"
+            f" line {line} of the comment-stripped text), so the comparison would silently skip it."
+            " Widen INSTANTIATION_RE."
         )
-    return signatures
-
-
-def read_balanced(text: str, open_index: int) -> str | None:
-    """Returns the text between ``text[open_index]`` ('(') and its matching ')'."""
-    depth = 0
-    for i in range(open_index, len(text)):
-        if text[i] == "(":
-            depth += 1
-        elif text[i] == ")":
-            depth -= 1
-            if depth == 0:
-                return text[open_index + 1 : i]
-    return None
+    return found
 
 
 def normalise(params: str) -> str:
     params = re.sub(r"\s+", " ", params).strip()
-    params = re.sub(r"\s*([,&*<>])\s*", r"\1", params)
+    params = re.sub(r"\s*([,&*<>()])\s*", r"\1", params)
     return params
 
 
-def check_recognizer_twin() -> list[str]:
-    desktop = constructor_signatures(DESKTOP_MODELS)
-    wasm = constructor_signatures(WASM_MODELS)
+def check_predictor_factory() -> list[str]:
+    declared = instantiations(PREDICTOR_HEADER, extern=True)
     errors: list[str] = []
-    for name in sorted(set(desktop) - set(wasm)):
-        errors.append(f"  {name} is defined in {rel(DESKTOP_MODELS)} but not in {rel(WASM_MODELS)}")
-    for name in sorted(set(wasm) - set(desktop)):
-        errors.append(f"  {name} is defined in {rel(WASM_MODELS)} but not in {rel(DESKTOP_MODELS)}")
-    for name in sorted(set(desktop) & set(wasm)):
-        if desktop[name] != wasm[name]:
+    if not declared:
+        errors.append(
+            f"  no extern template makePredictor declarations found in {rel(PREDICTOR_HEADER)}"
+            " -- the check parsed nothing"
+        )
+    for path in (DESKTOP_MODELS, WASM_MODELS):
+        defined = instantiations(path, extern=False)
+        for decoder in sorted(set(declared) - set(defined)):
             errors.append(
-                f"  {name} has a different signature in the two files:\n"
-                f"    {rel(DESKTOP_MODELS)}: ({desktop[name]})\n"
-                f"    {rel(WASM_MODELS)}: ({wasm[name]})"
+                f"  {rel(path)} does not instantiate makePredictor<{decoder}>, which"
+                f" {rel(PREDICTOR_HEADER)} declares"
             )
-    if not desktop:
-        errors.append(f"  no constructor definitions found in {rel(DESKTOP_MODELS)} -- the check parsed nothing")
+        for decoder in sorted(set(defined) - set(declared)):
+            errors.append(
+                f"  {rel(path)} instantiates makePredictor<{decoder}>, which {rel(PREDICTOR_HEADER)}"
+                " does not declare"
+            )
+        for decoder in sorted(set(declared) & set(defined)):
+            if declared[decoder] != defined[decoder]:
+                errors.append(
+                    f"  makePredictor<{decoder}> has a different parameter list in {rel(path)}:\n"
+                    f"    {rel(PREDICTOR_HEADER)}: {declared[decoder]}\n"
+                    f"    {rel(path)}: {defined[decoder]}"
+                )
+        text = strip_comments(path.read_text(encoding="utf-8"))
+        for name in sorted({_ctor_name(m) for m in CTOR_PROBE_RE.finditer(text)}):
+            errors.append(
+                f"  {rel(path)} defines the constructor {name}; the recognizers' constructors belong in the"
+                " shared chara_detail_recognizer.cpp, and this file defines only makePredictor"
+            )
     return errors
 
 
@@ -266,14 +303,14 @@ def main() -> int:
         failures += 1
         fail(["native/wasm/build.sh no longer describes native/src and native/wasm:"] + errors)
 
-    errors = check_recognizer_twin()
+    errors = check_predictor_factory()
     if errors:
         failures += 1
         fail(
             [
-                "the Wasm recognizer TU has drifted from its desktop twin"
-                " (wasm_recognizer_models.cpp must define the same constructors as"
-                " chara_detail_recognizer_models.cpp):"
+                "a platform definition of makePredictor has drifted from recognizer_prediction.h"
+                " (chara_detail_recognizer_models.cpp and wasm_recognizer_models.cpp must each instantiate"
+                " exactly the declared decoders, and define no recognizer constructor):"
             ]
             + errors
         )
@@ -285,7 +322,7 @@ def main() -> int:
 
     if failures:
         return 1
-    print("check_sources: source list, recognizer twin and manifest exclusions are in sync")
+    print("check_sources: source list, predictor factory and manifest exclusions are in sync")
     return 0
 
 
