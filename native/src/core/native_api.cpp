@@ -21,15 +21,20 @@
 
 namespace uma::app {
 
-// Do not use Native::instance() in this constructor.
 NativeApi::NativeApi()
-    : pane_mode_latch(std::make_shared<PaneModeLatch>())
+    : NativeApi(std::make_shared<PaneModeLatch>()) {}
+
+// Do not use Native::instance() in this constructor.
+NativeApi::NativeApi(std::shared_ptr<PaneModeLatch> latch)
+    : pane_mode_latch(std::move(latch))
     , detail_crop_tracker(std::make_shared<DetailCropTracker>(pane_mode_latch)) {
     // Installed once, here, rather than per session: the tracker outlives every pipeline (it is owned by
-    // this singleton so a latch survives a mid-capture record regeneration), and setReportCallback must not
-    // run while frames flow. `this` is a function-local static with process lifetime, so the capture cannot
-    // dangle. The callback fires on the distributor thread; notifyDetailCropReported is safe there (notify()
-    // is, and the throttle state it touches is only ever touched from that same thread).
+    // this NativeApi so a latch survives a mid-capture record regeneration), and setReportCallback must not
+    // run while frames flow. What keeps the captured `this` from dangling is not storage duration but the
+    // destructor: ~NativeApi joins the event loop before any member dies, and that teardown destroys every
+    // stage holding a copy of the tracker, so no invocation can be in flight or begin afterwards. The
+    // callback fires on the distributor thread; notifyDetailCropReported is safe there (notify() is, and the
+    // throttle state it touches is only ever touched from that same thread).
     detail_crop_tracker->setReportCallback(
         [this](const Rect<int> &default_rect, const Rect<int> &corrected, bool latched) {
             notifyDetailCropReported(default_rect, corrected, latched);
@@ -38,7 +43,8 @@ NativeApi::NativeApi()
 
 NativeApi::~NativeApi() {
     // The event loop must be joined before this instance is destroyed; otherwise the worker threads may
-    // still reference this singleton (a function-local static) as it is torn down at process exit.
+    // still reference it while its members are being torn down. Running here, ahead of every member
+    // destructor, is what makes the callbacks those threads hold safe -- see the constructor's.
     // joinEventLoop() is idempotent (no-op when not running), so this is safe even after an explicit join.
     joinEventLoop();
 }

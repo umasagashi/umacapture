@@ -9,22 +9,17 @@
 
 #include "core/frame_shaping.h"
 #include "core/native_api.h"
+#include "core/native_api_test_access.h"
 #include "cv/pane_mode_latch.h"
 #include "types/shape.h"
 
 namespace uma::app {
 
-struct NativeApiFrameShapingTestAccess {
-    static std::unique_ptr<NativeApi> create(const std::shared_ptr<PaneModeLatch> &pane_mode_latch) {
-        return std::unique_ptr<NativeApi>(new NativeApi(pane_mode_latch));
-    }
-};
-
 namespace {
 
 TEST_CASE("the NativeApi frame-shaping lookup is captured-size scoped") {
     const auto latch = std::make_shared<PaneModeLatch>();
-    const auto api = NativeApiFrameShapingTestAccess::create(latch);
+    const auto api = NativeApiTestAccess::create(latch);
     const NativeApi &const_api = *api;
     const Size<int> captured_size{640, 480};
     const Rect<int> pane_rect{{10, 20}, Point<int>{210, 375}};
@@ -37,7 +32,7 @@ TEST_CASE("the NativeApi frame-shaping lookup is captured-size scoped") {
 
 TEST_CASE("the NativeApi frame-shaping snapshot detects changes across producer work") {
     const auto latch = std::make_shared<PaneModeLatch>();
-    const auto api = NativeApiFrameShapingTestAccess::create(latch);
+    const auto api = NativeApiTestAccess::create(latch);
     const NativeApi &const_api = *api;
     const Size<int> captured_size{640, 480};
     const Rect<int> pane_rect{{10, 20}, Point<int>{210, 375}};

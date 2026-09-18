@@ -7,9 +7,9 @@
 // ways to lie: a count that survives into the next run reports another run's records, and a count cleared by a
 // teardown reads as zero for every reader, all of which read after their drain barrier has joined the loop.
 //
-// Driven directly rather than through NativeApi, which umacapture_tests deliberately does not compile (see the
-// target's comment in native/CMakeLists.txt); the counter is header-only for exactly that reason, like
-// CaptureSessionPolicy and RunningPipelineIdentity next to it.
+// Driven directly here for the counter's own contract -- the unit it counts in, and counting that holds up
+// across threads -- while the two sites that begin a run are asserted through the real NativeApi in
+// core/test_native_api_pipeline_wiring.cpp, like CaptureSessionPolicy and RunningPipelineIdentity next to it.
 
 #include <doctest/doctest.h>
 

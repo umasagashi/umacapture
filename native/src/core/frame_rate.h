@@ -5,8 +5,8 @@
 
 #include "util/misc.h"
 
-// Pure frame-rate arithmetic split out of NativeApi's lap-time listener so it can be unit-tested without
-// linking the ONNX/WinRT-heavy NativeApi translation unit (same rationale as native_api_messages.h).
+// Pure frame-rate arithmetic split out of NativeApi's lap-time listener so the ratio is asserted on its own,
+// apart from the event wiring that samples it (same rationale as native_api_messages.h).
 //
 // NativeApi accumulates frame timestamps into a buffer and, once the buffer spans more than the reporting
 // window, reports the observed rate and clears the buffer. The rate is the sample count scaled by the

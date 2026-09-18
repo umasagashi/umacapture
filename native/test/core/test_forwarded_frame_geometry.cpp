@@ -12,9 +12,9 @@
 // answer travels through, so what the observer itself must get right is asserted here rather than only end to
 // end.
 //
-// Driven directly rather than through NativeApi, which umacapture_tests deliberately does not compile (see the
-// target's comment in native/CMakeLists.txt); the observer is header-only for exactly that reason, like
-// RecordProductionCounter next to it.
+// Driven directly rather than through NativeApi: the one site that feeds the observer is the scraper's
+// forwarded-frame dequeue, which needs a recognized detail screen to reach, so what the observer itself must
+// get right is pinned here against direct calls, like RecordProductionCounter next to it.
 
 #include <doctest/doctest.h>
 

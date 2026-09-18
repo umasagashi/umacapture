@@ -43,7 +43,7 @@ class CharaDetailRecognizer;
 namespace uma::app {
 
 #ifdef UMACAPTURE_TESTING
-struct NativeApiFrameShapingTestAccess;
+struct NativeApiTestAccess;
 #endif
 
 using MessageCallback = void(const std::string &);
@@ -313,8 +313,7 @@ struct CapturePipelineIdentity {
 
 // The whole memory of what the RUNNING pipeline was built for. A tiny header-only state object, free of the
 // pipeline itself, so its contract -- a start records what it built, a teardown clears it, and a decision reads
-// it only about a loop that is actually running -- is unit-tested without linking the recognition stack
-// (umacapture_tests deliberately links OpenCV only and does not compile native_api.cpp).
+// it only about a loop that is actually running -- is unit-tested directly, without building a pipeline.
 class RunningPipelineIdentity {
 public:
     // Called LAST in a successful startPipeline: everything before it can throw, and a throw unwinds through
@@ -1123,9 +1122,14 @@ public:
     }
 
 private:
+    // The one constructor body, with the pane latch supplied. Not conditional on a test build: an object shape
+    // that exists only in tests is a second shape of this class, and a test holding a partially built NativeApi
+    // proves nothing about the one the app runs. NativeApi() delegates here with a fresh latch.
+    explicit NativeApi(std::shared_ptr<PaneModeLatch> latch);
 #ifdef UMACAPTURE_TESTING
-    explicit NativeApi(std::shared_ptr<PaneModeLatch> test_pane_mode_latch);
-    friend struct NativeApiFrameShapingTestAccess;
+    // Lets a test construct this class and reach the pipeline's own senders. Declared here so the seam is
+    // visible from the class it opens; its definition is test/core/native_api_test_access.h.
+    friend struct NativeApiTestAccess;
 #endif
 
     // Builds and starts the whole pipeline. May throw (config parse, model load, ...); startEventLoop wraps

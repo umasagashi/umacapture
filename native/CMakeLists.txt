@@ -152,10 +152,11 @@ add_custom_command(
 # Run:              ctest --test-dir <build-dir> --output-on-failure
 #                   (or run the umacapture_tests executable directly)
 #
-# The test target deliberately links only the pure-logic sources it needs
-# (currently the condition serializer, which pulls in OpenCV via cv/frame.h but
-# not ONNX/WinRT). Add new pure-logic .cpp files and their tests here as the
-# header/.cpp split progresses.
+# The test target links the sources it needs and no inference runtime: OpenCV
+# comes in via cv/frame.h, while the recognizers' predictors are supplied by
+# test/chara_detail/fake_predictor_factory.cpp, so neither onnxruntime nor WinRT
+# is linked. Add new .cpp files and their tests here as the header/.cpp split
+# progresses.
 # ---------------------------------------------------------------------------
 enable_testing()
 
@@ -187,6 +188,7 @@ set(
         test/core/test_native_api_capture_session.cpp
         test/core/test_native_api_frame_shaping.cpp
         test/core/test_native_api_messages.cpp
+        test/core/test_native_api_pipeline_wiring.cpp
         test/core/test_record_production_counter.cpp
         test/core/test_forwarded_frame_geometry.cpp
         test/core/test_factor_switch_verdict_tally.cpp
@@ -233,6 +235,10 @@ set(
         # below, the same way the wasm wire-contract headers are.
         test/tool/test_stop_file_guard.cpp
         test/tool/test_mimic_spec_parse.cpp
+        # The production pipeline assembly. It needs no inference runtime of its own: the predictors its
+        # recognizer stage builds come from the fake factory below, so this links against OpenCV like the rest of
+        # the target. Linked so test/core/test_native_api_pipeline_wiring.cpp drives the real NativeApi.
+        src/core/native_api.cpp
         src/core/native_api_frame_shaping.cpp
         src/condition/serializer.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp

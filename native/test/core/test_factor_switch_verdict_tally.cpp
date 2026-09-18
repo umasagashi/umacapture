@@ -8,9 +8,10 @@
 // declares. So what the tally itself must get right -- above all that the four verdicts are counted APART -- is
 // pinned here rather than only end to end.
 //
-// Driven directly rather than through NativeApi, which umacapture_tests deliberately does not compile (see the
-// target's comment in native/CMakeLists.txt); the tally is header-only for that reason, like
-// RecordProductionCounter and ForwardedFrameGeometryObserver next to it.
+// Driven directly rather than through NativeApi: the one site that feeds the tally sits inside the scraper's
+// processing of a judged frame, which needs a recognized detail screen to reach, so what the tally itself must
+// get right is pinned here against direct calls, like RecordProductionCounter and
+// ForwardedFrameGeometryObserver next to it.
 
 #include <doctest/doctest.h>
 

@@ -20,9 +20,9 @@
 // and turns them into ONE line a machine can parse, plus a classified exit code. It observes; it never decides
 // what the pipeline does.
 //
-// WHY IT IS A HEADER, and not a lambda inside cli.cpp: cli.cpp is not compiled into umacapture_tests (that
-// target deliberately links pure-logic sources only -- see native/CMakeLists.txt), so anything living there is
-// asserted by nothing. The wire tags this classifies are load-bearing strings that no C++ type checks, which is
+// WHY IT IS A HEADER, and not a lambda inside cli.cpp: cli.cpp carries main(), which umacapture_tests supplies
+// itself (test/test_main.cpp), so it is not compiled into that target and anything living in it is asserted by
+// nothing. The wire tags this classifies are load-bearing strings that no C++ type checks, which is
 // the same reason the rest of the wire vocabulary lives in native_api_messages.h rather than at its emitters.
 namespace uma::cli {
 

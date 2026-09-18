@@ -240,9 +240,20 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
 - `core/test_native_api_messages.cpp` — the notification wire contract. The
   `notify*` JSON payloads NativeApi pushes to Dart are built by the pure
   `uma::app::messages` free functions in `src/core/native_api_messages.h` (split
-  out of `native_api.h` so the contract is testable without linking the
-  ONNX/WinRT-heavy `native_api.cpp`); each builder's exact `type` tag and keys are
+  out of `native_api.h` so the wire contract is stated and tested on its own, apart
+  from the pipeline that sends it); each builder's exact `type` tag and keys are
   asserted against a raw-JSON expectation, order-independently.
+- `core/test_native_api_pipeline_wiring.cpp` — the real `NativeApi`, constructed and
+  started with the shipped `assets/config` against fake predictors: that a pipeline
+  start and a session that merely *adopts* a running loop both begin a new run's
+  record count, that a stitch failure finishes the attempt it names and reports
+  `stitch_failed` against that attempt's `record_id` even after a later attempt was
+  announced, that every terminal attempt failure is one finish plus one id-scoped
+  error, that a pipeline which fails to build reports the reason and leaves nothing
+  running, and that a pipeline builds the factor-tab models exactly once (one
+  factor-row reader shared by the scraper and the recognizer). `closed_before_completed`
+  and `scrape_failed` are reachable only from inside the scene scraper, so their
+  listener body is asserted here but not their attachment.
 - `core/test_frame_rate.cpp` — the pure `frameRate` helper in
   `src/core/frame_rate.h` (split out of NativeApi's lap-time listener for the same
   reason as `native_api_messages.h`): the `count * report_interval / span` ratio
@@ -467,10 +478,14 @@ The test target (`umacapture_tests` in [`../CMakeLists.txt`](../CMakeLists.txt))
 links only the sources under test — the header-only primitives above plus
 `src/condition/serializer.cpp`, `src/chara_detail/chara_detail_scene_scraper.cpp`,
 `src/chara_detail/chara_detail_scene_context.cpp`,
-`src/chara_detail/chara_detail_scene_stitcher.cpp`, and
-`src/chara_detail/chara_detail_search_helpers.cpp`, which pull in OpenCV via
-`cv/frame.h` but not ONNX or WinRT. (Their `log_*` / `vlog_*` calls resolve
-against the header-only spdlog default logger, so they need no `logger_util.cpp`.)
+`src/chara_detail/chara_detail_scene_stitcher.cpp`,
+`src/chara_detail/chara_detail_search_helpers.cpp`,
+`src/chara_detail/chara_detail_recognizer.cpp`, `src/core/native_api.cpp` and
+`src/core/native_api_frame_shaping.cpp`, which pull in OpenCV via `cv/frame.h`
+but neither ONNX nor WinRT — the recognizer stage's predictors come from
+`chara_detail/fake_predictor_factory.cpp` rather than a loaded model. (Their
+`log_*` / `vlog_*` calls resolve against the header-only spdlog default logger,
+so they need no `logger_util.cpp`.)
 This source list is maintained by hand in both `../CMakeLists.txt`
 (`TEST_SOURCE_FILES`) and here — keep the two in sync. As the header/.cpp split
 progresses, add each newly split `.cpp` and its tests here.

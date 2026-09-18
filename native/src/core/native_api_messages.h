@@ -14,7 +14,7 @@
 // Each function returns the already-dumped JSON string that NativeApi::notify() forwards. They are kept
 // free of any NativeApi/pipeline state on purpose: the wire contract these produce (the "type" tag plus the
 // per-message keys, which the Dart side reads by string) is the load-bearing part, and pulling it out here
-// lets it be unit-tested without linking the ONNX/WinRT-heavy NativeApi translation unit. NativeApi's notify*
+// lets it be asserted as data, without standing a pipeline up to reach the string. NativeApi's notify*
 // methods are thin wrappers that call these and hand the result to notify().
 namespace uma::app::messages {
 
