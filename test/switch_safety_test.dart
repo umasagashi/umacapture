@@ -1,11 +1,35 @@
 // Verifies CharaDetailCaptureState.status and .switchSafety, which drive the capture-tab guidance and
+// the "safe to switch character" indicator shown during continuous capture (navigating to an adjacent
+// character without closing the detail screen).
+//
 // Native detects a character switch on the factor tab (the 継承タブ) only: Rule 3's content diff, which
 // keeps watching that tab after it is captured and after the session completes. No rule watches the skill
 // or 育成情報 tabs, during capture or after it. A switch made there is seen only if the record type changes
-// with it. So a switch is safe only while the factor tab is shown (factorTabShown) and Rule 3 holds its
-// reference (factorSwitchArmed), during capture and after completion alike, at any scroll position: a record
-// switch returns the game to the head of the list, which is where Rule 3 judges, so the position before the
-// switch is not a condition (the premise is stated at switchSafety's doc comment).
+// with it. So a switch is safe only while the factor tab is shown (factorTabShown), during capture and
+// after completion alike, at any scroll position: a record switch returns the game to the head of the
+// list, which is where Rule 3 judges, so the position before the switch is not a condition (the premise is
+// stated at switchSafety's doc comment). And on the factor tab it is safe only once
+// the tab has LATCHED ITS HEAD: Rule 3's diff is taken against a reference that head latch installs (the
+// frame the duplicate probe is handed), so before the latch the screen looks exactly like the safe
+// moment and is not one. The core states whether it holds that reference (`onFactorSwitchArmed`, kept
+// as factorSwitchArmed), and switchSafety reads that level rather than inferring it from the settle
+// wait: on a page that scrolls the two coincide, but on a factor page with no scroll bar the latch
+// comes first and the wait lasts until the tab is read. The "armed" cases below pin that the arrows
+// follow the level and nothing else.
+//
+// "Detect" is not "tell every pair of records apart": Rule 3's diff only nominates a switch, and native
+// keeps the session when both frames' visible self-factor prefixes read the same. A switch between two
+// records with identical visible prefixes is therefore not reset, and nothing this state sees can tell.
+// switchSafety's doc comment states that limit; these tests pin where Rule 3 is armed, not that case.
+//
+// The scroll position (at top vs scrolled) is a single fact reported by native via the scroll-position
+// event (scrollPosition), kept separate from capture progress (the ring value set by progress()).
+// "capturing" and the duplicate hint's gate (factorAtTop) derive from that one fact, so they can never
+// disagree; "safe to switch" does not read it at all, only the tab shown and the armed level.
+//
+// Run: .fvm/flutter_sdk/bin/flutter test test/switch_safety_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/core/platform_controller.dart';
 
 void main() {
   group('CharaDetailCaptureState.switchSafety', () {
@@ -19,6 +43,7 @@ void main() {
         detailOpened: true,
         currentTab: 0,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {0: false},
       );
       expect(state.switchSafety, isFalse);
     });
@@ -28,9 +53,27 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {1: false},
         factorSwitchArmed: true,
       );
       expect(state.switchSafety, isTrue);
+    });
+
+    test('is unsafe on the factor tab while Rule 3 holds no reference, even with the wait over', () {
+      // ROW A. The settle wait being over is not the same fact as Rule 3 holding its reference, so a
+      // settled factor tab with no reference must not show the arrows. The core's statement that the
+      // detector is armed decides this, not the wait.
+      for (final position in TopOfContent.values) {
+        final notArmed = CharaDetailCaptureState(
+          detailOpened: true,
+          currentTab: 1,
+          topOfContent: position,
+          tabsAwaitingHead: {1: false},
+        );
+        expect(notArmed.status, isNot(CharaDetailCaptureStatus.waitingForReady), reason: '$position');
+        expect(notArmed.switchSafety, isFalse, reason: '$position: shown, not armed');
+        expect(notArmed.factorSwitchArmedChanged(true).switchSafety, isTrue, reason: '$position: armed');
+      }
     });
 
     test('during capture, is safe on the factor tab scrolled off its top, and unsafe on the other tabs', () {
@@ -41,6 +84,7 @@ void main() {
         detailOpened: true,
         currentTab: tab,
         topOfContent: TopOfContent.scrolled,
+        tabsAwaitingHead: {tab: false},
         factorSwitchArmed: true,
       );
       expect(scrolledOn(1).status, CharaDetailCaptureStatus.capturing);
@@ -56,10 +100,48 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.unknown,
+        tabsAwaitingHead: {1: false},
         factorSwitchArmed: true,
       );
       expect(state.status, CharaDetailCaptureStatus.detailReady);
       expect(state.switchSafety, isTrue);
+    });
+
+    test('is unsafe while the displayed tab has not latched its head, even at the factor top', () {
+      // NOT `factorAtTop` being conservative. Rule 3 diffs the factor list against a reference the
+      // head latch installs, and that reference does not exist until the latch, so a switch made
+      // while the tab still awaits its head is undetectable however at-the-top the screen looks. The
+      // core states that absence (`factorSwitchArmed` false, the default of a fresh session).
+      final state = CharaDetailCaptureState(detailOpened: true, currentTab: 1, topOfContent: TopOfContent.atTop);
+      expect(state.status, CharaDetailCaptureStatus.waitingForReady);
+      expect(state.switchSafety, isFalse, reason: 'not null: the answer is "not yet", not "no idea"');
+      // The factor tab being shown does not override the wait, at any position.
+      for (final position in TopOfContent.values) {
+        final waiting = CharaDetailCaptureState(detailOpened: true, currentTab: 1, topOfContent: position);
+        expect(waiting.status, CharaDetailCaptureStatus.waitingForReady, reason: '$position');
+        expect(waiting.switchSafety, isFalse, reason: '$position: the factor tab is shown and still not safe');
+      }
+    });
+
+    test('during the settle wait, follows the armed level rather than the wait', () {
+      // The arm does not infer "not armed" from the wait. On a factor page with no scroll bar the latch
+      // arms Rule 3 while the wait (which lasts until the tab is read) still stands, and a switch made
+      // then IS detected. Answering false here from the status alone would be that inference.
+      final waitingArmed = CharaDetailCaptureState(
+        detailOpened: true,
+        currentTab: 1,
+        topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {1: true},
+        tabsScrollBar: {1: false},
+        factorSwitchArmed: true,
+      );
+      expect(waitingArmed.status, CharaDetailCaptureStatus.waitingForReady);
+      expect(waitingArmed.switchSafety, isTrue);
+      expect(
+        waitingArmed.scrollPosition(0, TopOfContent.atTop).switchSafety,
+        isFalse,
+        reason: 'the same level on another tab: not the 継承タブ',
+      );
     });
 
     test('is unsafe when some but not all tabs are complete', () {
@@ -70,6 +152,7 @@ void main() {
         campaignTabProgress: 0,
         currentTab: 2,
         topOfContent: TopOfContent.scrolled,
+        tabsAwaitingHead: {2: false},
       );
       expect(state.switchSafety, isFalse);
     });
@@ -96,7 +179,8 @@ void main() {
       // The core states the position on edges only and does not restate it on completion, so a success
       // that dropped the pair would leave the 継承タブ looking unsafe until the user moved.
       final completed = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
+          .tabAwaitingHead(1, false)
           .factorSwitchArmedChanged(true)
           .scrollPosition(1, TopOfContent.scrolled)
           .success(id: 'x');
@@ -108,7 +192,7 @@ void main() {
 
       // The control: a session reset does drop the pair and the level, because the core restates them
       // after its own reset.
-      final restarted = completed.started();
+      final restarted = completed.started('rec-2');
       expect(restarted.currentTab, 0);
       expect(restarted.topOfContent, TopOfContent.unknown);
       expect(restarted.factorSwitchArmed, isFalse);
@@ -128,6 +212,7 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {1: false},
         factorSwitchArmed: true,
       )..error = 'duplicated_character_probe';
       expect(state.switchSafety, isTrue);
@@ -139,6 +224,7 @@ void main() {
         detailOpened: true,
         currentTab: 0,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {0: false},
       )..error = 'duplicated_character_probe';
       expect(state.switchSafety, isFalse);
     });
@@ -172,6 +258,25 @@ void main() {
       );
     });
 
+    test('on a completed tab, is safe on the armed factor tab and unsafe elsewhere', () {
+      // `tabCompleted` joins the phase arm: a completed factor tab always holds the reference, and the
+      // other tabs are watched by nothing, completed or not.
+      CharaDetailCaptureState completedOn(int tab) => CharaDetailCaptureState(
+        detailOpened: true,
+        currentTab: tab,
+        topOfContent: TopOfContent.scrolled,
+        tabsAwaitingHead: {tab: false},
+        tabsCompleted: {tab},
+        factorSwitchArmed: true,
+      );
+      expect(completedOn(1).status, CharaDetailCaptureStatus.tabCompleted);
+      expect(completedOn(1).switchSafety, isTrue);
+      for (final tab in [0, 2]) {
+        expect(completedOn(tab).status, CharaDetailCaptureStatus.tabCompleted);
+        expect(completedOn(tab).switchSafety, isFalse, reason: 'tab $tab: no rule watches it');
+      }
+    });
+
     test('shows no guidance for a hard error', () {
       final state = CharaDetailCaptureState(detailOpened: true)..error = 'closed_before_completed';
       expect(state.switchSafety, isNull);
@@ -184,22 +289,23 @@ void main() {
     });
 
     test('is detailReady when the screen is open and the tab is at its top', () {
-      final state = CharaDetailCaptureState(detailOpened: true);
+      final state = CharaDetailCaptureState(detailOpened: true, tabsAwaitingHead: {0: false});
       expect(state.status, CharaDetailCaptureStatus.detailReady);
     });
 
     test('a factor progress update alone does not mark the factor top', () {
       // Progress and scroll position are independent: a ring update on the factor tab does not, by
       // itself, place the current tab at the factor top -- that needs the scroll-position event.
-      final state = CharaDetailCaptureState().started().progress(1, 0.3);
+      final state = CharaDetailCaptureState().started('rec-1').tabAwaitingHead(0, false).progress(1, 0.3);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
       expect(state.switchSafety, isFalse);
     });
 
     test('the scroll-position event marks the factor top as a safe switch point', () {
       final state = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false)
           .factorSwitchArmedChanged(true);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
       expect(state.switchSafety, isTrue);
@@ -207,8 +313,9 @@ void main() {
 
     test('scrolling the factor tab off its top switches to capturing in one step', () {
       final state = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false)
           .factorSwitchArmedChanged(true)
           .scrollPosition(1, TopOfContent.scrolled);
       expect(state.factorAtTop, isFalse);
@@ -220,8 +327,9 @@ void main() {
     test('progress does not change the scroll position (kept independent)', () {
       // Completing the factor tab (a progress update) must not flip the at-top fact on its own.
       final state = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false)
           .progress(1, 1);
       expect(state.factorAtTop, isTrue);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
@@ -229,8 +337,9 @@ void main() {
 
     test('is capturing while the current tab is scrolled', () {
       final state = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(0, TopOfContent.scrolled)
+          .tabAwaitingHead(0, false)
           .progress(0, 1);
       expect(state.status, CharaDetailCaptureStatus.capturing);
     });
@@ -240,10 +349,12 @@ void main() {
       // current tab is now at its top, so the banner is detailReady and switching is safe, while the
       // skill ring keeps its progress.
       final state = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(0, TopOfContent.scrolled)
+          .tabAwaitingHead(0, false)
           .progress(0, 0.6)
           .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false)
           .factorSwitchArmedChanged(true);
       expect(state.skillTabProgress, 0.6);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
@@ -271,6 +382,7 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {1: false},
       )..error = 'duplicated_character_probe';
       expect(state.status, CharaDetailCaptureStatus.duplicateHint);
     });
@@ -282,10 +394,11 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {1: false},
       )..error = 'duplicated_character_probe';
       // The new tab settles first -- that is the settle wait asserted in its own case below; this
       // one is about the probe, so it is taken past the wait rather than stopping inside it.
-      final after = state.scrollPosition(0, TopOfContent.atTop);
+      final after = state.scrollPosition(0, TopOfContent.atTop).tabAwaitingHead(0, false);
       expect(after.factorAtTop, isFalse);
       expect(after.status, CharaDetailCaptureStatus.detailReady);
     });
@@ -295,6 +408,7 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.scrolled,
+        tabsAwaitingHead: {1: false},
         factorSwitchArmed: true,
       )..error = 'duplicated_character_probe';
       expect(state.status, CharaDetailCaptureStatus.capturing);
@@ -328,8 +442,9 @@ void main() {
 
     test('is tabRefused while any tab holds a refusal, and returns when it is withdrawn', () {
       final refused = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false)
           .tabRefused(0, true, 'scrolled');
       expect(refused.status, CharaDetailCaptureStatus.tabRefused);
       // Ranked above the three phase statuses: at the factor top, settled, this state would
@@ -339,7 +454,7 @@ void main() {
 
     test('a refusal outranks a scrolled tab but not a terminal outcome', () {
       final scrolled = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
           .scrollPosition(1, TopOfContent.scrolled)
           .tabRefused(1, true, 'scrolled');
       expect(scrolled.status, CharaDetailCaptureStatus.tabRefused, reason: 'above capturing');
@@ -371,6 +486,7 @@ void main() {
         detailOpened: true,
         currentTab: 1,
         topOfContent: TopOfContent.atTop,
+        tabsAwaitingHead: {1: false},
       ).tabRefused(0, true, 'scrolled').fail(message: 'duplicated_character_probe');
       expect(state.status, CharaDetailCaptureStatus.tabRefused);
       // The probe error is still held, and still means what it meant: withdraw the refusal and the
@@ -400,9 +516,34 @@ void main() {
   // thing that breaks the capture, at the one moment doing it breaks the capture. `onScrollReady`
   // reached Dart with a tab index and was discarded on the line that received it.
   group('CharaDetailCaptureState -- the settle wait', () {
+    test('a freshly opened detail screen is waiting, not ready', () {
+      // What `onCharaDetailStarted` leaves behind, verbatim. No readiness has been stated yet.
+      final state = CharaDetailCaptureState().started('rec-1');
+      expect(state.status, CharaDetailCaptureStatus.waitingForReady);
+      expect(state.currentTabAwaitingHead, isTrue);
+    });
+
     test('the readiness statement for the displayed tab ends the wait', () {
-      final state = CharaDetailCaptureState().started();
+      final state = CharaDetailCaptureState().started('rec-1').tabAwaitingHead(0, false);
       expect(state.status, CharaDetailCaptureStatus.detailReady);
+    });
+
+    test('a readiness statement about another tab does not end the displayed tab wait', () {
+      final state = CharaDetailCaptureState()
+          .started('rec-1')
+          .tabAwaitingHead(0, false)
+          .scrollPosition(1, TopOfContent.atTop);
+      expect(state.status, CharaDetailCaptureStatus.waitingForReady);
+    });
+
+    test('every tab switch re-enters the wait, which is the retry the core performs', () {
+      // Arriving on a tab the core has said nothing about is a wait, which is what makes a switch
+      // re-enter one without this side having to notice the switch at all.
+      final settled = CharaDetailCaptureState().started('rec-1').tabAwaitingHead(0, false);
+      expect(settled.status, CharaDetailCaptureStatus.detailReady);
+      final switched = settled.scrollPosition(1, TopOfContent.atTop);
+      expect(switched.status, CharaDetailCaptureStatus.waitingForReady);
+      expect(switched.tabAwaitingHead(1, false).status, CharaDetailCaptureStatus.detailReady);
     });
 
     test('the position event does not decide the wait, in either order', () {
@@ -411,11 +552,13 @@ void main() {
       // re-deriving a re-opened wait from a change of index and disagreeing with the core for a
       // frame. The RE-OPENING is the core's own statement; see the test below.
       final levelFirst = CharaDetailCaptureState()
-          .started()
+          .started('rec-1')
+          .tabAwaitingHead(1, false)
           .scrollPosition(1, TopOfContent.atTop);
       final positionFirst = CharaDetailCaptureState()
-          .started()
-          .scrollPosition(1, TopOfContent.atTop);
+          .started('rec-1')
+          .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false);
       expect(levelFirst.status, CharaDetailCaptureStatus.detailReady);
       expect(positionFirst.status, CharaDetailCaptureStatus.detailReady);
     });
@@ -425,12 +568,76 @@ void main() {
       // to preserve it does not. The core also states `awaiting: false` on a refused tab -- the wait
       // is genuinely over there, badly -- so the two do not in fact stand together; the ranking
       // covers a refusal and a rebuild racing within one frame.
-      final state = CharaDetailCaptureState().started().tabRefused(0, true, 'scrolled');
+      final state = CharaDetailCaptureState().started('rec-1').tabRefused(0, true, 'scrolled');
       expect(state.status, CharaDetailCaptureStatus.tabRefused);
       expect(
-        state.status,
+        state.tabAwaitingHead(0, false).status,
         CharaDetailCaptureStatus.tabRefused,
         reason: 'the level the core actually states alongside a refusal must not demote it',
+      );
+    });
+
+    test('coming BACK to an unfinished tab waits again, on the core statement that says so', () {
+      // THE CASE THE FORWARD DIRECTION DOES NOT COVER, and the one the user asked for by name:
+      // leaving a tab whose capture is in progress rebuilds it in the core, so returning to it finds
+      // a fresh interpreter that has to latch all over again.
+      //
+      // WHERE THAT NOW COMES FROM. The rebuild is the core's, and the core restates `awaiting: true`
+      // for that index on the very frame it rebuilds -- while another tab is displayed. This side
+      // does not re-derive it from the change of index: an inference here would be a second copy of
+      // a fact the wire already carries, and the two would disagree for whichever frame arrived
+      // first. So the assertion below is that the level is what re-opens the wait, and that a
+      // position event alone does NOT.
+      final bounced = CharaDetailCaptureState()
+          .started('rec-1')
+          .tabAwaitingHead(0, false)
+          .scrollPosition(0, TopOfContent.scrolled)
+          .progress(0, 0.4)
+          .scrollPosition(1, TopOfContent.atTop)
+          .scrollPosition(0, TopOfContent.atTop);
+      expect(bounced.skillTabProgress, 0.4, reason: 'the ring is untouched: this is about the wait only');
+      expect(
+        bounced.status,
+        CharaDetailCaptureStatus.detailReady,
+        reason: 'the core has not yet said the rebuilt tab is waiting; this side must not guess it',
+      );
+
+      final returned = bounced.tabAwaitingHead(0, true);
+      expect(returned.status, CharaDetailCaptureStatus.waitingForReady);
+      expect(returned.skillTabProgress, 0.4);
+      expect(returned.tabAwaitingHead(0, false).status, CharaDetailCaptureStatus.detailReady);
+    });
+
+    test('a completed tab is not waiting, however it was arrived at', () {
+      // THE OTHER WAY THIS COULD HANG. A completed tab is not rebuilt when it is left, so the core
+      // never restates `awaiting: true` for it, and the `false` it stated when the tab started
+      // capturing still stands when the user comes back. No progress-based escape hatch is needed on
+      // this side -- and the ring value below is deliberately NOT what answers the question.
+      final state = CharaDetailCaptureState()
+          .started('rec-1')
+          .scrollPosition(0, TopOfContent.scrolled)
+          .tabAwaitingHead(0, false)
+          .progress(0, 1)
+          .scrollPosition(1, TopOfContent.atTop)
+          .tabAwaitingHead(1, false)
+          .scrollPosition(0, TopOfContent.scrolled);
+      expect(state.currentTabAwaitingHead, isFalse, reason: 'the level the core stated for tab 0 still stands');
+      expect(state.status, CharaDetailCaptureStatus.capturing);
+    });
+
+    test('a tab index the core has not levelled asserts a wait', () {
+      // FAIL-CLOSED, and the reverse of what this side used to do. The old shape answered "ready" for
+      // an unknown index so that an instruction could not become unwithdrawable; the withdrawal now
+      // exists by construction, because the core walks the same `kAllTabPages` for the level as for
+      // the position event -- an index that can appear in one can appear in the other. With that
+      // guaranteed, the safe default is the one that costs a moment rather than the head of a list.
+      final state = CharaDetailCaptureState().started('rec-1').scrollPosition(7, TopOfContent.atTop);
+      expect(state.currentTabAwaitingHead, isTrue);
+      expect(state.status, CharaDetailCaptureStatus.waitingForReady);
+      expect(
+        state.tabAwaitingHead(7, false).status,
+        CharaDetailCaptureStatus.detailReady,
+        reason: 'and it is withdrawable: nothing here is special-cased to the three known indices',
       );
     });
 
@@ -460,6 +667,7 @@ void main() {
     CharaDetailCaptureState unreadableFactorTop(TopOfContent verdict) => CharaDetailCaptureState(
       detailOpened: true,
       currentTab: 1,
+      tabsAwaitingHead: {1: false},
       factorSwitchArmed: true,
     ).scrollPosition(1, verdict);
 

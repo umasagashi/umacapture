@@ -295,8 +295,9 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   `chara_detail/test_skill_tab_recognizer.cpp` (no skills for inheritance-only; a
   level read only for the first skill of a left+right row),
   `chara_detail/test_factor_recognizer.cpp` (`visibleSelfPrefix`: the missing
-  top banner, a fully visible left+right row with a 1-based star, and stopping
-  before a row whose name or star cell would leave the scroll area),
+  top banner, a fully visible left+right row with a 1-based star, stopping
+  before a row whose name or star cell would leave the scroll area, and stopping
+  at the window's factor limit without handing the models a cell past it),
   `chara_detail/test_support_card_recognizer.cpp` (no card top leaves the cards
   and `scan_top` untouched; six cards with 1-based ranks),
   `chara_detail/test_family_tree_recognizer.cpp` (the default family when no tree
@@ -620,6 +621,15 @@ vocabulary is short or has an extra word, is refused rather than partly read; an
 undeclared case asserts nothing about its verdicts either way; and a malformed
 declaration (a missing or unknown verdict, a negative/boolean/float count, a list, or
 `null`) is refused before any pipeline would run.
+
+The same self-test also drives `check_probe_factors`, the strict `onFactorProbe`
+check for `expect_probe_matches_golden_self`: every element the probe sent must agree
+with the golden self list, and when the probe line states `below_threshold`, the
+golden self list must also be exactly as long as the probe (the number of factors a
+probe is cut at lives in `assets/config/chara_detail/scene_scraper.json` as
+`self_factor_prefix_length`, not in this script, and never reaches the wire). A probe
+line with no `below_threshold` field, or a non-boolean one, is refused rather than
+defaulted.
 
 Regenerated goldens are tied to the `sandbox/modules` models — to what they
 *predict*, that is, not to the version string, which is stripped (above). When the

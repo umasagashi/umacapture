@@ -15,6 +15,10 @@ void main() {
     // Initial state.
     expect(container.read(charaDetailCaptureStateProvider).skillTabProgress, 0.0);
 
+    // started() begins the attempt the core announced; outcomes are applied only to it.
+    notifier.started('rec-1');
+    expect(container.read(charaDetailCaptureStateProvider).attemptId, 'rec-1');
+
     // progress() records per-tab progress.
     notifier.progress(0, 0.5);
     var state = container.read(charaDetailCaptureStateProvider);
@@ -23,8 +27,12 @@ void main() {
     notifier.progress(1, 1.0);
     expect(container.read(charaDetailCaptureStateProvider).factorTabProgress, 1.0);
 
+    // success() of another attempt changes nothing.
+    expect(notifier.success('rec-0'), isFalse);
+    expect(container.read(charaDetailCaptureStateProvider).link, isNull);
+
     // success() exposes the new link and pins every tab at 100% (the completed rings stay visible).
-    notifier.success('rec-1');
+    expect(notifier.success('rec-1'), isTrue);
     state = container.read(charaDetailCaptureStateProvider);
     expect(state.link?.id, 'rec-1');
     expect(state.skillTabProgress, 1.0);
@@ -33,11 +41,12 @@ void main() {
     notifier.fail('boom');
     expect(container.read(charaDetailCaptureStateProvider).error, 'boom');
 
-    // reset() returns to a clean state.
+    // reset() returns to a clean state, and keeps the attempt it was about.
     notifier.reset();
     final reset = container.read(charaDetailCaptureStateProvider);
     expect(reset.error, isNull);
     expect(reset.link, isNull);
+    expect(reset.attemptId, 'rec-1');
   });
 
   test('each read of charaDetailCaptureStateProvider sees a NEW instance on mutation', () {

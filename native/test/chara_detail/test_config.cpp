@@ -73,27 +73,28 @@ TEST_CASE("scene_context condition tree round-trips") {
     CHECK(first == second);
 }
 
-// A layout's factor limit below 1 is refused while the config is deserialized. The limit ends every
-// single-frame read of the factor tab, so 0 would read nothing on any frame -- the character-switch rule would
-// go blind without a word -- and a negative value has no meaning (recognizer_impl::SelfFactorWindow holds it
-// unsigned, so it would silently become a limit no list reaches).
-TEST_CASE("a layout factor limit below 1 is rejected while the scraper config is deserialized") {
-    const Json shipped = json_util::read(configPath("scene_scraper.json"));
-    CHECK_NOTHROW(shipped.get<scraper_config::CharaDetailSceneScraperConfig>());
-
-    for (const std::string layout : {"common", "friend_common"}) {
-        for (const int value : {0, -1}) {
-            CAPTURE(layout);
-            CAPTURE(value);
-            Json edited = shipped;
-            edited[layout]["self_factor_prefix_length"] = value;
-            CHECK_THROWS_AS(edited.get<scraper_config::CharaDetailSceneScraperConfig>(), std::invalid_argument);
-        }
-        // The boundary: 1 is a limit.
-        Json one = shipped;
-        one[layout]["self_factor_prefix_length"] = 1;
-        CHECK_NOTHROW(one.get<scraper_config::CharaDetailSceneScraperConfig>());
-    }
+// THE SHIPPED EARLY-DUPLICATE THRESHOLDS, AND THE ONE PLACE THEY ARE WRITTEN AS NUMBERS OUTSIDE THE BUILDER.
+// The literals are the point of this case, not a restatement of the config: they are what makes moving either
+// value without deciding to move it fail here, by name, instead of quietly changing when every front end calls a
+// character already captured. They are read from the SHIPPED file, the thing every platform loads, so a builder
+// edit that is regenerated fails here too. (A builder edit that is never regenerated does not: nothing in this
+// suite compares the builder with the file, and this case does not change that.)
+//
+// Nothing else pins these numbers, and nothing else may: scene_scraper.json's per-layout
+// self_factor_prefix_length is their one home, the core reads each frame up to the session's layout value
+// (recognizer_impl::SelfFactorWindow) and states on the onFactorProbe message only whether the list it sends is
+// shorter than that value, and the scraper tests assert only that each layout's own value is the one the read
+// used. The derivation lives beside the values in native/tool/builder/chara_detail_scene_scraper_builder.h.
+TEST_CASE("the shipped self-factor prefix lengths are 14 on Standard's layout and 10 on Friend's") {
+    const auto config =
+        json_util::read(configPath("scene_scraper.json")).get<scraper_config::CharaDetailSceneScraperConfig>();
+    CHECK(config.common.self_factor_prefix_length == 14);
+    CHECK(config.friend_common.self_factor_prefix_length == 10);
+    // Stored as JSON integers, not merely values that convert to them: nlohmann would static_cast a 14.5 into
+    // this int field without complaint, so the struct alone cannot see a float in the file.
+    const Json on_disk = json_util::read(configPath("scene_scraper.json"));
+    CHECK(on_disk.at("common").at("self_factor_prefix_length").is_number_integer());
+    CHECK(on_disk.at("friend_common").at("self_factor_prefix_length").is_number_integer());
 }
 
 TEST_CASE("missing required keys are rejected") {
@@ -125,6 +126,29 @@ TEST_CASE("an empty scan sequence is rejected while the scraper config is deseri
         Json emptied = shipped;
         emptied[key] = Json::array();
         CHECK_THROWS_AS(emptied.get<scraper_config::CharaDetailSceneScraperConfig>(), std::invalid_argument);
+    }
+}
+
+// A layout's factor limit below 1 is refused at the same boundary. The limit ends every single-frame read of the
+// factor tab, so 0 would read nothing on any frame -- the duplicate probe and the character-switch rule would both
+// go blind without a word -- and a negative value has no meaning (recognizer_impl::SelfFactorWindow holds it
+// unsigned, so it would silently become a limit no list reaches).
+TEST_CASE("a layout factor limit below 1 is rejected while the scraper config is deserialized") {
+    const Json shipped = json_util::read(configPath("scene_scraper.json"));
+    CHECK_NOTHROW(shipped.get<scraper_config::CharaDetailSceneScraperConfig>());
+
+    for (const std::string layout : {"common", "friend_common"}) {
+        for (const int value : {0, -1}) {
+            CAPTURE(layout);
+            CAPTURE(value);
+            Json edited = shipped;
+            edited[layout]["self_factor_prefix_length"] = value;
+            CHECK_THROWS_AS(edited.get<scraper_config::CharaDetailSceneScraperConfig>(), std::invalid_argument);
+        }
+        // The boundary: 1 is a limit.
+        Json one = shipped;
+        one[layout]["self_factor_prefix_length"] = 1;
+        CHECK_NOTHROW(one.get<scraper_config::CharaDetailSceneScraperConfig>());
     }
 }
 

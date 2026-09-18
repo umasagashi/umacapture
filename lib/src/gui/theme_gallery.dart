@@ -492,12 +492,45 @@ class _SemanticSection extends StatelessWidget {
   Widget build(BuildContext context) {
     // Live values from the AppSemanticColors extension (theme_extensions.dart),
     // brightness-tuned. These replaced the scattered status/brand literals.
+    //
+    // The COLORS here are live, but the usage strings are not: they are a snapshot of the call
+    // sites, the same as `_roleUsages`, and the color scan does not reach them (it matches
+    // `colorScheme.<role>`, and these tokens are read off the extension). So a new use of a
+    // semantic token is drift the scan cannot report -- re-check these by hand.
     final s = Theme.of(context).semantic;
     final entries = <(String, Color, Color?, String)>[
-      ('success', s.success, null, 'Toast success, capture requirement OK, addon success.'),
-      ('warning', s.warning, null, 'Toast warning, capture requirement unsure, addon timeout, script error icon.'),
-      ('info', s.info, null, 'Info toasts, addon running status.'),
-      ('danger', s.danger, null, 'Toast error, capture requirement insufficient (wired to colorScheme.error).'),
+      (
+        'success',
+        s.success,
+        null,
+        'Toast success, capture requirement OK, addon success, a finished tab\'s progress ring, the "safe to switch '
+            'characters" arrows, and every CaptureStatusTone.success line of the capture card.',
+      ),
+      (
+        'warning',
+        s.warning,
+        null,
+        'Toast warning, capture requirement unsure, addon timeout, script error icon, a part-way tab\'s progress '
+            'ring, the "do not switch yet" sign, and every CaptureStatusTone.hint line of the capture card -- the '
+            'web supply-stall and frozen-content notices, the duplicate hint, and the settle wait that tells the '
+            'user not to scroll yet. That last one is why the tone is worth keeping distinct from info: it is the '
+            'only capture line whose instruction is an instruction not to act.',
+      ),
+      (
+        'info',
+        s.info,
+        null,
+        'Info toasts, addon running status, and every CaptureStatusTone.info line of the capture card (import '
+            'running, waiting for the detail screen, ready, capturing).',
+      ),
+      (
+        'danger',
+        s.danger,
+        null,
+        'Toast error, capture requirement insufficient (wired to colorScheme.error), and every '
+            'CaptureStatusTone.error line of the capture card -- the controller load error, a failed character or '
+            'import, and a tab refused for having been scrolled before it was ready.',
+      ),
       (
         'onAccent',
         s.onAccent,

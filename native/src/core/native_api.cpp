@@ -267,8 +267,6 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         scraper_runner->makeConnection<chara_detail::SceneInfo>("chara_detail_opened");
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>("chara_detail_closed");
 
-    chara_detail_opened_connection->listen([this](const auto &) { notifyCharaDetailStarted(); });
-
     {
         // Detail-crop auto-calibration, on unless the config turns it off. Absent key == enabled, so the
         // shipped app config needs no change, and every front end agrees on that default: the CLI's offline
@@ -352,10 +350,8 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     event_runners->add(stitcher_runner);
 
     const auto closed_before_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
-    closed_before_completed_connection->listen([this](const auto &info) {
-        notifyCharaDetailFinished(info, false);
-        notifyError("closed_before_completed");
-    });
+    closed_before_completed_connection->listen(
+        [this](const auto &info) { notifyAttemptFailed(info, "closed_before_completed"); });
 
     const auto scroll_ready_connection = event_util::makeDirectConnection<int>();
     scroll_ready_connection->listen([this](int index) {
@@ -387,15 +383,37 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         notifyTabRefused(index, refused, reason);
     });
 
+    // Whether a tab is still waiting for the frame that becomes its fragment #0 -- the level the front ends'
+    // "do not scroll yet" instruction is made of. Level-driven and per tab, like the refusal above. Debug-level
+    // (not info) because unlike a refusal this fires on every ordinary tab in every ordinary capture; what
+    // makes it worth logging at all is that the pair "awaiting=false with no preceding scroll ready on that
+    // tab" is exactly the offset exit, which is otherwise invisible in a CLI run. `scroll_bar` is the page's
+    // structure, absent while the tab is not built (see messages::tabAwaitingHead).
+    const auto tab_awaiting_head_connection = event_util::makeDirectConnection<int, bool, std::optional<bool>>();
+    tab_awaiting_head_connection->listen([this](int index, bool awaiting, const std::optional<bool> &scroll_bar) {
+        log_debug(
+            "tab {} awaiting_head={} scroll_bar={}",
+            index,
+            awaiting,
+            scroll_bar.has_value() ? (scroll_bar.value() ? "true" : "false") : "absent");
+        notifyTabAwaitingHead(index, awaiting, scroll_bar);
+    });
+
     // Whether the character-switch rule holds a reference to compare the factor tab against -- the level the
-    // front ends' switch arrows are made of (see messages::factorSwitchArmed). Debug-level: it changes on every
-    // ordinary capture.
+    // front ends' switch arrows are made of (see messages::factorSwitchArmed). Debug-level for the reason the
+    // awaiting level above is: it changes on every ordinary capture.
     const auto factor_switch_armed_connection = event_util::makeDirectConnection<bool>();
     factor_switch_armed_connection->listen([this](bool armed) {
         log_debug("factor_switch_armed={}", armed);
         notifyFactorSwitchArmed(armed);
     });
 
+    // A session began for a freshly opened detail screen. Sent by the scraper once the session's id is minted and
+    // before the session is constructed (a construction that throws still ends under an announced id), and not by
+    // a listener on the open event: such a listener runs before the scraper's, i.e. before the session's id is
+    // minted, and the id is what the front end matches every later outcome of this attempt against.
+    const auto started_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    started_connection->listen([this](const auto &info) { notifyCharaDetailStarted(info); });
 
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
@@ -404,9 +422,12 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // session without the detail screen closing. Tell the UI to reset its capture progress -- and hand it the
     // session that was discarded, which is the only account anyone gets of a character lost mid-run (the
     // closed_before_completed path above sees the LAST session only). Relayed rather than judged here: the core
-    // states what was discarded, each front end decides whether that deserves a sentence.
-    const auto restarted_connection = event_util::makeDirectConnection<chara_detail::DiscardedSession>();
-    restarted_connection->listen([this](const auto &discarded) { notifyCharaDetailRestarted(discarded); });
+    // states what was discarded, each front end decides whether that deserves a sentence. The second argument is
+    // the session the reset began, whose id the new attempt is announced under.
+    const auto restarted_connection =
+        event_util::makeDirectConnection<chara_detail::DiscardedSession, chara_detail::RecordInfo>();
+    restarted_connection->listen(
+        [this](const auto &discarded, const auto &begun) { notifyCharaDetailRestarted(discarded, begun); });
 
     // Every verdict the factor character-switch rule reaches, counted for the run (FactorSwitchVerdictTally) and
     // relayed to no front end. Direct: the note is taken inside the scraper's processing of the judged frame.
@@ -458,12 +479,16 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // Early duplicate probe: the scraper sends the stable factor-tab frame here (recognizer runner),
     // the recognizer runs only the self-factor recognition on it, and the result is forwarded to the UI.
     const auto factor_probe_ready_connection =
-        recognizer_runner->makeConnection<Frame, chara_detail::RecordInfo>("factor_probe_ready");
+        recognizer_runner->makeConnection<
+            Frame, chara_detail::RecordInfo, chara_detail::recognizer_impl::SelfFactorWindow, bool>(
+            "factor_probe_ready");
 
-    const auto factor_probe_completed_connection =
-        event_util::makeDirectConnection<std::vector<chara_detail::record::Factor>, int>();
+    const auto factor_probe_completed_connection = event_util::makeDirectConnection<
+        std::vector<chara_detail::record::Factor>, std::size_t, bool, chara_detail::RecordInfo>();
     factor_probe_completed_connection->listen(
-        [this](const auto &factors, int record_type) { notifyFactorProbe(factors, record_type); });
+        [this](const auto &factors, std::size_t factor_limit, bool cue_owed, const auto &info) {
+            notifyFactorProbe(factors, factor_limit, cue_owed, info);
+        });
 
     const auto recognizer_config =
         config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>();
@@ -494,12 +519,14 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         scroll_updated_connection,
         scroll_position_connection,
         tab_refused_connection,
+        tab_awaiting_head_connection,
         factor_switch_armed_connection,
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,
         factor_rows,
         factor_switch_judged_connection,
+        started_connection,
         restarted_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir,
@@ -517,11 +544,10 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
 
     // Stitching failed partway (a corrupt/partial fragment): the record can never be recognized, so surface a
     // terminal failure just like closed_before_completed instead of leaving the UI waiting forever.
+    // The stitcher runs on its own thread, so this can arrive after the next attempt was announced -- which is
+    // why notifyAttemptFailed reports against the payload's own id rather than the latest announced one.
     const auto stitch_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
-    stitch_failed_connection->listen([this](const auto &info) {
-        notifyCharaDetailFinished(info, false);
-        notifyError("stitch_failed");
-    });
+    stitch_failed_connection->listen([this](const auto &info) { notifyAttemptFailed(info, "stitch_failed"); });
 
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,

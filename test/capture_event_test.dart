@@ -6,10 +6,19 @@
 //  * [CaptureEventNotifier] records an outcome WHEN IT HAPPENS, because the state that produced it
 //    does not survive. A duplicate hint stands only while the factor tab is at its top, so
 //    scrolling one pixel used to erase the only notice a user got that this character may already
-//    be in the table; a success is cleared by the next `started()`. A view that derived its line
+//    be in the table; a success is cleared when the next attempt begins. A view that derived its line
 //    from the live state would lose both, which is exactly what the old banner did.
 //  * [CaptureEventView] renders it, identically for a live capture and for a video import: "this
 //    character was already in the table" is the same fact whichever fed the recognizer.
+//
+// AND IT GOES WHEN THE NEXT ONE BEGINS -- never when this one ends. There are two "next"s and both
+// are asserted here: the next SESSION (a live capture starting, an import starting) and, one level
+// down, the next CHARACTER (`CharaDetailCaptureState.attemptId`, the core's `record_id` for the
+// session, set by `started()`, which is where both of native's openings arrive -- the detail screen
+// being opened, and the core inferring a character switch on a screen the user never closed). A
+// stop, a close and a cancel all leave the line standing, because the last character of a run is
+// read after the run. An outcome of an EARLIER attempt that arrives after the next one began is not
+// recorded at all; `attempt_outcome_test.dart` asserts that from the wire.
 //
 // The refusal-wording cases at the bottom moved here from the import's former status block. They
 // are unchanged in substance: what a refused import says is now an event, not a section.
@@ -29,12 +38,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:umacapture/src/core/platform_channel.dart';
 import 'package:umacapture/src/core/platform_controller.dart';
 import 'package:umacapture/src/core/video_import_ops.dart';
 import 'package:umacapture/src/core/wasm_worker_ops.dart';
 import 'package:umacapture/src/gui/capture.dart';
 import 'package:umacapture/src/gui/theme_extensions.dart';
 
+import 'support/hive.dart';
 import 'support/localization.dart';
 
 // ignore: constant_identifier_names
@@ -140,9 +151,33 @@ ProviderContainer _container({ValueListenable<VideoImportState>? imports}) {
 /// Records a success, so a case about clearing has something to clear.
 void _recordSuccess(ProviderContainer container, String id) {
   container.read(charaDetailCaptureStateProvider.notifier)
-    ..started()
+    ..started('rec-1')
     ..success(id);
 }
+
+/// Hands a controller the same [Ref] its own provider would, for the cases driven from the wire.
+final _refProvider = Provider<Ref>((ref) => ref);
+
+/// The native tab index of the factor tab, which is the only tab a duplicate hint stands on.
+const _factorTab = CharaDetailCaptureState.factorTabIndex;
+
+/// The shortest sequence that reaches each outcome the card records, from a state that has just
+/// [CharaDetailCaptureStateNotifier.started].
+///
+/// Keyed by the status rather than written out as four cases, so a case can assert that the set it
+/// drives IS [eventfulCaptureStatuses]. A fifth eventful status added to the notifier without a
+/// sequence here would otherwise be exempt from the staleness rule while looking covered.
+final _recordersByStatus = <CharaDetailCaptureStatus, void Function(CharaDetailCaptureStateNotifier)>{
+  CharaDetailCaptureStatus.succeeded: (notifier) => notifier.success('rec-1'),
+  CharaDetailCaptureStatus.alreadyCaptured: (notifier) =>
+      notifier.fail('duplicated_character', duplicateRecordId: 'rec-old'),
+  CharaDetailCaptureStatus.failed: (notifier) => notifier.fail('closed_before_completed'),
+  // The hint only stands at the factor top, and only once that tab has settled.
+  CharaDetailCaptureStatus.duplicateHint: (notifier) => notifier
+    ..scrollPosition(_factorTab, TopOfContent.atTop)
+    ..tabAwaitingHead(_factorTab, false)
+    ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old'),
+};
 
 void main() {
   setUpAll(loadAppTranslations);
@@ -151,7 +186,7 @@ void main() {
     test('a success is recorded with the record it produced', () {
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..success('rec-1');
 
       final event = container.read(captureEventProvider);
@@ -168,8 +203,9 @@ void main() {
       // knows it may already have, and nothing on screen says so.
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..scrollPosition(1, TopOfContent.atTop)
+        ..tabAwaitingHead(1, false)
         ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
 
       expect(
@@ -204,7 +240,7 @@ void main() {
       // first fragment are never seen at all.
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..scrollPosition(1, TopOfContent.atTop)
         ..tabRefused(0, true, 'scrolled')
         ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
@@ -224,8 +260,9 @@ void main() {
       // this notifier records whatever becomes eventful, whenever it does.
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..scrollPosition(1, TopOfContent.atTop)
+        ..tabAwaitingHead(1, false)
         ..tabRefused(0, true, 'scrolled')
         ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old');
       expect(container.read(captureEventProvider), isNull);
@@ -237,29 +274,140 @@ void main() {
       expect(event.recordId, 'rec-old');
     });
 
-    test('a success outlives the next character being opened', () {
+    test('a hint on a factor tab with no scroll bar is recorded, although the tab is read at once', () {
+      // THE ORDER THE CORE PRODUCES ON SUCH A PAGE: the probe fires at the latch, which is inside the
+      // wait (the wait lasts until the tab is read), and the tab is read in that frame or shortly
+      // after. If a read tab outranked the hint, the status would go from the wait straight to
+      // `tabCompleted` and the hint would never be recorded for this character. It must be recorded as
+      // soon as the wait ends.
       final container = _container();
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
-        ..success('rec-1');
-      // The next detail screen resets the capture state completely.
-      container.read(charaDetailCaptureStateProvider.notifier).started();
+        ..started('rec-1')
+        ..tabAwaitingHead(_factorTab, true, scrollBar: false)
+        ..scrollPosition(_factorTab, TopOfContent.atTop)
+        ..factorSwitchArmedChanged(true)
+        ..failForRecord('rec-1', 'duplicated_character_probe', duplicateRecordId: 'rec-old')
+        ..pageReady(_factorTab);
+      expect(container.read(charaDetailCaptureStateProvider).status, CharaDetailCaptureStatus.waitingForReady);
+      expect(container.read(captureEventProvider), isNull, reason: 'the wait is not an event');
+
+      container.read(charaDetailCaptureStateProvider.notifier).tabAwaitingHead(_factorTab, false, scrollBar: false);
+
+      final event = container.read(captureEventProvider);
+      expect(event, isA<CharaCaptureEvent>(), reason: 'the hint was never recorded');
+      expect((event as CharaCaptureEvent).status, CharaDetailCaptureStatus.duplicateHint);
+      expect(event.recordId, 'rec-old');
+      expect(container.read(charaDetailCaptureStateProvider).phase, CharaDetailCaptureStatus.tabCompleted);
+    });
+
+    test('and it is lost outright when the state never reaches the hint again', () {
+      // WHICH IS THE PATH THE REMEDY ITSELF PUTS THE USER ON, so this is the cost in its realistic
+      // shape rather than a contrived one: the in-session remedy is to scroll back up and leave the
+      // tab, the core withdraws it on the rebuild, and by then the factor top — the only place the hint
+      // stands — is not what is displayed. Nothing brings the hint back before the character
+      // finishes, and the outcome that finishes it takes the card's one slot.
+      final container = _container();
+      container.read(charaDetailCaptureStateProvider.notifier)
+        ..started('rec-1')
+        ..scrollPosition(1, TopOfContent.atTop)
+        ..tabAwaitingHead(1, false)
+        ..tabRefused(0, true, 'scrolled')
+        ..fail('duplicated_character_probe', duplicateRecordId: 'rec-old')
+        // Off the factor top to act on the refusal, and the rebuild withdraws it there.
+        ..scrollPosition(0, TopOfContent.atTop)
+        ..tabRefused(0, false, '')
+        // ...and the tab arrived at settles, which is what takes the card past the settle wait to
+        // the ordinary line below. The wait is not eventful either, so the assertion holds
+        // throughout; carrying it through is what keeps this case about the hint.
+        ..tabAwaitingHead(0, false);
 
       expect(
         container.read(charaDetailCaptureStateProvider).status,
         CharaDetailCaptureStatus.detailReady,
-        reason: 'the live state was expected to have moved on -- otherwise this proves nothing',
+        reason: 'the probe error is still held, but nothing shows it here',
       );
-      expect((container.read(captureEventProvider) as CharaCaptureEvent).status, CharaDetailCaptureStatus.succeeded);
+      expect(container.read(captureEventProvider), isNull);
+
+      container.read(charaDetailCaptureStateProvider.notifier).success('rec-1');
+      final event = container.read(captureEventProvider) as CharaCaptureEvent;
+      expect(event.status, CharaDetailCaptureStatus.succeeded, reason: 'the hint never got the slot');
+    });
+
+    test('every outcome the card records goes when the next character is opened', () {
+      // THE REPORTED DEFECT, for all four outcomes at once: 「キャプチャ完了前に詳細画面を見失いま
+      // した」 stayed on screen after the user opened the detail screen again, because the only
+      // "next" this side could name was the next SESSION. What the user is looking at had moved on
+      // and the past tense had not.
+      //
+      // All four rather than the failures alone: a success left standing points at a record from
+      // the previous character while the rings underneath fill for this one, which is the same
+      // defect wearing a green tick. The set is asserted against the notifier's own, so a fifth
+      // eventful status cannot be added without a case here.
+      expect(
+        _recordersByStatus.keys.toSet(),
+        eventfulCaptureStatuses,
+        reason: 'a status the card records but this case never drives would be exempt from the rule',
+      );
+
+      for (final entry in _recordersByStatus.entries) {
+        final container = _container();
+        final notifier = container.read(charaDetailCaptureStateProvider.notifier)..started('rec-1');
+        entry.value(notifier);
+        expect(
+          (container.read(captureEventProvider) as CharaCaptureEvent).status,
+          entry.key,
+          reason: '${entry.key} was never recorded, so this case would be about nothing',
+        );
+
+        // The next character's detail screen.
+        notifier.started('rec-2');
+
+        expect(
+          container.read(charaDetailCaptureStateProvider).status,
+          CharaDetailCaptureStatus.waitingForReady,
+          reason: 'the live state was expected to have moved on -- otherwise this proves nothing',
+        );
+        expect(
+          container.read(captureEventProvider),
+          isNull,
+          reason: '${entry.key} outlived the character it was about',
+        );
+      }
+    });
+
+    test('closing the detail screen does NOT clear it', () {
+      // The per-character half of "on the start, not on the stop", and the reason
+      // `CharaDetailCaptureState.reset` carries the attempt id instead of dropping it. A close is how
+      // an ordinary capture ENDS: the user hears the chime, closes the screen, and reads the line
+      // that says which record they now have. Clearing here would take it away at that moment --
+      // and would take the failure line away on the one path that produces it, since
+      // `closed_before_completed` arrives immediately AFTER the close it reports.
+      //
+      // The outcome is one the state reaches through `clone()` (`alreadyCaptured`) rather than
+      // `success`, which rebuilds the state through `reset()` and would leave this case unable to
+      // tell a carried id from a dropped one.
+      final container = _container();
+      final notifier = container.read(charaDetailCaptureStateProvider.notifier)
+        ..started('rec-1')
+        ..fail('duplicated_character', duplicateRecordId: 'rec-old');
+
+      notifier.reset(); // `onCharaDetailClosed`
+
+      expect(container.read(captureEventProvider), isA<CharaCaptureEvent>());
     });
 
     test('positions inside a character are not events', () {
-      // `waitingForDetail`, `detailReady` and `capturing` say where the recognizer is in the
-      // character it is on, which is what the three rings show frame by frame. Recording them
-      // would replace the last outcome with a restatement of the rings.
+      // `waitingForDetail`, `waitingForReady`, `detailReady` and `capturing` say where the
+      // recognizer is in the character it is on, which is what the three rings show frame by frame.
+      // Recording them would replace the last outcome with a restatement of the rings.
       final container = _container();
-      container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+      final notifier = container.read(charaDetailCaptureStateProvider.notifier)..started('rec-1');
+      // The settle wait, on its own, before anything else happens.
+      expect(container.read(charaDetailCaptureStateProvider).status, CharaDetailCaptureStatus.waitingForReady);
+      expect(container.read(captureEventProvider), isNull);
+
+      notifier
+        ..tabAwaitingHead(0, false)
         ..scrollPosition(0, TopOfContent.scrolled)
         ..progress(0, 0.5);
 
@@ -276,7 +424,7 @@ void main() {
       final container = _container(imports: imports);
 
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..success('rec-1');
 
       imports.value = const VideoImportState(
@@ -299,7 +447,7 @@ void main() {
       final container = _container(imports: imports);
 
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..success('rec-1');
 
       imports.value = const VideoImportState(
@@ -381,7 +529,7 @@ void main() {
         final container = _container(imports: imports);
 
         container.read(charaDetailCaptureStateProvider.notifier)
-          ..started()
+          ..started('rec-1')
           ..success('rec-1');
 
         imports.value = VideoImportState(
@@ -405,7 +553,7 @@ void main() {
       final container = _container(imports: imports);
 
       container.read(charaDetailCaptureStateProvider.notifier)
-        ..started()
+        ..started('rec-1')
         ..success('rec-1');
 
       imports.value = const VideoImportState(
@@ -447,6 +595,177 @@ void main() {
       imports.value = const VideoImportState(phase: VideoImportPhase.importing, fileName: 'clip.mkv');
 
       expect(container.read(captureEventProvider), isNull);
+    });
+  });
+
+  group('the two wires that open a character', () {
+    // WHICH NATIVE MESSAGES ARE "the next character", asserted from the wire rather than from
+    // `started()`, because that is the half the group above cannot see: it calls `started()` itself,
+    // so it would stay green if only one of native's two openings still reached it.
+    //
+    // The recording is still driven through the state notifier here. What is under test is the
+    // clearing, and building an outcome out of native messages would put the record store, the
+    // retention and the capture chime in the way of it.
+    useHiveForTest(['settings']);
+
+    setUp(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        (call) async => null,
+      );
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        null,
+      );
+    });
+
+    (ProviderContainer, PlatformController) build() {
+      final container = ProviderContainer.test();
+      final controller = PlatformController(container.read(_refProvider), const {});
+      addTearDown(controller.dispose);
+      addTearDown(container.dispose);
+      // Instantiated exactly as `listenCapturePreview` does in production.
+      container.read(captureEventProvider);
+      return (container, controller);
+    }
+
+    test('onCharaDetailStarted -- the screen was opened again -- clears the last outcome', () {
+      // THE REPORTED SEQUENCE, in the order the core produces it: the detail screen was lost
+      // mid-capture, `onCharaDetailClosed` arrives, the error naming the loss arrives right after
+      // it and takes the card's slot, and the user opens the character again. 「キャプチャ完了前に
+      // 詳細画面を見失いました」 has to be gone by then; it was not.
+      final (container, controller) = build();
+      final notifier = container.read(charaDetailCaptureStateProvider.notifier)..started('rec-1');
+      // The close FIRST, then the error -- which is the order the core guarantees, not an
+      // incidental one. `native/src/core/native_api.cpp` registers the `chara_detail_closed`
+      // listener that emits `onCharaDetailClosed` "before the scraper's own on_closed listener, so
+      // for an incomplete close this fires ahead of the closed_before_completed error, letting that
+      // error win the final UI state". Writing it the other way round makes the close reset a state
+      // that already carries the outcome, which is a different sequence from the reported one and
+      // silently turns this case into a second test of "`reset()` carries the attempt id".
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailClosed'}));
+      notifier.fail('closed_before_completed');
+      expect(container.read(captureEventProvider), isA<CharaCaptureEvent>(), reason: 'nothing left to clear');
+
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': 'rec-2'}));
+
+      expect(container.read(captureEventProvider), isNull);
+    });
+
+    test('onCharaDetailRestarted -- the switch nobody closed a screen for -- clears it too', () {
+      // CONTINUOUS CAPTURE, which is how the app is meant to be used: the player moves to the next
+      // character with the detail screen still up, and the core infers the switch and rebuilds the
+      // session rather than seeing a close and an open.
+      //
+      // The outcome here is `alreadyCaptured` on purpose. It is what this route actually produces --
+      // the player is walking a list and the app keeps saying "this one is already in the table" --
+      // and it is the shape that discriminates: `success` clears the state's `detailOpened` on its
+      // way through `reset()`, so a rule keyed off that level's rising edge would pass a
+      // success-then-restart case while still leaving THIS line on screen for the next character.
+      final (container, controller) = build();
+      container.read(charaDetailCaptureStateProvider.notifier)
+        ..started('rec-1')
+        ..fail('duplicated_character', duplicateRecordId: 'rec-old');
+      expect(container.read(captureEventProvider), isA<CharaCaptureEvent>(), reason: 'nothing left to clear');
+
+      controller.handleNativeMessage(
+        jsonEncode({'type': 'onCharaDetailRestarted', 'completed': false, 'record_id': 'rec-2'}),
+      );
+
+      expect(container.read(captureEventProvider), isNull);
+    });
+
+    test('onCharaDetailClosed does not, and that is what makes the two above a rule about starting', () {
+      // The negative control for the pair: a message that resets the same state and must NOT clear.
+      // Without it "the state changed" would pass for "the next character began". The outcome is
+      // one that survives `clone()` rather than `success`, for the reason the sibling case in the
+      // group above states.
+      final (container, controller) = build();
+      container.read(charaDetailCaptureStateProvider.notifier)
+        ..started('rec-1')
+        ..fail('duplicated_character', duplicateRecordId: 'rec-old');
+
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailClosed'}));
+
+      expect(container.read(charaDetailCaptureStateProvider).detailOpened, isFalse, reason: 'the reset did not run');
+      expect(container.read(captureEventProvider), isA<CharaCaptureEvent>());
+    });
+  });
+
+  group('the reported symptom, on screen', () {
+    // THE BUG AS THE USER SEES IT, which is a SENTENCE THAT WILL NOT GO AWAY -- not a provider
+    // value. Everything above stops at `container.read(captureEventProvider)`; every case below
+    // reaches the widget through `_pumpEvent`, which overrides the notifier with
+    // `_FixedCaptureEventNotifier` -- a holder that listens to nothing. So the recording rules and
+    // the rendering are pinned separately and the two halves meet only at the provider, never on
+    // screen. A change that keeps the notifier correct and breaks the view -- `CaptureEventView`
+    // gaining any caching, the tile hoisted into a parent that does not rebuild, `_failureText`
+    // swallowing the code -- reproduces the complaint exactly with this file green.
+    //
+    // This case therefore uses NO override: the real `CaptureEventNotifier` is mounted under the
+    // real view, the sentence is put on screen through the sequence the core emits, and the reopen
+    // arrives from the wire. What is asserted is the RENDERED text going away.
+    useHiveForTest(['settings']);
+
+    setUp(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        (call) async => null,
+      );
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        null,
+      );
+    });
+
+    testWidgets('the failure line leaves the screen when the character is opened again', (tester) async {
+      final container = ProviderContainer.test();
+      final controller = PlatformController(container.read(_refProvider), const {});
+      addTearDown(controller.dispose);
+      // Instantiated exactly as `listenCapturePreview` does in production, and before the view is
+      // mounted: the notifier's listeners are what carry the clearing, and a view that merely read
+      // a lazily-built provider would install them too late to see the close.
+      container.read(captureEventProvider);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            locale: appTestLocale,
+            theme: _theme(),
+            home: const Scaffold(body: SingleChildScrollView(child: CaptureEventView())),
+          ),
+        ),
+      );
+
+      // The detail screen is lost mid-capture: the close first, the error naming the loss right
+      // after it (the order `native_api.cpp` guarantees -- see the wire case above).
+      final notifier = container.read(charaDetailCaptureStateProvider.notifier)..started('rec-1');
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailClosed'}));
+      notifier.fail('closed_before_completed');
+      await tester.pump();
+
+      // The literal out of the shipped table, so this is the user's own sentence and not a key
+      // agreeing with itself.
+      final sentence = appSentenceAt("$_tr_event.failed.text.closed_before_completed");
+      expect(
+        find.text(sentence),
+        findsOneWidget,
+        reason: 'the reported sentence never reached the screen, so its leaving would prove nothing',
+      );
+
+      // The user opens the character again.
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': 'rec-2'}));
+      await tester.pump();
+
+      expect(find.text(sentence), findsNothing, reason: 'THE REPORTED BUG: the line survived the reopen');
+      expect(find.byType(CaptureMessageTile), findsNothing, reason: 'the card kept a row with something else in it');
     });
   });
 

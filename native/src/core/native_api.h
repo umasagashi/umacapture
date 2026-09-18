@@ -932,6 +932,10 @@ public:
     }
 
     void notifyError(const std::string &message) const { notify(messages::error(message)); }
+    // An error that ends ONE attempt's record, named by that attempt's id (see messages::error's overload).
+    void notifyError(const std::string &message, const std::string &record_id) const {
+        notify(messages::error(message, record_id));
+    }
 
     void notifyCaptureStarted() { notify(messages::captureStarted()); }
     void notifyCaptureStopped() { notify(messages::captureStopped()); }
@@ -977,27 +981,43 @@ public:
         notify(messages::tabRefused(index, refused, reason));
     }
 
+    void notifyTabAwaitingHead(int index, bool awaiting, const std::optional<bool> &scroll_bar) {
+        notify(messages::tabAwaitingHead(index, awaiting, scroll_bar));
+    }
+
     void notifyFactorSwitchArmed(bool armed) { notify(messages::factorSwitchArmed(armed)); }
 
     void notifyPageReady(int index) { notify(messages::pageReady(index)); }
 
-    void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {
-        notify(messages::factorProbe(factors, record_type));
+    // `info` is the session the probe frame was latched in, carried through the recognizer with the frame, so the
+    // result names that session even when it arrives after the next one was announced.
+    void notifyFactorProbe(
+        const std::vector<chara_detail::record::Factor> &factors,
+        std::size_t factor_limit,
+        bool cue_owed,
+        const chara_detail::RecordInfo &info) {
+        notify(messages::factorProbe(factors, factor_limit, cue_owed, info.record_id));
     }
 
-    void notifyCharaDetailStarted() { notify(messages::charaDetailStarted()); }
+    // A session was built for a freshly opened detail screen. `info` is that session's own identity, so the id on
+    // the wire is the one its record will finish under (messages::charaDetailStarted).
+    void notifyCharaDetailStarted(const chara_detail::RecordInfo &info) {
+        notify(messages::charaDetailStarted(info.record_id));
+    }
     // Mid-scene reset: the scraper discarded the current session (a character switch was inferred from
     // on-screen content) and rebuilt it, without the detail screen closing. The UI must reset its capture
     // progress just as it does for a fresh open.
     // The message carries WHETHER THE RESET DISCARDED ANYTHING (chara_detail::DiscardedSession::completed),
     // because "a session was thrown away" and "a session started" are otherwise indistinguishable on the wire
     // in any way a front end can act on -- which is what let an import that lost a character mid-clip still
-    // report success. One bit, and only one: see messages::charaDetailRestarted for what the struct carries
-    // that the wire deliberately does not. This is reported for every reset, live or import, and stays off the
+    // report success. It also carries the id of the session the reset BEGAN (`begun`), because a reset begins
+    // an attempt exactly as an open does; the discarded session's id stays off the wire (see
+    // messages::charaDetailRestarted). This is reported for every reset, live or import, and stays off the
     // error channel: a reset is the character-switch feature working, and only the receiving front end knows
     // whether a switch was something the user wanted.
-    void notifyCharaDetailRestarted(const chara_detail::DiscardedSession &discarded) {
-        notify(messages::charaDetailRestarted(discarded.completed));
+    void notifyCharaDetailRestarted(
+        const chara_detail::DiscardedSession &discarded, const chara_detail::RecordInfo &begun) {
+        notify(messages::charaDetailRestarted(discarded.completed, begun.record_id));
     }
     // A record reached a terminal state. The message carries WHO produced it: an `origin` marker when a video
     // import session is open, and nothing at all for a live capture (messages::charaDetailFinished says why
@@ -1023,6 +1043,17 @@ public:
         }
         notify(messages::charaDetailFinished(info.record_id, success, isVideoImportSessionActive()));
     }
+    // A TERMINAL FAILURE OF ONE ATTEMPT: the attempt is finished unsuccessfully and the reason is reported
+    // against that attempt's own id. The two notifications are one operation -- a front end told that an attempt
+    // failed but not which one cannot apply the failure, and one told only the id is left waiting for a capture
+    // that can never progress -- so every connection that ends an attempt routes through here instead of
+    // repeating the pair. The id comes from the payload, never from the most recently announced attempt: a
+    // failure can arrive after the next attempt was announced (see messages::error's overload).
+    void notifyAttemptFailed(const chara_detail::RecordInfo &info, const std::string &tag) {
+        notifyCharaDetailFinished(info, false);
+        notifyError(tag, info.record_id);
+    }
+
     // The detail screen was closed. The UI returns to waiting for the next detail screen (a completed
     // capture leaves its progress on screen until this fires; an incomplete one also emits an error).
     void notifyCharaDetailClosed() { notify(messages::charaDetailClosed()); }

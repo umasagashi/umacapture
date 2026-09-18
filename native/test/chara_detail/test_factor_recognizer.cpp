@@ -1,5 +1,6 @@
 // Behavioral tests for the factor tab's row scan (FactorRowReader, which FactorTabRecognizer, the early duplicate
-// probe and the scene scraper's character-switch rule all read through).
+// probe and the scene scraper's character-switch rule all read through), and for how the single-frame read's
+// limit reaches the probe message's below_threshold.
 //
 // Exercised through the injection ctor with fake Predictors (see test/util/fake_predictor.h); this TU links
 // into the onnxruntime-less umacapture_tests target.
@@ -19,7 +20,9 @@
 #pragma clang diagnostic pop
 
 #include "chara_detail/chara_detail_recognizer.h"
+#include "core/native_api_messages.h"
 #include "cv/frame.h"
+#include "util/json_util.h"
 #include "util/cv_test_helpers.h"
 #include "util/fake_predictor.h"
 
@@ -38,7 +41,7 @@ Rect<double> rect(double left, double top, double right, double bottom) {
 }
 
 // A limit no fixture in this file reaches, so the cases whose subject is the scroll-area bound are decided by the
-// bound alone.
+// bound alone. The limit's own cases below name their limits explicitly.
 constexpr std::size_t kNoFixtureReaches = 100;
 
 SelfFactorWindow boundOnly(const Rect<double> &scroll_area) {
@@ -359,16 +362,97 @@ TEST_CASE("a row whose star cell ends exactly on the scroll area's bottom edge i
     CHECK(idsOf(factors) == std::vector<int>{11, 12, 21, 22});
 }
 
-TEST_CASE("every row inside the scroll area is returned, the last one included") {
-    // THE READ IS NOT TRIMMED. Nothing is dropped from the end of the list: the bound already keeps out every
-    // cell that is cut off, so the last factor read is as fully visible as the first.
+// ---------------------------------------------------------------------------------------------------
+// The factor limit.
+//
+// A single-frame read never holds more than its window's factor_limit (the layout's
+// self_factor_prefix_length): the rows past it are not promised to be readable, so they are not read. The
+// probe and the character-switch rule both take this read, so the limit applies to both of them; the stitched
+// record's read takes no window and reads everything (recognizeOne with no limit, in
+// FactorTabRecognizer::recognize).
+// ---------------------------------------------------------------------------------------------------
+
+TEST_CASE("a read stops at the window's limit even when more rows lie inside the scroll area") {
+    // Four cells inside config.area, a limit of three: the read ends after row 2's left cell, which is also what a
+    // limit that falls between a row's two cells looks like. A limit of two ends on a row boundary.
+    const auto config = factorConfig();
+    const auto recognizer = makeMarkerRecognizer(config);
+    const Frame frame = Frame::fixed(boundTestFrame({{20, 20}, {40, 40}}));
+    // The control: the bound alone lets all four through, so a shorter list below is the limit's doing.
+    REQUIRE(idsOf(recognizer.visibleSelfPrefix(frame, boundOnly(config.area))) == std::vector<int>{11, 12, 21, 22});
+
+    CHECK(idsOf(recognizer.visibleSelfPrefix(frame, SelfFactorWindow{config.area, 3})) == std::vector<int>{11, 12, 21});
+    CHECK(idsOf(recognizer.visibleSelfPrefix(frame, SelfFactorWindow{config.area, 2})) == std::vector<int>{11, 12});
+}
+
+TEST_CASE("a read shorter than the window's limit returns every row inside the scroll area, the last one included") {
+    // Nothing is dropped from the end of a list the limit did not stop: the bound already keeps out every cell that
+    // is cut off, so the last factor read is as fully visible as the first. A limit equal to the factor count is
+    // the boundary: all four are read, and the list is not below the limit.
     const auto config = factorConfig();
     const auto recognizer = makeMarkerRecognizer(config);
     const Frame frame = Frame::fixed(boundTestFrame({{20, 20}, {40, 40}}));
 
-    const auto factors = recognizer.visibleSelfPrefix(frame, boundOnly(config.area));
+    CHECK(idsOf(recognizer.visibleSelfPrefix(frame, SelfFactorWindow{config.area, 5})) == std::vector<int>{11, 12, 21, 22});
+    CHECK(idsOf(recognizer.visibleSelfPrefix(frame, SelfFactorWindow{config.area, 4})) == std::vector<int>{11, 12, 21, 22});
+}
 
-    CHECK(idsOf(factors) == std::vector<int>{11, 12, 21, 22});
+TEST_CASE("a limited read hands the models no cell past the limit") {
+    // "Not read" and not "read, then dropped": both models are asked exactly `limit` times. A reader that read the
+    // whole area and truncated afterwards would ask four times and return the same list, so the list alone could
+    // not tell the two apart.
+    const auto config = factorConfig();
+    std::atomic<int> factor_calls{0};
+    std::atomic<int> rank_calls{0};
+    const FactorRowReader reader{
+        config,
+        testutil::functionPredictor<int>(
+            "factor",
+            [&factor_calls](const Frame &) {
+                ++factor_calls;
+                return recognizer::Predicted<int>{7, 1.0f, {}};
+            }),
+        testutil::functionPredictor<int>(
+            "factor_rank",
+            [&rank_calls](const Frame &) {
+                ++rank_calls;
+                return recognizer::Predicted<int>{0, 1.0f, {}};
+            }),
+    };
+    const Frame frame = Frame::fixed(boundTestFrame({{20, 20}, {40, 40}}));
+
+    const auto factors = reader.visibleSelfPrefix(frame, SelfFactorWindow{config.area, 3});
+
+    CHECK(factors.size() == 3);
+    CHECK(factor_calls.load() == 3);
+    CHECK(rank_calls.load() == 3);
+}
+
+// THE FLAG THE FRONT END RECEIVES IS THE READ'S, END TO END. The reader's list goes into messages::factorProbe with
+// the limit it was read under, which is what CharaDetailRecognizer::probe does (that class has no injection ctor,
+// so this composes the two halves it joins). below_threshold is asserted in the message text, on both sides of the
+// boundary.
+TEST_CASE("the probe message states below_threshold for exactly the reads that are shorter than their limit") {
+    const auto config = factorConfig();
+    const auto recognizer = makeMarkerRecognizer(config);
+    const Frame frame = Frame::fixed(boundTestFrame({{20, 20}, {40, 40}}));
+    const auto message = [&](std::size_t limit) {
+        const auto factors = recognizer.visibleSelfPrefix(frame, SelfFactorWindow{config.area, limit});
+        return json_util::Json::parse(app::messages::factorProbe(factors, limit, false, "probe_record"));
+    };
+
+    // Stopped by the limit: as many factors as the limit, not below it.
+    const auto stopped = message(3);
+    CHECK(stopped.at("factors").size() == 3);
+    CHECK(stopped.at("below_threshold") == false);
+    // The list ends exactly at the limit: still not below it.
+    const auto exact = message(4);
+    CHECK(exact.at("factors").size() == 4);
+    CHECK(exact.at("below_threshold") == false);
+    // The list ended first: below.
+    const auto ended = message(5);
+    CHECK(ended.at("factors").size() == 4);
+    CHECK(ended.at("below_threshold") == true);
 }
 
 TEST_CASE("a row whose left cell fits and whose right cell does not keeps the left factor and ends the list") {

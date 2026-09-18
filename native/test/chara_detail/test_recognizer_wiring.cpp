@@ -71,9 +71,10 @@ struct Wiring {
     event_util::Connection<RecordInfo> recognize_completed = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<RecordInfo> update_ready = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<RecordInfo> update_completed = event_util::makeDirectConnection<RecordInfo>();
-    event_util::Connection<Frame, RecordInfo> factor_probe_ready = event_util::makeDirectConnection<Frame, RecordInfo>();
-    event_util::Connection<std::vector<record::Factor>, int> factor_probe_completed =
-        event_util::makeDirectConnection<std::vector<record::Factor>, int>();
+    event_util::Connection<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> factor_probe_ready =
+        event_util::makeDirectConnection<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool>();
+    event_util::Connection<std::vector<record::Factor>, std::size_t, bool, RecordInfo> factor_probe_completed =
+        event_util::makeDirectConnection<std::vector<record::Factor>, std::size_t, bool, RecordInfo>();
     event_util::Connection<std::string> error = event_util::makeDirectConnection<std::string>();
 
     std::shared_ptr<CountingListener<RecordInfo>> recognize_ready_spy =
@@ -81,8 +82,12 @@ struct Wiring {
 
     std::vector<RecordInfo> recognized;
     std::vector<RecordInfo> updated;
-    // The record type each completed probe carried.
-    std::vector<int> probes;
+    struct Probe {
+        std::size_t factor_limit;
+        bool cue_owed;
+        std::string record_id;
+    };
+    std::vector<Probe> probes;
     std::vector<std::string> errors;
 
     std::unique_ptr<CharaDetailRecognizer> recognizer;
@@ -91,7 +96,9 @@ struct Wiring {
         recognize_completed->listen([this](const RecordInfo &info) { recognized.push_back(info); });
         update_completed->listen([this](const RecordInfo &info) { updated.push_back(info); });
         factor_probe_completed->listen(
-            [this](const std::vector<record::Factor> &, int record_type) { probes.push_back(record_type); });
+            [this](const std::vector<record::Factor> &, std::size_t limit, bool cue, const RecordInfo &info) {
+                probes.push_back({limit, cue, info.record_id});
+            });
         error->listen([this](const std::string &message) { errors.push_back(message); });
 
         const auto config = shippedRecognizerConfig();
@@ -132,15 +139,31 @@ cv::Mat factorTabFrame() {
     return mat;
 }
 
-TEST_CASE("a factor probe sent to the recognizer comes back on the completion channel with its record type") {
+recognizer_impl::SelfFactorWindow probeWindow(const Frame &frame, std::size_t factor_limit) {
+    const auto anchor = frame.anchor();
+    const Rect<double> scroll_area{
+        Point<double>{0.0, anchor.mapFromFrame(Point<int>{0, kContentTop}).y()},
+        Point<double>{1.0, anchor.mapFromFrame(Point<int>{0, kFrameHeight}).y() - 0.2426},
+    };
+    return {scroll_area, factor_limit};
+}
+
+TEST_CASE("a factor probe sent to the recognizer comes back on the completion channel with the limit and cue it was sent") {
     REQUIRE_FALSE(std::filesystem::exists(missingRecordRoot()));
     Wiring wiring;
     const Frame frame = Frame::fixed(factorTabFrame());
 
-    wiring.factor_probe_ready->send(frame, RecordInfo{"probe_record", record::RecordType::FriendStandard});
+    // Neither value is one the recognizer could produce by itself: the limit is none of the shipped layouts'
+    // prefix lengths, and the cue is the non-default one.
+    wiring.factor_probe_ready->send(frame, RecordInfo{"probe_record", record::RecordType::Standard},
+                                    probeWindow(frame, 3), true);
 
     REQUIRE(wiring.probes.size() == 1);
-    CHECK(wiring.probes[0] == static_cast<int>(record::RecordType::FriendStandard));
+    CHECK(wiring.probes[0].factor_limit == 3);
+    CHECK(wiring.probes[0].cue_owed == true);
+    // The session the frame was latched in comes back with the result, so the front end can tell a late result of
+    // a discarded session from the current one's.
+    CHECK(wiring.probes[0].record_id == "probe_record");
     CHECK(wiring.errors.empty());
     CHECK(wiring.recognized.empty());
     CHECK(wiring.updated.empty());

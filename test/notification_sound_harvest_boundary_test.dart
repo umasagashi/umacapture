@@ -165,6 +165,9 @@ void main() {
   }) async {
     final merged = Directory((tempRootActiveDir(id)).path);
     await tester.runAsync(() async {
+      // The session is announced first, as the core does: a duplicate verdict sounds only for the
+      // attempt on screen.
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': id}));
       controller.handleNativeMessage(
         jsonEncode({
           'type': 'onLiveRecordsHarvested',

@@ -86,6 +86,10 @@ void main() {
   /// One `onCharaDetailFinished`, exactly as the core writes it.
   String finished(String id) => jsonEncode({'type': 'onCharaDetailFinished', 'success': true, 'id': id});
 
+  /// The `onCharaDetailStarted` that announced the session [id] finishes under. A duplicate verdict
+  /// sounds only for the attempt on screen, so the duplicate cases announce it first, as the core does.
+  String started(String id) => jsonEncode({'type': 'onCharaDetailStarted', 'record_id': id});
+
   /// Boots the real store and the real controller over a temp store holding one record (card 1).
   Future<({ProviderContainer container, PlatformController controller, DirectoryPath activeDir})> boot() async {
     final root = DirectoryPath(tempRoot.path);
@@ -145,6 +149,7 @@ void main() {
     writeRecord(env.activeDir, makeRecord(id: 'dup', card: 1));
     var cues = 0;
     env.container.listen(duplicatedCharaEventProvider, (_, next) => next.whenData((_) => cues++));
+    env.controller.handleNativeMessage(started('dup'));
 
     final seen = await atNextEventLoopTask(
       () => env.controller.handleNativeMessage(finished('dup')),
@@ -171,6 +176,7 @@ void main() {
     writeRecord(env.activeDir, makeRecord(id: 'dup', card: 1));
     final order = <String>[];
     env.container.listen(duplicatedCharaEventProvider, (_, next) => next.whenData((_) => order.add('duplicate-cue')));
+    env.controller.handleNativeMessage(started('dup'));
 
     env.controller.handleNativeMessage(finished('dup'));
     order.add('first-message-returned');

@@ -235,18 +235,70 @@ enum CharaDetailCaptureStatus {
   /// Capturing, but no detail screen has been detected yet.
   waitingForDetail,
 
-  /// Detail screen detected, nothing captured yet. Whether a character switch is safe is
-  /// [CharaDetailCaptureState.switchSafety]'s answer, not this status's.
+  /// The detail screen (or a freshly opened tab) is detected, but the core has not yet declared the
+  /// displayed tab ready to be scrolled.
+  ///
+  /// The recognizer needs a stationary picture before it can accept the head of the list, and the
+  /// screen keeps moving for a moment after the detail screen opens and after every tab switch.
+  /// Scrolling inside that window loses the rows above the first fragment: the core answers it with
+  /// [tabRefused], which is the report of a loss that already happened. This is the state that
+  /// exists to prevent it, so its instruction is "not yet" and its tone is a caution.
+  ///
+  /// **The end of the wait is a statement the core makes**, and it is the core's own `onTabAwaitingHead`
+  /// level — not the chime, and not anything inferred here from a chime that failed to arrive. The
+  /// chime (`onScrollReady`, and `onFactorProbe` on the factor tab) is an *announcement*, and the core
+  /// has exits from this wait that announce nothing: capture that begins from the offset comparison
+  /// instead of a stationary latch, and the end of the wait on a tab with no scroll bar, which is
+  /// handed no cue sender at all. Keying the wait off the chime's absence therefore left this
+  /// displayed, in a caution colour, for the whole of an ordinary capture. See
+  /// [CharaDetailCaptureState.tabsAwaitingHead].
+  ///
+  /// **What ends the wait depends on the page, and the core names it.** On a page that scrolls it is
+  /// the head latch: from then on scrolling *is* the capture. On a page with no scroll bar it is the
+  /// tab's completion: nothing on such a page is the user's to do, and every step still ahead of it
+  /// needs the same thing, a picture that holds still. So this status covers both, and only its text
+  /// differs ([CharaDetailCaptureState.currentTabScrollBar] selects it). A tab with no scroll bar is
+  /// therefore either waiting or [tabCompleted], and never [detailReady] or [capturing].
+  ///
+  /// On the factor tab both silent paths *do* send `onFactorProbe` — the offset exit, and the settled
+  /// frame of a page with no scroll bar — since that message also carries the early duplicate check,
+  /// but with `cue_owed: false`, and the handler sounds nothing for it. So "announces nothing" stays
+  /// true of the sound while the probe itself reaches this side from every latch; the two are separate
+  /// facts on one message. On a page with no scroll bar the probe can therefore arrive while this
+  /// status still stands (the latch comes before the completion).
+  ///
+  /// Ranked below [tabRefused] because a refusal is the report that the head is already lost, which
+  /// is more urgent than an instruction to preserve it. The core states `awaiting: false` on a
+  /// refused tab as well, so the two are not in fact simultaneous — the ranking decides nothing on
+  /// its own and is kept for the case where a refusal and a rebuild race within one frame.
+  waitingForReady,
+
+  /// Detail screen detected and the displayed tab declared ready (safe to start scrolling). Whether a
+  /// character switch is safe is [CharaDetailCaptureState.switchSafety]'s answer, not this status's.
   detailReady,
 
   /// The displayed tab is scrolled while its session is still incomplete. Whether a character switch is
   /// safe is [CharaDetailCaptureState.switchSafety]'s answer, not this status's.
   capturing,
 
+  /// The displayed tab is complete in the core, and the session is not. Every tab still needed is
+  /// somewhere else, so the instruction is to show one of them.
+  ///
+  /// Read from [CharaDetailCaptureState.tabsCompleted], the core's own per-tab completion statement
+  /// (`onPageReady`), at any scroll position and on any page kind. Not an event: it is a position
+  /// inside a character, like [capturing]. Whether a character switch is safe is
+  /// [CharaDetailCaptureState.switchSafety]'s answer, not this status's.
+  tabCompleted,
+
   /// Every tab captured; the record was saved.
   succeeded,
 
   /// The early duplicate probe suggests this character is likely already captured (a hint, not an error).
+  ///
+  /// It carries no banner lines of its own: the card shows the lines of the phase beneath it,
+  /// [CharaDetailCaptureState.phase] ([tabCompleted] or [detailReady]). Ranked above [tabCompleted]
+  /// because the hint is recorded as a [CaptureEvent] only on the transition into it; see
+  /// [CharaDetailCaptureState.status].
   duplicateHint,
 
   /// At least one tab refused its capture because it did not start at the head of its list.
@@ -257,8 +309,8 @@ enum CharaDetailCaptureStatus {
   /// sends the withdrawal on the same message). The retry succeeds only if the tab was scrolled back
   /// to its head before leaving, because the game keeps a tab's scroll position across a tab switch;
   /// closing and reopening the detail screen also works (see [CharaDetailCaptureState.tabRefusals]).
-  /// Ranked above [capturing], [detailReady] *and* [duplicateHint] because it needs an action the
-  /// ordinary phases do not and
+  /// Ranked above [capturing], [detailReady], [tabCompleted] *and* [duplicateHint] because it needs an
+  /// action the ordinary phases do not and
   /// contradicts the hint's instruction, and below every terminal status. Winning the tie against
   /// the hint has a cost — the hint's [CaptureEvent] is lost for that character — which
   /// [CharaDetailCaptureState.status] states in full.
@@ -328,6 +380,40 @@ class CharaDetailCaptureState {
   /// Whether a chara-detail screen is currently open (set from the native started/restarted events).
   bool detailOpened;
 
+  /// Which per-character attempt this state describes: the core's `record_id` for the session, set by
+  /// [started], carried unchanged by every other transition, [reset] included. Null until the first
+  /// session is announced.
+  ///
+  /// **It is the core's own identity for the session**, not a counter kept here: the same id names
+  /// the session's scraping directory and is the `id` its `onCharaDetailFinished` reports, and the
+  /// core also puts it on the outcomes that are produced off the scraper thread (`onFactorProbe`, and
+  /// the `onError` of a failed stitch). Those can arrive after the next session has been announced,
+  /// so an outcome is applied to this state only when its id is this one; see
+  /// [CharaDetailCaptureStateNotifier.success] and [CharaDetailCaptureStateNotifier.failForRecord].
+  ///
+  /// **The fact that makes "the next attempt" expressible at all.** Every other field here says
+  /// something about the character in front of the user; this one says WHICH opening of a detail
+  /// screen the rest of them belong to, so a listener can tell "a different character is now being
+  /// captured" from "more news about the one already being captured". Without it the only "next"
+  /// this app could name was the next SESSION ([capturingStateProvider], and the import's
+  /// `isRunning`), which is one boundary per capture run rather than one per character.
+  ///
+  /// [detailOpened] cannot stand in for it. That level falls only when the screen actually closes,
+  /// and `onCharaDetailRestarted` — the core inferring a character switch while the user never left
+  /// the detail screen — is a new attempt with no fall and therefore no rising edge. Keying
+  /// anything off that edge would silently exempt continuous capture, which is the way the app is
+  /// meant to be used.
+  ///
+  /// Carried by [reset] rather than dropped, because a close is the END of an attempt and not the
+  /// beginning of the next one: the past tense has to outlive the state that produced it (see
+  /// [CaptureEvent]), so an id that was dropped on a close would make "cleared on the start" behave
+  /// as "cleared on the stop". It is also what lets the last record's `onCharaDetailFinished`,
+  /// which the core sends after `onCharaDetailClosed`, still find its attempt.
+  ///
+  /// An identity, not a count. Nothing displays it, and every reader compares it for equality or
+  /// inequality only.
+  String? attemptId;
+
   CharaDetailLink? link;
   String? error;
 
@@ -353,6 +439,59 @@ class CharaDetailCaptureState {
   /// [factorAtTop] resolves it pessimistically, because a wrong "at top" costs those two different
   /// things. Each states its own direction below; nothing resolves it here.
   TopOfContent topOfContent;
+
+  /// Per native tab index, whether that tab is still waiting for the frame that becomes its first
+  /// captured fragment — i.e. whether scrolling it now would lose the rows above that fragment.
+  ///
+  /// **A level the core states, not an inference from the chime.** It arrives on `onTabAwaitingHead`
+  /// and is withdrawn on the same message with `awaiting: false`, exactly as [tabRefusals] is. The
+  /// chime the user listens for (`onScrollReady`, and `onFactorProbe` when it says `cue_owed`) is a
+  /// separate fact: it announces a stationary latch, and the core has two ways out of this wait that
+  /// sound nothing — capture begun from the offset comparison, and the end of the wait on a tab with
+  /// no scroll bar. Reading "no chime yet" as "still waiting" is what made the caution message stick
+  /// for whole captures.
+  ///
+  /// **What the level waits for is the core's to say, per page kind**: the head latch on a page that
+  /// scrolls, the tab's completion on a page with no scroll bar (see
+  /// [CharaDetailCaptureStatus.waitingForReady]). This side reads the level and nothing else.
+  ///
+  /// **Every tab, not one, because the level is per tab and the core restates all three.** Leaving a
+  /// tab whose capture is in progress — or refused — rebuilds it
+  /// (`CharaDetailSceneScraper::handleTabSwitchInProgress`), and the fresh interpreter's `awaiting:
+  /// true` arrives here for that index while the user is already elsewhere. A *completed* tab keeps
+  /// `false`, which is why no progress-based escape hatch is needed on this side any more.
+  ///
+  /// Session-scoped: [reset] drops it, and the core clears its own emitted levels at the same
+  /// boundaries and restates all three on the session's first frame.
+  Map<int, bool> tabsAwaitingHead;
+
+  /// Per native tab index, whether that tab's page has a scroll bar, as the core states it on
+  /// `onTabAwaitingHead` (`scroll_bar`).
+  ///
+  /// A map of its own rather than a field folded into [tabsAwaitingHead], because the two have
+  /// different absent-defaults: a missing `awaiting` means waiting, while a missing `scroll_bar` means
+  /// "the core has not built this tab yet" and is resolved by its one reader
+  /// ([currentTabScrollBar]). Written only by [tabAwaitingHead], so the two cannot drift apart; a
+  /// message without the field removes the entry.
+  ///
+  /// Session-scoped like [tabsAwaitingHead]: [reset] and [success] drop it.
+  Map<int, bool> tabsScrollBar;
+
+  /// The tabs the core has declared complete in this session, by native tab index.
+  ///
+  /// **The core's own completion statement, `onPageReady`**, which it sends once per tab per session.
+  /// Not inferred from the ring: a ring can read 1 from a thumb position before the tab completes, and
+  /// the ring is also written back to 0 when the core resets it, which is not a statement about
+  /// completion. Written only by [pageReady], which sets the ring in the same call.
+  ///
+  /// **Monotonic within a session**, because the core never un-completes a tab: a completed tab is not
+  /// rebuilt when the user leaves it, and its completion is cleared only when the session itself is
+  /// reset, closed or rebuilt. Those boundaries arrive here as [started] or [reset], which drop the
+  /// set, in the same queue as `onPageReady`. So nothing withdraws an entry, and no message exists
+  /// that could.
+  ///
+  /// [success] drops it as well: its status is terminal, and nothing reads the set there.
+  Set<int> tabsCompleted;
 
   /// Whether the core's character-switch detector on the factor tab (Rule 3) holds the reference it
   /// diffs against, as the core states it on `onFactorSwitchArmed`.
@@ -396,6 +535,7 @@ class CharaDetailCaptureState {
     this.factorTabProgress = 0,
     this.campaignTabProgress = 0,
     this.detailOpened = false,
+    this.attemptId,
     this.link,
     this.error,
     this.duplicateRecordId,
@@ -404,9 +544,15 @@ class CharaDetailCaptureState {
     // tab is at its top. Both consumers then apply their own direction to it, so the pre-first-frame
     // state costs the same as any other unreadable frame instead of being optimistic for everyone.
     this.topOfContent = TopOfContent.unknown,
+    Map<int, bool>? tabsAwaitingHead,
     Map<int, String>? tabRefusals,
+    Map<int, bool>? tabsScrollBar,
+    Set<int>? tabsCompleted,
     this.factorSwitchArmed = false,
-  }) : tabRefusals = Map<int, String>.from(tabRefusals ?? const <int, String>{});
+  }) : tabsAwaitingHead = Map<int, bool>.from(tabsAwaitingHead ?? const <int, bool>{}),
+       tabRefusals = Map<int, String>.from(tabRefusals ?? const <int, String>{}),
+       tabsScrollBar = Map<int, bool>.from(tabsScrollBar ?? const <int, bool>{}),
+       tabsCompleted = Set<int>.from(tabsCompleted ?? const <int>{});
 
   CharaDetailCaptureState clone() {
     return CharaDetailCaptureState(
@@ -414,6 +560,7 @@ class CharaDetailCaptureState {
       factorTabProgress: factorTabProgress,
       campaignTabProgress: campaignTabProgress,
       detailOpened: detailOpened,
+      attemptId: attemptId,
       link: link,
       error: error,
       duplicateRecordId: duplicateRecordId,
@@ -421,18 +568,30 @@ class CharaDetailCaptureState {
       topOfContent: topOfContent,
       // Copied, not shared: every mutator here returns a new state built from a clone, and a shared
       // map would let a later refusal edit the state a listener already captured.
+      tabsAwaitingHead: tabsAwaitingHead,
       tabRefusals: tabRefusals,
+      tabsScrollBar: tabsScrollBar,
+      tabsCompleted: tabsCompleted,
       factorSwitchArmed: factorSwitchArmed,
     );
   }
 
   CharaDetailCaptureState reset() {
-    return CharaDetailCaptureState();
+    // Everything about the character is dropped; the attempt's IDENTITY is not. A reset is an
+    // attempt ending (the screen closed) or a terminal outcome being built on top of one -- neither
+    // is the next attempt beginning, and only [started] is. See [attemptId].
+    return CharaDetailCaptureState(attemptId: attemptId);
   }
 
-  CharaDetailCaptureState started() {
+  /// Begins the attempt the core announced under [recordId].
+  CharaDetailCaptureState started(String recordId) {
     final state = reset();
     state.detailOpened = true;
+    // THE NEXT ATTEMPT BEGINS HERE, and this is the only place it does. Both of native's openings
+    // arrive through this one call -- `onCharaDetailStarted` (a detail screen was opened) and
+    // `onCharaDetailRestarted` (the core inferred a character switch without the screen closing) --
+    // so a rule keyed off this id covers continuous capture without naming it separately.
+    state.attemptId = recordId;
     return state;
   }
 
@@ -459,8 +618,42 @@ class CharaDetailCaptureState {
   /// scroll-position event. The verdict is stored as stated; the consumers resolve it.
   CharaDetailCaptureState scrollPosition(int index, TopOfContent topOfContent) {
     final state = clone();
+    // Nothing about the wait is decided here any more. The rebuild that a tab switch performs is the
+    // core's own, and it restates that tab's `awaiting` level on the wire; this side inferring it
+    // from a change of index would be a second, independently-derived copy of the same fact, and the
+    // two orderings (position first, or level first) would then disagree for one frame.
     state.currentTab = index;
     state.topOfContent = topOfContent;
+    return state;
+  }
+
+  /// Records the core's statement of whether [index]'s tab still awaits its first fragment, and
+  /// whether its page has a scroll bar ([scrollBar], null while the core has not built the tab).
+  ///
+  /// Idempotent by construction, like [tabRefused]: [awaiting] is the level the core is stating, so
+  /// restating it leaves the same map. Unlike [tabRefused] the `false` case is STORED rather than
+  /// removed — absence here means "the core has not spoken about this tab yet", which
+  /// [currentTabAwaitingHead] answers conservatively, and collapsing `false` into absence would make
+  /// a withdrawal indistinguishable from silence. [scrollBar] is the other way round: null removes
+  /// the entry, because "not built" is exactly what absence means in [tabsScrollBar].
+  CharaDetailCaptureState tabAwaitingHead(int index, bool awaiting, {bool? scrollBar}) {
+    final state = clone();
+    state.tabsAwaitingHead[index] = awaiting;
+    if (scrollBar == null) {
+      state.tabsScrollBar.remove(index);
+    } else {
+      state.tabsScrollBar[index] = scrollBar;
+    }
+    return state;
+  }
+
+  /// Records the core's statement that [index]'s tab is complete (`onPageReady`), and fills its ring.
+  ///
+  /// The one writer of [tabsCompleted]. The ring and the set are written by this one call, so the
+  /// ring cannot report a completion the set does not hold.
+  CharaDetailCaptureState pageReady(int index) {
+    final state = progress(index, 1);
+    state.tabsCompleted.add(index);
     return state;
   }
 
@@ -489,7 +682,10 @@ class CharaDetailCaptureState {
   CharaDetailCaptureState success({required String id}) {
     final state = reset();
     // Keep every tab pinned at 100% instead of clearing it, so the completed progress rings (and the
-    // switch indicator alongside them) stay visible until the next character is opened.
+    // switch indicator alongside them) stay visible until the next attempt is announced -- which,
+    // because a late outcome is matched against [attemptId] before it gets here, is an attempt that
+    // began after this one, never before it. The per-tab levels ([tabsAwaitingHead], [tabsScrollBar],
+    // [tabsCompleted]) are dropped with the rest: the status is terminal and nothing reads them.
     state.skillTabProgress = 1;
     state.factorTabProgress = 1;
     state.campaignTabProgress = 1;
@@ -542,7 +738,7 @@ class CharaDetailCaptureState {
     // something or one tab's rows are lost.
     //
     // **Against the hint it is a ruling with a stated cost, not a free win.** `duplicateHint` is one
-    // of the `_eventfulCaptureStatuses`, so it is recorded as a `CaptureEvent` on the TRANSITION into
+    // of the `eventfulCaptureStatuses`, so it is recorded as a `CaptureEvent` on the TRANSITION into
     // it. A refusal that keeps the status off `duplicateHint` therefore records nothing when the
     // probe fires. The fact is not discarded — the probe error is held until the session resets, so
     // the hint is recorded late if the state reaches it again — but on the path the refusal's own
@@ -560,11 +756,52 @@ class CharaDetailCaptureState {
     if (tabRefusals.isNotEmpty) {
       return CharaDetailCaptureStatus.tabRefused;
     }
+    // THE SETTLE WAIT, above every remaining phase because every one of them either tells the user to
+    // scroll (or that scrolling is already under way), and doing it now is what loses the head of
+    // the list, or says the tab is done, which it is not yet. `duplicateHint` is included in that: it
+    // renders the lines of the phase beneath it -- see [phase] -- so it carries the same instruction,
+    // and the hint it adds is a convenience the user can still act on a second later.
+    //
+    // A completed tab never awaits, so this does not compete with [CharaDetailCaptureStatus.
+    // tabCompleted] on any settled state. Within one frame the core sends `onPageReady` before it
+    // withdraws the wait, and this rank shows the wait for those two adjacent messages instead of a
+    // "done" text next to a wait level that is about to fall.
+    if (currentTabAwaitingHead) {
+      return CharaDetailCaptureStatus.waitingForReady;
+    }
     // The probe hint only stands while the factor tab is still at its top (where the hint fired). Once the
     // user scrolls or navigates to another tab, factorAtTop is false and the stale hint degrades to the
     // ordinary phase below.
+    //
+    // **Above `tabCompleted`, and that order is load-bearing.** The hint is recorded as a [CaptureEvent]
+    // only on the transition into it. On a 継承タブ with no scroll bar the probe fires at the latch,
+    // which is inside the settle wait, and the tab completes in that frame or shortly after; ranked
+    // below `tabCompleted`, the status would go straight from the wait to `tabCompleted` and the hint
+    // would never be recorded for that character. Ranked here, it is recorded as soon as the wait ends.
     if (currentError == "duplicated_character_probe" && factorAtTop) {
       return CharaDetailCaptureStatus.duplicateHint;
+    }
+    return _positionPhase;
+  }
+
+  /// The status with the duplicate hint skipped: what the card says about the displayed tab beneath a
+  /// standing hint.
+  ///
+  /// Equal to [status] everywhere except where [status] is [CharaDetailCaptureStatus.duplicateHint],
+  /// which has no banner lines of its own; there it is the phase the hint stands over
+  /// ([CharaDetailCaptureStatus.tabCompleted] or [CharaDetailCaptureStatus.detailReady], since the hint
+  /// requires [factorAtTop]). Never [CharaDetailCaptureStatus.duplicateHint].
+  CharaDetailCaptureStatus get phase {
+    final current = status;
+    return current == CharaDetailCaptureStatus.duplicateHint ? _positionPhase : current;
+  }
+
+  /// Where the displayed tab is, once nothing above it in [status] applies.
+  CharaDetailCaptureStatus get _positionPhase {
+    // A tab the core declared complete says so, at any scroll position: the ring under it already
+    // reads 「完了」, and "scroll until 100%" would ask for something already done.
+    if (currentTabCompleted) {
+      return CharaDetailCaptureStatus.tabCompleted;
     }
     // Two states only: the current tab is either at its top (detailReady) or scrolled (capturing).
     // There is no intermediate, because both derive from the same top-of-content fact rather than
@@ -584,7 +821,31 @@ class CharaDetailCaptureState {
     return CharaDetailCaptureStatus.detailReady;
   }
 
-  /// Whether the factor tab is currently displayed at the head of its list -- the condition Rule 3's
+  /// Whether the displayed tab is still waiting for the frame that becomes its first fragment.
+  ///
+  /// One reading of one level, from [tabsAwaitingHead] — no second derivation, and in particular no
+  /// progress-based escape hatch. The core keeps the level correct for a completed tab too
+  /// (`notifyTabAwaitingHeadIfChanged` reads it off the tab's own interpreter, which stays started),
+  /// so coming back to a captured tab needs nothing special here.
+  ///
+  /// **Absent means waiting**, and that default is deliberate in this one direction: it decides
+  /// whether the user is told to hold off, and holding off costs a moment while scrolling too early
+  /// costs the head of the list (the same direction the core's own unknown-verdict policy takes).
+  /// It is also bounded — the core states all three tabs on the first frame of a session — so it
+  /// covers the gap between the detail screen opening and that frame, not a signal that never comes.
+  bool get currentTabAwaitingHead => tabsAwaitingHead[currentTab] ?? true;
+
+  /// Whether the displayed tab's page has a scroll bar, or null while the core has not stated it.
+  ///
+  /// Read only to choose the settle wait's text. A null reading selects the text for a page that
+  /// scrolls, which is the loss-preventing direction: if the page does scroll, "do not scroll yet" is
+  /// what protects the head of its list.
+  bool? get currentTabScrollBar => tabsScrollBar[currentTab];
+
+  /// Whether the core has declared the displayed tab complete in this session ([tabsCompleted]).
+  bool get currentTabCompleted => tabsCompleted.contains(currentTab);
+
+  /// Whether the factor tab is currently displayed at the head of its list — the condition Rule 3's
   /// character-switch gate is made of. Derived from the single (currentTab, [topOfContent]) fact.
   ///
   /// [topOfContent] is the core's one composite answer to "is this tab flush with the head of its
@@ -607,9 +868,6 @@ class CharaDetailCaptureState {
   /// unreadable frame in (`kMissingReadingIsScrolled`), so this reads exactly the gate the rule reads,
   /// including on the frames no sensor could read. Nothing on this side writes the position but the
   /// core's `onScrollPosition`, so no local assertion stands between the two either.
-  ///
-  /// **Used by the duplicate-probe hint gate in [status] only.** The hint stands where the probe fired,
-  /// at the factor top, and degrades to the ordinary phase once the user scrolls or leaves the tab.
   ///
   /// **Used by the duplicate-probe hint gate in [status] only.** The hint stands where the probe fired,
   /// at the factor top, and degrades to the ordinary phase once the user scrolls or leaves the tab.
@@ -640,13 +898,14 @@ class CharaDetailCaptureState {
   /// (no detail session, or a hard error surfaced separately).
   ///
   /// **"Detectable" is not "every pair of records is told apart".** At the factor top Rule 3's pixel diff only
-  /// nominates a switch; the core then reads the self factors both frames show (the visible prefix: the rows whose
-  /// cells lie inside the scroll area) and KEEPS the session when the two readings are non-empty and equal in every
-  /// (id, star). So a switch to a record whose visible prefix is identical to the current one's is not reset:
-  /// the new character's tabs are captured into the current record, with nothing on screen to say so. A true
-  /// here promises that Rule 3 is armed, not that it separates such a pair, and nothing on this side can see
-  /// the difference. The prefix is only as long as the rows the frame shows (11 to 17 on the golden corpus's
-  /// layouts, shortest on FriendStandard); no clip of such a collision exists, so the harm is unmeasured.
+  /// nominates a switch; the core then reads the self factors both frames show (the visible prefix — every
+  /// row whose name and star cells lie inside the scroll area, with no trailing row discarded) and KEEPS the
+  /// session when the two readings are non-empty and equal in every (id, star). So a switch to a record whose
+  /// visible prefix is identical to the current one's is not reset: the new character's tabs are captured
+  /// into the current record, with nothing on screen to say so. A true here promises that Rule 3 is armed,
+  /// not that it separates such a pair, and nothing on this side can see the difference. The prefix is only as
+  /// long as however many rows the frame's scroll area holds (fewest on FriendStandard's shifted layout; see
+  /// the golden corpus for the actual counts); no clip of such a collision exists, so the harm is unmeasured.
   ///
   /// **The scroll position is deliberately not part of the answer, and that rests on a game fact, not on
   /// data.** Rule 3 judges only frames at the head of the factor list ([factorAtTop]'s gate). Switching
@@ -657,29 +916,41 @@ class CharaDetailCaptureState {
   /// record switch, a switch from there would go unseen with the arrows shown.
   ///
   /// **Whether Rule 3 is armed is data, stated by the core.** The diff it nominates a switch by is taken
-  /// against a reference the factor tab's head latch installs (on a page with no scroll bar, by its one
-  /// stationary frame), and until that latch there is no reference at all: at the factor top, before the
-  /// latch, the screen looks exactly like the safe moment and is not one. The core states the reference's
-  /// presence as its own level ([factorSwitchArmed]), and this reads that level.
+  /// against a reference the factor tab's head latch installs — the same frame the duplicate probe is
+  /// handed, until a divergence read as the same record replaces it — and until that latch there is no
+  /// reference at all: at the factor top, before the latch, the screen looks exactly like the safe moment
+  /// and is not one. The core states the reference's presence as its own level ([factorSwitchArmed]), and
+  /// this reads that level rather than inferring it from the settle wait. Such an inference would hold
+  /// only on a page that scrolls, where the latch is also what ends the wait; on a factor page with no
+  /// scroll bar the latch comes before the end of the wait, which lasts until the tab completes.
   ///
   /// **A refused tab is answered, not skipped, and the answer is false.**
   /// [CharaDetailCaptureStatus.tabRefused] is a live in-detail phase, so it is not routed to the
   /// terminal `null` branch below -- the user is being told to move around the tabs, and blanking the
-  /// indicator there would be wrong. But the answer is a policy, not the witness: whichever tab was
-  /// refused, letting the user switch abandons that tab's refusal without the path that withdraws it
-  /// (leaving the tab, after scrolling it back to its head -- see [tabRefusals]), so a refused session is a "finish this first" state.
+  /// indicator there would be as wrong as it is during the settle wait. But the answer is a policy, not
+  /// the witness: whichever tab was refused, letting the user switch abandons that tab's refusal
+  /// without the in-session path that withdraws it (leaving the tab, after scrolling it back to its
+  /// head -- see [tabRefusals]), so a refused session is a "finish this first" state independent of
+  /// whether Rule 3 happens to be armed at that moment. (When the refused tab IS the factor tab, the
+  /// refusal happened instead of the latch, so Rule 3 is not armed either.)
   ///
   /// The statuses are listed rather than defaulted so that a status added later has to state its
   /// own answer here: the wildcard means "no guidance", which is the wrong answer for every phase
   /// status and is silent about being wrong.
   bool? get switchSafety => switch (status) {
-    // One answer for the phases and the completed states alike: Rule 3 on the factor tab is the only switch
-    // detector, it watches that tab before and after the session completes, and it can nominate a switch only
-    // once it holds its reference. `duplicateHint` is gated on [factorAtTop], so it is always on the factor
-    // tab; it reads the same facts rather than a second `true` that would agree only by that gate.
+    // One answer for the wait, the phases and the completed states alike: Rule 3 on the factor tab is
+    // the only switch detector, it watches that tab before and after the session completes, and it can
+    // nominate a switch only once it holds its reference. `duplicateHint` is gated on [factorAtTop], so
+    // it is always on the factor tab; it reads the same facts rather than a second `true` that would
+    // agree only by that gate. The settle wait is no exception: on a page that scrolls the core holds no
+    // reference until the latch that ends the wait, so this answers false there from the data, and on a
+    // factor page with no scroll bar the reference exists from the latch on, while the wait lasts until
+    // the tab completes -- a switch made in that gap is detected, and the arrows say so.
+    CharaDetailCaptureStatus.waitingForReady ||
     CharaDetailCaptureStatus.detailReady ||
     CharaDetailCaptureStatus.capturing ||
     CharaDetailCaptureStatus.duplicateHint ||
+    CharaDetailCaptureStatus.tabCompleted ||
     CharaDetailCaptureStatus.succeeded ||
     CharaDetailCaptureStatus.alreadyCaptured => factorTabShown && factorSwitchArmed,
     // A policy, not the witness; see the doc comment above.
@@ -694,20 +965,61 @@ class CharaDetailCaptureStateNotifier extends Notifier<CharaDetailCaptureState> 
 
   void reset() => state = state.reset();
 
-  void started() => state = state.started();
+  void started(String recordId) => state = state.started(recordId);
 
   void progress(int index, double progress) => state = state.progress(index, progress);
 
   void scrollPosition(int index, TopOfContent topOfContent) => state = state.scrollPosition(index, topOfContent);
 
+  void tabAwaitingHead(int index, bool awaiting, {bool? scrollBar}) =>
+      state = state.tabAwaitingHead(index, awaiting, scrollBar: scrollBar);
+
+  void pageReady(int index) => state = state.pageReady(index);
+
   void factorSwitchArmedChanged(bool armed) => state = state.factorSwitchArmedChanged(armed);
 
   void tabRefused(int index, bool refused, String reason) => state = state.tabRefused(index, refused, reason);
 
-  void success(String id) => state = state.success(id: id);
+  /// Whether an outcome the core reported for [recordId] belongs to the attempt this state describes.
+  ///
+  /// The one place the attempt check is made. The core produces some outcomes off the thread that
+  /// announces sessions (the record's completion, the early duplicate check, a failed stitch, and the
+  /// store's own duplicate verdict on the finished record), so one of them can arrive after the next
+  /// attempt has been announced. Such an outcome is still true of its own record, and whatever it
+  /// does to the store still happens; it only says nothing about the character now on screen.
+  bool isCurrentAttempt(String recordId) => recordId == state.attemptId;
 
+  /// Completes the attempt [id], and only that one; returns whether it was applied.
+  ///
+  /// An id of another attempt leaves the state unchanged and is logged. The transition itself,
+  /// [CharaDetailCaptureState.success], does not check: the check belongs to the arrival of an
+  /// outcome, not to what completing an attempt means.
+  bool success(String id) {
+    if (!isCurrentAttempt(id)) {
+      logger.i("Capture state: ignored the completion of $id, which is not the current attempt");
+      return false;
+    }
+    state = state.success(id: id);
+    return true;
+  }
+
+  /// Fails the capture with an error that is not about any one attempt (a failed command, a lost
+  /// frame supply). For an outcome that names its record, use [failForRecord].
   void fail(String message, {String? duplicateRecordId}) =>
       state = state.fail(message: message, duplicateRecordId: duplicateRecordId);
+
+  /// Fails the attempt [recordId] with [message], and only that one; returns whether it was applied.
+  ///
+  /// An id of another attempt leaves the state unchanged and is logged, as in [success]. The caller
+  /// uses the answer to decide whether the outcome may sound: a late outcome is silent.
+  bool failForRecord(String recordId, String message, {String? duplicateRecordId}) {
+    if (!isCurrentAttempt(recordId)) {
+      logger.i("Capture state: ignored $message for $recordId, which is not the current attempt");
+      return false;
+    }
+    fail(message, duplicateRecordId: duplicateRecordId);
+    return true;
+  }
 }
 
 final charaDetailCaptureStateProvider = NotifierProvider<CharaDetailCaptureStateNotifier, CharaDetailCaptureState>(
@@ -725,8 +1037,8 @@ final charaDetailCaptureStateProvider = NotifierProvider<CharaDetailCaptureState
 /// **The past tense has to outlive the state that produced it, and the capture state does not
 /// outlive itself.** A duplicate hint stands only while the factor tab is at its top
 /// ([CharaDetailCaptureState.factorAtTop]), so scrolling one pixel erased the only notice a
-/// user ever got that this character may already be in the table; a success is cleared by the
-/// next `started()`. Deriving the line from the live state therefore cannot work — it has to
+/// user ever got that this character may already be in the table; a success is cleared when the
+/// next attempt begins (`started()`). Deriving the line from the live state therefore cannot work — it has to
 /// be recorded when it happens.
 sealed class CaptureEvent {
   const CaptureEvent();
@@ -761,13 +1073,14 @@ final class VideoImportCaptureEvent extends CaptureEvent {
 /// The statuses that are FACTS about a character the recognizer has finished with, rather than
 /// a position inside the one it is on.
 ///
-/// The other three — `waitingForDetail`, `detailReady`, `capturing` — say only where the
-/// recognizer is within the current character, which is what the three progress rings show
-/// frame by frame. Recording them would replace the last outcome with a restatement of the
-/// rings, which is the one thing an event must never do: it is the only surface that still
-/// remembers what happened.
+/// The other six — `waitingForDetail`, `waitingForReady`, `detailReady`, `capturing`,
+/// `tabCompleted`, `tabRefused` — say only where the recognizer is within the current character,
+/// which is what the three progress rings show frame by frame. Recording them would replace the last
+/// outcome with a restatement of the rings, which is the one thing an event must never do: it is the
+/// only surface that still remembers what happened. (`tabCompleted` is a tab's completion, not the
+/// character's: the ring under that tab already says it.)
 ///
-/// `tabRefused` is the one of those five that is arguably news, and it is still left out: it is a
+/// `tabRefused` is the one of those six that is arguably news, and it is still left out: it is a
 /// LEVEL the user is being asked to act on, withdrawn the moment they do, so as an event it would
 /// outlive the condition it names — and it would spend the card's single slot, displacing the last
 /// character's outcome and the record link that opens it. The banner carries it instead.
@@ -778,7 +1091,13 @@ final class VideoImportCaptureEvent extends CaptureEvent {
 /// firing while a tab stands refused records nothing at the time, and on the path the refusal's
 /// remedy puts the user on it is never recorded at all. Accepted deliberately — the reasoning, and
 /// exactly what is lost, is written out at the ranking itself.
-const _eventfulCaptureStatuses = {
+///
+/// Visible for testing because the suite has to be able to drive **every** member: the rule that an
+/// event goes stale when the next character is opened is stated per status, so a fifth eventful
+/// status added here without a case would otherwise be exempt from it silently. The test asserts
+/// the set it drives IS this set rather than listing four statuses of its own.
+@visibleForTesting
+const eventfulCaptureStatuses = {
   CharaDetailCaptureStatus.succeeded,
   CharaDetailCaptureStatus.duplicateHint,
   CharaDetailCaptureStatus.alreadyCaptured,
@@ -848,6 +1167,9 @@ class CaptureEventNotifier extends Notifier<CaptureEvent?> {
     // Deliberately on the START, not on the stop: an event has to survive the end of the session
     // that produced it (a clip's last character is read after its import finished), and it is only
     // when the next one begins that it becomes stale.
+    //
+    // A session is the COARSER of the two "next"s, not the only one. The same sentence, one level
+    // down, is what the attempt-id rule in the listener below states per character.
     ref.listen<bool>(capturingStateProvider, (previous, next) {
       if (next && previous != true) {
         state = null;
@@ -855,8 +1177,33 @@ class CaptureEventNotifier extends Notifier<CaptureEvent?> {
     });
 
     ref.listen<CharaDetailCaptureState>(charaDetailCaptureStateProvider, (previous, next) {
+      // THE PER-CHARACTER HALF OF THE SAME RULE, on the same principle: not on the stop, on the
+      // start. A session is not the only thing that has a next -- within one running session each
+      // character opened is its own attempt, and the moment the next detail screen is up the last
+      // one's outcome is no longer the last thing that happened. It is what the user is looking at
+      // that has moved on, which is why the boundary is the screen being opened rather than the
+      // scroll that eventually starts capturing it.
+      //
+      // Keyed off [CharaDetailCaptureState.attemptId] because that is where the fact lives.
+      // Deriving it from the status leaving a terminal value, or from `detailOpened`, would be
+      // reading the timing of a report instead of the thing reported -- and `detailOpened` in
+      // particular never falls when the core infers a character switch on a screen the user never
+      // closed, so continuous capture would have been exempt.
+      //
+      // Cleared BEFORE the recording below, so that a transition which both begins an attempt and
+      // carries an outcome would keep the outcome. No such transition exists (`started()` leaves no
+      // link and no error, so its status is a position inside a character rather than an event), and
+      // stating the order here is what keeps that from being load-bearing.
+      //
+      // The opposite race -- an outcome of the PREVIOUS attempt arriving after this one began -- never
+      // reaches this listener: the notifier applies an outcome only to the attempt it names
+      // ([CharaDetailCaptureStateNotifier.isCurrentAttempt]), so a late one leaves the state, and
+      // therefore this slot, untouched.
+      if (previous != null && previous.attemptId != next.attemptId) {
+        state = null;
+      }
       final status = next.status;
-      if (!_eventfulCaptureStatuses.contains(status)) {
+      if (!eventfulCaptureStatuses.contains(status)) {
         return;
       }
       // Scroll-position and progress reports keep arriving while a terminal status stands, each
@@ -1262,11 +1609,6 @@ class PlatformController {
 
   final Map<String, dynamic> nativeConfig;
 
-  // The self-factors from the most recent factor probe. Native re-probes whenever the factor-tab content
-  // changes (a character switch), but may emit the same probe more than once; comparing against this key
-  // suppresses a redundant duplicate check (and its error cue) for an unchanged character.
-  List<Factor>? _lastProbeKey;
-
   /// Serializes the web live session's incremental record merges (Stage 5). Each
   /// `onLiveRecordsHarvested` chains its [_addHarvestedLiveRecords] onto this future
   /// so the per-record merges (and the final stop harvest) run strictly one after
@@ -1356,7 +1698,6 @@ class PlatformController {
   /// ended by the button.
   void _resetSessionScopedState() {
     _ref.read(charaDetailCaptureStateProvider.notifier).reset();
-    _lastProbeKey = null;
     _ref.read(capturingFrameSizeProvider.notifier).set(null);
     _ref.read(capturingFrameRateProvider.notifier).set(null);
     // The session is over, so the last frame is stale: drop it (and its texture) and
@@ -1435,19 +1776,6 @@ class PlatformController {
     Toaster.show(ToastData.error(description: "toast.config_failure".tr()));
   }
 
-  // Order-sensitive equality of two probe keys (factors are compared by value; their order is stable).
-  bool _sameFactorKey(List<Factor> a, List<Factor>? b) {
-    if (b == null || a.length != b.length) {
-      return false;
-    }
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   /// Test-only: stands in for the import [videoImportState] reports.
   ///
   /// `video_import.dart` resolves to the desktop stub on the VM, whose notifier is a constant idle by
@@ -1494,8 +1822,19 @@ class PlatformController {
             if (failedRecordId != null) {
               _ref.read(charaDetailRecordRegenerationControllerProvider.notifier).fail(failedRecordId);
             }
+            // `record_id` names the attempt an error ended (a failed stitch, a detail screen lost
+            // mid-capture). A failed stitch is reported off the scraper thread and can arrive after
+            // the next attempt was announced; it is then true of its own record only, so it neither
+            // touches the card nor sounds. An error with no `record_id` is not about any one attempt
+            // and is applied as it always was.
+            final recordId = data['record_id'];
             if (_webToastedErrorCodes.contains(message)) {
               Toaster.show(ToastData.error(description: "$tr_capture.capture_control.web.error.$message".tr()));
+            } else if (recordId is String) {
+              if (!captureState.failForRecord(recordId, message)) {
+                logger.i("Native error $message belongs to an earlier attempt; no sound");
+                break;
+              }
             } else {
               captureState.fail(message);
             }
@@ -1556,7 +1895,38 @@ class PlatformController {
           _resetSessionScopedState();
           break;
         case 'onScrollReady':
+          // THE CHIME, and only the chime. Whether the card still says "not yet" is a separate,
+          // per-tab level the core states on `onTabAwaitingHead`; this message is the announcement
+          // the user listens for. Keeping the two apart is the point: the core reaches "scrolling
+          // may begin" by paths that have nothing to announce (see [CharaDetailCaptureStatus.
+          // waitingForReady]), so a card driven from here waits for a sound that never comes.
+          //
+          // Carries an `index` this side no longer reads. Left on the wire because the sound is
+          // per tab and a front end that wanted a per-tab chime would need it; nothing here has to
+          // parse it to sound the cue, which is why a message that lost the field still chimes.
           _scrollReadyEvent.add(_soundEventSequence++);
+          break;
+        case 'onTabAwaitingHead':
+          {
+            // WHETHER THIS TAB STILL AWAITS ITS FIRST FRAGMENT -- the level the "do not scroll yet"
+            // instruction is made of, stated by the core and withdrawn on this same type.
+            //
+            // Both fields are required, unlike the chime above: a level with no index names no tab
+            // and a level with no value states nothing, and guessing either would put a permanent
+            // instruction on screen with no way for the core to withdraw it. Dropping the message
+            // leaves the previous level standing, which the next frame restates.
+            final index = data['index'] as int?;
+            final awaiting = data['awaiting'] as bool?;
+            if (index == null || awaiting == null) {
+              break;
+            }
+            // Whether the tab's page has a scroll bar; absent while the core has not built the tab.
+            // Optional, unlike the two above: it only chooses the wait's text, and a value this side
+            // cannot read is the same "not stated" the core's own absence means, which selects the
+            // text for a page that scrolls (see [CharaDetailCaptureState.currentTabScrollBar]).
+            final scrollBar = data['scroll_bar'];
+            captureState.tabAwaitingHead(index, awaiting, scrollBar: scrollBar is bool ? scrollBar : null);
+          }
           break;
         case 'onFactorSwitchArmed':
           // WHETHER RULE 3 CAN SEE A CHARACTER SWITCH NOW: the core's statement that the factor tab's
@@ -1569,9 +1939,55 @@ class PlatformController {
           break;
         case 'onFactorProbe':
           {
+            // NOT the end of the factor tab's settle wait, any more. That is `onTabAwaitingHead`
+            // for this index, which the core states: from the same `startScrolling` the probe hangs off
+            // on a page that scrolls, from the tab's completion on a page with no scroll bar (after the
+            // latch that sends this probe), and on the paths that produce no probe at all. This message used to
+            // double as the factor tab's readiness statement because the tab emits no
+            // `onScrollReady` (`makeTabScraper` wires it to the internal `factor_scroll_ready`
+            // instead); with the level on the wire the special case is gone.
+            //
+            // NOR DOES IT STATE WHERE THE TAB IS. The displayed tab and whether it is flush with its head
+            // are `onScrollPosition`'s alone, stated by the core from the frame on screen. This handler
+            // used to assert the factor top on every probe, because the probe fires from the head latch.
+            // That describes the frame the latch took, not the frame displayed when this message lands:
+            // the exit that latches because the user was already scrolling is taken off a moving list,
+            // and the core states the position on edges only (a change of tab or of verdict), so an
+            // asserted top overwrote a newer `scrolled` and stood until the next edge, with the arrows
+            // and the duplicate-hint gate open on a list Rule 3 does not judge. It overwrote the core's
+            // `unknown` the same way. Nothing needs it: the core's edge memory is cleared on every
+            // session reset, so the position is restated on the next frame, and a return to the tab is
+            // itself an edge.
+            // WHETHER THE CHIME IS OWED AT ALL, stated by the core on this message and not inferred here.
+            // The core latches this tab's fragment #0 on three paths. A page that scrolls has two exits: one
+            // waits for the screen to settle and owes the user "you may scroll now", the other latches because
+            // the user was already scrolling and owes nothing -- an announcement then arrives after the thing
+            // it announces. A page with no scroll bar latches its one settled frame and owes nothing either:
+            // there is nothing to scroll. Every path arms the probe (the duplicate check and the reset rule are
+            // owed either way), so the probe's mere arrival cannot tell them apart, and for the two exits
+            // neither can anything else this side sees: the other signals of that moment differ only in timing.
+            //
+            // Absent -> true, i.e. chime. The two directions are not symmetric: a chime the user did not
+            // need is a noise they can ignore, while a chime withheld by mistake leaves them waiting for
+            // a sound that never comes and the capture never starts. `onScrollReady` above takes the same
+            // direction for the same reason.
+            //
+            // WHICH ATTEMPT IT IS ABOUT, first of all. The probe is read off the scraper thread, so it can
+            // arrive after the next attempt was announced; a probe of an earlier attempt says nothing
+            // about the character on screen, and its chime (either one) would be about a tab the user is
+            // no longer looking at. It is skipped whole. A probe that names no attempt is skipped too:
+            // the same fail-open direction a missing `below_threshold` takes below, since the check is a
+            // convenience and the authoritative duplicate check still runs on the finished record.
+            final probeRecordId = data['record_id'];
+            if (probeRecordId is! String || !captureState.isCurrentAttempt(probeRecordId)) {
+              logger.i("Factor probe for ${jsonEncode(probeRecordId)} is not about the current attempt; skipped");
+              break;
+            }
+            final cueOwed = data['cue_owed'] as bool? ?? true;
             // Native deferred the factor-tab scroll-ready cue and instead sent the self-factors
-            // visible before scrolling. Run the early duplicate check: only emit the scroll-ready
-            // cue when it is not a duplicate; otherwise the storage layer raises the duplicate error.
+            // visible before scrolling. Run the early duplicate check: emit the scroll-ready cue only
+            // when the latch owed one and this is not a duplicate; otherwise the storage layer raises
+            // the duplicate error.
             final factorsRaw = data['factors'];
             if (factorsRaw is! List) {
               break;
@@ -1580,22 +1996,67 @@ class PlatformController {
                 .whereType<Map>()
                 .map((e) => FactorMapper.fromMap(Map<String, dynamic>.from(e)))
                 .toList();
-            // Native may re-emit the probe for the same character (e.g. a settling frame after a switch).
-            // Skip an unchanged key so the duplicate check and its error cue fire at most once per character.
-            if (_sameFactorKey(probeSelf, _lastProbeKey)) {
-              break;
+            // EVERY PROBE IS ANSWERED, including one whose factors are identical to the last. This side
+            // used to hold the previous probe's factors and drop a match, to spend the duplicate check
+            // and its error cue at most once per character — and because the comparison sat ahead of
+            // the chime, it spent the chime once per character too.
+            //
+            // Spending the chime that way was wrong from the day it was written, not something a later
+            // change broke. The suppression landed hours after the chime moved onto this message, and
+            // `handleTabSwitchInProgress` already rebuilt a tab the user had started but not finished —
+            // so a return visit already began at the top of a rebuilt tab with its fragments discarded,
+            // genuinely owing a cue, and already lost it to the unchanged key. The set of rebuilt tabs
+            // has only grown since (the exit once also spared a tab that had not started scrolling; it
+            // is now `scraper == nullptr || scraper->ready()`), which widened the defect rather than
+            // introducing it. The duplicate check itself keeps no memo and accumulates nothing — its
+            // verdict is recomputed from storage on every probe — but it is not silent when re-run: a
+            // character already on file re-sounds `duplicated_character_probe`'s error cue and restates
+            // the failure (`reportDuplicateFromFactorProbe`) each time the user returns to the tab. That
+            // repetition is accepted here rather than papered over, on the same grounds as the chime:
+            // the visit really is a fresh attempt on a rebuilt tab, and the alternative — staying silent
+            // about a duplicate the user is about to capture again — is the failure being removed.
+            //
+            // Nor could the comparison have told the two apart: `onFactorProbe` carries three fields
+            // (`native_api_messages.h`'s `factorProbe`) and none of them is a visit count or a
+            // re-emission flag, so a settling frame and a genuine revisit are the same message. Of the
+            // two ways to be wrong, a repeated cue is a noise the user can ignore, while a withheld one
+            // stalls the capture — the same direction `cue_owed`'s absent-means-true takes above.
+            //
+            // THE COUNT CHECK IS THE CORE'S TO REQUIRE, not this side's to guess. `below_threshold`
+            // states whether the core's own read of the self-factor list ended before it reached the
+            // factor-tab layout's self-factor-count threshold. When it did, `factors` is capped by
+            // content rather than by the threshold, so a stored record can match only if it holds
+            // exactly as many self-factors as were sent — otherwise a record that simply has more
+            // self-factors than a threshold-capped probe would match on a prefix that says nothing
+            // about the count. [CharaDetailRecord.matchesFactorProbe] carries that rule; this handler
+            // only forwards the flag off the wire.
+            //
+            // Absent or not a boolean -> the check does not run at all, the same fail-open direction
+            // taken for an empty `factors` list: a probe this side cannot read a fact off of matches
+            // nothing. Guessing `false` would risk exactly the false positive that rule exists to rule
+            // out — a short probe matching every element of a longer stored record's own list, with no
+            // count requirement enforced — and guessing `true` would reject the common case for a
+            // reason the message never stated. Neither
+            // guess is worth the risk, so the storage layer is not invoked and the character is treated
+            // as not a duplicate. The chime is unaffected and still follows `cue_owed`.
+            final belowThresholdRaw = data['below_threshold'];
+            final bool isDuplicate;
+            if (belowThresholdRaw is bool) {
+              isDuplicate = _ref
+                  .read(charaDetailRecordStorageLoaderProvider.notifier)
+                  .reportDuplicateFromFactorProbe(
+                    probeSelf,
+                    belowThreshold: belowThresholdRaw,
+                    recordId: probeRecordId,
+                  );
+            } else {
+              logger.w(
+                "Factor probe: no boolean below_threshold on the message "
+                "(got ${jsonEncode(belowThresholdRaw)}), so the early duplicate check is skipped",
+              );
+              isDuplicate = false;
             }
-            _lastProbeKey = probeSelf;
-            // The threshold depends on the capture's record type; -1 (or any out-of-range value)
-            // from native maps to null, which falls back to the default (non-friend-standard) threshold.
-            final recordTypeRaw = data['record_type'];
-            final recordType = (recordTypeRaw is int && recordTypeRaw >= 0 && recordTypeRaw < RecordType.values.length)
-                ? RecordType.values[recordTypeRaw]
-                : null;
-            final isDuplicate = _ref
-                .read(charaDetailRecordStorageLoaderProvider.notifier)
-                .reportDuplicateFromFactorProbe(probeSelf, recordType);
-            if (!isDuplicate) {
+            if (!isDuplicate && cueOwed) {
               _scrollReadyEvent.add(_soundEventSequence++);
             }
           }
@@ -1655,21 +2116,24 @@ class PlatformController {
         case 'onPageReady':
           {
             _pageReadyEvent.add(_soundEventSequence++);
+            // THE CORE'S COMPLETION STATEMENT for this tab, sent once per tab per session. It fills the
+            // ring and records the completion the card reads ([CharaDetailCaptureStatus.tabCompleted]).
+            // It carries no attempt id and needs none: it is sent on the thread that announces
+            // sessions, so it cannot arrive after the next one's announcement.
             final index = data['index'] as int?;
             if (index != null) {
-              captureState.progress(index, 1);
+              captureState.pageReady(index);
             }
           }
           break;
         case 'onCharaDetailStarted':
-          captureState.started();
-          _lastProbeKey = null;
+          captureState.started(_announcedRecordId(data));
           break;
         case 'onCharaDetailRestarted':
           // A restart is a mid-scene reset (native inferred a character switch and rebuilt the session
           // without the detail screen closing). The UI resets its capture progress exactly as on a fresh
-          // open, and the probe key is cleared so the new character's early duplicate check runs — which
-          // is why this shared the `onCharaDetailStarted` case until the message gained a payload.
+          // open — which is why this shared the `onCharaDetailStarted` case until the message gained a
+          // payload.
           //
           // WHAT IT DOES *NOT* DO IS REPORT A FAILURE, and that is a decision rather than an omission: both
           // of the scraper's reset rules fire legitimately when the player switches character, so a
@@ -1678,9 +2142,14 @@ class PlatformController {
           //
           // `completed` absent counts as NOT completed, matching the rule `record_info.h` states for this
           // field: err towards noticing a loss rather than towards the silence this change removes.
-          videoImportSessionTally.noteDiscardedSession(completed: data['completed'] == true);
-          captureState.started();
-          _lastProbeKey = null;
+          //
+          // `record_id` is the session the reset BUILT, which is the attempt that begins here. The
+          // discarded session's id is not on the wire: nothing on this side decides anything from it.
+          {
+            final recordId = _announcedRecordId(data);
+            videoImportSessionTally.noteDiscardedSession(completed: data['completed'] == true);
+            captureState.started(recordId);
+          }
           break;
         case 'onCharaDetailFinished':
           if (data['success'] == true) {
@@ -1702,6 +2171,10 @@ class PlatformController {
               capturedRecordRetention.retain(id, fromVideoImport: fromVideoImport);
             }
             _charaDetailRecordCapturedEvent.add((id: id, fromVideoImport: fromVideoImport));
+            // Only the card is scoped to the attempt. The record itself is real whichever attempt is
+            // on screen now, so the retention and the captured event above (the store merge, the
+            // add-on trigger) are unconditional; a completion that arrives after the next attempt was
+            // announced just does not claim that the new character is done.
             captureState.success(id);
           } else {
             // THE HALF OF THIS MESSAGE THAT USED TO BE PARSED AND THROWN AWAY. `success: false` is the
@@ -1729,7 +2202,6 @@ class PlatformController {
           // on screen until now) and return to waiting. For an incomplete close, the closed_before_completed
           // error arrives right after this and re-establishes the failure state.
           captureState.reset();
-          _lastProbeKey = null;
           break;
         case 'onCharaDetailUpdated':
           final id = data['id'];
@@ -1802,6 +2274,20 @@ class PlatformController {
     } catch (e, st) {
       logger.w("Failed to handle native message: $message", e, st);
     }
+  }
+
+  /// The `record_id` an `onCharaDetailStarted` / `onCharaDetailRestarted` announces.
+  ///
+  /// Required, and validated here the way `onCharaDetailFinished` validates its `id`: every later
+  /// outcome is matched against it, so an announcement without one would leave every outcome of that
+  /// attempt unmatched and the card would never complete while the capture looked healthy. Rejecting
+  /// the message instead is visible in the log.
+  static String _announcedRecordId(Map data) {
+    final recordId = data['record_id'];
+    if (recordId is! String) {
+      throw ArgumentError.value(recordId, 'record_id', '${data['type']} expects a String record_id');
+    }
+    return recordId;
   }
 
   /// Chains one live harvest's merge onto [_liveMergeChain] so overlapping harvests

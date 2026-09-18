@@ -299,69 +299,6 @@ std::optional<BannerHit> FactorRowReader::findBanner(const Frame &frame, const R
     };
 }
 
-std::vector<record::Factor>
-FactorTabRecognizer::recognizeVisibleSelf(const Frame &frame, PredictionHistory &history) const {
-    const auto anchor = frame.anchor();
-
-    const auto top_banner_y = searchVertical(
-        frame,
-        config.bg_color,
-        {
-            anchor.absolute(config.left_rect).left(),
-            anchor.absolute(config.area).top(),
-        },
-        config.vertical_banner_upper_gap);
-    if (!top_banner_y) {
-        log_warning("Failed to find top banner of factor tab.");
-        return {};
-    }
-
-    double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
-    return recognizeOne(frame, scan_top, history, /*bounded=*/true);
-}
-
-std::vector<record::Factor> FactorTabRecognizer::recognizeOne(
-    const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded) const {
-    const auto anchor = frame.anchor();
-    const auto left_rect = anchor.absolute(config.left_rect);
-    const auto right_rect = anchor.absolute(config.right_rect);
-
-    const auto fits_frame = [&](const Rect<double> &cell, double top) {
-        const auto mapped = anchor.mapToFrame(cell + Point<double>{0, top});
-        return mapped.top() >= 0 && mapped.left() >= 0  //
-            && mapped.bottom() <= frame.height() && mapped.right() <= frame.width();
-    };
-
-    std::vector<record::Factor> factors;
-    for (;;) {
-        const auto current_scan_top = scan_top;
-
-        // Find next row of LEFT column.
-        const auto left_column_y = rows->findNext(frame, left_rect.topLeft().withY(current_scan_top));
-        if (!left_column_y) {
-            break;
-        }
-        if (bounded && !fits_frame(left_rect, left_column_y.value())) {
-            break;
-        }
-        factors.push_back(rows->predictFactor(frame, rows->cellsAt(left_rect, left_column_y.value()), history));
-        scan_top = left_column_y.value() + config.vertical_delta;
-
-        // Find next row of RIGHT column.
-        const auto right_column_y = rows->findNext(frame, right_rect.topLeft().withY(current_scan_top));
-        if (!right_column_y) {
-            break;
-        }
-        if (bounded && !fits_frame(right_rect, right_column_y.value())) {
-            break;
-        }
-        factors.push_back(rows->predictFactor(frame, rows->cellsAt(right_rect, right_column_y.value()), history));
-    }
-
-    scan_top += config.vertical_chara_gap;
-    return factors;
-}
-
 record::Character FactorTabRecognizer::recognizeTrainee(
     const Frame &frame,
     const RecordInfo &record_info,
@@ -988,8 +925,8 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     const event_util::Sender<RecordInfo> &on_recognize_completed,
     const event_util::Listener<RecordInfo> &on_update_requested,
     const event_util::Sender<RecordInfo> &on_update_completed,
-    const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
-    const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
+    const event_util::Listener<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> &on_factor_probe_ready,
+    const event_util::Sender<std::vector<record::Factor>, std::size_t, bool, RecordInfo> &on_factor_probe_completed,
     const event_util::Sender<std::string> &on_error,
     const recognizer_config::CharaDetailRecognizerConfig &config)
     : trainer_id(trainer_id)
@@ -1010,31 +947,28 @@ CharaDetailRecognizer::CharaDetailRecognizer(
     , on_error(on_error) {
     this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
     this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
-    this->on_factor_probe_ready->listen([this](const auto &frame, const auto &info) { this->probe(frame, info); });
+    this->on_factor_probe_ready->listen(
+        [this](const auto &frame, const auto &info, const auto &window, bool cue_owed) {
+            this->probe(frame, info, window, cue_owed);
+        });
 }
 
-void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info) const {
+void CharaDetailRecognizer::probe(
+    const Frame &frame, const RecordInfo &raw_info, const recognizer_impl::SelfFactorWindow &window, bool cue_owed)
+    const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value());
 
     // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
     // An exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
     // Contain it so a single bad probe frame cannot take down the process.
     try {
-        recognizer_impl::PredictionHistory factor_tab_history;
-        auto self_factors = factor_tab_recognizer.recognizeVisibleSelf(frame, factor_tab_history);
-        // Drop the last recognized row: on a non-stitched live frame the bottom-most visible row can
-        // be clipped by the tab boundary, so its star rank is unreliable. The remaining prefix is still
-        // a strong signature and is matched against the leading self-factors of stored records.
-        if (!self_factors.empty()) {
-            self_factors.pop_back();
-        }
+        const auto self_factors = factor_rows->visibleSelfPrefix(frame, window);
 
-        // Forward the record type so the Dart side can pick a per-type match threshold (the factor
-        // tab's visible-row count differs by type). -1 means "unknown", mapped to null on Dart.
-        const int record_type = raw_info.record_type.has_value()  //
-                                  ? static_cast<int>(raw_info.record_type.value())
-                                  : -1;
-        on_factor_probe_completed->send(self_factors, record_type);
+        // The limit the read stopped at and `cue_owed` are forwarded exactly as received: this path recognizes
+        // factors, it neither judges exits nor decides what counts as a duplicate. The message states from the
+        // limit whether the list is shorter than it (messages::factorProbe); the limit itself is not sent. The
+        // session is forwarded as received too, so the result names the attempt it was taken in.
+        on_factor_probe_completed->send(self_factors, window.factor_limit, cue_owed, raw_info);
     } catch (...) {
         // One arm on purpose: WinRT/ONNX exceptions do not derive from std::exception, and without an arm
         // that catches them too they would escape the worker thread and terminate the process (see

@@ -141,9 +141,10 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     }
     // Is any placeholder track actually visible above the thumb? The margin run's end locates the track top
     // only on a frame where the thumb is NOT sitting on that end. The thumb is drawn far darker than the
-    // track, so the one anti-aliased row where its cap meets the near-white margin is dragged well under the
-    // margin floor (measured 243 -> 199 against a floor of 228), while the same row carrying only the
-    // track's own cap stays inside it (243 -> 231). At a genuine top the thumb IS on the track's top cap, so
+    // track, so the one anti-aliased row where its cap meets the near-white margin is dragged under the
+    // margin floor (a common-layout blend runs 243 -> 199 against a floor of 228; the measured at-top range
+    // of that row is 196-201 on common and 148-226 on friendCommon), while the same row carrying only the
+    // track's own cap stays inside it (243 -> 229..230). At a genuine top the thumb IS on the track's cap, so
     // that row is the thumb's, the margin run stops one sample early, and track_top is read one sample high
     // -- an offset that depends on what is occluding the cap and therefore cannot be cancelled by a
     // constant. Asking for the track's own colour BELOW the thumb's own cap (that boundary sample is an
@@ -154,7 +155,7 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // The window's LOWER bound is the start of the scan column and not the margin run's end (m_up), because
     // m_up is not a landmark: it moves with the thumb, in the same direction and by the same step as the
     // upper bound. The row a one-tip-pixel scroll uncovers is the track's own top cap, and that row's blend
-    // sits INSIDE the near-white margin box (231 against a 228 floor, the second value measured above). So
+    // sits INSIDE the near-white margin box (229..230 against a 228 floor, the second range measured above). So
     // the margin run swallows exactly the row that constitutes the evidence, m_up advances by one sample, the
     // upper bound advances by one sample with it, and the interval stays empty -- the window closes on the
     // only thing it was opened to find. Measured over 16 clips: with m_up as the lower bound the reading is 0
@@ -163,14 +164,34 @@ ScrollBarOffsetEstimator::geometryAt(const Frame &frame, const Line<double> &sca
     // move with the thumb -- it is the top edge of the scroll-bar crop -- which is the whole property being
     // bought here.
     //
-    // What that costs: the page margin is no longer excluded by the index window, only by colour. The track
-    // box's ceiling (234) sits 7 levels below the darkest page-margin sample in the corpus (241, over 3,506
-    // at-top frames), and on the friendCommon layout the thumb's own cap reaches 227 against the 228 margin
-    // floor, i.e. one level -- a capture whose cap brightened past that floor would have m_up swallow the cap
-    // too, and the cap would then be counted as track. Both are colour headroom on unfamiliar hardware, which
-    // this corpus (one device) cannot bound, and both fail toward a false "scrolled". The opposite failure is
-    // unchanged by the lower bound and predates it: if the track's tone leaves the box entirely, no sample
-    // matches, the reading is a definite 0, and every caller reads "at the very top".
+    // What that costs: the page margin is no longer excluded by the index window, only by colour. There are
+    // two colour headrooms here, they are NOT the same size, and -- measured, not argued -- they fail in
+    // OPPOSITE directions. Neither is bounded by this corpus, which is one device.
+    //
+    //  * TRACK CEILING vs PAGE MARGIN -> FALSE ALARM. The ceiling (234) sits 7 levels below the darkest
+    //    page-margin sample (241, over 3,669 at-top reads on common; 242 over 227 on friendCommon). Darken
+    //    the margin, or lift the ceiling, into that gap and page-margin samples inside the window start
+    //    counting as track at a genuine top. Measured: a full-corpus run with the ceiling at 244, and one
+    //    with the box opened to [0,255], each diverged on 47 tab-runs, and the FIRST verdict change was a
+    //    false alarm in 47 of 47 and a miss in 0. Offline, darkening the margin by 8 levels is the smallest
+    //    move that changes anything, and it is a false alarm on both layouts.
+    //  * MARGIN FLOOR vs THUMB CAP -> MISS. At a genuine top the thumb's own cap reaches 226 on friendCommon
+    //    against the 228 floor (2 levels; 201 on common, i.e. 27). Brightening that cap past the floor does
+    //    NOT make it count as track -- the cap row IS `upper`, and this window is the OPEN interval
+    //    (0, upper), so the cap is excluded from it whatever colour it is. What it does is extend the margin
+    //    run to meet the upper bound, which pins upper_gap at 0. At a genuine top that is still the right
+    //    answer; on an already-scrolled frame it erases the evidence. Measured: forcing the cap row to
+    //    exactly 228 gives 0 false alarms out of 3,896 at-top reads and 201 misses out of 9,703 scrolled
+    //    reads; a full-corpus run with the floor at 190 diverged on 43 tab-runs, first change a miss in 43
+    //    of 43 and a false alarm in 0.
+    //    How much of that 2 levels is actually spendable: floors of 226 (all of it) and 217 changed 0 of
+    //    26,147 reads. 190 is the first floor that changes any verdict, because the brightest thumb cap
+    //    sitting DIRECTLY against the margin run on an already-scrolled frame is 190 -- a 38-level
+    //    excursion, not a 2-level one. The 2 levels bound where the cap is, not where it starts to matter.
+    //
+    // The opposite failure is unchanged by the lower bound and predates it: if the track's tone leaves the
+    // box entirely, no sample matches, the reading is a definite 0, and every caller reads "at the very top"
+    // (measured: 43 of 43 diverging tab-runs, first change a miss, with the track box at [0,5]).
     // The column's very first sample is outside the open interval (isInBetween skips index 0) and is never
     // examined. For that exclusion to change an answer, sample 0 would have to be the ONLY track-coloured
     // sample above the thumb tip; the track is drawn contiguously, so that needs the near-white run above the
@@ -795,7 +816,7 @@ PageScrapingBox::PageScrapingBox(
     // and would leave a shipped build quietly capturing an empty tab forever.
     //
     // THIS THROW DOES NOT REACH THE USER, and nothing downstream turns it into one. The box is constructed from
-    // buildSession() on the scraper runner thread, where event_util's per-event catch only log_error()s what a
+    // constructSession() on the scraper runner thread, where event_util's per-event catch only log_error()s what a
     // listener threw; the half-built session is then rolled back and the next frame runs tabScraper() over null
     // scrapers. Treat it as a class invariant -- the last thing that still holds if some future caller builds a
     // box from something other than the shipped config.
@@ -1252,8 +1273,10 @@ Frame StationaryFrameCatcher::croppedFrame() const {
 }
 
 // The `cue_owed` a head latch carries on on_head_latched, spelled at the three call sites below so the exit each
-// one is says itself instead of being read off a bare literal. Not an enum: the fact is a yes/no that travels
-// with the latch as a yes/no, in the same idiom as on_tab_refused's `refused` level.
+// one is says itself instead of being read off a bare literal. Not an enum: the fact is a yes/no that travels on
+// the wire as a yes/no, in the same idiom as the other tab-keyed yes/no facts in this file (on_tab_awaiting_head,
+// and on_tab_refused's `refused` level). Not every fact here is one: on_scroll_position carries a three-valued
+// word precisely because its consumers answer its third state differently.
 constexpr bool kCueOwed = true;
 constexpr bool kCueWithheld = false;
 
@@ -1305,8 +1328,9 @@ void NonScrollableScrapingInterpreter::update(const Frame &frame) {
         // Publish the latch the way the scrollable interpreter's startScrolling does: the full frame this page's
         // one fragment was cut from (readyAfterUpdate just handed this frame's crop to the catcher, so `frame` IS
         // the latched frame), and what the latch owes the user. It owes no cue -- there is nothing to scroll, and
-        // the tab is complete on this very frame -- so a consumer that synthesizes the chime (the factor tab's
-        // front end) stays silent, as the skill and campaign tabs of such a page already are.
+        // the tab completes once its tab-button crop has settled too, which is this frame or a later one -- so a
+        // consumer that synthesizes the chime (the factor tab's front end) stays silent, as the skill and campaign
+        // tabs of such a page already are.
         on_head_latched->send(frame, kCueWithheld);
     }
 }
@@ -1317,6 +1341,10 @@ bool NonScrollableScrapingInterpreter::ready() const {
 
 std::optional<TopOfContent> NonScrollableScrapingInterpreter::refusal() const {
     return std::nullopt;  // structurally unscrollable, so it cannot have been scrolled -- see the declaration
+}
+
+bool NonScrollableScrapingInterpreter::awaitingHead() const {
+    return state != Ready;  // the one fragment, which is also the head, is not latched yet -- see the declaration
 }
 
 bool NonScrollableScrapingInterpreter::scrollable() const {
@@ -1377,10 +1405,16 @@ std::optional<TopOfContent> ScrollableScrapingInterpreter::refusal() const {
     return refusal_reason;
 }
 
+bool ScrollableScrapingInterpreter::awaitingHead() const {
+    // Read off the two members startScrolling writes, so every exit it has is covered by construction. In
+    // particular the offset exit -- which sets is_scrolling and deliberately sends no cue -- ends the wait
+    // here exactly as the latched exit does.
+    return !is_scrolling && !refusal_reason.has_value();
+}
+
 bool ScrollableScrapingInterpreter::scrollable() const {
     return true;  // built exactly when SceneScraper::build found a scroll bar -- see the base declaration
 }
-
 
 void ScrollableScrapingInterpreter::updateBefore(const Frame &frame) {
     // `frame` is the full frame: the catcher/capture use the content crop, the estimator the scroll-bar band.
@@ -1562,6 +1596,19 @@ std::optional<TopOfContent> SceneScraper::refusal() const {
     return scroll_area_scraper == nullptr ? std::nullopt : scroll_area_scraper->refusal();
 }
 
+bool SceneScraper::awaitingHead() const {
+    // No interpreter yet means this tab has never been displayed, so it has certainly not latched a head --
+    // see the declaration for why `true` is also the fail-safe answer here.
+    if (scroll_area_scraper == nullptr) {
+        return true;
+    }
+    // A page with no scroll bar waits for the whole tab, not only for its content latch -- see the declaration.
+    if (!scroll_area_scraper->scrollable()) {
+        return !ready();
+    }
+    return scroll_area_scraper->awaitingHead();
+}
+
 std::optional<bool> SceneScraper::scrollable() const {
     // No interpreter yet means nothing has looked at this tab, so neither answer is established -- see the
     // declaration for why that is not collapsed into either one.
@@ -1695,13 +1742,15 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     const event_util::Sender<int, double> &on_scroll_updated,
     const event_util::Sender<int, std::string> &on_scroll_position,
     const event_util::Sender<int, bool, std::string> &on_tab_refused,
+    const event_util::Sender<int, bool, std::optional<bool>> &on_tab_awaiting_head,
     const event_util::Sender<bool> &on_factor_switch_armed,
     const event_util::Sender<int> &on_page_ready,
     const event_util::Sender<RecordInfo> &on_completed,
-    const event_util::Sender<Frame, RecordInfo> &on_factor_probe,
+    const event_util::Sender<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> &on_factor_probe,
     const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_reader,
     const event_util::Sender<scraper_impl::FactorSwitchVerdict> &on_factor_switch_judged,
-    const event_util::Sender<DiscardedSession> &on_restarted,
+    const event_util::Sender<RecordInfo> &on_started,
+    const event_util::Sender<DiscardedSession, RecordInfo> &on_restarted,
     const scraper_config::CharaDetailSceneScraperConfig &config,
     const std::filesystem::path &scraping_dir,
     const io_util::DirectoryHooks &directory_hooks)
@@ -1713,6 +1762,7 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     , on_scroll_updated(on_scroll_updated)
     , on_scroll_position(on_scroll_position)
     , on_tab_refused(on_tab_refused)
+    , on_tab_awaiting_head(on_tab_awaiting_head)
     , on_factor_switch_armed(on_factor_switch_armed)
     , on_page_ready(on_page_ready)
     , on_completed(on_completed)
@@ -1720,6 +1770,7 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
     , factor_reader(factor_reader)
     , on_factor_switch_judged(on_factor_switch_judged)
     , on_restarted(on_restarted)
+    , on_started(on_started)
     , config(config)
     , scraping_root_dir(scraping_dir)
     , directory_hooks(directory_hooks) {
@@ -1738,10 +1789,13 @@ CharaDetailSceneScraper::CharaDetailSceneScraper(
 }
 
 void CharaDetailSceneScraper::build(const SceneInfo &info) {
-    buildSession(info.record_type);
+    beginSession(info.record_type);
+    // Between the two halves, on purpose -- see beginSession.
+    on_started->send(RecordInfo(current_record_info));
+    constructSession();
 }
 
-void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
+void CharaDetailSceneScraper::beginSession(record::RecordType record_type) {
     vlog_trace(record_type);
     assert_(scraping_state == scraper_impl::Null);
     resetMonitors();
@@ -1750,6 +1804,12 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         uuid_generator.uuid4().str(),
         record_type,
     };
+}
+
+void CharaDetailSceneScraper::constructSession() {
+    assert_(scraping_state == scraper_impl::Null);
+    // Always present: beginSession minted this identity with the opener's record type.
+    const record::RecordType record_type = current_record_info.record_type.value();
 
     // The "register practice partner" button that shifts the tab bar and scroll area down
     // appears only on a friend's FULL training record; a friend's inheritance-only record
@@ -1767,20 +1827,25 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         scraping_root_dir / current_record_info.record_id,
         directory_hooks);
 
-    // The factor tab's scroll-ready runs the early duplicate probe, on the full frame current at the cue. It is
-    // kept OFF on_scroll_ready: the chime for that tab is synthesized by the front end once the probe is answered.
+    // A SINK, and deliberately nothing more. The factor tab is handed this in place of the wire's on_scroll_ready
+    // (makeTabScraper), because that tab's announcement is not the core's to make: the front end withholds the
+    // chime until the duplicate probe below reports "not a duplicate", and synthesizes it there. Putting the
+    // tab on the wire sender instead would sound the chime at the latch, ahead of the check it exists to gate.
+    // It carries no listener any more -- what used to hang off it (the probe) hangs off the latch itself now,
+    // because "the cue fired" and "these are fragment #0's pixels" are different facts and only one exit states
+    // both. A direct connection with no listener dispatches to nothing, which is exactly the withholding.
+    // The fact this sink drops on the floor is not lost: startScrolling also puts it on on_head_latched as
+    // `cue_owed`, and the probe forwards it to the front end, which is where this tab's chime is decided.
     factor_scroll_ready = event_util::makeDirectConnection<>();
-    factor_scroll_ready->listen([this]() {
-        on_factor_probe->send(Frame(current_full_frame), RecordInfo(current_record_info));
-    });
 
     // Every tab's latch, carrying the pixels that tab accepted as its fragment #0. Created before the tab
     // scrapers because makeTabScraper binds each tab's index onto it.
     head_latched = event_util::makeDirectConnection<int, Frame, bool>();
-    // THE FACTOR TAB'S FRAGMENT #0 ARMS RULE 3, from whichever exit latched it. The tab is read off the event
-    // rather than tested for a state: this connection carries the index it was bound with, and being
-    // factor-specific is a property of this consumer (Rule 3 is factor-only), not a classification of the latch.
-    head_latched->listen([this](int tab_index, const Frame &frame, bool /*cue_owed*/) {
+    // THE FACTOR TAB'S FRAGMENT #0 ARMS THE DUPLICATE PROBE, from whichever exit latched it. The tab is read off
+    // the event rather than tested for a state: this connection carries the index it was bound with, and being
+    // factor-specific is a property of this consumer (Rule 3 and the self-factor rows are factor-only), not a
+    // classification of the latch.
+    head_latched->listen([this](int tab_index, const Frame &frame, bool cue_owed) {
         if (tab_index != static_cast<int>(TabPage::FactorPage)) {
             return;
         }
@@ -1792,19 +1857,20 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
         //   * at-top-ness is now by construction. startScrolling accepted this very frame through topOfContent --
         //     a thumb at the head, checked by the green header, whose window ends inside the recognizer's own
         //     banner search, so the frame is read from its header -- and a page with no scroll bar has no other
-        //     position to be in. The reference pixels are therefore read at the head on EVERY exit rather than
+        //     position to be in. The
+        //     reference pixels and the self-factor rows are therefore read at the head on EVERY exit rather than
         //     only on the one that happens to announce itself; "at the head" means inside that window, not at
         //     one exact row.
         //   * settledness is no longer guaranteed. The motion exit latches without asking the stationary
         //     catcher, so this may be a transitional render. A DELIBERATE TRADE, not an oversight: a smeared
         //     reference can make maybeResetOnFactorChange's diff exceed kFactorChangeRatioThreshold and fire a
         //     false reset, which is fail-CLOSED -- it logs, sends on_restarted and re-probes the character, so
-        //     the user sees it and the capture recovers. The alternative, an exit that arms nothing, leaves
-        //     Rule 3 silently absent for the rest of the session. It is also the same pixel material the
-        //     capture already trusts for fragment #0: if this frame is degraded, the record built from it is
-        //     degraded anyway.
+        //     the user sees it and the capture recovers. What it replaces is today's silent fail-OPEN, where
+        //     that exit armed nothing at all and both the early duplicate check and Rule 3 were simply absent
+        //     for the rest of the session. It is also the same pixel material the capture already trusts for
+        //     fragment #0: if this frame is degraded, the record built from it is degraded anyway.
         // Do not "fix" this by taking a later, settled frame instead -- a later frame is a scrolled frame, which
-        // is the displacement Rule 3's flush gate cannot tolerate at all.
+        // is the displacement Rule 3's flush gate and the duplicate check cannot tolerate at all.
         //
         // Retained across many later frames and diffed in maybeResetOnFactorChange. THE CLONE IS NOT WHAT MAKES
         // THAT SAFE, and the old justification here ("a capture source may reuse its buffer") no longer holds:
@@ -1845,6 +1911,20 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
             }
         }
         factor_change_pending_since = std::nullopt;
+        // `cue_owed` rides along untouched. It is not this listener's business -- the probe is armed from every
+        // exit precisely because the duplicate check and Rule 3 are owed on every exit -- but the front end
+        // synthesizes this tab's chime off this very message, so withholding it there needs the fact here. Two
+        // facts on one message rather than two messages the front end would have to correlate by arrival order.
+        // active_common is this session's layout (common or friend_common, chosen in constructSession above). The
+        // probe runs on a LIVE frame, so the recognizer needs the scroll area as it sits HERE; its own config
+        // only knows where the stitcher puts it. The read limit is the same layout's too (sized to the rows this
+        // scroll area shows). Both ride as one window, made by the same function readFactorSwitch uses, so the
+        // probe and Rule 3 read by one rule rather than by two copies of it.
+        on_factor_probe->send(
+            Frame(frame),
+            RecordInfo(current_record_info),
+            recognizer_impl::SelfFactorWindow::fromLayout(*active_common),
+            cue_owed);
     });
 
     skill_scraper = makeTabScraper(TabPage::SkillPage, scraping_box->skill_box());
@@ -1868,11 +1948,6 @@ void CharaDetailSceneScraper::buildSession(record::RecordType record_type) {
 
 void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene_state) {
     vlog_trace(scene_state.tab_page);
-
-    // Keep the latest full-screen frame so the factor scroll-ready callback (which fires from
-    // deep inside the per-page scraper, where only the cropped scroll area is in scope) can hand
-    // the whole frame to the duplicate probe.
-    current_full_frame = frame;
 
     const auto tab_page = scene_state.tab_page;
 
@@ -1944,11 +2019,23 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
     // this one had not already reported one frame earlier: it fired zero times over 583 doctest cases and 27
     // clip runs, and deleting it left every case green.
     notifyTabRefusalIfChanged();
-    // Rule 3's witness, stated after every mutator of it in this frame: the head latch (installs, via
-    // updateUntilReady), rebuildTab (clears, via handleTabSwitchInProgress) and Rule 3's Same reading (replaces,
-    // so the level stays true). A reset returns before this line and is restated on the next frame
-    // (resetMonitors).
+    // Rule 3's witness, BEFORE the awaiting level: in the frame a factor tab stops awaiting, the front end then
+    // already holds the witness that frame installed, so it never pairs a phase of the shown factor tab with "no
+    // switch possible" from the frame before. The mutators are all above this line with no `return` between them
+    // and here other than the `ready()` short-circuit: the head latch (installs, via updateUntilReady), rebuildTab
+    // (clears, via handleTabSwitchInProgress), and Rule 3's Same reading (replaces, so the level stays true). That
+    // short-circuit hides no change: while the session is ready handleTabSwitchInProgress rebuilds nothing, a Same
+    // reading keeps the witness, and a reset returns before it and is restated on the next frame (resetMonitors).
     notifyFactorSwitchArmedIfChanged();
+    // Alongside the refusal level and for the same reason -- both are levels this frame may have just changed,
+    // and both are read back off the scrapers rather than tracked separately. The mutators of THIS level are
+    // startScrolling (ends the wait on a page with a scroll bar, via updateUntilReady above), the tab's completion
+    // (ends it on a page with no scroll bar, via the same updateUntilReady -- see SceneScraper::awaitingHead), the
+    // tab's first frame (states the structure beside the level) and rebuildTab (restores it, via
+    // handleTabSwitchInProgress above); like the refusal they cannot cancel between two reports, because the
+    // rebuild names the tab the user LEFT and the update names the tab they are on, so no single tab can go
+    // false and back to true within one frame. Within a frame, on_page_ready precedes this report.
+    notifyTabAwaitingHeadIfChanged();
 
     if (updateUntilReady(base_frame_catcher, frame)) {
         scraping_box->addBase(base_frame_catcher->frame());
@@ -1960,7 +2047,7 @@ void CharaDetailSceneScraper::update(const Frame &frame, const SceneState &scene
 
 DiscardedSession CharaDetailSceneScraper::release() {
     // Read the session out BEFORE anything below clears it: ready() stops being answerable once scraping_state
-    // goes Null, and current_record_info survives this function but not the buildSession a reset performs
+    // goes Null, and current_record_info survives this function but not the beginSession a reset performs
     // immediately after. One snapshot, taken once, at the only moment both are still true.
     const DiscardedSession discarded{current_record_info, ready()};
 
@@ -1981,9 +2068,12 @@ void CharaDetailSceneScraper::resetSession(record::RecordType record_type) {
     // The discarded session comes from release() itself, which is what makes the reported contents unable to
     // describe the session built on the next line. See release().
     const DiscardedSession discarded = release();
-    buildSession(record_type);
+    beginSession(record_type);
     log_debug("session discarded (id={}, completed={})", discarded.info.record_id, discarded.completed);
-    on_restarted->send(discarded);
+    // The session just begun rides along: this reset begins its attempt, as build() does for an open, and is
+    // announced before the session is constructed for the same reason (see beginSession).
+    on_restarted->send(discarded, RecordInfo(current_record_info));
+    constructSession();
 }
 
 std::unique_ptr<scraper_impl::SceneScraper> CharaDetailSceneScraper::makeTabScraper(
@@ -2083,6 +2173,25 @@ void CharaDetailSceneScraper::notifyTabRefusalIfChanged() {
             static_cast<int>(tab_page),
             refusal.has_value(),
             refusal.has_value() ? std::string(scraper_impl::topOfContentTag(refusal.value())) : std::string{});
+    }
+}
+
+void CharaDetailSceneScraper::notifyTabAwaitingHeadIfChanged() {
+    for (const auto tab_page : kAllTabPages) {
+        const auto *scraper = scraperOf(tab_page);
+        // A tab with no scraper at all is in the same position as one whose interpreter is not built yet: it
+        // has not latched a head, and nothing has established its structure. SceneScraper::awaitingHead and
+        // SceneScraper::scrollable say the same for their own null interpreter.
+        const TabHeadLevel level{
+            scraper == nullptr || scraper->awaitingHead(),
+            scraper == nullptr ? std::nullopt : scraper->scrollable(),
+        };
+        auto &last = last_awaiting_head_emitted[static_cast<std::size_t>(tab_page)];
+        if (last == level) {
+            continue;
+        }
+        last = level;
+        on_tab_awaiting_head->send(static_cast<int>(tab_page), level.awaiting, level.scroll_bar);
     }
 }
 
@@ -2307,8 +2416,8 @@ std::optional<scraper_impl::FactorSwitchReading> CharaDetailSceneScraper::readFa
         // The reference first, and only if this reference has never been read. Stored as soon as it succeeds: if
         // the judged read then throws, the verdict is Unreadable and the reset drops the reference anyway, so
         // nothing depends on whether a half-finished reading was kept.
-        // Both lists under this layout's one window (SelfFactorWindow::fromLayout), so they are read with the same
-        // bound and the same limit.
+        // The same window the probe was sent with (see the head_latched listener), so the two lists compared
+        // here are read exactly as the front end's list was, limit included.
         const auto window = recognizer_impl::SelfFactorWindow::fromLayout(*active_common);
         auto &reference = factor_switch_reference.value();
         if (!reference.reading.has_value()) {
@@ -2342,7 +2451,11 @@ void CharaDetailSceneScraper::resetMonitors() {
     // Back to the true initial level (no tab refused), matching the scrapers a fresh session builds. The UI is
     // told about the session teardown itself (on_restarted / on_closed), which is what clears its own copy.
     last_refusal_emitted.fill(std::nullopt);
-    // Back to "never stated": the fresh session restates the witness (false) on its first frame.
+    // Back to "never stated" rather than to the initial level, which for this one is `true`. The fresh session
+    // therefore re-states all three tabs on its first frame instead of relying on the front end having
+    // reset its own copy to the same assumption.
+    last_awaiting_head_emitted.fill(std::nullopt);
+    // Likewise "never stated": the fresh session restates the witness (false) on its first frame.
     last_factor_switch_armed_emitted = std::nullopt;
 }
 

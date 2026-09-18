@@ -72,12 +72,32 @@ private:
             //    (ScrollableScrapingInterpreter::updateBefore) and once for the base image -- never per scroll
             //    step -- and there are three tabs (kAllTabPages), so +50 ms here is about +150 ms of holding
             //    the screen still per character.
-            //  * The cost that bites harder is not the latency but the widened "please do not scroll yet"
-            //    window, once per tab. Scroll-ready is what runs the factor tab's duplicate probe (the
-            //    factor_scroll_ready listener in chara_detail_scene_scraper.cpp), so a user who scrolls before
-            //    the dwell elapses never gets the early duplicate check. That loss is SILENT, and every
-            //    millisecond added here makes it likelier. Nothing in this repo can measure it: the clips are recordings of scrolling that
-            //    already happened, which is the closest proxy there is and is not the same thing.
+            //  * The remaining cost is the widened "please do not scroll yet" window, once per tab, and what
+            //    it now costs is the CUE, not the capture. ScrollableScrapingInterpreter::updateBefore has two
+            //    exits and the offset one -- taken by a user who scrolls before the dwell elapses -- withholds
+            //    scroll-ready deliberately, because the cue would announce an event that already happened. So
+            //    every millisecond added here sends more users down the silent exit and costs them the prompt.
+            //
+            //  * AN ARGUMENT THAT USED TO STAND HERE HAS BEEN WITHDRAWN; this constant now rests on one fewer
+            //    leg, and that is recorded rather than deleted so the next reader does not mistake a shorter
+            //    list for a list that was always this short. It read: arming scroll-ready is what captures
+            //    `factor_probe_reference`, so a user who scrolls before the dwell never arms it and the factor
+            //    tab's character-switch reset (Rule 3) then silently never fires -- every millisecond making
+            //    that likelier. The premise is gone: the reference is taken from `on_head_latched`, which
+            //    `startScrolling` sends from BOTH exits (chara_detail_scene_scraper.cpp), so the early
+            //    scroller arms the probe too.
+            //  * One silent probe loss survives, and it does not argue about this number, because it is not
+            //    made likelier by a millisecond here: a factor tab REFUSED at the latch (fragment #0 was not
+            //    the head of the list) arms nothing. The offset exit judges the tab's FIRST frame, which the
+            //    dwell does not move, so widening it does not shift that case. (A factor tab with no scroll bar
+            //    used to be a second loss; NonScrollableScrapingInterpreter now publishes its settled frame on
+            //    on_head_latched, so it arms the probe and Rule 3's witness too.)
+            //  * A factor page with no scroll bar opens no window for the switch arrows either. Its witness
+            //    arrives when its content has held still for this dwell, and the front end's arrows follow the
+            //    witness itself (the `onFactorSwitchArmed` level; see switchSafety in
+            //    lib/src/core/platform_controller.dart), not the page's wait. That page states `awaiting: true`
+            //    until the whole tab is complete, so what a millisecond added here costs on it is the wait the
+            //    user is already asked to sit through -- the same cost as the first bullet, not a second one.
             //
             // The measured ceiling is kept because it BOUNDS a future proposal, not because it licenses one:
             //  * at 300 ms -- and at 305, 310, 320, 330, 350 -- the `player_standard_2` GOLDEN produces no
@@ -268,9 +288,10 @@ private:
             // derived from is also material the golden suite re-runs.
             0.10,
             // self_factor_prefix_length: how many of the trainee's own factors are read, from the top, off one
-            // factor-tab frame. The character-switch rule reads both frames it compares under this one value
-            // (recognizer_impl::SelfFactorWindow): the read stops at it, and the rows past it are never read.
-            // This is the one home of its derivation; other comments point here instead of restating it.
+            // factor-tab frame and compared with a stored record. The early duplicate probe and the
+            // character-switch rule both use this one value (recognizer_impl::SelfFactorWindow): the read stops
+            // at it, and the rows past it are never read. This is the one home of its derivation; other
+            // comments point here instead of restating it.
             //
             // Why this many can be read: the rows that hold this many factors (two per row, so 7 rows here) lie
             // inside the scroll area on the frame, and content still remains below them. The margin is that
@@ -285,9 +306,14 @@ private:
             // scroll area is; the detail screen's layout is the same on portrait and landscape panes, so these
             // rows fit on both.
             //
+            // A read that holds fewer factors than this therefore ended on the frame: the list itself stops
+            // there. The probe says so (below_threshold, messages::factorProbe), and the front end then also
+            // requires the stored record to hold exactly that many self-factors, so a record with a short
+            // factor list is checked too, not skipped.
+            //
             // The larger the value, the more collision-resistant the comparison -- two characters whose first
-            // factors happen to coincide -- and the lower the row the read has to reach. It is 14 here and 10
-            // in friendCommon() because this layout's scroll area shows more rows.
+            // factors happen to coincide -- and the lower the row the read has to reach. 14 since 1290860c,
+            // which raised it from 10 for every layout but Friend's because this one shows more rows.
             14,
         };
     }
@@ -360,7 +386,7 @@ private:
         config.viewport = friend_viewport;
         // How many self-factors one frame is read for (common() says what the value means and how its margin
         // is measured). This scroll area is the shorter one, so it holds fewer rows than Standard's, and the
-        // value is 10, i.e. 5 rows. Measured on the golden corpus the same way
+        // value Friend has always used is kept: 10, i.e. 5 rows. Measured on the golden corpus the same way
         // (friend_standard and friend_standard_many_rental; unit 736): 47 px remain below those rows in a 397 px
         // area, 11.8% -- the same share as common()'s.
         config.self_factor_prefix_length = 10;

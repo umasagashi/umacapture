@@ -154,5 +154,17 @@ void main() {
         'スクロールを開始するのが早すぎた可能性があります。\nキャプチャをやり直してください。',
       );
     });
+
+    // WHY BOTH LINES ARE IMPERATIVE, UNLIKE THE OTHER PAIRS ABOVE. Every other `status` line in this
+    // file describes a state ("詳細画面を検出しました", "先頭をキャプチャできませんでした") and leaves the
+    // instruction to `action`. Here the state itself IS an instruction not to act: the settle wait
+    // exists only because scrolling during it is indistinguishable, from the user's side, from
+    // scrolling once the cue has sounded -- there is no passive way to describe "not yet" that is not
+    // also a command. So `status` and `action` were approved together, as one two-line instruction,
+    // rather than as a description plus a remedy.
+    test('the settle-wait card tells the user not to scroll yet, and what to wait for', () {
+      expectSentence('pages.capture.capture_control.message.waiting_for_ready.status', 'まだスクロールしないでください');
+      expectSentence('pages.capture.capture_control.message.waiting_for_ready.action', '通知音が鳴ってから開始してください。');
+    });
   });
 }

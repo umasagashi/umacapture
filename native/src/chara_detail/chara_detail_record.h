@@ -11,8 +11,10 @@
 namespace uma::chara_detail::record {
 
 // The integer VALUE of each entry is a cross-layer contract — do not reorder or renumber it:
-//   - the wire event sends static_cast<int>(record_type), and Dart reads it as RecordType.values[int];
-//   - the Dart enum, its column labels, and saved column specs all map by this index;
+//   - Dart declares its own RecordType enum in this same order and looks entries up positionally
+//     (RecordType.values.indexOf(...) in spec/parser.dart and spec/script.dart) for column/script lookups;
+//   - no wire message carries the value as an int any more (onFactorProbe used to, as a diagnostic nobody
+//     decoded, and dropped it);
 //   - record.json stores the NAME (see EXTENDED_JSON_TYPE_ENUM below), which is order-independent.
 // The scene context resolves which type is active by branch NAME, not position (see recordTypeTag and
 // CharaDetailSceneContext), so reordering the condition branches cannot silently change the mapping;
@@ -23,13 +25,13 @@ enum RecordType {
     FriendStandard = 2,
     FriendInheritance = 3,
 };
-// Compile-time guard for the wire ordinal contract above: the onFactorProbe event sends
-// static_cast<int>(record_type) and Dart reads it as RecordType.values[int], so these values must never
-// change. A matching Dart-side test pins RecordType.values order; the two together catch a reorder on
-// either layer. (test_native_api_messages.cpp also locks the exact record_type int factorProbe emits.)
+// Compile-time guard for the enum-order contract above: Dart declares RecordType.values in this same
+// order and looks entries up positionally, so these values must never change. A matching Dart-side test
+// (factor_probe_match_test.dart) pins RecordType.values order; the two together catch a reorder on either
+// layer.
 static_assert(
     Standard == 0 && InheritanceOnly == 1 && FriendStandard == 2 && FriendInheritance == 3,
-    "RecordType ordinals are a cross-layer wire contract with Dart; see the note above.");
+    "RecordType ordinals are a cross-layer enum-order contract with Dart; see the note above.");
 EXTENDED_JSON_TYPE_ENUM_STRICT(RecordType, Standard, InheritanceOnly, FriendStandard, FriendInheritance)
 
 // Stable tag for each record-type branch in the scene-context condition tree. The builder names each

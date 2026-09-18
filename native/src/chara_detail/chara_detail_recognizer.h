@@ -217,13 +217,16 @@ private:
 // WHAT A SINGLE LIVE FRAME IS READ FOR, as one record layout defines it: where the factor tab's scroll area sits
 // on that frame, and how many of the trainee's own factors are read at most. Both are properties of the layout
 // (scene_scraper.json's common or friend_common), whose choice has one owner, CharaDetailSceneScraper::
-// buildSession; fromLayout is the one place a window is made from a layout, so the two frames the
-// character-switch rule compares cannot be read under windows that differ.
+// constructSession; fromLayout is the one place a window is made from a layout, so the two consumers of a single-frame
+// read (the early duplicate probe and the character-switch rule) cannot be handed windows that differ.
 //
 // `factor_limit` is the layout's self_factor_prefix_length. The read stops once it holds that many factors.
 // The value is sized so that its rows lie inside the layout's scroll area with room left below them (the derivation
 // is in native/tool/builder/chara_detail_scene_scraper_builder.h); nothing is promised about the rows further
-// down, so they are not read at all rather than read and then compared.
+// down, so they are not read at all rather than read and then compared. A list SHORTER than the limit
+// therefore ended on this frame -- the detail screen's layout is the same on portrait and landscape panes, so the
+// threshold's rows always fit -- and that is the fact the probe's `below_threshold` carries to the front end
+// (messages::factorProbe).
 //
 // Unsigned so that no window can hold a negative limit. The conversion in fromLayout is safe because
 // CharaDetailSceneScraperConfig refuses a layout whose threshold is below 1 while it is deserialized.
@@ -281,12 +284,18 @@ public:
 
     // THE READING RULE every single-frame consumer takes: the trainee's own factors on a single, non-stitched
     // factor-tab frame (no scrolling), read by recognizeOne and therefore only from rows whose cells lie wholly
-    // inside [window.scroll_area] on this frame, and never more than [window.factor_limit] of them. Today its
-    // consumer is the character-switch rule (scraper stage).
+    // inside [window.scroll_area] on this frame, and never more than [window.factor_limit] of them. Today those
+    // consumers are the early duplicate probe (recognizer stage) and the character-switch rule (scraper stage).
     // The returned list is a prefix of the self-factors the full pipeline would read. It ends at whichever comes
     // first: the end of the list, the scroll area's bottom edge (a row that is cut off, or not on screen at all,
     // is never read), or the limit (see SelfFactorWindow for why rows past it are not read). Only this read is
     // limited; the stitched record's read (FactorTabRecognizer::recognize) reads every factor.
+    //
+    // It is one method of this class rather than something each consumer repeats because the probe's list is
+    // matched against stored records on the Dart side, and the switch rule's two lists against each other;
+    // written once per consumer -- the limit applied by one and not the other, say -- the lists would agree until
+    // the first time one of them was adjusted, and a comparison between them would then be between two different
+    // quantities.
     //
     // [window.scroll_area] is the factor tab's scroll area ON THIS FRAME, and the caller must supply it:
     // config.area cannot be used here. That rect is a STITCHED-image rect -- the stitcher always pastes
@@ -296,7 +305,7 @@ public:
     // three times the banner gap, so a scan anchored to config.area finds nothing and the probe comes
     // back empty. Lengthening the gap is not the fix either -- the stretch in between holds the tab bar,
     // which the scan would latch onto and read as the factor header.
-    // CharaDetailSceneScraper::buildSession is the single owner of the layout choice (common vs
+    // CharaDetailSceneScraper::constructSession is the single owner of the layout choice (common vs
     // friend_common), so the window is handed down from there rather than re-derived from the record type
     // against a second copy of the layout constants.
     [[nodiscard]] std::vector<record::Factor> visibleSelfPrefix(const Frame &frame, const SelfFactorWindow &window) const;
@@ -363,9 +372,6 @@ private:
     [[nodiscard]] record::Factor
     predictFactor(const Frame &frame, const FactorCells &cells, PredictionHistory &history) const;
 
-    // The early duplicate probe's read (FactorTabRecognizer::recognizeOne) predicts through these cells and models.
-    friend class FactorTabRecognizer;
-
     const recognizer_config::FactorTabConfig config;
 
     const AdmittedPredictor<int> factor_model;
@@ -396,21 +402,7 @@ public:
         CropInfo &crop_info,
         PredictionHistory &history) const;
 
-    // Recognizes only the trainee's own factors that are fully visible on a single, non-stitched
-    // factor-tab frame (no scrolling). Used by the early duplicate probe: the returned list is a
-    // prefix of the self-factors the full pipeline would read, which is enough to match a recapture.
-    [[nodiscard]] std::vector<record::Factor>
-    recognizeVisibleSelf(const Frame &frame, PredictionHistory &history) const;
-
 private:
-    // Reads one factor list from [scan_top] down on the frame the early probe hands over, advancing [scan_top].
-    // When [bounded] is set the scan stops before any row whose name cell would fall outside the frame: the probe
-    // runs on a single, non-stitched frame where the bottom-most visible row is clipped; predicting it would crop
-    // past the image and abort OpenCV, so the probe sets [bounded] to stop at the last fully-visible row. The
-    // cells and the models are the shared reader's (FactorRowReader::cellsAt, FactorRowReader::predictFactor).
-    [[nodiscard]] std::vector<record::Factor>
-    recognizeOne(const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded = false) const;
-
     [[nodiscard]] record::Character recognizeTrainee(
         const Frame &frame,
         const RecordInfo &record_info,
@@ -643,17 +635,32 @@ public:
         const event_util::Sender<RecordInfo> &on_recognize_completed,
         const event_util::Listener<RecordInfo> &on_update_requested,
         const event_util::Sender<RecordInfo> &on_update_completed,
-        const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
-        const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
+        const event_util::Listener<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> &on_factor_probe_ready,
+        const event_util::Sender<std::vector<record::Factor>, std::size_t, bool, RecordInfo> &on_factor_probe_completed,
         const event_util::Sender<std::string> &on_error,
         const recognizer_config::CharaDetailRecognizerConfig &config);
 
-    // Recognizes only the trainee's own factors visible on a single, non-stitched factor-tab frame
-    // (the stable frame captured at scroll-ready) so the duplicate check can run before scrolling.
-    // Reads the trainee's own visible factors through the same FactorRowReader as the full pipeline, from the
-    // recognizer's own factor-tab area; the result is a prefix of the self-factor list, matched against stored
-    // records on the Dart side.
-    void probe(const Frame &frame, const RecordInfo &raw_info) const;
+    // Recognizes only the trainee's own factors visible on a single, non-stitched factor-tab frame -- the frame
+    // the factor tab latched as its fragment #0, which is at the head of the list but not necessarily settled
+    // (see CharaDetailSceneScraper's head_latched listener) -- so the duplicate check can run before scrolling.
+    // Reads through the same FactorRowReader, and the same single-frame rule, as the character-switch rule
+    // (FactorRowReader::visibleSelfPrefix): the result is a prefix of the self-factor list, at most
+    // `window.factor_limit` long, and the front end compares every factor in it with the head of each stored
+    // record.
+    // `raw_info` is forwarded unchanged with the result: it names the session the frame belongs to.
+    // `cue_owed` is not recognized, read or judged here: it is the scraper's statement about the exit that
+    // latched this frame, forwarded to the front end alongside the result because the front end sounds the
+    // factor tab's chime only when the latch owed one AND the character is not a duplicate. Carrying it
+    // through keeps the two halves on one message instead of making the front end correlate two.
+    //
+    // `window` is the one this record's layout defines, as resolved by the scraper (SelfFactorWindow::fromLayout);
+    // see FactorRowReader::visibleSelfPrefix for why its scroll area cannot be read off the recognizer config.
+    // Its limit is sent on with the result, not as a number for the front end to apply, but so that the message
+    // can state whether the list is shorter than the limit (messages::factorProbe) from the same value the read
+    // stopped at.
+    void probe(
+        const Frame &frame, const RecordInfo &raw_info, const recognizer_impl::SelfFactorWindow &window, bool cue_owed)
+        const;
 
     void recognize(const RecordInfo &raw_info, bool isUpdateMode) const;
 
@@ -677,8 +684,12 @@ private:
     const event_util::Listener<RecordInfo> on_update_requested;
     const event_util::Sender<RecordInfo> on_update_completed;
 
-    const event_util::Listener<Frame, RecordInfo> on_factor_probe_ready;
-    const event_util::Sender<std::vector<record::Factor>, int> on_factor_probe_completed;
+    const event_util::Listener<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> on_factor_probe_ready;
+    // factors, the window's factor_limit, cue_owed, and the session the probe frame was latched in -- the order
+    // NativeApi::notifyFactorProbe takes them in. The session travels back out because this result is produced on
+    // this runner's thread and can reach the front end after the next session was announced; its id is what lets
+    // the front end tell the two apart.
+    const event_util::Sender<std::vector<record::Factor>, std::size_t, bool, RecordInfo> on_factor_probe_completed;
 
     // Surfaces a terminal recognition failure (currently only the update path) as a human-readable message,
     // wired to NativeApi::notifyError so a failed re-recognition reaches the UI instead of stalling forever.

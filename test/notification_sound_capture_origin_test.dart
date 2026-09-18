@@ -145,9 +145,11 @@ void main() {
 
   /// Announces one finished record exactly as the core does, then lets the merge and its cue land.
   ///
-  /// [origin] is omitted from the payload when null, which is what a live capture sends.
+  /// [origin] is omitted from the payload when null, which is what a live capture sends. The session
+  /// is announced first, as the core does: a duplicate verdict sounds only for the attempt on screen.
   Future<void> capture(WidgetTester tester, PlatformController controller, String id, {String? origin}) async {
     await tester.runAsync(() async {
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': id}));
       controller.handleNativeMessage(
         jsonEncode({'type': 'onCharaDetailFinished', 'success': true, 'id': id, 'origin': ?origin}),
       );
@@ -256,6 +258,9 @@ void main() {
     );
     // The import has already ended by the time the drain runs, which is the point.
     env.imports.value = _finished;
+    // The last session the core announced, so the live record is the attempt on screen and its
+    // duplicate verdict may sound.
+    env.container.read(charaDetailCaptureStateProvider.notifier).started('r-b');
     arm = true;
 
     await tester.runAsync(() async {

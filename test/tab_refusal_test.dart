@@ -173,7 +173,7 @@ void main() {
   group('the refusal is a level, held per tab', () {
     test('two tabs are refused independently and withdrawn independently', () {
       final (container, controller) = build();
-      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted'}));
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': 'rec-1'}));
 
       controller.handleNativeMessage(_refusedMessage(_skillTab));
       controller.handleNativeMessage(_refusedMessage(_campaignTab, reason: 'unknown'));
@@ -195,7 +195,7 @@ void main() {
         controller.handleNativeMessage(_refusedMessage(_factorTab));
         expect(container.read(charaDetailCaptureStateProvider).tabRefusals, isNotEmpty);
 
-        controller.handleNativeMessage(jsonEncode({'type': boundary}));
+        controller.handleNativeMessage(jsonEncode({'type': boundary, 'record_id': 'rec-2'}));
 
         expect(
           container.read(charaDetailCaptureStateProvider).tabRefusals,
@@ -207,6 +207,7 @@ void main() {
 
     test('a captured record carries no refusal into the next character', () {
       final (container, controller) = build();
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': 'rec-1'}));
       controller.handleNativeMessage(_refusedMessage(_factorTab));
 
       controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailFinished', 'success': true, 'id': 'rec-1'}));
@@ -334,7 +335,7 @@ void main() {
         ),
       );
       final notifier = container.read(charaDetailCaptureStateProvider.notifier);
-      notifier.started();
+      notifier.started('rec-1');
       notifier.progress(_skillTab, 0.4);
       notifier.tabRefused(_skillTab, true, 'scrolled');
       await tester.pump(const Duration(milliseconds: 200));

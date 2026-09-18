@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,19 @@ inline std::string error(const std::string &message) {
     // throw on such bytes, killing the very error notification the caller is trying to deliver;
     // replace invalid sequences with U+FFFD instead so onError always reaches the Dart side.
     return json_util::Json{{"type", "onError"}, {"message", message}}.dump(
+        -1, ' ', false, json_util::Json::error_handler_t::replace);
+}
+
+// A TERMINAL ERROR THAT BELONGS TO ONE CAPTURE ATTEMPT, named by the `record_id` that attempt was announced
+// under (charaDetailStarted / charaDetailRestarted). Used by the two errors that end a session's record --
+// `stitch_failed` and `closed_before_completed` -- because the first is reported from the stitcher's thread and
+// can therefore reach the front end after the NEXT attempt has been announced. A front end applies such an error
+// to its card only when the id is the attempt it is showing; without the id it could only apply it to whatever
+// attempt happened to be current when the message arrived.
+//
+// Every other error carries no `record_id`, and its absence is the meaning: "not scoped to an attempt".
+inline std::string error(const std::string &message, const std::string &record_id) {
+    return json_util::Json{{"type", "onError"}, {"message", message}, {"record_id", record_id}}.dump(
         -1, ' ', false, json_util::Json::error_handler_t::replace);
 }
 
@@ -96,6 +110,37 @@ inline std::string tabRefused(int index, bool refused, const std::string &reason
         .dump();
 }
 
+// A TAB STILL NEEDS THE USER TO LEAVE IT ALONE (or no longer does), and WHETHER ITS PAGE HAS A SCROLL BAR.
+// `awaiting` is the level, not an occurrence, in exactly the idiom of onTabRefused above: the scraper re-states
+// it whenever it changes and there is no paired "cleared" type. What ends the wait depends on the page, and the
+// core decides it (scraper_impl::SceneScraper::awaitingHead): on a page with a scroll bar the wait ends when the
+// frame that becomes fragment #0 is latched, because from then on scrolling IS the capture; on a page with no
+// scroll bar it ends when the tab is complete, because every remaining step there needs the same thing -- a
+// picture that holds still. A tab not built yet is awaiting.
+//
+// NOT onScrollReady, and the difference is the whole point of this message existing. onScrollReady is an
+// ANNOUNCEMENT -- the chime the user listens for -- and there are exits from this wait that have nothing to
+// announce: the offset exit in ScrollableScrapingInterpreter::updateBefore begins capture without ever
+// latching a stationary frame, and a page with no scroll bar is handed no cue sender at all. A front end that
+// read "no onScrollReady yet" as "still waiting" therefore told the user to hold off, in a caution colour,
+// for the rest of a capture that was running normally. The chime and the permission are two facts; this is
+// the second one.
+//
+// `scroll_bar` is the page's structure (scraper_impl::SceneScraper::scrollable), fixed from the tab's first frame
+// until the tab is rebuilt. It rides HERE, and not on a message of its own, because it and `awaiting` describe
+// one wait on one tab and change on the same events: on a tab's first frame the pair goes from
+// {awaiting, not built} to {awaiting, no scroll bar}, and one message carries that step whole. The one consumer is
+// the front end's wording of the wait (a page with no scroll bar must not be told about scrolling). The key is
+// OMITTED while the tab is not built -- nothing has established either answer -- and a reader must treat an
+// absent key as "unknown", not as either answer.
+inline std::string tabAwaitingHead(int index, bool awaiting, const std::optional<bool> &scroll_bar) {
+    json_util::Json json{{"type", "onTabAwaitingHead"}, {"index", index}, {"awaiting", awaiting}};
+    if (scroll_bar.has_value()) {
+        json["scroll_bar"] = scroll_bar.value();
+    }
+    return json.dump();
+}
+
 // WHETHER THE CHARACTER-SWITCH RULE CAN SEE A SWITCH RIGHT NOW: the core holds a reference to compare the factor
 // tab against (CharaDetailSceneScraper::factorSwitchArmed). Not per tab, because the reference is not: it is
 // installed by the factor tab's head latch, kept through that tab's capture and the session's completion, and
@@ -103,8 +148,9 @@ inline std::string tabRefused(int index, bool refused, const std::string &reason
 // and that half is already on the wire (onScrollPosition's `index`), so a front end offers a switch exactly when
 // the factor tab is shown AND this level is true -- which is the rule's own condition, read from the rule.
 //
-// A level, edge-triggered, restated on the first frame of every session. A reader must treat an absent or
-// malformed `armed` as false.
+// A level, edge-triggered, restated on the first frame of every session, like onTabAwaitingHead. It is sent
+// BEFORE onTabAwaitingHead within a frame, so a front end never holds "the factor tab has stopped waiting" while
+// still holding "not armed" from the frame before. A reader must treat an absent or malformed `armed` as false.
 inline std::string factorSwitchArmed(bool armed) {
     return json_util::Json{{"type", "onFactorSwitchArmed"}, {"armed", armed}}.dump();
 }
@@ -113,11 +159,58 @@ inline std::string pageReady(int index) {
     return json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump();
 }
 
-inline std::string factorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {
-    return json_util::Json{{"type", "onFactorProbe"}, {"factors", factors}, {"record_type", record_type}}.dump();
+// THE FACTOR TAB'S FRAGMENT #0, recognized down to the trainee's own visible factor rows, for the early
+// duplicate check -- plus the two facts the front end cannot work out for itself: `below_threshold` and
+// `cue_owed` -- and the attempt it belongs to, `record_id`. Four data fields and nothing else: no record type
+// (no consumer decided anything by it) and no threshold (the front end is not asked to apply one).
+//
+// `record_id` is the id the session was announced under (charaDetailStarted / charaDetailRestarted). The probe is
+// recognized on the recognizer's thread, so this message can arrive after the NEXT session has been announced;
+// the id is what lets the front end drop a result that no longer describes the character on screen, instead of
+// guessing from arrival order.
+//
+// `factors` is the single-frame read (FactorRowReader::visibleSelfPrefix), which never holds more than
+// `factor_limit` -- the self_factor_prefix_length of the layout this session's scraper chose
+// (scene_scraper.json's common or friend_common). The front end compares every factor in it with the head of
+// each stored record.
+//
+// `below_threshold` is `factors.size() < factor_limit`, computed HERE from the same limit the read stopped at,
+// so the flag and the list it describes cannot disagree. When it is true the list ended on the frame (the
+// layout's scroll area shows the threshold's rows, see recognizer_impl::SelfFactorWindow), so the front end
+// additionally requires a stored record to hold exactly that many self factors. An empty list is sent too (the
+// read found no header, say) and is below any limit; `cue_owed` still has to reach the front end.
+//
+// This tab's chime is not sounded by the core (see CharaDetailSceneScraper::constructSession's factor_scroll_ready
+// sink): the front end withholds it until this message says the character is not already stored, and sounds it
+// there. That leaves the front end holding only half the condition. `cue_owed` is the other half -- true when
+// the latch came from the exit that waited for a settled frame, false when the user was already scrolling and
+// an announcement would arrive after the thing it announces. Both halves travel on this one message rather
+// than on two the front end would have to correlate by arrival order; the probe is recognized on a worker
+// thread, so that order is not something either side may lean on.
+inline std::string factorProbe(
+    const std::vector<chara_detail::record::Factor> &factors,
+    std::size_t factor_limit,
+    bool cue_owed,
+    const std::string &record_id) {
+    return json_util::Json{
+        {"type", "onFactorProbe"},
+        {"factors", factors},
+        {"below_threshold", factors.size() < factor_limit},
+        {"cue_owed", cue_owed},
+        {"record_id", record_id},
+    }
+        .dump();
 }
 
-inline std::string charaDetailStarted() { return json_util::Json{{"type", "onCharaDetailStarted"}}.dump(); }
+// A CAPTURE ATTEMPT BEGAN, and `record_id` is the id it will finish under: the `id` of the onCharaDetailFinished
+// that ends it, and the `record_id` of every other message scoped to it (onFactorProbe, and onError for
+// stitch_failed / closed_before_completed). Those outcomes are produced on other threads and can arrive after the
+// next attempt has begun, so a front end compares ids rather than trusting arrival order. Sent by the scraper
+// (CharaDetailSceneScraper::build) after the session's id is minted and before the session is constructed, so the
+// id is the session's own and not a second mint, and a construction that throws still ends under an announced id.
+inline std::string charaDetailStarted(const std::string &record_id) {
+    return json_util::Json{{"type", "onCharaDetailStarted"}, {"record_id", record_id}}.dump();
+}
 
 // A SESSION WAS THROWN AWAY MID-SCENE, and this says whether that cost anything.
 //
@@ -140,17 +233,24 @@ inline std::string charaDetailStarted() { return json_util::Json{{"type", "onCha
 // which errs towards announcing a loss rather than towards the silence this change exists to remove -- the
 // opposite direction from `origin` above, because here the harmless default is the loud one.
 //
-// The discarded session's id and its captured-tab count are DELIBERATELY not here. Both were carried at first
-// and neither was ever read to decide anything: the id names a scraping directory no receiver can open, and the
-// tab count only ever narrowed one class of false positive in a number nothing displayed. A field on the wire
-// has to be parsed, defaulted and kept in step on three front ends, and a field nobody decides from buys none
-// of that back. The id still goes to the log at the discard site (chara_detail_scene_scraper.cpp), which is
-// where a discard is actually traced.
+// A RESET ALSO BEGINS AN ATTEMPT, so `record_id` is the id of the session the reset BUILT -- exactly what
+// charaDetailStarted carries for a fresh open, and for the same reason: the outcomes of the discarded session
+// (its onCharaDetailFinished, a late onFactorProbe) are still on their way, and the front end tells them apart
+// from the new attempt's by this id.
+//
+// The DISCARDED session's id and its captured-tab count are DELIBERATELY not here. Neither is read to decide
+// anything: the discarded id names a scraping directory no receiver can open, and the tab count only ever
+// narrowed one class of false positive in a number nothing displayed. A field on the wire has to be parsed,
+// defaulted and kept in step on three front ends, and a field nobody decides from buys none of that back. The
+// discarded id still goes to the log at the discard site (chara_detail_scene_scraper.cpp), which is where a
+// discard is actually traced. Putting it here under `record_id` would be the worse mistake: the front end would
+// then match the NEW attempt's outcomes against the OLD attempt's id.
 //
 // snake_case keys, like every other `on`-prefixed message in this file; the camelCase block further down is
 // web's protocol and says why it differs.
-inline std::string charaDetailRestarted(bool completed) {
-    return json_util::Json{{"type", "onCharaDetailRestarted"}, {"completed", completed}}.dump();
+inline std::string charaDetailRestarted(bool completed, const std::string &record_id) {
+    return json_util::Json{{"type", "onCharaDetailRestarted"}, {"completed", completed}, {"record_id", record_id}}
+        .dump();
 }
 
 inline std::string charaDetailClosed() { return json_util::Json{{"type", "onCharaDetailClosed"}}.dump(); }

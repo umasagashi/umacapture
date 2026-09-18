@@ -1049,15 +1049,25 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// Early duplicate check driven by the factor-tab probe (before scrolling).
   ///
   /// Returns true and fires the duplicate notification (error sound + capture error) when
-  /// [probeSelf] shares a long enough leading run of self-factors with any stored record (active or
-  /// archived) to clear the match threshold for [recordType] (see
-  /// [CharaDetailRecord.factorProbeMatchThreshold]). Fail-open: if storage is not loaded yet or
-  /// nothing matches it returns false, so the caller emits the normal scroll-ready cue. This only
-  /// notifies; the authoritative dedup still runs in [add] for the full record.
-  bool reportDuplicateFromFactorProbe(List<Factor> probeSelf, RecordType? recordType) {
-    if (probeSelf.isEmpty) {
-      return false;
-    }
+  /// [probeSelf] matches any stored record (active or archived), per
+  /// [CharaDetailRecord.matchesFactorProbe]: every sent factor must agree with the record's own
+  /// factors from the top, and if [belowThreshold] the record's self-factor count must also equal
+  /// [probeSelf]'s length. The core sizes and caps [probeSelf] to its chosen factor-tab layout's
+  /// self-factor-count threshold and states [belowThreshold] itself; this side holds no threshold of
+  /// its own and does
+  /// not re-derive the layout. Fail-open: if storage is not loaded yet or nothing matches it returns
+  /// false, so the caller emits the normal scroll-ready cue. This only notifies; the authoritative
+  /// dedup still runs in [add] for the full record.
+  ///
+  /// [recordId] is the attempt the probe was read in. The capture state is failed only for that
+  /// attempt, and the error sound plays only if it was: a probe of an earlier attempt is silent.
+  /// (The one caller already skips such a probe; the check is repeated here because this is where
+  /// the state is written.)
+  bool reportDuplicateFromFactorProbe(
+    List<Factor> probeSelf, {
+    required bool belowThreshold,
+    required String recordId,
+  }) {
     // Match add()'s view of the active set: fold in any pending batch updates so the probe and the
     // authoritative dedup agree. `_pendingRecords` already includes the published state when non-null
     // (see add()); fall back to the published state, staying null (fail-open) until storage loads.
@@ -1065,36 +1075,29 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     if (activeRecords == null) {
       return false;
     }
-    final threshold = CharaDetailRecord.factorProbeMatchThreshold(recordType);
     final archiveRecords =
         ref.read(charaDetailArchiveStorageLoaderProvider).asData?.value ?? const <CharaDetailRecord>[];
     final existing = [...activeRecords, ...archiveRecords];
-    var bestMatch = 0;
-    CharaDetailRecord? duplicated;
-    for (final record in existing) {
-      final common = record.leadingFactorProbeMatch(probeSelf);
-      if (common > bestMatch) {
-        bestMatch = common;
-      }
-      if (common >= threshold) {
-        duplicated = record;
-        break;
-      }
-    }
+    final duplicated = existing.firstWhereOrNull(
+      (record) => record.matchesFactorProbe(probeSelf, belowThreshold: belowThreshold),
+    );
     logger.i(
-      "Factor probe: ${probeSelf.length} factors, best leading match "
-      "$bestMatch/$threshold, duplicate=${duplicated != null}",
+      "Factor probe: ${probeSelf.length} factors, below_threshold=$belowThreshold, "
+      "duplicate=${duplicated != null}",
     );
     if (duplicated == null) {
       return false;
     }
-    _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
     // Distinct from add()'s "duplicated_character": this fires before scrolling on the looser
-    // leading-factor prefix match, so the message tells the user it is a preliminary check and that
+    // factor-probe match (every sent factor must agree, plus a count check only when the core says
+    // the read ended early), so the message tells the user it is a preliminary check and that
     // scrolling anyway re-runs the authoritative dedup (which can clear a rare false positive).
-    ref
+    final applied = ref
         .read(charaDetailCaptureStateProvider.notifier)
-        .fail("duplicated_character_probe", duplicateRecordId: duplicated.id);
+        .failForRecord(recordId, "duplicated_character_probe", duplicateRecordId: duplicated.id);
+    if (applied) {
+      _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
+    }
     return true;
   }
 
@@ -1158,6 +1161,23 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     );
   }
 
+  /// Tells the capture card that the finished record [recordId] was rejected as a duplicate of
+  /// [duplicatedId], and sounds the duplicate cue if [notifyDuplicate].
+  ///
+  /// Shared by [add] and [_addAsync]. The record id is the attempt's own id (the record directory is
+  /// named by it), so the card is failed only when that attempt is still the one on screen. A verdict
+  /// on an earlier attempt's record -- its merge can run after the next attempt was announced, and on
+  /// web it runs after an asynchronous harvest -- is still acted on in the store, but it neither
+  /// changes the card nor sounds.
+  void _reportRejectedDuplicate(String recordId, String? duplicatedId, {required bool notifyDuplicate}) {
+    final applied = ref
+        .read(charaDetailCaptureStateProvider.notifier)
+        .failForRecord(recordId, "duplicated_character", duplicateRecordId: duplicatedId);
+    if (notifyDuplicate && applied) {
+      _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
+    }
+  }
+
   /// Merges [record] into the active store, or rejects it as a duplicate.
   ///
   /// [notifyDuplicate] is false for a record a **video import** produced, exactly as in [_addAsync]:
@@ -1165,19 +1185,15 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// the import's state, because the merge of an import's records is not guaranteed to fall inside
   /// that window (on web its last batch runs ~0.9 s after the import reports it finished; on desktop
   /// it falls inside only for as long as this path stays synchronous). Only the sound is dropped —
-  /// the capture-state failure below still fires, so the visible status output is unchanged.
+  /// the capture-state failure below still fires, so the visible status output is unchanged (for the
+  /// attempt the record belongs to; see [_reportRejectedDuplicate]).
   ///
   /// Defaulted to true, so every caller that does not know about imports keeps a live capture's cue.
   void add(CharaDetailRecord record, {bool notifyDuplicate = true}) {
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
       _discardRejectedDuplicateSync(rootDirectory / record.id);
-      if (notifyDuplicate) {
-        _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
-      }
-      ref
-          .read(charaDetailCaptureStateProvider.notifier)
-          .fail("duplicated_character", duplicateRecordId: plan.duplicatedId);
+      _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
     }
 
@@ -1225,7 +1241,8 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
   /// that a failed merge could skip. Deciding per record instead has no window at all: a live
   /// capture's records keep their cue because they are merged with this left at its default,
   /// whatever else is running at the time. Only the sound is dropped -- the capture-state
-  /// failure below still fires, so the visible status output is unchanged.
+  /// failure below still fires, so the visible status output is unchanged (for the attempt the
+  /// record belongs to; see [_reportRejectedDuplicate]).
   Future<void> addFromFileAsync(String id, {bool notifyDuplicate = true}) async {
     final storageRoot = rootDirectory.parent.parent;
     try {
@@ -1303,12 +1320,7 @@ class CharaDetailRecordStorage extends AsyncNotifier<List<CharaDetailRecord>> im
     final plan = _resolveAddition(record);
     if (plan.duplicatedId != null) {
       await _discardRejectedDuplicateAsync(rootDirectory / record.id);
-      if (notifyDuplicate) {
-        _duplicatedCharaEvent.add(_duplicatedCharaEventSequence++);
-      }
-      ref
-          .read(charaDetailCaptureStateProvider.notifier)
-          .fail("duplicated_character", duplicateRecordId: plan.duplicatedId);
+      _reportRejectedDuplicate(record.id, plan.duplicatedId, notifyDuplicate: notifyDuplicate);
       return;
     }
 

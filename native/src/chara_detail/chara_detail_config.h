@@ -155,12 +155,15 @@ struct SceneScraperConfig {
     // estimate). Sized well above the worst measured true-offset guess error yet far below the periodicity
     // alias distance, so it rejects far aliases without ever rejecting a genuine offset.
     double guess_window_margin;
-    // How many of the trainee's own factors are read off a single factor-tab frame at most -- the two frames the
-    // character-switch rule compares (recognizer_impl::SelfFactorWindow). A property of THIS LAYOUT, not of the
-    // record type: it is sized so that its rows fit inside the layout's scroll area on that frame, and the layout
-    // choice has one owner (CharaDetailSceneScraper::buildSession). The derivation lives beside the values in
-    // native/tool/builder/chara_detail_scene_scraper_builder.h. A count of factors; not width-normalized. At least
-    // 1, enforced by CharaDetailSceneScraperConfig: a limit of 0 would read nothing on every frame.
+    // How many of the trainee's own factors are read off a single factor-tab frame at most -- the frame the early
+    // duplicate probe reads, and the two the character-switch rule compares (recognizer_impl::SelfFactorWindow).
+    // A property of THIS LAYOUT, not of the record type: it is sized so that its rows fit inside the layout's
+    // scroll area on that frame, and the layout choice has one owner (CharaDetailSceneScraper::constructSession).
+    // The value itself never reaches a front end: the probe message states only whether the list it carries is
+    // shorter than this (see messages::factorProbe), and the front end compares every factor it is sent. The
+    // derivation lives beside the values in native/tool/builder/chara_detail_scene_scraper_builder.h. A count of
+    // factors; not width-normalized. At least 1, enforced by CharaDetailSceneScraperConfig: a limit of 0 would
+    // read nothing on every frame.
     int self_factor_prefix_length;
 
     EXTENDED_JSON_TYPE_NDC(

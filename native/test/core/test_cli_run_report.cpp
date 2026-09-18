@@ -55,8 +55,9 @@ TEST_CASE("a run that reported nothing is a clean run") {
 TEST_CASE("a reported terminal error is named and turns the exit code non-zero") {
     // The empty-clip case this whole change exists for: zero records AND an announcement, which a driver must
     // be able to tell apart from a build that could not start (kExitDidNotRun).
+    // The core sends this tag scoped to the attempt it ends (with a `record_id`); the report counts it all the same.
     RunReport report;
-    report.observe(app::messages::error(kIncompleteSessionTag));
+    report.observe(app::messages::error(kIncompleteSessionTag, "rec-1"));
 
     CHECK(report.errorTotal() == 1);
     CHECK(report.exitCode(false) == kExitReportedError);
@@ -74,7 +75,7 @@ TEST_CASE("two different causes stay distinguishable on the line") {
     RunReport incomplete;
     incomplete.observe(app::messages::error(kIncompleteSessionTag));
     RunReport stitch;
-    stitch.observe(app::messages::error("stitch_failed"));
+    stitch.observe(app::messages::error("stitch_failed", "rec-1"));
 
     CHECK(incomplete.errorTags() != stitch.errorTags());
     CHECK(incomplete.errorTags().at(0) == std::string(kIncompleteSessionTag));
@@ -101,8 +102,8 @@ TEST_CASE("a discard that had already produced its record is not counted as a lo
     // character. Reporting the two alike would make the loud path fire on every legitimate switch, which is the
     // design the user already rejected.
     RunReport report;
-    report.observe(app::messages::charaDetailRestarted(true));
-    report.observe(app::messages::charaDetailRestarted(false));
+    report.observe(app::messages::charaDetailRestarted(true, "rec-2"));
+    report.observe(app::messages::charaDetailRestarted(false, "rec-3"));
 
     CHECK(report.discardedSessions() == 2);
     CHECK(report.discardedIncomplete() == 1);
@@ -213,7 +214,9 @@ TEST_CASE("a notification this report does not classify is not an anomaly") {
     // Most of the stream is progress and lifecycle chatter. It is read successfully and contributes nothing --
     // which is different from being unreadable, and must not show up as `unparsed`.
     RunReport report;
-    report.observe(app::messages::charaDetailStarted());
+    report.observe(app::messages::charaDetailStarted("rec-1"));
+    report.observe(app::messages::factorSwitchArmed(true));
+    report.observe(app::messages::tabAwaitingHead(1, false, false));
     report.observe(app::messages::scrollReady(1));
     report.observe(app::messages::captureStopped());
     CHECK(report.unparsed() == 0);

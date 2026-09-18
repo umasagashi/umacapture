@@ -435,9 +435,12 @@ class CharaDetailStateWidget extends ConsumerWidget {
   // Where the recognizer is inside the character it is on -- and nothing about how one ENDED, which
   // is [CaptureEventView]'s subject. The four terminal statuses collapse to two lines here: the
   // detail screen is either still open with everything captured, or gone.
-  _StatusMessage _resolvePerCharacterMessage(CharaDetailCaptureState state) {
+  _StatusMessage _resolvePerCharacterMessage(CharaDetailCaptureState state) => _messageForStatus(state.status, state);
+
+  // [status] is [state]'s status, or the phase beneath a duplicate hint (see the `duplicateHint` case).
+  _StatusMessage _messageForStatus(CharaDetailCaptureStatus status, CharaDetailCaptureState state) {
     const base = "$tr_capture.capture_control.message";
-    switch (state.status) {
+    switch (status) {
       case CharaDetailCaptureStatus.waitingForDetail:
       case CharaDetailCaptureStatus.failed:
         // A failure is reported as an event; what the banner still has to say is the situation it
@@ -446,14 +449,43 @@ class CharaDetailStateWidget extends ConsumerWidget {
         // ordinary waiting line (rather than a failure-flavoured copy of it) is also what keeps the
         // banner from restating an error the event already carries, in different words.
         return _StatusMessage(CaptureStatusTone.info, Symbols.hourglass_empty_rounded, "$base.waiting_for_detail");
+      case CharaDetailCaptureStatus.waitingForReady:
+        // THE ONE LINE ON THIS CARD THAT SAYS "NOT YET". The recognizer needs a stationary picture
+        // before it can accept the head of the list, and it does not have one for a moment after
+        // the detail screen opens and after every tab switch; scrolling inside that window loses
+        // the rows above the first fragment for good. On a page with no scroll bar there is nothing
+        // to scroll, and the wait lasts until the tab is read: the same status, with a text that
+        // mentions neither scrolling nor a cue (no cue sounds for such a page's wait).
+        //
+        // Hint tone, i.e. the theme's warning colour, for the reason `web.content_frozen` states
+        // for its own use of it: this warns and suggests rather than declaring a failure. Nothing
+        // has gone wrong yet -- that is the whole point of showing it -- but it is the only state
+        // here whose instruction is an instruction NOT to act, so it must not read as the ordinary
+        // informational blue every other phase wears. `tab_refused`, the report of the loss this
+        // prevents, keeps the error tone.
+        //
+        // Only a page the core stated to have no scroll bar gets the second text. An unstated page
+        // gets the first, which is the one that protects the head of a list if the page does scroll.
+        final key = state.currentTabScrollBar == false
+            ? "$base.waiting_for_ready_no_scroll_bar"
+            : "$base.waiting_for_ready";
+        return _StatusMessage(CaptureStatusTone.hint, Symbols.hourglass_empty_rounded, key);
       case CharaDetailCaptureStatus.detailReady:
-      case CharaDetailCaptureStatus.duplicateHint:
-        // A duplicate HINT is not a state of its own here: the screen is at the factor-tab top with
-        // nothing captured yet, exactly as `detailReady`, and the user may scroll on and capture it
-        // anyway. That the probe fired is the event's business.
         return _switchAwareMessage(CaptureStatusTone.info, Symbols.swipe_down_rounded, "$base.detail_ready", state);
+      case CharaDetailCaptureStatus.duplicateHint:
+        // A duplicate HINT is not a state of its own here: the card states the phase the hint stands
+        // over -- the factor-tab top, either not captured yet (`detailReady`) or already read
+        // (`tabCompleted`) -- and the user may go on either way. That the probe fired is the event's
+        // business. The phase is the state's answer, not a second decision made here.
+        final phase = state.phase;
+        assert(phase != CharaDetailCaptureStatus.duplicateHint, 'phase never answers duplicateHint');
+        return _messageForStatus(phase, state);
       case CharaDetailCaptureStatus.capturing:
         return _switchAwareMessage(CaptureStatusTone.info, Symbols.downloading_rounded, "$base.capturing", state);
+      case CharaDetailCaptureStatus.tabCompleted:
+        // The tab on screen is read; the character is not. Info tone rather than success: success is
+        // kept for the whole record, and the instruction here is still to move on to another tab.
+        return _switchAwareMessage(CaptureStatusTone.info, Symbols.task_alt_rounded, "$base.tab_completed", state);
       case CharaDetailCaptureStatus.tabRefused:
         // Present tense, and it belongs here rather than in the event tile: the refusal is a level
         // that stands until the user acts on it, and it is withdrawn the moment they do. An event
@@ -467,8 +499,10 @@ class CharaDetailStateWidget extends ConsumerWidget {
       case CharaDetailCaptureStatus.alreadyCaptured:
         // Both mean the same thing about the screen in front of the user: every tab of this
         // character is done, so they can switch away or keep going. WHICH of the two it was -- a new
-        // record or one already in the table -- is the event's subject, and the only place that
-        // distinction survives the next character being opened.
+        // record or one already in the table -- is the event's subject, and the event is the only
+        // place it is stated at all. It survives everything that happens to THIS character (the
+        // banner below it does not) and goes when the next one is opened, which is the moment the
+        // question it answers stops being about the screen in front of the user.
         return _switchAwareMessage(
           CaptureStatusTone.success,
           Symbols.check_circle_rounded,
@@ -482,8 +516,10 @@ class CharaDetailStateWidget extends ConsumerWidget {
   // now. [base] carries `action.switchable` and `action.not_switchable`; [switchSafety] picks one, so
   // the line that says switching is possible and the green arrows beside it read the same answer.
   // While it is not safe the line points at the 継承タブ, the one tab the core watches for a switch,
-  // during capture and after it alike. A null answer (no guidance) reads as "not safe", as the
-  // indicator does.
+  // during capture and after it alike. That pointer is only ever shown away from the 継承タブ: the
+  // statuses routed here are reached on that tab only after its head latch, and the latch is what
+  // arms the core's switch detector (the core states the arming before it withdraws the wait). A null
+  // answer (no guidance) reads as "not safe", as the indicator does.
   _StatusMessage _switchAwareMessage(
     CaptureStatusTone tone,
     IconData icon,
@@ -582,7 +618,15 @@ class CharaDetailStateWidget extends ConsumerWidget {
         controllerAvailable &&
         sessionActive &&
         (status == CharaDetailCaptureStatus.detailReady ||
+            // The settle wait is an open detail screen with a session in progress, exactly like the
+            // states around it. Its switch indicator is also the one thing on the card that says
+            // "do not switch characters yet" while the factor tab has not latched its head -- the
+            // screen then looks like a safe moment and the core cannot yet see a switch.
+            status == CharaDetailCaptureStatus.waitingForReady ||
             status == CharaDetailCaptureStatus.capturing ||
+            // A read tab of an unfinished character: the rings are what tells the user which tab
+            // is still to do, and the instruction beside them is to go there.
+            status == CharaDetailCaptureStatus.tabCompleted ||
             status == CharaDetailCaptureStatus.duplicateHint ||
             // A refused tab is still an open detail screen with a session in progress: the other
             // tabs keep whatever they captured, and the remedy is to move between the tabs the rings
@@ -1457,8 +1501,8 @@ class CaptureEventView extends ConsumerWidget {
       CharaDetailCaptureStatus.succeeded => (CaptureStatusTone.success, Symbols.check_circle_rounded, "succeeded"),
       CharaDetailCaptureStatus.duplicateHint => (CaptureStatusTone.hint, Symbols.lightbulb_rounded, "duplicate_hint"),
       CharaDetailCaptureStatus.alreadyCaptured => (CaptureStatusTone.neutral, Symbols.info_rounded, "already_captured"),
-      // Only `failed` is left; the other five statuses are positions inside a character and are
-      // never recorded as events (see `_eventfulCaptureStatuses`).
+      // Only `failed` is left; the other six statuses are positions inside a character and are
+      // never recorded as events (see `eventfulCaptureStatuses`).
       _ => (CaptureStatusTone.error, Symbols.error_rounded, "failed"),
     };
     final text = event.status == CharaDetailCaptureStatus.failed ? _failureText(event.error) : "$base.$key.text".tr();
