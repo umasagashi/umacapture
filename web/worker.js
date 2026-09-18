@@ -1035,9 +1035,11 @@ function startDrainLoop() {
       //
       // The onError must be attributed to THIS update, not merely observed during it: a record regeneration is
       // a passenger on a shared event loop (see handleUpdateRecord), so a live capture running alongside it
-      // emits its own onErrors -- closed_before_completed, stitch_failed, updateFrame failed -- into the very
-      // same message queue. Counting one of those as the regeneration's failure would fail a record that never
-      // failed. This is the same coexistence the desktop implements on purpose (native_controller.h), so the
+      // emits its own onErrors into the very same message queue: the attempt-ending tags that
+      // NativeApi::notifyAttemptFailed reports (closed_before_completed, scrape_failed, stitch_failed), and
+      // per-frame failures such as updateFrame failed. Counting one of those as the regeneration's failure
+      // would fail a record that never failed. This is the same coexistence the desktop implements on
+      // purpose (native_controller.h), so the
       // attribution, not the coexistence, is what has to be fixed.
       if (parsed && parsed.type === 'onError') {
         const target = updateFailureTarget(parsed.message);

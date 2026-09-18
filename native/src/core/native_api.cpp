@@ -429,6 +429,13 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     restarted_connection->listen(
         [this](const auto &discarded, const auto &begun) { notifyCharaDetailRestarted(discarded, begun); });
 
+    // The attempt could not be built: creating its scraping directory failed, so it has nowhere to scrape into.
+    // Terminal for the attempt, and reported exactly as a stitch failure is -- the record will never exist, so
+    // the UI is told the attempt finished unsuccessfully instead of being left waiting for a capture that can
+    // never progress.
+    const auto session_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    session_failed_connection->listen([this](const auto &info) { notifyAttemptFailed(info, "scrape_failed"); });
+
     // Every verdict the factor character-switch rule reaches, counted for the run (FactorSwitchVerdictTally) and
     // relayed to no front end. Direct: the note is taken inside the scraper's processing of the judged frame.
     const auto factor_switch_judged_connection =
@@ -528,6 +535,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         factor_switch_judged_connection,
         started_connection,
         restarted_connection,
+        session_failed_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir,
         directory_hooks);

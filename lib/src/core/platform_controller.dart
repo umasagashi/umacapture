@@ -2143,7 +2143,7 @@ class PlatformController {
           // `completed` absent counts as NOT completed, matching the rule `record_info.h` states for this
           // field: err towards noticing a loss rather than towards the silence this change removes.
           //
-          // `record_id` is the session the reset BUILT, which is the attempt that begins here. The
+          // `record_id` is the session the reset BEGAN, which is the attempt that begins here. The
           // discarded session's id is not on the wire: nothing on this side decides anything from it.
           {
             final recordId = _announcedRecordId(data);
@@ -2179,9 +2179,10 @@ class PlatformController {
           } else {
             // THE HALF OF THIS MESSAGE THAT USED TO BE PARSED AND THROWN AWAY. `success: false` is the
             // core's single announcement that a session reached a terminal state having produced
-            // nothing, from all three of its emitters (the detail screen closed mid-capture, the input
-            // ended mid-capture, a stitch that failed), and it is the only one of the three that is a
-            // fact about the SESSION rather than a string about the cause.
+            // nothing, from all four of its emitters (the detail screen closed mid-capture, the input
+            // ended mid-capture, a session whose scraping directory could not be created, a stitch that
+            // failed), and it is the only one of the four that is a fact about the SESSION rather than a
+            // string about the cause.
             //
             // Counted, and nothing else — deliberately. The user-facing report of these endings is the
             // `onError` that native sends immediately after each of them, which already reaches
@@ -2191,7 +2192,7 @@ class PlatformController {
             // to know that a session ended empty, not what killed it.
             //
             // Counting HERE rather than off those `onError` tags is what makes the number right: the
-            // tags are three different strings that this side would have to keep in step with C++ by
+            // tags are four different strings that this side would have to keep in step with C++ by
             // hand, `stitch_failed` is not among the two the design named, and an error tag can arrive
             // for things that are not a session ending at all. One emitter, one count.
             videoImportSessionTally.noteSessionEndedWithoutRecord();

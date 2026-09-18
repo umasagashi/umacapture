@@ -958,9 +958,11 @@ void CharaDetailRecognizer::probe(
     const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value());
 
-    // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
-    // An exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
-    // Contain it so a single bad probe frame cannot take down the process.
+    // This runs on the recognizer event-runner thread, whose runner already contains a throwing listener
+    // around the single event (SingleThreadMultiEventRunnerImpl in util/event_util.h, plus the backstop in
+    // EventRunnerThread::run), so an escape costs this event and not the process. Contain it here anyway:
+    // the runner's arm logs one generic line that names no record_id and cannot tell a deliberate stop()
+    // cancellation from a real failure, which is the distinction drawn below.
     try {
         const auto self_factors = factor_rows->visibleSelfPrefix(frame, window);
 
@@ -971,8 +973,9 @@ void CharaDetailRecognizer::probe(
         on_factor_probe_completed->send(self_factors, window.factor_limit, cue_owed, raw_info);
     } catch (...) {
         // One arm on purpose: WinRT/ONNX exceptions do not derive from std::exception, and without an arm
-        // that catches them too they would escape the worker thread and terminate the process (see
-        // EventRunnerThread::run for the same pattern). describeCurrentFailure() does the type matching.
+        // that catches them too they would pass this handler and be reported by the runner as an unknown
+        // exception, losing the record_id and the abort/failure split (EventRunnerThread::run carries the
+        // same pair of arms for that reason). describeCurrentFailure() does the type matching.
         const auto failure = error_util::describeCurrentFailure();
         if (failure.aborted) {
             // Not a defect: stop() cancels an in-flight inference by design (see
@@ -988,10 +991,11 @@ void CharaDetailRecognizer::probe(
 void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateMode) const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value(), isUpdateMode);
 
-    // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
-    // Frame::open / json_util::read/write / copy_file all throw on a missing or corrupt record file, and an
-    // exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
-    // Contain it so one unreadable record cannot take down the process; the next queued record still runs.
+    // This runs on the recognizer event-runner thread, whose runner contains a throwing listener around the
+    // single event (SingleThreadMultiEventRunnerImpl in util/event_util.h), so the next queued record runs
+    // either way. Frame::open / json_util::read/write / copy_file all throw on a missing or corrupt record
+    // file; contain that here so the drop is reported against its record_id and a stop() cancellation is
+    // not logged as an error, neither of which the runner's generic arm can do.
     try {
         const auto record_dir = record_root_dir / raw_info.record_id;
         const auto record_path = record_dir / "record.json";
@@ -1109,7 +1113,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         }
     } catch (...) {
         // One arm on purpose, same as probe(): WinRT/ONNX exceptions do not derive from std::exception and
-        // must be contained here too, so one unreadable record cannot terminate the process.
+        // must be matched here too, or they reach the runner's arm and lose the classification below.
         const auto failure = error_util::describeCurrentFailure();
         if (failure.aborted) {
             // A stop() that races a full recognize() lands here, and it is the same expected cancellation

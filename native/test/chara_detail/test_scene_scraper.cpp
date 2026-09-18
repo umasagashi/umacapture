@@ -194,6 +194,12 @@ struct HookRecorder {
     // `refused` instead of `made`, and the call throws what std::filesystem::create_directories throws.
     bool refuse = false;
     std::vector<std::filesystem::path> refused;
+    // Set to make the mkdir of the directory with this name succeed and record as usual WITHOUT creating it, so
+    // the session builds and every write into that tab fails the way a full disk or a revoked permission makes
+    // it fail. Frame::save has no hook of its own, so this is the only seam that puts a failing fragment write
+    // in reach of a case without touching production code. A tab's directory is created with its parents, so
+    // silencing one tab still leaves the session's own directory there (the other two tabs make it).
+    std::optional<std::filesystem::path> silent_stem;
 
     [[nodiscard]] io_util::DirectoryHooks hooks() {
         io_util::DirectoryHooks h;
@@ -204,6 +210,9 @@ struct HookRecorder {
                     "refused by the test", path, std::make_error_code(std::errc::no_space_on_device));
             }
             made.push_back(path);
+            if (silent_stem.has_value() && path.filename() == silent_stem.value()) {
+                return;
+            }
             std::filesystem::create_directories(path);
         };
         h.rmdir = [this](const std::filesystem::path &path) {
@@ -299,12 +308,16 @@ struct ScraperHarness {
     event_util::Connection<RecordInfo> started = event_util::makeDirectConnection<RecordInfo>();
     event_util::Connection<DiscardedSession, RecordInfo> restarted =
         event_util::makeDirectConnection<DiscardedSession, RecordInfo>();
+    event_util::Connection<RecordInfo> session_failed = event_util::makeDirectConnection<RecordInfo>();
 
     std::vector<DiscardedSession> discards;
-    // The session each reset BUILT, in the order of `discards`, and every session build() announced. What lets a
+    // The session each reset BEGAN, in the order of `discards`, and every session build() announced. What lets a
     // case state which id a new attempt is announced under.
     std::vector<RecordInfo> rebuilt;
     std::vector<RecordInfo> starts;
+    // The identity every on_session_failed carried, in order: the id an attempt that could not be built ends
+    // under. What lets a case state that a refused directory ends the attempt instead of crashing on it.
+    std::vector<RecordInfo> failures;
     // The identity every on_completed carried, in order: the id a session's record finishes under.
     std::vector<RecordInfo> completed_infos;
     // Every verdict the character-switch rule stated, in order, each with how many sessions had been discarded when
@@ -463,12 +476,13 @@ struct ScraperHarness {
               factor_switch_judged,
               started,
               restarted,
+              session_failed,
               config,
               kScrapingRoot,
               recorder.hooks()) {
-        restarted->listen([this](const DiscardedSession &discarded, const RecordInfo &built) {
+        restarted->listen([this](const DiscardedSession &discarded, const RecordInfo &begun) {
             discards.push_back(discarded);
-            rebuilt.push_back(built);
+            rebuilt.push_back(begun);
             sequence.emplace_back("restarted");
             view = FrontEndView{};
         });
@@ -476,6 +490,10 @@ struct ScraperHarness {
             starts.push_back(info);
             sequence.emplace_back("started");
             view = FrontEndView{};
+        });
+        session_failed->listen([this](const RecordInfo &info) {
+            failures.push_back(info);
+            sequence.emplace_back("session_failed");
         });
         factor_switch_judged->listen(
             [this](const scraper_impl::FactorSwitchVerdict verdict) { verdicts.emplace_back(verdict, discards.size()); });
@@ -2693,11 +2711,12 @@ TEST_CASE("an opened session announces the id its record finishes under, before 
     CHECK(h.completed_infos[0].record_id == h.starts[0].record_id);
     CHECK(h.starts.size() == 1);
 }
-TEST_CASE("an opened attempt whose session cannot be built is announced first, under the id its close reports") {
+TEST_CASE("an opened attempt whose session cannot be built ends as a failure under the id it was announced with") {
     // Building a session creates its scraping directory, and that throws when the directory cannot be created. A
-    // front end accepts an outcome only under an id it was told about, and the close below reports the id the
-    // failed session was given -- so unless that id was announced BEFORE the throw, the front end drops the
-    // failure and keeps showing the previous attempt, with no failure and no sound.
+    // front end accepts an outcome only under an id it was told about, and the failure below reports the id the
+    // refused session was given -- so unless that id was announced BEFORE the throw, the front end drops the
+    // failure and keeps showing the previous attempt, with no failure and no sound. The frames that follow must
+    // find no session to work on: the scrapers the construction never made are what the next frame would reach.
     ScraperHarness h;
     std::vector<RecordInfo> closed_unfinished;
     h.closed_before_completed->listen([&closed_unfinished](const RecordInfo &info) {
@@ -2705,18 +2724,33 @@ TEST_CASE("an opened attempt whose session cannot be built is announced first, u
     });
 
     h.recorder.refuse = true;
-    CHECK_THROWS_AS(h.opened->send(SceneInfo{record::Standard}), std::filesystem::filesystem_error);
+    REQUIRE_NOTHROW(h.opened->send(SceneInfo{record::Standard}));
     REQUIRE(h.starts.size() == 1);
     REQUIRE_FALSE(h.recorder.refused.empty());
     CHECK(h.recorder.made.empty());
     CHECK(h.starts[0].record_id == sessionIdOf(h.recorder.refused.front()));
 
+    // The attempt ends HERE, under the id it was announced with, instead of leaving a half-built session for the
+    // next frame to dereference.
+    REQUIRE(h.failures.size() == 1);
+    CHECK(h.failures[0].record_id == h.starts[0].record_id);
+
+    // Later frames are inert: nothing is scraped, nothing reaches the wire, and no directory is retried.
+    const std::size_t refused_before = h.recorder.refused.size();
+    REQUIRE_NOTHROW(h.update(solidFrameAt(0, kNoBanner), SceneState{FactorPage, record::Standard}));
+    REQUIRE_NOTHROW(h.update(solidFrameAt(kPastDwell, kBanner), SceneState{FactorPage, record::FriendStandard}));
+    CHECK(h.recorder.refused.size() == refused_before);
+    CHECK(h.positions.empty());
+    CHECK(h.starts.size() == 1);
+    CHECK(h.rebuilt.empty());
+    CHECK(h.failures.size() == 1);
+
+    // And the close says nothing more: the attempt already reported its own, more specific outcome.
     h.closed->send();
-    REQUIRE(closed_unfinished.size() == 1);
-    CHECK(closed_unfinished[0].record_id == h.starts[0].record_id);
+    CHECK(closed_unfinished.empty());
 }
 
-TEST_CASE("a reset whose session cannot be built is announced first, under the id its close reports") {
+TEST_CASE("a reset whose session cannot be built ends as a failure under the id the reset announced") {
     // The reset's twin of the case above: a reset begins an attempt too, and announces it on the restart.
     ScraperHarness h;
     std::vector<RecordInfo> closed_unfinished;
@@ -2729,17 +2763,231 @@ TEST_CASE("a reset whose session cannot be built is announced first, under the i
     h.recorder.refuse = true;
     // A record type that persists past the dwell resets the session; the first frame only opens the dwell.
     h.update(solidFrameAt(0, kNoBanner), SceneState{FactorPage, record::FriendStandard});
-    CHECK_THROWS_AS(
-        h.scraper.update(solidFrameAt(kPastDwell, kBanner), SceneState{FactorPage, record::FriendStandard}),
-        std::filesystem::filesystem_error);
+    REQUIRE_NOTHROW(h.update(solidFrameAt(kPastDwell, kBanner), SceneState{FactorPage, record::FriendStandard}));
     REQUIRE(h.rebuilt.size() == 1);
     REQUIRE_FALSE(h.recorder.refused.empty());
     CHECK(h.rebuilt[0].record_id == sessionIdOf(h.recorder.refused.front()));
     CHECK(h.rebuilt[0].record_id != h.starts[0].record_id);
 
+    REQUIRE(h.failures.size() == 1);
+    CHECK(h.failures[0].record_id == h.rebuilt[0].record_id);
+
+    // The dwell that caused this reset is gone with the session, so a further frame of the same record type does
+    // not announce a second attempt and does not retry the refused directory.
+    const std::size_t refused_before = h.recorder.refused.size();
+    REQUIRE_NOTHROW(h.update(solidFrameAt(2 * kPastDwell, kBanner), SceneState{FactorPage, record::FriendStandard}));
+    CHECK(h.recorder.refused.size() == refused_before);
+    CHECK(h.rebuilt.size() == 1);
+    CHECK(h.failures.size() == 1);
+
+    h.closed->send();
+    CHECK(closed_unfinished.empty());
+}
+
+TEST_CASE("a tab rebuild whose directory cannot be recreated ends the attempt instead of retrying every frame") {
+    // Leaving an incomplete tab recreates its directory: rmdir then mkdir (SceneScrapingBox::recreate). The mkdir
+    // can be refused for exactly the reasons the session's own can, and this one happens on a session that is
+    // fully built and capturing. Left to the runner's containment the tab would keep its old interpreter while
+    // its directory stayed deleted, and the same rebuild would be retried -- and thrown out of -- on every later
+    // frame, so the capture would never finish and nobody would be told why.
+    ScraperHarness h;
+    std::vector<RecordInfo> closed_unfinished;
+    h.closed_before_completed->listen([&closed_unfinished](const RecordInfo &info) {
+        closed_unfinished.push_back(info);
+    });
+
+    h.opened->send(SceneInfo{record::Standard});
+    REQUIRE(h.starts.size() == 1);
+    REQUIRE(h.failures.empty());
+    // One frame on the skill tab is enough to make it the tab the next frame leaves.
+    h.update(solidFrameAt(0, kNoBanner), SceneState{SkillPage, record::Standard});
+
+    h.recorder.refuse = true;
+    REQUIRE_NOTHROW(h.update(solidFrameAt(1, kNoBanner), SceneState{FactorPage, record::Standard}));
+    REQUIRE_FALSE(h.recorder.refused.empty());
+    REQUIRE(h.failures.size() == 1);
+    CHECK(h.failures[0].record_id == h.starts[0].record_id);
+    // The rebuild is not a new attempt: nothing was announced and nothing was discarded.
+    CHECK(h.starts.size() == 1);
+    CHECK(h.rebuilt.empty());
+
+    const std::size_t refused_before = h.recorder.refused.size();
+    REQUIRE_NOTHROW(h.update(solidFrameAt(2, kNoBanner), SceneState{FactorPage, record::Standard}));
+    REQUIRE_NOTHROW(h.update(solidFrameAt(3, kNoBanner), SceneState{SkillPage, record::Standard}));
+    CHECK(h.recorder.refused.size() == refused_before);
+    CHECK(h.failures.size() == 1);
+
+    h.closed->send();
+    CHECK(closed_unfinished.empty());
+}
+
+// --- A fragment that could not be written ------------------------------------------------------------------
+//
+// One step later than the three cases above: the session was built, so what fails is a write INTO it. The
+// commit is two steps -- persist the fragment, then record that it is persisted -- and updateUntilReady never
+// asks a latch that has become ready() again, so a throw in between is unrepairable by any later frame. It
+// breaks two ways and both are covered below: a latch whose flag was never set (a tab that can never be ready),
+// and a fragment counter that was incremented while building the path (a tab that reports ready over a file
+// that is not on disk, so the stitcher delivers a short record as a success).
+//
+// The negative control for the frame scripts here is "the capture helpers really capture", which drives the
+// same helpers with the directories in place; the base case carries its own control, because its script is its
+// own.
+
+TEST_CASE("a base image that cannot be written ends the attempt under the id it was announced with") {
+    ScraperHarness h;
+    std::vector<RecordInfo> closed_unfinished;
+    h.closed_before_completed->listen(
+        [&closed_unfinished](const RecordInfo &info) { closed_unfinished.push_back(info); });
+
+    bool directory_survives = false;
+    SUBCASE("the session's directory goes away under the capture") {
+        directory_survives = false;
+    }
+    SUBCASE("negative control: the same frames with the directory in place") {
+        directory_survives = true;
+    }
+
+    h.opened->send(SceneInfo{record::Standard});
+    REQUIRE(h.starts.size() == 1);
+    const std::filesystem::path session_dir = kScrapingRoot / h.starts[0].record_id;
+
+    // The skill tab first, on frames with NO banner: the base catcher's snackbar gate stays shut, so the tab's
+    // own writes are the only ones so far and they all succeed.
+    h.update(noScrollBarFrameAt(0, /*nonce=*/0), SceneState{SkillPage, record::Standard});
+    h.update(noScrollBarFrameAt(kPastStationary, /*nonce=*/0), SceneState{SkillPage, record::Standard});
+    REQUIRE(h.pages_ready == std::vector<int>{static_cast<int>(SkillPage)});
+    REQUIRE(h.failures.empty());
+
+    // The record directory removed under a running capture -- one of the causes in range -- leaves the base
+    // image as the only write left, and the one that fails.
+    if (!directory_survives) {
+        std::filesystem::remove_all(session_dir);
+    }
+
+    // Banner frames now: identical, so the base region settles while the snackbar gate opens. Driven until the
+    // gate is certain to have opened rather than pinned to one frame, and every frame after a failure is inert.
+    for (int i = 1; i <= 4; i++) {
+        CHECK_NOTHROW(h.update(
+            withBanner(noScrollBarFrameAt(kPastStationary * static_cast<uint64>(i + 1), /*nonce=*/0)),
+            SceneState{SkillPage, record::Standard}));
+    }
+
+    if (directory_survives) {
+        CHECK(h.failures.empty());
+        CHECK(std::filesystem::exists(session_dir / path_config.base.filename()));
+    } else {
+        REQUIRE(h.failures.size() == 1);
+        CHECK(h.failures[0].record_id == h.starts[0].record_id);
+        CHECK(h.completions == 0);
+        // The attempt is over: a later frame does nothing, and the close adds no second, vaguer outcome.
+        CHECK_NOTHROW(h.update(
+            withBanner(noScrollBarFrameAt(kPastStationary * 8, /*nonce=*/0)), SceneState{SkillPage, record::Standard}));
+        CHECK(h.failures.size() == 1);
+        h.closed->send();
+        CHECK(closed_unfinished.empty());
+    }
+}
+
+TEST_CASE("a tab button that cannot be written ends the attempt under the id it was announced with") {
+    ScraperHarness h;
+    std::vector<RecordInfo> closed_unfinished;
+    h.closed_before_completed->listen(
+        [&closed_unfinished](const RecordInfo &info) { closed_unfinished.push_back(info); });
+
+    // The skill tab's directory is recorded but never created, so writes into it fail while the session itself
+    // is built exactly as usual.
+    h.recorder.silent_stem = path_config.skill.stem();
+    h.opened->send(SceneInfo{record::Standard});
+    REQUIRE(h.starts.size() == 1);
+
+    // A fixed nonce settles the tab-button crop together with the content, and SceneScraper::update asks the
+    // button first, so addTabButton is the write that fails.
+    CHECK_NOTHROW(captureWithoutScrolling(h, SkillPage, 0));
+
+    REQUIRE(h.failures.size() == 1);
+    CHECK(h.failures[0].record_id == h.starts[0].record_id);
+    CHECK(h.pages_ready.empty());
+    CHECK(h.completions == 0);
+
+    CHECK_NOTHROW(captureWithoutScrolling(h, SkillPage, kPastStationary * 4));
+    CHECK(h.failures.size() == 1);
+    CHECK(h.pages_ready.empty());
+
+    h.closed->send();
+    CHECK(closed_unfinished.empty());
+}
+
+TEST_CASE("a scroll-area fragment that cannot be written ends the attempt, and no tab is reported ready") {
+    // THE OUTCOME THAT IS NOT A STALL. saveIncremental increments the fragment count while BUILDING the path,
+    // so a write that throws leaves the box counting a file that is not on disk; the tab then reads ready over
+    // a fragment set with a hole in it, the session completes, and the stitcher hands back a record short by a
+    // strip -- reported as a success. `pages_ready` staying empty is what pins that, and it is the assertion
+    // this case exists for.
+    ScraperHarness h;
+    std::vector<RecordInfo> closed_unfinished;
+    h.closed_before_completed->listen(
+        [&closed_unfinished](const RecordInfo &info) { closed_unfinished.push_back(info); });
+
+    h.recorder.silent_stem = path_config.skill.stem();
+    h.opened->send(SceneInfo{record::Standard});
+    REQUIRE(h.starts.size() == 1);
+
+    // An alternating nonce repaints everything above the scroll area, so the tab-button crop never settles and
+    // the content latch is the only write these frames drive.
+    CHECK_NOTHROW(h.update(noScrollBarFrameAt(0, /*nonce=*/0), SceneState{SkillPage, record::Standard}));
+    CHECK(h.failures.empty());
+    CHECK_NOTHROW(h.update(noScrollBarFrameAt(kPastStationary, /*nonce=*/1), SceneState{SkillPage, record::Standard}));
+
+    REQUIRE(h.failures.size() == 1);
+    CHECK(h.failures[0].record_id == h.starts[0].record_id);
+    CHECK(h.pages_ready.empty());
+    CHECK(h.completions == 0);
+
+    CHECK_NOTHROW(
+        h.update(noScrollBarFrameAt(kPastStationary * 4, /*nonce=*/0), SceneState{SkillPage, record::Standard}));
+    CHECK(h.failures.size() == 1);
+    CHECK(h.pages_ready.empty());
+
+    h.closed->send();
+    CHECK(closed_unfinished.empty());
+}
+
+TEST_CASE("a crop that falls outside the frame still degrades for that frame alone") {
+    // THE OTHER SIDE OF THE CATCH, and the reason it names a type instead of catching everything. A rect that
+    // does not fit the frame is a property of the configuration and the frame size, not of the session: the
+    // next frame is read again from scratch, nothing is half-written, and the attempt must survive it. A
+    // catch(...) around the same calls would end the attempt here, which is what this case refuses.
+    auto config = shippedScraperConfig();
+    config.common.tab_button_rect = Rect<double>{Point<double>{0.0, 0.0}, Point<double>{4.0, 4.0}};
+    ScraperHarness h(config);
+    std::vector<RecordInfo> closed_unfinished;
+    h.closed_before_completed->listen(
+        [&closed_unfinished](const RecordInfo &info) { closed_unfinished.push_back(info); });
+
+    h.opened->send(SceneInfo{record::Standard});
+    REQUIRE(h.starts.size() == 1);
+
+    // The tab-button catcher crops with that rect, inside the same call the fragment writes are reached
+    // through, so the throw travels the exact path the catch sits on. Counted over the two frames the tab
+    // needs rather than pinned to one, because which frame first reaches the crop is the catcher's business,
+    // not this case's: what is pinned is that it reaches the CALLER, and that the attempt is still standing.
+    int escaped = 0;
+    for (const uint64 at : {uint64{0}, kPastStationary}) {
+        try {
+            h.update(withBanner(noScrollBarFrameAt(at, /*nonce=*/0)), SceneState{SkillPage, record::Standard});
+        } catch (const std::out_of_range &) {
+            escaped++;
+        }
+    }
+    CHECK(escaped > 0);
+    CHECK(h.failures.empty());
+
+    // The session announced at the open is still the one in place: closing it reports an unfinished capture,
+    // which an attempt ended by failSession does not.
     h.closed->send();
     REQUIRE(closed_unfinished.size() == 1);
-    CHECK(closed_unfinished[0].record_id == h.rebuilt[0].record_id);
+    CHECK(closed_unfinished[0].record_id == h.starts[0].record_id);
 }
 
 TEST_CASE("a tab with no scroll bar keeps awaiting from its content latch until its tab button settles") {

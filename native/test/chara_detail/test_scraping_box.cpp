@@ -76,6 +76,25 @@ TEST_CASE("PageScrapingBox refuses a page configured with no scans") {
     CHECK(recorder.made.empty());
 }
 
+TEST_CASE("a scroll-area write that failed still leaves the page reading as a complete scroll area") {
+    // WHY A FAILED FRAGMENT WRITE CANNOT BE LEFT TO THE NEXT FRAME. saveIncremental numbers the file while
+    // BUILDING its path, so the count moves before the bytes do: a write that throws leaves the page counting a
+    // fragment that is not on disk, and scrollAreaReady() -- the predicate the interpreter turns into "this tab
+    // is captured" -- says yes over the hole. The scraper's answer is to end the attempt
+    // (CharaDetailSceneScraper::update); this pins the state that answer exists for.
+    //
+    // This HookRecorder never creates anything, so the page's directory is absent and the save fails to open. A
+    // solid frame in the placeholder scan's colour completes the one-scan sequence on its first strip, which is
+    // the write-through commit a skill or campaign page makes.
+    HookRecorder recorder;
+    scraper_impl::PageScrapingBox box(kPlaceholderScans, "unit_test_absent_page_box", recorder.hooks());
+    const Frame frame = Frame::fixed(testutil::solid(100, Color(0, 0, 255)));
+
+    CHECK_FALSE(box.scrollAreaReady());
+    CHECK_THROWS_AS(box.addScrollArea(frame), ImageIoError);
+    CHECK(box.scrollAreaReady());
+}
+
 TEST_CASE("SceneScrapingBox creates one directory per tab") {
     HookRecorder recorder;
     const std::filesystem::path root = "unit_test_scene_box";
@@ -616,6 +635,31 @@ TEST_CASE("setScrollArea on a factor box commits its sole strip immediately") {
 
     CHECK(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
     CHECK(box.scrollAreaReady());
+}
+
+TEST_CASE("a staged factor strip whose flush fails still leaves the page reading as a complete scroll area") {
+    // THE SAME HOLE AS THE WRITE-THROUGH SITE, ON THE PATH A FACTOR TAB ACTUALLY TAKES. A factor box stages
+    // its strips, so the write a real factor capture ends on is flushFront, not saveIncremental. flushFront
+    // numbers the file while BUILDING its path and pops the strip only after the bytes land: a flush that
+    // throws leaves the page counting fragments that are not on disk, while scrollAreaReady() -- the
+    // predicate the interpreter turns into "this tab is captured" -- has already become true from the same
+    // gray completion that ordered the flush. The scraper's answer is to end the attempt
+    // (CharaDetailSceneScraper::update); this pins the state that answer exists for, so a flush moved out
+    // from under that catch cannot quietly deliver a record short by every staged strip.
+    //
+    // Same script as the gray-termination cases above, with a directory the HookRecorder never creates: the
+    // staging and the in-RAM crop are identical and only the drain that follows them fails.
+    HookRecorder recorder;
+    const std::filesystem::path dir = "unit_test_absent_factor_box";
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    box.addScrollArea(structuredArmFrame(100));  // staged in RAM: no write is attempted yet
+    CHECK_FALSE(box.scrollAreaReady());
+
+    // Gray completion (20 px of background completes kGapScan) crops in RAM and then drains the tail.
+    CHECK_THROWS_AS(box.addScrollArea(gapFrame(), 20), ImageIoError);
+
+    CHECK(box.scrollAreaReady());
+    CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
 }
 
 }  // namespace

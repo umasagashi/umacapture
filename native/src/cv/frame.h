@@ -86,6 +86,16 @@ inline std::vector<double> linspace(double start, double end, int num) {
 
 using namespace frame_impl;
 
+// An image file could not be read or written. Its own type, rather than a bare std::runtime_error, because a
+// caller that owns bookkeeping about the file (a scraping box, which counts the fragments it has persisted)
+// has to tell this apart from the image errors it survives per frame -- an out-of-range crop, an undecodable
+// probe -- and "which exception class the failing call happens to use" is not a distinction it can rest on.
+// Thrown by Frame::decodeBgr and Frame::save; see them for the conditions.
+class ImageIoError : public std::runtime_error {
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class FrameAnchor {
 public:
     static FrameAnchor intersect(const Size<int> &frame_size) {
@@ -252,15 +262,15 @@ public:
     [[nodiscard]] inline static cv::Mat decodeBgr(const std::filesystem::path &path) {
         std::ifstream file(path, std::ios::binary);
         if (!file) {
-            throw std::runtime_error("Frame::decodeBgr: failed to open: " + path.generic_string());
+            throw ImageIoError("Frame::decodeBgr: failed to open: " + path.generic_string());
         }
         const std::vector<uchar> buffer((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         const cv::Mat image = cv::imdecode(buffer, cv::IMREAD_UNCHANGED);
         if (image.empty()) {
-            throw std::runtime_error("Frame::decodeBgr: failed to decode image: " + path.generic_string());
+            throw ImageIoError("Frame::decodeBgr: failed to decode image: " + path.generic_string());
         }
         if (image.type() != CV_8UC3) {
-            throw std::runtime_error("Frame::decodeBgr: image must be CV_8UC3: " + path.generic_string());
+            throw ImageIoError("Frame::decodeBgr: image must be CV_8UC3: " + path.generic_string());
         }
         return image;
     }
@@ -648,7 +658,7 @@ public:
         const auto &dest_rect = anchor_.mapToFrame(rect);
         // Real bounds check (mirrors view()): image(cvRect) with a ROI past the edge, or a negative-size rect,
         // throws a raw cv::Exception. Throw std::out_of_range instead so it degrades via the same path as
-        // bgrAt/view (a dropped record through the recognizer/scraper try/catch).
+        // bgrAt/view; see bgrAt for the catches that contain it.
         if (dest_rect.left() < 0 || dest_rect.top() < 0 || dest_rect.width() < 0 || dest_rect.height() < 0
             || dest_rect.right() > image.cols || dest_rect.bottom() > image.rows) {
             throw std::out_of_range("Frame::paste out of bounds");
@@ -672,16 +682,16 @@ public:
         // tries to read it back.
         std::vector<uchar> buffer;
         if (!cv::imencode(path.extension().string(), image, buffer)) {
-            throw std::runtime_error("failed to encode image: " + path.generic_string());
+            throw ImageIoError("failed to encode image: " + path.generic_string());
         }
         std::ofstream file(path, std::ios::binary);
         if (!file) {
-            throw std::runtime_error("failed to open image for write: " + path.generic_string());
+            throw ImageIoError("failed to open image for write: " + path.generic_string());
         }
         file.write(reinterpret_cast<const char *>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
         file.flush();
         if (!file) {
-            throw std::runtime_error("failed to write image: " + path.generic_string());
+            throw ImageIoError("failed to write image: " + path.generic_string());
         }
     }
 
@@ -705,7 +715,10 @@ private:
 
     [[nodiscard]] inline const BGR &bgrAt(int x, int y) const {
         // Real bounds check (not a Debug-only assert): an out-of-range access is undefined behavior in
-        // release. Throwing degrades to a dropped record via the recognizer/scraper try/catch.
+        // release. Throwing degrades the read instead of corrupting it: the recognizer's own catch drops the
+        // record it was reading, and on the scraper's path the containment is the event runner's per-event
+        // catch (see EventRunner in util/event_util.h), which costs the rest of that frame's update and
+        // nothing beyond it -- the scraper's own catch is typed on ImageIoError and does not take this.
         if (y < 0 || y >= image.rows || x < 0 || x >= image.cols) {
             throw std::out_of_range("Frame::bgrAt out of bounds");
         }
@@ -714,7 +727,7 @@ private:
 
     [[nodiscard]] inline Frame view(int x, int y, int width, int height) const {
         // Real bounds check (not a Debug-only assert): a ROI past the image edge is undefined behavior in
-        // release. Throwing degrades to a dropped record via the recognizer/scraper try/catch.
+        // release. Throwing degrades this frame's work the same way bgrAt's does; see there for the catches.
         if (x < 0 || y < 0 || width < 0 || height < 0 || (x + width) > image.cols || (y + height) > image.rows) {
             throw std::out_of_range("Frame::view out of bounds");
         }

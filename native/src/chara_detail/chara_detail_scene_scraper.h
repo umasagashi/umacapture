@@ -682,10 +682,11 @@ public:
     // its own scroll sequence, so an empty sequence is a malformed configuration rather than a page that simply
     // captures nothing; it is refused at construction, in Release too.
     //
-    // This is a class invariant, NOT a user-facing diagnostic: the box is built on the scraper runner thread,
-    // where the throw is only logged and the next frame then trips over the rolled-back session. The refusal
-    // that reaches the user is CharaDetailSceneScraperConfig's constructor in chara_detail_config.h, on the
-    // startPipeline path. See the definition.
+    // This is a class invariant, not the configuration check a user is meant to see: the box is built on the
+    // scraper runner thread, where its construction site -- CharaDetailSceneScraper::constructSession, or
+    // rebuildTab through SceneScrapingBox::recreate -- turns the throw into that attempt's own `scrape_failed`.
+    // The refusal that names the configuration is CharaDetailSceneScraperConfig's constructor in
+    // chara_detail_config.h, on the startPipeline path. See the definition.
     PageScrapingBox(
         const std::vector<scraper_config::ScanParameter> &scan_parameters,
         const std::filesystem::path &image_dir,
@@ -1211,6 +1212,23 @@ private:
 
 }  // namespace scraper_impl
 
+// The lifecycle of ONE capture attempt, owned by CharaDetailSceneScraper alone. Deliberately not
+// scraper_impl::ReadyState: that enum answers "can this interpreter still be updated" for the three tab
+// interpreters, which have no attempt to fail, and an attempt that failed is neither updatable nor complete.
+//
+//   Closed     -- no session. The initial state, and what release() leaves behind.
+//   Scraping   -- constructSession finished; the tab scrapers, the box and the base catcher all exist. THE ONLY
+//                 state in which they may be dereferenced (tabScraper asserts it).
+//   Completed  -- the session captured everything and announced its record (checkForCompleted).
+//   Failed     -- building or rebuilding the session threw; the partial state was discarded and the failure was
+//                 reported under the attempt's id. Terminal: only a close clears it (see failSession).
+enum class SessionState {
+    Closed,
+    Scraping,
+    Completed,
+    Failed,
+};
+
 class CharaDetailSceneScraper {
 public:
     CharaDetailSceneScraper(
@@ -1231,6 +1249,7 @@ public:
         const event_util::Sender<scraper_impl::FactorSwitchVerdict> &on_factor_switch_judged,
         const event_util::Sender<RecordInfo> &on_started,
         const event_util::Sender<DiscardedSession, RecordInfo> &on_restarted,
+        const event_util::Sender<RecordInfo> &on_session_failed,
         const scraper_config::CharaDetailSceneScraperConfig &config,
         const std::filesystem::path &scraping_dir,
         const io_util::DirectoryHooks &directory_hooks);
@@ -1279,14 +1298,15 @@ private:
     // beginSession gives the session its identity: the monitors go back to their initial levels and a fresh record
     // id is minted. It cannot fail. constructSession builds everything the session scrapes with, and CAN throw --
     // the scraping directory is created there, and a failed create_directories (disk full, access denied) throws.
-    // On the scraper runner that throw is only logged (event_util), and the session stays unbuilt.
+    // It catches that throw, discards whatever was constructed and ends the attempt as `scrape_failed` under the
+    // announced id (failSession).
     //
     // THE ANNOUNCEMENT HAS TO PRECEDE THE THROW. A front end accepts an attempt's outcome only under the id the
-    // attempt was announced with. The id minted here is still the one a close reports
-    // (on_closed_before_completed carries current_record_info), so a session that failed to construct after an
-    // unannounced mint would end in a failure the front end cannot attribute to anything: it would drop it, and
-    // keep showing the previous attempt instead of this one's failure. Announcing between the halves makes every
-    // id an outcome can carry an id the front end has already been told.
+    // attempt was announced with. The id minted here is the one that failure reports (on_session_failed carries
+    // current_record_info), so a session that failed to construct after an unannounced mint would end in a
+    // failure the front end cannot attribute to anything: it would drop it, and keep showing the previous attempt
+    // instead of this one's failure. Announcing between the halves makes every id an outcome can carry an id the
+    // front end has already been told.
     void beginSession(record::RecordType record_type);
     void constructSession();
 
@@ -1369,9 +1389,24 @@ private:
     // notifyTabAwaitingHeadIfChanged in the same frame (see the call site).
     void notifyFactorSwitchArmedIfChanged();
 
-    void handleTabSwitchInProgress(TabPage tab_page);
+    // Returns true when the session ended here, so update() stops processing a frame whose session no longer
+    // exists -- the same contract handleRecordTypeChange has. The only way it can end here is a rebuild that
+    // could not create the tab's directory (see rebuildTab).
+    [[nodiscard]] bool handleTabSwitchInProgress(TabPage tab_page);
 
-    void rebuildTab(TabPage tab_page);
+    // Replace the tab's interpreter and its scraping directory. Returns false when the directory could not be
+    // recreated: the partial session is then discarded and reported (failSession), because the box the tab would
+    // scrape into no longer exists -- recreate() removes the directory before it makes it again.
+    [[nodiscard]] bool rebuildTab(TabPage tab_page);
+
+    // End the attempt that could not be built: log the failure being handled, discard whatever was constructed,
+    // hold SessionState::Failed and report the failure under the id the attempt was announced with. CALL ONLY
+    // FROM A CATCH BLOCK -- it describes the exception in flight (error_util::describeCurrentFailure).
+    //
+    // Failed is cleared by release() alone, i.e. by the detail screen closing. A retry on the next frame, or on
+    // the next reset, would re-run the very create_directories that just failed, and nothing about a frame or a
+    // character switch makes an unwritable directory writable.
+    void failSession();
 
     // On the factor tab, diff the current top-of-page against factor_switch_reference. A large change that
     // outlasts the dwell while at the top is a CANDIDATE switch, and the rule then reads what both frames show:
@@ -1548,11 +1583,18 @@ private:
     // both reset rules fire legitimately on a real switch, so what travels here is the FACT of a discard
     // and its contents -- see DiscardedSession for why the contents are what makes a partial failure
     // expressible, and why "a discard is a failure" was rejected. The second argument is the session the reset
-    // built: a reset begins an attempt as an open does, and that attempt is announced under its own id.
+    // began: a reset begins an attempt as an open does, and that attempt is announced under its own id.
     const event_util::Sender<DiscardedSession, RecordInfo> on_restarted;
     // A session began for a freshly opened detail screen (build), carrying its identity. The id is the one
     // its record finishes under (on_completed), so every later outcome of this attempt can be matched to it.
     const event_util::Sender<RecordInfo> on_started;
+    // THE ATTEMPT ENDED BECAUSE ITS SESSION COULD NOT BE BUILT, carrying the id it was announced under. An error
+    // channel, and terminal for the attempt exactly as a stitch failure is for a record: the scraping directory
+    // could not be created, so there is nothing for this attempt to scrape into and nothing a later frame could
+    // retry. Scoped to the attempt for the same reason on_completed is -- a front end applies an outcome only to
+    // the attempt it was announced for. A session that failed does NOT also report closed_before_completed when
+    // the screen is closed: it already stated its own, more specific outcome (see the on_closed listener).
+    const event_util::Sender<RecordInfo> on_session_failed;
 
     // THE ONE top margin (fraction of the true placeholder track above the thumb, from topMargin()) at or
     // below which the content counts as flush with the head of its list. Zero: any exposed track above the
@@ -1738,7 +1780,7 @@ private:
     std::unique_ptr<scraper_impl::SceneScraper> campaign_scraper;
     std::unique_ptr<scraper_impl::BaseFrameCatcher> base_frame_catcher;
     std::shared_ptr<scraper_impl::SceneScrapingBox> scraping_box;
-    scraper_impl::ReadyState scraping_state = scraper_impl::Null;
+    SessionState scraping_state = SessionState::Closed;
 
     // Switch-detection bookkeeping. Indexed by TabPage.
     std::array<bool, kAllTabPages.size()> tab_completed{};

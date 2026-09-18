@@ -2,9 +2,11 @@
 
 // Telling a deliberate cancellation apart from a real failure, at the places that contain every exception.
 //
-// Several pipeline stages catch everything on purpose, because they run on an event-runner thread that has no
-// try/catch of its own (see EventRunnerThread::run): an exception escaping there leaves the std::thread and
-// calls std::terminate. Those handlers used to log every containment at error level, which is right for a
+// Several pipeline stages catch everything on purpose. The event runner beneath them contains a throwing
+// listener around the single event (SingleThreadMultiEventRunnerImpl in util/event_util.h) and a backstop in
+// EventRunnerThread::run, but that containment can only log one generic line: it names neither the unit of
+// work that was lost nor whether the throw was a failure at all.
+// Those handlers used to log every containment at error level, which is right for a
 // genuine failure and wrong for a cancellation the app itself asked for. The concrete case is the Wasm build:
 // stop() raises an inference abort by design (native/wasm/wasm_inference_bridge.h), the parked bridge wait
 // throws, and the in-flight record is dropped. That is the successful stop path -- yet it read exactly like a

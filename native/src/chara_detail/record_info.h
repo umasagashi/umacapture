@@ -26,7 +26,7 @@ struct RecordInfo {
 //    scraping directory the discarded fragments were being written into, which is what makes a discard
 //    traceable in a log at all. It is deliberately NOT put on the wire: no front end decides anything from it,
 //    and a record id that names nothing a receiver can open is a field to be kept in step for nothing. The id
-//    that DOES travel with a discard is the session the reset built (messages::charaDetailRestarted), because a
+//    that DOES travel with a discard is the session the reset began (messages::charaDetailRestarted), because a
 //    front end matches the new attempt's outcomes against it; this one would be the wrong attempt's.
 //  * `completed` -- whether the session had ALREADY produced its record (CharaDetailSceneScraper::ready()). A
 //    discard of a completed session loses nothing: the record was handed to the stitcher before the switch.

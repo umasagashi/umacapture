@@ -130,8 +130,8 @@ void CharaDetailSceneStitcher::stitchTab(
     // For record types other than Standard, unnecessary tabs may be left empty -- and PageScrapingBox only
     // creates the directories it actually writes to, so an unscraped tab's input_dir may not exist at all.
     // std::filesystem::is_empty throws if the path is missing, so check existence first (a missing dir is
-    // treated as empty, falling back to the dummy image) rather than letting the throw escape the stitcher
-    // runner and terminate the process.
+    // treated as empty, falling back to the dummy image) rather than letting the throw reach this stitcher's
+    // own handler, which would turn an ordinary unscraped tab into a failed record.
     const bool has_content = std::filesystem::exists(input_dir) && !std::filesystem::is_empty(input_dir);
     auto scroll_area =
         Frame::fixed(has_content ? scroll_area_stitcher.stitch(input_dir) : createDummyImage(scroll_area_window_size));

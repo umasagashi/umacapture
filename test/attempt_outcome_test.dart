@@ -138,7 +138,7 @@ void main() {
       expect(stateOf(env.container).attemptId, 'r1');
 
       env.controller.handleNativeMessage(_restarted('r2'));
-      expect(stateOf(env.container).attemptId, 'r2', reason: 'the session the reset built');
+      expect(stateOf(env.container).attemptId, 'r2', reason: 'the session the reset began');
     });
 
     for (final message in <String, Map<String, Object?>>{
