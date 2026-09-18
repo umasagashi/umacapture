@@ -493,10 +493,18 @@ class PlatformChannel {
       // pre-select the window tab; it is advisory (implementation-defined) rather than enforced,
       // so the exclusion above is what actually keeps monitors out — in Chromium. Firefox honours
       // neither, so its picker still lists whole screens.
+      //
+      // `cursor: 'never'` asks the engine for a pointer-free surface, and no engine can be relied on
+      // to deliver one: Firefox's capture constraints do not implement `cursor`, Chromium does not
+      // honour it consistently across its capture backends, and WebKit's behaviour is unknown. So on
+      // web the pointer can be part of what recognition reads — unlike Windows, which drops it at the
+      // capture session itself (`IsCursorCaptureEnabled(false)` in windows/runner/window_capturer.h).
+      // The constraint is requested anyway: it costs nothing and states what this app wants, so an
+      // engine that honours it delivers a pointer-free surface without a change here.
       stream = await web.window.navigator.mediaDevices
           .getDisplayMedia(
             web.DisplayMediaStreamOptions(
-              video: web.MediaTrackConstraints(displaySurface: 'window'.toJS),
+              video: web.MediaTrackConstraints(displaySurface: 'window'.toJS, cursor: 'never'.toJS),
               monitorTypeSurfaces: 'exclude',
             ),
           )
@@ -1068,11 +1076,12 @@ class PlatformChannel {
     // close before the call happens.
     final JSPromise<web.MediaStream> request;
     try {
-      // Same constraints the capture session uses, so the still shows exactly the surface capture
-      // would have seen: a window share (monitors excluded), which is what these reports are about.
+      // Same constraints the capture session uses, including the cursor request it cannot rely on, so
+      // the still shows exactly the surface capture would have seen: a window share (monitors
+      // excluded), which is what these reports are about.
       request = web.window.navigator.mediaDevices.getDisplayMedia(
         web.DisplayMediaStreamOptions(
-          video: web.MediaTrackConstraints(displaySurface: 'window'.toJS),
+          video: web.MediaTrackConstraints(displaySurface: 'window'.toJS, cursor: 'never'.toJS),
           monitorTypeSurfaces: 'exclude',
         ),
       );

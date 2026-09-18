@@ -362,6 +362,8 @@ private:
                 throw std::runtime_error("Failed to create CaptureSession.");
             }
 
+            // The pointer is dropped at the source here. The web producer cannot guarantee the same;
+            // the reason is at its getDisplayMedia call in lib/src/core/platform_channel_web.dart.
             session.IsCursorCaptureEnabled(false);
             session.StartCapture();
             current_window = hwnd;
