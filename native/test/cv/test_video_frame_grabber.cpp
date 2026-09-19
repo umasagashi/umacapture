@@ -24,6 +24,7 @@
 #include <filesystem>
 #include <fstream>
 #include <optional>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -37,6 +38,7 @@
 
 #include "cv/video_frame_grabber.h"
 #include "types/shape.h"
+#include "util/video_backend_guard.h"
 
 namespace uma::video {
 namespace {
@@ -50,8 +52,16 @@ const Size<int> kSize{64, 48};
 
 // Motion JPEG in AVI: the one encoding OpenCV can always produce, so the clip exists on any machine that can
 // build this target and no case here degrades into a skip.
+//
+// The written path carries a per-PROCESS random token: more than one umacapture_tests process can run at
+// a time in the same working directory (Debug and Release side by side, an independent verification run
+// alongside a regression run), and a fixed name under the shared system temp directory would let one
+// process's write/remove race another's still-open clip. There is no pid helper in this tree, so a
+// random token stands in (test_scraper_estimators.cpp's uniqueHarnessDir() uses the same device for the
+// same reason). One token per process is enough here -- every call site already passes a distinct `name`.
 std::filesystem::path writeClip(const std::string &name, const int frames = kFrameCount) {
-    const auto path = std::filesystem::temp_directory_path() / name;
+    static const std::string token = std::to_string(std::random_device{}());
+    const auto path = std::filesystem::temp_directory_path() / (token + "_" + name);
     std::filesystem::remove(path);
     cv::VideoWriter writer(path.generic_string(), cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), kFps,
                            cv::Size(kSize.width(), kSize.height()));
@@ -63,6 +73,8 @@ std::filesystem::path writeClip(const std::string &name, const int frames = kFra
     }
     writer.release();
     REQUIRE(std::filesystem::exists(path));
+    // Written to be decoded by the backend the product decodes with; see util/video_backend_guard.h.
+    testutil::requireFfmpegDecodes(path);
     return path;
 }
 
@@ -516,7 +528,11 @@ TEST_CASE("a path that does not open throws with the message the front end class
 }
 
 TEST_CASE("a file that is not a video throws rather than reporting an empty timeline") {
-    const auto path = std::filesystem::temp_directory_path() / "uma_grabber_not_a_video.avi";
+    // Random per-process token for the same reason writeClip() above carries one: this literal is a real
+    // write, not just a path computed for comparison, so two concurrent umacapture_tests processes would
+    // otherwise race the same file (one truncating it mid-read by the other).
+    const std::string token = std::to_string(std::random_device{}());
+    const auto path = std::filesystem::temp_directory_path() / ("uma_grabber_not_a_video_" + token + ".avi");
     {
         std::ofstream out(path, std::ios::binary);
         out << "this is not a video, but it has a video extension";

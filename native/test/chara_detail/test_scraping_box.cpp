@@ -9,6 +9,8 @@
 #include <doctest/doctest.h>
 
 #include <filesystem>
+#include <random>
+#include <stdexcept>
 #include <vector>
 
 #pragma clang diagnostic push
@@ -30,6 +32,12 @@ namespace {
 // constructor, so it cannot be brace-value-initialized with {}.
 const scraper_config::ScanParameter kNoFactorEndGreen{0.0, 0.0, {Color(0, 0, 0), Color(0, 0, 0)}};
 
+// A placeholder scan sequence for the directory-lifecycle cases, which never run a scan at all. They still
+// have to build their boxes the way product does: PageScrapingBox refuses an empty sequence, because a page
+// that scans nothing can never terminate its scroll sequence.
+const std::vector<scraper_config::ScanParameter> kPlaceholderScans{
+    {0.5, 0.2, {Color(0, 0, 200), Color(0, 0, 255)}}};
+
 // Records the paths passed to the injected directory hooks, without touching the filesystem.
 struct HookRecorder {
     std::vector<std::filesystem::path> made;
@@ -47,11 +55,44 @@ TEST_CASE("PageScrapingBox creates its image directory via the injected hook") {
     HookRecorder recorder;
     const std::filesystem::path dir = "unit_test_page_box";
 
-    scraper_impl::PageScrapingBox box({}, dir, recorder.hooks());
+    scraper_impl::PageScrapingBox box(kPlaceholderScans, dir, recorder.hooks());
 
     CHECK(recorder.made.size() == 1);
     CHECK(recorder.made.front() == dir);
     CHECK(recorder.removed.empty());
+}
+
+TEST_CASE("PageScrapingBox refuses a page configured with no scans") {
+    HookRecorder recorder;
+
+    // A page that scans nothing can never terminate its scroll sequence: current_scan is end() from the first
+    // strip on, so every latch drops its rows and the page never completes. That is a malformed configuration,
+    // and it has to be refused in RELEASE too -- the assert_ in addScrollArea compiles away there, so without
+    // this the shipped build would quietly capture an empty tab instead of reporting a bad config.
+    CHECK_THROWS_AS(
+        scraper_impl::PageScrapingBox({}, "unit_test_empty_scans", recorder.hooks()), std::invalid_argument);
+
+    // Refused before it takes any effect: no directory is created for a box that was never valid.
+    CHECK(recorder.made.empty());
+}
+
+TEST_CASE("a scroll-area write that failed still leaves the page reading as a complete scroll area") {
+    // WHY A FAILED FRAGMENT WRITE CANNOT BE LEFT TO THE NEXT FRAME. saveIncremental numbers the file while
+    // BUILDING its path, so the count moves before the bytes do: a write that throws leaves the page counting a
+    // fragment that is not on disk, and scrollAreaReady() -- the predicate the interpreter turns into "this tab
+    // is captured" -- says yes over the hole. The scraper's answer is to end the attempt
+    // (CharaDetailSceneScraper::update); this pins the state that answer exists for.
+    //
+    // This HookRecorder never creates anything, so the page's directory is absent and the save fails to open. A
+    // solid frame in the placeholder scan's colour completes the one-scan sequence on its first strip, which is
+    // the write-through commit a skill or campaign page makes.
+    HookRecorder recorder;
+    scraper_impl::PageScrapingBox box(kPlaceholderScans, "unit_test_absent_page_box", recorder.hooks());
+    const Frame frame = Frame::fixed(testutil::solid(100, Color(0, 0, 255)));
+
+    CHECK_FALSE(box.scrollAreaReady());
+    CHECK_THROWS_AS(box.addScrollArea(frame), ImageIoError);
+    CHECK(box.scrollAreaReady());
 }
 
 TEST_CASE("SceneScrapingBox creates one directory per tab") {
@@ -59,7 +100,8 @@ TEST_CASE("SceneScrapingBox creates one directory per tab") {
     const std::filesystem::path root = "unit_test_scene_box";
 
     scraper_impl::SceneScrapingBox box(
-        {}, {}, {}, kNoFactorEndGreen, record::RecordType::Standard, root, recorder.hooks());
+        kPlaceholderScans, kPlaceholderScans, kPlaceholderScans, kNoFactorEndGreen, record::RecordType::Standard,
+        root, recorder.hooks());
 
     CHECK(recorder.made.size() == 3);
     CHECK(recorder.made[0] == root / path_config.skill.stem());
@@ -74,7 +116,8 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
     const std::filesystem::path factor_dir = root / path_config.factor.stem();
 
     scraper_impl::SceneScrapingBox box(
-        {}, {}, {}, kNoFactorEndGreen, record::RecordType::Standard, root, recorder.hooks());
+        kPlaceholderScans, kPlaceholderScans, kPlaceholderScans, kNoFactorEndGreen, record::RecordType::Standard,
+        root, recorder.hooks());
     recorder.made.clear();
 
     box.resetFactorBox();
@@ -97,8 +140,17 @@ TEST_CASE("SceneScrapingBox::resetFactorBox removes then recreates only the fact
 // resolves to a 5 px required run and K (the absent scan's length, 0.2) resolves to 20 px.
 
 // A fresh, empty temp directory for boxes whose addScrollArea writes real fragment files. Reused, cleared.
+//
+// The directory name carries a per-PROCESS random token: more than one umacapture_tests process can run
+// at a time in the same working directory (Debug and Release side by side, an independent verification
+// run alongside a regression run), and a fixed name under the shared system temp directory would let one
+// process's remove_all/create_directories race another's still-open files. There is no pid helper in this
+// tree, so a random token stands in (test_scraper_estimators.cpp's uniqueHarnessDir() uses the same
+// device for the same reason). One token per process is enough here -- unlike uniqueHarnessDir(), this
+// function already takes a distinguishing `name` per call, so no additional counter is needed.
 std::filesystem::path freshTempDir(const std::string &name) {
-    const auto dir = std::filesystem::temp_directory_path() / name;
+    static const std::string token = std::to_string(std::random_device{}());
+    const auto dir = std::filesystem::temp_directory_path() / (name + "_" + token);
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
     return dir;
@@ -583,6 +635,31 @@ TEST_CASE("setScrollArea on a factor box commits its sole strip immediately") {
 
     CHECK(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
     CHECK(box.scrollAreaReady());
+}
+
+TEST_CASE("a staged factor strip whose flush fails still leaves the page reading as a complete scroll area") {
+    // THE SAME HOLE AS THE WRITE-THROUGH SITE, ON THE PATH A FACTOR TAB ACTUALLY TAKES. A factor box stages
+    // its strips, so the write a real factor capture ends on is flushFront, not saveIncremental. flushFront
+    // numbers the file while BUILDING its path and pops the strip only after the bytes land: a flush that
+    // throws leaves the page counting fragments that are not on disk, while scrollAreaReady() -- the
+    // predicate the interpreter turns into "this tab is captured" -- has already become true from the same
+    // gray completion that ordered the flush. The scraper's answer is to end the attempt
+    // (CharaDetailSceneScraper::update); this pins the state that answer exists for, so a flush moved out
+    // from under that catch cannot quietly deliver a record short by every staged strip.
+    //
+    // Same script as the gray-termination cases above, with a directory the HookRecorder never creates: the
+    // staging and the in-RAM crop are identical and only the drain that follows them fails.
+    HookRecorder recorder;
+    const std::filesystem::path dir = "unit_test_absent_factor_box";
+    scraper_impl::PageScrapingBox box({kArmScan, kGapScan}, dir, recorder.hooks(), kGreenEnd);
+    box.addScrollArea(structuredArmFrame(100));  // staged in RAM: no write is attempted yet
+    CHECK_FALSE(box.scrollAreaReady());
+
+    // Gray completion (20 px of background completes kGapScan) crops in RAM and then drains the tail.
+    CHECK_THROWS_AS(box.addScrollArea(gapFrame(), 20), ImageIoError);
+
+    CHECK(box.scrollAreaReady());
+    CHECK_FALSE(std::filesystem::exists(dir / path_config.scroll_area.withNumber(0, 5).filename()));
 }
 
 }  // namespace

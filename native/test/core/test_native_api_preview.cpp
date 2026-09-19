@@ -14,10 +14,10 @@
 //     display surface and never turns the preview on. These cases are the only automated detection this
 //     behaviour has (.claude/rules/platform-parity.md, "test gap").
 //   * The EMISSION itself (NativeApi::emitPreviewFrame: the pyramid pre-pass, the final INTER_AREA resize to
-//     fitSize, the BGR -> BGRA conversion and the transport copy) is not reachable from this target. It lives
-//     in native_api.cpp, which the test executable deliberately does not link -- that TU builds the whole
-//     recognition pipeline. What IS pinned here is every decision that function consults; binding fitSize to
-//     the pixel dimensions actually emitted would need emitPreviewFrame split into its own translation unit.
+//     fitSize, the BGR -> BGRA conversion and the transport copy) is not asserted anywhere. The translation
+//     unit is linked, but reaching that function needs a running pipeline delivering frames and a sink to
+//     receive them; binding fitSize to the pixel dimensions actually emitted would need emitPreviewFrame split
+//     out so it can be called on its own. What IS pinned here is every decision that function consults.
 
 #include <doctest/doctest.h>
 

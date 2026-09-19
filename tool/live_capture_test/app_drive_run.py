@@ -86,8 +86,10 @@ SCRATCH_ROOT = ROOT / "testdata/harness/appdrive_root"
 # Per-tab scroll-ready markers in the app's own stdout, at debug level. Tabs 0 and 2 are logged by
 # the `scroll_ready_connection` listener in native_api.cpp, which is a direct connection and so
 # fires synchronously at the scraper's send instant. The factor tab never reaches that listener --
-# `factor_scroll_ready` is a separate connection that runs the duplicate probe -- so its observable
-# is the probe's own value dump, which crosses into the recognizer runner and therefore LAGS the
+# `makeTabScraper` hands it `factor_scroll_ready`, a sink with no listener at all, which is how the
+# factor tab's cue is withheld from the wire -- so its observable is instead the duplicate probe's
+# own value dump. The probe is armed from the head latch (`head_latched`, sent by both of
+# `startScrolling`'s exits) and crosses into the recognizer runner, and therefore LAGS the
 # scraper's instant by one queue hop. Waiting on it is still sound (it can only be late, never
 # early), it just holds the clip marginally longer than tab 1 strictly needs.
 #

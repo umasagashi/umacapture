@@ -21,15 +21,20 @@
 
 namespace uma::app {
 
-// Do not use Native::instance() in this constructor.
 NativeApi::NativeApi()
-    : pane_mode_latch(std::make_shared<PaneModeLatch>())
+    : NativeApi(std::make_shared<PaneModeLatch>()) {}
+
+// Do not use Native::instance() in this constructor.
+NativeApi::NativeApi(std::shared_ptr<PaneModeLatch> latch)
+    : pane_mode_latch(std::move(latch))
     , detail_crop_tracker(std::make_shared<DetailCropTracker>(pane_mode_latch)) {
     // Installed once, here, rather than per session: the tracker outlives every pipeline (it is owned by
-    // this singleton so a latch survives a mid-capture record regeneration), and setReportCallback must not
-    // run while frames flow. `this` is a function-local static with process lifetime, so the capture cannot
-    // dangle. The callback fires on the distributor thread; notifyDetailCropReported is safe there (notify()
-    // is, and the throttle state it touches is only ever touched from that same thread).
+    // this NativeApi so a latch survives a mid-capture record regeneration), and setReportCallback must not
+    // run while frames flow. What keeps the captured `this` from dangling is not storage duration but the
+    // destructor: ~NativeApi joins the event loop before any member dies, and that teardown destroys every
+    // stage holding a copy of the tracker, so no invocation can be in flight or begin afterwards. The
+    // callback fires on the distributor thread; notifyDetailCropReported is safe there (notify() is, and the
+    // throttle state it touches is only ever touched from that same thread).
     detail_crop_tracker->setReportCallback(
         [this](const Rect<int> &default_rect, const Rect<int> &corrected, bool latched) {
             notifyDetailCropReported(default_rect, corrected, latched);
@@ -38,7 +43,8 @@ NativeApi::NativeApi()
 
 NativeApi::~NativeApi() {
     // The event loop must be joined before this instance is destroyed; otherwise the worker threads may
-    // still reference this singleton (a function-local static) as it is torn down at process exit.
+    // still reference it while its members are being torn down. Running here, ahead of every member
+    // destructor, is what makes the callbacks those threads hold safe -- see the constructor's.
     // joinEventLoop() is idempotent (no-op when not running), so this is safe even after an explicit join.
     joinEventLoop();
 }
@@ -143,6 +149,7 @@ CaptureSessionStart NativeApi::startCaptureSession(const CaptureSessionKind kind
         // Same unit, same two hooks, same reason: the geometry belongs to the run being measured, and a range
         // carried over from the previous session would describe frames this one never forwarded.
         forwarded_frame_geometry.beginRun();
+        factor_switch_verdicts.beginRun();
         // A loop left running by a record regeneration is ADOPTED when it was built for the same pipeline
         // identity and REBUILT when it was not (CapturePipelineIdentity says which config keys that covers and
         // why): riding a mismatched loop would silently give this session the other one's frame handling, record
@@ -182,6 +189,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // one a session start reaching this far gets a second time, harmlessly.
     record_production.beginRun();
     forwarded_frame_geometry.beginRun();
+    factor_switch_verdicts.beginRun();
 
     const auto config_json = json_util::Json::parse(native_config);
     // What this loop is being built for, resolved by the SAME function that produced the identity the caller
@@ -264,8 +272,6 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto chara_detail_opened_connection =
         scraper_runner->makeConnection<chara_detail::SceneInfo>("chara_detail_opened");
     const auto chara_detail_closed_connection = scraper_runner->makeConnection<>("chara_detail_closed");
-
-    chara_detail_opened_connection->listen([this](const auto &) { notifyCharaDetailStarted(); });
 
     {
         // Detail-crop auto-calibration, on unless the config turns it off. Absent key == enabled, so the
@@ -350,10 +356,8 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     event_runners->add(stitcher_runner);
 
     const auto closed_before_completed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
-    closed_before_completed_connection->listen([this](const auto &info) {
-        notifyCharaDetailFinished(info, false);
-        notifyError("closed_before_completed");
-    });
+    closed_before_completed_connection->listen(
+        [this](const auto &info) { notifyAttemptFailed(info, "closed_before_completed"); });
 
     const auto scroll_ready_connection = event_util::makeDirectConnection<int>();
     scroll_ready_connection->listen([this](int index) {
@@ -369,8 +373,53 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto scroll_updated_connection = event_util::makeDirectConnection<int, double>();
     scroll_updated_connection->listen([this](int index, double progress) { notifyScrollUpdated(index, progress); });
 
-    const auto scroll_position_connection = event_util::makeDirectConnection<int, bool>();
-    scroll_position_connection->listen([this](int index, bool at_top) { notifyScrollPosition(index, at_top); });
+    // Carries the three-valued top-of-content word, not a yes/no: the resolution of "no sensor could read this
+    // frame" belongs to each front-end consumer, whose costs for it are opposite (see messages::scrollPosition).
+    const auto scroll_position_connection = event_util::makeDirectConnection<int, std::string>();
+    scroll_position_connection->listen(
+        [this](int index, const std::string &top_of_content) { notifyScrollPosition(index, top_of_content); });
+
+    // A tab's capture was refused (its first fragment was not the head of the list), or that refusal was
+    // withdrawn by a rebuild. Level-driven and per tab -- see messages::tabRefused for why this is not routed
+    // through notifyError. Relayed, not judged: the core states which tab is unusable, each front end decides
+    // what to say. Info-level so a refusal is observable in the CLI's log the way a factor reset is.
+    const auto tab_refused_connection = event_util::makeDirectConnection<int, bool, std::string>();
+    tab_refused_connection->listen([this](int index, bool refused, const std::string &reason) {
+        log_info("tab {} refused={} ({})", index, refused, reason);
+        notifyTabRefused(index, refused, reason);
+    });
+
+    // Whether a tab is still waiting for the frame that becomes its fragment #0 -- the level the front ends'
+    // "do not scroll yet" instruction is made of. Level-driven and per tab, like the refusal above. Debug-level
+    // (not info) because unlike a refusal this fires on every ordinary tab in every ordinary capture; what
+    // makes it worth logging at all is that the pair "awaiting=false with no preceding scroll ready on that
+    // tab" is exactly the offset exit, which is otherwise invisible in a CLI run. `scroll_bar` is the page's
+    // structure, absent while the tab is not built (see messages::tabAwaitingHead).
+    const auto tab_awaiting_head_connection = event_util::makeDirectConnection<int, bool, std::optional<bool>>();
+    tab_awaiting_head_connection->listen([this](int index, bool awaiting, const std::optional<bool> &scroll_bar) {
+        log_debug(
+            "tab {} awaiting_head={} scroll_bar={}",
+            index,
+            awaiting,
+            scroll_bar.has_value() ? (scroll_bar.value() ? "true" : "false") : "absent");
+        notifyTabAwaitingHead(index, awaiting, scroll_bar);
+    });
+
+    // Whether the character-switch rule holds a reference to compare the factor tab against -- the level the
+    // front ends' switch arrows are made of (see messages::factorSwitchArmed). Debug-level for the reason the
+    // awaiting level above is: it changes on every ordinary capture.
+    const auto factor_switch_armed_connection = event_util::makeDirectConnection<bool>();
+    factor_switch_armed_connection->listen([this](bool armed) {
+        log_debug("factor_switch_armed={}", armed);
+        notifyFactorSwitchArmed(armed);
+    });
+
+    // A session began for a freshly opened detail screen. Sent by the scraper once the session's id is minted and
+    // before the session is constructed (a construction that throws still ends under an announced id), and not by
+    // a listener on the open event: such a listener runs before the scraper's, i.e. before the session's id is
+    // minted, and the id is what the front end matches every later outcome of this attempt against.
+    const auto started_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    started_connection->listen([this](const auto &info) { notifyCharaDetailStarted(info); });
 
     const auto page_ready_connection = event_util::makeDirectConnection<int>();
     page_ready_connection->listen([this](int index) { notifyPageReady(index); });
@@ -379,9 +428,26 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // session without the detail screen closing. Tell the UI to reset its capture progress -- and hand it the
     // session that was discarded, which is the only account anyone gets of a character lost mid-run (the
     // closed_before_completed path above sees the LAST session only). Relayed rather than judged here: the core
-    // states what was discarded, each front end decides whether that deserves a sentence.
-    const auto restarted_connection = event_util::makeDirectConnection<chara_detail::DiscardedSession>();
-    restarted_connection->listen([this](const auto &discarded) { notifyCharaDetailRestarted(discarded); });
+    // states what was discarded, each front end decides whether that deserves a sentence. The second argument is
+    // the session the reset began, whose id the new attempt is announced under.
+    const auto restarted_connection =
+        event_util::makeDirectConnection<chara_detail::DiscardedSession, chara_detail::RecordInfo>();
+    restarted_connection->listen(
+        [this](const auto &discarded, const auto &begun) { notifyCharaDetailRestarted(discarded, begun); });
+
+    // The attempt cannot continue: creating its scraping directory failed, so it has nowhere to scrape into, or
+    // one of its fragments could not be written, so the record would be short. Terminal for the attempt, and reported exactly as a stitch failure is -- the record will never exist, so
+    // the UI is told the attempt finished unsuccessfully instead of being left waiting for a capture that can
+    // never progress.
+    const auto session_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
+    session_failed_connection->listen([this](const auto &info) { notifyAttemptFailed(info, "scrape_failed"); });
+
+    // Every verdict the factor character-switch rule reaches, counted for the run (FactorSwitchVerdictTally) and
+    // relayed to no front end. Direct: the note is taken inside the scraper's processing of the judged frame.
+    const auto factor_switch_judged_connection =
+        event_util::makeDirectConnection<chara_detail::scraper_impl::FactorSwitchVerdict>();
+    factor_switch_judged_connection->listen(
+        [this](const chara_detail::scraper_impl::FactorSwitchVerdict verdict) { factor_switch_verdicts.note(verdict); });
 
     const auto stitch_ready_connection = stitcher_runner->makeConnection<chara_detail::RecordInfo>("stitch_ready");
     on_stitch_ready = stitch_ready_connection;
@@ -426,12 +492,29 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     // Early duplicate probe: the scraper sends the stable factor-tab frame here (recognizer runner),
     // the recognizer runs only the self-factor recognition on it, and the result is forwarded to the UI.
     const auto factor_probe_ready_connection =
-        recognizer_runner->makeConnection<Frame, chara_detail::RecordInfo>("factor_probe_ready");
+        recognizer_runner->makeConnection<
+            Frame, chara_detail::RecordInfo, chara_detail::recognizer_impl::SelfFactorWindow, bool>(
+            "factor_probe_ready");
 
-    const auto factor_probe_completed_connection =
-        event_util::makeDirectConnection<std::vector<chara_detail::record::Factor>, int>();
+    const auto factor_probe_completed_connection = event_util::makeDirectConnection<
+        std::vector<chara_detail::record::Factor>, std::size_t, bool, chara_detail::RecordInfo>();
     factor_probe_completed_connection->listen(
-        [this](const auto &factors, int record_type) { notifyFactorProbe(factors, record_type); });
+        [this](const auto &factors, std::size_t factor_limit, bool cue_owed, const auto &info) {
+            notifyFactorProbe(factors, factor_limit, cue_owed, info);
+        });
+
+    const auto recognizer_config =
+        config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>();
+    const auto modules_dir = json_util::decodePath(config_json["directory"]["modules_dir"]);
+
+    // THE FACTOR TAB'S ROW READER, built ONCE here and handed to BOTH stages that read factor rows: the recognizer
+    // (the stitched record and the early duplicate probe) and the scene scraper (the frames its character-switch
+    // rule judges, read synchronously inside that frame's processing). One pair of factor models per pipeline,
+    // serialized in arrival order inside the reader, so neither stage waits on the other's queue -- only on the
+    // inference calls queued ahead of its own. Both stages hold the same shared_ptr, so the reader lives exactly
+    // as long as the longer-lived of the two, and a stage built without it does not compile.
+    const auto factor_rows =
+        std::make_shared<const chara_detail::recognizer_impl::FactorRowReader>(modules_dir, recognizer_config.factor_tab);
 
     const auto scraping_dir = json_util::decodePath(config_json["directory"]["temp_dir"]) / "chara_detail";
 
@@ -448,10 +531,17 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         scroll_ready_connection,
         scroll_updated_connection,
         scroll_position_connection,
+        tab_refused_connection,
+        tab_awaiting_head_connection,
+        factor_switch_armed_connection,
         page_ready_connection,
         stitch_ready_connection,
         factor_probe_ready_connection,
+        factor_rows,
+        factor_switch_judged_connection,
+        started_connection,
         restarted_connection,
+        session_failed_connection,
         config_json["chara_detail"]["scene_scraper"].get<chara_detail::scraper_config::CharaDetailSceneScraperConfig>(),
         scraping_dir,
         directory_hooks);
@@ -468,11 +558,10 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
 
     // Stitching failed partway (a corrupt/partial fragment): the record can never be recognized, so surface a
     // terminal failure just like closed_before_completed instead of leaving the UI waiting forever.
+    // The stitcher runs on its own thread, so this can arrive after the next attempt was announced -- which is
+    // why notifyAttemptFailed reports against the payload's own id rather than the latest announced one.
     const auto stitch_failed_connection = event_util::makeDirectConnection<chara_detail::RecordInfo>();
-    stitch_failed_connection->listen([this](const auto &info) {
-        notifyCharaDetailFinished(info, false);
-        notifyError("stitch_failed");
-    });
+    stitch_failed_connection->listen([this](const auto &info) { notifyAttemptFailed(info, "stitch_failed"); });
 
     chara_detail_scene_stitcher = std::make_unique<chara_detail::CharaDetailSceneStitcher>(
         scraping_dir,
@@ -497,14 +586,16 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
     const auto recognize_failed_connection = event_util::makeDirectConnection<std::string>();
     recognize_failed_connection->listen([this](const std::string &message) { notifyError(message); });
 
-    // The recognizer stage runs ONNX inference. On Windows it links onnxruntime in-process (recognizer_models.cpp
-    // names recognizer::Model); the Emscripten Wasm PoC links a JS bridge instead (wasm/wasm_recognizer_models.cpp
-    // provides the same ctors, backed by onnxruntime-web). Either way the recognizer subscribes to the stitcher's
-    // recognize_ready output and emits recognize_completed on success, so the pipeline runs end to end.
+    // The recognizer stage runs ONNX inference. The constructor is the same on every platform; only the predictors
+    // it builds through makePredictor differ (in-process onnxruntime on Windows, a JS bridge to onnxruntime-web in
+    // the Emscripten Wasm PoC; see chara_detail/recognizer_prediction.h). Either way the recognizer subscribes to
+    // the stitcher's recognize_ready output and emits recognize_completed on success, so the pipeline runs end to
+    // end.
     chara_detail_recognizer = std::make_unique<chara_detail::CharaDetailRecognizer>(
         config_json["trainer_id"].get<std::string>(),
         stitcher_dir,
-        json_util::decodePath(config_json["directory"]["modules_dir"]),
+        modules_dir,
+        factor_rows,
         recognize_ready_connection,
         recognize_completed_connection,
         update_ready_connection,
@@ -512,7 +603,7 @@ void NativeApi::startPipeline(const std::string &native_config, const std::optio
         factor_probe_ready_connection,
         factor_probe_completed_connection,
         recognize_failed_connection,
-        config_json["chara_detail"]["recognizer"].get<chara_detail::recognizer_config::CharaDetailRecognizerConfig>());
+        recognizer_config);
 
     event_runners->start();
 

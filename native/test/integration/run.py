@@ -120,6 +120,12 @@ CLI_EXIT_REPORTED_ERROR = 2
 RUN_SUMMARY_MARKER = "UMACAPTURE_RUN_SUMMARY"
 RUN_SUMMARY_SCHEMA = 1
 
+# The factor character-switch rule's verdict words, mirrored from native/src/chara_detail/factor_switch_verdict.h
+# (kFactorSwitchVerdicts / factorSwitchVerdictTag) -- the keys of the summary's `factor_switch_verdicts` object.
+# A mirror for the same reason the exit codes above are one; what turns its staleness into a loud failure is that
+# factor_switch_verdict_failure refuses a summary whose key set is not exactly this one.
+FACTOR_SWITCH_VERDICTS = ("same", "different", "empty", "unreadable")
+
 # The config key whose name this suite guards. Every appearance of it in the CLI's output is the core warning
 # that it could not use the `frame_resize` block as written -- see check_run step (5) for why the numbers
 # being pinned in C++ leaves the key NAMES unguarded, and native/src/core/pipeline_config.h for the warnings.
@@ -352,6 +358,63 @@ def expected_discarded_incomplete(case: dict) -> int:
     )
 
 
+def expected_factor_switch_verdicts(case: dict) -> dict[str, int] | None:
+    """The verdicts the factor character-switch rule must reach over this run, per verdict, or None when unstated.
+
+    WHY A CASE WOULD STATE IT. The rule resets on `different`, `empty` and `unreadable` alike (fail-CLOSED) and
+    keeps the session only on `same`. A build whose switch reader always finds nothing, or always throws, therefore
+    resets exactly as often as a working build: `discarded`, `discarded_incomplete` and every record are unchanged,
+    and every other claim in check_run stays green. The verdict counts are the one number that differs.
+
+    ALL FOUR OR NONE. A declaration names every verdict, zeros included, so a case cannot assert `different` and
+    say nothing -- by omission -- about `unreadable`, which is exactly the count a broken reader moves.
+
+    UNSTATED MEANS NOTHING IS ASSERTED, not "all zero". Whether an undeclared case should be held to a default is
+    not decided here; until it is, only a case that states the key is judged on it.
+    """
+    if "expect_factor_switch_verdicts" not in case:
+        return None
+    value = case["expect_factor_switch_verdicts"]
+    if (
+        isinstance(value, dict)
+        and set(value) == set(FACTOR_SWITCH_VERDICTS)
+        and all(isinstance(count, int) and not isinstance(count, bool) and count >= 0 for count in value.values())
+    ):
+        return dict(value)
+    raise ValueError(
+        f"case {case.get('name')!r} has expect_factor_switch_verdicts {value!r}; state an object with exactly the "
+        f"keys {list(FACTOR_SWITCH_VERDICTS)}, each a non-negative integer, or omit the key."
+    )
+
+
+def factor_switch_verdict_failure(case: dict, summary: dict) -> str | None:
+    """Judge the factor switch rule's verdicts against what the case declares. Returns a detail, or None."""
+    wanted = expected_factor_switch_verdicts(case)
+    if wanted is None:
+        return None
+    actual = summary.get("factor_switch_verdicts")
+    if actual is None:
+        return (
+            "this cli reports no factor_switch_verdicts on its run summary; it predates the key this case "
+            "asserts -- rebuild it from this tree rather than reading the absence as a result"
+        )
+    if not isinstance(actual, dict) or set(actual) != set(FACTOR_SWITCH_VERDICTS):
+        return (
+            "cli reports factor_switch_verdicts {!r}, whose verdict words are not {}. The vocabulary moved in "
+            "native/src/chara_detail/factor_switch_verdict.h without FACTOR_SWITCH_VERDICTS here, or the cli "
+            "stopped listing every verdict; either way the counts cannot be read at the meaning declared."
+        ).format(actual, list(FACTOR_SWITCH_VERDICTS))
+    if actual != wanted:
+        return (
+            "the factor switch rule reached verdicts {}, expected {}. The resets can look right while this is "
+            "wrong: `empty` and `unreadable` reset exactly like `different`, so a switch reader that stopped "
+            "reading is visible here and nowhere else."
+        ).format(
+            {word: actual[word] for word in FACTOR_SWITCH_VERDICTS}, {word: wanted[word] for word in FACTOR_SWITCH_VERDICTS}
+        )
+    return None
+
+
 def _tail(label: str, text: str) -> str:
     lines = text.strip().splitlines()[-DIAGNOSTIC_TAIL_LINES:]
     return f"--- {label} (last {len(lines)}) ---\n" + "\n".join(lines)
@@ -400,6 +463,8 @@ def check_run(case: dict, completed: subprocess.CompletedProcess) -> str | None:
     3. it announced exactly the terminal errors the manifest names -- no more, and no fewer;
     4. it discarded the number of sessions the manifest states, when it states one, and it LOST the number
        the manifest states -- which every case states, since omitting the key claims zero;
+       and the factor switch rule reached the verdicts the manifest states, when it states them -- which is
+       what tells a reset caused by a reading from a reset caused by a reader that cannot read;
     5. the core understood the frame_resize block the cli wrote (the config was ACCEPTED);
     6. the frames reached recognition at the geometry the manifest states (the config had EFFECT).
 
@@ -470,6 +535,14 @@ def check_run(case: dict, completed: subprocess.CompletedProcess) -> str | None:
             "disagreement is either a reset rule that moved or a `completed` bit that stopped being set."
         ).format(incomplete, wanted_incomplete)
 
+    # (4c) WHY those discards happened, as far as the factor switch rule is concerned -- when the case declares it.
+    # (4) and (4b) cannot tell a reset the rule decided on a reading from one it fell into because the reader
+    # returned nothing or failed: both reset, and both leave the same records behind. See
+    # expected_factor_switch_verdicts.
+    verdict_failure = factor_switch_verdict_failure(case, summary)
+    if verdict_failure is not None:
+        return verdict_failure
+
     # (5) The core UNDERSTOOD the frame_resize block the CLI wrote. This is the only place in either suite
     # where what a writer emits is read back, and it exists because the constants are pinned and the KEY NAMES
     # are not: `readFrameResizeBand` (native/src/core/pipeline_config.h) falls back to the shipped default
@@ -533,6 +606,7 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
     case_frame_resize(case)
     case_anchor_unit(case)
     expected_discarded_incomplete(case)
+    expected_factor_switch_verdicts(case)
 
     video = (data_dir / case["video"]).resolve()
 
@@ -575,6 +649,10 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
         if failure is not None:
             return "fail", failure
 
+        probe_failure = check_probe_factors(case, completed)
+        if probe_failure is not None:
+            return "fail", probe_failure
+
         actual = collect_records(output_dir)
 
     # The record count, measured on disk and cross-checked against the count the core states in its summary
@@ -594,6 +672,161 @@ def run_case(case: dict, cli: Path, data_dir: Path, assets_dir: Path, modules_di
             )
 
     return "records", actual
+
+
+# The wire message the early duplicate check rides on. spdlog puts the core's notifications on stdout, so the
+# probe's own payload is readable from a finished run without instrumenting anything.
+PROBE_MARKER = '{"type":"onFactorProbe"'
+
+# THE PRODUCT'S OWN PREDICATE, WITH THE FLAG THE PRODUCT ITSELF STATED IN THIS RUN.
+#
+#   a probe passes when every element of probe.factors equals golden self at the same index, AND
+#   (not probe.below_threshold OR len(golden self) == len(probe.factors))
+#
+# A floor of 5 and a prefix match would both be slack: measured, weakening such a check to "the probe is
+# non-empty" leaves all three cases passing, so neither would be the thing that bites. Asserting full
+# agreement (and, when the core says the read ended, the count too) is what makes this a statement about the
+# FEATURE working rather than about the probe merely having said something.
+#
+# WHERE THE FLAG COMES FROM AND WHY THERE IS NO THRESHOLD HERE. `factors` on the wire is already
+# capped to the self-factor-count threshold of the factor-tab layout the scraper chose for the session
+# (`common` or `friend_common` in assets/config/chara_detail/scene_scraper.json) -- the core trims before
+# sending, not the front end, and this file follows that: every element the probe DID send must agree, with
+# no threshold of its own to compare a count against. `below_threshold` is the core's separate statement that
+# its read of the self-factor list ended before it reached that cap; when it did, a probe that merely stopped
+# early because the character has fewer self-factors than the layout's threshold must ALSO match the golden
+# record's count, or a record that legitimately has more self-factors than the probe read would pass on a
+# prefix that says
+# nothing about the character actually having only that many. `record_type` and the numeric threshold are not
+# on the wire at all (the front end holds no copy of the threshold); re-deriving
+# either from lib/ would state the layout choice a second time, next to the scraper's own.
+#
+# NO DEFAULT. A probe line without a boolean `below_threshold` fails the case with a reason, and is never
+# judged against a remembered value: a check that assumed a default would go on passing after the core
+# stopped sending the field, which is exactly the silent hollowing-out this check exists to rule out.
+#
+# The list on the wire is already `probeSelf`: the probe reads with FactorRowReader::visibleSelfPrefix, which
+# stops a row whose cells fall outside the scroll area AND stops once it already holds
+# `self_factor_prefix_length` factors -- the read itself is where the trim happens, before sending -- so neither
+# this file nor the front end trims it again.
+
+
+def leading_factor_match(probe_self: list, own: list) -> int:
+    """Length of the leading run where the two factor lists agree, id and star.
+
+    A diagnostic only: it locates the golden self list the probe agrees with longest, and the index of
+    the first disagreement when there is one. The pass/fail rule itself (below) requires this to reach
+    the full length of `probe_self`, not merely some threshold -- the front end holds no such primitive
+    any more (see CharaDetailRecord.matchesFactorProbe, which returns a bool, not a count).
+    """
+    limit = min(len(probe_self), len(own))
+    matched = 0
+    while matched < limit and probe_self[matched] == own[matched]:
+        matched += 1
+    return matched
+
+
+def check_probe_factors(case: dict, completed: subprocess.CompletedProcess) -> str | None:
+    """The early duplicate check's payload, judged against the golden record it came from.
+
+    WHAT THIS COVERS THAT NOTHING ELSE DOES. `onFactorProbe` carries the trainee's own visible factor
+    rows, recognized from fragment #0 on a LIVE frame -- a different crop, a different scan origin and a
+    different code path from the stitched recognition every golden compares. It has failed silently
+    before: on the Friend full-record layout the probe scanned from the Standard layout's rect, found
+    nothing, and came back empty. No golden moved, because an empty probe only means the front end skips
+    a duplicate check, and skipping it looks exactly like passing it.
+
+    IT NEEDS NO NEW BASELINE. The probe recognizes a PREFIX of what the finished record calls
+    factors.self -- FactorRowReader::visibleSelfPrefix reads only rows whose name and star cells lie
+    inside the scroll area, so a row the tab boundary would clip is never sent in the first place -- so
+    the committed golden already states the answer, and this check requires every element the probe did
+    send to equal that answer at the same index, not merely to fall inside a leading run that reaches
+    the threshold.
+
+    Silent on a case that does not ask for it, and on a machine with no golden to compare against: the
+    golden comparison itself is what reports a missing baseline, and saying so twice would turn one
+    absence into two failures.
+    """
+    if not case.get("expect_probe_matches_golden_self"):
+        return None
+    golden = golden_path(case)
+    if golden is None or not golden.is_file():
+        return None
+
+    probes = []
+    for line in completed.stdout.splitlines():
+        at = line.find(PROBE_MARKER)
+        if at < 0:
+            continue
+        try:
+            probes.append(json.loads(line[at:]))
+        except ValueError as error:
+            return f"an onFactorProbe line was not readable as JSON ({error}): {line[at:][:200]}"
+
+    if not probes:
+        return (
+            "the run announced no onFactorProbe, so the early duplicate check was never armed. That is the "
+            "shape the Friend-layout defect took: a probe aimed at the wrong scroll area comes back with "
+            "nothing and reports nothing."
+        )
+
+    selves = [record.get("factors", {}).get("self", []) for record in json.loads(golden.read_text(encoding="utf-8"))]
+    for probe in probes:
+        factors = probe.get("factors")
+        if not factors:
+            return (
+                "onFactorProbe carried an empty factor list, so the duplicate check had nothing to match "
+                "against: " + json.dumps(probe)[:200]
+            )
+        # The flag the product stated on this very probe -- and FAIL rather than fall back when it is not
+        # there (see "NO DEFAULT" above).
+        below_threshold = probe.get("below_threshold")
+        if not isinstance(below_threshold, bool):
+            stated = json.dumps(below_threshold) if "below_threshold" in probe else "no below_threshold field at all"
+            return (
+                f"onFactorProbe carried no boolean below_threshold (got {stated}), so there is no flag "
+                "the product stated to judge this probe against, and this check does not assume one: "
+                + json.dumps(probe)[:200]
+            )
+
+        # THE WHOLE PROBE, NOT JUST A LEADING RUN AGAINST A THRESHOLD: `visibleSelfPrefix` sends only rows
+        # whose name and star cells lie inside the scroll area, so a clipped trailing row is never on the wire
+        # to begin with -- every element the probe DID send must equal the golden self factors at the same
+        # index. `best_own` is whichever golden self list the probe agrees with longest; picking any other one
+        # first would blame a mismatch on the wrong candidate record.
+        best_own: list | None = None
+        best_matched = -1
+        for own in selves:
+            candidate_matched = leading_factor_match(factors, own)
+            if candidate_matched > best_matched:
+                best_matched, best_own = candidate_matched, own
+        matched = max(best_matched, 0)
+
+        if matched < len(factors):
+            probe_value = factors[matched]
+            own_value = best_own[matched] if best_own is not None and matched < len(best_own) else None
+            return (
+                f"onFactorProbe disagrees with the golden record's self factors at index {matched}: probe "
+                f"has {json.dumps(probe_value)}, golden self has {json.dumps(own_value)} (the two agreed on "
+                f"the leading {matched} factor(s) before it).\n"
+                f"  probe : {json.dumps(factors)}\n"
+                f"  golden: {json.dumps(best_own)[:400] if best_own is not None else 'none'}"
+            )
+        # Every element sent agreed. If the core says its own read ended before the layout's
+        # self-factor-count threshold (`below_threshold`), the match also owes count equality: a probe
+        # that merely stopped early because the character has fewer self-factors than the threshold must
+        # not pass against a golden record that has MORE self-factors than the probe read -- that would
+        # be a prefix match on a count that isn't this character's, the same gap the front end's own
+        # count check closes.
+        if below_threshold and best_own is not None and len(best_own) != len(factors):
+            return (
+                f"the early duplicate check would not fire: onFactorProbe stated below_threshold, which "
+                f"requires the golden record's self-factor count ({len(best_own)}) to equal the probe's "
+                f"length ({len(factors)}), and it does not.\n"
+                f"  probe : {json.dumps(factors)}\n"
+                f"  golden: {json.dumps(selves)[:400]}"
+            )
+    return None
 
 
 class BaselineUnreadable(Exception):

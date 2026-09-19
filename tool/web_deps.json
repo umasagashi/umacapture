@@ -270,18 +270,18 @@
       }
     },
     "wasm/umacapture_core.js": {
-      "sha256": "57693fa46eea6c705d3be78fe56ddeba5c984528229fe1d1550914253fe7ec79",
-      "bytes": 125370,
+      "sha256": "35e184ac734b8c72671eab8a226239bd041ad4da9f981c0ad77173fdf293d90e",
+      "bytes": 126237,
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
-        "git_commit": "4c7dad29",
-        "git_commit_note": "git_commit names 4c7dad29, a commit reachable from develop whose native/src, native/vendor and native/wasm are identical to the tree these bytes were built from -- verified with `git merge-base --is-ancestor 4c7dad29 develop` (exit 0) and an empty `git diff 4c7dad29 develop -- native/src native/vendor native/wasm`. This field was null for a while and the reason is worth keeping, because it is the condition under which it must go back to null: the module was rebuilt 2026-08-28 against the UNCOMMITTED working tree of fix/test-harness-and-wasm-toolchain, to clear the build.sources.digest staleness that comment-only edits under native/src and native/wasm/build.sh (stale path citations corrected in prose) had introduced, so at the moment of the repin no commit reproduced these bytes on its own. The value before that, 9bca991b, was orphaned by a squash merge and was additionally one commit older than the misc.h state it described. So: name a commit here only while one exists that reproduces these bytes by itself, and set this back to null the next time a rebuild runs against an uncommitted or unpushed tree. build.sources.digest remains the durable identity: it is content-addressed over native/src, native/vendor and native/wasm with line endings normalised, so it survives any history rewrite, and it is the field the checks actually compare (nothing reads git_commit). EVIDENCE OF AN ACTUAL REBUILD: build.sh recompiles unconditionally (no incremental skip), and this run compiled all 11 translation units and linked once in 130 s; the 11 obj/*.o mtimes and both outputs fall in a single window 00:47:05-00:48:48 on 2026-08-28, strictly after the invocation started. RESULT: both artifacts came out BYTE-IDENTICAL to the previous pin (umacapture_core.js sha256 57693fa4..., 125370 bytes; umacapture_core.wasm sha256 3befc2ce..., 3622922 bytes). That is the expected outcome, not a skipped build: every changed line under the digest roots is a comment, and the toolchain paths that bake into the module via __FILE__ did not move this time. So sha256 and bytes are unchanged and only build.sources.digest moved, 52a52a24... -> aac99172.... Toolchain unchanged at its C:/Projects/umacapture-wasm-toolchain defaults for EMSDK_DIR/OPENCV_DIR/BUILD_DIR.",
+        "git_commit": null,
+        "git_commit_note": "git_commit is null because a commit cannot contain its own SHA. The bytes pinned above were built by native/wasm/build.sh, with its default EMSDK_DIR, OPENCV_DIR and BUILD_DIR, from the sources whose digest is build.sources.digest; a checkout of those sources prints that value from 'dart run tool/check_web_pins.dart --source-digest'. The verifier compares an artifact present under web/ with the pinned bytes and sha256; nothing checks that those bytes were built from the sources the digest names, so a repin without a rebuild passes. build.sh passes absolute source paths to em++, and spdlog's __FILE__ embeds them in the module, so reproducing the bytes also needs the checkout at the same absolute path, besides the same toolchain.",
         "emscripten": "6.0.3",
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "aac991722ace5c560cd9c2c555befd64786fd99b9716bbfd15a4119cdf607a4d",
+          "digest": "9ca28c4ab59efb700230dc04d3de4c6f91c07e4e79744d5adc533a6811c5a816",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [
@@ -303,18 +303,18 @@
       }
     },
     "wasm/umacapture_core.wasm": {
-      "sha256": "3befc2ce3e9bd0150ff75968469f8209d4e4383555266ef4775b66c694d86ec8",
-      "bytes": 3622922,
+      "sha256": "71426558d9ab62d5d5c0ac01c8bb0754daea323cc349e8bcdc491f47226d0548",
+      "bytes": 3709046,
       "origin": "in-tree",
       "build": {
         "script": "native/wasm/build.sh",
-        "git_commit": "4c7dad29",
-        "git_commit_note": "git_commit names 4c7dad29, a commit reachable from develop whose native/src, native/vendor and native/wasm are identical to the tree these bytes were built from -- verified with `git merge-base --is-ancestor 4c7dad29 develop` (exit 0) and an empty `git diff 4c7dad29 develop -- native/src native/vendor native/wasm`. This field was null for a while and the reason is worth keeping, because it is the condition under which it must go back to null: the module was rebuilt 2026-08-28 against the UNCOMMITTED working tree of fix/test-harness-and-wasm-toolchain, to clear the build.sources.digest staleness that comment-only edits under native/src and native/wasm/build.sh (stale path citations corrected in prose) had introduced, so at the moment of the repin no commit reproduced these bytes on its own. The value before that, 9bca991b, was orphaned by a squash merge and was additionally one commit older than the misc.h state it described. So: name a commit here only while one exists that reproduces these bytes by itself, and set this back to null the next time a rebuild runs against an uncommitted or unpushed tree. build.sources.digest remains the durable identity: it is content-addressed over native/src, native/vendor and native/wasm with line endings normalised, so it survives any history rewrite, and it is the field the checks actually compare (nothing reads git_commit). EVIDENCE OF AN ACTUAL REBUILD: build.sh recompiles unconditionally (no incremental skip), and this run compiled all 11 translation units and linked once in 130 s; the 11 obj/*.o mtimes and both outputs fall in a single window 00:47:05-00:48:48 on 2026-08-28, strictly after the invocation started. RESULT: both artifacts came out BYTE-IDENTICAL to the previous pin (umacapture_core.js sha256 57693fa4..., 125370 bytes; umacapture_core.wasm sha256 3befc2ce..., 3622922 bytes). That is the expected outcome, not a skipped build: every changed line under the digest roots is a comment, and the toolchain paths that bake into the module via __FILE__ did not move this time. So sha256 and bytes are unchanged and only build.sources.digest moved, 52a52a24... -> aac99172.... Toolchain unchanged at its C:/Projects/umacapture-wasm-toolchain defaults for EMSDK_DIR/OPENCV_DIR/BUILD_DIR.",
+        "git_commit": null,
+        "git_commit_note": "git_commit is null because a commit cannot contain its own SHA. The bytes pinned above were built by native/wasm/build.sh, with its default EMSDK_DIR, OPENCV_DIR and BUILD_DIR, from the sources whose digest is build.sources.digest; a checkout of those sources prints that value from 'dart run tool/check_web_pins.dart --source-digest'. The verifier compares an artifact present under web/ with the pinned bytes and sha256; nothing checks that those bytes were built from the sources the digest names, so a repin without a rebuild passes. build.sh passes absolute source paths to em++, and spdlog's __FILE__ embeds them in the module, so reproducing the bytes also needs the checkout at the same absolute path, besides the same toolchain.",
         "emscripten": "6.0.3",
         "emsdk_release": "1b8b2456bf3f54fd6e47d55a82dde7752978a40f",
         "opencv_wasm": "4.13.0",
         "sources": {
-          "digest": "aac991722ace5c560cd9c2c555befd64786fd99b9716bbfd15a4119cdf607a4d",
+          "digest": "9ca28c4ab59efb700230dc04d3de4c6f91c07e4e79744d5adc533a6811c5a816",
           "roots": ["native/src", "native/vendor", "native/wasm"],
           "extensions": [".c", ".cc", ".cpp", ".h", ".hpp", ".inl", ".sh"],
           "exclude": [

@@ -8,7 +8,7 @@ description: >-
   summary line, treating a changed golden as a finding rather than something to
   regenerate, the shipped frame-resize band and the rule that 540 px is the
   nominal minimum supported size, the eleven-configuration encode/scale regression
-  grid and its clip mapping, the five must-fire switch clips whose signal is the reset count,
+  grid and its clip mapping, the five must-fire switch clips whose signals are the reset count and the factor-switch verdict counts,
   falsifying the change into named test failures, what the suites structurally
   cannot reach (Windows live capture, the Windows video import, the web build and
   the browser), and the wasm-pin / assets-config coupling a native/src edit
@@ -74,11 +74,12 @@ moves no record on this material, so the goldens were identical with and without
 `integration_dual_decode.landscape_2pane_ps5`, each quoting the geometry that actually reached
 recognition.
 
-**Since 8457a45 that particular cover is gone, and nothing has replaced it.** Every case now states
-735, 736 or 737 — recount them off `cases.json`, do not take it from here — and all three sit inside
-the untouched arm, so the band performs **no step on any golden clip** and band-on and band-off yield
-the same `anchor_unit`. The assertion still does what it says: it pins the geometry that reached
-recognition, which is the thing every normalized coordinate is multiplied by. It no longer detects a
+**Since 8457a45 that particular cover is gone, and nothing has replaced it.** Every case states one of
+`713`, `720`, `735`, `736` or `737` (`grep -o '"anchor_unit": [0-9]*' native/test/integration/cases.json |
+sort | uniq -c` — recount them off `cases.json`, do not take the list from here), and every one of those
+sits inside the untouched arm, so the band performs **no step on any golden clip** and band-on and
+band-off yield the same `anchor_unit`. The assertion still does what it says: it pins the geometry that
+reached recognition, which is the thing every normalized coordinate is multiplied by. It no longer detects a
 band that never ran. **So do not read a green `anchor_unit` as evidence that the band is armed.** On
 this material the shrink arm is reached only by the §3 grid's 1080-wide rungs and by the doctest
 edge cases named in §0; a change to it has no golden cover at all.
@@ -135,25 +136,33 @@ Run plain `ctest` in a build dir configured **this session**, against a **Releas
 Debug build a violated `assert_` pops a modal abort/retry/ignore dialog and hangs an unattended
 run (`native/CMakeLists.txt`).
 
-A fully provisioned machine registers **39** tests: `umacapture_tests`, `umacapture_ffv1_tests`,
-**17** `integration_golden.*`, `integration_golden_coverage`, `integration_coverage_selftest`,
-**18** `integration_dual_decode.*`
-(one per case in `cases.json`, unconditionally). Green there means `0 tests failed` with exactly
-**five** `***Skipped` lines, all of them dual-decode, in two groups:
+A fully provisioned machine registers (`native/CMakeLists.txt`): `umacapture_tests`,
+`umacapture_ffv1_tests`, one `integration_golden.<name>` per case that states a `golden` or an
+`expect_records`, `integration_golden_coverage`, the harness selftests (`integration_coverage_selftest`,
+`integration_check_selftest`), and one `integration_dual_decode.<name>` per case in `cases.json`
+(unconditionally). **No count is written here on purpose:** every one of them is `cases.json`'s length
+or its key composition, or grows when a harness gains a selftest, and the literal that used to stand
+here ("39") was already behind the registry before anyone noticed. Count the registry of the build
+you configured this session instead:
 
-* the two `replay` cases — `player_standard_5`, `firefox_landscape_2pane_ps5`. FFV1 stores BGR0, so
-  there is no YUV matrix to vary.
-* the three `expect_records: 0` cases — `player_standard_factor_only_1`,
-  `player_standard_factor_tiny_scroll_switch`, `_2`. "bt601 == bt709" over two empty record sets is
-  the pass-by-vacuum `run_dual_decode.py` refuses by name.
+```bash
+ctest --test-dir <build> -N | grep -c 'Test *#'                                # all tests
+ctest --test-dir <build> -N -R '^integration_golden\.' | grep -c 'Test *#'      # golden cases
+ctest --test-dir <build> -N -R '^integration_dual_decode\.' | grep -c 'Test *#' # == cases in cases.json
+ctest --test-dir <build> -N -R 'selftest$'                                      # names the selftests
+```
+
+Green there means `0 tests failed`, and on a machine that holds every clip and the models, the only
+`***Skipped` lines are dual-decode ones, one per case in these two groups (ctest names each):
+
+* every `replay` case. FFV1 stores BGR0, so there is no YUV matrix to vary.
+* every `expect_records: 0` case. "bt601 == bt709" over two empty record sets is the pass-by-vacuum
+  `run_dual_decode.py` refuses by name.
 
 `landscape_2pane_ps5` states neither a `golden` nor an `expect_records`, so it registers a
 dual-decode test only; that is not a missing golden. A case registers an `integration_golden` test
 when it states **either** of those two keys (`native/CMakeLists.txt`, mirroring `run.py`'s
 `has_expectation()`).
-
-Recount rather than trusting these numbers: they are `cases.json`'s length and its key composition,
-and the manifest is edited by ordinary work. `ctest -N` prints the registry.
 
 Every case must also state `frame_resize` and `anchor_unit` (§0); both runners raise on a case that
 omits or misstates either, as an unhandled traceback rather than a `FAIL <name>:` line. They resolve
@@ -170,8 +179,9 @@ all this machine ever reached, so read the absolute number off the per-case Skip
 this test's status. What it does guarantee is that the number cannot fall silently — including when
 the baseline file itself is damaged, which until 2026-08-22 was read as "no record" and rewritten
 from the current set, inverting exit 1 to exit 0 (measured, 3 → 2). `integration_coverage_selftest`
-pins that decision table; it needs no clips, no models and no cli, so it is the one integration test
-that runs — and must Pass — everywhere, CI included.
+pins that decision table; it needs no clips, no models and no cli, so — like every harness selftest
+(`integration_check_selftest` pins `check_run`'s summary-line claims the same way) — it runs, and must
+Pass, everywhere, CI included.
 
 ## 2. A changed golden is a finding, not a thing to update
 
@@ -189,7 +199,8 @@ kept, so re-derive them before running the grid and say in the report that you d
 explicitly** (`--frame-resize` or `--no-frame-resize`) so the row says which configuration it is.
 Most of the numbers below no longer have to be grepped out of the log: the run's
 `UMACAPTURE_RUN_SUMMARY` line on **stderr** carries `records`, `discarded` (all reset rules, not just
-the factor one) and the anchor unit the frames reached recognition at — see §5.
+the factor one), `factor_switch_verdicts` (the factor rule's verdicts, §4) and the anchor unit the
+frames reached recognition at — see §5.
 
 | # | configuration | clip |
 |---|---|---|
@@ -231,7 +242,8 @@ The `_404w` rungs are the only material anywhere below the band, i.e. the only t
 the upscale arm. That is not an invitation: see §0 — below 540 nothing is promised, and pinning it is
 not wanted.
 
-Per configuration report: **records**, **factor resets**, the **factor total** (108 is correct; a
+Per configuration report: **records**, **factor resets** with the four `factor_switch_verdicts`
+counts beside them, the **factor total** (108 is correct; a
 silently degraded record reads 65 with the self/parent split wrong), the **anchor unit** off the
 summary line (which says which arm of the band that rung took), and the **leaf diff against the
 pristine 1080p record** after dropping `record_id` / `captured_date` / `trainer_id`. Then the
@@ -276,11 +288,16 @@ entry names a bare file (`"video": "player_standard_factor_only_1.mp4"`), so the
 
 | clip (`testdata/clips/golden/`) | required | asserted by |
 |---|---|---|
-| `player_standard_factor_only_1` | 1 reset, 0 records, `closed_before_completed` | `integration_golden.player_standard_factor_only_1` |
-| `player_standard_switch_at_factor_top` | 1 reset, 1 record (character B) | its golden (the record); **reset count not asserted** |
-| `player_standard_factor_tiny_scroll_switch` | 2 resets, 0 records, `closed_before_completed` | `integration_golden.player_standard_factor_tiny_scroll_switch` |
-| `player_standard_factor_tiny_scroll_switch_2` | 4 resets, 0 records, `closed_before_completed` | `integration_golden.…_switch_2` |
-| `player_inheritance_switch_with_tiny_scroll` | 1 reset, 1 record (entry B) | its golden (the record); **reset count not asserted** |
+| `player_standard_factor_only_1` | 1 reset (1 `different`), 0 records, `closed_before_completed` | `integration_golden.player_standard_factor_only_1` |
+| `player_standard_switch_at_factor_top` | 1 reset (1 `different`), 1 record (character B) | its golden (the record); **reset count not asserted** |
+| `player_standard_factor_tiny_scroll_switch` | 2 resets (2 `different`), 0 records, `closed_before_completed` | `integration_golden.player_standard_factor_tiny_scroll_switch` |
+| `player_standard_factor_tiny_scroll_switch_2` | 4 resets (4 `different`), 0 records, `closed_before_completed` | `integration_golden.…_switch_2` |
+| `player_inheritance_switch_with_tiny_scroll` | 1 reset (1 `different`), 1 record (entry B) | its golden (the record); **reset count not asserted** |
+
+Every required verdict count above is `different`, with `same`, `empty` and `unreadable` at 0. The
+"asserted by" column covers the verdict counts only for a case whose `cases.json` entry states
+`expect_factor_switch_verdicts`; check that before quoting a ctest as the assertion
+(`grep -c expect_factor_switch_verdicts native/test/integration/cases.json`) — see the subsection below.
 
 ### `player_standard_factor_only_1` is the only automated cover for `NativeApi::endOfInput()`
 
@@ -316,17 +333,48 @@ to block that — both runners treating an empty record set as a failure, and du
 registered unconditionally — is gone: `run.py` branches on `expect_records`, and `run_dual_decode.py`
 skips a zero-record case with its reason printed.
 
+### The reset count alone cannot see a broken switch reader
+
+Rule 3 no longer resets on its pixel diff alone. The diff only nominates a switch; the scraper then
+reads the visible self-factor prefix of the reference and of the judged frame with the pipeline's
+shared `FactorRowReader` and reaches one of four verdicts
+(`native/src/chara_detail/factor_switch_verdict.h`): `same` keeps the session and makes the judged
+frame the new reference; `different`, `empty` and `unreadable` reset it (fail-closed). **So a reader
+that always finds nothing, or always throws, resets exactly as often as a working one:** `discarded`,
+`discarded_incomplete` and every record are unchanged, and a verifier who reads only the reset count
+calls that build green. The opposite break is just as quiet in the count: a reader that answers
+`same` too readily removes resets, which shows up as a *missing* reset only on a clip that asserts one.
+
+The number that moves is the verdict count, carried twice:
+
+* the run summary's `factor_switch_verdicts` object — every verdict word as a key, zeros included,
+  e.g. `{"same":0,"different":1,"empty":0,"unreadable":0}`. `run.py` judges it against a case's
+  `expect_factor_switch_verdicts`: all four keys or none, and **an undeclared case asserts nothing**,
+  not "all zero".
+* one INFO line per candidate switch, present in Release: `factor switch verdict=<word>
+  reference=[…] judged=[…]`, or just `factor switch verdict=<word>` when the reader threw.
+
+For each must-fire clip report the four counts next to the reset count, and say whether its case
+declares them. The counts also narrow the "which rule fired" question below: every verdict other than
+`same` is one Rule 3 reset, whereas `discarded` counts every reset, the record-type one included.
+
 Two things the ctests do **not** cover, and which still have to be measured by hand:
 
 * **The reset count of the two clips that produce a record.** Neither states `expect_discarded`;
-  their goldens assert the record, not the number of discards that preceded it.
-* **Which rule fired.** `expect_discarded` counts every `onCharaDetailRestarted`, i.e. all three
-  reset sites in `chara_detail_scene_scraper.cpp` (record-type change, completed-tab-at-top,
-  factor-change). Only the factor one logs at INFO (`factor reset (…)`, present in Release); the
-  other two log at DEBUG. **So the two numbers legitimately disagree** — measured:
-  `player_standard_sequential` prints **zero** `factor reset` lines and reports `discarded: 1`. Do
-  not read a `discarded` count as a factor-reset count, in either direction. If the change under
-  review is about *which* rule fires, the count alone cannot tell you and the log line can.
+  their goldens assert the record, not the number of discards that preceded it. Their Rule 3 resets
+  are covered by the verdict counts where the case declares them; a record-type reset is not.
+* **Which rule fired.** `expect_discarded` counts every `onCharaDetailRestarted`, i.e. both
+  `resetSession` call sites in `chara_detail_scene_scraper.cpp`: the record-type change and the
+  factor change (Rule 3). The factor one logs at INFO (`factor reset (…)`, present in Release); the
+  record-type one logs at DEBUG (`record type changed -> reset session`). **So the two numbers can
+  legitimately disagree**, by exactly the number of record-type resets. There used to be a third
+  site — a completed tab held at its head — and the example of disagreement quoted here was that
+  rule firing on `player_standard_sequential`. That rule is gone, and so is the example: the clip's
+  post-completion switch is now caught by Rule 3 when the factor tab is next shown, and it prints
+  **one** `factor reset` line beside `discarded: 1` (measured 2026-09-15 with `grep -c 'factor reset'`
+  over the stdout of a `video` run given `run.py`'s arguments). Do not read a `discarded` count as a
+  factor-reset count, in either direction. If the change under review is about *which* rule fires,
+  the count alone cannot tell you; the log line and the verdict counts can.
 
 **A legitimate switch and a lost half-captured character ARE distinguishable in the data**, so do not
 report a discard count on its own. The discriminator is the payload
@@ -361,7 +409,8 @@ line on **stderr** — `UMACAPTURE_RUN_SUMMARY {…}` — carrying `records`, `f
 reached recognition at: `forwarded_frames`, `anchor_unit_min`, `anchor_unit_max`, noted at the point
 the scraper runner **dequeues** a forwarded frame, so it is what was scraped and not what a sender
 believed it sent. Those three are additions and did not bump `schema`; a CLI too old to carry them
-reads as "rebuild it", not as a geometry of zero. spdlog still writes the log to **stdout**, so the
+reads as "rebuild it", not as a geometry of zero. `factor_switch_verdicts` (§4) is a later addition on
+the same terms: `run.py` reads its absence as an old CLI, not as zero verdicts. spdlog still writes the log to **stdout**, so the
 two streams are no longer interchangeable: capture both.
 
 Consequences for how a break is read:

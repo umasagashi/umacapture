@@ -1,20 +1,31 @@
-// Emscripten replacement for chara_detail_recognizer_models.cpp: the ONNX-linked half of the recognizer TU
-// split. The stock file names recognizer::Model (which includes cv/model.h -> onnxruntime) and is compiled
-// out of the Wasm build; this file provides the SAME production constructors, but each predictor is backed by
-// a JS bridge to onnxruntime-web instead of an in-process Ort::Session. Keep the two files' signatures in sync.
+// Wasm definition of recognizer_impl::makePredictor (declared in chara_detail/recognizer_prediction.h), and the
+// shared-memory inference channel it runs on.
+//
+// Why this is per platform: the Wasm module links no onnxruntime -- models run in onnxruntime-web on the JS
+// thread -- and predict() runs on a pipeline pthread, which may not call JS. So a predictor here is a JS bridge
+// rather than recognizer::Model (the desktop definition, chara_detail_recognizer_models.cpp, is excluded from
+// this build), and a model is identified by its relative module_path, the key the JS side built its sessions
+// under, so no model file is read from the module directory. (The directory itself is still used: the shared
+// recognizer reads version_info.json from it, which web/worker.js mounts there.) Everything else -- the
+// constructors that call makePredictor and the decoders that read its outputs -- is the shared code in
+// chara_detail_recognizer.cpp.
 //
 // Threading model (mirrors the notes in wasm_api.cpp, in reverse):
 //   * Predictor construction runs on the module main thread (inside Module.init -> startPipeline), where JS
-//     calls via emscripten::val ARE allowed. Each WasmPredictor resolves its model id + input H/W there by
-//     calling the JS-side umaOrtResolve(key).
-//   * predict() runs on the recognizer pthread, where arbitrary JS calls are NOT allowed. So inference is a
+//     calls via emscripten::val ARE allowed. Each WasmPredictor resolves its model id, input H/W and output count
+//     there by calling the JS-side umaOrtResolve(key).
+//   * predict() runs on a pipeline pthread -- the recognizer's runner, or the scene scraper's for the factor rows
+//     its character-switch rule reads -- where arbitrary JS calls are NOT allowed. So inference is a
 //     shared-memory request/response over the (SharedArrayBuffer-backed) Wasm heap: the pthread writes the
 //     resized NHWC uint8 input + model id into a control block, futex-waits, and the JS main-thread pump
-//     (see harness worker.js) runs ORT and writes the scalar outputs back, then Atomics.notify wakes us.
+//     (web/worker.js) runs ORT and writes the outputs back, each with its element type and element count, then
+//     Atomics.notify wakes us.
 //
-// This is a PoC bridge: one in-flight request at a time (the recognizer drives all inference from a single
-// runner thread), scalar-only outputs (every head here is a 1-element int64 label or float confidence), and a
-// fixed-size request buffer. Product code would batch and avoid the per-call round trip.
+// This is a PoC bridge: one in-flight request at a time, whichever pthread issues it (the channel admits callers
+// in arrival order, see InferenceChannel), element 0 of each output carried back as a double, and a fixed-size
+// request buffer. Product code would batch and avoid the per-call round trip. That each output really is the
+// scalar the decoder reads is not assumed: the pump reports every output's type and element count, and every read
+// passes through requireScalarOutput (cv/prediction_check.h), the check desktop runs on its onnxruntime tensors.
 //
 // The one thing that is NOT PoC-grade, because getting it wrong hangs the whole worker: the wait. This thread
 // waits on a pump that runs on the JS thread, so anything that occupies the JS thread stalls it -- and stop()
@@ -32,7 +43,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <stdexcept>
 #include <string>
 
@@ -43,13 +53,14 @@
 
 #include <opencv2/imgproc.hpp>
 
-#include "chara_detail/chara_detail_recognizer.h"
+#include "chara_detail/recognizer_prediction.h"
 #include "cv/frame.h"
+#include "cv/prediction_check.h"
 #include "cv/predictor.h"
 #include "types/shape.h"
 #include "util/error_util.h"
-#include "util/json_util.h"
 #include "util/logger_util.h"
+#include "util/thread_util.h"
 
 #include "wasm_inference_bridge.h"
 
@@ -92,7 +103,7 @@ EM_JS(void, umaInstallOrtResolveGuard, (), {
             }
             // Read the fields here too: a resolver that answers with an exotic object (a getter that throws,
             // a Proxy) must fail inside this try like every other JS misbehaviour, not at the embind read.
-            return {id: info.id | 0, h: info.h | 0, w: info.w | 0, c: info.c | 0};
+            return {id: info.id | 0, h: info.h | 0, w: info.w | 0, c: info.c | 0, outputs: info.outputs | 0};
         } catch (e) {
             const detail = (e && e.message) ? e.message : String(e);
             return {error: 'umaOrtResolve failed for model ' + key + ': ' + detail};
@@ -109,7 +120,7 @@ enum ControlWord : int {
     kInputH = 2,      // resized input rows
     kInputW = 3,      // resized input cols
     kInputC = 4,      // resized input channels (3, BGR)
-    kOutputCount = 5, // number of scalar outputs the decoder needs (== PredictionType::kOutputCount)
+    kOutputCount = 5, // number of scalar outputs the decoder needs (== Decoder::kOutputCount)
     kControlWords = 16,
 };
 
@@ -121,7 +132,7 @@ enum ProtocolState : int32_t {
 };
 
 constexpr std::size_t kRequestCapacity = 4u * 1024u * 1024u;  // resized crops are small; this is generous
-constexpr std::size_t kResponseCapacity = 32u;                // doubles; max head count here is 10
+constexpr std::size_t kResponseCapacity = 32u;                // outputs; max head count here is 10
 
 // --- Wait bounds -----------------------------------------------------------------------------------------
 // Every wait here is on the JS pump, i.e. on a thread this one does not control, so all three bounds exist to
@@ -144,14 +155,23 @@ constexpr double kInferenceDeadlineMs = 30000.0;
 // pays this once (rather than the full inference budget) before failing.
 constexpr double kReclaimDeadlineMs = 2000.0;
 
-// A single global inference channel. The recognizer runs all inference from one runner thread, so one
-// in-flight slot suffices; the mutex only guards against the (unused here) possibility of two recognizer
-// threads and makes the single-flight contract explicit.
+// A single global inference channel with one in-flight slot, used by EVERY pipeline pthread that runs a
+// prediction. Two do today: the recognizer's runner, and the scene scraper's runner, which reads the factor rows
+// of the frame its character-switch rule judges (chara_detail::recognizer_impl::FactorRowReader).
+//
+// `admission` is what makes the slot single-flight: it covers reclaim -> publish -> wait -> kIdle for one request.
+// A FIFO rather than a std::mutex, because the recognizer issues predictions back to back for a whole record and
+// a std::mutex promises no order -- a waiting scraper could lose every re-acquisition race for the length of that
+// record. Admitted in arrival order, a caller waits for the requests queued ahead of it and no longer.
 struct InferenceChannel {
     volatile int32_t *control = nullptr;
     std::uint8_t *request = nullptr;
+    // kResponseCapacity entries each, indexed by output: element 0 as a double, the element count, and the element
+    // type as a uma::recognizer::ScalarKind value.
     double *response = nullptr;
-    std::mutex mutex;
+    std::int32_t *response_element_counts = nullptr;
+    std::int32_t *response_kinds = nullptr;
+    uma::thread_util::FifoAdmission admission;
 };
 
 InferenceChannel &channel() {
@@ -171,14 +191,16 @@ std::atomic<bool> g_inference_aborting{false};
 std::atomic<bool> g_abandoned_response_pending{false};
 
 // Allocates the shared buffers on the Wasm heap and hands their pointers to JS. Called once from the module
-// main thread (harness worker.js) before Module.init(). The buffers live on the pthread-shared heap, so the
-// recognizer pthread and the JS main thread address the same bytes.
+// main thread (web/worker.js) before Module.init(). The buffers live on the pthread-shared heap, so every
+// pipeline pthread and the JS main thread address the same bytes.
 emscripten::val setupInferenceBridge() {
     auto &ch = channel();
     if (ch.control == nullptr) {
         ch.control = static_cast<volatile int32_t *>(std::calloc(kControlWords, sizeof(int32_t)));
         ch.request = static_cast<std::uint8_t *>(std::malloc(kRequestCapacity));
         ch.response = static_cast<double *>(std::malloc(kResponseCapacity * sizeof(double)));
+        ch.response_element_counts = static_cast<std::int32_t *>(std::calloc(kResponseCapacity, sizeof(std::int32_t)));
+        ch.response_kinds = static_cast<std::int32_t *>(std::calloc(kResponseCapacity, sizeof(std::int32_t)));
     }
     auto info = emscripten::val::object();
     info.set("controlPtr", static_cast<int>(reinterpret_cast<std::intptr_t>(ch.control)));
@@ -186,6 +208,16 @@ emscripten::val setupInferenceBridge() {
     info.set("requestCapacity", static_cast<int>(kRequestCapacity));
     info.set("responsePtr", static_cast<int>(reinterpret_cast<std::intptr_t>(ch.response)));
     info.set("responseCapacity", static_cast<int>(kResponseCapacity));
+    info.set("responseElementCountsPtr", static_cast<int>(reinterpret_cast<std::intptr_t>(ch.response_element_counts)));
+    info.set("responseKindsPtr", static_cast<int>(reinterpret_cast<std::intptr_t>(ch.response_kinds)));
+    // The onnxruntime-web tensor type strings a decoder can read, and the ScalarKind value the pump writes for each;
+    // any other type is written as `otherKind`. Handed over rather than restated in JS, so the two sides cannot
+    // disagree on the values. This is the web counterpart of Prediction::kindOf in cv/model.h.
+    auto kinds = emscripten::val::object();
+    kinds.set("int64", static_cast<int>(uma::recognizer::ScalarKind::kInt64));
+    kinds.set("float32", static_cast<int>(uma::recognizer::ScalarKind::kFloat));
+    info.set("kindsByTensorType", kinds);
+    info.set("otherKind", static_cast<int>(uma::recognizer::ScalarKind::kOther));
     info.set("stateIndex", static_cast<int>(kState));
     return info;
 }
@@ -195,10 +227,11 @@ struct ModelHandle {
     int height = 0;
     int width = 0;
     int channels = 0;
+    int outputs = 0;  // the session's output count
 };
 
-// Resolves a model key (its config module_path, e.g. "skill/prediction.onnx") to a session id + static input
-// shape via the JS side. Runs on the module main thread during predictor construction.
+// Resolves a model key (its config module_path, e.g. "skill/prediction.onnx") to a session id, static input
+// shape and output count via the JS side. Runs on the module main thread during predictor construction.
 //
 // Never calls umaOrtResolve directly: it throws on an unknown key (the JS side answers the module set actually
 // present in OPFS, which can drift from recognizer.json), and a JS throw crossing this boundary would strand
@@ -218,14 +251,15 @@ ModelHandle resolveModel(const std::string &key) {
     if (!error.isUndefined() && !error.isNull()) {
         throw std::runtime_error(error.as<std::string>());
     }
-    return {info["id"].as<int>(), info["h"].as<int>(), info["w"].as<int>(), info["c"].as<int>()};
+    return {info["id"].as<int>(), info["h"].as<int>(), info["w"].as<int>(), info["c"].as<int>(),
+        info["outputs"].as<int>()};
 }
 
 // Waits for the JS pump to move the protocol word off kRequest, and returns the terminal state it published.
 // Throws instead of returning when the abort flag is raised or `deadline_ms` elapses; in both cases the
 // request stays published and is marked abandoned, because the pump may still be holding it (see
-// g_abandoned_response_pending). Runs on the recognizer pthread only -- futex_wait is not allowed on the JS
-// thread, and blocking that thread is precisely what this whole mechanism exists to survive.
+// g_abandoned_response_pending). Runs on a pipeline pthread only, never on the JS thread -- futex_wait is not
+// allowed there, and blocking that thread is precisely what this whole mechanism exists to survive.
 int32_t awaitBridgeResponse(InferenceChannel &ch, double deadline_ms, const char *what) {
     const auto deadline =
         std::chrono::steady_clock::now() + std::chrono::milliseconds(static_cast<long long>(deadline_ms));
@@ -252,7 +286,8 @@ int32_t awaitBridgeResponse(InferenceChannel &ch, double deadline_ms, const char
 }
 
 // Collects the completion of a request that was abandoned earlier, and returns the channel to kIdle. Called
-// with ch.mutex held, before a new request is published, so a stray kDone can never be mistaken for the answer
+// with the channel's admission pass held, before a new request is published, so a stray kDone can never be
+// mistaken for the answer
 // to the request that follows it. Throws (leaving the channel still marked abandoned) when the stray
 // completion does not arrive within kReclaimDeadlineMs.
 void reclaimAbandonedResponse(InferenceChannel &ch) {
@@ -265,9 +300,46 @@ void reclaimAbandonedResponse(InferenceChannel &ch) {
     log_debug("inference bridge: reclaimed an abandoned response, channel is idle again");
 }
 
-// Runs one inference on the recognizer pthread by handing the request to the JS pump and futex-waiting.
-void runInferenceOnBridge(
-    int model_id, const std::uint8_t *input, int height, int width, int channels, int output_count, double *output) {
+// The outputs of one inference, as the JS pump wrote them back. All labels here are small class indices (or an
+// 8-digit date) that round-trip exactly through a double, so element 0 of every output is carried as a double
+// across the JS boundary, next to what the pump observed of that output: its element type and element count.
+class BridgeOutputs final : public uma::recognizer::PredictionOutputs {
+public:
+    [[nodiscard]] std::int64_t int64At(int index) const override {
+        return static_cast<std::int64_t>(std::llround(values[checked(index, uma::recognizer::ScalarKind::kInt64)]));
+    }
+
+    [[nodiscard]] float floatAt(int index) const override {
+        return static_cast<float>(values[checked(index, uma::recognizer::ScalarKind::kFloat)]);
+    }
+
+    std::size_t count = 0;  // outputs written back
+    std::array<double, kResponseCapacity> values{};
+    std::array<std::int32_t, kResponseCapacity> element_counts{};
+    std::array<std::int32_t, kResponseCapacity> kinds{};
+
+private:
+    [[nodiscard]] static uma::recognizer::ScalarKind kindOf(std::int32_t wire) {
+        using uma::recognizer::ScalarKind;
+        switch (wire) {
+            case static_cast<std::int32_t>(ScalarKind::kInt64): return ScalarKind::kInt64;
+            case static_cast<std::int32_t>(ScalarKind::kFloat): return ScalarKind::kFloat;
+            default: return ScalarKind::kOther;
+        }
+    }
+
+    [[nodiscard]] std::size_t checked(int index, uma::recognizer::ScalarKind expected) const {
+        uma::recognizer::requireScalarOutput(index, count, expected, [this](std::size_t i) {
+            return uma::recognizer::OutputDescription{
+                kindOf(kinds[i]), static_cast<std::size_t>(element_counts[i] < 0 ? 0 : element_counts[i])};
+        });
+        return static_cast<std::size_t>(index);
+    }
+};
+
+// Runs one inference on the calling pipeline pthread by handing the request to the JS pump and futex-waiting.
+void runInferenceOnBridge(int model_id, const std::uint8_t *input, int height, int width, int channels,
+    int output_count, BridgeOutputs &output) {
     auto &ch = channel();
     if (ch.control == nullptr) {
         throw std::runtime_error("inference bridge is not set up");
@@ -288,7 +360,13 @@ void runInferenceOnBridge(
         throw std::runtime_error("inference output count exceeds the shared response buffer");
     }
 
-    std::lock_guard<std::mutex> lock(ch.mutex);
+    const auto pass = ch.admission.admit();
+    // Re-checked with the pass held: the abort may have been raised while this caller was queued behind another
+    // request, and publishing now would only cost a wait slice before throwing (FifoAdmission leaves abort to
+    // the caller by contract).
+    if (g_inference_aborting.load(std::memory_order_acquire)) {
+        throw uma::error_util::OperationAborted("inference bridge is stopping");
+    }
     reclaimAbandonedResponse(ch);
     std::memcpy(ch.request, input, byte_count);
     ch.control[kModelId] = model_id;
@@ -306,91 +384,17 @@ void runInferenceOnBridge(
         throw std::runtime_error("onnxruntime-web inference failed (see console)");
     }
     for (int i = 0; i < output_count; ++i) {
-        output[i] = ch.response[i];
+        output.values[i] = ch.response[i];
+        output.element_counts[i] = ch.response_element_counts[i];
+        output.kinds[i] = ch.response_kinds[i];
     }
+    output.count = static_cast<std::size_t>(output_count);
     __atomic_store_n(&ch.control[kState], kIdle, __ATOMIC_SEQ_CST);
 }
 
-// The scalar outputs of one inference, addressed like recognizer::Prediction: even index = int64 label,
-// odd index = float confidence. All labels here are small class indices (or an 8-digit date) that round-trip
-// exactly through a double, so the whole vector is carried as doubles across the JS boundary.
-struct BridgeOutputs {
-    std::array<double, kResponseCapacity> values{};
-
-    [[nodiscard]] std::int64_t i64(int index) const {
-        return static_cast<std::int64_t>(std::llround(values[static_cast<std::size_t>(index)]));
-    }
-    [[nodiscard]] float f32(int index) const { return static_cast<float>(values[static_cast<std::size_t>(index)]); }
-};
-
-using uma::chara_detail::recognizer_impl::Chara;
-using uma::chara_detail::recognizer_impl::RacePlace;
-
-// Decoders mirror the ONNX-backed Prediction structs in recognizer_prediction.h one-for-one, reading from the
-// bridged scalar outputs instead of Ort::Value. Keep result()/confidence()/toJson() identical to that file.
-struct IndexDecoder {
-    using Result = int;
-    static constexpr std::size_t kOutputCount = 2;
-    static Result result(const BridgeOutputs &out) { return static_cast<int>(out.i64(0)); }
-    static float confidence(const BridgeOutputs &out) { return out.f32(1); }
-    static uma::json_util::Json json(const BridgeOutputs &out) {
-        return {{"confidence", confidence(out)}, {"label", result(out)}};
-    }
-};
-
-struct CharaDecoder {
-    using Result = Chara;
-    static constexpr std::size_t kOutputCount = 10;
-    static Result result(const BridgeOutputs &out) {
-        return {
-            static_cast<int>(out.i64(0)),  // icon
-            static_cast<int>(out.i64(2)),  // chara
-            static_cast<int>(out.i64(4)),  // card
-            static_cast<bool>(out.i64(6)),  // rental
-            static_cast<int>(out.i64(8)),  // record_type
-        };
-    }
-    static float confidence(const BridgeOutputs &out) {
-        return std::min({out.f32(1), out.f32(3), out.f32(5), out.f32(7), out.f32(9)});
-    }
-    static uma::json_util::Json json(const BridgeOutputs &out) {
-        return {{"confidence", confidence(out)}, {"label", result(out)}};
-    }
-};
-
-struct RacePlaceDecoder {
-    using Result = RacePlace;
-    static constexpr std::size_t kOutputCount = 8;
-    static Result result(const BridgeOutputs &out) {
-        return {
-            static_cast<int>(out.i64(0)),  // place
-            static_cast<int>(out.i64(2)),  // ground
-            static_cast<int>(out.i64(4)),  // distance
-            static_cast<int>(out.i64(6)),  // variation
-        };
-    }
-    static float confidence(const BridgeOutputs &out) {
-        return std::min({out.f32(1), out.f32(3), out.f32(5), out.f32(7)});
-    }
-    static uma::json_util::Json json(const BridgeOutputs &out) {
-        return {{"confidence", confidence(out)}, {"label", result(out)}};
-    }
-};
-
-struct DateTimeDecoder {
-    using Result = std::string;
-    static constexpr std::size_t kOutputCount = 2;
-    static Result result(const BridgeOutputs &out) {
-        return uma::chara_detail::recognizer_impl::formatTrainedDate(out.i64(0));
-    }
-    static float confidence(const BridgeOutputs &out) { return out.f32(1); }
-    static uma::json_util::Json json(const BridgeOutputs &out) {
-        return {{"confidence", confidence(out)}, {"label", result(out)}};
-    }
-};
-
 // A Predictor whose predict() resizes exactly like recognizer::Model (INTER_LINEAR, NHWC uint8) and runs the
-// inference over the JS bridge. Decoder selects the head layout / Result type.
+// inference over the JS bridge. Decoder (chara_detail/recognizer_prediction.h) selects the head layout and
+// the Result type.
 template<typename Decoder>
 class WasmPredictor : public uma::recognizer::Predictor<typename Decoder::Result> {
 public:
@@ -398,9 +402,11 @@ public:
 
     WasmPredictor(const std::string &key, std::string name) : model_name(std::move(name)) {
         handle = resolveModel(key);
+        uma::recognizer::requireOutputCount(
+            model_name, static_cast<std::size_t>(handle.outputs < 0 ? 0 : handle.outputs), Decoder::kOutputCount);
         input_size = {handle.width, handle.height};
-        log_debug("WasmPredictor '{}' -> id={} input={}x{}x{}", model_name, handle.id, handle.width, handle.height,
-            handle.channels);
+        log_debug("WasmPredictor '{}' -> id={} input={}x{}x{} outputs={}", model_name, handle.id, handle.width,
+            handle.height, handle.channels, handle.outputs);
     }
 
     [[nodiscard]] uma::recognizer::Predicted<Result> predict(const uma::Frame &frame) const override {
@@ -411,8 +417,8 @@ public:
         }
         BridgeOutputs out;
         runInferenceOnBridge(handle.id, image.data, image.rows, image.cols, image.channels(),
-            static_cast<int>(Decoder::kOutputCount), out.values.data());
-        return {Decoder::result(out), Decoder::confidence(out), Decoder::json(out)};
+            static_cast<int>(Decoder::kOutputCount), out);
+        return Decoder::decode(out);
     }
 
     [[nodiscard]] const std::string &name() const override { return model_name; }
@@ -423,18 +429,12 @@ private:
     uma::Size<int> input_size;
 };
 
-template<typename Decoder>
-std::unique_ptr<const uma::recognizer::Predictor<typename Decoder::Result>>
-makePredictor(const std::string &key, const std::string &name) {
-    return std::make_unique<WasmPredictor<Decoder>>(key, name);
-}
-
 }  // namespace
 
 namespace uma::wasm {
 
 // See wasm_inference_bridge.h for why this exists. Runs on the JS thread, from stop(), just before it joins
-// the recognizer pthread.
+// the pipeline pthreads.
 void beginInferenceAbort() {
     g_inference_aborting.store(true, std::memory_order_release);
     auto &ch = channel();
@@ -458,138 +458,25 @@ EMSCRIPTEN_BINDINGS(umacapture_recognizer) {
     emscripten::function("setupInferenceBridge", &setupInferenceBridge);
 }
 
-// --- Production constructors (mirror chara_detail_recognizer_models.cpp) ----------------------------------
-// module_root_dir is unused: the JS side fetches models from the harness server keyed by module_path, so the
-// MEMFS module directory is never read. The relative module_path string is the bridge key.
+namespace uma::chara_detail::recognizer_impl {
 
-namespace uma::chara_detail {
-
-namespace recognizer_impl {
-
-StatusHeaderRecognizer::StatusHeaderRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::StatusHeaderConfig &config)
-    : config(config)
-    , evaluation_value_model(makePredictor<IndexDecoder>(config.evaluation.module_path, "evaluation_value"))
-    , status_value_model(makePredictor<IndexDecoder>(config.status.module_path, "status_value"))
-    , aptitude_model(makePredictor<IndexDecoder>(config.aptitude.module_path, "aptitude")) {
+// module_root_dir is unused here: the JS side loaded the models from OPFS and keyed its sessions by module_path,
+// so the relative module_path is the bridge key and no model file is read from the MEMFS module directory. The
+// recognizer that calls this still reads version_info.json from that directory.
+template<typename Decoder>
+PredictorFor<Decoder> makePredictor(
+    const std::filesystem::path &module_root_dir, const std::string &module_path, const std::string &name) {
     (void) module_root_dir;
+    return std::make_unique<WasmPredictor<Decoder>>(module_path, name);
 }
 
-SkillTabRecognizer::SkillTabRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config)
-    : config(config)
-    , skill_model(makePredictor<IndexDecoder>(config.module_path, "skill"))
-    , skill_level_model(makePredictor<IndexDecoder>(config.skill_level.module_path, "skill_level")) {
-    (void) module_root_dir;
-}
+template PredictorFor<IndexDecoder> makePredictor<IndexDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
+template PredictorFor<CharaDecoder> makePredictor<CharaDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
+template PredictorFor<RacePlaceDecoder> makePredictor<RacePlaceDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
+template PredictorFor<DateTimeDecoder> makePredictor<DateTimeDecoder>(
+    const std::filesystem::path &, const std::string &, const std::string &);
 
-FactorTabRecognizer::FactorTabRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
-    : config(config)
-    , factor_model(makePredictor<IndexDecoder>(config.module_path, "factor"))
-    , factor_rank_model(makePredictor<IndexDecoder>(config.factor_rank.module_path, "factor_rank"))
-    , character_model(makePredictor<CharaDecoder>(config.trainee_icon.icon.module_path, "character"))
-    , character_rank_model(makePredictor<IndexDecoder>(config.trainee_icon.rank.module_path, "character_rank")) {
-    (void) module_root_dir;
-}
-
-SupportCardRecognizer::SupportCardRecognizer(
-    const std::filesystem::path &module_root_dir,
-    const recognizer_config::SupportCardConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
-    : config(config)
-    , common_config(common_config)
-    , support_card_model(makePredictor<IndexDecoder>(config.module_path, "support_card"))
-    , support_card_rank_model(makePredictor<IndexDecoder>(config.rank.module_path, "support_card_rank")) {
-    (void) module_root_dir;
-}
-
-FamilyTreeRecognizer::FamilyTreeRecognizer(
-    const std::filesystem::path &module_root_dir,
-    const recognizer_config::FamilyTreeConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
-    : config(config)
-    , common_config(common_config)
-    , character_model(makePredictor<CharaDecoder>(config.module.chara, "character"))
-    , character_rank_model(makePredictor<IndexDecoder>(config.module.rank, "character_rank")) {
-    (void) module_root_dir;
-}
-
-CampaignRecordRecognizer::CampaignRecordRecognizer(
-    const std::filesystem::path &module_root_dir,
-    const recognizer_config::CampaignRecordConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
-    : config(config)
-    , common_config(common_config)
-    , campaign_field_model(makePredictor<IndexDecoder>(config.campaign_field.module_path, "campaign_field"))
-    , fans_value_model(makePredictor<IndexDecoder>(config.fans_value.module_path, "fans_value"))
-    , scenario_model(makePredictor<IndexDecoder>(config.scenario.module_path, "scenario"))
-    , trained_date_model(makePredictor<DateTimeDecoder>(config.trained_date.module_path, "trained_date")) {
-    (void) module_root_dir;
-}
-
-RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(
-    const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config)
-    : title(makePredictor<IndexDecoder>(block_config.title.module_path, "race_title"))
-    , place(makePredictor<RacePlaceDecoder>(block_config.place.module_path, "race_place"))
-    , weather(makePredictor<IndexDecoder>(block_config.weather.module_path, "race_weather"))
-    , strategy(makePredictor<IndexDecoder>(block_config.strategy.module_path, "race_strategy"))
-    , turn(makePredictor<IndexDecoder>(block_config.turn.module_path, "race_turn"))
-    , position(makePredictor<IndexDecoder>(block_config.position.module_path, "race_position")) {
-    (void) module_root_dir;
-}
-
-RaceRecordRecognizer::RaceRecordRecognizer(
-    const std::filesystem::path &module_root_dir,
-    const recognizer_config::RaceConfig &config,
-    const recognizer_config::CampaignTabCommonConfig &common_config)
-    : config(config)
-    , common_config(common_config)
-    , models_1line(module_root_dir, config.block_1line_config)
-    , models_2line(module_root_dir, config.block_2line_config) {
-}
-
-CampaignTabRecognizer::CampaignTabRecognizer(
-    const std::filesystem::path &module_root_dir, const recognizer_config::CampaignTabConfig &config)
-    : config(config)
-    , support_card_recognizer(module_root_dir, config.support_card, config.common)
-    , family_tree_recognizer(module_root_dir, config.family_tree, config.common)
-    , campaign_record_recognizer(module_root_dir, config.campaign_record, config.common)
-    , race_record_recognizer(module_root_dir, config.race, config.common) {
-}
-
-}  // namespace recognizer_impl
-
-CharaDetailRecognizer::CharaDetailRecognizer(
-    const std::string &trainer_id,
-    const std::filesystem::path &record_root_dir,
-    const std::filesystem::path &module_root_dir,
-    const event_util::Listener<RecordInfo> &on_recognize_ready,
-    const event_util::Sender<RecordInfo> &on_recognize_completed,
-    const event_util::Listener<RecordInfo> &on_update_requested,
-    const event_util::Sender<RecordInfo> &on_update_completed,
-    const event_util::Listener<Frame, RecordInfo> &on_factor_probe_ready,
-    const event_util::Sender<std::vector<record::Factor>, int> &on_factor_probe_completed,
-    const event_util::Sender<std::string> &on_error,
-    const recognizer_config::CharaDetailRecognizerConfig &config)
-    : trainer_id(trainer_id)
-    , record_root_dir(record_root_dir)
-    , module_root_dir(module_root_dir)
-    , config(config)
-    , status_header_recognizer(module_root_dir, config.status_header)
-    , skill_tab_recognizer(module_root_dir, config.skill_tab)
-    , factor_tab_recognizer(module_root_dir, config.factor_tab)
-    , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
-    , on_recognize_ready(on_recognize_ready)
-    , on_recognize_completed(on_recognize_completed)
-    , on_update_requested(on_update_requested)
-    , on_update_completed(on_update_completed)
-    , on_factor_probe_ready(on_factor_probe_ready)
-    , on_factor_probe_completed(on_factor_probe_completed)
-    , on_error(on_error) {
-    this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
-    this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
-    this->on_factor_probe_ready->listen([this](const auto &frame, const auto &info) { this->probe(frame, info); });
-}
-
-}  // namespace uma::chara_detail
+}  // namespace uma::chara_detail::recognizer_impl

@@ -1,0 +1,199 @@
+[
+  {
+    "aptitudes": {
+      "distance": {
+        "long_range": 6,
+        "middle_range": 6,
+        "mile_range": 2,
+        "short_range": 0
+      },
+      "ground": {
+        "dirt": 2,
+        "turf": 6
+      },
+      "style": {
+        "late_charge": 1,
+        "lead_pace": 5,
+        "off_pace": 5,
+        "with_pace": 6
+      }
+    },
+    "evaluation_value": 1276,
+    "factors": {
+      "parent1": [
+        {
+          "id": 54,
+          "star": 1
+        },
+        {
+          "id": 182,
+          "star": 2
+        },
+        {
+          "id": 155,
+          "star": 1
+        },
+        {
+          "id": 623,
+          "star": 2
+        }
+      ],
+      "parent2": [
+        {
+          "id": 246,
+          "star": 1
+        },
+        {
+          "id": 27,
+          "star": 2
+        },
+        {
+          "id": 198,
+          "star": 1
+        },
+        {
+          "id": 623,
+          "star": 1
+        }
+      ],
+      "self": [
+        {
+          "id": 147,
+          "star": 1
+        },
+        {
+          "id": 164,
+          "star": 2
+        },
+        {
+          "id": 269,
+          "star": 1
+        }
+      ]
+    },
+    "family": {
+      "parent1": {
+        "parent1": {
+          "card": 212,
+          "character": 114,
+          "icon": 662,
+          "rank": 298,
+          "record_type": "InheritanceOnly"
+        },
+        "parent2": {
+          "card": 183,
+          "character": 34,
+          "icon": 404,
+          "rank": 90,
+          "record_type": "Standard"
+        },
+        "self": {
+          "card": 1,
+          "character": 31,
+          "icon": 96,
+          "rank": 4,
+          "record_type": "Standard"
+        }
+      },
+      "parent2": {
+        "parent1": {
+          "card": 1,
+          "character": 31,
+          "icon": 96,
+          "rank": 4,
+          "record_type": "Standard"
+        },
+        "parent2": {
+          "card": 79,
+          "character": 13,
+          "icon": 98,
+          "rank": 77,
+          "record_type": "Standard"
+        },
+        "self": {
+          "card": 56,
+          "character": 7,
+          "icon": 40,
+          "rank": 4,
+          "record_type": "Standard"
+        }
+      }
+    },
+    "fans": 1275,
+    "metadata": {
+      "format_version": "1.0.0",
+      "record_type": "Standard",
+      "region": "JPN",
+      "stage": "active",
+      "strategy": 3
+    },
+    "races": [
+      {
+        "distance": 10,
+        "ground": 0,
+        "place": 2,
+        "position": 1,
+        "strategy": 3,
+        "title": 273,
+        "turn": 11,
+        "variation": 5,
+        "weather": 4
+      }
+    ],
+    "scenario": {
+      "id": 1
+    },
+    "skills": [
+      {
+        "id": 198,
+        "level": 4
+      }
+    ],
+    "status": {
+      "guts": 182,
+      "intelligence": 252,
+      "power": 133,
+      "speed": 124,
+      "stamina": 180
+    },
+    "support_cards": [
+      {
+        "id": 1,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 109,
+        "level": 0,
+        "rank": 1
+      },
+      {
+        "id": 539,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 416,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 76,
+        "level": 0,
+        "rank": 5
+      },
+      {
+        "id": 522,
+        "level": 0,
+        "rank": 1
+      }
+    ],
+    "trained_date": "2026/09/15",
+    "trainee": {
+      "card": 2,
+      "character": 12,
+      "icon": 70,
+      "rank": 3
+    }
+  }
+]

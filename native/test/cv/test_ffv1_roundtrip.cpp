@@ -4,6 +4,8 @@
 // libav directly (unlike the opencv-only umacapture_tests), so it is built separately.
 
 #include <filesystem>
+#include <random>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -22,6 +24,18 @@
 
 namespace uma {
 namespace {
+
+// A token unique to this PROCESS, appended to every scratch filename below. More than one
+// umacapture_ffv1_tests process can run at a time (Debug and Release side by side, or an independent
+// verification run alongside a regression run), and with fixed literal filenames under the shared system
+// temp directory two such processes would race the same .mkv file. There is no pid helper
+// in this tree, so a random token stands in for one --
+// native/test/chara_detail/test_scraper_estimators.cpp's uniqueHarnessDir() uses the same device for the
+// same reason.
+std::string processToken() {
+    static const std::string token = std::to_string(std::random_device{}());
+    return token;
+}
 
 // A deterministic BGR pattern with per-channel gradients that span the full 0..255 range (the corners are
 // pinned to pure black and white), so a lossy colorspace conversion would corrupt at least one sample.
@@ -77,7 +91,7 @@ bool bitExact(const cv::Mat &a, const cv::Mat &b) {
 }
 
 TEST_CASE("FFV1 round-trip preserves pixels bit-exactly and reproduces timestamp deltas") {
-    const auto path = std::filesystem::temp_directory_path() / "uma_ffv1_roundtrip.mkv";
+    const auto path = std::filesystem::temp_directory_path() / ("uma_ffv1_roundtrip_" + processToken() + ".mkv");
     std::filesystem::remove(path);
 
     // Odd dimensions on purpose: the bgr0 pixel format has no even-size requirement (unlike yuv420p), and
@@ -105,7 +119,8 @@ TEST_CASE("FFV1 round-trip preserves pixels bit-exactly and reproduces timestamp
 }
 
 TEST_CASE("FFV1 recorder writes through non-ASCII paths") {
-    const auto path = std::filesystem::temp_directory_path() / std::filesystem::u8path("uma_テスト_ffv1.mkv");
+    const auto path =
+        std::filesystem::temp_directory_path() / std::filesystem::u8path("uma_テスト_ffv1_" + processToken() + ".mkv");
     std::filesystem::remove(path);
 
     std::vector<Frame> inputs;
@@ -127,7 +142,8 @@ TEST_CASE("FFV1 recorder writes through non-ASCII paths") {
 // number of frames in flight when that happens is set by thread scheduling -- so a snapshot here would make
 // the delivered frame set depend on timing rather than on the recording.
 TEST_CASE("FFV1 replay resolves no pane decision and emits full frames with the default anchor") {
-    const auto path = std::filesystem::temp_directory_path() / "uma_ffv1_anchor_only.mkv";
+    const auto path =
+        std::filesystem::temp_directory_path() / ("uma_ffv1_anchor_only_" + processToken() + ".mkv");
     std::filesystem::remove(path);
 
     std::vector<Frame> inputs;

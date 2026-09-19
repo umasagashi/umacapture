@@ -32,8 +32,13 @@ final _refProvider = Provider<Ref>((ref) => ref);
 
 const _path = r'C:\clips\partial.mkv';
 
-/// One `onCharaDetailRestarted`, spelled the way `messages::charaDetailRestarted` spells it.
-Map<String, dynamic> _restarted({Object? completed}) => {'type': 'onCharaDetailRestarted', 'completed': ?completed};
+/// One `onCharaDetailRestarted`, spelled the way `messages::charaDetailRestarted` spells it. The
+/// `record_id` is the session the reset began; nothing here reads it.
+Map<String, dynamic> _restarted({Object? completed}) => {
+  'type': 'onCharaDetailRestarted',
+  'completed': ?completed,
+  'record_id': 'rebuilt',
+};
 
 /// One `videoImportDone`, with the fields this file cares about.
 ///

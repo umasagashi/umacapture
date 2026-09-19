@@ -68,7 +68,8 @@ jobs:
       # Drift gate for the two hand-maintained copies the Wasm build depends on and
       # that no compiler cross-checks: native/wasm/build.sh's SOURCES/EXCLUDED_SOURCES
       # must together cover native/src exactly, and wasm_recognizer_models.cpp must
-      # define the same constructors as its desktop twin. A new native/src/**.cpp is
+      # instantiate makePredictor for the same decoders as the desktop definition
+      # (recognizer_prediction.h declares them). A new native/src/**.cpp is
       # otherwise simply absent from the Wasm module, with no signal until someone
       # runs build.sh by hand -- which is why it lives in the job that owns those
       # sources, right next to where they are compiled for Windows.
@@ -114,19 +115,23 @@ jobs:
       # what registers these tests; the run.py / run_dual_decode.py harnesses handle the missing cli.)
       #
       # They are registered as one ctest per case (integration_golden.<name> and
-      # integration_dual_decode.<name>, plus the two single tests integration_golden_coverage and
-      # integration_coverage_selftest), so this log
+      # integration_dual_decode.<name>, plus the single tests that are not per case:
+      # integration_golden_coverage and the harness selftests), so this log
       # names every case that did not run instead of collapsing them into a single line. That is the
       # point of the split: ctest hides the stdout of a passing or skipped test, so coverage has to be
       # carried by test status, and a partial local run must not be able to look like a full one.
       #
-      # EXPECT EVERY REGISTERED INTEGRATION TEST TO SKIP HERE, WITH ONE NAMED EXCEPTION:
-      # integration_coverage_selftest, which must say Passed. It drives no cli and reads no clip --
-      # it exercises run.py --coverage's own decision table against a synthetic manifest inside a
-      # TemporaryDirectory -- so there is no machine on which it is allowed to skip, and it is
-      # registered without SKIP_RETURN_CODE for exactly that reason (native/CMakeLists.txt). It is
-      # what keeps the coverage alarm from being disarmed by a damaged baseline file, which is the
-      # one part of the golden suite CI can actually verify. The expected number of "***Skipped"
+      # EXPECT EVERY REGISTERED INTEGRATION TEST TO SKIP HERE, EXCEPT THE ONES THAT DRIVE NO CLI AND
+      # READ NO CLIP, WHICH MUST SAY Passed. Those are the harness selftests: each exercises one of the
+      # harness's own decision tables against synthetic input, so there is no machine on which it is
+      # allowed to skip, and each is registered without SKIP_RETURN_CODE for exactly that reason. The
+      # exception is that condition, not a list of names: in native/CMakeLists.txt they are the
+      # integration add_test entries that are NOT appended to INTEGRATION_TESTS / DUAL_DECODE_TESTS,
+      # the two lists given SKIP_RETURN_CODE 77. For example integration_coverage_selftest pins
+      # run.py --coverage's decision table, which keeps the coverage alarm from being disarmed by a
+      # damaged baseline file, and integration_check_selftest pins check_run's claims decided from the
+      # summary line alone, such as a declared factor-switch verdict count. They are the part of the
+      # golden suite CI can actually verify. The expected number of "***Skipped"
       # lines is deliberately NOT written down: derive it from native/test/integration/cases.json,
       # which is where it changes -- one integration_dual_decode per case, one integration_golden per
       # case that states a `golden` or an `expect_records`, plus integration_golden_coverage (see the

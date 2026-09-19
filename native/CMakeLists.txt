@@ -9,6 +9,13 @@ set(CMAKE_CXX_STANDARD 17)
 # it reaches every target that pulls in spdlog.
 add_compile_options(/utf-8)
 
+# Every target, every configuration. Debug's /Zi (a .debug$S section per function) and /RTC1 (extra
+# .xdata/.pdata) nearly double the object sections per function, which pushes the largest TUs (cli.cpp and
+# native_api.cpp) past the plain COFF section limit (C1128) in Debug only. The Windows runner, which
+# compiles native_api.cpp as well, gets /bigobj from APPLY_STANDARD_SETTINGS in windows/CMakeLists.txt.
+# /bigobj only widens the object file's section-count field; it does not change the generated code.
+add_compile_options(/bigobj)
+
 set(OpenCV_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/opencv/build")
 set(OpenCV_VERSION "4130")
 set(OpenCV_ARCH "x64")
@@ -19,7 +26,8 @@ set(OpenCV_DEBUG_DLL "${OpenCV_DLL_PREFIX}d.dll")
 set(OpenCV_RELEASE_DLL "${OpenCV_DLL_PREFIX}.dll")
 # OpenCV decodes video through this FFmpeg plugin DLL; the `video` subcommand fails to open a clip
 # without it next to the exe. Copied by the POST_BUILD step below so `video` works from the build dir.
-set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/opencv_videoio_ffmpeg${OpenCV_VERSION}_64.dll")
+set(OpenCV_FFMPEG_DLL_NAME "opencv_videoio_ffmpeg${OpenCV_VERSION}_64")
+set(OpenCV_FFMPEG_DLL "${OpenCV_DIR}/${OpenCV_ARCH}/${OpenCV_RUNTIME}/bin/${OpenCV_FFMPEG_DLL_NAME}.dll")
 
 set(ONNX_DIR "${CMAKE_CURRENT_LIST_DIR}/../windows/onnxruntime")
 
@@ -61,13 +69,6 @@ target_compile_options(
                    # default-less switch over an enum must stay exhaustive (e.g. recordTypeTag,
                    # tabPageTag). Not /we4061, which also fires when a default IS present.
 )
-
-# cli.cpp is the only TU that still needs /bigobj: it includes the tool/builder/* headers, which
-# instantiate the full condition/builder template set in a single translation unit and overflow the
-# COFF section limit. The recognition-pipeline sources no longer need it now that their
-# implementations live in their own .cpp files (previously they were compiled inline into
-# native_api.cpp's TU), so scope the flag to this one file instead of the whole target.
-set_source_files_properties(src/core/cli.cpp PROPERTIES COMPILE_OPTIONS "/bigobj")
 
 target_compile_definitions(
         ${PROJECT_NAME} PRIVATE
@@ -151,10 +152,11 @@ add_custom_command(
 # Run:              ctest --test-dir <build-dir> --output-on-failure
 #                   (or run the umacapture_tests executable directly)
 #
-# The test target deliberately links only the pure-logic sources it needs
-# (currently the condition serializer, which pulls in OpenCV via cv/frame.h but
-# not ONNX/WinRT). Add new pure-logic .cpp files and their tests here as the
-# header/.cpp split progresses.
+# The test target links the sources it needs and no inference runtime: OpenCV
+# comes in via cv/frame.h, while the recognizers' predictors are supplied by
+# test/chara_detail/fake_predictor_factory.cpp, so neither onnxruntime nor WinRT
+# is linked. Add new .cpp files and their tests here as the header/.cpp split
+# progresses.
 # ---------------------------------------------------------------------------
 enable_testing()
 
@@ -168,6 +170,7 @@ set(
         test/chara_detail/test_scene_context.cpp
         test/chara_detail/test_scene_stitcher.cpp
         test/chara_detail/test_scene_scraper.cpp
+        test/chara_detail/test_factor_header_band.cpp
         test/chara_detail/test_factor_change_discriminator.cpp
         test/chara_detail/test_scraper_estimators.cpp
         test/chara_detail/test_search_helpers.cpp
@@ -175,6 +178,7 @@ set(
         test/chara_detail/test_race_recognizer.cpp
         test/chara_detail/test_campaign_recognizer.cpp
         test/chara_detail/test_factor_recognizer.cpp
+        test/chara_detail/test_recognizer_wiring.cpp
         test/chara_detail/test_status_header_recognizer.cpp
         test/chara_detail/test_skill_tab_recognizer.cpp
         test/chara_detail/test_support_card_recognizer.cpp
@@ -184,8 +188,10 @@ set(
         test/core/test_native_api_capture_session.cpp
         test/core/test_native_api_frame_shaping.cpp
         test/core/test_native_api_messages.cpp
+        test/core/test_native_api_pipeline_wiring.cpp
         test/core/test_record_production_counter.cpp
         test/core/test_forwarded_frame_geometry.cpp
+        test/core/test_factor_switch_verdict_tally.cpp
         test/core/test_native_api_preview.cpp
         test/core/test_pipeline_config.cpp
         test/core/test_pipeline_drain.cpp
@@ -220,6 +226,7 @@ set(
         test/cv/test_detail_crop_tracker.cpp
         test/cv/test_frame_distributor.cpp
         test/cv/test_frame_stall_watchdog.cpp
+        test/cv/test_prediction_check.cpp
         # The Wasm module itself needs Emscripten and is compiled by no suite; its Emscripten-free wire-contract
         # headers (native/wasm/*.h) are testable here, which is why they are kept free of emscripten includes.
         test/wasm/test_pane_snapshot_token.cpp
@@ -228,16 +235,23 @@ set(
         # below, the same way the wasm wire-contract headers are.
         test/tool/test_stop_file_guard.cpp
         test/tool/test_mimic_spec_parse.cpp
+        # The production pipeline assembly. It needs no inference runtime of its own: the predictors its
+        # recognizer stage builds come from the fake factory below, so this links against OpenCV like the rest of
+        # the target. Linked so test/core/test_native_api_pipeline_wiring.cpp drives the real NativeApi.
+        src/core/native_api.cpp
         src/core/native_api_frame_shaping.cpp
         src/condition/serializer.cpp
         src/chara_detail/chara_detail_scene_scraper.cpp
         src/chara_detail/chara_detail_scene_context.cpp
         src/chara_detail/chara_detail_scene_stitcher.cpp
         src/chara_detail/chara_detail_search_helpers.cpp
-        # ONNX-free half of the recognizer TU split (its production ctors, which name recognizer::Model, live
-        # in chara_detail_recognizer_models.cpp and are deliberately NOT linked here). This lets the scan logic
-        # be tested against fake predictors without onnxruntime; the ONNX include dir/lib below are omitted.
+        # The recognizers' constructors, decoders and scan logic, which are ONNX-free. Their production ctors
+        # build predictors through makePredictor, whose desktop definition (chara_detail_recognizer_models.cpp)
+        # names recognizer::Model and is deliberately NOT linked here; the fake below defines it instead, loading
+        # no model. So the scan logic is tested against fake predictors without onnxruntime, and the ONNX include
+        # dir/lib below are omitted.
         src/chara_detail/chara_detail_recognizer.cpp
+        test/chara_detail/fake_predictor_factory.cpp
 )
 
 add_executable(umacapture_tests ${TEST_SOURCE_FILES})
@@ -268,6 +282,15 @@ target_compile_definitions(
         # Absolute path to the repo-committed config assets, so test/chara_detail/test_config.cpp can
         # characterization-test the real shipped config without depending on the working directory.
         TEST_ASSET_CONFIG_DIR="${CMAKE_CURRENT_LIST_DIR}/../assets/config"
+        # Absolute path to the gitignored golden clip directory, so a case that states an invariant about real
+        # footage (test/chara_detail/test_factor_header_band.cpp) can find its input. The directory is test
+        # MATERIAL and not part of the repository, so the case that reads it must -- like every golden case --
+        # report and continue when a clip is absent rather than fail.
+        TEST_GOLDEN_CLIP_DIR="${CMAKE_CURRENT_LIST_DIR}/../testdata/clips/golden"
+        # The FFmpeg plugin file name this configuration's opencv_world loads, so a case that decodes video can
+        # name the missing file when the backend is absent (test/util/video_backend_guard.h). The same value the
+        # POST_BUILD copy below writes, so the message cannot name a file the build does not place.
+        TEST_OPENCV_FFMPEG_PLUGIN="${OpenCV_FFMPEG_DLL_NAME}.dll"
 )
 
 target_include_directories(
@@ -530,6 +553,22 @@ if(UV_EXECUTABLE)
              COMMAND ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/test_run_coverage.py")
     set_tests_properties(integration_coverage_selftest PROPERTIES LABELS "integration;golden")
 
+    # The run judge's own test: check_run's per-case claims that are decided from the summary line alone, driven
+    # against synthetic summaries in-process. Like the coverage selftest it spawns no cli and needs no clip, so
+    # it runs in CI. It exists because the golden cases can only exercise a claim against the numbers the real
+    # corpus happens to produce: a claim that stopped comparing -- a declared factor-switch verdict count the
+    # judge no longer checks -- stays green on every golden case whose declaration is right.
+    add_test(NAME integration_check_selftest
+             COMMAND ${UV_EXECUTABLE} run "${INTEGRATION_DIR}/test_run_check.py")
+    set_tests_properties(integration_check_selftest PROPERTIES LABELS "integration;golden")
+
+    # check_sources.py's own comment/string stripping, driven against hand-built text: no clip, model or cli
+    # is needed, so it runs in CI. Not part of the golden suite (it has nothing to do with the recognition
+    # pipeline or its clips), so it carries no "integration;golden" label and no SKIP_RETURN_CODE -- there is
+    # no machine on which it is allowed to skip.
+    add_test(NAME wasm_check_sources_selftest
+             COMMAND ${UV_EXECUTABLE} run "${CMAKE_CURRENT_LIST_DIR}/wasm/test_check_sources.py")
+
     # Dual-decode equivalence: the same clip run through `video --color_matrix bt601` and
     # `--color_matrix bt709`, requiring one identical record set. See test/integration/run_dual_decode.py
     # for what that measures and why the bt601 run is also diffed against the golden.
@@ -586,5 +625,18 @@ add_custom_command(
         copy
         $<$<CONFIG:Debug>:${OpenCV_DEBUG_DLL}>
         $<$<CONFIG:Release>:${OpenCV_RELEASE_DLL}>
+        $<TARGET_FILE_DIR:umacapture_tests>
+)
+
+# The tests that decode video (the footage cases in test/chara_detail/test_factor_header_band.cpp, and the
+# generated-clip cases in test/cv/test_video_loader.cpp and test_video_frame_grabber.cpp) need OpenCV's FFmpeg
+# plugin next to THIS exe, and nothing else puts it there in a tests-only build. Without it OpenCV falls back to
+# MSMF without a word -- an FFV1 clip decodes to nothing, and an .mp4 decodes to different pixels that still pass. Copied under its shipped name in every configuration: a
+# Debug opencv_world4130d.dll asks for `..._64d.dll` first and then loads `..._64.dll` from beside the exe
+# (measured on this target, OpenCV 4.13). This target links no onnxruntime and no libav, so nothing else is needed.
+add_custom_command(
+        TARGET umacapture_tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E
+        copy
+        ${OpenCV_FFMPEG_DLL}
         $<TARGET_FILE_DIR:umacapture_tests>
 )

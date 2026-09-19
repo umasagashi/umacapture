@@ -55,8 +55,9 @@ TEST_CASE("a run that reported nothing is a clean run") {
 TEST_CASE("a reported terminal error is named and turns the exit code non-zero") {
     // The empty-clip case this whole change exists for: zero records AND an announcement, which a driver must
     // be able to tell apart from a build that could not start (kExitDidNotRun).
+    // The core sends this tag scoped to the attempt it ends (with a `record_id`); the report counts it all the same.
     RunReport report;
-    report.observe(app::messages::error(kIncompleteSessionTag));
+    report.observe(app::messages::error(kIncompleteSessionTag, "rec-1"));
 
     CHECK(report.errorTotal() == 1);
     CHECK(report.exitCode(false) == kExitReportedError);
@@ -74,7 +75,7 @@ TEST_CASE("two different causes stay distinguishable on the line") {
     RunReport incomplete;
     incomplete.observe(app::messages::error(kIncompleteSessionTag));
     RunReport stitch;
-    stitch.observe(app::messages::error("stitch_failed"));
+    stitch.observe(app::messages::error("stitch_failed", "rec-1"));
 
     CHECK(incomplete.errorTags() != stitch.errorTags());
     CHECK(incomplete.errorTags().at(0) == std::string(kIncompleteSessionTag));
@@ -101,8 +102,8 @@ TEST_CASE("a discard that had already produced its record is not counted as a lo
     // character. Reporting the two alike would make the loud path fire on every legitimate switch, which is the
     // design the user already rejected.
     RunReport report;
-    report.observe(app::messages::charaDetailRestarted(true));
-    report.observe(app::messages::charaDetailRestarted(false));
+    report.observe(app::messages::charaDetailRestarted(true, "rec-2"));
+    report.observe(app::messages::charaDetailRestarted(false, "rec-3"));
 
     CHECK(report.discardedSessions() == 2);
     CHECK(report.discardedIncomplete() == 1);
@@ -176,6 +177,26 @@ TEST_CASE("a run that forwarded no frame reports the count, not a geometry of ze
     CHECK(json["anchor_unit_max"].get<int>() == 0);
 }
 
+TEST_CASE("the line states every factor switch verdict the caller counted, under its own word") {
+    // The only place a switch reader that always finds nothing -- or always fails -- differs from a working one:
+    // all three reset alike, so the records and the discard counts are identical. native/test/integration/run.py
+    // compares this object with what a case declares. Distinct counts, so a key written under another's word
+    // cannot pass.
+    RunReport report;
+    RunInvocation run{"video", 1, 1, kExitOk};
+    run.factor_switch_verdicts = {{"same", 1}, {"different", 2}, {"empty", 3}, {"unreadable", 0}};
+    const auto json = summaryJsonOf(report, run);
+    REQUIRE(json.contains("factor_switch_verdicts"));
+    const auto &verdicts = json["factor_switch_verdicts"];
+    REQUIRE(verdicts.is_object());
+    CHECK(verdicts.size() == 4);
+    CHECK(verdicts["same"].get<int64_t>() == 1);
+    CHECK(verdicts["different"].get<int64_t>() == 2);
+    CHECK(verdicts["empty"].get<int64_t>() == 3);
+    // A zero is stated, not left out: "no Unreadable verdict" and "this line does not count Unreadable" differ.
+    CHECK(verdicts["unreadable"].get<int64_t>() == 0);
+}
+
 TEST_CASE("a notification that cannot be read is counted, never dropped") {
     // The mechanism that exists to end silent failures must not have a silent failure of its own.
     RunReport report;
@@ -193,7 +214,9 @@ TEST_CASE("a notification this report does not classify is not an anomaly") {
     // Most of the stream is progress and lifecycle chatter. It is read successfully and contributes nothing --
     // which is different from being unreadable, and must not show up as `unparsed`.
     RunReport report;
-    report.observe(app::messages::charaDetailStarted());
+    report.observe(app::messages::charaDetailStarted("rec-1"));
+    report.observe(app::messages::factorSwitchArmed(true));
+    report.observe(app::messages::tabAwaitingHead(1, false, false));
     report.observe(app::messages::scrollReady(1));
     report.observe(app::messages::captureStopped());
     CHECK(report.unparsed() == 0);

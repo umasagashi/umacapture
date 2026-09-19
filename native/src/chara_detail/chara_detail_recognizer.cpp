@@ -1,21 +1,26 @@
 #include "chara_detail/chara_detail_recognizer.h"
 
-// INVARIANT (see native/CMakeLists.txt and the TU-split note in chara_detail_recognizer_models.cpp): this
-// translation unit must stay ONNX-free so it links into BOTH the app target and the onnxruntime-less
-// umacapture_tests target. It must NEVER name recognizer::Model or include cv/model.h -- every ONNX model
-// construction lives in chara_detail_recognizer_models.cpp. Only the injection ctors (which take pre-built
-// Predictors) and the recognize()/scan methods live here. The tripwire below fails the build loudly if the
-// onnxruntime header leaks in transitively.
+// Every constructor of the recognizers and the decoders that read a prediction's outputs live here, once for
+// every platform. A production constructor obtains its predictors from makePredictor
+// (chara_detail/recognizer_prediction.h), the one piece each build defines for itself; an injection constructor
+// takes pre-built predictors, so the scan logic can be tested against fakes.
+//
+// INVARIANT: this translation unit must stay ONNX-free. It is compiled into the desktop app, the Wasm module
+// (which links no onnxruntime) and the onnxruntime-less umacapture_tests target, so it must NEVER name
+// recognizer::Model or include cv/model.h. The tripwire below fails the build loudly if the onnxruntime header
+// leaks in transitively.
 #ifdef ORT_API_VERSION
-#error "chara_detail_recognizer.cpp must stay ONNX-free; the onnxruntime header leaked in (see the TU-split note)."
+#error "chara_detail_recognizer.cpp must stay ONNX-free; the onnxruntime header leaked in (see the note above)."
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <exception>
 #include <map>
 #include <utility>
 
 #include "chara_detail/chara_detail_search_helpers.h"
+#include "chara_detail/recognizer_prediction.h"
 #include "util/error_util.h"
 #include "util/logger_util.h"
 
@@ -23,12 +28,68 @@ namespace uma::chara_detail {
 
 namespace recognizer_impl {
 
+// Decoders (chara_detail/recognizer_prediction.h). Each platform's predictor hands its outputs to these.
+
+namespace {
+
+template<typename Result>
+recognizer::Predicted<Result> predicted(Result result, float confidence) {
+    json_util::Json json = {{"confidence", confidence}, {"label", result}};
+    return {std::move(result), confidence, std::move(json)};
+}
+
+}  // namespace
+
+recognizer::Predicted<int> IndexDecoder::decode(const recognizer::PredictionOutputs &out) {
+    const auto result = static_cast<int>(out.int64At(0));
+    return predicted(result, out.floatAt(1));
+}
+
+recognizer::Predicted<Chara> CharaDecoder::decode(const recognizer::PredictionOutputs &out) {
+    Chara result{
+        static_cast<int>(out.int64At(0)),  // icon
+        static_cast<int>(out.int64At(2)),  // chara
+        static_cast<int>(out.int64At(4)),  // card
+        static_cast<bool>(out.int64At(6)),  // rental
+        // record_type_index (output 8), not rental_index (output 6): the model has a dedicated record-type head
+        // with values 0-3 (see record::RecordType). Read it as int, not bool, so a FriendStandard/
+        // FriendInheritance value (>= 2) is not truncated to 1.
+        static_cast<int>(out.int64At(8)),
+    };
+    const auto confidence =
+        std::min({out.floatAt(1), out.floatAt(3), out.floatAt(5), out.floatAt(7), out.floatAt(9)});
+    return predicted(std::move(result), confidence);
+}
+
+recognizer::Predicted<RacePlace> RacePlaceDecoder::decode(const recognizer::PredictionOutputs &out) {
+    RacePlace result{
+        static_cast<int>(out.int64At(0)),  // place
+        static_cast<int>(out.int64At(2)),  // ground
+        static_cast<int>(out.int64At(4)),  // distance
+        static_cast<int>(out.int64At(6)),  // variation
+    };
+    const auto confidence = std::min({out.floatAt(1), out.floatAt(3), out.floatAt(5), out.floatAt(7)});
+    return predicted(std::move(result), confidence);
+}
+
+recognizer::Predicted<std::string> DateTimeDecoder::decode(const recognizer::PredictionOutputs &out) {
+    auto result = formatTrainedDate(out.int64At(0));
+    return predicted(std::move(result), out.floatAt(1));
+}
+
 json_util::Json PredictionHistory::toJson() const {
     vlog_debug(records.size());
     return records;
 }
 
-// StatusHeaderRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+StatusHeaderRecognizer::StatusHeaderRecognizer(
+    const std::filesystem::path &module_root_dir, const recognizer_config::StatusHeaderConfig &config)
+    : config(config)
+    , evaluation_value_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.evaluation.module_path, "evaluation_value"))
+    , status_value_model(makePredictor<IndexDecoder>(module_root_dir, config.status.module_path, "status_value"))
+    , aptitude_model(makePredictor<IndexDecoder>(module_root_dir, config.aptitude.module_path, "aptitude")) {
+}
 
 StatusHeaderRecognizer::StatusHeaderRecognizer(
     const recognizer_config::StatusHeaderConfig &config,
@@ -53,7 +114,12 @@ void StatusHeaderRecognizer::recognize(
     record.aptitudes = predict(*aptitude_model, frame, config.aptitude.rects, history);
 }
 
-// SkillTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+SkillTabRecognizer::SkillTabRecognizer(
+    const std::filesystem::path &module_root_dir, const recognizer_config::SkillTabConfig &config)
+    : config(config)
+    , skill_model(makePredictor<IndexDecoder>(module_root_dir, config.module_path, "skill"))
+    , skill_level_model(makePredictor<IndexDecoder>(module_root_dir, config.skill_level.module_path, "skill_level")) {
+}
 
 SkillTabRecognizer::SkillTabRecognizer(
     const recognizer_config::SkillTabConfig &config,
@@ -124,17 +190,41 @@ std::optional<double> SkillTabRecognizer::findNext(const Frame &frame, const Poi
     return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_gap);
 }
 
-// FactorTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+FactorRowReader::FactorRowReader(
+    const std::filesystem::path &module_root_dir, const recognizer_config::FactorTabConfig &config)
+    : FactorRowReader(
+          config,
+          makePredictor<IndexDecoder>(module_root_dir, config.module_path, "factor"),
+          makePredictor<IndexDecoder>(module_root_dir, config.factor_rank.module_path, "factor_rank")) {
+}
+
+FactorRowReader::FactorRowReader(
+    const recognizer_config::FactorTabConfig &config,
+    std::unique_ptr<const recognizer::Predictor<int>> factor_model,
+    std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model)
+    : config(config)
+    , factor_model(std::move(factor_model))
+    , factor_rank_model(std::move(factor_rank_model)) {
+}
+
+FactorTabRecognizer::FactorTabRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::FactorTabConfig &config,
+    std::shared_ptr<const FactorRowReader> rows)
+    : config(config)
+    , rows(requireFactorRows(std::move(rows)))
+    , character_model(makePredictor<CharaDecoder>(module_root_dir, config.trainee_icon.icon.module_path, "character"))
+    , character_rank_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.trainee_icon.rank.module_path, "character_rank")) {
+}
 
 FactorTabRecognizer::FactorTabRecognizer(
     const recognizer_config::FactorTabConfig &config,
-    std::unique_ptr<const recognizer::Predictor<int>> factor_model,
-    std::unique_ptr<const recognizer::Predictor<int>> factor_rank_model,
+    std::shared_ptr<const FactorRowReader> rows,
     std::unique_ptr<const recognizer::Predictor<Chara>> character_model,
     std::unique_ptr<const recognizer::Predictor<int>> character_rank_model)
     : config(config)
-    , factor_model(std::move(factor_model))
-    , factor_rank_model(std::move(factor_rank_model))
+    , rows(requireFactorRows(std::move(rows)))
     , character_model(std::move(character_model))
     , character_rank_model(std::move(character_rank_model)) {
 }
@@ -145,29 +235,24 @@ void FactorTabRecognizer::recognize(
     record::CharaDetailRecord &record,
     CropInfo &crop_info,
     PredictionHistory &history) const {
-    const auto anchor = frame.anchor();
-
-    // Find the green banner at the top of the Factors tab to calibrate the initial Y position,
-    const auto top_banner_y = searchVertical(
-        frame,
-        config.bg_color,
-        {
-            anchor.absolute(config.left_rect).left(),
-            anchor.absolute(config.area).top(),
-        },
-        config.vertical_banner_upper_gap);
-    if (!top_banner_y) {
+    // Find the green banner at the top of the Factors tab to calibrate the initial Y position. The search is the
+    // shared reader's (findBanner), so this read and the single-frame read find the banner by one rule.
+    const auto banner = rows->findBanner(frame, config.area);
+    if (!banner) {
         log_warning("Failed to find top banner of factor tab.");
         return;
     }
 
     // Move to the space between the banner and the first factor.
-    const double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
+    const double scan_top = banner->top + config.vertical_banner_bottom_delta;
 
+    // The stitched image's scroll area is config.area, the same rect the banner search above starts from.
     double current_y = scan_top;
-    const auto self = recognizeOne(frame, current_y, history);
-    const auto parent1 = recognizeOne(frame, current_y, history);
-    const auto parent2 = recognizeOne(frame, current_y, history);
+    // Every list is read in full: the limit belongs to the single-frame read only (SelfFactorWindow), and each
+    // list here starts where the one before it ended, which a limited read would not reach.
+    const auto self = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
+    const auto parent1 = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
+    const auto parent2 = rows->recognizeOne(frame, config.area, current_y, history, std::nullopt);
 
     record.factors = {self, parent1, parent2};
 
@@ -175,24 +260,43 @@ void FactorTabRecognizer::recognize(
 }
 
 std::vector<record::Factor>
-FactorTabRecognizer::recognizeVisibleSelf(const Frame &frame, PredictionHistory &history) const {
-    const auto anchor = frame.anchor();
-
-    const auto top_banner_y = searchVertical(
-        frame,
-        config.bg_color,
-        {
-            anchor.absolute(config.left_rect).left(),
-            anchor.absolute(config.area).top(),
-        },
-        config.vertical_banner_upper_gap);
-    if (!top_banner_y) {
+FactorRowReader::visibleSelfPrefix(const Frame &frame, const SelfFactorWindow &window) const {
+    // Scan from the caller's scroll area, NOT from config.area: this frame is a live one, whose scroll
+    // area moves with the record layout (see the header for the full reason).
+    const auto banner = findBanner(frame, window.scroll_area);
+    if (!banner) {
         log_warning("Failed to find top banner of factor tab.");
         return {};
     }
 
-    double scan_top = top_banner_y.value() + config.vertical_banner_bottom_delta;
-    return recognizeOne(frame, scan_top, history, /*bounded=*/true);
+    double scan_top = banner->top + config.vertical_banner_bottom_delta;
+    PredictionHistory history;
+    return recognizeOne(frame, window.scroll_area, scan_top, history, window.factor_limit);
+}
+
+std::optional<BannerHit> FactorRowReader::findBanner(const Frame &frame, const Rect<double> &scroll_area) const {
+    const auto anchor = frame.anchor();
+    const auto scan = scanVertical(
+        frame,
+        config.bg_color,
+        {
+            anchor.absolute(config.left_rect).left(),
+            anchor.absolute(scroll_area).top(),
+        },
+        config.vertical_banner_upper_gap);
+    if (!scan || !scan->hit_y) {
+        return std::nullopt;
+    }
+    const int hit_y = scan->hit_y.value();
+    const auto area = anchor.mapToFrame(scroll_area);
+    const int run_end_y = backgroundResumesAt(frame, config.bg_color, scan->x, hit_y, area.bottom());
+    return BannerHit{
+        anchor.mapFromFrame(Point<int>{scan->x, hit_y}).y(),
+        scan->x - area.left(),
+        hit_y - scan->start_y,
+        scan->length,
+        run_end_y - scan->start_y,
+    };
 }
 
 record::Character FactorTabRecognizer::recognizeTrainee(
@@ -202,7 +306,7 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     CropInfo &crop_info,
     PredictionHistory &history) const {
     const auto &anchor = frame.anchor();
-    const auto reference_top = findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
+    const auto reference_top = rows->findNext(frame, anchor.absolute(config.left_rect).topLeft().withY(scan_top));
     if (!reference_top.has_value()) {
         log_warning("Failed to find reference point for trainee icon.");
         return {};
@@ -231,67 +335,98 @@ record::Character FactorTabRecognizer::recognizeTrainee(
     return character;
 }
 
-std::vector<record::Factor> FactorTabRecognizer::recognizeOne(
-    const Frame &frame, double &scan_top, PredictionHistory &history, bool bounded) const {
+std::vector<record::Factor> FactorRowReader::recognizeOne(
+    const Frame &frame,
+    const Rect<double> &scroll_area,
+    double &scan_top,
+    PredictionHistory &history,
+    const std::optional<std::size_t> factor_limit) const {
     const auto anchor = frame.anchor();
     const auto left_rect = anchor.absolute(config.left_rect);
     const auto right_rect = anchor.absolute(config.right_rect);
 
-    const auto fits_frame = [&](const Rect<double> &cell, double top) {
-        const auto mapped = anchor.mapToFrame(cell + Point<double>{0, top});
-        return mapped.top() >= 0 && mapped.left() >= 0  //
-            && mapped.bottom() <= frame.height() && mapped.right() <= frame.width();
+    // The region a cell has to lie in, in the pixels Frame::view crops by: the scroll area, clipped to the frame.
+    const auto area = anchor.mapToFrame(scroll_area);
+    const Rect<int> visible{
+        {std::max(area.left(), 0), std::max(area.top(), 0)},
+        Point<int>{std::min(area.right(), frame.width()), std::min(area.bottom(), frame.height())},
+    };
+    const auto inside_visible = [&](const Rect<double> &cell) {
+        const auto mapped = anchor.mapToFrame(cell);
+        return mapped.left() >= visible.left() && mapped.top() >= visible.top()  //
+            && mapped.right() <= visible.right() && mapped.bottom() <= visible.bottom();
+    };
+    const auto fits = [&](const FactorCells &cells) {
+        return inside_visible(cells.name) && inside_visible(cells.star);
+    };
+
+    // Checked before each cell is looked for, so a limited read hands the models nothing past the limit.
+    const auto full = [&](const std::vector<record::Factor> &read) {
+        return factor_limit.has_value() && read.size() >= factor_limit.value();
     };
 
     std::vector<record::Factor> factors;
     for (;;) {
         const auto current_scan_top = scan_top;
+        if (full(factors)) {
+            break;
+        }
 
         // Find next row of LEFT column.
         const auto left_column_y = findNext(frame, left_rect.topLeft().withY(current_scan_top));
         if (!left_column_y) {
             break;
         }
-        if (bounded && !fits_frame(left_rect, left_column_y.value())) {
+        const auto left_cells = cellsAt(left_rect, left_column_y.value());
+        if (!fits(left_cells)) {
             break;
         }
-        factors.push_back(predictFactor(frame, left_rect, left_column_y.value(), history));
+        factors.push_back(predictFactor(frame, left_cells, history));
         scan_top = left_column_y.value() + config.vertical_delta;
+        if (full(factors)) {
+            break;
+        }
 
         // Find next row of RIGHT column.
         const auto right_column_y = findNext(frame, right_rect.topLeft().withY(current_scan_top));
         if (!right_column_y) {
             break;
         }
-        if (bounded && !fits_frame(right_rect, right_column_y.value())) {
+        const auto right_cells = cellsAt(right_rect, right_column_y.value());
+        if (!fits(right_cells)) {
             break;
         }
-        factors.push_back(predictFactor(frame, right_rect, right_column_y.value(), history));
+        factors.push_back(predictFactor(frame, right_cells, history));
     }
 
     scan_top += config.vertical_chara_gap;
     return factors;
 }
 
-std::optional<double> FactorTabRecognizer::findNext(const Frame &frame, const Point<double> &scan_top_left) const {
+std::optional<double> FactorRowReader::findNext(const Frame &frame, const Point<double> &scan_top_left) const {
     return searchVertical(frame, config.bg_color, scan_top_left, config.vertical_factor_gap);
 }
 
-record::Factor FactorTabRecognizer::predictFactor(
-    const Frame &frame, const Rect<double> &rect, double top, PredictionHistory &history) const {
+FactorRowReader::FactorCells FactorRowReader::cellsAt(const Rect<double> &column_rect, double top) const {
     // The offset math below only holds for ScreenStart-anchored rects. This is a structural invariant of the
     // parsed config, so a violation is a real check (not a Debug-only assert): it is caught by the recognizer's
     // per-record try/catch and degrades to a dropped record plus a log entry.
     if (!(config.factor_rank.rect.topLeft().anchor() == ScreenStart)
-        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart) || !(rect.topLeft().anchor() == ScreenStart)
-        || !(rect.bottomRight().anchor() == ScreenStart)) {
-        throw std::logic_error("predictFactor requires ScreenStart-anchored rects");
+        || !(config.factor_rank.rect.bottomRight().anchor() == ScreenStart)
+        || !(column_rect.topLeft().anchor() == ScreenStart) || !(column_rect.bottomRight().anchor() == ScreenStart)) {
+        throw std::logic_error("FactorRowReader::cellsAt requires ScreenStart-anchored rects");
     }
+    return {
+        column_rect + Point<double>{0, top},
+        config.factor_rank.rect + Point<double>{column_rect.left(), top},
+    };
+}
 
-    const auto factor_id = predict(*factor_model, frame, rect + Point<double>{0, top}, history);
+record::Factor
+FactorRowReader::predictFactor(const Frame &frame, const FactorCells &cells, PredictionHistory &history) const {
+    const auto factor_id = predict(factor_model, frame, cells.name, history);
 
-    const auto factor_rank =
-        predict(*factor_rank_model, frame, config.factor_rank.rect + Point<double>{rect.left(), top}, history);
+    const auto factor_rank = predict(factor_rank_model, frame, cells.star, history);
 
     return {
         factor_id,
@@ -299,7 +434,16 @@ record::Factor FactorTabRecognizer::predictFactor(
     };
 }
 
-// SupportCardRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+SupportCardRecognizer::SupportCardRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::SupportCardConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , support_card_model(makePredictor<IndexDecoder>(module_root_dir, config.module_path, "support_card"))
+    , support_card_rank_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.rank.module_path, "support_card_rank")) {
+}
 
 SupportCardRecognizer::SupportCardRecognizer(
     const recognizer_config::SupportCardConfig &config,
@@ -354,7 +498,15 @@ void SupportCardRecognizer::recognize(
     scan_top = card_top.value() + config.vertical_delta;
 }
 
-// FamilyTreeRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+FamilyTreeRecognizer::FamilyTreeRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::FamilyTreeConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , character_model(makePredictor<CharaDecoder>(module_root_dir, config.module.chara, "character"))
+    , character_rank_model(makePredictor<IndexDecoder>(module_root_dir, config.module.rank, "character_rank")) {
+}
 
 FamilyTreeRecognizer::FamilyTreeRecognizer(
     const recognizer_config::FamilyTreeConfig &config,
@@ -454,7 +606,19 @@ record::Character FamilyTreeRecognizer::makeCharacter(const Chara &chara, int ra
     return character;
 }
 
-// CampaignRecordRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+CampaignRecordRecognizer::CampaignRecordRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::CampaignRecordConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , campaign_field_model(
+          makePredictor<IndexDecoder>(module_root_dir, config.campaign_field.module_path, "campaign_field"))
+    , fans_value_model(makePredictor<IndexDecoder>(module_root_dir, config.fans_value.module_path, "fans_value"))
+    , scenario_model(makePredictor<IndexDecoder>(module_root_dir, config.scenario.module_path, "scenario"))
+    , trained_date_model(
+          makePredictor<DateTimeDecoder>(module_root_dir, config.trained_date.module_path, "trained_date")) {
+}
 
 CampaignRecordRecognizer::CampaignRecordRecognizer(
     const recognizer_config::CampaignRecordConfig &config,
@@ -583,8 +747,26 @@ std::optional<double> CampaignRecordRecognizer::findNext(
     return searchVertical(frame, common_config.strict_bg_color, scan_top_left, max_length);
 }
 
-// RaceRecordRecognizer: production ctors (for the recognizer and its RaceBlockModelSet) live in
-// chara_detail_recognizer_models.cpp.
+RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(
+    const std::filesystem::path &module_root_dir, const recognizer_config::RaceBlockConfig &block_config)
+    : title(makePredictor<IndexDecoder>(module_root_dir, block_config.title.module_path, "race_title"))
+    // race_place has 1line and 2line variations, but since there's no need to distinguish the output, name can be the same.
+    , place(makePredictor<RacePlaceDecoder>(module_root_dir, block_config.place.module_path, "race_place"))
+    , weather(makePredictor<IndexDecoder>(module_root_dir, block_config.weather.module_path, "race_weather"))
+    , strategy(makePredictor<IndexDecoder>(module_root_dir, block_config.strategy.module_path, "race_strategy"))
+    , turn(makePredictor<IndexDecoder>(module_root_dir, block_config.turn.module_path, "race_turn"))
+    , position(makePredictor<IndexDecoder>(module_root_dir, block_config.position.module_path, "race_position")) {
+}
+
+RaceRecordRecognizer::RaceRecordRecognizer(
+    const std::filesystem::path &module_root_dir,
+    const recognizer_config::RaceConfig &config,
+    const recognizer_config::CampaignTabCommonConfig &common_config)
+    : config(config)
+    , common_config(common_config)
+    , models_1line(module_root_dir, config.block_1line_config)
+    , models_2line(module_root_dir, config.block_2line_config) {
+}
 
 RaceRecordRecognizer::RaceBlockModelSet::RaceBlockModelSet(RaceBlockPredictors predictors)
     : title(std::move(predictors.title))
@@ -714,7 +896,14 @@ record::Race RaceRecordRecognizer::recognizeRace(
     return race;
 }
 
-// CampaignTabRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+CampaignTabRecognizer::CampaignTabRecognizer(
+    const std::filesystem::path &module_root_dir, const recognizer_config::CampaignTabConfig &config)
+    : config(config)
+    , support_card_recognizer(module_root_dir, config.support_card, config.common)
+    , family_tree_recognizer(module_root_dir, config.family_tree, config.common)
+    , campaign_record_recognizer(module_root_dir, config.campaign_record, config.common)
+    , race_record_recognizer(module_root_dir, config.race, config.common) {
+}
 
 void CampaignTabRecognizer::recognize(
     const Frame &frame, record::CharaDetailRecord &record, PredictionHistory &history) const {
@@ -727,34 +916,66 @@ void CampaignTabRecognizer::recognize(
 
 }  // namespace recognizer_impl
 
-// CharaDetailRecognizer: production ctor lives in chara_detail_recognizer_models.cpp.
+CharaDetailRecognizer::CharaDetailRecognizer(
+    const std::string &trainer_id,
+    const std::filesystem::path &record_root_dir,
+    const std::filesystem::path &module_root_dir,
+    const std::shared_ptr<const recognizer_impl::FactorRowReader> &factor_rows,
+    const event_util::Listener<RecordInfo> &on_recognize_ready,
+    const event_util::Sender<RecordInfo> &on_recognize_completed,
+    const event_util::Listener<RecordInfo> &on_update_requested,
+    const event_util::Sender<RecordInfo> &on_update_completed,
+    const event_util::Listener<Frame, RecordInfo, recognizer_impl::SelfFactorWindow, bool> &on_factor_probe_ready,
+    const event_util::Sender<std::vector<record::Factor>, std::size_t, bool, RecordInfo> &on_factor_probe_completed,
+    const event_util::Sender<std::string> &on_error,
+    const recognizer_config::CharaDetailRecognizerConfig &config)
+    : trainer_id(trainer_id)
+    , record_root_dir(record_root_dir)
+    , module_root_dir(module_root_dir)
+    , config(config)
+    , factor_rows(factor_rows)
+    , status_header_recognizer(module_root_dir, config.status_header)
+    , skill_tab_recognizer(module_root_dir, config.skill_tab)
+    , factor_tab_recognizer(module_root_dir, config.factor_tab, factor_rows)
+    , campaign_tab_recognizer(module_root_dir, config.campaign_tab)
+    , on_recognize_ready(on_recognize_ready)
+    , on_recognize_completed(on_recognize_completed)
+    , on_update_requested(on_update_requested)
+    , on_update_completed(on_update_completed)
+    , on_factor_probe_ready(on_factor_probe_ready)
+    , on_factor_probe_completed(on_factor_probe_completed)
+    , on_error(on_error) {
+    this->on_recognize_ready->listen([this](const auto &info) { this->recognize(info, false); });
+    this->on_update_requested->listen([this](const auto &info) { this->recognize(info, true); });
+    this->on_factor_probe_ready->listen(
+        [this](const auto &frame, const auto &info, const auto &window, bool cue_owed) {
+            this->probe(frame, info, window, cue_owed);
+        });
+}
 
-void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info) const {
+void CharaDetailRecognizer::probe(
+    const Frame &frame, const RecordInfo &raw_info, const recognizer_impl::SelfFactorWindow &window, bool cue_owed)
+    const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value());
 
-    // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
-    // An exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
-    // Contain it so a single bad probe frame cannot take down the process.
+    // This runs on the recognizer event-runner thread, whose runner already contains a throwing listener
+    // around the single event (SingleThreadMultiEventRunnerImpl in util/event_util.h, plus the backstop in
+    // EventRunnerThread::run), so an escape costs this event and not the process. Contain it here anyway:
+    // the runner's arm logs one generic line that names no record_id and cannot tell a deliberate stop()
+    // cancellation from a real failure, which is the distinction drawn below.
     try {
-        recognizer_impl::PredictionHistory factor_tab_history;
-        auto self_factors = factor_tab_recognizer.recognizeVisibleSelf(frame, factor_tab_history);
-        // Drop the last recognized row: on a non-stitched live frame the bottom-most visible row can
-        // be clipped by the tab boundary, so its star rank is unreliable. The remaining prefix is still
-        // a strong signature and is matched against the leading self-factors of stored records.
-        if (!self_factors.empty()) {
-            self_factors.pop_back();
-        }
+        const auto self_factors = factor_rows->visibleSelfPrefix(frame, window);
 
-        // Forward the record type so the Dart side can pick a per-type match threshold (the factor
-        // tab's visible-row count differs by type). -1 means "unknown", mapped to null on Dart.
-        const int record_type = raw_info.record_type.has_value()  //
-                                  ? static_cast<int>(raw_info.record_type.value())
-                                  : -1;
-        on_factor_probe_completed->send(self_factors, record_type);
+        // The limit the read stopped at and `cue_owed` are forwarded exactly as received: this path recognizes
+        // factors, it neither judges exits nor decides what counts as a duplicate. The message states from the
+        // limit whether the list is shorter than it (messages::factorProbe); the limit itself is not sent. The
+        // session is forwarded as received too, so the result names the attempt it was taken in.
+        on_factor_probe_completed->send(self_factors, window.factor_limit, cue_owed, raw_info);
     } catch (...) {
         // One arm on purpose: WinRT/ONNX exceptions do not derive from std::exception, and without an arm
-        // that catches them too they would escape the worker thread and terminate the process (see
-        // EventRunnerThread::run for the same pattern). describeCurrentFailure() does the type matching.
+        // that catches them too they would pass this handler and be reported by the runner as an unknown
+        // exception, losing the record_id and the abort/failure split (EventRunnerThread::run carries the
+        // same pair of arms for that reason). describeCurrentFailure() does the type matching.
         const auto failure = error_util::describeCurrentFailure();
         if (failure.aborted) {
             // Not a defect: stop() cancels an in-flight inference by design (see
@@ -770,10 +991,11 @@ void CharaDetailRecognizer::probe(const Frame &frame, const RecordInfo &raw_info
 void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateMode) const {
     vlog_debug(raw_info.record_id, raw_info.record_type.has_value(), isUpdateMode);
 
-    // This runs on the recognizer event-runner thread (see EventRunnerThread::run), which has no try/catch.
-    // Frame::open / json_util::read/write / copy_file all throw on a missing or corrupt record file, and an
-    // exception escaping here would leave the std::thread and call std::terminate, crashing the whole app.
-    // Contain it so one unreadable record cannot take down the process; the next queued record still runs.
+    // This runs on the recognizer event-runner thread, whose runner contains a throwing listener around the
+    // single event (SingleThreadMultiEventRunnerImpl in util/event_util.h), so the next queued record runs
+    // either way. Frame::open / json_util::read/write / copy_file all throw on a missing or corrupt record
+    // file; contain that here so the drop is reported against its record_id and a stop() cancellation is
+    // not logged as an error, neither of which the runner's generic arm can do.
     try {
         const auto record_dir = record_root_dir / raw_info.record_id;
         const auto record_path = record_dir / "record.json";
@@ -891,7 +1113,7 @@ void CharaDetailRecognizer::recognize(const RecordInfo &raw_info, bool isUpdateM
         }
     } catch (...) {
         // One arm on purpose, same as probe(): WinRT/ONNX exceptions do not derive from std::exception and
-        // must be contained here too, so one unreadable record cannot terminate the process.
+        // must be matched here too, or they reach the runner's arm and lose the classification below.
         const auto failure = error_util::describeCurrentFailure();
         if (failure.aborted) {
             // A stop() that races a full recognize() lands here, and it is the same expected cancellation

@@ -8,6 +8,7 @@
 
 #include <doctest/doctest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -28,25 +29,35 @@ void checkMessage(const std::string &built, const std::string &expected) {
 TEST_CASE("no-argument messages carry only their type tag") {
     checkMessage(captureStarted(), R"({"type":"onCaptureStarted"})");
     checkMessage(captureStopped(), R"({"type":"onCaptureStopped"})");
-    checkMessage(charaDetailStarted(), R"({"type":"onCharaDetailStarted"})");
     checkMessage(charaDetailClosed(), R"({"type":"onCharaDetailClosed"})");
 }
 
-TEST_CASE("a mid-scene reset reports whether the session it discarded had completed") {
-    checkMessage(charaDetailRestarted(false), R"({"type":"onCharaDetailRestarted","completed":false})");
-    checkMessage(charaDetailRestarted(true), R"({"type":"onCharaDetailRestarted","completed":true})");
+TEST_CASE("a session start names the id its record will finish under, and nothing else") {
+    // The id is what a front end matches every later outcome of this attempt against (onCharaDetailFinished's
+    // `id`, and the `record_id` of a probe or a scoped error), so the key and its value are the contract.
+    checkMessage(charaDetailStarted("rec-1"), R"({"type":"onCharaDetailStarted","record_id":"rec-1"})");
+}
+
+TEST_CASE("a mid-scene reset reports whether the session it discarded had completed, and the id it built") {
+    checkMessage(
+        charaDetailRestarted(false, "rec-2"),
+        R"({"type":"onCharaDetailRestarted","completed":false,"record_id":"rec-2"})");
+    checkMessage(
+        charaDetailRestarted(true, "rec-3"),
+        R"({"type":"onCharaDetailRestarted","completed":true,"record_id":"rec-3"})");
 }
 
 TEST_CASE("a discard is distinguishable from a start by more than its tag") {
-    // THE DEFECT THIS EXISTS TO REMOVE. The two tags always differed, but the restart message was empty, so the
-    // only thing a receiver could do with the difference was ignore it -- and both front ends did, dispatching
-    // the pair into one branch. The start still carries nothing (there is nothing to say about a fresh session);
-    // the discard carries the one bit that says whether anything was lost with it.
-    const Json started = Json::parse(charaDetailStarted());
-    const Json restarted = Json::parse(charaDetailRestarted(false));
+    // A tag difference alone is not enough: with an empty restart message, the only thing a receiver can do
+    // with the difference is ignore it and dispatch the pair into one branch. Both begin an attempt and name
+    // it; only the discard carries the one bit that says whether anything was lost with it.
+    const Json started = Json::parse(charaDetailStarted("rec-1"));
+    const Json restarted = Json::parse(charaDetailRestarted(false, "rec-1"));
     CHECK(started.at("type") != restarted.at("type"));
-    CHECK(started.size() == 1);
+    CHECK(started.size() == 2);
+    CHECK_FALSE(started.contains("completed"));
     CHECK(restarted.at("completed") == false);
+    CHECK(started.at("record_id") == restarted.at("record_id"));
 }
 
 TEST_CASE("a discarded session that had already produced its record says so") {
@@ -54,19 +65,22 @@ TEST_CASE("a discarded session that had already produced its record says so") {
     // the switch that follows a FINISHED capture threw nothing away -- the record went to the stitcher before
     // it. A front end counting discards without reading this would report a loss for every character the user
     // captured successfully, which is worse than the silence it replaces.
-    const Json kept = Json::parse(charaDetailRestarted(true));
+    const Json kept = Json::parse(charaDetailRestarted(true, "rec-built"));
     CHECK(kept.at("completed") == true);
-    const Json lost = Json::parse(charaDetailRestarted(false));
+    const Json lost = Json::parse(charaDetailRestarted(false, "rec-built"));
     CHECK(lost.at("completed") == false);
 }
 
-TEST_CASE("a discard carries the completion bit and nothing else") {
+TEST_CASE("a discard carries the completion bit and the built session's id, and nothing about the discarded one") {
     // THE WIRE IS DELIBERATELY THIS NARROW. The discarded session's id and its captured-tab count were both
     // carried at first and neither was ever read to decide anything, so they were taken back off: a field that
-    // has to be parsed, defaulted and kept in step on three front ends has to buy something. The id still goes
-    // to the log at the discard site, which is where a discard is actually traced.
-    const Json parsed = Json::parse(charaDetailRestarted(false));
-    CHECK(parsed.size() == 2);
+    // has to be parsed, defaulted and kept in step on three front ends has to buy something. The discarded id
+    // still goes to the log at the discard site, which is where a discard is actually traced. The one id on the
+    // wire is the BUILT session's, under the same key a start uses: which session's id it is cannot be told from
+    // here (the builder is handed one string), so that half is pinned by the scraper test that drives a reset.
+    const Json parsed = Json::parse(charaDetailRestarted(false, "rec-built"));
+    CHECK(parsed.size() == 3);
+    CHECK(parsed.at("record_id") == "rec-built");
     CHECK_FALSE(parsed.contains("id"));
     CHECK_FALSE(parsed.contains("captured_tabs"));
 }
@@ -76,6 +90,35 @@ TEST_CASE("string-payload messages") {
         screenshotTaken("C:/tmp/shot.png", "ok"),
         R"({"type":"onScreenshotTaken","path":"C:/tmp/shot.png","result":"ok"})");
     checkMessage(error("boom"), R"({"type":"onError","message":"boom"})");
+}
+
+TEST_CASE("an error that ends one attempt names it, and any other error names none") {
+    // Absence is the meaning of the unscoped form: "not about any one attempt". A front end fails the card for a
+    // scoped error only when the id is the attempt it is showing.
+    checkMessage(
+        error("stitch_failed", "rec-1"), R"({"type":"onError","message":"stitch_failed","record_id":"rec-1"})");
+    CHECK_FALSE(Json::parse(error("stitch_failed")).contains("record_id"));
+    // The scoped form keeps the unscoped one's tolerance for a non-UTF-8 message.
+    std::string built;
+    CHECK_NOTHROW(built = error("boom: \x8e\xc0\x8d\x73", "rec-1"));
+    CHECK(Json::parse(built).at("record_id") == "rec-1");
+}
+
+TEST_CASE("a tab's wait states the level and the page's structure, and omits the structure until it is known") {
+    checkMessage(
+        tabAwaitingHead(0, true, true), R"({"type":"onTabAwaitingHead","index":0,"awaiting":true,"scroll_bar":true})");
+    checkMessage(
+        tabAwaitingHead(1, false, false),
+        R"({"type":"onTabAwaitingHead","index":1,"awaiting":false,"scroll_bar":false})");
+    // ABSENT, not false and not null: a reader treats the missing key as "not established", and a `false` here would
+    // tell it the tab has no scroll bar before anything has looked at it.
+    checkMessage(tabAwaitingHead(2, true, std::nullopt), R"({"type":"onTabAwaitingHead","index":2,"awaiting":true})");
+    CHECK_FALSE(Json::parse(tabAwaitingHead(2, true, std::nullopt)).contains("scroll_bar"));
+}
+
+TEST_CASE("the switch witness is a level with one key, in both directions") {
+    checkMessage(factorSwitchArmed(true), R"({"type":"onFactorSwitchArmed","armed":true})");
+    checkMessage(factorSwitchArmed(false), R"({"type":"onFactorSwitchArmed","armed":false})");
 }
 
 TEST_CASE("error survives a non-UTF-8 message instead of throwing") {
@@ -95,8 +138,26 @@ TEST_CASE("scroll messages") {
     checkMessage(scrollReady(3), R"({"type":"onScrollReady","index":3})");
     checkMessage(pageReady(2), R"({"type":"onPageReady","index":2})");
     checkMessage(scrollUpdated(1, 0.25), R"({"type":"onScrollUpdated","index":1,"progress":0.25})");
-    checkMessage(scrollPosition(0, true), R"({"type":"onScrollPosition","index":0,"at_top":true})");
-    checkMessage(scrollPosition(4, false), R"({"type":"onScrollPosition","index":4,"at_top":false})");
+    // Three-valued, not a bool: "unknown" is on the wire because the front end's two consumers of this fact
+    // resolve a missing reading in opposite directions (see messages::scrollPosition). Pinning all three words
+    // here is what keeps a later "simplification" back to a yes/no from being silent.
+    checkMessage(scrollPosition(0, "at_top"), R"({"type":"onScrollPosition","index":0,"top_of_content":"at_top"})");
+    checkMessage(
+        scrollPosition(4, "scrolled"), R"({"type":"onScrollPosition","index":4,"top_of_content":"scrolled"})");
+    checkMessage(
+        scrollPosition(1, "unknown"), R"({"type":"onScrollPosition","index":1,"top_of_content":"unknown"})");
+}
+
+TEST_CASE("a tab refusal states the tab, the level and the machine reason") {
+    // The withdrawal travels on the SAME type with refused=false, so a front end holding one value per index
+    // needs no second message type; pinning both directions here is what keeps that contract from drifting
+    // into a paired "cleared" message later.
+    checkMessage(
+        tabRefused(1, true, "scrolled"), R"({"type":"onTabRefused","index":1,"refused":true,"reason":"scrolled"})");
+    checkMessage(
+        tabRefused(1, false, ""), R"({"type":"onTabRefused","index":1,"refused":false,"reason":""})");
+    checkMessage(
+        tabRefused(0, true, "unknown"), R"({"type":"onTabRefused","index":0,"refused":true,"reason":"unknown"})");
 }
 
 TEST_CASE("chara-detail record messages use the id/success keys") {
@@ -258,29 +319,55 @@ TEST_CASE("detail crop report before anything is measured repeats the default as
     CHECK(parsed.at("latched") == false);
 }
 
-TEST_CASE("factor probe serializes each factor as id/star") {
+TEST_CASE("factor probe serializes each factor as id/star, beside exactly three more data fields") {
+    // The whole message, so any extra field (record_type and match_threshold are not part of it) or a missing
+    // one fails here.
+    // `record_id` names the attempt the probe frame was latched in, so a result arriving after the next attempt
+    // began can be told apart from that attempt's own.
     const std::vector<chara_detail::record::Factor> factors{{101, 3}, {202, 1}};
     checkMessage(
-        factorProbe(factors, 2),
-        R"({"type":"onFactorProbe","factors":[{"id":101,"star":3},{"id":202,"star":1}],"record_type":2})");
+        factorProbe(factors, 10, true, "rec-1"),
+        R"({"type":"onFactorProbe","factors":[{"id":101,"star":3},{"id":202,"star":1}],)"
+        R"("below_threshold":true,"cue_owed":true,"record_id":"rec-1"})");
 }
 
-TEST_CASE("factor probe with no factors emits an empty array") {
-    const Json parsed = Json::parse(factorProbe({}, 0));
+TEST_CASE("factor probe with no factors emits an empty array, below any limit") {
+    // An empty read (no header found, say) is still sent: cue_owed has to reach the front end. It is below the
+    // limit by the same comparison as any other list; telling "read nothing" apart is the front end's rule.
+    const Json parsed = Json::parse(factorProbe({}, 14, true, "rec-1"));
     CHECK(parsed.at("factors").is_array());
     CHECK(parsed.at("factors").empty());
-    CHECK(parsed.at("record_type") == 0);
+    CHECK(parsed.at("below_threshold") == true);
 }
 
-TEST_CASE("factor probe sends record_type as its wire ordinal (contract with Dart RecordType.values)") {
-    // The Dart side decodes record_type positionally (RecordType.values[int]). Lock each enumerator to the
-    // exact int it must cross the wire as, so a reorder/renumber on the native side fails here (and the
-    // matching Dart test pins the Dart-side order). Keep this in sync with the enum in chara_detail_record.h.
-    using chara_detail::record::RecordType;
-    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::Standard))).at("record_type") == 0);
-    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::InheritanceOnly))).at("record_type") == 1);
-    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::FriendStandard))).at("record_type") == 2);
-    CHECK(Json::parse(factorProbe({}, static_cast<int>(RecordType::FriendInheritance))).at("record_type") == 3);
+TEST_CASE("factor probe states below_threshold as the list's length against the limit, and never the limit") {
+    // below_threshold is `factors.size() < factor_limit`, on both sides of the boundary: one short of the limit is
+    // below, the limit itself is not. A flag hard-wired to either value, or compared with <=, fails one of these.
+    // The limit is not on the wire: the front end compares every factor it is sent and applies no number.
+    const std::vector<chara_detail::record::Factor> nine(9, chara_detail::record::Factor{101, 3});
+    const std::vector<chara_detail::record::Factor> ten(10, chara_detail::record::Factor{101, 3});
+    CHECK(Json::parse(factorProbe(nine, 10, true, "rec-1")).at("below_threshold") == true);
+    CHECK(Json::parse(factorProbe(ten, 10, true, "rec-1")).at("below_threshold") == false);
+    // The same nine under Standard's larger limit: the flag follows the limit, not a constant.
+    CHECK(Json::parse(factorProbe(nine, 14, true, "rec-1")).at("below_threshold") == true);
+    CHECK(Json::parse(factorProbe(std::vector<chara_detail::record::Factor>(14, {101, 3}), 14, true, "rec-1"))
+              .at("below_threshold")
+          == false);
+    const Json parsed = Json::parse(factorProbe(ten, 10, true, "rec-1"));
+    CHECK(parsed.at("below_threshold").is_boolean());
+    CHECK_FALSE(parsed.contains("match_threshold"));
+    CHECK_FALSE(parsed.contains("record_type"));
+}
+
+TEST_CASE("factor probe states whether the latch owed a cue, in both directions") {
+    // The factor tab's chime is synthesized by the front end off this message, so this field is the whole of
+    // what tells it whether the latch that took fragment #0 owed the user a cue: of a scrollable page's two exits
+    // only the one that waited does, and a page with no scroll bar (which also arms the probe) owes none. Both
+    // directions are pinned: a field hard-wired to either value would leave the front end either always silent
+    // (the capture never starts, because the user is never told to scroll) or always chiming (a cue over a
+    // capture that owed none).
+    CHECK(Json::parse(factorProbe({}, 14, true, "rec-1")).at("cue_owed") == true);
+    CHECK(Json::parse(factorProbe({}, 14, false, "rec-1")).at("cue_owed") == false);
 }
 
 }  // namespace

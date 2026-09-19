@@ -32,8 +32,13 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   `CharaDetailSceneStitcher::stitch` (a missing base image removes the partial
   output via the injected hook and sends `on_stitch_failed`, keeping the input for
   diagnosis). Fragment reads use real files under the temp directory; directory
-  ops are `DirectoryHooks` fakes. The full success path (needs a calibrated config
-  and a valid image set) is left to the CLI/integration harness.
+  ops are `DirectoryHooks` fakes. The success path is exercised for one property:
+  a synthetic record stitched with the shipped configs keeps the factor tab's
+  banner at the live frame's row, column, search length and run end
+  (`FactorRowReader::findBanner` on both sides; Standard and Friend layouts, units
+  540/720/736/1079, four anchor shapes including a re-anchored pane whose
+  `base.png` reads back with a smaller unit). What stitched records read as is
+  left to the CLI/integration harness.
 - `chara_detail/test_scraper_estimators.cpp` — the scroll-offset estimators and the
   stationary-frame catcher. `ScrollBarOffsetEstimator`: thumb margins / position from a
   rendered track (and the no-bar nullopt), and `scrollGuess` — the thumb-move-to-content-
@@ -67,7 +72,21 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   change, self-heal across a resolution change, cropping the latched frame to its target rect,
   the `minimum_color` gate reaching the pixel diff, and measuring a *fraction* of its region
   rather than an absolute amount of change — all keyed on frame timestamps. Driven by
-  hand-built `CV_8UC3` mats.
+  hand-built `CV_8UC3` mats. Also the **factor tab's head judgment**
+  (`scraper_impl::factorHeadReading` / `factorHeadVerdict`) on readings handed in. Behind a
+  thumb at the head: the banner row accepted from 1 to `factorHeadLastRow` (the recognizer's
+  search window less `banner_window_reserve`) and refused at 0 and one past it, the reserve
+  being what refuses that row, and the banner's run having to contain the green sensor's row.
+  The thumb's role, stated on the structure: an unreadable thumb is `unknown` and a thumb
+  reading `scrolled` is `scrolled` however clearly the header shows the head, with neither the
+  banner search nor the green scan taken; a thumb at the head is kept or refused by the header
+  (refused by the window without the green scan being taken). Also
+  `TopOfContentPolicy` (which way an `unknown` reading falls, both directions) and the one
+  shipped thumb threshold (`thumbTopOfContent` refusing the smallest positive top margin),
+  and `ScrollableScrapingInterpreter`'s fragment-#0 acceptance driven with a thumb judgment
+  handed in: the stationary and motion exits each latching a head and refusing a head start,
+  the motion exit asking the judgment about the descriptor it latches (the first frame) and
+  not the frame that triggered it.
 - `chara_detail/test_scene_scraper.cpp` — `BaseFrameCatcher`, the base-image gate
   layered on top of `StationaryFrameCatcher`: readiness needs both the base region
   stationary AND the green title-bar banner visible on the header scan line for a
@@ -79,15 +98,85 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   built from the *shipped* `scene_scraper.json`, driven past the switch dwell so the
   record-type reset rule fires, asserting that the reported session is the one thrown
   away and not the one rebuilt on the same call, that it says it did not complete, and
-  that `release()` reports its session without announcing a discard of its own. Only
-  that one of the three reset rules is reachable without game pixels — the other two
-  read the image — and a discard reporting `completed == true` is not reachable at all
-  from this target (it needs a fully captured session); the integration manifest's
-  `expect_discarded_incomplete` is what covers that direction.
-- `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical` (split
-  out of the ONNX-linked recognizer TU into `chara_detail_search_helpers.{h,cpp}`):
+  that `release()` reports its session without announcing a discard of its own. The
+  record-type rule is the one reset rule that needs no image at all; a discard reporting
+  `completed == true` is produced by the Rule 3 cases below that complete a whole
+  session from synthetic frames and then show a different factor list, and the integration manifest's
+  `expect_discarded_incomplete` covers the same bit on real footage. Also the **top-of-content
+  wire**: that `on_scroll_position` carries the composite verdict's own word
+  (`at_top` / `scrolled` / `unknown`) *unresolved*, because the two front-end consumers
+  answer an unreadable frame in opposite directions — a resolve on this side is invisible
+  to the records a golden compares. A tab built for a page with **no scroll bar** says
+  `at_top` from the structure it was built with, before any sensor and whatever its frames
+  show (on the skill, campaign and factor tabs alike, with the factor header missing or
+  drawn past its window). A tab not built yet says `unknown` on its first frame — the
+  factor tab too, even with its header at the head row, because the thumb is every tab's
+  head sensor and the header is asked only behind a thumb at the head. From the second
+  frame the factor tab's word comes from its head judgment: a banner anywhere in the window
+  (including two rows above the head row) says `at_top`, a banner cut at row 0 or one row
+  past the window says `scrolled` although the thumb reads a head, a thumb showing one tip
+  pixel says `scrolled` over a banner at the head row, a factor frame with no banner in its
+  window under a thumb at the head — scrolled or covered — says `scrolled`, and a built
+  factor page whose frame shows neither its thumb nor its header says `unknown` and is not
+  judged by Rule 3. The harness's factor
+  frames paint that banner (`kFactorHeadRow`, with the rows above it in the harness
+  reader's background) because the judgment reads the harness's own `FactorRowReader`.
+  **Fragment-#0 acceptance asks the same judgment** (`topOfContent`, handed to every tab's
+  interpreter): on the factor tab a banner cut at row 0 is refused as `scrolled` while the
+  thumb reads a head, and row 1 is latched; a long list pre-scrolled by 24–27 px, which a
+  short thumb still reads as the head, is refused on the stationary and the motion exit
+  alike, while the same frames at the head are latched (the motion control's current frame
+  already being cut, so judging "now" would refuse it); the skill and campaign tabs still
+  accept by the thumb alone (a header-less frame and a cut "header" latched, one tip pixel
+  refused as `scrolled`, a vanished thumb refused as `unknown`). Rule 3 judges a factor list
+  displaced a few rows inside the window, and a `same` reading takes the displaced frame as
+  its witness without a reset. And **which rule watches a captured tab for a
+  character switch**: Rule 3, and only Rule 3, whenever the factor tab holds its witness
+  (after the tab is captured and after the session completes, keeping the session on a
+  same-record reading). No rule watches any other tab, so a captured skill or campaign tab
+  at the head of its list is never discarded, in an incomplete session or a completed one,
+  and a switch made there after completion is judged by Rule 3 when the factor tab is next
+  shown. The factor tab's
+  witness is installed by its head latch whether its page scrolls or has no scroll bar
+  (the latter arming the probe with `cue_owed == false`), so a factor page with no scroll
+  bar that stays at its head is never discarded and a switch on it is judged by Rule 3;
+  before its latch the tab holds no witness and nothing reads it. Rule 3's dwell does not
+  resume across a frame of another tab.
+- `chara_detail/test_factor_header_band.cpp` — the invariant the fine (green "因子"
+  header) sensor rests on, measured against real footage: inside the configured probe
+  band, the header row is the *only* row of the scroll-area crop that clears
+  `green_fraction_threshold`. `factorHeaderTopY` returns the first row that clears it and
+  stops, so any other row that could clear it would be returned silently instead. Decodes
+  two golden clips (one Player-layout, one Friend-layout with the longest rental-factor
+  list) through the shared `VideoLoader` and checks that the cleared rows form a single
+  run of header height, with the threshold strictly between the worst non-header row and
+  the weakest header row. It is an invariant about game CONTENT, so it is re-measured on
+  every run rather than argued once. The clips are gitignored test material, so the case
+  reports and continues when they are absent. A second case states `band_start` /
+  `band_end` / `green_fraction_threshold` as data with their derivation, because the
+  band's width also buys occlusion tolerance that no corpus statistic can observe.
+  A third compares the header's crop row across the two layouts, which is what notices
+  `friend_common.viewport` moving without the scroll-area rect that is now derived from it.
+  A fourth runs the factor tab's head judgment on the production readings (the
+  recognizer's `findBanner` on the shipped `recognizer.json`, the green scan
+  `firstHeaderGreenRow`, the thumb estimator) over three clips at two anchor units: every
+  frame the thumb and the green header place at the head is accepted, counted with its
+  denominator, and every banner row those frames show has room on both sides inside the
+  window. A fifth decodes `friend_standard_many_rental` and checks that the 46 frames
+  where the end-of-list 継承履歴 bar sits inside the banner window (decode order 354..399)
+  pass both banner conditions and are refused by the thumb alone, and that no other frame
+  of the clip is. A sixth, clip-free, paints the header at ten measured capture geometries
+  (units 540–810, re-anchored ones included) and checks that the measured head row, row 1
+  and the window's last row are accepted, that the row past it is refused although the
+  recognizer still finds the banner there, and that the window is
+  `lround(vertical_banner_upper_gap * unit)`. The footage cases report and continue when
+  their clips are absent.
+- `chara_detail/test_search_helpers.cpp` — `recognizer_impl::searchVertical`
+  (`chara_detail_search_helpers.{h,cpp}`):
   downward/upward run scanning, the `max_length` cap, the all-background nullopt, and
-  the out-of-bounds start clamp, against hand-built mats.
+  the out-of-bounds start clamp, against hand-built mats; `scanVertical`, the pixel
+  form of the same scan (start, unclamped length, hit row), and
+  `backgroundResumesAt`, the end of a content run.
 - `chara_detail/test_record.cpp` — the `RecordType` axis predicates
   (`isInheritanceOnly` / `isFriend`; pure enum logic) plus the JSON serialization
   contract of the `CharaDetailRecord` tree: a fully populated record survives
@@ -105,6 +194,14 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   debounce (fire once on the transition into a stall, rearm only after frames
   resume), driven with synthetic elapsed durations so the timing logic is
   deterministic without spinning up the poll thread or the real clock.
+- `cv/test_prediction_check.cpp` — the inference-output check desktop (`cv/model.h`)
+  and web (`native/wasm/wasm_recognizer_models.cpp`) both run before a decoder reads
+  a model's outputs: a session one output short refused at load, a wrong element
+  type, a vector and an empty output refused per read with the exception type each
+  raises, and an out-of-range index refused before the platform is asked to describe
+  it. Neither adapter compiles here; the JS half of the web contract (output count at
+  load, element count and type per output) is covered by
+  `tool/test_web_capture_session.mjs`.
 - `util/test_event_util.cpp` — the event plumbing: `bindLeft`/`bindRight` argument
   binding, the queued-connection limit modes (`Discard` drops, `NoLimit` keeps,
   `Block` back-pressures without dropping), and the runner thread's containment of a
@@ -143,9 +240,20 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
 - `core/test_native_api_messages.cpp` — the notification wire contract. The
   `notify*` JSON payloads NativeApi pushes to Dart are built by the pure
   `uma::app::messages` free functions in `src/core/native_api_messages.h` (split
-  out of `native_api.h` so the contract is testable without linking the
-  ONNX/WinRT-heavy `native_api.cpp`); each builder's exact `type` tag and keys are
+  out of `native_api.h` so the wire contract is stated and tested on its own, apart
+  from the pipeline that sends it); each builder's exact `type` tag and keys are
   asserted against a raw-JSON expectation, order-independently.
+- `core/test_native_api_pipeline_wiring.cpp` — the real `NativeApi`, constructed and
+  started with the shipped `assets/config` against fake predictors: that a pipeline
+  start and a session that merely *adopts* a running loop both begin a new run's
+  record count, that a stitch failure finishes the attempt it names and reports
+  `stitch_failed` against that attempt's `record_id` even after a later attempt was
+  announced, that every terminal attempt failure is one finish plus one id-scoped
+  error, that a pipeline which fails to build reports the reason and leaves nothing
+  running, and that a pipeline builds the factor-tab models exactly once (one
+  factor-row reader shared by the scraper and the recognizer). `closed_before_completed`
+  and `scrape_failed` are reachable only from inside the scene scraper, so their
+  listener body is asserted here but not their attachment.
 - `core/test_frame_rate.cpp` — the pure `frameRate` helper in
   `src/core/frame_rate.h` (split out of NativeApi's lap-time listener for the same
   reason as `native_api_messages.h`): the `count * report_interval / span` ratio
@@ -165,7 +273,9 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   config JSON under `assets/config/chara_detail` via the `TEST_ASSET_CONFIG_DIR`
   compile definition CMake injects — a deliberate, narrow exception to the "no game
   assets" scope below (those files are small versioned config, not screenshots or
-  ONNX models, and are themselves the contract under test).
+  ONNX models, and are themselves the contract under test). It also checks that the
+  shipped files agree on the one scroll-area rect the scraper crops with, the
+  stitcher pastes at and the recognizer reads from.
 
 - `chara_detail/test_factor_change_discriminator.cpp` — the character-switch
   discriminator: a resample/requantisation perturbation of the same factor list is
@@ -173,18 +283,32 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
   per-pixel cut, an identical frame never is, a whole-frame brightness drift below
   the cut is not, and a small high-contrast change is rejected by the area bar
   rather than by the cut.
-- The ONNX-linked recognizers, driven through the `util/fake_predictor.h` stub
-  (their production constructors live in the deliberately unlinked
-  `chara_detail_recognizer_models.cpp`, so the scan logic is testable with no
-  onnxruntime). Each covers its landmark-not-found path, its layout selection and
+- `chara_detail/fake_predictor_factory.cpp` — not a test: the test target's
+  definition of `makePredictor`, which the recognizers' production constructors
+  call. The desktop definition (`chara_detail_recognizer_models.cpp`) loads ONNX
+  models and is deliberately unlinked; this one loads nothing and returns
+  `util/fake_predictor.h` constants (the value-initialized result, confidence 1),
+  so the production constructors link and can be built in a test.
+- `chara_detail/test_recognizer_wiring.cpp` — the three subscriptions of
+  `CharaDetailRecognizer`'s production constructor, built with the fake above and
+  the shipped `recognizer.json` over direct connections: a factor probe answers
+  once on the completion channel with the limit and cue it was sent; an update
+  request for a missing record answers once with `updateRecord failed for
+  record_id=…`; the capture input is registered exactly once and its failure
+  reports no update error. A capture subscription that calls nothing still passes
+  (the capture path reports failure only to the log); the golden suite covers that.
+- The recognizers, driven through their injection constructors and the
+  `util/fake_predictor.h` stub, so the scan logic is testable with no
+  onnxruntime. Each covers its landmark-not-found path, its layout selection and
   the 0-based-to-1-based conversions the record contract requires:
   `chara_detail/test_status_header_recognizer.cpp` (evaluation / status /
   aptitudes, and what an inheritance-only record skips),
   `chara_detail/test_skill_tab_recognizer.cpp` (no skills for inheritance-only; a
   level read only for the first skill of a left+right row),
-  `chara_detail/test_factor_recognizer.cpp` (`recognizeVisibleSelf`: the missing
-  top banner, a fully visible left+right row with a 1-based star, and stopping
-  before a row that would fall off the frame),
+  `chara_detail/test_factor_recognizer.cpp` (`visibleSelfPrefix`: the missing
+  top banner, a fully visible left+right row with a 1-based star, stopping
+  before a row whose name or star cell would leave the scroll area, and stopping
+  at the window's factor limit without handing the models a cell past it),
   `chara_detail/test_support_card_recognizer.cpp` (no card top leaves the cards
   and `scan_top` untouched; six cards with 1-based ranks),
   `chara_detail/test_family_tree_recognizer.cpp` (the default family when no tree
@@ -240,6 +364,16 @@ screen-capture / ONNX / WinRT stack (OpenCV is allowed):
 - `core/test_record_production_counter.cpp` — the per-run record count: each record
   counted once, zero at the start of a run however the previous one ended, surviving
   until the next run begins, and safe across the threads that use it.
+- `core/test_factor_switch_verdict_tally.cpp` — `app::FactorSwitchVerdictTally`, the
+  per-run count of what the factor tab's character-switch rule concluded (`Same` /
+  `Different` / `Empty` / `Unreadable`): a fresh tally reports zero for every verdict,
+  four unequal counts stay apart under their own slots (so a conflation -- `Empty`
+  folded into `Unreadable`, say -- cannot reproduce all four numbers), a new run
+  resets every verdict however the previous one ended, each verdict's tag word is
+  distinct and non-empty and matches the four words (`same`/`different`/`empty`/
+  `unreadable`) the CLI's run summary keys its line by, and concurrent `note()` calls
+  from separate threads (mirroring the scraper runner vs. the CLI's post-drain read)
+  lose no count.
 - `core/test_frame_flow_counters.cpp` — the two in-flight counters whose difference
   is the resident frame count: the lead-in, a frame counted on each hop it crosses,
   a full drain returning to zero rather than to a residue, reset in both directions,
@@ -327,6 +461,13 @@ The hand-built mat builders shared across the pixel-level tests (`solid`,
 (`uma::testutil`), included via the `test/` include root, so a new test reuses the
 same conventions instead of copying them.
 
+Every case that decodes a video file (the footage cases in `chara_detail/test_factor_header_band.cpp`, and the
+generated-clip fixtures of `cv/test_video_loader.cpp` and `cv/test_video_frame_grabber.cpp`) first calls
+`requireFfmpegDecodes` from [`util/video_backend_guard.h`](util/video_backend_guard.h): it fails, naming the
+missing `opencv_videoio_ffmpeg*` plugin, when OpenCV would open the file through any backend other than FFmpeg.
+The `umacapture_tests` POST_BUILD step places that plugin next to the exe (under its shipped name, which the
+Debug `opencv_world` also loads), so a tests-only build needs no other target built beside it.
+
 Since this binary is built Debug, `assert_` aborts rather than being a no-op, so
 the assert-guarded negative paths (e.g. `linspace(num < 2)`, mismatched-anchor
 point arithmetic, the event-runner's after-start `makeConnection`/`add` guards)
@@ -337,10 +478,14 @@ The test target (`umacapture_tests` in [`../CMakeLists.txt`](../CMakeLists.txt))
 links only the sources under test — the header-only primitives above plus
 `src/condition/serializer.cpp`, `src/chara_detail/chara_detail_scene_scraper.cpp`,
 `src/chara_detail/chara_detail_scene_context.cpp`,
-`src/chara_detail/chara_detail_scene_stitcher.cpp`, and
-`src/chara_detail/chara_detail_search_helpers.cpp`, which pull in OpenCV via
-`cv/frame.h` but not ONNX or WinRT. (Their `log_*` / `vlog_*` calls resolve
-against the header-only spdlog default logger, so they need no `logger_util.cpp`.)
+`src/chara_detail/chara_detail_scene_stitcher.cpp`,
+`src/chara_detail/chara_detail_search_helpers.cpp`,
+`src/chara_detail/chara_detail_recognizer.cpp`, `src/core/native_api.cpp` and
+`src/core/native_api_frame_shaping.cpp`, which pull in OpenCV via `cv/frame.h`
+but neither ONNX nor WinRT — the recognizer stage's predictors come from
+`chara_detail/fake_predictor_factory.cpp` rather than a loaded model. (Their
+`log_*` / `vlog_*` calls resolve against the header-only spdlog default logger,
+so they need no `logger_util.cpp`.)
 This source list is maintained by hand in both `../CMakeLists.txt`
 (`TEST_SOURCE_FILES`) and here — keep the two in sync. As the header/.cpp split
 progresses, add each newly split `.cpp` and its tests here.
@@ -472,14 +617,52 @@ That decision table is itself a ctest, `integration_coverage_selftest`
 (`integration/test_run_coverage.py`). `--coverage` decides everything from file
 existence, so the self-test drives it against a synthetic manifest inside a
 `TemporaryDirectory` — no clips, no models, no cli, and no contact with the real
-baseline. It is therefore the only integration test here that is unconditional and
-that actually runs in CI.
+baseline. It is therefore one of the two integration tests here that are
+unconditional and actually run in CI — the other is `integration_check_selftest`
+below.
+
+`run.py`'s per-case judge (`check_run`) gets the same treatment for the same reason:
+a golden case only exercises a claim against the numbers its own clip happens to
+produce, so a claim the judge quietly stopped comparing stays green on every case
+whose declaration is right. This is sharpest for `expect_factor_switch_verdicts` (the
+four counts `core/test_factor_switch_verdict_tally.cpp` pins the source of): a
+declaration that matches the run passes whether or not the judge is still reading it.
+[`integration/test_run_check.py`](integration/test_run_check.py) — `integration_check_selftest`
+— drives `check_run` against hand-built `CompletedProcess` summaries, no cli or clip
+needed: a matching declaration passes; each of the four verdict words disagreeing on
+its own is caught by name (so a judge that compared only some of them, summed them, or
+folded `empty` into `unreadable`, fails); a summary predating the key, or whose verdict
+vocabulary is short or has an extra word, is refused rather than partly read; an
+undeclared case asserts nothing about its verdicts either way; and a malformed
+declaration (a missing or unknown verdict, a negative/boolean/float count, a list, or
+`null`) is refused before any pipeline would run.
+
+The same self-test also drives `check_probe_factors`, the strict `onFactorProbe`
+check for `expect_probe_matches_golden_self`: every element the probe sent must agree
+with the golden self list, and when the probe line states `below_threshold`, the
+golden self list must also be exactly as long as the probe (the number of factors a
+probe is cut at lives in `assets/config/chara_detail/scene_scraper.json` as
+`self_factor_prefix_length`, not in this script, and never reaches the wire). A probe
+line with no `below_threshold` field, or a non-boolean one, is refused rather than
+defaulted.
 
 Regenerated goldens are tied to the `sandbox/modules` models — to what they
 *predict*, that is, not to the version string, which is stripped (above). When the
 models change, rerun `--update-golden`, eyeball the diff, and commit the updated
 goldens alongside the model change; a refresh that moves no prediction produces an
 empty diff rather than 12 changed version lines.
+
+`native/wasm/check_sources.py`'s own comment/string stripping has its own self-test,
+`wasm_check_sources_selftest` ([`../wasm/test_check_sources.py`](../wasm/test_check_sources.py)),
+registered next to the two above because it also needs only `uv` and no clip, model or
+cli — not because it is part of the golden suite. It drives `strip_comments` and the
+constructor/duplicate-instantiation probes that read its output against hand-built
+text: a `/*` inside a line comment or a string literal, and a duplicated
+`makePredictor<Decoder>` instantiation hidden behind one, are each caught; a
+constructor or a duplicate instantiation entirely inside a real comment, an apostrophe
+in a line comment, and a string literal containing `//` all stay quiet; and the real
+`chara_detail_recognizer_models.cpp` / `wasm_recognizer_models.cpp`
+/ `recognizer_prediction.h` still report no drift.
 
 ### Dual-decode equivalence (`integration_dual_decode.<name>`)
 

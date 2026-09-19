@@ -101,6 +101,25 @@ Use the `MSYS2_ARG_CONV_EXCL='*'` form with an **absolute Windows path** to the
 script. After any `cmd`-driven build, confirm it actually built — look for
 compiler/link output, or check the exe's mtime — rather than trusting rc=0.
 
+### Trap: `MSYS2_ARG_CONV_EXCL='*'` only fixes the `cmd` hop — it is not a general "make any Git Bash launch reliable" prefix
+
+The env var above solves one specific problem: MSYS mangling `cmd`'s own `/c`
+switch (and, the same way, mangling a path argument to a Windows executable
+launched directly from Git Bash, e.g. `umacapture_cli.exe` — that use is fine).
+It is not safe to carry onto a **plain bash script** just because the script
+also does something Windows-flavored: setting it disables MSYS path conversion
+for that script's whole process tree, including tools the script shells out to
+that do their own path resolution.
+
+Measured 2026-09-09: launching `native/wasm/build.sh` (a bash script with no
+`cmd` hop at all) as `MSYS2_ARG_CONV_EXCL='*' bash native/wasm/build.sh` made
+the script's internal `uv run` call fail with `Failed to spawn (os error 3)` —
+`uv` could no longer resolve its own executable/interpreter path. Plain
+`bash native/wasm/build.sh`, with normal MSYS path conversion left on, ran fine.
+So scope the flag to the literal `cmd /c '<abs.cmd>'` (or direct `.exe`) launch
+it targets; don't prefix a bash script with it on the assumption that it makes
+Git Bash launches more reliable in general.
+
 ### Trap: a bare exe name inside a `.cmd` is not resolved from the cwd
 
 This machine sets `NoDefaultCurrentDirectoryInExePath=1`, so cmd does **not**
@@ -250,7 +269,7 @@ The same runs print **one line on stderr** (key set as of
 recorded run):
 
 ```
-UMACAPTURE_RUN_SUMMARY {"schema":1,"subcommand":"video","unit":"run","inputs":1,"records":2,"failed":0,"discarded":1,"discarded_incomplete":0,"errors":[],"error_total":0,"unparsed":0,"forwarded_frames":1284,"anchor_unit_min":720,"anchor_unit_max":720,"exit":0}
+UMACAPTURE_RUN_SUMMARY {"schema":1,"subcommand":"video","unit":"run","inputs":1,"records":2,"failed":0,"discarded":1,"discarded_incomplete":0,"errors":[],"error_total":0,"unparsed":0,"forwarded_frames":1284,"anchor_unit_min":720,"anchor_unit_max":720,"factor_switch_verdicts":{"same":0,"different":1,"empty":0,"unreadable":0},"exit":0}
 ```
 
 `RunReport::summaryLine` in `native/src/core/cli_run_report.h` is the definition
@@ -258,7 +277,13 @@ of that key set — read it there rather than off this example.
 
 `records` is the core's own count read after the drain, `discarded` counts
 `onCharaDetailRestarted` (mid-run session resets), and `errors` is the deduped
-list of `onError` tags. The last three before `exit` are **the geometry that
+list of `onError` tags. `factor_switch_verdicts` counts what the factor tab's
+character-switch rule concluded each time it read a candidate switch, with every
+verdict word present, zeros included (`native/src/chara_detail/factor_switch_verdict.h`):
+`same` kept the session, and `different` / `empty` / `unreadable` each reset it, so
+they are the factor rule's share of `discarded`. A broken switch reader leaves
+`discarded` unchanged and moves only these counts; `native-change-verification` §4
+says how they are asserted. The three keys before it are **the geometry that
 reached recognition**: `anchor_unit_min` / `anchor_unit_max` are the intersection
 width of the frames the scraper actually scraped (min and max, because the unit
 may legitimately move within a run), and `forwarded_frames` is what says whether

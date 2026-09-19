@@ -1,6 +1,7 @@
 #pragma once
 
 #include "builder/builder_util.h"
+#include "builder/chara_detail_geometry.h"
 #include "chara_detail/chara_detail_config.h"
 
 namespace uma::tool {
@@ -64,7 +65,7 @@ private:
         return {
             getModulePath("skill"),
             {{235, 235, 235}, {255, 255, 255}},
-            {{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            standard_scroll_area_rect,
             {{0.1037, 0.0259, {IS, SS}}, {0.4722, 0.0537, {IS, SS}}},
             {{0.5685, 0.0259, {IS, SS}}, {0.9370, 0.0537, {IS, SS}}},
             0.9352 - 0.8444,
@@ -86,7 +87,7 @@ private:
         return {
             getModulePath("factor"),
             Range<Color>{{235, 235, 235}, {255, 255, 255}},
-            Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
+            standard_scroll_area_rect,
             left_rect,
             right_rect,
             0.9852 - 0.9111,
@@ -116,7 +117,7 @@ private:
     [[nodiscard]] CampaignTabConfig campaignTab() const {
         return {
             {
-                Rect<double>{{0.0000, 0.8093, IS}, {0.0, -0.2426, {IPE, ILE}}},
+                standard_scroll_area_rect,
                 Range<Color>{{218, 218, 218}, {248, 248, 248}},
                 Range<Color>{{218, 218, 218}, {255, 255, 255}},
                 Range<Color>{{248, 248, 248}, {255, 255, 255}},

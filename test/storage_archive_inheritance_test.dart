@@ -137,6 +137,8 @@ void main() {
     expect(captured.isSameChara(makeRecord(id: 'archived-chara', card: 50, self: const [Factor(5, 1)])), isTrue);
     writeRecord(activeDir, captured); // the recognizer drops the dir before add()
     final newDir = activeDir / 'newly-captured';
+    // The attempt the core announced; a duplicate verdict is reported for the attempt on screen only.
+    container.read(charaDetailCaptureStateProvider.notifier).started('newly-captured');
 
     active.add(captured);
 

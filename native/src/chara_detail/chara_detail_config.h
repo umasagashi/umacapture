@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sstream>
+#include <stdexcept>
 #include <string>
 
 #include "types/color.h"
@@ -114,11 +115,39 @@ struct SceneScraperConfig {
     // thumb_length); it is NOT the crop height. `cap_offset` is the thumb's rounded-cap depth c: the tip-to-tip
     // length over-reads the logical thumb length by 2c, so the logical length is `tip - 2 * cap_offset`.
     // `scroll_bar_margin_color` is the near-white band flanking the placeholder track; isolating it locates the
-    // fixed track ends so the position is measured against the true track, not the (slightly longer) config
+    // track ends so the position is measured against the true track, not the (slightly longer) config
     // scan line.
     double viewport;
     double cap_offset;
     Range<Color> scroll_bar_margin_color;
+    // The placeholder track's own fill. Third of three colour boxes on the same scan column, and deliberately
+    // the one BETWEEN the other two: `scroll_bar_margin_color` starts at the near-white floor 228 and
+    // `scroll_bar_bg_color` starts at the thumb's own tone, so the track's mid-grey fell in the gap they leave
+    // and no box named it. It is not a subset of either; it is the missing middle.
+    //
+    // WHY THE MARGIN RUN'S END CANNOT ANSWER "IS THE TRACK EXPOSED". `scroll_bar_margin_color`'s end locates
+    // the track top only while the thumb is elsewhere. The thumb is drawn far darker than the track, so the
+    // single anti-aliased row where the thumb's cap meets the margin is pulled below the near-white
+    // floor (a common-layout blend runs 243 -> 199 against a floor of 228; that row's measured at-top range
+    // is 196-201 on common and 148-226 on friendCommon), whereas the same row carrying only the track's own
+    // cap stays above it (243 -> 229..230). At a genuine top the thumb sits ON the track's top cap, so that row is
+    // the thumb's: the margin run terminates one sample early and `thumb_top - track_top` reads a gap of one
+    // sample where the true gap is zero. The bias is a property of WHICH feature is occluding the cap, so it
+    // cannot be cancelled by a constant, and moving the 228 floor only trades which frame reads wrong.
+    // Testing for the track's own colour below the thumb's cap asks the question directly -- "is there any
+    // track above the thumb" -- and reads no absolute position, so it survives the ~1 px whole-widget
+    // translation that differs between capture geometries.
+    //
+    // AND THE MARGIN RUN'S END CANNOT BOUND THAT TEST EITHER. The row a one-tip-pixel scroll uncovers is the
+    // track's OWN top cap, whose blend (229..230) is above the 228 floor and therefore inside
+    // `scroll_bar_margin_color`. So the margin run advances over precisely the row that is the evidence, in
+    // lockstep with the thumb; a window starting at that run's end never contains it and the reading collapses
+    // to 0 for the first tip pixel of travel. geometryAt starts the window at the scan column instead, which
+    // is a fixed landmark. The cost is that this box's ceiling now faces the page margin directly: 234 against
+    // a measured margin minimum of 241 is 7 levels, and nothing but colour separates them. That headroom
+    // fails toward a FALSE ALARM -- a genuine top reported as scrolled, i.e. a refused tab -- and not toward
+    // a miss; the two hazards on this scan column fail in opposite directions and geometryAt sets out both.
+    Range<Color> scroll_bar_track_color;
     // Sub-pixel thumb-centre probe geometry (self-centres the vertical scan on the thumb; see trackCenterX).
     ScrollBarThumbProbeConfig scroll_bar_thumb_probe;
     // Half-width (width-normalized) of the scroll-guess safeguard window: the image estimator's chosen offset
@@ -126,6 +155,16 @@ struct SceneScraperConfig {
     // estimate). Sized well above the worst measured true-offset guess error yet far below the periodicity
     // alias distance, so it rejects far aliases without ever rejecting a genuine offset.
     double guess_window_margin;
+    // How many of the trainee's own factors are read off a single factor-tab frame at most -- the frame the early
+    // duplicate probe reads, and the two the character-switch rule compares (recognizer_impl::SelfFactorWindow).
+    // A property of THIS LAYOUT, not of the record type: it is sized so that its rows fit inside the layout's
+    // scroll area on that frame, and the layout choice has one owner (CharaDetailSceneScraper::constructSession).
+    // The value itself never reaches a front end: the probe message states only whether the list it carries is
+    // shorter than this (see messages::factorProbe), and the front end compares every factor it is sent. The
+    // derivation lives beside the values in native/tool/builder/chara_detail_scene_scraper_builder.h. A count of
+    // factors; not width-normalized. At least 1, enforced by CharaDetailSceneScraperConfig: a limit of 0 would
+    // read nothing on every frame.
+    int self_factor_prefix_length;
 
     EXTENDED_JSON_TYPE_NDC(
         SceneScraperConfig,
@@ -145,8 +184,10 @@ struct SceneScraperConfig {
         viewport,
         cap_offset,
         scroll_bar_margin_color,
+        scroll_bar_track_color,
         scroll_bar_thumb_probe,
-        guess_window_margin);
+        guess_window_margin,
+        self_factor_prefix_length);
 };
 
 struct ScanParameter {
@@ -157,25 +198,36 @@ struct ScanParameter {
     EXTENDED_JSON_TYPE_NDC(ScanParameter, x, length, color_range);
 };
 
-// Locates the green "因子" section header, whose top edge moves 1:1 with the factor list (unlike the scroll
-// thumb, whose travel is compressed by viewport/content). maybeResetOnFactorChange uses it as a precise "flush
-// at the very top" sensor: it runs the same-character content diff only when the header sits at its reference
-// (flush) y, so a tiny scroll of the same character no longer reads as a switch.
+// The factor tab's green header check, and the green "因子" section header sensor it uses. The factor tab's
+// head is the scroll thumb's to decide, as on every tab; when the thumb reads the head, the judgment
+// (scraper_impl::factorHeadReading) checks it closely with the header. It takes the header row from the
+// RECOGNIZER's banner search
+// (FactorRowReader::findBanner, configured by recognizer.json's factor tab) and checks it against that search's
+// own window less `banner_window_reserve`; this sensor only confirms that the run the search found is the green
+// header (its first green row lies inside that run). So no position here is calibrated against footage: the
+// window is the recognizer's, which is the bound a fragment #0 has to stay inside to be read correctly.
+//
+// Neither a calibrated absolute position nor a reference row read from an earlier frame is used: a
+// one-capture-pixel window around a fixed position refuses displacements the recognizer tolerates, and a
+// reference row cannot answer before it has been taken.
 struct FactorHeaderConfig {
     // Vivid header green (same UI green as factor_end_green / header_color_range).
     Range<Color> color_range;
-    // Horizontal probe band, expressed as fractions of the scroll-area crop width. Right of centre, clear of the
-    // left icon column and the diagonal stripes, where only the solid header spans the whole band.
+    // Horizontal probe band, expressed as fractions of the scroll-area crop width. Its width is an OCCLUSION
+    // BUDGET: a tap effect wider than the band hides the probe entirely, so the band is as wide as the row
+    // contents allow rather than as narrow as certainty allows. See factorHeader() in
+    // chara_detail_scene_scraper_builder.h for the measured edges and what each one costs.
     double band_start;
     double band_end;
     // Minimum green fraction across the band for a row to count as the header (rejects a narrow stray green pill).
     double green_fraction_threshold;
-    // Max |current - reference| header top-edge offset, in capture pixels, still treated as flush. In pixels (not
-    // a width fraction) on purpose: the two quantities this discriminates -- the ~1 px header-row detection jitter
-    // and the ~2 px scroll at which the content diff already spikes -- are pixel-scale, not screen-geometry-scale.
-    // A width fraction would drift with capture resolution and, at a smaller capture, shrink below the 1 px jitter
-    // floor and start dropping real switches.
-    double flush_tolerance_px;
+    // THE SHARE OF THE BANNER SEARCH WINDOW HELD BACK FROM THE HEAD JUDGMENT, as a fraction of that window
+    // (BannerHit::search_rows, L = the recognizer's vertical_banner_upper_gap in capture pixels). A banner row r
+    // is at the head when 1 <= r <= L - 1 - ceil(banner_window_reserve * L) (scraper_impl::factorHeadLastRow).
+    // A fraction of L, not of the width, so it follows the window if vertical_banner_upper_gap is ever changed.
+    // It is a POLICY RESERVE, not a measured error: see factorHeader() in the builder for what it does and does
+    // not correspond to.
+    double banner_window_reserve;
 
     EXTENDED_JSON_TYPE_NDC(
         FactorHeaderConfig,
@@ -183,7 +235,7 @@ struct FactorHeaderConfig {
         band_start,
         band_end,
         green_fraction_threshold,
-        flush_tolerance_px);
+        banner_window_reserve);
 };
 
 struct CharaDetailSceneScraperConfig {
@@ -197,6 +249,66 @@ struct CharaDetailSceneScraperConfig {
     Range<Color> header_color_range;
     uint64 header_visible_time_threshold;
     FactorHeaderConfig factor_header;
+
+    // Refuses a config in which any of the three scan sequences is empty. A page with no scans is not a
+    // supported "page that scans nothing": PageScrapingBox parks current_scan at end() from the very first
+    // strip, so every latch drops its rows and the page can never reach its own completion. An empty sequence
+    // therefore disables a whole tab silently rather than configuring it.
+    //
+    // The check is on THIS type's constructor rather than on a call site because this is where the value
+    // enters the program: EXTENDED_JSON_TYPE_NDC deserializes via Type{...}, so every reader passes through
+    // here -- the pipeline start (core/native_api.cpp, inside startPipeline), the CLI `build` subcommand's
+    // round-trip (core/cli.cpp) and the generator in tool/builder -- and Windows, web and the CLI get the
+    // same answer from the same shared-core line. Landing inside startPipeline is what makes the refusal
+    // reportable: startEventLoopReportingError catches it, tears the partial pipeline down and hands the
+    // message to notifyError, i.e. Dart's onError on Windows and web and a non-zero exit plus a stderr
+    // summary on the CLI. That is exactly where Range's inverted-box check (types/range.h) and Model's
+    // output-head check (cv/model.h) already land.
+    //
+    // PageScrapingBox's own constructor keeps an equivalent throw as a class invariant. It runs on the scraper
+    // runner thread, where both construction sites catch it and end the attempt as `scrape_failed`; it is not
+    // where a bad config is diagnosed.
+    CharaDetailSceneScraperConfig(
+        const SceneScraperConfig &common,
+        const SceneScraperConfig &friend_common,
+        const std::vector<ScanParameter> &skill_scans,
+        const std::vector<ScanParameter> &factor_scans,
+        const std::vector<ScanParameter> &campaign_scans,
+        const ScanParameter &factor_end_green,
+        const Line<double> &header_scan_line,
+        const Range<Color> &header_color_range,
+        uint64 header_visible_time_threshold,
+        const FactorHeaderConfig &factor_header)
+        : common(common)
+        , friend_common(friend_common)
+        , skill_scans(skill_scans)
+        , factor_scans(factor_scans)
+        , campaign_scans(campaign_scans)
+        , factor_end_green(factor_end_green)
+        , header_scan_line(header_scan_line)
+        , header_color_range(header_color_range)
+        , header_visible_time_threshold(header_visible_time_threshold)
+        , factor_header(factor_header) {
+        const auto require = [](const char *name, const std::vector<ScanParameter> &scans) {
+            if (scans.empty()) {
+                throw std::invalid_argument(
+                    std::string("CharaDetailSceneScraperConfig: ") + name + " must not be empty");
+            }
+        };
+        require("skill_scans", this->skill_scans);
+        require("factor_scans", this->factor_scans);
+        require("campaign_scans", this->campaign_scans);
+        const auto require_factor_limit = [](const char *name, const SceneScraperConfig &layout) {
+            if (layout.self_factor_prefix_length < 1) {
+                throw std::invalid_argument(
+                    std::string("CharaDetailSceneScraperConfig: ") + name
+                    + ".self_factor_prefix_length must be at least 1, got "
+                    + std::to_string(layout.self_factor_prefix_length));
+            }
+        };
+        require_factor_limit("common", this->common);
+        require_factor_limit("friend_common", this->friend_common);
+    }
 
     EXTENDED_JSON_TYPE_NDC(
         CharaDetailSceneScraperConfig,

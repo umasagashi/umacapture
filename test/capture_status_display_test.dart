@@ -51,7 +51,12 @@ String _cancellingStatus() => appSentenceAt("$_tr_message.import_cancelling.stat
 
 String _status(String key) => appSentenceAt("$_tr_message.$key.status");
 
-String _action(String key) => appSentenceAt("$_tr_message.$key.action");
+/// One variant of a status whose action line depends on whether a character switch is safe.
+String _actionVariant(String key, String variant) => appSentenceAt("$_tr_message.$key.action.$variant");
+
+/// The switch indicator's tooltip for the same answer the [_actionVariant] of that name gives.
+String _switchTooltip(String variant) =>
+    appSentenceAt("pages.capture.capture_control.switch_indicator.${variant == 'switchable' ? 'safe' : 'unsafe'}");
 
 const _importing = VideoImportState(phase: VideoImportPhase.importing, fileName: 'clip.mkv');
 const _cancelling = VideoImportState(phase: VideoImportPhase.cancelling, fileName: 'clip.mkv');
@@ -139,7 +144,7 @@ Future<ProviderContainer> _pump(
 
 /// Puts the recognition state where the progress rings are shown: the detail screen is open.
 void _openDetail(ProviderContainer container) {
-  container.read(charaDetailCaptureStateProvider.notifier).started();
+  container.read(charaDetailCaptureStateProvider.notifier).started('rec-1');
 }
 
 /// Advances past the display's animations without waiting for the tree to go still.
@@ -486,36 +491,132 @@ void main() {
     // now; what the banner still owes the user is the SITUATION each leaves behind, and there are
     // only two of those.
     testWidgets('a success and an already-captured duplicate both read as completed', (tester) async {
-      for (final drive in <void Function(CharaDetailCaptureStateNotifier)>[
-        (n) => n
-          ..started()
-          ..success('rec-1'),
-        (n) => n
-          ..started()
-          ..fail('duplicated_character'),
-      ]) {
-        await _pumpThenDrive(tester, import: VideoImportState.idle, capturing: true, drive: drive);
+      // The action line follows `switchSafety`: on the armed 継承タブ (at any position) the user may switch;
+      // on another tab they are pointed at the 継承タブ. The tab and the armed level are stated BEFORE the
+      // outcome and not after, because the core does not restate them on completion.
+      for (final outcome in <String, void Function(CharaDetailCaptureStateNotifier)>{
+        'success': (n) => n.success('rec-1'),
+        'duplicate': (n) => n.fail('duplicated_character'),
+      }.entries) {
+        for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable'), (2, 'not_switchable')]) {
+          await _pumpThenDrive(
+            tester,
+            import: VideoImportState.idle,
+            capturing: true,
+            drive: (n) {
+              n
+                ..started('rec-1')
+                ..tabAwaitingHead(tab, false)
+                ..factorSwitchArmedChanged(true)
+                ..scrollPosition(tab, TopOfContent.scrolled);
+              outcome.value(n);
+            },
+          );
 
-        expect(find.text(_status('capture_completed')), findsOneWidget);
-        expect(find.text(_action('capture_completed')), findsOneWidget);
+          final label = '${outcome.key} on tab $tab';
+          expect(find.text(_status('capture_completed')), findsOneWidget, reason: label);
+          expect(find.text(_actionVariant('capture_completed', variant)), findsOneWidget, reason: label);
+          expect(find.byTooltip(_switchTooltip(variant)), findsNWidgets(2), reason: '$label: the arrows agree');
+        }
       }
     });
 
-    testWidgets('a duplicate HINT is still the ordinary detail-ready screen', (tester) async {
-      // The probe fires at the factor-tab top with nothing captured yet and the user may scroll on
-      // and capture the character anyway. That the probe fired is the event's subject; the banner
-      // must not turn a hint into a state.
-      await _pumpThenDrive(
-        tester,
-        import: VideoImportState.idle,
-        capturing: true,
-        drive: (n) => n
-          ..started()
-          ..scrollPosition(1, true)
-          ..fail('duplicated_character_probe'),
-      );
+    testWidgets('while capturing, the action line follows the tab shown', (tester) async {
+      for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable'), (2, 'not_switchable')]) {
+        await _pumpThenDrive(
+          tester,
+          import: VideoImportState.idle,
+          capturing: true,
+          drive: (n) => n
+            ..started('rec-1')
+            ..tabAwaitingHead(tab, false)
+            ..factorSwitchArmedChanged(true)
+            ..scrollPosition(tab, TopOfContent.scrolled),
+        );
 
-      expect(find.text(_status('detail_ready')), findsOneWidget);
+        expect(find.text(_status('capturing')), findsOneWidget, reason: 'tab $tab');
+        expect(find.text(_actionVariant('capturing', variant)), findsOneWidget, reason: 'tab $tab');
+        expect(find.byTooltip(_switchTooltip(variant)), findsNWidgets(2), reason: 'tab $tab: the arrows agree');
+      }
+    });
+
+    testWidgets('at the head of a tab, the action line follows the tab shown', (tester) async {
+      for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable')]) {
+        await _pumpThenDrive(
+          tester,
+          import: VideoImportState.idle,
+          capturing: true,
+          drive: (n) => n
+            ..started('rec-1')
+            ..tabAwaitingHead(tab, false)
+            ..factorSwitchArmedChanged(true)
+            ..scrollPosition(tab, TopOfContent.atTop),
+        );
+
+        expect(find.text(_status('detail_ready')), findsOneWidget, reason: 'tab $tab');
+        expect(find.text(_actionVariant('detail_ready', variant)), findsOneWidget, reason: 'tab $tab');
+      }
+    });
+
+    testWidgets('a read tab says so, at any position, and its action line follows the tab shown', (tester) async {
+      // A tab the core declared complete does not ask for a scroll "until 100%": the ring under it
+      // already reads 「完了」, and what is left is to show a tab that is not.
+      for (final position in [TopOfContent.atTop, TopOfContent.scrolled]) {
+        for (final (tab, variant) in [(1, 'switchable'), (0, 'not_switchable'), (2, 'not_switchable')]) {
+          await _pumpThenDrive(
+            tester,
+            import: VideoImportState.idle,
+            capturing: true,
+            drive: (n) => n
+              ..started('rec-1')
+              ..tabAwaitingHead(tab, false)
+              ..factorSwitchArmedChanged(true)
+              ..scrollPosition(tab, position)
+              ..pageReady(tab),
+          );
+
+          final label = 'tab $tab, $position';
+          expect(find.text(_status('tab_completed')), findsOneWidget, reason: label);
+          expect(find.text(_actionVariant('tab_completed', variant)), findsOneWidget, reason: label);
+          expect(find.text(_status('capturing')), findsNothing, reason: label);
+          expect(find.text(_status('detail_ready')), findsNothing, reason: label);
+          expect(find.byTooltip(_switchTooltip(variant)), findsNWidgets(2), reason: '$label: the arrows agree');
+          expect(_rings(), findsNWidgets(3), reason: '$label: the rings say which tab is left');
+        }
+      }
+    });
+
+    testWidgets('a duplicate HINT shows the phase beneath it, not a state of its own', (tester) async {
+      // The probe fires at the factor-tab top and the user may go on and capture the character
+      // anyway. That the probe fired is the event's subject; the banner states the phase the hint
+      // stands over -- the unread factor top, or the read factor tab.
+      for (final read in [false, true]) {
+        await _pumpThenDrive(
+          tester,
+          import: VideoImportState.idle,
+          capturing: true,
+          drive: (n) {
+            n
+              ..started('rec-1')
+              ..scrollPosition(1, TopOfContent.atTop)
+              // The level that ends the settle wait; a fixture that omits it describes a screen that
+              // is still settling, which is a different banner.
+              ..tabAwaitingHead(1, false)
+              ..factorSwitchArmedChanged(true);
+            if (read) {
+              n.pageReady(1);
+            }
+            n.fail('duplicated_character_probe');
+          },
+        );
+
+        final label = read ? 'over a read tab' : 'over an unread tab';
+        final phase = read ? 'tab_completed' : 'detail_ready';
+        final other = read ? 'detail_ready' : 'tab_completed';
+        expect(find.text(_status(phase)), findsOneWidget, reason: label);
+        expect(find.text(_actionVariant(phase, 'switchable')), findsOneWidget, reason: label);
+        expect(find.text(_status(other)), findsNothing, reason: label);
+      }
     });
 
     testWidgets('a failure asks for the detail screen again rather than restating the error', (tester) async {
@@ -542,7 +643,7 @@ void main() {
         import: VideoImportState.idle,
         capturing: true,
         drive: (n) => n
-          ..started()
+          ..started('rec-1')
           ..success('rec-1'),
       );
 
@@ -556,7 +657,7 @@ void main() {
         tester,
         import: _importing,
         drive: (n) => n
-          ..started()
+          ..started('rec-1')
           ..success('rec-1'),
       );
 

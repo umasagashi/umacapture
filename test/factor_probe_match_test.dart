@@ -1,12 +1,28 @@
-// Verifies the early duplicate probe's prefix-matching primitive on
-// CharaDetailRecord: leadingFactorProbeMatch counts the leading run of
-// self-factors (id and star) shared with a probe, and the per-record-type
-// factorProbeMatchThreshold gates the duplicate decision the storage layer
-// makes with that count.
+// Verifies the early duplicate probe's matching primitive on CharaDetailRecord:
+// matchesFactorProbe checks that every self-factor (id and star) the probe sent agrees with this
+// record's own factors from the top, and -- when the probe states `below_threshold` -- that the
+// record's own self-factor count equals the probe's length. And verifies that the duplicate
+// decision made from that primitive is driven off the `below_threshold` flag the core sends on the
+// same onFactorProbe message -- this side holds no numeric threshold of its own, because `factors`
+// arrives already capped to the core's chosen layout's self-factor-count threshold.
+//
+// The shipped threshold values are NOT pinned here: they live in the core's config, and the native
+// config tests pin them.
 //
 // Run: .fvm/flutter_sdk/bin/flutter test test/factor_probe_match_test.dart
+import 'dart:convert';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hive_ce/hive.dart';
 import 'package:umacapture/src/chara_detail/chara_detail_record.dart';
+import 'package:umacapture/src/chara_detail/storage.dart';
+import 'package:umacapture/src/core/app_logger.dart';
+import 'package:umacapture/src/core/platform_channel.dart';
+import 'package:umacapture/src/core/platform_controller.dart';
+
+import 'support/hive.dart';
+import 'support/localization.dart';
 
 Character _chara(int card) => Character(0, 0, card, 0);
 
@@ -44,104 +60,289 @@ CharaDetailRecord makeRecord({required List<Factor> self}) {
   );
 }
 
+/// A record store already holding [initial], so the probe is judged against a loaded store.
+class _StoredRecords extends CharaDetailRecordStorage {
+  _StoredRecords(this.initial);
+
+  final List<CharaDetailRecord> initial;
+
+  @override
+  Future<List<CharaDetailRecord>> build() async => initial;
+}
+
+/// An empty archive, so the only candidate is the active record under test.
+class _NoArchive extends CharaDetailArchiveStorage {
+  @override
+  Future<List<CharaDetailRecord>> build() async => const [];
+}
+
+/// Exposes a [Ref] so a [PlatformController] can be built against a bare container, exactly as
+/// `scroll_ready_wait_test.dart` does.
+final _refProvider = Provider<Ref>((ref) => ref);
+
 void main() {
-  group('leadingFactorProbeMatch', () {
-    test('identical probe matches the full self length', () {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUpAll(loadAppTranslations);
+
+  useHiveForTest(['settings']);
+
+  group('matchesFactorProbe', () {
+    test('an identical probe matches, below_threshold false', () {
       final self = [const Factor(1, 1), const Factor(2, 2), const Factor(3, 3)];
       final record = makeRecord(self: self);
 
-      expect(record.leadingFactorProbeMatch([...self]), self.length);
+      expect(record.matchesFactorProbe([...self], belowThreshold: false), isTrue);
     });
 
-    test('stops at the first diverging star', () {
+    test('a diverging star fails the match', () {
       final record = makeRecord(self: [const Factor(1, 1), const Factor(2, 2), const Factor(3, 3)]);
 
       // Same ids, but the second star differs.
-      expect(record.leadingFactorProbeMatch([const Factor(1, 1), const Factor(2, 9)]), 1);
+      expect(record.matchesFactorProbe([const Factor(1, 1), const Factor(2, 9)], belowThreshold: false), isFalse);
     });
 
-    test('stops at the first diverging id', () {
+    test('a diverging id fails the match', () {
       final record = makeRecord(self: [const Factor(1, 1), const Factor(2, 2), const Factor(3, 3)]);
 
       // Same stars, but the second id differs.
-      expect(record.leadingFactorProbeMatch([const Factor(1, 1), const Factor(9, 2)]), 1);
+      expect(record.matchesFactorProbe([const Factor(1, 1), const Factor(9, 2)], belowThreshold: false), isFalse);
     });
 
-    test('returns zero when the first factor already differs', () {
+    test('a mismatch on the very first factor fails the match', () {
       final record = makeRecord(self: [const Factor(1, 1), const Factor(2, 2)]);
 
-      expect(record.leadingFactorProbeMatch([const Factor(9, 9), const Factor(1, 1)]), 0);
+      expect(record.matchesFactorProbe([const Factor(9, 9), const Factor(1, 1)], belowThreshold: false), isFalse);
     });
 
-    test('empty probe returns zero', () {
+    test('an empty probe matches nothing, regardless of the record or the flag', () {
       final record = makeRecord(self: [const Factor(1, 1), const Factor(2, 2)]);
 
-      expect(record.leadingFactorProbeMatch(const []), 0);
+      expect(record.matchesFactorProbe(const [], belowThreshold: false), isFalse);
+      expect(record.matchesFactorProbe(const [], belowThreshold: true), isFalse);
+
+      final emptyRecord = makeRecord(self: const []);
+      expect(emptyRecord.matchesFactorProbe(const [], belowThreshold: false), isFalse);
     });
 
-    test('empty self returns zero for any probe', () {
+    test('a non-empty probe against a record with no self-factors fails the match', () {
       final record = makeRecord(self: const []);
 
-      expect(record.leadingFactorProbeMatch([const Factor(1, 1)]), 0);
+      expect(record.matchesFactorProbe([const Factor(1, 1)], belowThreshold: false), isFalse);
     });
 
-    test('caps the count at min(self, probe) length', () {
+    // THE FOUR PATTERNS THE DUPLICATE DECISION IS BUILT FROM: full agreement with no count
+    // requirement (pattern 1), full agreement with an equal count required and met (pattern 2), full
+    // agreement with an equal count required and unmet (pattern 3), and an empty probe (pattern 4).
+
+    test('pattern 1: below_threshold false, every sent factor agrees -> matches', () {
+      // The ordinary continuing-list case: the probe is capped by the layout's self-factor-count
+      // threshold, not by the character's own factor count, so no count requirement applies. The
+      // record legitimately has more self-factors than the probe sent, and that must not defeat the
+      // match.
+      final self = [for (var i = 1; i <= 16; i++) Factor(i, 1)];
+      final record = makeRecord(self: self);
+
+      expect(record.matchesFactorProbe(self.sublist(0, 10), belowThreshold: false), isTrue);
+    });
+
+    test('pattern 2: below_threshold true, every sent factor agrees, and the counts are equal -> matches', () {
+      // The core's own read ended before the layout's cap: the character really does have exactly as
+      // many self-factors as were sent. A rule of leading-run agreement only could never reach this
+      // case at all: a record with as few self-factors as the threshold never had enough of
+      // a leading run to fire the check.
+      final self = [for (var i = 1; i <= 9; i++) Factor(i, 1)];
+      final record = makeRecord(self: self);
+
+      expect(record.matchesFactorProbe([...self], belowThreshold: true), isTrue);
+    });
+
+    test('pattern 3: below_threshold true, every sent factor agrees, but the record is longer -> no match', () {
+      // The probe stopped short of the layout's cap, but this record has MORE self-factors than the
+      // probe read. A prefix agreeing says nothing about the character actually having only that many.
+      final self = [for (var i = 1; i <= 12; i++) Factor(i, 1)];
+      final record = makeRecord(self: self);
+
+      expect(record.matchesFactorProbe(self.sublist(0, 9), belowThreshold: true), isFalse);
+    });
+
+    test('pattern 4: an empty probe -> no match, under either flag value', () {
+      final self = [const Factor(1, 1), const Factor(2, 2)];
+      final record = makeRecord(self: self);
+
+      expect(record.matchesFactorProbe(const [], belowThreshold: false), isFalse);
+      expect(record.matchesFactorProbe(const [], belowThreshold: true), isFalse);
+    });
+
+    test('a middle element differing -> no match, under either flag value', () {
       final self = [const Factor(1, 1), const Factor(2, 2), const Factor(3, 3)];
+      final record = makeRecord(self: self);
+      final probe = [const Factor(1, 1), const Factor(9, 9), const Factor(3, 3)];
 
-      // Probe longer than self: capped at self length.
-      expect(makeRecord(self: self).leadingFactorProbeMatch([...self, const Factor(4, 4)]), self.length);
-
-      // Probe shorter than self: capped at probe length.
-      expect(makeRecord(self: self).leadingFactorProbeMatch([const Factor(1, 1), const Factor(2, 2)]), 2);
+      expect(record.matchesFactorProbe(probe, belowThreshold: false), isFalse);
+      expect(record.matchesFactorProbe(probe, belowThreshold: true), isFalse);
     });
   });
 
-  group('factorProbeMatchThreshold', () {
-    test('friendStandard uses the lower threshold', () {
-      expect(CharaDetailRecord.factorProbeMatchThreshold(RecordType.friendStandard), 10);
+  group('the duplicate check reads below_threshold off the probe message', () {
+    // THE FLAG IS THE CORE'S, taken off the message as sent. `factors` already arrives capped to the
+    // layout's self-factor-count threshold, so this side holds no numeric threshold to compare a count
+    // against; only `below_threshold` decides whether the extra count requirement applies.
+    //
+    // Driven through the real handler and the real storage method, so what is asserted is the hint the
+    // user would see (the capture state's error), not a helper's return value.
+    List<Factor> factors(int count) => [for (var i = 0; i < count; i++) Factor(i + 1, i % 3 + 1)];
+    final breadcrumbs = <String>[];
+    late BreadcrumbSink realSink;
+
+    setUp(() async {
+      await Hive.box('settings').clear();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        (call) async => null,
+      );
+      breadcrumbs.clear();
+      realSink = debugBreadcrumbSink;
+      debugBreadcrumbSink = (level, message, error) => breadcrumbs.add(message);
     });
 
-    test('the other record types use the higher threshold', () {
-      for (final type in [RecordType.standard, RecordType.inheritanceOnly, RecordType.friendInheritance, null]) {
-        expect(CharaDetailRecord.factorProbeMatchThreshold(type), 14);
-      }
+    tearDown(() {
+      debugBreadcrumbSink = realSink;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        PlatformChannel.channel,
+        null,
+      );
     });
-  });
 
-  group('factorProbeMatchThreshold gating', () {
-    // The storage layer treats a record as a duplicate when the leading match
-    // reaches the per-type threshold; document that boundary with the same expression.
-    List<Factor> factors(int count) => [for (var i = 0; i < count; i++) Factor(i, i % 3)];
+    /// Stores one record whose self-factors are [stored], sends one probe carrying [probe] plus [fields],
+    /// and answers the container along with every chime the probe sounded.
+    Future<(ProviderContainer, List<int>)> sendProbe({
+      required List<Factor> stored,
+      required List<Factor> probe,
+      required Map<String, Object?> fields,
+    }) async {
+      final container = ProviderContainer.test(
+        overrides: [
+          charaDetailRecordStorageLoaderProvider.overrideWith(() => _StoredRecords([makeRecord(self: stored)])),
+          charaDetailArchiveStorageLoaderProvider.overrideWith(_NoArchive.new),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(charaDetailRecordStorageLoaderProvider.future);
+      await container.read(charaDetailArchiveStorageLoaderProvider.future);
+      final cues = <int>[];
+      final subscription = container.listen<AsyncValue<int>>(
+        scrollReadyEventProvider,
+        (_, current) => current.whenData(cues.add),
+      );
+      addTearDown(subscription.close);
+      final controller = PlatformController(container.read(_refProvider), const {});
+      addTearDown(controller.dispose);
 
-    for (final (type, threshold) in [(RecordType.friendStandard, 10), (RecordType.standard, 14)]) {
-      test('$type: a leading run at the threshold counts as a duplicate', () {
-        final shared = factors(threshold);
-        final record = makeRecord(self: [...shared, const Factor(999, 1)]);
+      controller.handleNativeMessage(jsonEncode({'type': 'onCharaDetailStarted', 'record_id': 'rec-1'}));
+      controller.handleNativeMessage(
+        jsonEncode({
+          'type': 'onFactorProbe',
+          'factors': [for (final factor in probe) factor.toMap()],
+          'cue_owed': true,
+          'record_id': 'rec-1',
+          ...fields,
+        }),
+      );
+      await pumpEventQueue();
+      return (container, cues);
+    }
 
-        final match = record.leadingFactorProbeMatch(shared);
-        expect(match, threshold);
-        expect(match >= CharaDetailRecord.factorProbeMatchThreshold(type), isTrue);
+    CharaDetailCaptureState stateOf(ProviderContainer container) => container.read(charaDetailCaptureStateProvider);
+
+    test('below_threshold false raises the hint on full agreement, with the record longer than the probe', () async {
+      final stored = factors(16);
+      final (container, cues) = await sendProbe(
+        stored: stored,
+        probe: stored.sublist(0, 10),
+        fields: {'below_threshold': false},
+      );
+
+      expect(stateOf(container).error, 'duplicated_character_probe');
+      expect(stateOf(container).duplicateRecordId, 'id');
+      expect(cues, isEmpty, reason: 'a duplicate withholds the scroll-ready chime');
+    });
+
+    test('below_threshold true raises nothing when the stored record is longer than the probe', () async {
+      final stored = factors(16);
+      final (container, cues) = await sendProbe(
+        stored: stored,
+        probe: stored.sublist(0, 10),
+        fields: {'below_threshold': true},
+      );
+
+      expect(stateOf(container).error, isNull);
+      expect(cues, hasLength(1), reason: 'not a duplicate, and the latch owed the chime');
+    });
+
+    test('below_threshold true raises the hint when the stored count equals the probe length', () async {
+      final stored = factors(10);
+      final (container, cues) = await sendProbe(
+        stored: stored,
+        probe: stored.sublist(0, 10),
+        fields: {'below_threshold': true},
+      );
+
+      expect(stateOf(container).error, 'duplicated_character_probe');
+      expect(stateOf(container).duplicateRecordId, 'id');
+      expect(cues, isEmpty);
+    });
+
+    for (final (label, fields) in <(String, Map<String, Object?>)>[
+      ('absent', {}),
+      ('null', {'below_threshold': null}),
+      ('a string', {'below_threshold': 'true'}),
+      ('an int', {'below_threshold': 1}),
+    ]) {
+      test('a below_threshold that is $label runs no duplicate check, chimes, and says so in the log', () async {
+        // Every one of the probe's 16 factors agrees with the stored record, and the record has more
+        // self-factors than the probe sent -- the false direction (no count requirement) would raise
+        // the hint here, so only SKIPPING the check stays silent. Matching nothing is the same
+        // fail-open direction taken for an empty probe; guessing either boolean risks a false positive
+        // (false) or a wrong rejection (true) from a fact the message never stated.
+        final stored = factors(16);
+        final (container, cues) = await sendProbe(stored: stored, probe: stored.sublist(0, 10), fields: fields);
+
+        expect(stateOf(container).error, isNull, reason: 'a malformed/missing flag must not raise a hint');
+        expect(cues, hasLength(1), reason: 'fail-open: the chime still follows cue_owed');
+        expect(
+          breadcrumbs.where((line) => line.contains('below_threshold') && line.contains('skipped')),
+          hasLength(1),
+          reason: 'the skipped check is logged through logger, so it reaches the crash report too',
+        );
       });
+    }
 
-      test('$type: a leading run one short of the threshold is not a duplicate', () {
-        final shared = factors(threshold - 1);
-        // Diverge right after the shared prefix so the run stops one short.
-        final record = makeRecord(self: [...shared, const Factor(999, 1)]);
-        final probe = [...shared, const Factor(998, 2)];
+    for (final (label, fields) in <(String, Map<String, Object?>)>[
+      ('absent', {}),
+      ('null', {'below_threshold': null}),
+      ('a string', {'below_threshold': 'true'}),
+      ('an int', {'below_threshold': 1}),
+    ]) {
+      test('a below_threshold that is $label matches nothing even where a guessed true would', () async {
+        // The fixture above (stored 16, probe 10) only ever distinguishes "skip" from a guessed FALSE:
+        // guessing true there also stays silent (16 != 10 fails the count check either way), so it could
+        // not catch a regression that guesses true instead of skipping. Here the stored record's count
+        // equals the probe's length, so a guessed true would ALSO match (full agreement, equal counts)
+        // and wrongly raise the hint -- only skipping the check keeps this silent.
+        final stored = factors(10);
+        final (container, cues) = await sendProbe(stored: stored, probe: [...stored], fields: fields);
 
-        final match = record.leadingFactorProbeMatch(probe);
-        expect(match, threshold - 1);
-        expect(match >= CharaDetailRecord.factorProbeMatchThreshold(type), isFalse);
+        expect(stateOf(container).error, isNull, reason: 'neither a guessed true nor false may raise a hint here');
+        expect(cues, hasLength(1), reason: 'fail-open: the chime still follows cue_owed');
       });
     }
   });
 
-  group('RecordType wire ordinal contract', () {
-    // The onFactorProbe event carries record_type as a raw ordinal: native sends
-    // static_cast<int>(record_type) and this side decodes RecordType.values[int]
-    // (see PlatformController._handleMessage). This order must match the native
-    // enum in chara_detail_record.h, which has a matching static_assert and a
-    // factorProbe contract test. Pin the Dart-side order so a reorder fails here.
+  group('RecordType ordinal contract', () {
+    // chara_detail_record.dart states that this order stays aligned with the native RecordType enum, because
+    // record_type columns (the saved record's own metadata field, unrelated to onFactorProbe, which carries
+    // no record_type field) map the value to a label by index.
     test('values are in the exact wire order', () {
       expect(RecordType.values, [
         RecordType.standard,

@@ -122,7 +122,7 @@ void main() {
     // an action line therefore turns this red on its own -- which a list written out here would not,
     // because the way a list fails is by not mentioning the new one.
     final states = _statusBearingNodes(_controlBase);
-    expect(states, hasLength(9), reason: 'the shape scan must actually find the states, not zero of them');
+    expect(states, hasLength(13), reason: 'the shape scan must actually find the states, not zero of them');
     expect(states.keys, contains('$_messageBase.importing'), reason: 'including the one this file is about');
 
     states.forEach((path, state) {

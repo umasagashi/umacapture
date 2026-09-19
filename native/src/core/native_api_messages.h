@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,7 +14,7 @@
 // Each function returns the already-dumped JSON string that NativeApi::notify() forwards. They are kept
 // free of any NativeApi/pipeline state on purpose: the wire contract these produce (the "type" tag plus the
 // per-message keys, which the Dart side reads by string) is the load-bearing part, and pulling it out here
-// lets it be unit-tested without linking the ONNX/WinRT-heavy NativeApi translation unit. NativeApi's notify*
+// lets it be asserted as data, without standing a pipeline up to reach the string. NativeApi's notify*
 // methods are thin wrappers that call these and hand the result to notify().
 namespace uma::app::messages {
 
@@ -30,6 +31,19 @@ inline std::string error(const std::string &message) {
         -1, ' ', false, json_util::Json::error_handler_t::replace);
 }
 
+// A TERMINAL ERROR THAT BELONGS TO ONE CAPTURE ATTEMPT, named by the `record_id` that attempt was announced
+// under (charaDetailStarted / charaDetailRestarted). Used by the three errors that end a session's record --
+// `stitch_failed`, `scrape_failed` and `closed_before_completed` -- because the first is reported from the
+// stitcher's thread and can therefore reach the front end after the NEXT attempt has been announced. A front
+// end applies such an error to its card only when the id is the attempt it is showing; without the id it could
+// only apply it to whatever attempt happened to be current when the message arrived.
+//
+// Every other error carries no `record_id`, and its absence is the meaning: "not scoped to an attempt".
+inline std::string error(const std::string &message, const std::string &record_id) {
+    return json_util::Json{{"type", "onError"}, {"message", message}, {"record_id", record_id}}.dump(
+        -1, ' ', false, json_util::Json::error_handler_t::replace);
+}
+
 inline std::string captureStarted() { return json_util::Json{{"type", "onCaptureStarted"}}.dump(); }
 
 inline std::string captureStopped() { return json_util::Json{{"type", "onCaptureStopped"}}.dump(); }
@@ -42,19 +56,162 @@ inline std::string scrollUpdated(int index, double progress) {
     return json_util::Json{{"type", "onScrollUpdated"}, {"index", index}, {"progress", progress}}.dump();
 }
 
-inline std::string scrollPosition(int index, bool at_top) {
-    return json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"at_top", at_top}}.dump();
+// WHETHER A TAB IS FLUSH WITH THE HEAD OF ITS CONTENT, stated THREE-VALUED and deliberately UNRESOLVED.
+//
+// `top_of_content` is the same stable machine word `onTabRefused`'s `reason` carries
+// (scraper_impl::topOfContentTag): "at_top", "scrolled", or "unknown" when no sensor could read this frame --
+// a tab not built yet, or a scroll bar unmeasurable for a moment on a page that has one. A page with NO scroll
+// bar at all reads "at_top" from the frame after its tab is built, on every tab and whatever its frames show:
+// it cannot be anywhere but the head of its content, and the core takes that from the structure the tab was
+// built with, before any sensor (CharaDetailSceneScraper::topOfContent). A scrollable factor page reads its
+// scroll thumb first, like every other tab, so it reads "unknown" exactly when the thumb cannot be read (the
+// first frame of a tab not built yet included). The green header is asked only behind a thumb at the head,
+// and it can only turn that "at_top" into "scrolled".
+//
+// NOT A BOOL, and that is the contract rather than a richer payload for its own sake. The core cannot answer
+// "unknown" for the front end because the front end has two consumers whose costs for a wrong answer are
+// OPPOSITE: the capture card's phase wants fail-open (a tab nobody could read is not "capturing"), while the
+// duplicate-probe hint gate wants fail-closed (standing the hint on an unreadable frame would claim a
+// certainty that the core's own reset rule -- which resolves fail-closed -- refuses to claim for a switch).
+// One bool picks one of them for both. Each consumer resolves this word for itself, which is the same rule
+// the core already applies internally (TopOfContentPolicy::unknown_verdict), applied one layer further out.
+// The green character-switch arrows are not a consumer of this word at all: they read whether the factor tab
+// is shown (this message's `index`) and whether the switch rule holds its witness (onFactorSwitchArmed below),
+// never the scroll position (see switchSafety in lib/src/core/platform_controller.dart).
+//
+// A READER MUST TREAT AN ABSENT OR UNRECOGNISED WORD AS "unknown", not as "at_top": that keeps a payload this
+// build does not understand on the side each consumer already chose for missing evidence, instead of handing
+// every consumer the optimistic answer. Fail-open consumers lose nothing by it -- "unknown" is what they
+// resolve to at_top anyway -- and fail-closed ones stay closed.
+//
+// Edge-triggered on the VERDICT, so a tab going from readable-at-top to unreadable is a message: the two
+// resolve the same way for one consumer and differently for the other, so they cannot be collapsed here.
+inline std::string scrollPosition(int index, const std::string &top_of_content) {
+    return json_util::Json{{"type", "onScrollPosition"}, {"index", index}, {"top_of_content", top_of_content}}
+        .dump();
+}
+
+// A TAB'S CAPTURE WAS REFUSED, or that refusal was withdrawn. `refused` is the level, not an occurrence: the
+// scraper re-states it whenever it changes, so a front end holds the last value per `index` rather than
+// counting events, and a tab switch (which rebuilds the tab) arrives here as `refused: false` on the same
+// message type. There is deliberately no separate "cleared" type to fall out of step with this one.
+//
+// NOT onError. That channel is session-scoped and terminal: it would mark the whole capture failed while the
+// other two tabs are still fine and while this one is about to be retried. What happened is that this tab's
+// first captured fragment was not the head of its list -- the user began scrolling before the ready cue -- so
+// the rows above it were never seen and only this tab is unusable.
+//
+// `reason` is a stable machine word (scraper_impl::topOfContentTag): "scrolled" when the scroll bar was
+// measured away from the top, "unknown" when the tab has a scroll bar but this frame yielded no reading and
+// the shipped policy refuses rather than risk capturing a truncated list. It is not a user-facing string; the
+// front end maps it to its own wording, and must have a fallback for a word it does not recognise.
+inline std::string tabRefused(int index, bool refused, const std::string &reason) {
+    return json_util::Json{{"type", "onTabRefused"}, {"index", index}, {"refused", refused}, {"reason", reason}}
+        .dump();
+}
+
+// A TAB STILL NEEDS THE USER TO LEAVE IT ALONE (or no longer does), and WHETHER ITS PAGE HAS A SCROLL BAR.
+// `awaiting` is the level, not an occurrence, in exactly the idiom of onTabRefused above: the scraper re-states
+// it whenever it changes and there is no paired "cleared" type. What ends the wait depends on the page, and the
+// core decides it (scraper_impl::SceneScraper::awaitingHead): on a page with a scroll bar the wait ends when the
+// frame that becomes fragment #0 is latched, because from then on scrolling IS the capture; on a page with no
+// scroll bar it ends when the tab is complete, because every remaining step there needs the same thing -- a
+// picture that holds still. A tab not built yet is awaiting.
+//
+// NOT onScrollReady, and the difference is the whole point of this message existing. onScrollReady is an
+// ANNOUNCEMENT -- the chime the user listens for -- and there are exits from this wait that have nothing to
+// announce: the offset exit in ScrollableScrapingInterpreter::updateBefore begins capture without ever
+// latching a stationary frame, and a page with no scroll bar is handed no cue sender at all. A front end that
+// reads "no onScrollReady yet" as "still waiting" would tell the user to hold off, in a caution colour, for
+// the rest of a capture that is running normally. The chime and the permission are two facts; this is
+// the second one.
+//
+// `scroll_bar` is the page's structure (scraper_impl::SceneScraper::scrollable), fixed from the tab's first frame
+// until the tab is rebuilt. It rides HERE, and not on a message of its own, because it and `awaiting` describe
+// one wait on one tab and change on the same events: on a tab's first frame the pair goes from
+// {awaiting, not built} to {awaiting, no scroll bar}, and one message carries that step whole. The one consumer is
+// the front end's wording of the wait (a page with no scroll bar must not be told about scrolling). The key is
+// OMITTED while the tab is not built -- nothing has established either answer -- and a reader must treat an
+// absent key as "unknown", not as either answer.
+inline std::string tabAwaitingHead(int index, bool awaiting, const std::optional<bool> &scroll_bar) {
+    json_util::Json json{{"type", "onTabAwaitingHead"}, {"index", index}, {"awaiting", awaiting}};
+    if (scroll_bar.has_value()) {
+        json["scroll_bar"] = scroll_bar.value();
+    }
+    return json.dump();
+}
+
+// WHETHER THE CHARACTER-SWITCH RULE CAN SEE A SWITCH RIGHT NOW: the core holds a reference to compare the factor
+// tab against (CharaDetailSceneScraper::factorSwitchArmed). Not per tab, because the reference is not: it is
+// installed by the factor tab's head latch, kept through that tab's capture and the session's completion, and
+// dropped only when the factor tab is rebuilt or the session is discarded. The rule watches only the factor tab,
+// and that half is already on the wire (onScrollPosition's `index`), so a front end offers a switch exactly when
+// the factor tab is shown AND this level is true -- which is the rule's own condition, read from the rule.
+//
+// A level, edge-triggered, restated on the first frame of every session, like onTabAwaitingHead. It is sent
+// BEFORE onTabAwaitingHead within a frame, so a front end never holds "the factor tab has stopped waiting" while
+// still holding "not armed" from the frame before. A reader must treat an absent or malformed `armed` as false.
+inline std::string factorSwitchArmed(bool armed) {
+    return json_util::Json{{"type", "onFactorSwitchArmed"}, {"armed", armed}}.dump();
 }
 
 inline std::string pageReady(int index) {
     return json_util::Json{{"type", "onPageReady"}, {"index", index}}.dump();
 }
 
-inline std::string factorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {
-    return json_util::Json{{"type", "onFactorProbe"}, {"factors", factors}, {"record_type", record_type}}.dump();
+// THE FACTOR TAB'S FRAGMENT #0, recognized down to the trainee's own visible factor rows, for the early
+// duplicate check -- plus the two facts the front end cannot work out for itself: `below_threshold` and
+// `cue_owed` -- and the attempt it belongs to, `record_id`. Four data fields and nothing else: no record type
+// (no consumer decided anything by it) and no threshold (the front end is not asked to apply one).
+//
+// `record_id` is the id the session was announced under (charaDetailStarted / charaDetailRestarted). The probe is
+// recognized on the recognizer's thread, so this message can arrive after the NEXT session has been announced;
+// the id is what lets the front end drop a result that no longer describes the character on screen, instead of
+// guessing from arrival order.
+//
+// `factors` is the single-frame read (FactorRowReader::visibleSelfPrefix), which never holds more than
+// `factor_limit` -- the self_factor_prefix_length of the layout this session's scraper chose
+// (scene_scraper.json's common or friend_common). The front end compares every factor in it with the head of
+// each stored record.
+//
+// `below_threshold` is `factors.size() < factor_limit`, computed HERE from the same limit the read stopped at,
+// so the flag and the list it describes cannot disagree. When it is true the list ended on the frame (the
+// layout's scroll area shows the threshold's rows, see recognizer_impl::SelfFactorWindow), so the front end
+// additionally requires a stored record to hold exactly that many self factors. An empty list is sent too (the
+// read found no header, say) and is below any limit; `cue_owed` still has to reach the front end.
+//
+// This tab's chime is not sounded by the core (see CharaDetailSceneScraper::constructSession's factor_scroll_ready
+// sink): the front end withholds it until this message says the character is not already stored, and sounds it
+// there. That leaves the front end holding only half the condition. `cue_owed` is the other half -- true when
+// the latch came from the exit that waited for a settled frame, false when the user was already scrolling and
+// an announcement would arrive after the thing it announces. Both halves travel on this one message rather
+// than on two the front end would have to correlate by arrival order; the probe is recognized on a worker
+// thread, so that order is not something either side may lean on.
+inline std::string factorProbe(
+    const std::vector<chara_detail::record::Factor> &factors,
+    std::size_t factor_limit,
+    bool cue_owed,
+    const std::string &record_id) {
+    return json_util::Json{
+        {"type", "onFactorProbe"},
+        {"factors", factors},
+        {"below_threshold", factors.size() < factor_limit},
+        {"cue_owed", cue_owed},
+        {"record_id", record_id},
+    }
+        .dump();
 }
 
-inline std::string charaDetailStarted() { return json_util::Json{{"type", "onCharaDetailStarted"}}.dump(); }
+// A CAPTURE ATTEMPT BEGAN, and `record_id` is the id it will finish under: the `id` of the onCharaDetailFinished
+// that ends it, and the `record_id` of every other message scoped to it (onFactorProbe, and onError for
+// stitch_failed / scrape_failed / closed_before_completed). Those outcomes are produced on other threads and can
+// arrive after the next attempt has begun, so a front end compares ids rather than trusting arrival order. Sent by
+// the scraper (CharaDetailSceneScraper::build) after the session's id is minted and before the session is
+// constructed, so the id is the session's own and not a second mint, and a construction that throws ends this
+// attempt under the id already announced (scrape_failed).
+inline std::string charaDetailStarted(const std::string &record_id) {
+    return json_util::Json{{"type", "onCharaDetailStarted"}, {"record_id", record_id}}.dump();
+}
 
 // A SESSION WAS THROWN AWAY MID-SCENE, and this says whether that cost anything.
 //
@@ -65,7 +222,7 @@ inline std::string charaDetailStarted() { return json_util::Json{{"type", "onCha
 // are now different messages, and an import can report "3 registered, 1 lost" instead of reporting the 3 as an
 // unqualified success.
 //
-// NOT AN ERROR, and deliberately not routed like one. Every one of the scraper's three reset rules fires
+// NOT AN ERROR, and deliberately not routed like one. Each of the scraper's two reset rules fires
 // legitimately when the player switches character, so reporting a discard as a failure would be wrong more
 // often than right (it would fire on every switch in an ordinary two-character clip). What the wire states is
 // the FACT and its contents; which of them deserves a sentence is the front end's call, and it differs by front
@@ -77,17 +234,24 @@ inline std::string charaDetailStarted() { return json_util::Json{{"type", "onCha
 // which errs towards announcing a loss rather than towards the silence this change exists to remove -- the
 // opposite direction from `origin` above, because here the harmless default is the loud one.
 //
-// The discarded session's id and its captured-tab count are DELIBERATELY not here. Both were carried at first
-// and neither was ever read to decide anything: the id names a scraping directory no receiver can open, and the
-// tab count only ever narrowed one class of false positive in a number nothing displayed. A field on the wire
-// has to be parsed, defaulted and kept in step on three front ends, and a field nobody decides from buys none
-// of that back. The id still goes to the log at the discard site (chara_detail_scene_scraper.cpp), which is
-// where a discard is actually traced.
+// A RESET ALSO BEGINS AN ATTEMPT, so `record_id` is the id of the session the reset BEGAN -- exactly what
+// charaDetailStarted carries for a fresh open, and for the same reason: the outcomes of the discarded session
+// (its onCharaDetailFinished, a late onFactorProbe) are still on their way, and the front end tells them apart
+// from the new attempt's by this id.
+//
+// The DISCARDED session's id and its captured-tab count are DELIBERATELY not here. Neither is read to decide
+// anything: the discarded id names a scraping directory no receiver can open, and the tab count only ever
+// narrowed one class of false positive in a number nothing displayed. A field on the wire has to be parsed,
+// defaulted and kept in step on three front ends, and a field nobody decides from buys none of that back. The
+// discarded id still goes to the log at the discard site (chara_detail_scene_scraper.cpp), which is where a
+// discard is actually traced. Putting it here under `record_id` would be the worse mistake: the front end would
+// then match the NEW attempt's outcomes against the OLD attempt's id.
 //
 // snake_case keys, like every other `on`-prefixed message in this file; the camelCase block further down is
 // web's protocol and says why it differs.
-inline std::string charaDetailRestarted(bool completed) {
-    return json_util::Json{{"type", "onCharaDetailRestarted"}, {"completed", completed}}.dump();
+inline std::string charaDetailRestarted(bool completed, const std::string &record_id) {
+    return json_util::Json{{"type", "onCharaDetailRestarted"}, {"completed", completed}, {"record_id", record_id}}
+        .dump();
 }
 
 inline std::string charaDetailClosed() { return json_util::Json{{"type", "onCharaDetailClosed"}}.dump(); }

@@ -707,32 +707,35 @@ class CharaDetailRecord extends JsonEquatable with CharaDetailRecordMappable {
     ].everyIn();
   }
 
-  /// Number of leading self-factors the probe and a stored record must agree on (id and star) for
-  /// the early duplicate check to fire, for a capture of the given record [type].
-  ///
-  /// The factors are read top-to-bottom / left-then-right exactly as the full pipeline reads
-  /// [FactorSet.self], so a recapture reproduces this many leading entries reliably. The threshold
-  /// stays below the count visible before scrolling so the bottom-most rows — which can be clipped or
-  /// misrecognized on a single, non-stitched frame — never affect the result, while remaining unique
-  /// enough to avoid collisions. [RecordType.friendStandard] uses a shifted factor-tab layout that
-  /// exposes fewer reliable rows, so it keeps a lower threshold; the other types show more rows and
-  /// use a higher, more collision-resistant one.
-  static int factorProbeMatchThreshold(RecordType? type) {
-    return type == RecordType.friendStandard ? 10 : 14;
-  }
-
-  /// Length of the leading run of self-factors that exactly match [probeSelf] (id and star).
+  /// Whether this record's own self-factors could be the character [probeSelf] was read from.
   ///
   /// The early duplicate check recognizes only the self-factors visible on the factor tab before
-  /// scrolling; this counts how many of them line up with this record's own factors from the top.
-  int leadingFactorProbeMatch(List<Factor> probeSelf) {
-    final self = factors.self;
-    final limit = probeSelf.length < self.length ? probeSelf.length : self.length;
-    var common = 0;
-    while (common < limit && self[common] == probeSelf[common]) {
-      common++;
+  /// scrolling. The core caps [probeSelf] to its chosen layout's self-factor-count threshold before
+  /// sending it, so this checks that every sent factor agrees with this record's own factors from the
+  /// top -- not a threshold of its own, since [probeSelf] already carries no more than the core allowed.
+  ///
+  /// An empty [probeSelf] matches nothing: the core sends one when the self-factor banner search
+  /// failed, which is a read failure, not evidence that this record has zero self-factors.
+  ///
+  /// [belowThreshold] is the core's own statement that its read ended before reaching the threshold
+  /// (`onFactorProbe`'s `below_threshold`). When true, a probe capped only by content, not by the
+  /// threshold, must also match this record's self-factor *count* -- otherwise a record that simply
+  /// has more self-factors than the probe read would match on a prefix that says nothing about the
+  /// character actually having only that many.
+  bool matchesFactorProbe(List<Factor> probeSelf, {required bool belowThreshold}) {
+    if (probeSelf.isEmpty) {
+      return false;
     }
-    return common;
+    final self = factors.self;
+    if (probeSelf.length > self.length) {
+      return false;
+    }
+    for (var i = 0; i < probeSelf.length; i++) {
+      if (self[i] != probeSelf[i]) {
+        return false;
+      }
+    }
+    return !belowThreshold || self.length == probeSelf.length;
   }
 
   bool isObsoleted(ModuleVersion moduleVersion, bool includeCurrentVersion) {

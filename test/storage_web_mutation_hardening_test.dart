@@ -165,6 +165,8 @@ void main() {
     final toastSubscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
     addTearDown(toastSubscription.close);
     fsBackend = _FailRecordDeleteBackend(originalBackend, 'incoming');
+    // The attempt the core announced; a duplicate verdict is reported for the attempt on screen only.
+    container.read(charaDetailCaptureStateProvider.notifier).started('incoming');
 
     await active.addFromFileAsync('incoming');
     await Future<void>.delayed(Duration.zero);
@@ -205,6 +207,8 @@ void main() {
     final toastSubscription = container.listen(plainToastEventProvider, (_, next) => next.whenData(toasts.add));
     addTearDown(toastSubscription.close);
     fsBackend = _FailSyncRecordDeleteBackend(originalBackend, incoming.id);
+    // The attempt the core announced; a duplicate verdict is reported for the attempt on screen only.
+    container.read(charaDetailCaptureStateProvider.notifier).started(incoming.id);
 
     active.add(incoming);
     await Future<void>.delayed(Duration.zero);

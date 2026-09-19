@@ -157,6 +157,18 @@
         "b": 255
       }
     },
+    "scroll_bar_track_color": {
+      "min": {
+        "r": 180,
+        "g": 180,
+        "b": 180
+      },
+      "max": {
+        "r": 234,
+        "g": 234,
+        "b": 234
+      }
+    },
     "scroll_bar_thumb_probe": {
       "centroid_half_width": 0.010869565217391304,
       "white_reference_gap": 0.012228260869565218,
@@ -167,7 +179,8 @@
       "minimum_contrast": 20.0,
       "minimum_coverage": 3.0
     },
-    "guess_window_margin": 0.1
+    "guess_window_margin": 0.1,
+    "self_factor_prefix_length": 14
   },
   "friend_common": {
     "base_image_stationary_rect": {
@@ -227,7 +240,7 @@
     "scroll_area_rect": {
       "top_left": {
         "x": 0.0,
-        "y": 0.9896304347826087,
+        "y": 0.9942999999999999,
         "anchor": {
           "h": "IntersectStart",
           "v": "IntersectStart"
@@ -245,7 +258,7 @@
     "scroll_bar_rect": {
       "top_left": {
         "x": 0.0,
-        "y": 0.9896304347826087,
+        "y": 0.9942999999999999,
         "anchor": {
           "h": "IntersectStart",
           "v": "IntersectStart"
@@ -327,6 +340,18 @@
         "b": 255
       }
     },
+    "scroll_bar_track_color": {
+      "min": {
+        "r": 180,
+        "g": 180,
+        "b": 180
+      },
+      "max": {
+        "r": 234,
+        "g": 234,
+        "b": 234
+      }
+    },
     "scroll_bar_thumb_probe": {
       "centroid_half_width": 0.010869565217391304,
       "white_reference_gap": 0.012228260869565218,
@@ -337,7 +362,8 @@
       "minimum_contrast": 20.0,
       "minimum_coverage": 3.0
     },
-    "guess_window_margin": 0.1
+    "guess_window_margin": 0.1,
+    "self_factor_prefix_length": 10
   },
   "skill_scans": [
     {
@@ -517,9 +543,9 @@
         "b": 85
       }
     },
-    "band_start": 0.65,
-    "band_end": 0.88,
+    "band_start": 0.12,
+    "band_end": 0.93,
     "green_fraction_threshold": 0.5,
-    "flush_tolerance_px": 1.5
+    "banner_window_reserve": 0.1
   }
 }

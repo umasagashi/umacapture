@@ -148,15 +148,16 @@ TEST_CASE("Frame::fractionIn reports the share of sampled points in range") {
 }
 
 TEST_CASE("Frame::fractionIn separates a solid header band from a narrow stray run") {
-    // Mirrors factorHeaderTopY's probe: a right-of-centre band is "the header" only when it is *mostly* green,
-    // so a solid header row clears a 0.5 threshold while a narrow stray green pill in the same band does not.
+    // Mirrors factorHeaderTopY's probe: a horizontal band is "the header" only when it is *mostly* green, so a
+    // solid header row clears a 0.5 threshold while a narrow stray green pill in the same band does not.
     cv::Mat mat = solid(100, 100, Color(0, 0, 0));  // background is out of the green range
     mat(cv::Rect(0, 20, 100, 1)).setTo(cv::Scalar(0, 200, 0));  // y=20: a full-width solid green header row
     mat(cv::Rect(65, 40, 5, 1)).setTo(cv::Scalar(0, 200, 0));  // y=40: a 5px green pill inside the band
     const Frame frame = Frame::fixed(mat);
     const Range<Color> green{Color(0, 150, 0), Color(80, 255, 80)};
 
-    // The probe band spans x[0.65,0.88] (23px on a 100px-wide frame), matching the config right-band.
+    // An arbitrary sub-band, x[0.65,0.88] (23px on a 100px-wide frame): this case pins fractionIn's semantics,
+    // not the shipped band, so it does not move when factorHeader()'s edges are re-measured.
     const Line<double> header_band{Point<double>(0.65, 0.20), Point<double>(0.88, 0.20)};
     CHECK(frame.fractionIn(green, header_band) == doctest::Approx(1.0));  // solid header -> accepted
 

@@ -181,7 +181,7 @@ let setupComplete = false;
 // dangling), a second set of ORT sessions, and -- the part that corrupts RESULTS and not merely memory -- a
 // second `pump()`. The inference bridge has no compare-and-swap: `pump` tests for ST_REQUEST and only then
 // awaits the session, so two pumps service the SAME request, and the late one's `Atomics.store(ST_DONE)` can
-// land after C++ has published the NEXT request -- handing the waiting recognizer thread the previous request's
+// land after C++ has published the NEXT request -- handing the waiting pipeline thread the previous request's
 // output. A silent misrecognition: no log line, no `pumpError`, nothing for a playtest to see.
 //
 // It needs no debug console to reach. The Dart client's init timeout expires after two minutes and drops its
@@ -247,7 +247,10 @@ const models = [];
 const byPath = new Map();
 
 // Shared inference control-block indices (resolved once from setupInferenceBridge()).
-let ctrlBase = 0, reqPtr = 0, respBase = 0, stateIdx = 0;
+let ctrlBase = 0, reqPtr = 0, respBase = 0, respCountBase = 0, respKindBase = 0, stateIdx = 0;
+// How the pump reports each output's element type to C++: the kind value for each onnxruntime-web tensor type a
+// decoder can read, and the one for every other type. Supplied by setupInferenceBridge(), never restated here.
+let kindsByTensorType = null, otherKind = 0;
 
 // Inference pump state (module lifetime).
 //
@@ -748,7 +751,8 @@ function rollbackSetup() {
   models.length = 0;
   byPath.clear();
   delete self.umaOrtResolve;
-  ctrlBase = 0; reqPtr = 0; respBase = 0; stateIdx = 0;
+  ctrlBase = 0; reqPtr = 0; respBase = 0; respCountBase = 0; respKindBase = 0; stateIdx = 0;
+  kindsByTensorType = null; otherKind = 0;
   pumpRunning = false;
   setupComplete = false;
 }
@@ -795,12 +799,13 @@ async function setupOnceBody(message) {
 
   await createOrtSessions(message);
 
-  // Resolves a model key (recognizer.json module_path, e.g. "skill/prediction.onnx") to its session id + static
-  // input shape. Called on the module main thread during predictor construction (inside Module.init).
+  // Resolves a model key (recognizer.json module_path, e.g. "skill/prediction.onnx") to its session id, static
+  // input shape and output count. Called on the module main thread during predictor construction (inside
+  // Module.init), where C++ refuses a session with fewer outputs than its decoder reads.
   self.umaOrtResolve = (key) => {
     const e = byPath.get(key);
     if (!e) throw new Error('umaOrtResolve: unknown model key ' + key);
-    return { id: e.id, h: e.h, w: e.w, c: e.c };
+    return { id: e.id, h: e.h, w: e.w, c: e.c, outputs: e.outputNames.length };
   };
 
   // Allocate the shared inference control block on the (pthread-shared) Wasm heap, then start the pump.
@@ -808,6 +813,10 @@ async function setupOnceBody(message) {
   ctrlBase = bridge.controlPtr >> 2;      // Int32 index of the control block
   reqPtr = bridge.requestPtr;             // byte offset of the request (NHWC uint8) buffer
   respBase = bridge.responsePtr >> 3;     // Float64 index of the response block
+  respCountBase = bridge.responseElementCountsPtr >> 2;  // Int32 index of the per-output element counts
+  respKindBase = bridge.responseKindsPtr >> 2;           // Int32 index of the per-output element types
+  kindsByTensorType = bridge.kindsByTensorType;
+  otherKind = bridge.otherKind;
   stateIdx = ctrlBase + bridge.stateIndex;
   pumpRunning = true;
   pump();
@@ -870,8 +879,12 @@ function inputShapeOf(session, inputName, key) {
 
 // --- inference pump ---------------------------------------------------------------------------------------
 // Services one bridged request: read the NHWC uint8 input + model id from the shared control block, run the
-// matching ORT session, write the scalar outputs back, and wake the futex-waiting recognizer pthread. Fresh
-// HEAP views every access: ORT session.run may grow the heap and detach stale views.
+// matching ORT session, write the outputs back, and wake the futex-waiting pipeline pthread. Fresh HEAP views
+// every access: ORT session.run may grow the heap and detach stale views.
+//
+// Each output is written as element 0 plus its element count and element type, and judged by nobody here: C++
+// runs the same check on them that desktop runs on its tensors (cv/prediction_check.h) and drops the record on a
+// mismatch. Throwing here instead would latch `pumpError`, which halts the live supply for the whole unit of work.
 async function serviceOneRequest() {
   const ctrl = Module.HEAP32;
   const modelId = ctrl[ctrlBase + W_MODEL];
@@ -882,9 +895,14 @@ async function serviceOneRequest() {
   const tensor = new ort.Tensor('uint8', input, [1, h, w, c]);
   const results = await entry.session.run({ [entry.inputName]: tensor });
   const resp = Module.HEAPF64;  // re-fetch after await in case the heap grew
+  const heap32 = Module.HEAP32;
   for (let i = 0; i < outCount; i++) {
-    const v = results[entry.outputNames[i]].data[0];
+    const output = results[entry.outputNames[i]];
+    const v = output.data[0];
     resp[respBase + i] = (typeof v === 'bigint') ? Number(v) : v;
+    heap32[respCountBase + i] = output.size;
+    heap32[respKindBase + i] = Object.hasOwn(kindsByTensorType, output.type)
+      ? kindsByTensorType[output.type] : otherKind;
   }
   Atomics.store(Module.HEAP32, stateIdx, ST_DONE);
   Atomics.notify(Module.HEAP32, stateIdx);
@@ -1017,9 +1035,11 @@ function startDrainLoop() {
       //
       // The onError must be attributed to THIS update, not merely observed during it: a record regeneration is
       // a passenger on a shared event loop (see handleUpdateRecord), so a live capture running alongside it
-      // emits its own onErrors -- closed_before_completed, stitch_failed, updateFrame failed -- into the very
-      // same message queue. Counting one of those as the regeneration's failure would fail a record that never
-      // failed. This is the same coexistence the desktop implements on purpose (native_controller.h), so the
+      // emits its own onErrors into the very same message queue: the attempt-ending tags that
+      // NativeApi::notifyAttemptFailed reports (closed_before_completed, scrape_failed, stitch_failed), and
+      // per-frame failures such as updateFrame failed. Counting one of those as the regeneration's failure
+      // would fail a record that never failed. This is the same coexistence the desktop implements on
+      // purpose (native_controller.h), so the
       // attribution, not the coexistence, is what has to be fixed.
       if (parsed && parsed.type === 'onError') {
         const target = updateFailureTarget(parsed.message);

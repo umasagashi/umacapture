@@ -2,17 +2,15 @@
 
 #include <experimental_onnxruntime_cxx_api.h>
 #include <filesystem>
-#include <iostream>
 #include <memory>
-#include <sstream>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
 #include <opencv2/opencv.hpp>
 
 #include "cv/frame.h"
+#include "cv/prediction_check.h"
 #include "cv/predictor.h"
 #include "types/shape.h"
 #include "util/logger_util.h"
@@ -20,23 +18,6 @@
 namespace uma::recognizer {
 
 namespace recognizer_impl {
-
-template<typename T>
-bool is_same(ONNXTensorElementDataType type) {
-    switch (type) {
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8: return std::is_same<T, uint8_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16: return std::is_same<T, uint16_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32: return std::is_same<T, uint32_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64: return std::is_same<T, uint64_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8: return std::is_same<T, int8_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16: return std::is_same<T, int16_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32: return std::is_same<T, int32_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: return std::is_same<T, int64_t>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: return std::is_same<T, float>::value;
-        case ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE: return std::is_same<T, double>::value;
-        default: throw std::invalid_argument("Unsupported type: " + std::to_string(type));
-    }
-}
 
 // A single ONNX Runtime environment shared across every Model. Ort::Env is intended to be a per-process
 // singleton (it owns the shared logging/threading state); one env per model wastes those resources. The
@@ -48,47 +29,50 @@ inline Ort::Env &shared_env() {
 
 }  // namespace recognizer_impl
 
-struct Prediction {
-    std::vector<Ort::Value> data;
+// The onnxruntime outputs of one inference, read through PredictionOutputs by the shared decoders. Every read
+// passes through requireScalarOutput (cv/prediction_check.h), the check the Wasm build runs on its bridged
+// outputs too; this class only describes each Ort::Value to it.
+class Prediction final : public PredictionOutputs {
+public:
+    explicit Prediction(std::vector<Ort::Value> data)
+        : data(std::move(data)) {}
 
-    template<typename T>
-    [[nodiscard]] const T &at(int index, bool check = true) const {
-        // Real bounds check (not a Debug-only assert): the return below dereferences data[index] even when
-        // check is false, so an out-of-range index (e.g. a model swapped for one with fewer outputs) would be
-        // undefined behavior in release. Throwing degrades to a dropped record via the recognizer try/catch.
-        if (index < 0 || static_cast<size_t>(index) >= data.size()) {
-            throw std::out_of_range("Prediction::at: index out of range");
-        }
-        // The return below dereferences element [0] even on the check=false path, so an empty tensor (a model
-        // swapped for one whose output N has no elements) would read out of bounds. Reject that regardless of
-        // check; the vector-output (count > 1) rejection stays gated behind check.
-        const auto element_count = data[index].GetTensorTypeAndShapeInfo().GetElementCount();
-        if (element_count < 1) {
-            throw std::out_of_range("Prediction::at: empty tensor output");
-        }
-        if (check) {
-            auto type_info = data[index].GetTensorTypeAndShapeInfo();
-            auto element_type = type_info.GetElementType();
-            if (!recognizer_impl::is_same<T>(element_type)) {
-                std::ostringstream stream;
-                stream << "Incorrect template type specified. index=" << index
-                       << ", type=" << std::to_string(element_type) << ", See ONNXTensorElementDataType.";
-                throw std::invalid_argument(stream.str());
-            }
-
-            if (element_count != 1) {
-                throw std::invalid_argument("Vector output is not supported.");
-            }
-        }
-
-        return *data[index].template GetTensorData<T>();
+    [[nodiscard]] std::int64_t int64At(int index) const override {
+        return *checked(index, ScalarKind::kInt64).GetTensorData<std::int64_t>();
     }
+
+    [[nodiscard]] float floatAt(int index) const override {
+        return *checked(index, ScalarKind::kFloat).GetTensorData<float>();
+    }
+
+private:
+    [[nodiscard]] static ScalarKind kindOf(ONNXTensorElementDataType type) {
+        switch (type) {
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64: return ScalarKind::kInt64;
+            case ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT: return ScalarKind::kFloat;
+            default: return ScalarKind::kOther;
+        }
+    }
+
+    // A real check in release, not a Debug-only assert: the caller dereferences element 0 of the returned value, so
+    // an index outside the outputs or an empty tensor would otherwise be undefined behaviour.
+    [[nodiscard]] const Ort::Value &checked(int index, ScalarKind expected) const {
+        requireScalarOutput(index, data.size(), expected, [this](std::size_t i) {
+            const auto info = data[i].GetTensorTypeAndShapeInfo();
+            return OutputDescription{kindOf(info.GetElementType()), info.GetElementCount()};
+        });
+        return data[static_cast<std::size_t>(index)];
+    }
+
+    std::vector<Ort::Value> data;
 };
 
-template<typename PredictionType>
-class Model : public Predictor<decltype(std::declval<PredictionType>().result())> {
+// Decoder supplies the head layout: `Result`, `kOutputCount` (the highest output index it reads, plus one) and
+// `static Predicted<Result> decode(const PredictionOutputs &)`.
+template<typename Decoder>
+class Model : public Predictor<typename Decoder::Result> {
 public:
-    using Result = decltype(std::declval<PredictionType>().result());
+    using Result = typename Decoder::Result;
 
     [[maybe_unused]] Model(const std::filesystem::path &path, const std::string &name)
         : model_name(name)
@@ -109,30 +93,23 @@ public:
         }
         input_size = {static_cast<int>(input_shape[2]), static_cast<int>(input_shape[1])};
 
-        // A model swapped for one with fewer output heads than PredictionType reads would surface only later as
-        // a per-record out_of_range in Prediction::at (index out of range), silently dropping every record via
-        // the recognizer's try/catch. Reject the mismatch at load time so it reads as a config error instead.
-        const auto output_count = prediction->GetOutputNames().size();
-        if (output_count < PredictionType::kOutputCount) {
-            throw std::runtime_error(
-                "Model " + name + ": expected at least " + std::to_string(PredictionType::kOutputCount)
-                + " outputs, got " + std::to_string(output_count));
-        }
+        requireOutputCount(name, prediction->GetOutputNames().size(), Decoder::kOutputCount);
     }
 
     // `const` reflects logical constness (the model configuration is unchanged), but this runs ONNX
-    // inference which mutates hidden session state and is NOT thread-safe. Call it from a single thread
-    // only (the recognizer drives all inference from its own event-runner thread). Decodes the raw
-    // Prediction into a Predicted<Result> here so callers (the recognizer) never touch Ort::Value.
+    // inference which mutates hidden session state and is NOT thread-safe: calls on ONE instance must never
+    // overlap. An instance used by a single stage is called from that stage's runner thread only. An instance
+    // two stages share -- the factor tab's two row models, used by the recognizer and the scene scraper -- is
+    // wrapped in chara_detail::recognizer_impl::AdmittedPredictor, which admits one call at a time in arrival
+    // order. Decodes the raw Prediction into a Predicted<Result> here so callers never touch Ort::Value.
     [[nodiscard]] Predicted<Result> predict(const Frame &frame) const override {
-        const auto raw = runInference(frame);
-        return {raw.result(), raw.confidence(), raw.toJson()};
+        return Decoder::decode(runInference(frame));
     }
 
     [[nodiscard]] const std::string &name() const override { return model_name; }
 
 private:
-    [[nodiscard]] PredictionType runInference(const Frame &frame) const {
+    [[nodiscard]] Prediction runInference(const Frame &frame) const {
         cv::Mat image;
         cv::resize(frame.data(), image, input_size.toCVSize(), 0, 0, cv::INTER_LINEAR);
 
@@ -146,7 +123,7 @@ private:
         input_tensors.emplace_back(
             Ort::Experimental::Value::CreateTensor<uint8_t>(image.data, image.total() * image.channels(), input_shape));
 
-        return {prediction->Run(prediction->GetInputNames(), input_tensors, prediction->GetOutputNames())};
+        return Prediction{prediction->Run(prediction->GetInputNames(), input_tensors, prediction->GetOutputNames())};
     }
 
     const std::string model_name;

@@ -1,7 +1,7 @@
 // Behavioral tests for CampaignRecordRecognizer and the pure formatTrainedDate helper.
 //
 // The recognizer's scan logic is exercised through its injection ctor, which takes fake Predictors instead of
-// ONNX models (see test/util/fake_predictor.h and the TU split in chara_detail_recognizer.cpp). This TU links
+// ONNX models (see test/util/fake_predictor.h and the ONNX-free note in chara_detail_recognizer.cpp). This TU links
 // into the onnxruntime-less umacapture_tests target, proving the scan orchestration is ONNX-decoupled.
 
 #include <doctest/doctest.h>

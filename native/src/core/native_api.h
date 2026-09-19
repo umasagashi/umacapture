@@ -21,6 +21,7 @@
 #include <opencv2/opencv.hpp>
 #pragma clang diagnostic pop
 
+#include "chara_detail/factor_switch_verdict.h"
 #include "chara_detail/record_info.h"
 #include "core/detail_crop_report_throttle.h"
 #include "core/native_api_messages.h"
@@ -42,7 +43,7 @@ class CharaDetailRecognizer;
 namespace uma::app {
 
 #ifdef UMACAPTURE_TESTING
-struct NativeApiFrameShapingTestAccess;
+struct NativeApiTestAccess;
 #endif
 
 using MessageCallback = void(const std::string &);
@@ -312,8 +313,7 @@ struct CapturePipelineIdentity {
 
 // The whole memory of what the RUNNING pipeline was built for. A tiny header-only state object, free of the
 // pipeline itself, so its contract -- a start records what it built, a teardown clears it, and a decision reads
-// it only about a loop that is actually running -- is unit-tested without linking the recognition stack
-// (umacapture_tests deliberately links OpenCV only and does not compile native_api.cpp).
+// it only about a loop that is actually running -- is unit-tested directly, without building a pipeline.
 class RunningPipelineIdentity {
 public:
     // Called LAST in a successful startPipeline: everything before it can throw, and a throw unwinds through
@@ -445,6 +445,61 @@ public:
 private:
     mutable std::mutex mutex;
     ForwardedFrameGeometry observed;
+};
+
+// How many times the current run's factor character-switch rule reached each verdict, indexed by the verdict
+// (chara_detail/factor_switch_verdict.h pins that each verdict is its own index).
+struct FactorSwitchVerdictCounts {
+    std::array<int64_t, chara_detail::scraper_impl::kFactorSwitchVerdicts.size()> by_verdict{};
+
+    [[nodiscard]] int64_t of(const chara_detail::scraper_impl::FactorSwitchVerdict verdict) const {
+        return by_verdict[static_cast<std::size_t>(verdict)];
+    }
+};
+
+// WHAT THE FACTOR TAB'S CHARACTER-SWITCH RULE CONCLUDED OVER A RUN, as a fact the core states.
+//
+// WHY IT EXISTS AT ALL. The rule resets on Different, Empty and Unreadable alike -- fail-CLOSED -- and keeps the
+// session only on Same. So a build whose reader always comes back empty, or always throws, resets exactly as
+// often as a working build: the records, `discarded` and `discarded_incomplete` are all identical, every golden
+// stays green, and the rule has silently gone back to discarding on the pixel diff alone. The verdicts are the
+// only thing that differs, and nothing outside the core could see them. The CLI reports these counts on its run
+// summary and native/test/integration/run.py compares them with what a case declares.
+//
+// A COUNT PER VERDICT, and Empty never folded into Unreadable: they are different defects ("nothing rendered" vs
+// "the reader failed"), and a single "unread" count would let one hide inside the other.
+//
+// OBSERVED OUTSIDE THE STAGE, like the two counters above: the scraper states each verdict on a direct
+// connection (CharaDetailSceneScraper::on_factor_switch_judged) and NativeApi's listener notes it here. The
+// scraper states facts on its connections and knows nothing of runs; what a run is -- and when one begins --
+// belongs to NativeApi, which is where the other two run-scoped counts already reset. Direct, so the note is
+// taken on the scraper thread inside the processing of the judged frame, and every verdict of a run has been
+// noted once the drain barrier has joined the loop.
+class FactorSwitchVerdictTally {
+public:
+    // A new run starts here. Hooked at the same two sites as RecordProductionCounter::beginRun, for the same
+    // reason: verdicts carried over from the previous run would describe switches this one never judged.
+    void beginRun() {
+        std::lock_guard<std::mutex> lock(mutex);
+        counts = {};
+    }
+
+    // The rule reached `verdict` once.
+    void note(const chara_detail::scraper_impl::FactorSwitchVerdict verdict) {
+        std::lock_guard<std::mutex> lock(mutex);
+        counts.by_verdict[static_cast<std::size_t>(verdict)] += 1;
+    }
+
+    // One observation of all four counts, so no reader sees a Same from after a note next to a Different from
+    // before it.
+    [[nodiscard]] FactorSwitchVerdictCounts snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex);
+        return counts;
+    }
+
+private:
+    mutable std::mutex mutex;
+    FactorSwitchVerdictCounts counts;
 };
 
 // What a start request has to do to the event loop before it can proceed.
@@ -703,6 +758,13 @@ public:
         return forwarded_frame_geometry.snapshot();
     }
 
+    // What the CURRENT run's factor character-switch rule concluded, per verdict (FactorSwitchVerdictTally says
+    // why this is the one observable that tells a working switch reader from a broken one).
+    //
+    // READ IT AFTER THE DRAIN, for the reason recordsProduced() states: a frame still queued for the scraper has
+    // not been judged yet.
+    [[nodiscard]] FactorSwitchVerdictCounts factorSwitchVerdicts() const { return factor_switch_verdicts.snapshot(); }
+
     // Whether the session open right now (if any) is a video import. This is what makes a record's origin a FACT
     // the core states rather than something a receiver infers from timing -- see notifyCharaDetailFinished.
     [[nodiscard]] bool isVideoImportSessionActive() const {
@@ -869,6 +931,10 @@ public:
     }
 
     void notifyError(const std::string &message) const { notify(messages::error(message)); }
+    // An error that ends ONE attempt's record, named by that attempt's id (see messages::error's overload).
+    void notifyError(const std::string &message, const std::string &record_id) const {
+        notify(messages::error(message, record_id));
+    }
 
     void notifyCaptureStarted() { notify(messages::captureStarted()); }
     void notifyCaptureStopped() { notify(messages::captureStopped()); }
@@ -906,27 +972,51 @@ public:
 
     void notifyScrollUpdated(int index, double progress) { notify(messages::scrollUpdated(index, progress)); }
 
-    void notifyScrollPosition(int index, bool at_top) { notify(messages::scrollPosition(index, at_top)); }
+    void notifyScrollPosition(int index, const std::string &top_of_content) {
+        notify(messages::scrollPosition(index, top_of_content));
+    }
+
+    void notifyTabRefused(int index, bool refused, const std::string &reason) {
+        notify(messages::tabRefused(index, refused, reason));
+    }
+
+    void notifyTabAwaitingHead(int index, bool awaiting, const std::optional<bool> &scroll_bar) {
+        notify(messages::tabAwaitingHead(index, awaiting, scroll_bar));
+    }
+
+    void notifyFactorSwitchArmed(bool armed) { notify(messages::factorSwitchArmed(armed)); }
 
     void notifyPageReady(int index) { notify(messages::pageReady(index)); }
 
-    void notifyFactorProbe(const std::vector<chara_detail::record::Factor> &factors, int record_type) {
-        notify(messages::factorProbe(factors, record_type));
+    // `info` is the session the probe frame was latched in, carried through the recognizer with the frame, so the
+    // result names that session even when it arrives after the next one was announced.
+    void notifyFactorProbe(
+        const std::vector<chara_detail::record::Factor> &factors,
+        std::size_t factor_limit,
+        bool cue_owed,
+        const chara_detail::RecordInfo &info) {
+        notify(messages::factorProbe(factors, factor_limit, cue_owed, info.record_id));
     }
 
-    void notifyCharaDetailStarted() { notify(messages::charaDetailStarted()); }
+    // A session was built for a freshly opened detail screen. `info` is that session's own identity, so the id on
+    // the wire is the one its record will finish under (messages::charaDetailStarted).
+    void notifyCharaDetailStarted(const chara_detail::RecordInfo &info) {
+        notify(messages::charaDetailStarted(info.record_id));
+    }
     // Mid-scene reset: the scraper discarded the current session (a character switch was inferred from
     // on-screen content) and rebuilt it, without the detail screen closing. The UI must reset its capture
     // progress just as it does for a fresh open.
     // The message carries WHETHER THE RESET DISCARDED ANYTHING (chara_detail::DiscardedSession::completed),
     // because "a session was thrown away" and "a session started" are otherwise indistinguishable on the wire
     // in any way a front end can act on -- which is what let an import that lost a character mid-clip still
-    // report success. One bit, and only one: see messages::charaDetailRestarted for what the struct carries
-    // that the wire deliberately does not. This is reported for every reset, live or import, and stays off the
+    // report success. It also carries the id of the session the reset BEGAN (`begun`), because a reset begins
+    // an attempt exactly as an open does; the discarded session's id stays off the wire (see
+    // messages::charaDetailRestarted). This is reported for every reset, live or import, and stays off the
     // error channel: a reset is the character-switch feature working, and only the receiving front end knows
     // whether a switch was something the user wanted.
-    void notifyCharaDetailRestarted(const chara_detail::DiscardedSession &discarded) {
-        notify(messages::charaDetailRestarted(discarded.completed));
+    void notifyCharaDetailRestarted(
+        const chara_detail::DiscardedSession &discarded, const chara_detail::RecordInfo &begun) {
+        notify(messages::charaDetailRestarted(discarded.completed, begun.record_id));
     }
     // A record reached a terminal state. The message carries WHO produced it: an `origin` marker when a video
     // import session is open, and nothing at all for a live capture (messages::charaDetailFinished says why
@@ -952,6 +1042,17 @@ public:
         }
         notify(messages::charaDetailFinished(info.record_id, success, isVideoImportSessionActive()));
     }
+    // A TERMINAL FAILURE OF ONE ATTEMPT: the attempt is finished unsuccessfully and the reason is reported
+    // against that attempt's own id. The two notifications are one operation -- a front end told that an attempt
+    // failed but not which one cannot apply the failure, and one told only the id is left waiting for a capture
+    // that can never progress -- so every connection that ends an attempt routes through here instead of
+    // repeating the pair. The id comes from the payload, never from the most recently announced attempt: a
+    // failure can arrive after the next attempt was announced (see messages::error's overload).
+    void notifyAttemptFailed(const chara_detail::RecordInfo &info, const std::string &tag) {
+        notifyCharaDetailFinished(info, false);
+        notifyError(tag, info.record_id);
+    }
+
     // The detail screen was closed. The UI returns to waiting for the next detail screen (a completed
     // capture leaves its progress on screen until this fires; an incomplete one also emits an error).
     void notifyCharaDetailClosed() { notify(messages::charaDetailClosed()); }
@@ -1021,9 +1122,14 @@ public:
     }
 
 private:
+    // The one constructor body, with the pane latch supplied. Not conditional on a test build: an object shape
+    // that exists only in tests is a second shape of this class, and a test holding a partially built NativeApi
+    // proves nothing about the one the app runs. NativeApi() delegates here with a fresh latch.
+    explicit NativeApi(std::shared_ptr<PaneModeLatch> latch);
 #ifdef UMACAPTURE_TESTING
-    explicit NativeApi(std::shared_ptr<PaneModeLatch> test_pane_mode_latch);
-    friend struct NativeApiFrameShapingTestAccess;
+    // Lets a test construct this class and reach the pipeline's own senders. Declared here so the seam is
+    // visible from the class it opens; its definition is test/core/native_api_test_access.h.
+    friend struct NativeApiTestAccess;
 #endif
 
     // Builds and starts the whole pipeline. May throw (config parse, model load, ...); startEventLoop wraps
@@ -1123,6 +1229,7 @@ private:
     // after their drain. See RecordProductionCounter.
     RecordProductionCounter record_production;
     ForwardedFrameGeometryObserver forwarded_frame_geometry;
+    FactorSwitchVerdictTally factor_switch_verdicts;
 
     // Producer-visible pane-mode handoff and auto-calibrated detail crop. Both are owned HERE rather than by
     // the pipeline so they survive teardownLocked():

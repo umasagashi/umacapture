@@ -13,9 +13,10 @@
 //
 // WHAT THE FIX IS. The park is now a state and not only an event:
 // `holdWhenFree` enters and leaves `longReadDeferralsProvider` on the transitions,
-// and the row asks which of the two waits it is in. The sentences are the author's,
-// pinned verbatim in `approved_wording_test.dart`; what this file asserts is that
-// the right one reaches the row, and that it goes away again.
+// and the row asks which of the two waits it is in. The sentences, and the decision that the row tells
+// the two waits apart, are the author's (`docs/wording-decisions.md` records both, and that an approved
+// sentence changes only after confirming with the author); what this file asserts is that the right one
+// reaches the row, and that it goes away again.
 //
 // WHY IT DRIVES THE PRODUCTION METHOD RATHER THAN THE WHOLE PAGE. `AboutGroup`'s
 // tile also renders the licence row and the app-version check, neither of which

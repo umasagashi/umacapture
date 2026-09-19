@@ -1,11 +1,12 @@
 // Abort protocol for the JS-serviced inference bridge. Declared separately from the bridge itself
 // (wasm_recognizer_models.cpp) because the only caller is wasm_api.cpp's stop().
 //
-// Why an abort exists at all: the recognizer's predict() runs on a pthread and is serviced by a pump on the
-// worker's JS thread. Anything that blocks the JS thread therefore blocks every in-flight inference. stop()
-// does exactly that -- it joins the recognizer pthread synchronously -- so without a way to cancel the wait,
-// stopping while a recognition or a factor probe is in flight wedges the worker permanently: the pthread waits
-// for a pump that cannot run, and the pump's thread waits for that pthread to exit.
+// Why an abort exists at all: predict() runs on a pipeline pthread (the recognizer's, or the scene scraper's for
+// the factor rows its character-switch rule reads) and is serviced by a pump on the worker's JS thread. Anything
+// that blocks the JS thread therefore blocks every in-flight inference. stop() does exactly that -- it joins the
+// pipeline pthreads synchronously -- so without a way to cancel the wait, stopping while a recognition, a factor
+// probe or a switch reading is in flight wedges the worker permanently: the pthread waits for a pump that cannot
+// run, and the pump's thread waits for that pthread to exit.
 
 #pragma once
 
